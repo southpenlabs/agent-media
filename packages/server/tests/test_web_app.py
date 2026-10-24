@@ -140,6 +140,21 @@ def test_dl_is_its_own_folder_and_a_gone_file_is_404(bundle, server, tmp_path, m
     res, body = _get(server, "/app/dl/tok/sasonica-1.apk")
     assert res.status == 200 and body == b"PK apk"
     assert res.getheader("Content-Type") == "application/vnd.android.package-archive"
+    assert res.getheader("Content-Disposition") == 'attachment; filename="sasonica-1.apk"'
+    # Asked about first (Chrome, agent-phone-adb's check): the headers, no body.
+    conn = http.client.HTTPConnection(*server, timeout=5)
+    conn.request("HEAD", "/app/dl/tok/sasonica-1.apk")
+    head = conn.getresponse()
+    assert head.status == 200 and head.read() == b""
+    assert head.getheader("Content-Length") == str(len(b"PK apk"))
+    conn.request("HEAD", "/app/dl/tok/other.apk")
+    gone = conn.getresponse()
+    assert gone.status == 404 and gone.read() == b""
+    conn.request("HEAD", "/targets")
+    api = conn.getresponse()
+    assert api.status == 404, "HEAD is the web app's only"
+    api.read()
+    conn.close()
     for gone in ("/app/dl/tok/other.apk", "/app/dl/nope/", "/app/dl/../secret.txt", "/app/dl/%2e%2e/bundle/index.html"):
         res, _ = _get(server, gone)
         assert res.status == 404, gone

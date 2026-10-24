@@ -632,6 +632,10 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     if (path == "/bridges" or any(r.fullmatch(path) for r in BRIDGE_ROUTES)) \
             and method in ("GET", "POST"):
         return _bridges(h, method, path)
+    # HEAD only for the web app's files: Chrome and agent-phone-adb ask
+    # before an /app/dl/ download (David, 25 Oct 2026).
+    if method == "HEAD":
+        return (path == web_app.PREFIX or path.startswith(web_app.PREFIX + "/")) and web_app.serve(h, path)
     if method == "GET":
         # The web app's own files (web_app.py, roadmap 21): no credential,
         # and nothing under /app is an API route.
@@ -3267,6 +3271,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if not dispatch(self, "GET", self.path.partition("?")[0]):
             self._not_found()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        if not dispatch(self, "HEAD", self.path.partition("?")[0]):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802
         # Reject oversized bodies before reading a byte (#139).

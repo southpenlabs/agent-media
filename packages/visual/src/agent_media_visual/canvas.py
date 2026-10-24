@@ -1766,6 +1766,13 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, obj: dict) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json")
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        # The web app's files only (app.dispatch): an /app/dl/ download is asked about first.
+        if not _app.dispatch(self, "HEAD", self.path.partition("?")[0]):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
     def do_GET(self) -> None:  # noqa: N802
         path, _, query = self.path.partition("?")
         if path == "/":
@@ -2229,6 +2236,10 @@ class PublicHandler(Handler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         self._caller()
         super().do_OPTIONS()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._caller()
+        super().do_HEAD()
 
     def do_GET(self) -> None:  # noqa: N802
         self._caller()

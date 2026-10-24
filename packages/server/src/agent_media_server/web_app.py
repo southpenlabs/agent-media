@@ -80,7 +80,9 @@ def _dl(h: BaseHTTPRequestHandler, rel: str) -> None:
     except (OSError, ValueError):
         p = root
     if p != root and root in p.parents and p.is_file():
-        _file(h, p, "no-store")
+        # A download, not a page: Chrome on Android shows nothing to tap
+        # for an APK it was only shown (David, 25 Oct 2026).
+        _file(h, p, "no-store", {"Content-Disposition": f'attachment; filename="{p.name}"'})
     else:
         _send(h, 404, b"not found\n", {"Content-Type": "text/plain", "Cache-Control": "no-store"})
 
@@ -99,11 +101,11 @@ def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, headers: dict[str, 
         h.wfile.write(body)
 
 
-def _file(h: BaseHTTPRequestHandler, p: Path, cache: str) -> None:
+def _file(h: BaseHTTPRequestHandler, p: Path, cache: str, extra: dict[str, str] | None = None) -> None:
     ext = p.suffix.lower()
     st = p.stat()
     headers = {"Content-Type": _TYPES.get(ext, "application/octet-stream"),
-               "Cache-Control": cache, "X-Content-Type-Options": "nosniff"}
+               "Cache-Control": cache, "X-Content-Type-Options": "nosniff", **(extra or {})}
     accepts = "gzip" in (h.headers.get("Accept-Encoding") or "").lower()
     if ext in _GZIP and accepts and st.st_size > 1024:
         key = (str(p), st.st_mtime, st.st_size)
