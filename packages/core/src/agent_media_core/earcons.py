@@ -19,8 +19,11 @@ Four, and each says one thing the voice cannot say without words:
   thinking"). Played *under* the voice, not before it (see `play_under`), so
   it can last two seconds and add no wait (David, 25 Oct 2026: "a kind of
   subtle imagining sound … have the voice play over the notification"; he
-  chose the dream pad of five tried). Quieter than the others: it comes with
-  every readout, so it must stay out of the way. Never with a reply.
+  chose the dream pad of five tried). Repeated under the whole readout, a
+  breath of silence between passes, and quieter than the others so the
+  words stay on top (David, 25 Oct 2026: "play several times in the
+  background while it's being spoken … at a lower volume"). Never with a
+  reply.
 
 Synthesised here, stdlib only (``wave`` + ``math`` + ``array``): the repo has
 no audio assets and a binary blob would be one more thing a fresh install has
@@ -61,11 +64,11 @@ RATE = 48000
 #: Peak level, dBFS. Speech sits near full scale; these sit well under it so
 #: they read as punctuation, not as a second voice.
 PEAK_DBFS = -12.0
-#: Tones that sit lower still: `think` comes with every thinking readout,
-#: under the voice.
-_PEAK_DBFS = {"think": -22.0}
+#: Tones that sit lower still: `think` loops under every thinking readout's
+#: voice.
+_PEAK_DBFS = {"think": -27.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 2
+VERSION = 3
 
 NAMES = ("cut", "interrupt", "held", "think")
 
@@ -138,6 +141,8 @@ def _recipe(name: str) -> list[float]:
         # 2.2 s, each note with a slow vibrato a little out of step with the
         # others, so it wavers like a daydream. Under the voice (play_under),
         # so its length costs no wait; low and soft so the words sit on top.
+        # Ends in a second of silence: it loops, and the gap is what makes
+        # the repeats a slow breath rather than a drone.
         dur = 2.2
         n = int(RATE * dur)
         chord = (261.63, 329.63, 392.0, 493.88, 587.33)
@@ -150,6 +155,7 @@ def _recipe(name: str) -> list[float]:
                          + 0.6 * math.sin(2 * math.pi * 5.2 * t + k))
                 / (1 + 0.3 * k)
                 for k, f in enumerate(chord)))
+        body += _silence(1.0)
     else:
         raise ValueError(f"no earcon called {name!r}")
     return pad + body + pad
@@ -327,8 +333,11 @@ def play(name: str, target=None, sink=None, *, wait: bool = False) -> bool:
         return False
 
 
-def play_under(name: str, target=None, sink=None) -> bool:
+def play_under(name: str, target=None, sink=None, *, loop: bool = False) -> bool:
     """Start earcon `name` under whatever the player plays next. True if sent.
+
+    `loop`: repeat it until the reply is over (the player stops it at the
+    reply's end; this host's own one is stopped by `SinkSpeech.stop_under`).
 
     For `think`: the readout's voice comes in over it rather than after it,
     so the tone can be long enough to read as a mood without holding the
@@ -363,7 +372,7 @@ def play_under(name: str, target=None, sink=None) -> bool:
         pre = getattr(sink, "prefetch", None)
         if pre is not None:
             pre([p], target)
-        if not under(str(p), target):
+        if not under(str(p), target, loop=loop):
             return False
         log.info("earcon: %s under the next clip on %s", name,
                  getattr(target, "name", target))

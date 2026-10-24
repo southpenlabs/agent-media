@@ -147,9 +147,13 @@ class CueSink(Sink):
         self.played.append(("cue", Path(uri).name))
         return True
 
-    def play_under(self, uri, target):
+    def play_under(self, uri, target, loop=False):
         self.played.append(("under", Path(uri).name))
+        self.loop = loop
         return True
+
+    def stop_under(self, target):
+        self.played.append(("stop_under", target.name))
 
     def play_playlist(self, uris, target, **kw):
         self.played.extend(uris)
@@ -166,19 +170,21 @@ def test_thinking_readout_opens_with_the_think_earcon_under_it(tones_on):
     from agent_media_core import earcons
     sink = CueSink()
     say(sink)
-    # Under the first clip, not a clip of its own before it (25 Oct 2026).
+    # Under the first clip, not a clip of its own before it, looping under
+    # the readout and stopped at its end (25 Oct 2026).
     assert sink.played[0] == ("under", earcons.path("think").name)
-    # Once, before the first clip; the sentences follow as before.
-    assert [p for p in sink.played if isinstance(p, tuple)] == [sink.played[0]]
-    assert len(sink.played) == 3
+    assert sink.loop is True
+    assert sink.played[-1] == ("stop_under", "local")
+    assert len([p for p in sink.played if not isinstance(p, tuple)]) == 2
 
 
 def test_think_earcon_has_its_own_switch(tones_on, monkeypatch):
     monkeypatch.setenv("MEDIA_EARCON_THINK", "0")
     sink = CueSink()
     say(sink)
-    assert not any(isinstance(p, tuple) for p in sink.played)
-    assert len(sink.played) == 2
+    # No tone; the end-of-readout stop_under is a no-op with none running.
+    assert not any(isinstance(p, tuple) and p[0] != "stop_under" for p in sink.played)
+    assert len([p for p in sink.played if not isinstance(p, tuple)]) == 2
 
 
 class ReplyCoord(Coord):
@@ -200,8 +206,9 @@ def test_reply_does_not_open_with_the_think_earcon(tones_on, monkeypatch):
 def test_think_earcon_is_a_short_pad_quieter_than_the_cut_tick():
     import array
     from agent_media_core import earcons
-    # Long enough to read as a mood under the voice, gone within a sentence.
-    assert 1.0 < earcons.duration_s("think") < 3.0
+    # A pass long enough to read as a mood under the voice, with a gap after
+    # it so the loop breathes.
+    assert 2.5 < earcons.duration_s("think") < 4.0
 
     def peak(name):
         return max(abs(s) for s in array.array("h", earcons.synth(name)))
@@ -217,9 +224,12 @@ def test_play_under_tells_a_phone_player_the_clip(monkeypatch, tmp_path):
                         lambda sock, name, value, **kw: sent.append((sock, name, value)))
     sink = speech.SinkSpeech.__new__(speech.SinkSpeech)
     monkeypatch.setattr(speech.SinkSpeech, "_prefer_url", lambda self, t: False)
-    assert sink.play_under(str(tmp_path / "earcon-think-v2.wav"), Target("testphone"))
-    assert sent == [("tcp://127.0.0.1:1", speech.UNDER_PROPERTY,
-                     "/phone/clips/earcon-think-v2.wav")]
+    assert sink.play_under(str(tmp_path / "earcon-think-v3.wav"),
+                           Target("testphone"), loop=True)
+    # The loop flag first, so the app has it when it takes the clip.
+    assert sent == [("tcp://127.0.0.1:1", speech.UNDER_LOOP_PROPERTY, "1"),
+                    ("tcp://127.0.0.1:1", speech.UNDER_PROPERTY,
+                     "/phone/clips/earcon-think-v3.wav")]
 
 
 def test_play_under_runs_a_second_player_beside_a_local_broker(monkeypatch, tmp_path):
@@ -227,17 +237,25 @@ def test_play_under_runs_a_second_player_beside_a_local_broker(monkeypatch, tmp_
     monkeypatch.setenv("MEDIA_SPEECH_SOCKET_TESTDESK", str(tmp_path / "s.sock"))
     monkeypatch.setenv("MEDIA_SPEECH_DEVICE_TESTDESK", "pulse/x")
     monkeypatch.setattr(speech.ipc, "get_properties", lambda *a, **kw: {"volume": 80.0})
-    runs = []
+    runs, stopped = [], []
 
     class P:
         def __init__(self, argv, **kw):
             runs.append(argv)
+
+        def terminate(self):
+            stopped.append(True)
     monkeypatch.setattr(speech.subprocess, "Popen", P)
     sink = speech.SinkSpeech.__new__(speech.SinkSpeech)
-    assert sink.play_under("/clips/earcon-think-v2.wav", Target("testdesk"))
+    assert sink.play_under("/clips/earcon-think-v3.wav", Target("testdesk"), loop=True)
     argv = runs[0]
     assert "--audio-device=pulse/x" in argv and "--volume=80" in argv
-    assert argv[-1] == "/clips/earcon-think-v2.wav"
+    assert "--loop-file=inf" in argv
+    assert argv[-1] == "/clips/earcon-think-v3.wav"
+    # The reply's end stops the loop, once.
+    sink.stop_under(Target("testdesk"))
+    sink.stop_under(Target("testdesk"))
+    assert stopped == [True]
 
 
 class ClearSink(CueSink):

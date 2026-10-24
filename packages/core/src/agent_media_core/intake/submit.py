@@ -5025,7 +5025,7 @@ def _submit_event(event: Event,
                 # and costs no wait. Here, with the claim and the lead in
                 # hand, so the first clip is what it plays under.
                 from .. import earcons
-                earcons.play_under("think", target, sink)
+                earcons.play_under("think", target, sink, loop=True)
             else:
                 # The app clears it only when it plays it, so a readout
                 # stopped before it sounded would leave its tone for this
@@ -5860,6 +5860,13 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
+            if thinking:
+                # The `think` tone loops under the readout; this host's own
+                # player of it stops here (a phone's stops with the reply).
+                try:
+                    getattr(sink, "stop_under", lambda *a: None)(target)
+                except Exception:  # noqa: BLE001 — never cost the cleanup
+                    log.debug("stop_under failed", exc_info=True)
             # A claim still in flight (before_speech raised) must finish
             # before it is released, or it would land after and hold the
             # broker for its whole TTL. It may be waiting for a lead that is

@@ -201,6 +201,13 @@ def set_duck_cue(cue: str, target: Target = DEFAULT_TARGET) -> bool:
 #: the voice itself and so is the only one that can lay one over the other.
 #: The app plays it once and clears it.
 UNDER_PROPERTY = "user-data/agent-media/under"
+#: Written just before UNDER_PROPERTY: "1" repeats that clip until the reply
+#: is over, "" plays it once.
+UNDER_LOOP_PROPERTY = "user-data/agent-media/under-loop"
+
+#: This host's own under players (play_under), by target name, so the
+#: reply's end can stop a looping one.
+_UNDER_PROCS: dict = {}
 
 
 #: mpv `user-data` key carrying whether the *device* wants to be quiet.
@@ -881,7 +888,8 @@ class SinkSpeech:
             log.info("sink-speech: cue %s failed: %s", Path(uri).name, e)
             return False
 
-    def play_under(self, uri: str, target: Target = DEFAULT_TARGET) -> bool:
+    def play_under(self, uri: str, target: Target = DEFAULT_TARGET, *,
+                   loop: bool = False) -> bool:
         """Play one clip that is not speech (an earcon) under the next reply.
 
         Not through the reply's playlist — its index is the sentence index
@@ -896,12 +904,16 @@ class SinkSpeech:
           the same output and at the broker's volume. Started now: the
           reply's first clip follows within moments.
 
+        `loop` repeats it until the reply is over: the phone stops it at the
+        reply's end itself, this host's one is stopped by stop_under.
+
         True if sent. Never raises.
         """
         sock = _socket_for(target)
         if str(sock).startswith("tcp://"):
             clip = _clip_uri_for(str(uri), target, self._prefer_url(target))
             try:
+                ipc.set_property(sock, UNDER_LOOP_PROPERTY, "1" if loop else "")
                 ipc.set_property(sock, UNDER_PROPERTY, clip)
                 return True
             except (ipc.MpvIpcError, OSError) as e:
@@ -921,16 +933,32 @@ class SinkSpeech:
                 argv.append(f"--volume={float(vol):g}")
         except (ipc.MpvIpcError, OSError):
             pass
+        if loop:
+            argv.append("--loop-file=inf")
         argv.append(str(uri))
+        self.stop_under(target)
         try:
-            subprocess.Popen(argv, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    start_new_session=True)
+            if loop:
+                _UNDER_PROCS[target.name] = proc
             return True
         except OSError as e:
             log.info("sink-speech: under %s failed: %s", Path(uri).name, e)
             return False
+
+    def stop_under(self, target: Target = DEFAULT_TARGET) -> None:
+        """The reply is over: stop this host's looping under player, if one
+        runs for `target`. (A phone stops its own.) Never raises."""
+        proc = _UNDER_PROCS.pop(getattr(target, "name", target), None)
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+        except OSError:
+            pass
 
     def clear_under(self, target: Target = DEFAULT_TARGET) -> None:
         """Take back a play_under the phone has not played yet. Never raises."""
@@ -939,6 +967,7 @@ class SinkSpeech:
             return
         try:
             ipc.set_property(sock, UNDER_PROPERTY, "")
+            ipc.set_property(sock, UNDER_LOOP_PROPERTY, "")
         except (ipc.MpvIpcError, OSError) as e:
             log.debug("sink-speech: clearing under failed: %s", e)
 
