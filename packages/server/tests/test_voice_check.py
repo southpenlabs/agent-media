@@ -166,3 +166,21 @@ def test_speak_submits_privately_in_the_threads_voice(monkeypatch):
     assert got and got[0].text == "Did you mean: yes?"
     md = got[0].metadata
     assert md["session"] == S1 and md["private"] is True and md["voice_from"] == "session"
+
+
+def test_a_private_threads_words_reach_only_a_private_model(monkeypatch):
+    from agent_media_core.intake import _summary
+
+    asked: list = []
+
+    def chat(system, user, timeout, model=None):
+        asked.append(model)
+        return '{"sure": false, "gist": "the gist"}'
+    monkeypatch.setattr(_summary, "_chat", chat)
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
+    monkeypatch.delenv("MEDIA_PRIVATE_MODELS", raising=False)
+    got = voice_check.check("turn it up", private=True)
+    assert got["sure"] is True and asked == []          # not checked: sent as heard
+    monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
+    got = voice_check.check("turn it up", private=True)
+    assert got["sure"] is False and asked == ["local"]

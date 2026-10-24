@@ -1409,8 +1409,11 @@ recogniser's 0–1, omitted or ≤ 0 when unknown>, "say"?: "Did you mean:
 {gist}?"}` → `{"ok": true, "sure": bool, "gist": "<one short sentence of what
 they meant>", "spoken": bool, "why"?: "…"}`.
 
-A fast model (`MEDIA_VOICE_CHECK_MODEL`, else `MEDIA_FOLLOWUP_MODEL`, on the
-summary gateway, `MEDIA_SUMMARY_*`) reads the words with `context` (the last
+A fast model (`agent_media_core/intake/fast.py`: `MEDIA_VOICE_CHECK_MODEL`,
+`MEDIA_FAST_MODELS`, `MEDIA_FOLLOWUP_MODEL`, the first to answer inside the
+deadline, on the summary gateway; a private thread's words only to
+`MEDIA_PRIVATE_MODELS`, and with none they are not checked) reads the words
+with `context` (the last
 1500 characters) and answers `sure: false` when they look garbled, misheard,
 cut off or easily taken the wrong way; a recogniser `confidence` under
 `MEDIA_VOICE_CHECK_MIN_CONFIDENCE` (0.5) makes it unsure on its own. `gist`
@@ -1583,13 +1586,16 @@ Pinned by `packages/server/tests/test_reap.py`.
 - Both in `CORS_PATHS`.
 
 - `POST /session/tags/suggest {"session"}` (25 Oct 2026) → `{"ok": true,
-  "session", "tags"}`: up to four tags for the thread from a quick model
-  (`MEDIA_TAG_MODEL`, else `MEDIA_FOLLOWUP_MODEL`, on the summary gateway),
-  which reads the thread and the tags in use and prefers those. Nothing is
-  saved; the app's Auto adds them to the sheet. Its own tags, the exporter's
-  and anything that is not a tag are dropped. 503 `"no tags to suggest"`
-  when the model gives none (no gateway, no answer, a private thread); 423
-  sealed; 400 `"not a session id"`. In `CORS_PATHS`.
+  "session", "tags"}`: up to four tags for the thread. First the tags already
+  in use that fit it, found with no model (their words in the thread, or on
+  threads whose titles are like its), then new ones from the fast models
+  (`agent_media_core/intake/fast.py`: `MEDIA_TAG_MODEL`, `MEDIA_FAST_MODELS`,
+  `MEDIA_FOLLOWUP_MODEL`, in order). A private thread is read only to
+  `MEDIA_PRIVATE_MODELS`; with none it gets the matched ones alone. Nothing
+  is saved; the app's Auto adds them to the sheet. Its own tags, the
+  exporter's and anything that is not a tag are dropped. 503 `"no tags to
+  suggest"` when there are none; 423 sealed; 400 `"not a session id"`. In
+  `CORS_PATHS`.
 
 Pinned by `packages/server/tests/test_thread_tags.py`.
 

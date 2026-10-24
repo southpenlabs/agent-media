@@ -46,6 +46,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("AGENT_PRIVATE_DIR", str(tmp_path / "private.d"))
     # The thread tags live in the real ~/org (tags.py): never read or edit it.
     monkeypatch.setenv("MEDIA_THREAD_TAGS_DIR", str(tmp_path / "org-sessions"))
+    # A model one test made fail is not skipped in the next (intake/fast.py).
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
     # The alert store files TODOs in ~/org/inbox.org: never David's here.
     monkeypatch.setenv("MEDIA_ALERTS_INBOX", "0")
     # No ~/agent-personas: a host without the repo, unless a test makes one.

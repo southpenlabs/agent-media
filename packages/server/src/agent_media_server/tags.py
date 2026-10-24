@@ -29,13 +29,17 @@ the exporter has written it, and writing a node here would mean guessing the
 exporter's own tags.
 
 `POST /session/tags/suggest {"session"}` → `{"session", "tags"}`: a few
-tags for the thread from the summary gateway's quick model (the follow-up's,
-as `threads.auto_title` uses), reading the thread and the tags already in
-use, which it prefers. Nothing is saved: the app adds them to the sheet and
-Save sends them. A private thread is never read to a model, and gets none.
+tags for the thread. First the tags already in use that fit it, found with
+no model (`matched`: their words in the thread, or on threads with titles
+like its), so it works for everyone and for a private thread; then new ones
+from the fast models (agent_media_core/intake/fast.py), which read the
+thread and the tags in use. A private thread is read only to
+MEDIA_PRIVATE_MODELS. Nothing is saved: the app adds them to the sheet and
+Save sends them.
 
 `MEDIA_THREAD_TAGS_DIR` moves the root (default `~/org/roam/sessions`).
-`MEDIA_TAG_MODEL` picks the suggester's model (else `MEDIA_FOLLOWUP_MODEL`).
+`MEDIA_TAG_MODEL` is the suggester's own model, or list, tried before
+MEDIA_FAST_MODELS (intake/fast.py).
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ def _tagify(s: str) -> str:
     t = re.sub(r"[^A-Za-z0-9_@#%]", "_", (s or "").strip())
     return re.sub(r"_+", "_", t).strip("_").lower()
 _FILETAGS = re.compile(r"^#\+filetags:[ \t]*(.*)$", re.M | re.I)
+_TITLE = re.compile(r"^#\+title:[ \t]*(.*)$", re.M | re.I)
 
 _lock = threading.Lock()
 # path -> ((mtime_ns, size), node); one stat per file once warm.
@@ -105,7 +110,9 @@ def _parse(text: str) -> dict | None:
     cwd = _CWD.search(head)
     if cwd:
         auto.update({_tagify(cwd.group(1)), _tagify(os.path.basename(cwd.group(1).rstrip("/")))})
+    title = _TITLE.search(head)
     return {"session": m.group(1), "every": every,
+            "title": title.group(1).strip() if title else "",
             "tags": [t for t in every if t not in auto and not _PATH_TAG.fullmatch(t)]}
 
 
@@ -311,30 +318,91 @@ SUGGEST_PROMPT = (
 )
 
 
+#: Words too common to say what a thread is about.
+_STOP = frozenset(
+    "the and for you your with that this from have are was were but not can "
+    "what when where which will would could should into onto about there "
+    "their them they then than also just like want need make made does done "
+    "here more some any all one two its it's i'm let's yes okay please thanks "
+    "thread app server".split())
+
+
+def _words(text: str) -> list[str]:
+    """Content words, lowercased, a plural's s dropped."""
+    out = []
+    for w in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if len(w) < 3 or w in _STOP:
+            continue
+        out.append(w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w)
+    return out
+
+
+def matched(session: str, text: str) -> list[str]:
+    """Tags already in use that fit the thread, with no model: a tag whose
+    words all appear in it (more often, higher), and the tags of threads
+    whose titles share its words (the closer, higher). Instant, and read
+    only here, so a private thread gets them too. Its own left out."""
+    nodes = _nodes()
+    mine = nodes.get(session) or []
+    own = {t for _, n in mine for t in n["tags"]}
+    title = next((n["title"] for _, n in mine if n.get("title")), "")
+    seen = _words(title + "\n" + text)
+    bag: dict[str, int] = {}
+    for w in seen:
+        bag[w] = bag.get(w, 0) + 1
+    score: dict[str, float] = {}
+    for c in counts():
+        tag = c["tag"]
+        parts = _words(tag.replace("_", " "))
+        if parts and all(p in bag for p in parts):
+            score[tag] = score.get(tag, 0.0) + 1.0 + min(sum(bag[p] for p in parts), 6) / 3
+    mine_title = set(_words(title)) or set(_words(text[:400]))
+    if mine_title:
+        for sid, found in nodes.items():
+            if sid == session:
+                continue
+            for _, n in found:
+                if not n["tags"]:
+                    continue
+                theirs = set(_words(n.get("title") or ""))
+                if not theirs:
+                    continue
+                sim = len(mine_title & theirs) / len(mine_title | theirs)
+                if sim >= 0.2:
+                    for tag in n["tags"]:
+                        score[tag] = score.get(tag, 0.0) + 3 * sim
+    ranked = sorted((t for t, v in score.items() if v >= 1.0 and t not in own),
+                    key=lambda t: (-score[t], t))
+    return ranked[:MAX_SUGGESTED]
+
+
 def suggest(session: str) -> list[str]:
-    """Tags for the thread from the quick model, its own left out; [] when
-    there are none to be had (no gateway, a private thread, nothing said)."""
-    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _chat, _int_env
+    """Tags for the thread, its own left out; [] when there are none.
+
+    First the tags already in use that fit (`matched`, no model), then new
+    ones from the fast models (intake/fast.py: MEDIA_TAG_MODEL, then
+    MEDIA_FAST_MODELS, then the follow-up's). A private thread is read only
+    to MEDIA_PRIVATE_MODELS, and with none gets the matched tags alone."""
+    from agent_media_core.intake import fast
+    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _int_env
     from agent_media_core.private import hidden
 
     from . import threads
 
-    if hidden(session):
-        return []
     text = threads._conversation_text(session)
     if not text:
         return []
-    in_use = [c["tag"] for c in counts()][:60]
     own = set(tags_by_session().get(session, []))
+    picked = matched(session, text)
+    in_use = [c["tag"] for c in counts()][:60]
     user = ("Existing tags: " + (", ".join(in_use) if in_use else "(none yet)")
             + "\n\nConversation:\n" + text)
-    model = os.environ.get("MEDIA_TAG_MODEL") or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None
     timeout = _int_env("MEDIA_TAG_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    out = (_chat(SUGGEST_PROMPT, user, timeout, model=model) or "").strip()
+    out = (fast.chat(SUGGEST_PROMPT, user, timeout, purpose_env="MEDIA_TAG_MODEL",
+                     private=hidden(session)) or "").strip()
     line = out.splitlines()[0] if out else ""
     if line.lower().startswith("tags:"):
         line = line[len("tags:"):]
-    picked: list[str] = []
     for raw in re.split(r"[,;]", line):
         t = clean(raw.strip().strip("\"'`*").lower())
         if t and t not in EXPORTER_TAGS and t not in own and t not in picked:

@@ -181,3 +181,27 @@ def test_suggest_is_gated(server, shelf, monkeypatch):
     res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID})
     assert res.status == 401
     assert "/session/tags/suggest" in app.CORS_PATHS
+
+
+def test_tags_in_use_are_matched_with_no_model(server, shelf, signed_in, monkeypatch):
+    _node(SID, ":claude:inbox:home_ryer_projects_agent_media:")
+    _node(SID2, ":claude:inbox:home_ryer:full_screen:mic:", sub="claude")
+    _fake_model(monkeypatch, None)                      # no model answers
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    # "mic" is in the thread's words; "full_screen" is not, nor its title's.
+    assert res.status == 200 and obj["tags"] == ["mic"]
+
+
+def test_a_private_thread_never_reaches_a_hosted_model(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import private
+
+    _node(SID2, ":claude:inbox:home_ryer:mic:", sub="claude")
+    seen: list[str] = []
+    _fake_model(monkeypatch, "hosted_guess", seen)
+    monkeypatch.setattr(private, "hidden", lambda s: s == SID)
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert obj["tags"] == ["mic"] and seen == []        # matched only, no model read it
+    monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert obj["tags"] == ["mic", "hosted_guess"] and len(seen) == 1

@@ -181,21 +181,23 @@ def _conversation_text(session: str, budget: int = 8000) -> str:
 
 
 def auto_title(session: str) -> str:
-    """A name for the conversation from the summary gateway, or "" when it
-    cannot be had. The follow-up's model (a small hosted one): the summary's
-    local model takes half a minute on red5 for a line."""
-    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _chat, _int_env
+    """A name for the conversation from the fast models (intake/fast.py:
+    MEDIA_TITLE_MODEL, then MEDIA_FAST_MODELS, then the follow-up's), or ""
+    when it cannot be had. A private thread is read only to
+    MEDIA_PRIVATE_MODELS, and with none gets no name."""
+    from agent_media_core.intake import fast
+    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _int_env
     from agent_media_core.private import hidden
 
-    if hidden(session):     # a private thread is never read out to a model
-        return ""
+    private = hidden(session)
+    if private and not fast.models(private=True):
+        return ""           # not even read: no model may have it
     text = _conversation_text(session)
     if not text:
         return ""
-    model = (os.environ.get("MEDIA_TITLE_MODEL")
-             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
     timeout = _int_env("MEDIA_TITLE_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    out = (_chat(AUTO_TITLE_PROMPT, text, timeout, model=model) or "").strip()
+    out = (fast.chat(AUTO_TITLE_PROMPT, text, timeout, purpose_env="MEDIA_TITLE_MODEL",
+                     private=private) or "").strip()
     line = out.splitlines()[0] if out else ""
     if line.lower().startswith("title:"):
         line = line[len("title:"):]

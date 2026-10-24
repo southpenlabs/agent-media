@@ -20,9 +20,12 @@ place), and kept out of speech history (`private`).
 
 Config (env / ~/.config/agent-media.env):
   MEDIA_VOICE_CHECK           "0" turns it off (always sure)
-  MEDIA_VOICE_CHECK_MODEL     the model (default MEDIA_FOLLOWUP_MODEL, then
-                              the summary's); the gateway is the summary's
-                              (intake/_summary.py, MEDIA_SUMMARY_*). It must
+  MEDIA_VOICE_CHECK_MODEL     the model, or a list, tried before
+                              MEDIA_FAST_MODELS and MEDIA_FOLLOWUP_MODEL
+                              (intake/fast.py); a private thread's words go
+                              only to MEDIA_PRIVATE_MODELS, and with none it
+                              is not checked (sure). The gateway is the
+                              summary's (intake/_summary.py). It must
                               answer in a second or two: on red5's gateway
                               gemini-3-flash takes 0.5–2.8 s, claude-haiku-4-5
                               about 15 s (24 Oct 2026)
@@ -76,32 +79,17 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
-def _model() -> str | None:
-    return (os.environ.get("MEDIA_VOICE_CHECK_MODEL")
-            or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
-
-
-def _ask_model(words: str, context: str, timeout: float) -> dict | None:
-    """`{"sure", "gist"}` from the model, or None: no answer within `timeout`
-    (a hard deadline: the request runs on its own thread), or none usable."""
-    from agent_media_core.intake import _summary
+def _ask_model(words: str, context: str, timeout: float, private: bool = False) -> dict | None:
+    """`{"sure", "gist"}` from the fast models (intake/fast.py:
+    MEDIA_VOICE_CHECK_MODEL, then MEDIA_FAST_MODELS, then the follow-up's), or
+    None: no answer within `timeout` (a hard deadline), or none usable. A
+    private thread's words go only to MEDIA_PRIVATE_MODELS."""
+    from agent_media_core.intake import fast
 
     user = (f"The assistant last said:\n<said>{context}</said>\n\n"
             f"The recogniser heard:\n<heard>{words}</heard>")
-    out: list[str | None] = []
-
-    def run() -> None:
-        try:
-            # urlopen takes a float; the join below is the real deadline.
-            out.append(_summary._chat(PROMPT, user, timeout=timeout,  # type: ignore[arg-type]
-                                      model=_model()))
-        except Exception:  # noqa: BLE001 — a failed check is a sure one
-            out.append(None)
-
-    t = threading.Thread(target=run, daemon=True)
-    t.start()
-    t.join(timeout)
-    return parse(out[0]) if out else None
+    return parse(fast.chat(PROMPT, user, timeout, purpose_env="MEDIA_VOICE_CHECK_MODEL",
+                           private=private))
 
 
 def parse(text: str | None) -> dict | None:
@@ -123,7 +111,8 @@ def parse(text: str | None) -> dict | None:
     return {"sure": got["sure"], "gist": gist}
 
 
-def check(words: str, context: str = "", confidence: float | None = None) -> dict:
+def check(words: str, context: str = "", confidence: float | None = None,
+          private: bool = False) -> dict:
     """`{"sure", "gist", "why"?}` for these words; never raises."""
     words = " ".join(str(words or "").split())[:MAX_WORDS]
     if not words:
@@ -131,7 +120,7 @@ def check(words: str, context: str = "", confidence: float | None = None) -> dic
     if not _enabled():
         return {"sure": True, "gist": "", "why": "off"}
     got = _ask_model(words, " ".join(str(context or "").split())[-MAX_CONTEXT:],
-                     _float_env("MEDIA_VOICE_CHECK_TIMEOUT", DEFAULT_TIMEOUT_S))
+                     _float_env("MEDIA_VOICE_CHECK_TIMEOUT", DEFAULT_TIMEOUT_S), private)
     if not got:
         return {"sure": True, "gist": "", "why": "no_answer"}
     floor = _float_env("MEDIA_VOICE_CHECK_MIN_CONFIDENCE", DEFAULT_MIN_CONFIDENCE)
@@ -180,7 +169,9 @@ def post(body: dict, bearer: str) -> tuple[bool, dict]:
     conf = body.get("confidence")
     confidence = float(conf) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None
     context = body.get("context") if isinstance(body.get("context"), str) else ""
-    got = check(text, context, confidence)
+    from agent_media_core.private import hidden
+
+    got = check(text, context, confidence, private=bool(session) and hidden(session))
     say = body.get("say")
     spoken = False
     if not got["sure"] and session and isinstance(say, str) and "{gist}" in say:
