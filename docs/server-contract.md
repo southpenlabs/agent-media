@@ -1442,6 +1442,42 @@ spoken.
 
 Clients: W (`hooks/useHandsFree.ts`, `hooks/useDictation.ts`).
 
+#### `POST /voice/tidy` — gated (25 Oct 2026)
+
+An offer to clean up a dictated message before it goes to a person (David,
+25 Oct 2026: "particularly for messages to other people"). Asked by the app
+only for a send to a person — a Matrix room (a text through a bridge, a chat
+room) — never to an agent thread, and only after the voice check has passed
+the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
+"context"?: "<the last few messages, for tone>", "say"?: "Send this one?
+{tidy}"}` → `{"ok": true, "messy": bool, "tidy": "…", "spoken": bool,
+"why"?: "…"}`.
+
+- A cheap local test (`looks_messy`: fillers, a word said twice, a broken-off
+  start, a long run with no punctuation, no capital) runs first; clean text
+  answers `messy: false, why: "clean"` and never reaches a model. The app has
+  the same test (`lib/messy.ts`) and does not ask at all.
+- A fast model (`intake/fast.py`: `MEDIA_TIDY_MODEL`, then
+  `MEDIA_FAST_MODELS`, then `MEDIA_FOLLOWUP_MODEL`) returns `{messy, tidy}`:
+  only fillers, repeats and false starts removed, punctuation, capitals and
+  obvious mis-hearings fixed; meaning, voice, register, language and every
+  name, number and date kept. A `tidy` that is longer than the words (by
+  more than 8 characters), that loses a number, or that equals them answers
+  `messy: false, why: "unsafe"`.
+- A private or sealed `session` is only ever sent to `MEDIA_PRIVATE_MODELS`;
+  with none set it gets no model (`why: "no_answer"`).
+- Hard deadline `MEDIA_VOICE_TIDY_TIMEOUT` (3 s). Every failure — no model, a
+  timeout, an unusable answer, `MEDIA_VOICE_TIDY=0` (`why: "off"`) — answers
+  `messy: false`: the message goes as it was.
+- With `say` (containing `{tidy}`) and a `session`, a tidy version is spoken
+  in that thread's voice and place (`spoken: true`), private, never in speech
+  history, for the flow where nobody is looking. Nothing is sent to the
+  session. 400 without `text`, or for a `session` that is not a session id.
+  `voice_tidy.py`.
+
+Clients: W (`hooks/useDictation.ts`, `hooks/useHandsFree.ts`; a Matrix room's
+thread only).
+
 ### 6.4 Managing a thread
 
 #### `POST /rename` — gated

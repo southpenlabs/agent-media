@@ -163,6 +163,10 @@ device gets its token):
                   hands-free's check of heard words before they send: `sure`,
                   a one-sentence `gist`; with `say`, an unsure one is asked
                   aloud in the thread (voice_check.py)
+  POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?} →
+                  an offer to clean up a dictated message to a person: `messy`,
+                  `tidy`; only when the words look messy, never for an agent
+                  (voice_tidy.py)
   POST /session/move/cancel {"session"} → drop the move waiting on that
                   session, and any failure it left (§6.15)
   POST /session/answer {"session", "choice", "key"} → answer the dialog that
@@ -335,7 +339,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
-    "/session/ask/part", "/voice/check",
+    "/session/ask/part", "/voice/check", "/voice/tidy",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/voice",
     "/settings/language",
     "/sessions/state", "/commands", "/rename",
@@ -2679,6 +2683,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import ask_follow
 
         ok, detail = ask_follow.post(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/voice/tidy":
+        # An offer to tidy a dictated message to a person (voice_tidy.py).
+        from . import voice_tidy
+
+        ok, detail = voice_tidy.post(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/voice/check":
         # Hands-free: were the heard words what was meant (voice_check.py)?
