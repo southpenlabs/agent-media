@@ -932,6 +932,16 @@ class SinkSpeech:
             log.info("sink-speech: under %s failed: %s", Path(uri).name, e)
             return False
 
+    def clear_under(self, target: Target = DEFAULT_TARGET) -> None:
+        """Take back a play_under the phone has not played yet. Never raises."""
+        sock = _socket_for(target)
+        if not str(sock).startswith("tcp://"):
+            return
+        try:
+            ipc.set_property(sock, UNDER_PROPERTY, "")
+        except (ipc.MpvIpcError, OSError) as e:
+            log.debug("sink-speech: clearing under failed: %s", e)
+
     # ---- cross-host broker ownership -------------------------------------
     #
     # These are no-ops for a local/rooms (unix-socket) target: only one host

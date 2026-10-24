@@ -5026,6 +5026,13 @@ def _submit_event(event: Event,
                 # hand, so the first clip is what it plays under.
                 from .. import earcons
                 earcons.play_under("think", target, sink)
+            else:
+                # The app clears it only when it plays it, so a readout
+                # stopped before it sounded would leave its tone for this
+                # reply. Best-effort, a no-op off a phone.
+                clear = getattr(sink, "clear_under", None)
+                if clear is not None:
+                    clear(target)
             # Speech-started breadcrumb — the moment we commit to feeding the
             # broker. Its "end" twin is in the finally below, so every exit
             # (finished, superseded, yielded-then-done, error) closes the pair.

@@ -238,3 +238,20 @@ def test_play_under_runs_a_second_player_beside_a_local_broker(monkeypatch, tmp_
     argv = runs[0]
     assert "--audio-device=pulse/x" in argv and "--volume=80" in argv
     assert argv[-1] == "/clips/earcon-think-v2.wav"
+
+
+class ClearSink(CueSink):
+    def clear_under(self, target):
+        self.played.append(("clear", target.name))
+
+
+def test_a_reply_takes_back_an_unplayed_think_tone(tones_on, monkeypatch):
+    monkeypatch.setattr(S, "_remote_playlist", lambda *a: False)
+    sink = ClearSink()
+    S.submit_event(
+        Event("A reply is long enough to be its own sentence. And a second one.",
+              Source.CLAUDE_CODE, Priority.NORMAL, target=Target("local"),
+              metadata={"session": "reply-test"}),
+        state=StateStore(), sink=sink, coordinator=ReplyCoord())
+    assert ("clear", "local") in sink.played
+    assert not any(p[0] == "under" for p in sink.played if isinstance(p, tuple))
