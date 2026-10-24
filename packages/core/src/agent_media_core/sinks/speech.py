@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import socket as _socket
+import subprocess
 import time
 from pathlib import Path
 from typing import Optional
@@ -193,6 +194,13 @@ def set_duck_cue(cue: str, target: Target = DEFAULT_TARGET) -> bool:
     except (ipc.MpvIpcError, OSError) as e:
         log.debug("sink-speech: duck cue %r failed: %s", cue, e)
         return False
+
+
+#: mpv `user-data` key naming a clip to play under the next reply
+#: (`SinkSpeech.play_under`): the `think` earcon, for a player that renders
+#: the voice itself and so is the only one that can lay one over the other.
+#: The app plays it once and clears it.
+UNDER_PROPERTY = "user-data/agent-media/under"
 
 
 #: mpv `user-data` key carrying whether the *device* wants to be quiet.
@@ -871,6 +879,57 @@ class SinkSpeech:
             return True
         except (ipc.MpvIpcError, OSError) as e:
             log.info("sink-speech: cue %s failed: %s", Path(uri).name, e)
+            return False
+
+    def play_under(self, uri: str, target: Target = DEFAULT_TARGET) -> bool:
+        """Play one clip that is not speech (an earcon) under the next reply.
+
+        Not through the reply's playlist — its index is the sentence index
+        (see play_cue) — and not before it, which is what play_cue does and
+        what makes a long tone a wait. Called just before the reply starts:
+
+        - A tcp:// player (the phone's) is told, as UNDER_PROPERTY, the clip
+          to play alongside the reply it starts next; it renders the voice
+          itself, so only it can lay one over the other. An app that does
+          not know the property stores it and plays nothing.
+        - This host's own broker gets a second mpv beside it, one-shot, on
+          the same output and at the broker's volume. Started now: the
+          reply's first clip follows within moments.
+
+        True if sent. Never raises.
+        """
+        sock = _socket_for(target)
+        if str(sock).startswith("tcp://"):
+            clip = _clip_uri_for(str(uri), target, self._prefer_url(target))
+            try:
+                ipc.set_property(sock, UNDER_PROPERTY, clip)
+                return True
+            except (ipc.MpvIpcError, OSError) as e:
+                log.info("sink-speech: under %s failed: %s", Path(uri).name, e)
+                return False
+        argv = [os.environ.get("MEDIA_MPV_BIN", "mpv"), "--no-config",
+                "--no-video", "--really-quiet", "--no-terminal"]
+        try:
+            device = _device_for(target)
+        except NotImplementedError:
+            return False
+        if device:
+            argv.append(f"--audio-device={device}")
+        try:
+            vol = ipc.get_properties(sock, ["volume"], timeout=1.0).get("volume")
+            if isinstance(vol, (int, float)):
+                argv.append(f"--volume={float(vol):g}")
+        except (ipc.MpvIpcError, OSError):
+            pass
+        argv.append(str(uri))
+        try:
+            subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            return True
+        except OSError as e:
+            log.info("sink-speech: under %s failed: %s", Path(uri).name, e)
             return False
 
     # ---- cross-host broker ownership -------------------------------------

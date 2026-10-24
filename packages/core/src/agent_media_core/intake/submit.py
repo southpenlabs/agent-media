@@ -5020,13 +5020,12 @@ def _submit_event(event: Event,
             if thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,
-                # 23 Oct 2026). Its own clip on the reply's player, so it
-                # sounds wherever the readout does — phone, rooms, desk —
-                # and waited out, since the first clip's load starts with a
-                # stop that would take it. Here, with the claim and the lead
-                # in hand, so nothing but the first clip comes between them.
+                # 23 Oct 2026). Under the voice, not before it (25 Oct), so
+                # it sounds wherever the readout does — phone, rooms, desk —
+                # and costs no wait. Here, with the claim and the lead in
+                # hand, so the first clip is what it plays under.
                 from .. import earcons
-                earcons.play("think", target, sink, wait=True)
+                earcons.play_under("think", target, sink)
             # Speech-started breadcrumb — the moment we commit to feeding the
             # broker. Its "end" twin is in the finally below, so every exit
             # (finished, superseded, yielded-then-done, error) closes the pair.

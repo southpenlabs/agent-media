@@ -140,10 +140,15 @@ def test_live_thinking_is_not_synthesized_as_an_assistant_reply():
 
 
 class CueSink(Sink):
-    """Records earcons (play_cue) and clips in the order the player got them."""
+    """Records earcons (play_cue, play_under) and clips in the order the
+    player got them."""
 
     def play_cue(self, uri, target):
         self.played.append(("cue", Path(uri).name))
+        return True
+
+    def play_under(self, uri, target):
+        self.played.append(("under", Path(uri).name))
         return True
 
     def play_playlist(self, uris, target, **kw):
@@ -157,11 +162,12 @@ def tones_on(monkeypatch):
     monkeypatch.setattr(S, "ringer_quiet", lambda *a: None)
 
 
-def test_thinking_readout_opens_with_the_think_earcon(tones_on):
+def test_thinking_readout_opens_with_the_think_earcon_under_it(tones_on):
     from agent_media_core import earcons
     sink = CueSink()
     say(sink)
-    assert sink.played[0] == ("cue", earcons.path("think").name)
+    # Under the first clip, not a clip of its own before it (25 Oct 2026).
+    assert sink.played[0] == ("under", earcons.path("think").name)
     # Once, before the first clip; the sentences follow as before.
     assert [p for p in sink.played if isinstance(p, tuple)] == [sink.played[0]]
     assert len(sink.played) == 3
@@ -191,11 +197,44 @@ def test_reply_does_not_open_with_the_think_earcon(tones_on, monkeypatch):
     assert not any(isinstance(p, tuple) and "think" in p[1] for p in sink.played)
 
 
-def test_think_earcon_is_short_and_quieter_than_the_cut_tick():
+def test_think_earcon_is_a_short_pad_quieter_than_the_cut_tick():
     import array
     from agent_media_core import earcons
-    assert earcons.duration_s("think") < 0.4
+    # Long enough to read as a mood under the voice, gone within a sentence.
+    assert 1.0 < earcons.duration_s("think") < 3.0
 
     def peak(name):
         return max(abs(s) for s in array.array("h", earcons.synth(name)))
     assert peak("think") < peak("cut")
+
+
+def test_play_under_tells_a_phone_player_the_clip(monkeypatch, tmp_path):
+    from agent_media_core.sinks import speech
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_TESTPHONE", "tcp://127.0.0.1:1")
+    monkeypatch.setenv("MEDIA_SPEECH_CLIP_LOCALDIR_TESTPHONE", "/phone/clips")
+    sent = []
+    monkeypatch.setattr(speech.ipc, "set_property",
+                        lambda sock, name, value, **kw: sent.append((sock, name, value)))
+    sink = speech.SinkSpeech.__new__(speech.SinkSpeech)
+    monkeypatch.setattr(speech.SinkSpeech, "_prefer_url", lambda self, t: False)
+    assert sink.play_under(str(tmp_path / "earcon-think-v2.wav"), Target("testphone"))
+    assert sent == [("tcp://127.0.0.1:1", speech.UNDER_PROPERTY,
+                     "/phone/clips/earcon-think-v2.wav")]
+
+
+def test_play_under_runs_a_second_player_beside_a_local_broker(monkeypatch, tmp_path):
+    from agent_media_core.sinks import speech
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_TESTDESK", str(tmp_path / "s.sock"))
+    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_TESTDESK", "pulse/x")
+    monkeypatch.setattr(speech.ipc, "get_properties", lambda *a, **kw: {"volume": 80.0})
+    runs = []
+
+    class P:
+        def __init__(self, argv, **kw):
+            runs.append(argv)
+    monkeypatch.setattr(speech.subprocess, "Popen", P)
+    sink = speech.SinkSpeech.__new__(speech.SinkSpeech)
+    assert sink.play_under("/clips/earcon-think-v2.wav", Target("testdesk"))
+    argv = runs[0]
+    assert "--audio-device=pulse/x" in argv and "--volume=80" in argv
+    assert argv[-1] == "/clips/earcon-think-v2.wav"
