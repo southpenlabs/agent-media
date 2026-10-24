@@ -128,3 +128,56 @@ def test_older_exports_tags_are_not_yours(server, shelf, signed_in):
     assert _row(targets, SID)["tags"] == ["mine"]
     res, obj = call(server, "POST", "/session/tags", {"session": SID, "add": ["home_x"]}, AUTH)
     assert res.status == 400
+
+
+# --- suggestions (Auto) ---------------------------------------------------------
+
+def _fake_model(monkeypatch, answer, seen=None):
+    from agent_media_core.intake import _summary
+    from agent_media_server import threads
+
+    monkeypatch.setattr(threads, "_conversation_text", lambda s: "you: the mic cuts out\n\nassistant: fixed")
+
+    def chat(system, user, timeout, model=None):
+        if seen is not None:
+            seen.append(user)
+        return answer
+    monkeypatch.setattr(_summary, "_chat", chat)
+
+
+def test_suggest_prefers_tags_in_use_and_saves_nothing(server, shelf, signed_in, monkeypatch):
+    p = _node(SID, ":claude:inbox:home_ryer_projects_agent_media:voice:")
+    _node(SID2, ":claude:inbox:home_ryer:phone:", sub="claude")
+    before = p.read_text()
+    seen: list[str] = []
+    _fake_model(monkeypatch, "Tags: Phone, voice, #Mic Bugs, claude, home_ryer, x:y, a, b, c", seen)
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert res.status == 200, obj
+    # Its own (voice), the exporter's, a path tag and a bad one are left out; four at most.
+    assert obj == {"ok": True, "session": SID, "tags": ["phone", "mic_bugs", "a", "b"]}
+    assert "Existing tags: " in seen[0] and "phone" in seen[0] and "voice" in seen[0]
+    assert p.read_text() == before                      # nothing saved
+
+
+def test_suggest_refusals(server, shelf, signed_in, monkeypatch):
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": "nope"}, AUTH)
+    assert res.status == 400
+    _fake_model(monkeypatch, None)                      # no gateway, or no answer
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert res.status == 503 and obj["error"] == "no tags to suggest"
+    from agent_media_core import private
+
+    _fake_model(monkeypatch, "phone")
+    monkeypatch.setattr(private, "hidden", lambda s: True)
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert res.status == 503                            # a private thread is never read out
+
+
+def test_suggest_is_gated(server, shelf, monkeypatch):
+    from agent_media_server import auth_abs
+
+    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
+    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID})
+    assert res.status == 401
+    assert "/session/tags/suggest" in app.CORS_PATHS

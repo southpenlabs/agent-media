@@ -1582,6 +1582,15 @@ Pinned by `packages/server/tests/test_reap.py`.
   in use, most used first, for a filter and for suggestions.
 - Both in `CORS_PATHS`.
 
+- `POST /session/tags/suggest {"session"}` (25 Oct 2026) → `{"ok": true,
+  "session", "tags"}`: up to four tags for the thread from a quick model
+  (`MEDIA_TAG_MODEL`, else `MEDIA_FOLLOWUP_MODEL`, on the summary gateway),
+  which reads the thread and the tags in use and prefers those. Nothing is
+  saved; the app's Auto adds them to the sheet. Its own tags, the exporter's
+  and anything that is not a tag are dropped. 503 `"no tags to suggest"`
+  when the model gives none (no gateway, no answer, a private thread); 423
+  sealed; 400 `"not a session id"`. In `CORS_PATHS`.
+
 Pinned by `packages/server/tests/test_thread_tags.py`.
 
 #### `POST /session/priority` — gated (24 Sep 2026)

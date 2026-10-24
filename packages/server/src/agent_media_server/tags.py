@@ -28,7 +28,14 @@ export, which runs every few minutes) is 409: there is nothing to edit until
 the exporter has written it, and writing a node here would mean guessing the
 exporter's own tags.
 
+`POST /session/tags/suggest {"session"}` → `{"session", "tags"}`: a few
+tags for the thread from the summary gateway's quick model (the follow-up's,
+as `threads.auto_title` uses), reading the thread and the tags already in
+use, which it prefers. Nothing is saved: the app adds them to the sheet and
+Save sends them. A private thread is never read to a model, and gets none.
+
 `MEDIA_THREAD_TAGS_DIR` moves the root (default `~/org/roam/sessions`).
+`MEDIA_TAG_MODEL` picks the suggester's model (else `MEDIA_FOLLOWUP_MODEL`).
 """
 
 from __future__ import annotations
@@ -284,3 +291,73 @@ def tags_list(bearer: str) -> tuple[bool, dict]:
     if not user:
         return False, err
     return True, {"tags": counts()}
+
+
+#: Suggested at most, per press.
+MAX_SUGGESTED = 4
+
+SUGGEST_PROMPT = (
+    "You tag a conversation between a person and their coding assistant, so "
+    "it can be found again among hundreds. Read it and reply with one to four "
+    "short tags for what it is about. The first names its specific subject or "
+    "the part of the system it is about (for example thread_tags, calendar, "
+    "full_screen, voice); broad kinds of work such as bug or idea only after "
+    "that, and only when they fit. Use a "
+    "tag from the person's existing tags whenever one fits, spelled exactly "
+    "as given; make a new one only when none does. A tag is one or two "
+    "lowercase words joined by _, with no #. Never a person's name, a file "
+    "path, a date, or the name of the tool (claude, codex, pi). Reply with "
+    "the tags only, comma-separated, on one line."
+)
+
+
+def suggest(session: str) -> list[str]:
+    """Tags for the thread from the quick model, its own left out; [] when
+    there are none to be had (no gateway, a private thread, nothing said)."""
+    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _chat, _int_env
+    from agent_media_core.private import hidden
+
+    from . import threads
+
+    if hidden(session):
+        return []
+    text = threads._conversation_text(session)
+    if not text:
+        return []
+    in_use = [c["tag"] for c in counts()][:60]
+    own = set(tags_by_session().get(session, []))
+    user = ("Existing tags: " + (", ".join(in_use) if in_use else "(none yet)")
+            + "\n\nConversation:\n" + text)
+    model = os.environ.get("MEDIA_TAG_MODEL") or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None
+    timeout = _int_env("MEDIA_TAG_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
+    out = (_chat(SUGGEST_PROMPT, user, timeout, model=model) or "").strip()
+    line = out.splitlines()[0] if out else ""
+    if line.lower().startswith("tags:"):
+        line = line[len("tags:"):]
+    picked: list[str] = []
+    for raw in re.split(r"[,;]", line):
+        t = clean(raw.strip().strip("\"'`*").lower())
+        if t and t not in EXPORTER_TAGS and t not in own and t not in picked:
+            picked.append(t)
+    return picked[:MAX_SUGGESTED]
+
+
+def session_suggest(session: str, bearer: str) -> tuple[bool, dict]:
+    """`POST /session/tags/suggest`. Gated like `/session/tags`; 400 for a bad
+    id, 423 sealed, 503 when the model gave nothing to suggest."""
+    from . import auth, sessions
+
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from agent_media_core.sealed import is_sealed
+
+    if is_sealed(session):
+        return False, {"error": "a sealed thread has no tags", "status": 423}
+    picked = suggest(session)
+    if not picked:
+        return False, {"error": "no tags to suggest", "status": 503}
+    return True, {"session": session, "tags": picked}
