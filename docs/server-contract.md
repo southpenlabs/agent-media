@@ -3688,6 +3688,7 @@ local look, never a network call:
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
 | `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
 | `read_page` | always: `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) |
+| `stories` | unless `MEDIA_STORIES` is `off` (or `0`, `false`, `no`): the app's Chats tab offers its stories row, which opens Facebook's and Instagram's own stories in the phone's signed-in browser; nothing about it is sent to the server |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.

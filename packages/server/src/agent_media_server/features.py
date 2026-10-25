@@ -22,6 +22,10 @@ never a network call, so the app can ask on every start.
   read      the share sheet's Read it (read_it.py, 26 Oct 2026): this server
             answers `POST /read`; always true here, as quick
   read_page `POST /read {"page"}` takes a page the phone read (signed in)
+  stories   the Chats tab's stories row (26 Oct 2026): a tap opens Facebook's
+            or Instagram's own stories in the app's signed-in browser; on
+            unless MEDIA_STORIES is off/0/false/no. Nothing about it reaches
+            the server: this is only whether the row is offered
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -62,6 +66,12 @@ def _bridges() -> bool:
     return bool(bridges.discover())
 
 
+def _stories() -> bool:
+    import os
+
+    return os.environ.get("MEDIA_STORIES", "").strip().lower() not in ("off", "0", "false", "no")
+
+
 def _personas() -> bool:
     from . import personas
 
@@ -70,7 +80,7 @@ def _personas() -> bool:
 
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
-          "read": lambda: True, "read_page": lambda: True}
+          "read": lambda: True, "read_page": lambda: True, "stories": _stories}
 
 
 def detect() -> dict[str, bool]:

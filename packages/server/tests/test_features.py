@@ -16,6 +16,7 @@ def _bare(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_ORG_DIR", str(tmp_path / "org"))
     monkeypatch.setenv("MATRIX_BRIDGES", str(tmp_path / "mautrix-*" / "config.yaml"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("MEDIA_STORIES", raising=False)
 
 
 def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path):
@@ -23,7 +24,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     res, obj = call(server, "GET", "/features", headers=AUTH)
     assert res.status == 200
     # Quick chat is this server's own (quick.py): there on every one.
-    assert obj == {"ok": True, **{p: False for p in PARTS}, "quick": True, "read": True, "read_page": True}
+    assert obj == {"ok": True, **{p: False for p in PARTS}, "quick": True, "read": True, "read_page": True, "stories": True}
     assert "/features" in app.CORS_PATHS
 
 
@@ -46,7 +47,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     personas.mkdir()
     monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(personas))
     _, obj = call(server, "GET", "/features", headers=AUTH)
-    assert obj == {"ok": True, **{p: True for p in PARTS}, "quick": True, "read": True, "read_page": True}
+    assert obj == {"ok": True, **{p: True for p in PARTS}, "quick": True, "read": True, "read_page": True, "stories": True}
 
 
 def test_music_from_the_play_history(signed_in, monkeypatch, tmp_path):
@@ -66,6 +67,16 @@ def test_a_check_that_fails_is_a_part_not_shown(monkeypatch, tmp_path):
 
     monkeypatch.setitem(features.CHECKS, "bridges", boom)
     assert features.detect()["bridges"] is False
+
+
+def test_the_stories_row_is_the_servers_to_turn_off(monkeypatch, tmp_path):
+    _bare(monkeypatch, tmp_path)
+    assert features.detect()["stories"] is True
+    for off in ("off", "0", "False", " no "):
+        monkeypatch.setenv("MEDIA_STORIES", off)
+        assert features.detect()["stories"] is False
+    monkeypatch.setenv("MEDIA_STORIES", "on")
+    assert features.detect()["stories"] is True
 
 
 # The refusals are test_contract's GATED_GETS, which lists /features.
