@@ -273,3 +273,37 @@ def test_a_reply_takes_back_an_unplayed_think_tone(tones_on, monkeypatch):
         state=StateStore(), sink=sink, coordinator=ReplyCoord())
     assert ("clear", "local") in sink.played
     assert not any(p[0] == "under" for p in sink.played if isinstance(p, tuple))
+
+
+def test_thinking_is_rendered_slower_and_quieter_than_a_reply(monkeypatch):
+    """David, 25 Oct 2026: the thinking readout's voice a little slower and
+    quieter (MEDIA_THINKING_RATE / _VOLUME)."""
+    seen = []
+
+    def spy(text, outfile, **kw):
+        seen.append(kw.get("prosody", "none"))
+        return render(text, outfile, **kw)
+
+    monkeypatch.setattr(S, "render_text", spy)
+    say(Sink())
+    assert seen and all(p == ("-15%", "-60%") for p in seen)
+
+    seen.clear()
+    monkeypatch.setenv("MEDIA_THINKING_RATE", "-25%")
+    monkeypatch.setenv("MEDIA_THINKING_VOLUME", "")
+    say(Sink())
+    assert seen and all(p == ("-25%", "") for p in seen)
+
+
+def test_a_device_rendered_thinking_clip_has_a_prosody_sidecar(monkeypatch):
+    monkeypatch.setenv("MEDIA_SPEECH_RENDER_LOCAL", "device")
+    sidecars = []
+
+    class Reading(Sink):
+        def play(self, uri, target, **kw):
+            side = Path(uri).with_suffix(".prosody")
+            sidecars.append(side.read_text() if side.exists() else None)
+            super().play(uri, target, **kw)
+
+    say(Reading())
+    assert sidecars and all(t == "rate=-15%;volume=-60%" for t in sidecars)

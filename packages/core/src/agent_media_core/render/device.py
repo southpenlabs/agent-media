@@ -333,12 +333,15 @@ def is_clip(path: "str | Path") -> bool:
     return str(path).endswith(SUFFIX)
 
 
-def write_clip(text: str, outfile: Path, *, pinned_voice: str | None = None, **_ignored) -> tuple[bool, Optional[str]]:
+def write_clip(text: str, outfile: Path, *, pinned_voice: str | None = None,
+               prosody: Optional[tuple[str, str]] = None, **_ignored) -> tuple[bool, Optional[str]]:
     """The render_text stand-in: the clip is the sentence itself."""
     try:
         Path(outfile).write_text(text, encoding="utf-8")
         if pinned_voice:
             set_clip_voice(outfile, pinned_voice)
+        if prosody:
+            set_clip_prosody(outfile, prosody)
     except OSError as e:
         return False, str(e)
     return True, None
@@ -370,13 +373,76 @@ def clip_voice(path: "str | Path") -> Optional[str]:
         return None
 
 
+#: Beside a clip, how it is to be said when that is not the voice's usual
+#: way: `rate=-15%;volume=-60%`, the thinking readouts' softer, slower voice
+#: (David, 25 Oct 2026: "a little bit quieter ... and maybe even a little
+#: slower"). Written for thinking clips only (`thinking_prosody`).
+PROSODY_SUFFIX = ".prosody"
+
+#: What the thinking voice is changed by, tunable on this host
+#: (MEDIA_THINKING_RATE / MEDIA_THINKING_VOLUME; empty turns that one off).
+#: Microsoft's volume is a share of the amplitude, so -60% is about -8 dB.
+THINKING_RATE = "-15%"
+THINKING_VOLUME = "-60%"
+
+_PCT = re.compile(r"^[+-]?\d{1,3}%?$")
+
+
+def _pct(value: Optional[str]) -> str:
+    """`value` as a signed percentage ("-15%"), or "" if it is not one."""
+    v = (value or "").strip()
+    if not _PCT.match(v):
+        return ""
+    v = v if v.endswith("%") else v + "%"
+    return v if v[0] in "+-" else "+" + v
+
+
+def thinking_prosody() -> tuple[str, str]:
+    """(rate, volume) a thinking readout is said with; "" for a part left alone."""
+    def one(name: str, default: str) -> str:
+        raw = os.environ.get(name)
+        return _pct(default if raw is None else raw)
+    return one("MEDIA_THINKING_RATE", THINKING_RATE), one("MEDIA_THINKING_VOLUME", THINKING_VOLUME)
+
+
+def set_clip_prosody(path: "str | Path", prosody: Optional[tuple[str, str]]) -> None:
+    """Have `path` said with `prosody` (rate, volume) wherever it is said (raises OSError)."""
+    rate, volume = (_pct(prosody[0]), _pct(prosody[1])) if prosody else ("", "")
+    if not (rate or volume):
+        return
+    parts = [f"rate={rate}" if rate else "", f"volume={volume}" if volume else ""]
+    Path(path).with_suffix(PROSODY_SUFFIX).write_text(";".join(p for p in parts if p), encoding="utf-8")
+
+
+def clip_prosody(path: "str | Path") -> tuple[str, str]:
+    """(rate, volume) `set_clip_prosody` gave this clip; "" for each not set."""
+    try:
+        text = Path(path).with_suffix(PROSODY_SUFFIX).read_text(encoding="utf-8")
+    except OSError:
+        return "", ""
+    got = dict(p.split("=", 1) for p in text.strip().split(";") if "=" in p)
+    return _pct(got.get("rate")), _pct(got.get("volume"))
+
+
+def rate_factor(rate: str) -> float:
+    """How much faster than usual `rate` ("-15%") says it: 0.85."""
+    try:
+        return max(0.5, 1.0 + int(rate.rstrip("%")) / 100.0)
+    except ValueError:
+        return 1.0
+
+
 def estimate_duration(path: "str | Path") -> float:
-    """Seconds the device will take to say this clip at 1.0, or 0.0."""
+    """Seconds the device will take to say this clip at 1.0, or 0.0.
+
+    A slower voice (the clip's `.prosody` rate) takes proportionally longer to
+    say the words, so the follow-along's clock stays right for it."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError:
         return 0.0
-    return LEAD_S + len(text.strip()) / CHARS_PER_S
+    rate, _volume = clip_prosody(path)
+    return LEAD_S + len(text.strip()) / (CHARS_PER_S * rate_factor(rate))
 
 
 def tts_uri(path: "str | Path", voice: Optional[str] = None) -> str:
@@ -384,6 +450,11 @@ def tts_uri(path: "str | Path", voice: Optional[str] = None) -> str:
     p = Path(path)
     text = p.read_text(encoding="utf-8").strip()
     uri = f"tts:{p.stem}?text={quote(text, safe='')}"
+    rate, volume = clip_prosody(p)
+    if rate:
+        uri += f"&rate={quote(rate, safe='')}"
+    if volume:
+        uri += f"&volume={quote(volume, safe='')}"
     if voice:
         uri += f"&voice={quote(voice, safe='')}"
         if voice.startswith("edge:"):

@@ -1898,6 +1898,21 @@ device's. 400 on another mode, a voice not in `voices`, or `server` with a
 phone-only voice (`"<label> is only on the phone: …"`); 409 when the target
 cannot render words; in `CORS_PATHS`.
 
+A thinking readout is said slower and quieter than a reply (David, 25 Oct
+2026: "a little bit quieter ... and maybe even a little slower"; voice only,
+no pitch or echo). A device-rendered thinking clip gets a `.prosody` sidecar
+(`rate=-15%;volume=-60%`, `MEDIA_THINKING_RATE` / `MEDIA_THINKING_VOLUME`
+set the values, empty leaves that part alone), and its `tts:` address then
+carries `&rate=-15%25&volume=-60%25` after the text. The app reads them
+clamped (rate -50..+50%, volume -90..0%; Microsoft's SSML `<prosody>`, where
+volume is a share of the amplitude, -60% about -8 dB) and says the clip so;
+its on-device voice fallback takes the rate only. Absent means as before. A
+thinking clip rendered here (edge-tts `--rate`/`--volume`, ffmpeg
+`atempo`/`volume` for other engines) is slowed and softened the same, and
+`estimate_duration` lengthens the clip by the rate so the follow-along's
+clock stays right. Pinned by `packages/core/tests/test_device_voice.py` and
+the app's `ProsodyTest`.
+
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_device_voice.py`.
 

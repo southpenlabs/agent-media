@@ -109,7 +109,8 @@ def _engine_path(bin_name: str) -> str:
 
 
 def _render_edge(text: str, outfile: Path, *, voice: str, edge_bin: str,
-                 subtitles: Optional[Path] = None) -> tuple[bool, str]:
+                 subtitles: Optional[Path] = None,
+                 prosody: Optional[tuple[str, str]] = None) -> tuple[bool, str]:
     """Render one clip. With `subtitles`, also write the word timings.
 
     edge-tts reports a WordBoundary as it synthesises, and `--write-subtitles`
@@ -119,11 +120,16 @@ def _render_edge(text: str, outfile: Path, *, voice: str, edge_bin: str,
     """
     _ensure_edge_endpoint()
     err = ""
+    # A thinking readout's slower, quieter voice: edge-tts takes both as
+    # percentages, with `=` because a negative one looks like an option.
+    rate, volume = prosody or ("", "")
     for attempt in range(_EDGE_RETRIES + 1):
         try:
             proc = subprocess.run(
                 [_engine_path(edge_bin), "--text", text, "--voice", voice,
                  "--write-media", str(outfile)]
+                + ([f"--rate={rate}"] if rate else [])
+                + ([f"--volume={volume}"] if volume else [])
                 + (["--write-subtitles", str(subtitles)] if subtitles else []),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -147,6 +153,38 @@ def _render_edge(text: str, outfile: Path, *, voice: str, edge_bin: str,
     return False, err
 
 
+def _soften(outfile: Path, prosody: tuple[str, str]) -> None:
+    """Say a finished clip slower and quieter with ffmpeg, in place.
+
+    For the engines that take no rate or volume of their own (plugins). The
+    rate is a tempo change that keeps the pitch (atempo), the volume a share
+    of the amplitude as Microsoft's is. Best effort: without ffmpeg, or if it
+    fails, the clip stays as the engine made it.
+    """
+    rate, volume = prosody
+    filters = []
+    try:
+        if rate:
+            filters.append(f"atempo={max(0.5, 1.0 + int(rate.rstrip('%')) / 100.0):.3f}")
+        if volume:
+            filters.append(f"volume={max(0.0, 1.0 + int(volume.rstrip('%')) / 100.0):.3f}")
+    except ValueError:
+        return
+    if not filters or not shutil.which("ffmpeg"):
+        return
+    tmp = outfile.with_name(f"{outfile.stem}.soft{outfile.suffix}")
+    try:
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(outfile),
+                            "-filter:a", ",".join(filters), str(tmp)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            tmp.replace(outfile)
+    except OSError:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 # The only engine bundled with core. Everything else arrives via entry points;
 # `extensions.all_engine_names()` reports built-ins + installed plugins.
 KNOWN_ENGINES = ("edge",)
@@ -161,6 +199,7 @@ def _render_one(
     edge_voice: str,
     edge_bin: str,
     subtitles: Optional[Path] = None,
+    prosody: Optional[tuple[str, str]] = None,
 ) -> tuple[bool, str]:
     """Render via a single engine, no fallback. Returns (ok, err).
 
@@ -172,13 +211,17 @@ def _render_one(
     """
     if engine == "edge":
         return _render_edge(text, outfile, voice=voice or edge_voice,
-                            edge_bin=edge_bin, subtitles=subtitles)
+                            edge_bin=edge_bin, subtitles=subtitles,
+                            prosody=prosody)
     from ..extensions import get_render_engine
     ext = get_render_engine(engine)
     if ext is None:
         return False, f"unknown engine: {engine!r} (not installed?)"
     try:
-        return ext(text, outfile, voice=voice)
+        ok, err = ext(text, outfile, voice=voice)
+        if ok and prosody and (prosody[0] or prosody[1]):
+            _soften(Path(outfile), prosody)
+        return ok, err
     except Exception as e:  # noqa: BLE001 — isolate plugin faults; fall back below
         return False, f"engine {engine!r} raised: {e}"
 
@@ -194,6 +237,7 @@ def render_text(
     fallback_to_edge: bool = True,
     on_fallback: Optional[Callable[[str, str], None]] = None,
     subtitles: Optional[Path] = None,
+    prosody: Optional[tuple[str, str]] = None,
 ) -> tuple[bool, str]:
     """Render `text` to `outfile` via `engine`, with a fallback. Returns (ok, err).
 
@@ -208,7 +252,7 @@ def render_text(
     """
     ok, err = _render_one(text, outfile, engine=engine, voice=voice,
                           edge_voice=edge_voice, edge_bin=edge_bin,
-                          subtitles=subtitles)
+                          subtitles=subtitles, prosody=prosody)
     if ok or not fallback_to_edge:
         # `fallback_to_edge=False` means "no fallback, give me the raw result".
         return ok, err
@@ -225,4 +269,4 @@ def render_text(
     fb_voice = edge_voice if fallback == "edge" else None
     return _render_one(text, outfile, engine=fallback, voice=fb_voice,
                        edge_voice=edge_voice, edge_bin=edge_bin,
-                       subtitles=subtitles)
+                       subtitles=subtitles, prosody=prosody)

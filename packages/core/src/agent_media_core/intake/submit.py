@@ -2871,7 +2871,9 @@ def render_device_clips(clip_uris: list) -> tuple[list, list[float]]:
                 text = src.read_text(encoding="utf-8")
             except OSError:
                 continue
+            soft = device_voice.clip_prosody(src)
             ok, err = render_text(text, audio, engine=eng, voice=v,
+                                  **({"prosody": soft} if any(soft) else {}),
                                   **({"edge_voice": v} if eng == "edge" and v else {}))
             if not ok:
                 log.warning("replay: rendering %s failed: %s", src.name, err)
@@ -4174,12 +4176,17 @@ def _submit_event(event: Event,
 
     engine, voice = _engine_and_voice(event, target)
     ext = _ext_for(engine)
-    renderer = render_text
+    # A thinking readout is said slower and quieter than a reply (David, 25
+    # Oct 2026), wherever it is said: edge-tts / ffmpeg here, a sidecar the
+    # device reads for the clips it renders itself.
+    prosody = device_voice.thinking_prosody() if thinking else None
+    renderer = partial(render_text, prosody=prosody) if prosody and any(prosody) else render_text
     if device_voice.renders_on_device(target.name):
         # The device says it in its own voice: each clip is its sentence.
         engine, ext = "device", device_voice.SUFFIX[1:]
         renderer = partial(device_voice.write_clip,
-                           pinned_voice=voice if voice and voice.startswith("edge:") else None)
+                           pinned_voice=voice if voice and voice.startswith("edge:") else None,
+                           prosody=prosody)
 
     audio_dir = _audio_dir()
     # Per-submission unique: second-resolution time is NOT enough — two

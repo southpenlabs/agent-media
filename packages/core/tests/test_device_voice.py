@@ -257,3 +257,94 @@ def test_one_voice_per_speaker_the_multilingual_kept(monkeypatch):
     us = device_voice.languages()[0]["accents"][0]["voices"]
     assert [v["name"] for v in us] == ["edge:en-US-AvaMultilingualNeural", "edge:en-US-GuyNeural"]
     assert device_voice.find_voice("edge:en-US-AvaNeural"), "one chosen before is still known"
+
+
+# ── The thinking readout's slower, quieter voice (25 Oct 2026) ──
+
+def test_the_thinking_prosody_is_the_default_and_tunable(monkeypatch):
+    monkeypatch.delenv("MEDIA_THINKING_RATE", raising=False)
+    monkeypatch.delenv("MEDIA_THINKING_VOLUME", raising=False)
+    assert device_voice.thinking_prosody() == ("-15%", "-60%")
+    monkeypatch.setenv("MEDIA_THINKING_RATE", "-20")
+    monkeypatch.setenv("MEDIA_THINKING_VOLUME", "")
+    assert device_voice.thinking_prosody() == ("-20%", "")
+    monkeypatch.setenv("MEDIA_THINKING_RATE", "slow")
+    assert device_voice.thinking_prosody()[0] == ""
+
+
+def test_a_tts_uri_carries_the_prosody_only_for_a_clip_that_has_one(tmp_path):
+    plain = tmp_path / "r--claude--000.tts"
+    device_voice.write_clip("A reply.", plain, engine="x")
+    assert "rate=" not in device_voice.tts_uri(plain, "en-au-x-aua-local")
+    assert not plain.with_suffix(device_voice.PROSODY_SUFFIX).exists()
+
+    think = tmp_path / "t--claude--000.tts"
+    device_voice.write_clip("Looking at the logs.", think, engine="x",
+                            prosody=("-15%", "-60%"))
+    assert think.with_suffix(".prosody").read_text() == "rate=-15%;volume=-60%"
+    uri = device_voice.tts_uri(think, "edge:en-AU-NatashaNeural")
+    assert "&rate=-15%25&volume=-60%25" in uri
+    assert uri.index("&rate=") < uri.index("&voice=")
+    assert unquote(uri.split("&rate=", 1)[1].split("&", 1)[0]) == "-15%"
+
+
+def test_a_clip_through_the_players_path_has_it_too(tmp_path, monkeypatch):
+    clip = tmp_path / "t--claude--001.tts"
+    device_voice.write_clip("Checking.", clip, engine="x", prosody=("-15%", ""))
+    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_VOICE_SASONICA", "en-au-x-aua-local")
+    uri = _clip_uri_for(str(clip), Target(name="sasonica"))
+    assert "&rate=-15%25" in uri and "volume=" not in uri
+
+
+def test_a_slower_clip_is_estimated_longer(tmp_path):
+    a = tmp_path / "a.tts"
+    b = tmp_path / "b.tts"
+    device_voice.write_clip("x" * 100, a, engine="x")
+    device_voice.write_clip("x" * 100, b, engine="x", prosody=("-15%", "-60%"))
+    plain = device_voice.estimate_duration(a) - device_voice.LEAD_S
+    slow = device_voice.estimate_duration(b) - device_voice.LEAD_S
+    assert abs(slow - plain / 0.85) < 1e-9
+
+
+def test_edge_is_asked_for_the_rate_and_volume(tmp_path, monkeypatch):
+    from agent_media_core.render import engines
+
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        Path(cmd[cmd.index("--write-media") + 1]).write_bytes(b"ID3")
+
+        class P:
+            returncode = 0
+            stderr = b""
+        return P()
+
+    monkeypatch.setattr(engines.subprocess, "run", fake_run)
+    monkeypatch.setattr(engines, "_ensure_edge_endpoint", lambda: None)
+    ok, _ = engines.render_text("Thinking.", tmp_path / "t.mp3", engine="edge",
+                                prosody=("-15%", "-60%"))
+    assert ok and "--rate=-15%" in seen[0] and "--volume=-60%" in seen[0]
+    engines.render_text("A reply.", tmp_path / "r.mp3", engine="edge")
+    assert not any(a.startswith(("--rate", "--volume")) for a in seen[1])
+
+
+def test_replay_elsewhere_says_a_thinking_clip_softly(tmp_path, monkeypatch):
+    from agent_media_core.intake import submit
+
+    got = {}
+
+    def fake_render(text, outfile, *, engine, voice=None, **kw):
+        got[Path(outfile).name] = kw.get("prosody")
+        Path(outfile).write_bytes(b"ID3fake")
+        return True, ""
+
+    monkeypatch.setattr(submit, "render_text", fake_render)
+    monkeypatch.setattr(submit, "_default_engine", lambda: "edge")
+    monkeypatch.setattr(submit, "_clip_duration", lambda p: 1.0)
+    reply = tmp_path / "r--000.tts"
+    reply.write_text("A reply.")
+    think = tmp_path / "t--000.tts"
+    device_voice.write_clip("Looking.", think, engine="x", prosody=("-15%", "-60%"))
+    submit.render_device_clips([str(reply), str(think)])
+    assert got == {"r--000.mp3": None, "t--000.mp3": ("-15%", "-60%")}
