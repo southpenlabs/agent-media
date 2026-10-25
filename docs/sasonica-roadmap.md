@@ -1710,6 +1710,21 @@ ahead.
     GTD and linked-note foundations. Scope, candidate views and design
     questions: [Unified conversations and views](proposals/2026-10-22-unified-conversations-and-views.md).
     Direction requested; design proposal only, not started.
+39. **Background music under long readings** (David, 26 Oct 2026: "maybe
+    we could even use dynamically selected music in the background"; "are
+    there libraries of different genres we could have selectable in
+    settings?"). Quiet instrumental music under a long reply or a document
+    read aloud, only when nothing else is playing (the DJ duck already
+    covers music that is). Default: music generated on red5, no licence and
+    offline, in six moods he liked from samples (calm, dusk, a calm/dusk
+    blend, morning, rainy day with rain behind it, late night), picked by
+    time of day and the weather. A Settings choice: off, generated (a mood
+    or genre style: ambient, piano, lo-fi, jazz chords, nature), or a genre
+    playlist from his streaming music through Mopidy. Free libraries
+    (Musopen, Free Music Archive, Kevin MacLeod, Pixabay) only after each
+    licence is checked. Sample recipes (stdlib): [music-bed samples](proposals/2026-10-26-music-bed-samples/), gen.py and gen2.py
+    (`python3 gen2.py blend`). Short replies keep the tones, not
+    music. Not started.
 
 ## Loose ends
 
