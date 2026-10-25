@@ -22,6 +22,13 @@ Anything that goes wrong — no model, a timeout (MEDIA_VOICE_TIDY_TIMEOUT, 3 s,
 a hard deadline), an unusable answer, MEDIA_VOICE_TIDY=0 — answers
 `messy: false`, and the message goes as it would have.
 
+`force` (David, 25 Oct 2026: a Tidy button beside Send) is an explicit ask: it
+skips the messy pre-check, however clean the words look, and keeps every other
+guard — the private-model rule, the deadline, the unsafe-tidy refusals. A model
+that finds nothing to change (or a tidy equal to the words) answers
+`messy: false` with `why: "model_clean"` or `"unchanged"`, which the app says as
+"Nothing to tidy".
+
 With `say` (the app's own words, with `{tidy}` in them) a tidy version is
 read aloud in the thread's voice and place, kept out of speech history, for
 the flow where nobody is looking.
@@ -118,14 +125,16 @@ def parse(text: str | None) -> dict | None:
     return {"messy": got["messy"], "tidy": str(got.get("tidy") or "")}
 
 
-def tidy(text: str, recipient: str = "", context: str = "", private: bool = False) -> dict:
-    """`{"messy", "tidy", "why"?}`; never raises."""
+def tidy(text: str, recipient: str = "", context: str = "", private: bool = False,
+         force: bool = False) -> dict:
+    """`{"messy", "tidy", "why"?}`; never raises. `force` skips the local
+    messy test (an explicit ask) and nothing else."""
     original = " ".join(str(text or "").split())[:MAX_TEXT]
     if not original:
         return {"messy": False, "tidy": "", "why": "no_words"}
     if not _enabled():
         return {"messy": False, "tidy": "", "why": "off"}
-    if not looks_messy(original):
+    if not force and not looks_messy(original):
         return {"messy": False, "tidy": "", "why": "clean"}
     from agent_media_core.intake import fast
 
@@ -139,12 +148,13 @@ def tidy(text: str, recipient: str = "", context: str = "", private: bool = Fals
         return {"messy": False, "tidy": "", "why": "model_clean"}
     safe = accept(original, got["tidy"])
     if not safe:
-        return {"messy": False, "tidy": "", "why": "unsafe"}
+        same = " ".join(str(got["tidy"]).split()) == original
+        return {"messy": False, "tidy": "", "why": "unchanged" if same else "unsafe"}
     return {"messy": True, "tidy": safe}
 
 
 def post(body: dict, bearer: str) -> tuple[bool, dict]:
-    """POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?}."""
+    """POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?, "force"?}."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -159,7 +169,8 @@ def post(body: dict, bearer: str) -> tuple[bool, dict]:
 
     recipient = str(body.get("recipient") or "")[:120] if isinstance(body.get("recipient"), str) else ""
     context = body.get("context") if isinstance(body.get("context"), str) else ""
-    got = tidy(text, recipient, context, private=bool(session) and hidden(session))
+    got = tidy(text, recipient, context, private=bool(session) and hidden(session),
+               force=body.get("force") is True)
     say = body.get("say")
     spoken = False
     if got["messy"] and session and isinstance(say, str) and "{tidy}" in say:

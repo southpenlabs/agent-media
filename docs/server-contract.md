@@ -1463,9 +1463,15 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   obvious mis-hearings fixed; meaning, voice, register, language and every
   name, number and date kept. A `tidy` that is longer than the words (by
   more than 8 characters), that loses a number, or that equals them answers
-  `messy: false, why: "unsafe"`.
+  `messy: false, why: "unsafe"` (`"unchanged"` for the same words).
 - A private or sealed `session` is only ever sent to `MEDIA_PRIVATE_MODELS`;
   with none set it gets no model (`why: "no_answer"`).
+- `force: true` (25 Oct 2026, the composer's Tidy button) is an explicit ask:
+  it skips the local messy test and nothing else (the private-model rule, the
+  deadline and the unsafe-tidy refusals all apply). A model that finds nothing
+  to change, or returns the words as they were, answers `messy: false` with
+  `why: "model_clean"` or `"unchanged"`: the app says "Nothing to tidy" and
+  shows no card. Only the JSON `true` forces.
 - Hard deadline `MEDIA_VOICE_TIDY_TIMEOUT` (3 s). Every failure — no model, a
   timeout, an unusable answer, `MEDIA_VOICE_TIDY=0` (`why: "off"`) — answers
   `messy: false`: the message goes as it was.

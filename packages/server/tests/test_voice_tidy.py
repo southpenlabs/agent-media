@@ -85,10 +85,10 @@ def test_a_messy_message_comes_back_tidy_with_the_recipient_and_chat(model):
 @pytest.mark.parametrize("answer, why", [
     (None, "no_answer"), ("", "no_answer"), ("I tidied it", "no_answer"), (RuntimeError("x"), "no_answer"),
     ('{"messy": false, "tidy": ""}', "model_clean"),
-    # unsafe: longer, a number lost, the same words
+    # unsafe: longer, a number lost; unchanged: the same words
     ('{"messy": true, "tidy": "' + MESSY + ' and I really hope that works for you, please say yes"}', "unsafe"),
     ('{"messy": true, "tidy": "I was thinking we could meet on Friday."}', "unsafe"),
-    ('{"messy": true, "tidy": "' + MESSY + '"}', "unsafe"),
+    ('{"messy": true, "tidy": "' + MESSY + '"}', "unchanged"),
 ])
 def test_anything_else_is_not_messy(model, answer, why):
     model["answer"] = answer
@@ -160,3 +160,59 @@ def test_a_marked_private_thread_uses_the_private_models(server, signed_in, mode
     monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
     res, got = call(server, "POST", "/voice/tidy", {"text": MESSY, "session": S1}, AUTH)
     assert got["messy"] is False and model["asked"] == []
+
+
+def test_force_skips_only_the_messy_pre_check(model):
+    clean = "Can you bring the salad on Sunday?"
+    assert voice_tidy.tidy(clean)["why"] == "clean" and not model["asked"]
+    model["answer"] = '{"messy": true, "tidy": "Can you bring the salad on Sunday, please?"}'
+    got = voice_tidy.tidy(clean, "Mum", force=True)
+    assert got["messy"] is True and got["tidy"].endswith("please?") and len(model["asked"]) == 1
+
+
+def test_forced_nothing_to_change_says_so(model):
+    clean = "Can you bring the salad on Sunday?"
+    model["answer"] = '{"messy": false, "tidy": ""}'
+    assert voice_tidy.tidy(clean, force=True)["why"] == "model_clean"
+    model["answer"] = f'{{"messy": true, "tidy": "{clean}"}}'
+    assert voice_tidy.tidy(clean, force=True) == {"messy": False, "tidy": "", "why": "unchanged"}
+
+
+def test_forced_keeps_the_other_guards(model, monkeypatch):
+    clean = "Meet me at 5 on Sunday at the station."
+    # unsafe: longer, or a number lost
+    model["answer"] = '{"messy": true, "tidy": "Meet me on Sunday at the station, and please do not be late, it matters."}'
+    assert voice_tidy.tidy(clean, force=True)["why"] == "unsafe"
+    model["answer"] = '{"messy": true, "tidy": "Meet me on Sunday at the station."}'
+    assert voice_tidy.tidy(clean, force=True)["why"] == "unsafe"
+    # failure and the off switch
+    model["answer"] = None
+    assert voice_tidy.tidy(clean, force=True)["why"] == "no_answer"
+    monkeypatch.setenv("MEDIA_VOICE_TIDY", "0")
+    assert voice_tidy.tidy(clean, force=True)["why"] == "off"
+
+
+def test_forced_deadline_and_private_rule(model, monkeypatch):
+    clean = "See you at the station."
+    monkeypatch.setenv("MEDIA_VOICE_TIDY_TIMEOUT", "0.6")
+    model["delay"] = 2.0
+    t0 = time.monotonic()
+    assert voice_tidy.tidy(clean, force=True)["messy"] is False and time.monotonic() - t0 < 1.6
+    model["delay"] = 0.0
+    model["answer"] = '{"messy": true, "tidy": "See you at the station!"}'
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
+    model["asked"].clear()
+    assert voice_tidy.tidy(clean, private=True, force=True)["messy"] is False and model["asked"] == []
+    monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
+    assert voice_tidy.tidy(clean, private=True, force=True)["messy"] is True
+    assert [a["model"] for a in model["asked"]] == ["local"]
+
+
+def test_the_route_takes_force_only_as_true(server, signed_in, model):
+    clean = "See you at the station."
+    model["answer"] = '{"messy": true, "tidy": "See you at the station!"}'
+    res, got = call(server, "POST", "/voice/tidy", {"text": clean, "force": True}, AUTH)
+    assert res.status == 200 and got["messy"] is True, got
+    for odd in ("yes", 1, None, False):
+        res, got = call(server, "POST", "/voice/tidy", {"text": clean, "force": odd}, AUTH)
+        assert got["messy"] is False and got["why"] == "clean"
