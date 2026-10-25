@@ -291,3 +291,24 @@ def _no_music_bed_renderer(monkeypatch):
     from agent_media_core import music_bed
 
     monkeypatch.setattr(music_bed, "spawn_warm", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _no_music_bed_network(monkeypatch):
+    """The music bed's other sources reach off the machine: the online
+    library (music_bed_library.py) fetches from archive.org and ccMixter,
+    and the streaming source (music_bed_stream.py) drives Mopidy — the house
+    speakers' real queue and volume — and fetches tracks on the phone. Every
+    one of those goes through a function patched here to refuse, so no test
+    reaches the internet, the queue or the phone; a test of them fakes the
+    one it needs."""
+    from agent_media_core import music_bed_library, music_bed_stream
+
+    def refuse(*a, **k):
+        raise OSError("no network in the tests (conftest)")
+
+    monkeypatch.setattr(music_bed_library, "_http", refuse)
+    monkeypatch.setattr(music_bed_library, "_download", refuse)
+    monkeypatch.setattr(music_bed_stream, "_mpd", refuse)
+    monkeypatch.setattr(music_bed_stream, "_fetch_local", lambda vid: None)
+    monkeypatch.setattr(music_bed_stream, "_set_volume", refuse)

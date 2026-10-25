@@ -137,7 +137,7 @@ def test_the_env_switch_and_the_stored_choice(monkeypatch):
     monkeypatch.setenv("MEDIA_MUSIC_BED", "off")
     assert B.choice() == "off" and B.wanted(120.0, 30) is None
     monkeypatch.setenv("MEDIA_MUSIC_BED", "night")
-    assert B.choice() == "night" and B.wanted(120.0, 30) == "night"
+    assert B.choice() == "night" and B.wanted(120.0, 30).style == "night"
     monkeypatch.setenv("MEDIA_MUSIC_BED", "nonsense")
     assert B.choice() == "auto"
     B.set_choice("calm")                             # Settings wins
@@ -146,7 +146,9 @@ def test_the_env_switch_and_the_stored_choice(monkeypatch):
     B.set_choice(None)
     assert B.choice() == "off" and B.status()["set"] is False
     with pytest.raises(ValueError):
-        B.set_choice("jazz")
+        B.set_choice("classical")       # a library genre, not a generated style
+    with pytest.raises(ValueError):
+        B.set_choice("library:bebop")
 
 
 def test_long_means_45_seconds_or_12_sentences(monkeypatch):
@@ -312,6 +314,39 @@ def test_thoughts_people_questions_and_alerts_keep_theirs(monkeypatch, tmp_path)
     assert all(not u.startswith("music-bed") for u in speak(LONG, ask=True).unders())
     assert all(not u.startswith("music-bed")
                for u in speak(LONG, source=Source.CLI, alert=True).unders())
+
+
+def test_a_long_reply_plays_a_library_track_with_its_credit(monkeypatch, tmp_path):
+    from agent_media_core import music_bed_library as L
+    _fake_ready(monkeypatch, tmp_path)
+    B.set_choice("library:jazz")
+    d = L._dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "music-bed-lib-ia-abc.mp3").write_bytes(b"x" * 100)
+    L.save({"tracks": [{"key": "ia-abc", "genre": "jazz", "file": "music-bed-lib-ia-abc.mp3",
+                        "title": "Acid Trumpet", "creator": "Kevin MacLeod",
+                        "license": "CC BY 3.0", "license_url": "x", "url": "y"}], "tried": {}})
+    sink = speak(LONG)
+    assert sink.unders() == ["music-bed-lib-ia-abc.mp3"]
+    assert ("stop_under",) in sink.played
+    now = B.status()["now"]
+    assert now["credit"]["title"] == "Acid Trumpet" and now["playing"] is False
+
+
+def test_a_long_reply_on_this_host_can_have_his_streaming_music(monkeypatch, tmp_path):
+    from agent_media_core import music_bed_stream as T
+    _fake_ready(monkeypatch, tmp_path)
+    B.set_choice("streaming:jazz")
+    entry = {"id": "aaaaaaaaaaa", "title": "Late Jazz", "artist": "Trio",
+             "genre": "jazz", "file": "/x.mka"}
+    monkeypatch.setattr(T, "pick", lambda genre: [entry])
+    monkeypatch.setattr(T, "tracks", lambda genre=None, data=None: [entry])
+    seen = []
+    monkeypatch.setattr(T, "start", lambda entries: seen.append(("start", entries[0]["id"]))
+                        or (lambda: seen.append(("stop",))))
+    sink = speak(LONG)
+    assert seen == [("start", "aaaaaaaaaaa"), ("stop",)]
+    assert sink.unders() == []             # no tone over it, no under player
 
 
 def test_not_ready_falls_back_to_the_tone(monkeypatch):

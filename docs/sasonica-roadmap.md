@@ -1755,11 +1755,43 @@ ahead.
     dusk 17–21, night 21–6, rainy by day when Open-Meteo (astrotunes'
     source) says it rains. `MEDIA_MUSIC_BED=off|auto|<mood>` (default
     auto); Settings → Music under long readings (`/speech/music-bed`, the
-    server's list) wins. Not yet: `media doc`, books and Listen play
-    through the book channel, not submit, so they get no bed; the genre
-    styles (piano, lo-fi, jazz chords, nature); a genre playlist from his
-    streaming music through Mopidy as a Settings choice; the free
-    libraries, after their licences are checked.
+    server's list) wins.
+    **Landed 26 Oct 2026 (three sources)** (David: "let's go with the
+    three options for music that you gave me earlier"; "it will be good to
+    use some kind of online library"). Settings → Music under long
+    readings is now a source (Off, Generated, Your streaming music, Online
+    library) and a style per source, each with Auto (contract §6.4
+    `/speech/music-bed`, `sources` with availability per target).
+    **Generated** adds five stdlib styles beside the moods
+    (`music_bed_styles.py`): ambient (evolving pads and bells), piano (felt
+    piano), lo-fi (Rhodes, a low-passed brushed beat, vinyl hiss and
+    crackle), jazz chords (rootless ii-V-I in F, swung brushes, walking
+    bass), nature (rain, a stream, birds); each a seamless 29–40 s loop,
+    -24 dBFS peak, most of its energy above 300 Hz for a phone's speaker.
+    **Streaming** (`music_bed_stream.py`): lo-fi, ambient, classical, jazz
+    or piano from Mopidy's YouTube Music search, a few tracks a genre
+    fetched in the background into the rooms cache (red5 is bot-walled, so
+    on the phone's address, as every house play), played by Mopidy after
+    his queue at volume 12, faded with the DJ duck's fader, taken out of
+    the queue when the reading ends, only when Mopidy is stopped; house
+    speakers and red5 only. **Not on a phone**, and the list says why: the
+    hand-off player asks YouTube Music to play, which takes the audio focus
+    as it starts (pausing the reply) and keeps its own volume.
+    **Online library** (`music_bed_library.py`): archive.org (Musopen's
+    public-domain classical and Chopin, Kevin MacLeod's CC BY albums) and
+    ccMixter (CC BY instrumentals); public domain, CC0 and CC BY only, from
+    each item's own metadata, never NC, ND or SA; a few tracks a genre,
+    loudnormed to -30 LUFS and kept as clips (`music-bed-lib-*.mp3`, cap
+    300 MB, least recently played first), so the phone plays them too; the
+    credit shown in Settings ("Now playing: … (CC BY)", with a link).
+    Auto for those two is a genre by the hour (morning classical, calm
+    piano, blend lo-fi, dusk jazz, night ambient, rainy piano). Fallback:
+    the chosen source, else the nearest generated style, else the tone;
+    nothing fetched while a reply waits. The old choice values still mean
+    the generated source. Not yet: `media doc`, books and Listen play
+    through the book channel, not submit, so they get no bed; streaming on
+    the phone (needs the app to start the music app before the voice and
+    hold it ducked, or Media3 to play the stream itself).
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

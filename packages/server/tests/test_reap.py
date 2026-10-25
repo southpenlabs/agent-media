@@ -732,7 +732,7 @@ def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
     res, obj = call(server, "POST", "/speech/music-bed", {"choice": "dusk"}, AUTH)
     assert res.status == 200 and obj["choice"] == "dusk" and obj["set"] is True
     assert music_bed.choice() == "dusk"
-    for bad in ("jazz", 3, True):
+    for bad in ("classical", "library:bebop", 3, True):
         res, obj = call(server, "POST", "/speech/music-bed", {"choice": bad}, AUTH)
         assert res.status == 400, bad
     res, obj = call(server, "POST", "/speech/music-bed", {}, AUTH)
@@ -740,6 +740,20 @@ def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
     assert music_bed.choice() == "dusk"
     res, obj = call(server, "POST", "/speech/music-bed", {"choice": None}, AUTH)
     assert res.status == 200 and obj["set"] is False and obj["choice"] == "auto"
+    # The three sources (26 Oct 2026): {source, style}, or a source:style choice.
+    assert [s["id"] for s in obj["sources"]] == ["generated", "streaming", "library"]
+    res, obj = call(server, "POST", "/speech/music-bed", {"source": "library", "style": "jazz"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "library:jazz" and obj["source"] == "library"
+    res, obj = call(server, "POST", "/speech/music-bed", {"source": "streaming"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "streaming:auto" and obj["style"] == "auto"
+    res, obj = call(server, "POST", "/speech/music-bed", {"choice": "generated:lofi"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "lofi" and obj["source"] == "generated"
+    for bad in ({"source": "generated", "style": "classical"}, {"source": "radio"},
+                {"source": 3}):
+        res, obj = call(server, "POST", "/speech/music-bed", bad, AUTH)
+        assert res.status == 400, bad
+    res, obj = call(server, "POST", "/speech/music-bed", {"source": "off"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "off" and obj["source"] == "off"
 
 
 def test_speech_default_is_every_thread_without_its_own(server, shelf, signed_in, typed):

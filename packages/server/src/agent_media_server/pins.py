@@ -181,16 +181,28 @@ def speech_balance(bearer: str, balance=None) -> tuple[bool, dict]:
 _UNSET = object()
 
 
-def speech_music_bed(bearer: str, choice=_UNSET) -> tuple[bool, dict]:
-    """`GET /speech/music-bed` and `POST /speech/music-bed {"choice"}`: the
-    music under a long reading (agent_media_core/music_bed.py) — "off",
-    "auto" (by time and weather) or one of the moods the answer lists; null
-    forgets the choice (back to MEDIA_MUSIC_BED). The server's, so every
-    device's. Without `choice`, only read."""
+def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
+                     style=None) -> tuple[bool, dict]:
+    """`GET /speech/music-bed` and `POST /speech/music-bed {"choice"}` or
+    `{"source", "style"?}`: the music under a long reading
+    (agent_media_core/music_bed.py) — "off", "auto" (generated, by time and
+    weather), a generated mood or style, or "<source>:<style>" for the
+    streaming and library sources, as the answer lists them; null forgets
+    the choice (back to MEDIA_MUSIC_BED). The server's, so every device's.
+    Without either, only read."""
     from agent_media_core import music_bed
 
-    if choice is not _UNSET and choice is not None and choice not in music_bed.CHOICES:
-        return False, {"error": "choice must be off, auto or one of the moods listed",
+    if source is not _UNSET:
+        if source is None:
+            choice = None
+        else:
+            choice = (music_bed.compose(source, style if isinstance(style, str) else None)
+                      if isinstance(source, str) else None)
+            if choice is None:
+                return False, {"error": "source must be off, generated, streaming or library, "
+                                        "with one of its styles", "status": 400}
+    if choice is not _UNSET and choice is not None and music_bed.normalise(choice) is None:
+        return False, {"error": "choice must be off, auto or one of the choices listed",
                        "status": 400}
     user, err = auth.gate(bearer)
     if not user:

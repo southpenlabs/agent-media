@@ -4141,6 +4141,7 @@ def _submit_event(event: Event,
     reply_tone = False   # set once the claim is in hand; read in the finally
     people_tone = False  # likewise
     bed_tone = False     # likewise: the music bed (music_bed.py) is under it
+    bed_stop = None      # likewise: what ends the bed (Mopidy's tracks, its credit)
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -5157,22 +5158,24 @@ def _submit_event(event: Event,
             # unknown as it starts). Whether anything else plays is what the
             # duck found, so it waits on before_speech, bounded and only for
             # a reading that wants a bed.
-            bed_path = None
+            # The source (generated, his streaming music, the online
+            # library) is Settings'; `choose` falls back to generated.
+            bed_plan = None
             if (not thinking and not people_tone and not arriving
                     and not (event.metadata or {}).get("ask")
                     and not _alert_class(event)):
                 from .. import music_bed
-                _bed_mood = music_bed.wanted(_dj.estimate_seconds(text),
+                _bed_pick = music_bed.wanted(_dj.estimate_seconds(text),
                                              len(sentences))
-                if _bed_mood and music_bed.ready_or_warm(_bed_mood):
+                if _bed_pick and music_bed.ready_or_warm(_bed_pick, target):
                     _before_thread.join(timeout=music_bed.probe_wait_s())
-                    bed_path = music_bed.choose(
-                        _bed_mood, None if _before_thread.is_alive()
-                        else getattr(coordinator, "other_audio", None))
-            if bed_path is not None:
+                    bed_plan = music_bed.choose(
+                        _bed_pick, None if _before_thread.is_alive()
+                        else getattr(coordinator, "other_audio", None), target)
+            if bed_plan is not None:
                 from .. import music_bed
-                bed_tone = music_bed.play_under(bed_path, target, sink)
-                if not bed_tone and reply_tone:
+                bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
+                if not bed_tone and bed_stop is None and reply_tone:
                     from .. import earcons
                     earcons.play_under(earcons.reply_name(_reply_folder(event.metadata)),
                                        target, sink, loop=True)
@@ -6040,6 +6043,13 @@ def _submit_event(event: Event,
                     getattr(sink, "stop_under", lambda *a: None)(target)
                 except Exception:  # noqa: BLE001 — never cost the cleanup
                     log.debug("stop_under failed", exc_info=True)
+            if bed_stop is not None:
+                # The music bed's own end: Mopidy's tracks faded and taken
+                # back, the credit no longer playing (music_bed.start).
+                try:
+                    bed_stop()
+                except Exception:  # noqa: BLE001 — never cost the cleanup
+                    log.debug("music bed stop failed", exc_info=True)
             # A claim still in flight (before_speech raised) must finish
             # before it is released, or it would land after and hold the
             # broker for its whole TTL. It may be waiting for a lead that is

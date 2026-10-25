@@ -147,8 +147,10 @@ device gets its token):
                   (agent_media_core/watching.py, pins.py)
   GET|POST /speech/default {"level"} → the level of every thread with none
                   of its own; the server's, so every device's (pins.py)
-  GET|POST /speech/music-bed {"choice"} → music under long readings: off,
-                  auto or a mood; the server's (music_bed.py)
+  GET|POST /speech/music-bed {"choice"} | {"source", "style"} → music under
+                  long readings: off, generated (a mood or style), his
+                  streaming music or the online library, each with Auto;
+                  the server's (music_bed.py)
   GET|POST /speech/balance {"balance"} → how loud speech is next to music
                   in the app, -100..100; the server's (speech_balance.py)
   GET|POST /speech/voice {"mode", "voice"?} → the speech target's replies
@@ -2853,8 +2855,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/speech/music-bed":
         # Settings' Music under long readings.
         body = _read_json(h) or {}
-        if "choice" not in body:
-            _json(h, 400, {"ok": False, "error": "choice is required (null forgets it)"})
+        if "choice" not in body and "source" not in body:
+            _json(h, 400, {"ok": False, "error": "choice (or source and style) is required "
+                                                "(null forgets it)"})
+        elif "source" in body:
+            ok, detail = pins.speech_music_bed(_bearer(h), source=body.get("source"),
+                                               style=body.get("style"))
+            _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
         else:
             ok, detail = pins.speech_music_bed(_bearer(h), choice=body.get("choice"))
             _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})

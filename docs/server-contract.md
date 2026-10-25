@@ -2003,6 +2003,66 @@ nothing that time and starts the renderer. Pinned by
 `packages/core/tests/test_music_bed.py` and
 `packages/server/tests/test_reap.py`.
 
+**Three sources (26 Oct 2026).** `GET` also answers `"source"` (`"off"`,
+`"generated"`, `"streaming"`, `"library"`), `"style"` (`"auto"`, a style id,
+or null for off), and `"sources"`: one row per source, in that order —
+`{"id", "label", "styles": [{"id", "label"}], "available", "reason",
+"targets": [{"target", "label", "available", "reason"}], "note"}`.
+`styles` starts with `auto` ("Auto (by time and weather)"); `available` and
+`reason` are for the current speech target (`"target"`), `targets` for each
+one the server knows; `reason` is English words for the listener (null when
+available); `note` is a line about the chosen source's cache (null for
+others). `POST {"source", "style"?}` sets one (`style` defaults to `auto`;
+`source: "off"` is off; `source: null` forgets the choice), as does `POST
+{"choice"}` with the canonical string: `off`, `auto` or a generated style —
+the values from before, still accepted and still meaning the generated
+source — or `<source>:<style>` (`streaming:jazz`, `library:auto`;
+`generated:<style>` is taken as `<style>`). `choices` stays the flat list of
+every canonical choice ("Online library: Jazz"), so an app that knows only
+the list still works. 400 for a style its source does not have.
+
+- **generated** — the moods, and the styles `ambient` (evolving pads),
+  `piano` (felt piano), `lofi` (Rhodes, a low-passed brushed beat, vinyl
+  hiss), `jazz` (rootless ii-V-I voicings, swung brushes, walking bass) and
+  `nature` (rain, a stream, birds), all stdlib (`music_bed_styles.py`), each
+  a seamless 29–40 s loop at -24 dBFS peak with most of its energy above
+  300 Hz, cached like the moods (`music-bed-<style>-v1.wav`). Auto picks a
+  mood; a style fixes it. Every target.
+- **streaming** — a quiet genre playlist (`lofi`, `ambient`, `classical`,
+  `jazz`, `piano`) found through Mopidy's YouTube Music search
+  (`music_bed_stream.py`), its tracks fetched in the background into the
+  rooms cache (the phone's address, as every house play), played by Mopidy
+  after his queue at `MEDIA_MUSIC_BED_STREAM_VOLUME` (12 of 100), faded in
+  and out with the DJ duck's fader, taken back out of the queue when the
+  reading ends; only when Mopidy is stopped. The house speakers and this
+  host only (`MEDIA_MUSIC_BED_STREAM_TARGETS`, `rooms,local`); a phone
+  target is unavailable, with the reason (its music app takes the audio
+  focus as it starts, pausing the reply, and keeps its own volume).
+- **library** — the same five genres from archive.org (Musopen's public
+  domain classical and Chopin, Kevin MacLeod's CC BY albums) and ccMixter
+  (CC BY instrumentals), licence read from each item's own metadata: public
+  domain, CC0 or CC BY only, never NC, ND or SA (`music_bed_library.py`). A
+  few tracks a genre, fetched in the background, trimmed of leading silence
+  and loudnormed to -30 LUFS, kept in the clip dir as
+  `music-bed-lib-<key>.mp3` (so a phone fetches one by its signed clip
+  URL), the cache capped (`MEDIA_MUSIC_BED_LIBRARY_MAX_MB`, 300) by least
+  recently played. Played as any bed (`under`, `under-loop` "1"). Every
+  target.
+
+For streaming and library, `auto` is a genre by the hour and weather:
+morning → classical, calm → piano, blend → lo-fi, dusk → jazz, night →
+ambient, rainy → piano (`auto_style` says which now). **Fallback:** the
+chosen source if it can play on the reading's target and has a track kept;
+else the generated style nearest it (classical → piano, the others the
+same; Auto's mood for Auto); else the tone. Nothing is ever fetched while a
+reply waits. `"now"` is what is (`playing: true`) or was last under a
+reading: `{"source", "style", "label", "credit", "playing", "at"}`;
+`"credit"` is its `credit` — `{"title", "creator", "license", "license_url",
+"url", "source"}` for a library or streaming track (`license` "" for
+streaming), null for a generated bed — for the app's "Now playing: <title> —
+<creator> (CC BY)" with a link. `"library"` and `"streaming"` count the
+tracks kept per genre. Pinned by `packages/core/tests/test_music_bed_sources.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,
