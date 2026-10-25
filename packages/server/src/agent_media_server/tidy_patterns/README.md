@@ -2,7 +2,7 @@
 
 `voice_tidy.py` rewrites a dictated message to a person. Each *intent*
 (plain, proofread, polish, professional, friendly, brief, firm, apologetic,
-decline, request) has a pattern here that is the style guidance in the prompt,
+decline, request, emoji) has a pattern here that is the style guidance in the prompt,
 wrapped in agent-media's own fixed rules (`tidy_intents.py`). The rules always
 win: they keep the meaning, names, numbers, dates and language, ask for the
 message text only, and bound the length, whatever a pattern says.
@@ -36,6 +36,9 @@ repository's `LICENSE` at that commit, change the SHA above and in
 
 ## Our own patterns (Apache-2.0, South Pen Labs)
 
-`plain.md`, `friendly.md`, `brief.md`, `firm.md`, `apologetic.md`, `decline.md`
-and `request.md` are written for this project: short, about the message's
-register, and nothing else. `plain` is the original tidy.
+`plain.md`, `friendly.md`, `brief.md`, `firm.md`, `apologetic.md`, `decline.md`,
+`request.md` and `emoji.md` are written for this project: short, about the
+message's register, and nothing else. `plain` is the original tidy. `emoji`
+(David, 25 Oct 2026: "cool little emoji paragraphs") carries his own examples
+as few-shot guidance, and has its own rules in `tidy_intents.py`: emoji, line
+breaks and tiny text flourishes may be added, the words may not grow or change.

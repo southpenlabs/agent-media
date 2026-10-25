@@ -1482,7 +1482,16 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   person's relationship, role and company from their contact, the tone of the
   recent messages — will add to it. The app opens the card in `last`. Today: `plain` (Tidy), `proofread` (Fix typos),
   `polish`, `professional`, `friendly`, `brief`, `firm`, `apologetic`,
-  `decline` (Polite no), `request` (Ask nicely). `proofread`, `polish` and
+  `decline` (Polite no), `request` (Ask nicely), `emoji` (Emoji, 25 Oct 2026:
+  an "emoji paragraph" — the words in short lines, an emoji leading or closing
+  each, blank lines between beats, now and then a tiny text flourish such as a
+  stick arm ". L"). `emoji` has its own rules and guards: emoji, line breaks
+  and flourishes may be added but no new words (a lone letter aside), the
+  words' length (emoji and whitespace left out) within the plain bound, at
+  most one emoji per non-blank line plus two, swearing kept and none added,
+  every number kept; its `tidy` keeps its line breaks (`\n`), which the app
+  shows and sends as they are. Spoken with `say`, the emoji, joiners and
+  flourishes are taken out so the voice reads the words. `proofread`, `polish` and
   `professional` use prompts vendored from Fabric (MIT, pinned commit; see
   `tidy_patterns/README.md` and the root `NOTICE`); the others are our own.
   The prompt is the pattern as style guidance inside our fixed rules, which

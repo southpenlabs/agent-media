@@ -93,10 +93,13 @@ def accept(original: str, tidy: str, intent: "tidy_intents.Intent | None" = None
     """The tidy text if it is a safe one, else ''. It must say something new,
     be within the intent's length bound (the default: no longer than a little
     over the original) and keep every number."""
-    tidy = " ".join(tidy_intents.plain_text(tidy).split())
+    chosen = intent or tidy_intents.get(None)
+    cleaned = tidy_intents.plain_text(tidy)
+    # An emoji paragraph keeps its lines; everything else is one line.
+    tidy = tidy_intents.emoji_text(cleaned) if chosen.emoji else " ".join(cleaned.split())
     if not tidy or tidy == original:
         return ""
-    if not tidy_intents.grows_ok(intent or tidy_intents.get(None), original, tidy):
+    if not tidy_intents.grows_ok(chosen, original, tidy):
         return ""
     low = tidy.lower()
     if any(n not in low for n in _nums(original)):
@@ -144,7 +147,10 @@ def tidy(text: str, recipient: str = "", context: str = "", private: bool = Fals
                           purpose_env="MEDIA_TIDY_MODEL", private=private))
     if not got:
         return {"messy": False, "tidy": "", "why": "no_answer"}
-    if not got["messy"]:
+    # A register asked for by name is wanted whatever the model thinks of the
+    # words: only a result the same as them is "nothing to change". For the
+    # plain tidy the model's own judgement stands.
+    if not got["messy"] and (chosen.key == tidy_intents.DEFAULT or not got["tidy"].strip()):
         return {"messy": False, "tidy": "", "why": "model_clean"}
     safe = accept(original, got["tidy"], chosen)
     if not safe:
@@ -213,6 +219,7 @@ def post(body: dict, bearer: str) -> tuple[bool, dict]:
     if got["messy"] and session and isinstance(say, str) and "{tidy}" in say:
         from .voice_check import speak
 
-        speak(session, say.replace("{tidy}", got["tidy"])[:MAX_TEXT + 200])
+        # The voice reads the words, not emoji names (an emoji paragraph's are taken out).
+        speak(session, say.replace("{tidy}", tidy_intents.speakable(got["tidy"]))[:MAX_TEXT + 200])
         spoken = True
     return True, {**got, "spoken": spoken}

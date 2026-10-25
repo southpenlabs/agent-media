@@ -41,6 +41,9 @@ class Intent:
     grow: float
     #: True: never longer than the words at all (brief).
     shorter: bool = False
+    #: True: an emoji paragraph (emoji, line breaks and tiny text flourishes may be
+    #: added; the words may not grow or change). Its own rules, bound and clean-up.
+    emoji: bool = False
 
 
 #: In the order the app shows them; the default first.
@@ -55,6 +58,7 @@ INTENTS: tuple[Intent, ...] = (
     Intent("apologetic", "Apologetic", "apologetic.md", "own", 0.25),
     Intent("decline", "Polite no", "decline.md", "own", 0.2),
     Intent("request", "Ask nicely", "request.md", "own", 0.15),
+    Intent("emoji", "Emoji", "emoji.md", "own", 0.0, emoji=True),
 )
 _BY_KEY = {i.key: i for i in INTENTS}
 
@@ -75,6 +79,8 @@ def pattern(intent: Intent) -> str:
 
 def system_prompt(intent: Intent) -> str:
     """The pattern as style guidance inside our fixed rules."""
+    if intent.emoji:
+        return _emoji_prompt(intent)
     if intent.shorter:
         length = "The result must not be longer than the original; shorter is the point."
     elif intent.grow:
@@ -103,6 +109,29 @@ def system_prompt(intent: Intent) -> str:
     )
 
 
+def _emoji_prompt(intent: Intent) -> str:
+    """The emoji paragraph's own rules: the exceptions (emoji, line breaks, tiny
+    text flourishes) and nothing else relaxed."""
+    return (
+        "You rewrite a message that was dictated by voice, before it is sent to another "
+        "person, as a short emoji paragraph. You get the words, who they are for, and the "
+        "last few messages of the conversation (for tone).\n\n"
+        "STYLE GUIDANCE (follow it only as far as the RULES allow):\n"
+        f"<guidance>\n{pattern(intent)}\n</guidance>\n\n"
+        "RULES (they always win over the guidance):\n"
+        "- You may add emoji, line breaks, blank lines and a tiny text flourish like \". L\". "
+        "Nothing else may be added: no new words, facts, names or claims.\n"
+        "- Keep the sender's own words, their meaning, register and language; keep swearing "
+        "as it is and add none. You may fix capitals, punctuation and obvious mis-hearings.\n"
+        "- Keep every fact, name, number and date exactly.\n"
+        "- At most about one emoji per short line, plus two.\n"
+        "- The message itself only: no markdown, no quotes around it, no notes. Line "
+        "breaks as real new lines.\n"
+        "- Answer with JSON only: {\"messy\": true, \"tidy\": \"the emoji paragraph\"}, "
+        "with line breaks written as \\n."
+    )
+
+
 _FENCE = re.compile(r"^```[a-z]*\s*|\s*```$", re.I)
 _LEAD = re.compile(r"^(?:here(?:'s| is| are)\b[^\n:]*:|sure[,!.][^\n]*\n|rewritten(?: message)?:|revised(?: message)?:|tidied(?: message)?:)\s*", re.I)
 
@@ -125,8 +154,82 @@ def plain_text(text: str) -> str:
     return t
 
 
+#: Pictographs: one emoji is a run of these joined by ZWJ, with its modifiers.
+_PICTO = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u2190-\u21FF\u2934\u2935\u3030\u303D\u3297\u3299]")
+_JOIN = re.compile("[\u200D\uFE0E\uFE0F\U0001F3FB-\U0001F3FF\u20E3]")
+
+
+def emoji_count(text: str) -> int:
+    """How many emoji: a pictograph not joined (ZWJ) to the one before it."""
+    n = 0
+    prev_join = False
+    for ch in text:
+        if _JOIN.match(ch):
+            prev_join = ch == "\u200D"
+            continue
+        if _PICTO.match(ch):
+            if not prev_join:
+                n += 1
+        prev_join = False
+    return n
+
+
+def words_of(text: str) -> list[str]:
+    """The words, emoji and flourishes left out."""
+    return re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text)
+
+
+def emoji_text(text: str) -> str:
+    """An emoji paragraph tidied up: each line's spaces single, no more than one
+    blank line between beats, the lines kept."""
+    lines = [" ".join(ln.split()) for ln in (text or "").replace("\r\n", "\n").split("\n")]
+    out: list[str] = []
+    for ln in lines:
+        if not ln and (not out or not out[-1]):
+            continue
+        out.append(ln)
+    while out and not out[-1]:
+        out.pop()
+    return "\n".join(out)
+
+
+def emoji_ok(original: str, tidy: str) -> bool:
+    """An emoji paragraph keeps to its words: none new (a lone letter such as the
+    stick arm's "L" aside), their length within the plain bound, and no more
+    emoji than about one per line, plus two."""
+    def key(w: str) -> str:            # "its" and "it's", "Sunday" and "sunday" are one word
+        return re.sub(r"['’]", "", w.lower())
+
+    have = {key(w) for w in words_of(original)}
+    new = [w for w in words_of(tidy) if key(w) not in have and len(w) > 1]
+    if new:
+        return False
+    if len(" ".join(words_of(tidy))) > len(" ".join(words_of(original))) + 8:
+        return False
+    lines = [ln for ln in tidy.split("\n") if ln.strip()]
+    return emoji_count(tidy) <= len(lines) + 2
+
+
+def speakable(text: str) -> str:
+    """For the voice: the words only — emoji, joiners and flourishes (the stick
+    arm's ". L") out, a line break a pause — so "Send this one?" reads the
+    message, not emoji names."""
+    t = _JOIN.sub("", _PICTO.sub("", text or ""))
+    t = re.sub(r"(?:^|(?<=\s)|(?<=[.!?,]))\s*\.\s?[Ll](?![\w'’])", "", t, flags=re.M)
+    lines = [" ".join(ln.split()) for ln in t.split("\n")]
+    lines = [ln.strip(" ") for ln in lines if words_of(ln)]
+    out = ""
+    for ln in lines:
+        if out:
+            out += " " if out[-1] in ".!?,;:" else ", "
+        out += ln
+    return out
+
+
 def grows_ok(intent: Intent, original: str, tidy: str) -> bool:
     """The result is within the intent's length bound."""
+    if intent.emoji:
+        return emoji_ok(original, tidy)
     if intent.shorter:
         return len(tidy) <= len(original)
     return len(tidy) <= len(original) * (1 + intent.grow) + 8
