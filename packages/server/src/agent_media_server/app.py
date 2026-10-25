@@ -147,6 +147,8 @@ device gets its token):
                   (agent_media_core/watching.py, pins.py)
   GET|POST /speech/default {"level"} → the level of every thread with none
                   of its own; the server's, so every device's (pins.py)
+  GET|POST /speech/music-bed {"choice"} → music under long readings: off,
+                  auto or a mood; the server's (music_bed.py)
   GET|POST /speech/balance {"balance"} → how loud speech is next to music
                   in the app, -100..100; the server's (speech_balance.py)
   GET|POST /speech/voice {"mode", "voice"?} → the speech target's replies
@@ -350,7 +352,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language",
     "/sessions/state", "/commands", "/rename",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -1755,6 +1757,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Speech next to music in the app (speech_balance.py).
         ok, detail = pins.speech_balance(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/music-bed":
+        # Music under a long reading (music_bed.py): off, auto or a mood.
+        ok, detail = pins.speech_music_bed(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # The phone's voice or the server's (render/device.py).
         ok, detail = pins.speech_voice(_bearer(h))
@@ -2826,6 +2832,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         balance = body.get("balance")
         ok, detail = pins.speech_balance(_bearer(h), balance="" if balance is None else balance)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/music-bed":
+        # Settings' Music under long readings.
+        body = _read_json(h) or {}
+        if "choice" not in body:
+            _json(h, 400, {"ok": False, "error": "choice is required (null forgets it)"})
+        else:
+            ok, detail = pins.speech_music_bed(_bearer(h), choice=body.get("choice"))
+            _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # Settings' Voice: this phone's or the server's.
         body = _read_json(h) or {}

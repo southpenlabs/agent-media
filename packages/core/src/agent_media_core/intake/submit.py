@@ -4140,6 +4140,7 @@ def _submit_event(event: Event,
     thinking = bool((event.metadata or {}).get("thinking"))
     reply_tone = False   # set once the claim is in hand; read in the finally
     people_tone = False  # likewise
+    bed_tone = False     # likewise: the music bed (music_bed.py) is under it
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -5149,7 +5150,33 @@ def _submit_event(event: Event,
                           and not (event.metadata or {}).get("ask"))
             people_tone = (not thinking and not reply_tone
                            and _people_message(event))
-            if thinking and not _thinking_done():
+            # The music bed (music_bed.py, roadmap 39): in place of the reply
+            # tone, or of no tone, under a LONG reading with nothing else
+            # playing. Never under a thought, a person's message, a question
+            # card or an alert, and never for a streamed reply (its length is
+            # unknown as it starts). Whether anything else plays is what the
+            # duck found, so it waits on before_speech, bounded and only for
+            # a reading that wants a bed.
+            bed_path = None
+            if (not thinking and not people_tone and not arriving
+                    and not (event.metadata or {}).get("ask")
+                    and not _alert_class(event)):
+                from .. import music_bed
+                _bed_mood = music_bed.wanted(_dj.estimate_seconds(text),
+                                             len(sentences))
+                if _bed_mood and music_bed.ready_or_warm(_bed_mood):
+                    _before_thread.join(timeout=music_bed.probe_wait_s())
+                    bed_path = music_bed.choose(
+                        _bed_mood, None if _before_thread.is_alive()
+                        else getattr(coordinator, "other_audio", None))
+            if bed_path is not None:
+                from .. import music_bed
+                bed_tone = music_bed.play_under(bed_path, target, sink)
+                if not bed_tone and reply_tone:
+                    from .. import earcons
+                    earcons.play_under(earcons.reply_name(_reply_folder(event.metadata)),
+                                       target, sink, loop=True)
+            elif thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,
                 # 23 Oct 2026). Under the voice, not before it (25 Oct), so
@@ -6005,8 +6032,8 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
-            if thinking or reply_tone or people_tone:
-                # The `think` / `reply` / `people` tone loops under the voice; this
+            if thinking or reply_tone or people_tone or bed_tone:
+                # The `think` / `reply` / `people` tone (or the music bed) loops under the voice; this
                 # host's own player of it stops here (a phone's stops with
                 # the reply).
                 try:

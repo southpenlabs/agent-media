@@ -134,6 +134,8 @@ class Coordinator:
         self._android_paused: list[str] = []
         # Whether we paused the book channel for the current clip.
         self._book_paused = False
+        self.other_audio: Optional[bool] = None
+        self._music_found = False
         # A duck this coordinator decided on but has not applied yet — see
         # before_speech(defer_music=True) and duck_music_now(). The lock makes
         # the hand-off single-shot: two callers race to apply it (the far
@@ -487,6 +489,24 @@ class Coordinator:
         except Exception:  # noqa: BLE001 — surfaced by the caller
             return False
 
+    def _music_audible(self) -> bool:
+        """Is the music that has a uri actually playing? Mopidy names its
+        current song paused or stopped as well, and a paused song is no
+        reason to keep the music bed off (music_bed.py). The phone's players
+        are only chosen when live. Unsure means playing. Never raises."""
+        try:
+            observe = getattr(self.music, "_observe_backend", None)
+            backend = observe() if observe is not None else self.music
+            status = getattr(backend, "status_dict", None)
+            if status is not None:
+                return status(self.music_target).get("state") == "play"
+            active = getattr(backend, "active", None)
+            if active is not None:
+                return bool(active(self.music_target))
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
     def _probe_music_uri(self):
         """What the music channel is playing. Asked concurrently."""
         return self.music.now_playing_uri(self.music_target)
@@ -530,6 +550,10 @@ class Coordinator:
         """
         self._speech_hint = {"priority": priority or "", "ask": bool(ask),
                              "est_s": est_s}
+        # Whether anything else was playing (music_bed.py: no bed over it).
+        # None until this call has finished looking; it stays None if it fails.
+        self.other_audio = None
+        self._music_found = False
         # Every music call below re-resolves which backend is live — two
         # probes across the tailnet each time — so the probe, the position
         # and the pause are asked to agree on one answer (see
@@ -539,6 +563,9 @@ class Coordinator:
         with pin() if pin is not None else nullcontext():
             self._before_speech(title=title, priority=priority,
                                 defer_music=defer_music, text=text)
+        self.other_audio = bool(
+            self._music_found or self._book_paused or self._mpris_paused
+            or any(self._mpris_remote_paused.values()) or self._android_paused)
 
     def _before_speech(self, *, title: str, priority: str,
                        defer_music: bool, text: str) -> None:
@@ -638,6 +665,7 @@ class Coordinator:
             probes.shutdown(wait=False)
         if not uri:
             return  # nothing to interrupt via Mopidy
+        self._music_found = self._music_audible()
 
         if defer_music:
             # Decided, not yet done. The probe above has already been paid for,

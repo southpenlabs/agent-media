@@ -1969,6 +1969,40 @@ The server's, so every device's. Kept in `<state_dir>/speech-balance.json`.
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_speech_balance.py`.
 
+#### `GET` / `POST /speech/music-bed` — gated (26 Oct 2026)
+
+`GET` → `{"ok": true, "choice", "set", "choices": [{"id", "label"}],
+"auto_now", "weather", "ready"}`; `POST {"choice"}` → the same, after
+setting it. Quiet generated music under a long reading
+(`agent_media_core/music_bed.py`, roadmap 39). `choice` is `"off"`,
+`"auto"` (the mood by the hour and the weather) or a mood id;
+`choices` lists them in order — `off`, `auto`, then the moods (today
+`calm`, `dusk`, `blend`, `morning`, `rainy`, `night`) with English labels.
+The app renders the list it is given, so a new mood needs no app change; it
+may put its own words on `off` and `auto`. `set` is whether Settings chose
+(`choice: null` forgets it, back to `MEDIA_MUSIC_BED`, default `auto`).
+`auto_now` is the mood `auto` would play now, `weather` the weather words
+it read (null when none is known or the weather is off), `ready` the moods
+rendered so far. The server's, so every device's; kept in
+`<state_dir>/music-bed.json`. 400 for an unknown choice or no `choice` key;
+in `CORS_PATHS`.
+
+When it plays: in place of the under tone, for a reading of at least 45 s
+by the device renderer's estimate or at least 12 sentences
+(`MEDIA_MUSIC_BED_MIN_S` / `_MIN_SENTENCES`), when the reading's own duck
+found nothing else playing (no music, book or paused player; a duck that
+has not answered within `MEDIA_MUSIC_BED_PROBE_S`, 1 s, counts as
+playing). Never under a thinking readout, a person's message, a question
+card or an alert, and not for a streamed reply. `auto`: morning 6–11, calm
+11–14, blend 14–17, dusk 17–21, night 21–6, rainy from 6 to 21 when it
+rains (Open-Meteo's current weather, kept up to an hour; never fetched while
+a reply waits). The phone gets the bed as any under tone: `under-loop` "1",
+`under` the clip (`music-bed-<mood>-v<N>.wav`, mono 48 kHz, a seamless loop
+of 29–45 s at -24 dBFS peak), `tone-kind` "". A mood not yet rendered plays
+nothing that time and starts the renderer. Pinned by
+`packages/core/tests/test_music_bed.py` and
+`packages/server/tests/test_reap.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

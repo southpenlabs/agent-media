@@ -178,6 +178,31 @@ def speech_balance(bearer: str, balance=None) -> tuple[bool, dict]:
     return True, {"balance": b, "speech": sb.speech_level(b), "music": sb.music_level(b)}
 
 
+_UNSET = object()
+
+
+def speech_music_bed(bearer: str, choice=_UNSET) -> tuple[bool, dict]:
+    """`GET /speech/music-bed` and `POST /speech/music-bed {"choice"}`: the
+    music under a long reading (agent_media_core/music_bed.py) — "off",
+    "auto" (by time and weather) or one of the moods the answer lists; null
+    forgets the choice (back to MEDIA_MUSIC_BED). The server's, so every
+    device's. Without `choice`, only read."""
+    from agent_media_core import music_bed
+
+    if choice is not _UNSET and choice is not None and choice not in music_bed.CHOICES:
+        return False, {"error": "choice must be off, auto or one of the moods listed",
+                       "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    if choice is not _UNSET:
+        try:
+            music_bed.set_choice(choice)
+        except OSError as e:
+            return False, {"error": f"could not save the music choice ({e})", "status": 500}
+    return True, music_bed.status()
+
+
 def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
     """`GET /speech/voice` and `POST /speech/voice {"mode", "voice"?}`: whether
     the current speech target's replies are rendered on the phone, by

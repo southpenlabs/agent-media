@@ -1738,7 +1738,28 @@ ahead.
     (Musopen, Free Music Archive, Kevin MacLeod, Pixabay) only after each
     licence is checked. Sample recipes (stdlib): [music-bed samples](proposals/2026-10-26-music-bed-samples/), gen.py and gen2.py
     (`python3 gen2.py blend`). Short replies keep the tones, not
-    music. Not started.
+    music.
+    **Landed 26 Oct 2026 (generated beds):** `agent_media_core/music_bed.py`
+    ports the six moods (stdlib), each a seamless 29–45 s loop (the notes
+    ringing past the end wrapped round to the start, rain crossfaded over
+    the seam, a 20 ms release on each note where the samples cut it dead),
+    mono 48 kHz, -24 dBFS peak, cached versioned in the clip dir
+    (`music-bed-<mood>-v1.wav`). Rendered by a detached, niced
+    `python -m agent_media_core.music_bed warm` the first time one is
+    wanted (about 10 s a mood); until then no bed plays. Plays in place of
+    the under tone for a reading of ≥ 45 s estimated or ≥ 12 sentences,
+    only when the reading's own duck found nothing else playing
+    (`Coordinator.other_audio`; unknown after 1 s counts as playing); never
+    under a thought, a person's message, a question card or an alert, and
+    not for a streamed reply. Auto: morning 6–11, calm 11–14, blend 14–17,
+    dusk 17–21, night 21–6, rainy by day when Open-Meteo (astrotunes'
+    source) says it rains. `MEDIA_MUSIC_BED=off|auto|<mood>` (default
+    auto); Settings → Music under long readings (`/speech/music-bed`, the
+    server's list) wins. Not yet: `media doc`, books and Listen play
+    through the book channel, not submit, so they get no bed; the genre
+    styles (piano, lo-fi, jazz chords, nature); a genre playlist from his
+    streaming music through Mopidy as a Settings choice; the free
+    libraries, after their licences are checked.
 
 ## Loose ends
 

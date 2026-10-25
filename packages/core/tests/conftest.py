@@ -280,3 +280,14 @@ def _no_live_jobs_server(monkeypatch):
     route sets it itself."""
     monkeypatch.setenv("MEDIA_PHONE_JOBS_URL", "http://127.0.0.1:9")
     monkeypatch.delenv("MEDIA_PHONE_JOBS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_music_bed_renderer(monkeypatch):
+    """Never start the music bed's detached renderer (music_bed.py): it
+    would outlive the test, spend a minute of CPU and fetch the weather.
+    Patched rather than switched off by env, since many suites strip every
+    MEDIA_* variable. A test of the spawn patches it back itself."""
+    from agent_media_core import music_bed
+
+    monkeypatch.setattr(music_bed, "spawn_warm", lambda: False)

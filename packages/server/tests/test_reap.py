@@ -718,6 +718,30 @@ def test_speech_balance_is_the_servers(server, shelf, signed_in, typed):
     assert speech_balance.balance() == 35
 
 
+def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
+    from agent_media_core import music_bed
+
+    monkeypatch.delenv("MEDIA_MUSIC_BED", raising=False)
+    monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
+    res, obj = call(server, "GET", "/speech/music-bed", headers=AUTH)
+    assert res.status == 200 and obj["ok"] and obj["choice"] == "auto" and obj["set"] is False
+    ids = [c["id"] for c in obj["choices"]]
+    assert ids[:2] == ["off", "auto"] and set(music_bed.MOODS) <= set(ids)
+    assert all(c["label"] for c in obj["choices"])
+    assert obj["auto_now"] in music_bed.MOODS and obj["weather"] is None
+    res, obj = call(server, "POST", "/speech/music-bed", {"choice": "dusk"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "dusk" and obj["set"] is True
+    assert music_bed.choice() == "dusk"
+    for bad in ("jazz", 3, True):
+        res, obj = call(server, "POST", "/speech/music-bed", {"choice": bad}, AUTH)
+        assert res.status == 400, bad
+    res, obj = call(server, "POST", "/speech/music-bed", {}, AUTH)
+    assert res.status == 400
+    assert music_bed.choice() == "dusk"
+    res, obj = call(server, "POST", "/speech/music-bed", {"choice": None}, AUTH)
+    assert res.status == 200 and obj["set"] is False and obj["choice"] == "auto"
+
+
 def test_speech_default_is_every_thread_without_its_own(server, shelf, signed_in, typed):
     from agent_media_core import speak_priority
 
