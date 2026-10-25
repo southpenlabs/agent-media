@@ -51,3 +51,19 @@ def test_the_verdicts():
     assert level == "warn" and "speech.example.com" in detail, "a moved host is drift too"
     assert w.verdict(APP, dict(APP, HOST="speech.platform.bing.com"), (9000, ""))[0] == "ok", \
         "edge-tts still on the old host is behind the app, not news"
+
+
+def test_gec_version_read_from_secmsgec():
+    assert w.gec_version('    static final String VERSION = "2-";') == "2-"
+    assert w.gec_version("class SecMsGec {}") == "1-"
+
+
+def test_v2_token_shape_and_window():
+    tok = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+    a = w.sec_ms_gec(tok, 1761400000.0, "2-")
+    cs64, sha = a.split("-")
+    assert len(cs64) == 16 and len(sha) == 64 and a == a.upper()
+    # the same five-minute window gives the same token
+    assert w.sec_ms_gec(tok, 1761400000.0 - 1761400000.0 % 300 + 299, "2-") == \
+        w.sec_ms_gec(tok, 1761400000.0 - 1761400000.0 % 300, "2-")
+    assert w.sec_ms_gec(tok, 1761400000.0) != a  # v1 still the default

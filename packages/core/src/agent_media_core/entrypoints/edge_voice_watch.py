@@ -44,6 +44,8 @@ from pathlib import Path
 ALERT_ID = "edge-voice"
 APP_REPO = Path.home() / "projects/sasonica-app"
 APP_PATH = "android/app/src/main/java/com/sasonica/app/speech/EdgeVoice.java"
+#: Where the app keeps its Sec-MS-GEC recipe and the version prefix it sends.
+GEC_PATH = "android/app/src/main/java/com/sasonica/app/speech/SecMsGec.java"
 #: Synthesis's host until Oct 2026, when it began refusing it with 403s.
 LEGACY_HOST = "speech.platform.bing.com"
 UPSTREAM = "https://raw.githubusercontent.com/rany2/edge-tts/master/src/edge_tts/constants.py"
@@ -55,15 +57,16 @@ FIX = ("Natasha's handshake with Microsoft has moved: update TOKEN/CHROMIUM in "
 WIN_EPOCH = 11644473600
 
 
-def app_source(repo: Path) -> str:
-    """EdgeVoice.java as pushed — what CI builds for the phone, not whatever
-    a session has half-edited in the shared checkout."""
-    subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin", "main"],
-                   capture_output=True, timeout=60)
-    r = subprocess.run(["git", "-C", str(repo), "show", f"origin/main:{APP_PATH}"],
+def app_source(repo: Path, path: str = APP_PATH, fetch: bool = True) -> str:
+    """EdgeVoice.java (or `path`) as pushed — what CI builds for the phone,
+    not whatever a session has half-edited in the shared checkout."""
+    if fetch:
+        subprocess.run(["git", "-C", str(repo), "fetch", "-q", "origin", "main"],
+                       capture_output=True, timeout=60)
+    r = subprocess.run(["git", "-C", str(repo), "show", f"origin/main:{path}"],
                        capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
-        raise ValueError(f"no {APP_PATH} on origin/main: {r.stderr.strip()}")
+        raise ValueError(f"no {path} on origin/main: {r.stderr.strip()}")
     return r.stdout
 
 
@@ -84,6 +87,13 @@ def app_constants(text: str) -> dict:
     return out
 
 
+def gec_version(text: str) -> str:
+    """The Sec-MS-GEC-Version prefix SecMsGec.java sends ("1-" or "2-"); an
+    app from before the file (or the constant) signed v1."""
+    m = re.search(r'static final String VERSION = "([^"]+)"', text)
+    return m.group(1) if m else "1-"
+
+
 def upstream_constants(text: str) -> dict:
     """The same two values in edge-tts's constants.py."""
     out = {}
@@ -102,7 +112,13 @@ def upstream_constants(text: str) -> dict:
     return out
 
 
-def sec_ms_gec(token: str, unix_s: float) -> str:
+def sec_ms_gec(token: str, unix_s: float, version: str = "1-") -> str:
+    """The token the app signs with: v2 since 24 Oct 2026 (speech.platform.bing.com
+    refuses v1 with a 403), v1 before."""
+    if version == "2-":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from edge_gec_v2 import generate
+        return generate(token, unix_s)
     s = int(unix_s) + WIN_EPOCH
     s -= s % 300
     return hashlib.sha256(f"{s}0000000{token}".encode("ascii")).hexdigest().upper()
@@ -113,9 +129,10 @@ async def probe(c: dict, text: str = "Checking the voice.", timeout: float = 15.
     import aiohttp
 
     major = c["CHROMIUM"].split(".", 1)[0]
+    version = c.get("GEC_VERSION", "1-")
     url = (f"{c['URL']}&ConnectionId={uuid.uuid4().hex}"
-           f"&Sec-MS-GEC={sec_ms_gec(c['TOKEN'], time.time())}"
-           f"&Sec-MS-GEC-Version=1-{c['CHROMIUM']}")
+           f"&Sec-MS-GEC={sec_ms_gec(c['TOKEN'], time.time(), version)}"
+           f"&Sec-MS-GEC-Version={version}{c['CHROMIUM']}")
     headers = {
         "Pragma": "no-cache", "Cache-Control": "no-cache",
         "Origin": "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
@@ -184,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         app = app_constants(app_source(a.repo))
+        try:
+            app["GEC_VERSION"] = gec_version(app_source(a.repo, GEC_PATH, fetch=False))
+        except ValueError:  # no SecMsGec.java: an app from before v2
+            app["GEC_VERSION"] = "1-"
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         level, title, detail = "warn", "Natasha watch can't read the app", str(e)
     else:
