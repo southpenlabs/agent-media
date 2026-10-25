@@ -483,12 +483,12 @@ def body_limit(path: str) -> int:
     (/upload), which is streamed to disk after the bearer is checked."""
     if path == "/upload":
         return uploads.max_bytes()
-    if path == "/contacts/import":
-        from . import contacts
     if path == "/read":
         from . import read_it
 
         return read_it.MAX_BODY        # a page the phone read, as its text
+    if path == "/contacts/import":
+        from . import contacts
 
         return contacts.IMPORT_MAX
     # A Termux job's output (phone_jobs.py): up to 1 MiB each of out and
