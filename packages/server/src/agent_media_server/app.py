@@ -134,6 +134,8 @@ device gets its token):
                   quick model, preferring ones in use; nothing saved (tags.py)
   POST /contacts/tags {"contact", "add"?, "remove"?, "tags"?} → a person's
                   own tags, shared by all their chats (tags.py)
+  POST /tags/auto {"force"?} → tag every chat with the tags in use that fit,
+                  in the background; GET /tags/auto says how it went (tags_auto.py)
   POST /session/priority {"session", "level"} → that thread's speech
                   level: interrupt | auto | pocket | normal | quiet
                   (agent_media_core/speak_priority.py, pins.py)
@@ -342,7 +344,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/tags", "/session/priority", "/session/pocket",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/tags/auto", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -1662,6 +1664,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The install or sign-in window, as the desk sees it.
         ok, detail = harnesses.screen((parse_qs(query).get("pane") or [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/tags/auto":
+        # How the last pass of auto tags on chats went (tags_auto.py).
+        from . import tags_auto
+
+        ok, detail = tags_auto.status(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
     elif path == "/tags":
         # Every thread tag in use, with its count (tags.py).
         from . import tags
@@ -2727,6 +2735,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = pins.session_pin(str(body.get("session") or ""),
                                       body.get("pinned"), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/tags/auto":
+        # Tag every chat now, in the background (tags_auto.py).
+        from . import tags_auto
+
+        ok, detail = tags_auto.post_run(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/contacts/tags":
         # A person's own tags, shared by every chat with them (tags.py).

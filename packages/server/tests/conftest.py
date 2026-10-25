@@ -48,6 +48,11 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_THREAD_TAGS_DIR", str(tmp_path / "org-sessions"))
     # Nor load the embedding model (tag_embed.py), installed or not.
     monkeypatch.setenv("MEDIA_TAG_EMBED", "0")
+    # Nor tag chats in the background (tags_auto.py).
+    monkeypatch.setenv("MEDIA_AUTO_TAG_CHATS", "0")
+    from agent_media_server import tags_auto
+
+    tags_auto._reset_for_tests()
     # A model one test made fail is not skipped in the next (intake/fast.py).
     from agent_media_core.intake import fast
 

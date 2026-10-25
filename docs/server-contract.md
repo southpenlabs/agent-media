@@ -307,7 +307,10 @@ Everything a message can be pointed at.
   (the chat's own, `POST /session/tags`), `person_tags` (the person's own,
   shared by every chat with them, `POST /contacts/tags`), `label_tags` (the
   contact's Google and phone labels, made tags; edited on the card) and
-  `tags`, all of them in that order.
+  `tags`, all of them in that order. And `auto_tags` (26 Oct 2026): tags in
+  use the server put on the chat itself (`tags_auto.py`), in `tags` after the
+  chat's own; `POST /session/tags {"auto": [kept]}` takes the rest off for
+  good.
 - `speech` (every row, 24 Sep 2026): the thread's speech level —
   `"interrupt"`, `"auto"`, `"normal"` or `"quiet"` — set with
   `POST /session/priority` (§6.4) or `media priority`; a thread with none
@@ -1704,6 +1707,21 @@ such contact"`. A chat's own tags go through `POST /session/tags` with the
 room's thread and are kept in `<state_dir>/chat-tags.json`. Auto in a chat is
 always private: only the local matching and `MEDIA_PRIVATE_MODELS`. In
 `CORS_PATHS`. Pinned by `packages/server/tests/test_thread_tags.py`.
+
+#### `POST /tags/auto`, `GET /tags/auto` — gated (26 Oct 2026)
+
+Chats tag themselves: in the background, at most every
+`MEDIA_AUTO_TAG_EVERY_H` hours (6), started by a thread list being read,
+every chat with a message newer than its last pass gets the tags already in
+use that fit it strongly (`tags.scored` ≥ 2: words, similar titles, local
+embeddings), then a private model's picks from the same list where
+`MEDIA_PRIVATE_MODELS` is set; at most three, kept as the row's
+`auto_tags`. Fewer than three tags in use: nothing (`why: "no_vocabulary"`).
+A tag taken off (the sheet's `auto`) is never put back on that chat.
+`POST {"force"?}` starts a pass now (owner only; 409 when
+`MEDIA_AUTO_TAG_CHATS=0`), `GET` → `{"running", "at", "done", "total",
+"tagged", "why", "enabled"}`. Kept in `<state_dir>/chat-auto-tags.json` and
+`chat-auto-dismissed.json`.
 
 #### `POST /session/priority` — gated (24 Sep 2026)
 

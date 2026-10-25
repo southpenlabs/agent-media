@@ -246,13 +246,19 @@ def add_tags(rows: list[dict]) -> list[dict]:
     except Exception:  # noqa: BLE001 — a thread list never fails on tags
         by = {}
     rooms = [r for r in rows if r.get("harness") == "matrix" and not r.get("sealed")]
+    from . import tags_auto
+
     try:
         cids = sorted({str((r.get("contact") or {}).get("id") or "") for r in rooms} - {""})
         labels = _labels(cids)
         chat_map, people_map = _jsonmaps()
         chats, people = chat_map.all(), people_map.all()
+        autos = tags_auto.all_auto() if rooms else {}
     except Exception:  # noqa: BLE001
-        labels, chats, people = {}, {}, {}
+        labels, chats, people, autos = {}, {}, {}, {}
+    if rooms:
+        # Chats get their auto tags in the background (tags_auto.py).
+        tags_auto.kick()
     for r in rows:
         sid = str(r.get("session") or "")
         if r.get("sealed"):
@@ -262,8 +268,10 @@ def add_tags(rows: list[dict]) -> list[dict]:
             chat = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
             person = [t for t in (people.get(cid) or []) if isinstance(t, str)] if cid else []
             label = [t for t in labels.get(cid, []) if t not in person]
+            auto = [t for t in autos.get(sid, []) if t not in chat and t not in person and t not in label]
             r["chat_tags"], r["person_tags"], r["label_tags"] = chat, person, label
-            r["tags"] = list(dict.fromkeys(chat + person + label))
+            r["auto_tags"] = auto
+            r["tags"] = list(dict.fromkeys(chat + auto + person + label))
         else:
             r["tags"] = list(by.get(sid, []))
     return rows
@@ -399,6 +407,13 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         return False, {"error": "a sealed thread has no tags", "status": 423}
     if matrix.room(session) is not None:
         ok, detail = _store_edit(_jsonmaps()[0], session, edit)
+        kept = body.get("auto")
+        if ok and isinstance(kept, list):
+            # The auto tags the sheet kept; the rest are taken off for good.
+            from . import tags_auto
+
+            tags_auto.keep_only(session, [t for t in kept if isinstance(t, str)])
+            detail["auto"] = tags_auto.auto_tags(session)
         return ok, ({"session": session, **detail} if ok else detail)
     found = _nodes().get(session)
     if not found:
@@ -497,17 +512,27 @@ def _words(text: str) -> list[str]:
     return out
 
 
-def matched(session: str, text: str) -> list[str]:
+def matched(session: str, text: str, title: str = "") -> list[str]:
     """Tags already in use that fit the thread, with no hosted model: a tag
     whose words all appear in it (more often, higher), the tags of threads
     whose titles share its words (the closer, higher), and — with the
     `tags-embed` extra installed — the ones close to it in meaning
     (tag_embed.py, a small model run here). All of it stays on this machine,
     so a private thread gets them too. Its own left out."""
+    score, own = scored(session, text, title)
+    ranked = sorted((t for t, v in score.items() if v >= 1.0 and t not in own),
+                    key=lambda t: (-score[t], t))
+    return ranked[:MAX_SUGGESTED]
+
+
+def scored(session: str, text: str, title: str = "") -> tuple[dict[str, float], set[str]]:
+    """`matched`'s scores for every tag in use, and the thread's own tags.
+    1.0 is a fit; 2.0 a strong one (tags_auto.py applies those). `title`: a
+    chat's, which has no org node to give one."""
     nodes = _nodes()
     mine = nodes.get(session) or []
-    own = {t for _, n in mine for t in n["tags"]}
-    title = next((n["title"] for _, n in mine if n.get("title")), "")
+    own = {t for _, n in mine for t in n["tags"]} | set(chat_tags(session))
+    title = next((n["title"] for _, n in mine if n.get("title")), "") or title
     # The title and how it opened say what a thread is about; a long one
     # mentions half the system in passing further on.
     opening = text[:2000]
@@ -546,9 +571,7 @@ def matched(session: str, text: str) -> list[str]:
     near = tag_embed.scores(title + "\n" + opening, [c["tag"] for c in counts()], others)
     for tag, v in (near or {}).items():
         score[tag] = score.get(tag, 0.0) + v
-    ranked = sorted((t for t, v in score.items() if v >= 1.0 and t not in own),
-                    key=lambda t: (-score[t], t))
-    return ranked[:MAX_SUGGESTED]
+    return score, own
 
 
 def suggest(session: str) -> list[str]:

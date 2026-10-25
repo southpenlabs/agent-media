@@ -315,3 +315,82 @@ def test_a_chat_is_private_to_auto(server, shelf, signed_in, monkeypatch):
     monkeypatch.delenv("MEDIA_PRIVATE_MODELS", raising=False)
     res, obj = call(server, "POST", "/session/tags/suggest", {"session": r.thread}, AUTH)
     assert res.status == 503 and seen == []             # no hosted model read the chat
+
+
+# --- auto tags on chats (tags_auto.py) ------------------------------------------------
+
+T_A, T_B = "aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222"
+
+
+def _auto_rig(monkeypatch, texts: dict, vocab=("voice", "calendar", "music")):
+    from agent_media_server import matrix, tags_auto, threads
+    from agent_media_server._jsonmap import JsonMap
+
+    monkeypatch.setenv("MEDIA_AUTO_TAG_CHATS", "1")
+    tags_auto._reset_for_tests()
+    # A vocabulary: tags already in use on some other chat.
+    JsonMap("chat-tags.json").put("cccccccc-3333-4333-8333-333333333333", list(vocab))
+    rows = [{"session": s, "at": 100.0, "title": ""} for s in texts]
+    monkeypatch.setattr(matrix, "rows", lambda flags=frozenset(): rows)
+    monkeypatch.setattr(threads, "_conversation_text", lambda s, budget=8000: texts.get(s, ""))
+    return tags_auto, rows
+
+
+def test_auto_tags_apply_strong_matches_only(monkeypatch):
+    tags_auto, _ = _auto_rig(monkeypatch, {
+        T_A: "Person: the voice keeps cutting out. voice voice, the voice on the phone",
+        T_B: "Person: lunch on sunday?"})
+    got = tags_auto.run()
+    assert got["why"] is None and got["total"] == 2 and got["tagged"] == 1
+    assert tags_auto.auto_tags(T_A) == ["voice"] and tags_auto.auto_tags(T_B) == []
+    rows = tags.add_tags([{"session": T_A, "harness": "matrix"}])
+    assert rows[0]["auto_tags"] == ["voice"] and rows[0]["tags"] == ["voice"]
+
+
+def test_auto_tags_need_a_vocabulary(monkeypatch):
+    tags_auto, _ = _auto_rig(monkeypatch, {T_A: "voice voice voice"}, vocab=("voice",))
+    assert tags_auto.run()["why"] == "no_vocabulary" and tags_auto.auto_tags(T_A) == []
+
+
+def test_a_dismissed_auto_tag_never_comes_back(server, shelf, signed_in, monkeypatch):
+    from test_matrix_rooms import _room
+    from agent_media_server import matrix
+
+    r, _ = _room([])
+    tags_auto, _rows = _auto_rig(monkeypatch, {r.thread: "voice voice voice, the voice again"})
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    tags_auto.run()
+    assert tags_auto.auto_tags(r.thread) == ["voice"]
+    # The sheet saved keeping none of the auto ones: "voice" is taken off.
+    res, obj = call(server, "POST", "/session/tags", {"session": r.thread, "tags": [], "auto": []}, AUTH)
+    assert res.status == 200 and obj["auto"] == [] and tags_auto.dismissed(r.thread) == ["voice"]
+    tags_auto.run(force=True)
+    assert tags_auto.auto_tags(r.thread) == []
+
+
+def test_a_chat_with_nothing_new_is_not_read_again(monkeypatch):
+    tags_auto, rows = _auto_rig(monkeypatch, {T_A: "voice voice voice"})
+    from agent_media_server import threads
+
+    tags_auto.run()
+    reads = []
+    monkeypatch.setattr(threads, "_conversation_text", lambda s, budget=8000: reads.append(s) or "x")
+    tags_auto.run()
+    assert reads == []                                  # seen at 100.0, nothing newer
+    rows[0]["at"] = 200.0
+    tags_auto.run()
+    assert reads == [T_A]
+
+
+def test_the_private_model_picks_only_from_the_list(monkeypatch):
+    tags_auto, _ = _auto_rig(monkeypatch, {T_A: "Person: see you at the gig on friday"})
+    seen: list[str] = []
+    _fake_model(monkeypatch, "Music, concerts, #calendar", seen)
+    from agent_media_server import threads
+
+    monkeypatch.setattr(threads, "_conversation_text", lambda s, budget=8000: "Person: see you at the gig on friday")
+    monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
+    tags_auto.run()
+    assert tags_auto.auto_tags(T_A) == ["music", "calendar"]   # "concerts" is not in use
+    assert len(seen) == 1                               # one ask, to the private model
