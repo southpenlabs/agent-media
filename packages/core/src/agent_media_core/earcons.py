@@ -78,13 +78,14 @@ RATE = 48000
 PEAK_DBFS = -12.0
 #: Tones that sit lower still: `think` loops under every thinking readout's
 #: voice. -27 was not heard at all on the phone's speaker, alone or under
-#: the voice (David, 25 Oct 2026); he chose this level from four tried.
+#: the voice (David, 25 Oct 2026); he chose -18 from four tried, then asked
+#: for it a little lower (-22).
 #: done / fail / question at the level David heard them at when he chose
 #: them (-14, the samples' own), in the phone speaker's range: the `think`
 #: lesson was that low and quiet is not heard there at all.
-_PEAK_DBFS = {"think": -18.0, "done": -14.0, "fail": -14.0, "question": -14.0}
+_PEAK_DBFS = {"think": -22.0, "done": -14.0, "fail": -14.0, "question": -14.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 6
+VERSION = 7
 
 NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question")
 
