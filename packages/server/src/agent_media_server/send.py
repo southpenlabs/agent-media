@@ -1123,6 +1123,9 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
         from agent_media_core import voice_mode as _vm
 
         text, quote, voice = _vm.nudge_text(), "", True
+    # A room keeps the first line's leading spaces: an emoji picture's layout
+    # (voice_tidy.py, the Emoji style). Everything else is stripped as before.
+    drawn = (text or "").strip("\n").rstrip()
     text = (text or "").strip()
     if not text:
         return False, {"error": "empty reply"}
@@ -1146,7 +1149,7 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
                 return False, {"error": "a Matrix room cannot be branched", "status": 409}
             if nudge:
                 return False, {"error": "a Matrix room cannot be nudged", "status": 409}
-            body = f"> {quote.strip()}\n\n{text}" if quote.strip() else text
+            body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
             return room.send(body)
         # A session id nothing knows — not running, no transcript — is the
         # same answer an item with no session behind it gets: not there.

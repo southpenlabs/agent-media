@@ -268,3 +268,22 @@ def test_the_layout_survives_the_clean_up_and_art_is_allowed(model):
     # a word that is not the sender's is still refused, art or not
     _answer(model, "   👶\n  ( _ )\nthe sweet baby finally\n fell asleep 💤")
     assert voice_tidy.tidy("the baby finally fell asleep", force=True, intent="emoji")["why"] == "unsafe"
+
+
+def test_a_room_send_keeps_the_pictures_first_row(monkeypatch):
+    """The first line's leading spaces are part of the picture: a room's body keeps them
+    (an agent's text is stripped as before)."""
+    from agent_media_server import auth, matrix, send
+
+    sent = []
+
+    class Room:
+        def send(self, body):
+            sent.append(body)
+            return True, {"ok": True}
+
+    monkeypatch.setattr(matrix, "room", lambda s: Room() if s == S1 else None)
+    monkeypatch.setattr(auth, "gate", lambda bearer: ({"username": "david"}, None))
+    baby = "  😴\n  👶\n/ | \\  the baby\n  |    finally\n / \\   fell asleep 💤"
+    ok, _ = send.reply("", "\n" + baby + "  \n", "tok", session=S1)
+    assert ok and sent == [baby]
