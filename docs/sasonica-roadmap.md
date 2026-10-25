@@ -1542,7 +1542,10 @@ ahead.
     existing Gemini history with its original reader and harness identity.
     The original Gemini plan remains in
     `docs/proposals/2026-10-17-gemini-as-an-agent.md` as historical context.
-26. **Quick chat** (David, 17 Oct 2026; renamed from "Quick question" the same day). A chat that skips the coding
+26. **Quick chat** — **DONE 26 Oct 2026** (agent-media `quick.py`, contract
+    "Quick chat"; sasonica-app `quickchat.mjs`): New chat → Agent → Quick chat,
+    answered by the fast-model chain, spoken like any reply, ⋮ → Hand to an
+    agent… with the conversation so far. (David, 17 Oct 2026; renamed from "Quick question" the same day). A chat that skips the coding
     agent: the question goes straight to a fast model (Haiku, Gemini Flash)
     through red5's LiteLLM gateway — the route the speech summaries already
     take (`intake/_summary.py`) — so the reply starts in about a second
