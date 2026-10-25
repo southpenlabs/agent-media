@@ -271,6 +271,21 @@ def test_a_reply_takes_back_an_unplayed_think_tone(tones_on, monkeypatch):
               Source.CLAUDE_CODE, Priority.NORMAL, target=Target("local"),
               metadata={"session": "reply-test"}),
         state=StateStore(), sink=sink, coordinator=ReplyCoord())
+    # An agent's reply gets its own tone under it, not the thought's.
+    from agent_media_core import earcons
+    assert ("under", earcons.path("reply").name) in sink.played
+    assert ("stop_under", "local") in sink.played
+    assert ("under", earcons.path("think").name) not in sink.played
+
+
+def test_an_announcement_takes_back_an_unplayed_tone_and_gets_none(tones_on, monkeypatch):
+    monkeypatch.setattr(S, "_remote_playlist", lambda *a: False)
+    sink = ClearSink()
+    S.submit_event(
+        Event("A plain announcement long enough to be a sentence. And another.",
+              Source.CLI, Priority.NORMAL, target=Target("local"),
+              metadata={"session": "say-test"}),
+        state=StateStore(), sink=sink, coordinator=ReplyCoord())
     assert ("clear", "local") in sink.played
     assert not any(p[0] == "under" for p in sink.played if isinstance(p, tuple))
 

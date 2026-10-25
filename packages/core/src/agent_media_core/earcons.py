@@ -83,11 +83,12 @@ PEAK_DBFS = -12.0
 #: done / fail / question at the level David heard them at when he chose
 #: them (-14, the samples' own), in the phone speaker's range: the `think`
 #: lesson was that low and quiet is not heard there at all.
-_PEAK_DBFS = {"think": -26.0, "done": -14.0, "fail": -14.0, "question": -14.0}
+_PEAK_DBFS = {"think": -26.0, "reply": -28.0, "done": -14.0, "fail": -14.0, "question": -14.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 8
+VERSION = 9
 
-NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question")
+NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question",
+         "reply")
 
 #: The tones a reply can ask for with a `[[sound: <name>]]` marker.
 MARKED = ("done", "fail")
@@ -196,6 +197,25 @@ def _recipe(name: str) -> list[float]:
         body = (_note(880.0, 0.11, attack_s=0.015, release_s=0.03)
                 + _silence(0.02)
                 + _note(659.25, 0.14, attack_s=0.015, release_s=0.06))
+    elif name == "reply":
+        # "Air": a high, open shimmer (E5 B5 E6) swelling over 3 s with a
+        # slow, shallow waver, then 0.8 s of quiet; looped under an agent's
+        # reply as the think pad is under a thought, calmer and higher so the
+        # two are told apart (David, 26 Oct 2026: "a tone for regular
+        # replies"; he chose this of four tried).
+        dur = 3.0
+        n = int(RATE * dur)
+        chord = (659.25, 987.77, 1318.51)
+        body = []
+        for i in range(n):
+            t = i / RATE
+            env = math.sin(math.pi * t / dur) ** 2
+            body.append(env * sum(
+                math.sin(2 * math.pi * f * t
+                         + 0.3 * math.sin(2 * math.pi * 0.5 * t + k))
+                / (1 + 0.3 * k)
+                for k, f in enumerate(chord)))
+        body += _silence(0.8)
     elif name == "think":
         # A dream pad: a Cmaj9 chord (C4 E4 G4 B4 D5) swelling in and out over
         # 2.2 s, each note with a slow vibrato a little out of step with the

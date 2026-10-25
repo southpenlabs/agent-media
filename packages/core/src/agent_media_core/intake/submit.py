@@ -36,10 +36,16 @@ from ..route import Coordinator
 from ..route import dj as _dj
 from ..sinks.speech import SinkSpeech, _env_key
 from ..state import StateStore
-from ..types import Event, Priority, Target
+from ..types import Event, Priority, Source, Target
 
 
 log = logging.getLogger(__name__)
+
+#: The harnesses whose replies are an agent talking (the `reply` tone).
+_AGENT_SOURCES = frozenset({
+    Source.CLAUDE_CODE, Source.CODEX, Source.HERMES, Source.PI,
+    Source.OPENCODE, Source.ANTIGRAVITY, Source.GEMINI, Source.GROK,
+})
 
 
 _DEFAULT_ENGINE = "edge"
@@ -4101,6 +4107,7 @@ def _submit_event(event: Event,
     # remote-say bridge — gathers the source first, and from then on it is an
     # iterator over a list that is already complete.
     thinking = bool((event.metadata or {}).get("thinking"))
+    reply_tone = False   # set once the claim is in hand; read in the finally
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -5095,6 +5102,10 @@ def _submit_event(event: Event,
                     # says played=False.
                     return None
             _claim.join()
+            # An agent's own reply (not a thought, a question card, an alert
+            # or a `media say`) gets the `reply` tone under it.
+            reply_tone = (not thinking and event.source in _AGENT_SOURCES
+                          and not (event.metadata or {}).get("ask"))
             if thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,
@@ -5104,6 +5115,11 @@ def _submit_event(event: Event,
                 # hand, so the first clip is what it plays under.
                 from .. import earcons
                 earcons.play_under("think", target, sink, loop=True)
+            elif reply_tone:
+                # The `reply` earcon: "Air", looped under an agent's reply
+                # as the think pad is under a thought (David, 26 Oct 2026).
+                from .. import earcons
+                earcons.play_under("reply", target, sink, loop=True)
             else:
                 # The app clears it only when it plays it, so a readout
                 # stopped before it sounded would leave its tone for this
@@ -5938,9 +5954,10 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
-            if thinking:
-                # The `think` tone loops under the readout; this host's own
-                # player of it stops here (a phone's stops with the reply).
+            if thinking or reply_tone:
+                # The `think` / `reply` tone loops under the voice; this
+                # host's own player of it stops here (a phone's stops with
+                # the reply).
                 try:
                     getattr(sink, "stop_under", lambda *a: None)(target)
                 except Exception:  # noqa: BLE001 — never cost the cleanup
