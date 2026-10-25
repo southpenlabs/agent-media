@@ -153,12 +153,38 @@ def tidy(text: str, recipient: str = "", context: str = "", private: bool = Fals
     return {"messy": True, "tidy": safe}
 
 
-def intents(bearer: str) -> tuple[bool, dict]:
-    """GET /voice/tidy/intents → the intents the app can offer, `{key, label}` in order."""
+def intents(bearer: str, session: str = "") -> tuple[bool, dict]:
+    """GET /voice/tidy/intents[?session=] → the intents the app can offer,
+    `{key, label}` in the order to show them, with `last`: the one last sent
+    with for that person ('' for none), listed first (tidy_prefs.py)."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    return True, {"intents": tidy_intents.listing(), "default": tidy_intents.DEFAULT}
+    session = (session or "").strip()
+    if session and not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    from . import tidy_prefs
+
+    listing, last = tidy_prefs.rank(session)
+    return True, {"intents": listing, "default": tidy_intents.DEFAULT, "last": last}
+
+
+def sent(body: dict, bearer: str) -> tuple[bool, dict]:
+    """POST /voice/tidy/sent {"session", "intent"}: the tidy version was sent in that
+    register; remember it for the person. Only the key and the time are kept."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    body = body if isinstance(body, dict) else {}
+    session = str(body.get("session") or "").strip()
+    intent = body.get("intent")
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    if not isinstance(intent, str) or tidy_intents.get(intent) is None:
+        return False, {"error": "unknown intent", "status": 400}
+    from . import tidy_prefs
+
+    return True, {"recorded": tidy_prefs.record(session, intent)}
 
 
 def post(body: dict, bearer: str) -> tuple[bool, dict]:

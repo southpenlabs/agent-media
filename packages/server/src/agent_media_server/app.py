@@ -163,8 +163,10 @@ device gets its token):
                   hands-free's check of heard words before they send: `sure`,
                   a one-sentence `gist`; with `say`, an unsure one is asked
                   aloud in the thread (voice_check.py)
-  GET /voice/tidy/intents → the registers a message to a person can be
-                  rewritten in, `{key, label}` (tidy_intents.py)
+  GET /voice/tidy/intents[?session=] → the registers a message to a person can be
+                  rewritten in, `{key, label}`, the last sent with for that person
+                  first (`last`) (tidy_intents.py, tidy_prefs.py)
+  POST /voice/tidy/sent {"session", "intent"} → remember it (key and time only)
   POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?, "force"?, "intent"?} →
                   an offer to clean up a dictated message to a person: `messy`,
                   `tidy`; only when the words look messy, never for an agent
@@ -341,7 +343,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
-    "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents",
+    "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/voice",
     "/settings/language",
     "/sessions/state", "/commands", "/rename",
@@ -1393,7 +1395,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The register chips on the tidy card, from the server (voice_tidy.py).
         from . import voice_tidy
 
-        ok, detail = voice_tidy.intents(_bearer(h))
+        ok, detail = voice_tidy.intents(_bearer(h), (parse_qs(query).get("session") or [""])[0])
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
         return True
     if path == "/device/location":
@@ -2692,6 +2694,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import ask_follow
 
         ok, detail = ask_follow.post(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/voice/tidy/sent":
+        # The tidy version was sent in a register: remembered per person (tidy_prefs.py).
+        from . import voice_tidy
+
+        ok, detail = voice_tidy.sent(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/voice/tidy":
         # An offer to tidy a dictated message to a person (voice_tidy.py).

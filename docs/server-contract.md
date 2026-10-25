@@ -1468,9 +1468,19 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   with none set it gets no model (`why: "no_answer"`).
 - `intent` (25 Oct 2026): a key from the server's list, to rewrite in a chosen
   register rather than only clean up. `GET /voice/tidy/intents` (gated) →
-  `{"ok": true, "default": "plain", "intents": [{"key", "label"}, …]}`, in the
+  `{"ok": true, "default": "plain", "last": "", "intents": [{"key", "label"}, …]}`, in the
   order the app shows them; the app renders its chips from it and knows only
-  the default by name. Today: `plain` (Tidy), `proofread` (Fix typos),
+  the default by name. With `?session=<thread>` the list is ranked for that
+  person (25 Oct 2026): the register last *sent* with (Send tidy on a card in
+  it) is first and is `last`, the rest in their order; the room's own choice,
+  else its contact's (`contacts.for_room`). `POST /voice/tidy/sent {"session",
+  "intent"}` (gated) records it → `{"recorded": bool}`: the app calls it when
+  it sends the tidy version, never for Send mine. Only the key and the time are
+  kept (`<state>/tidy-intents.json`), never a word of the message; a private or
+  sealed thread records and ranks nothing (`recorded: false`, `last: ""`). The
+  ranking is made in one place (`tidy_prefs.rank`), where later signals — the
+  person's relationship, role and company from their contact, the tone of the
+  recent messages — will add to it. The app opens the card in `last`. Today: `plain` (Tidy), `proofread` (Fix typos),
   `polish`, `professional`, `friendly`, `brief`, `firm`, `apologetic`,
   `decline` (Polite no), `request` (Ask nicely). `proofread`, `polish` and
   `professional` use prompts vendored from Fabric (MIT, pinned commit; see
