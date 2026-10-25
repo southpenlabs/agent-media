@@ -338,15 +338,20 @@ def _words(text: str) -> list[str]:
 
 
 def matched(session: str, text: str) -> list[str]:
-    """Tags already in use that fit the thread, with no model: a tag whose
-    words all appear in it (more often, higher), and the tags of threads
-    whose titles share its words (the closer, higher). Instant, and read
-    only here, so a private thread gets them too. Its own left out."""
+    """Tags already in use that fit the thread, with no hosted model: a tag
+    whose words all appear in it (more often, higher), the tags of threads
+    whose titles share its words (the closer, higher), and — with the
+    `tags-embed` extra installed — the ones close to it in meaning
+    (tag_embed.py, a small model run here). All of it stays on this machine,
+    so a private thread gets them too. Its own left out."""
     nodes = _nodes()
     mine = nodes.get(session) or []
     own = {t for _, n in mine for t in n["tags"]}
     title = next((n["title"] for _, n in mine if n.get("title")), "")
-    seen = _words(title + "\n" + text)
+    # The title and how it opened say what a thread is about; a long one
+    # mentions half the system in passing further on.
+    opening = text[:2000]
+    seen = _words(title + "\n" + opening)
     bag: dict[str, int] = {}
     for w in seen:
         bag[w] = bag.get(w, 0) + 1
@@ -356,7 +361,7 @@ def matched(session: str, text: str) -> list[str]:
         parts = _words(tag.replace("_", " "))
         if parts and all(p in bag for p in parts):
             score[tag] = score.get(tag, 0.0) + 1.0 + min(sum(bag[p] for p in parts), 6) / 3
-    mine_title = set(_words(title)) or set(_words(text[:400]))
+    mine_title = set(_words(title)) or set(_words(opening[:400]))
     if mine_title:
         for sid, found in nodes.items():
             if sid == session:
@@ -371,6 +376,16 @@ def matched(session: str, text: str) -> list[str]:
                 if sim >= 0.2:
                     for tag in n["tags"]:
                         score[tag] = score.get(tag, 0.0) + 3 * sim
+    # And by meaning, with small local embeddings where they are installed
+    # (tag_embed.py): a tag whose name, or a tagged thread whose title, is
+    # close to what this thread is about.
+    from . import tag_embed
+
+    others = [(n["title"], n["tags"]) for sid, found in nodes.items() if sid != session
+              for _, n in found if n["tags"] and n.get("title")]
+    near = tag_embed.scores(title + "\n" + opening, [c["tag"] for c in counts()], others)
+    for tag, v in (near or {}).items():
+        score[tag] = score.get(tag, 0.0) + v
     ranked = sorted((t for t, v in score.items() if v >= 1.0 and t not in own),
                     key=lambda t: (-score[t], t))
     return ranked[:MAX_SUGGESTED]

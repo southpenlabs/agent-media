@@ -205,3 +205,51 @@ def test_a_private_thread_never_reaches_a_hosted_model(server, shelf, signed_in,
     monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
     res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
     assert obj["tags"] == ["mic", "hosted_guess"] and len(seen) == 1
+
+
+# --- by meaning (tag_embed.py), the child process faked ----------------------------
+
+def _fake_embedder(monkeypatch, table: dict):
+    """Each text's vector from `table` by a word it holds, else far from all."""
+    from agent_media_server import tag_embed
+
+    monkeypatch.setenv("MEDIA_TAG_EMBED", "1")
+    monkeypatch.setattr(tag_embed, "available", lambda: True)
+    calls: list = []
+
+    def child(texts):
+        calls.append(list(texts))
+        out = []
+        for t in texts:
+            v = next((vec for word, vec in table.items() if word in t.lower()), [0.0, 0.0, 1.0])
+            out.append(v)
+        return out
+    monkeypatch.setattr(tag_embed, "_embed_in_child", child)
+    return calls
+
+
+def test_a_tag_that_fits_by_meaning(server, shelf, signed_in, monkeypatch):
+    _node(SID, ":claude:inbox:home_ryer_projects_agent_media:")
+    _node(SID2, ":claude:inbox:home_ryer:voice:calendar:", sub="claude")
+    _fake_model(monkeypatch, None)                      # "you: the mic cuts out ..."
+    # "voice" means what "mic" does; "calendar" does not.
+    calls = _fake_embedder(monkeypatch, {"mic": [1.0, 0.0, 0.0], "voice": [0.9, 0.1, 0.0],
+                                         "calendar": [0.0, 1.0, 0.0]})
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert res.status == 200 and obj["tags"] == ["voice"]
+    # Cached: a second ask embeds nothing new.
+    n = len(calls)
+    call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert len(calls) == n
+
+
+def test_embeddings_failing_fall_back_to_words(server, shelf, signed_in, monkeypatch):
+    from agent_media_server import tag_embed
+
+    _node(SID, ":claude:inbox:home_ryer_projects_agent_media:")
+    _node(SID2, ":claude:inbox:home_ryer:mic:", sub="claude")
+    _fake_model(monkeypatch, None)
+    _fake_embedder(monkeypatch, {})
+    monkeypatch.setattr(tag_embed, "_embed_in_child", lambda texts: None)
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
+    assert obj["tags"] == ["mic"]                       # the word match still stands

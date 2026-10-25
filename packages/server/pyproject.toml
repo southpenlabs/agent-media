@@ -15,6 +15,11 @@ requires-python = ">=3.11"
 # (calendar_sources.py), imported only when one is configured.
 dependencies = ["agent-media-core", "icalendar>=6", "websockets>=15,<17"]
 
+[project.optional-dependencies]
+# Tags by meaning for the tags sheet's Auto (tag_embed.py): a small local
+# embedding model, ONNX, no PyTorch. Without it, Auto matches words.
+tags-embed = ["fastembed>=0.9"]
+
 [project.scripts]
 # The quick tunnel (tunnel.py); `sasonica tunnel` runs it.
 media-tunnel = "agent_media_server.tunnel:main"
