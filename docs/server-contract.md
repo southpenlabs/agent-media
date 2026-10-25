@@ -2018,6 +2018,37 @@ in `strip_markdown`), the thread (`transcript.display_text`) and search.
 `MEDIA_EARCON_DONE` / `_FAIL` / `_QUESTION=0` turn one off. Pinned by
 `packages/core/tests/test_reply_sounds.py` and the app's `ProsodyTest`.
 
+Tones by kind (26 Oct 2026, agent_media_core/earcons.py). Under the voice,
+looped until the reply ends (a phone gets them as the stored
+`user-data/agent-media/under-loop` "1" then `user-data/agent-media/under`
+<clip>, as the `think` pad): **reply** ("Air") under an agent harness's own
+reply (not a thought, a question card, an alert or a `media say`), in one of
+three keys by the reply's project — files `earcon-reply-E|G|C-v<N>.wav`; the
+project is the git repository of the hook's `cwd` (a worktree counts as its
+main checkout), else a `p-<project>` workspace; agent-media is E, others by a
+stable hash of the name, `MEDIA_REPLY_TONE_KEYS="folder=G,other=C"` pins
+them and `=off` plays every reply in E. **people** (a harp) under a person's
+message: a Matrix room's text from anyone but the owner (Source.MATRIX; the
+owner's own sends are never spoken). Before the voice, waited out:
+**alert** (a wind chime) before alert-class speech — `metadata.alert`
+(`media say --alert`: agenda alarms, digest-pane reminders and timers,
+watchers) or a Home Assistant announcement (Source.HA_SSE); **mail** (a
+paper whoosh) before an agent harness's reply whose turn began with another
+agent's mail, `[From Name] …` (agent-mail-deliver, `media session send`; not
+`[From the session host]`), which the Claude hook marks `metadata.mail_from`.
+First that applies: question, done/fail, alert, mail. **The kind for a phone
+sound**: red5 stores `user-data/agent-media/tone-kind` = `alert` | `people` |
+"" — before `under-loop`/`under` for every under tone (`people` for the
+harp, "" otherwise), and first in the same command batch as a cue's
+playlist load (`alert` for the chime, "" for any other cue), cleared again
+once the cue has played and by `clear_under`. The app takes it as the sound
+begins: with a phone sound picked for that kind (Settings, Android's sound
+picker) it plays that sound once instead — for `alert` in place of the cue
+(the cue clip still runs, silenced), for `people` in place of the loop.
+Without a pick, or an unknown kind, everything as sent. `MEDIA_EARCON_REPLY`
+/ `_PEOPLE` / `_ALERT` / `_MAIL=0` turn one off. Pinned by
+`packages/core/tests/test_kind_earcons.py` and the app's `ToneKindTest`.
+
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_device_voice.py`.
 

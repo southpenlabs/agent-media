@@ -550,6 +550,59 @@ def _latest_assistant_text(transcript_path: Path) -> str:
     return ""
 
 
+#: How much of a transcript's end is read for the turn's prompt: a turn's own
+#: tool calls sit between it and the reply, and a transcript can be large.
+_PROMPT_TAIL_BYTES = 4 * 1024 * 1024
+
+#: Another agent's mail as it arrives in a session: agent-mail-deliver and
+#: `media session send` put "[From Name] " before the words. The session
+#: host's own notes ("[From the session host] …") are not mail.
+_MAIL_PREFIX = re.compile(r"^\[From (?!the session host\])([^\]\n]{1,40})\]")
+
+
+def _turn_prompt(transcript_path: Path) -> str:
+    """The words that began the turn now ending: the transcript's latest user
+    message with text of its own (a tool result, a meta line or a harness
+    note in angle brackets is not one). "" when it cannot be read."""
+    try:
+        with open(transcript_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - _PROMPT_TAIL_BYTES))
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    for raw in reversed(lines):
+        raw = raw.strip()
+        if not raw or '"user"' not in raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        msg = obj.get("message") or {}
+        if msg.get("role") != "user" or obj.get("isMeta"):
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            texts = [content]
+        else:
+            texts = [c.get("text") or "" for c in content or []
+                     if isinstance(c, dict) and c.get("type") == "text"]
+        text = "\n".join(t for t in texts if t).strip()
+        if not text or text.startswith("<"):
+            continue
+        return text
+    return ""
+
+
+def mail_from(prompt: str) -> str:
+    """Who sent `prompt`, when it is another agent's mail ("[From Sam] …"),
+    else "". (earcons.py: the `mail` tone opens the reply to it.)"""
+    m = _MAIL_PREFIX.match((prompt or "").lstrip())
+    return m.group(1).strip() if m else ""
+
+
 def _latest_ask_question(transcript_path: Path) -> str:
     """If the latest assistant turn contains an AskUserQuestion tool call,
     return its synthesized speakable text; else "".
@@ -1298,6 +1351,17 @@ def _handle_stop(payload: dict) -> int:
     # the parent opens no DB connection to fork across.
     metadata = {"kind": "stop", "session": payload.get("session_id") or "",
                 **_source_place(payload.get("session_id") or "")}
+    # The folder the agent works in: its `reply` tone is in that project's
+    # key (earcons.reply_key).
+    cwd = (payload.get("cwd") or "").strip() or os.getcwd()
+    if cwd:
+        metadata["cwd"] = cwd
+    # A reply to another agent's mail ("[From Sam] …" began the turn): the
+    # `mail` tone before it, so the mail reaches the ear marked as mail.
+    tpath = (payload.get("transcript_path") or "").strip()
+    sender = mail_from(_turn_prompt(Path(tpath))) if tpath else ""
+    if sender:
+        metadata["mail_from"] = sender
     # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
     # (strip_markdown already took the marker out of the words), and the
     # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).

@@ -48,6 +48,36 @@ _AGENT_SOURCES = frozenset({
 })
 
 
+
+
+def _alert_class(event: Event) -> bool:
+    """Speech nobody asked for at that moment, which the `alert` tone opens
+    (earcons.py, David 26 Oct 2026): alert-class speech, marked so by its
+    producer (`media say --alert`: agenda alarms, reminders and timers from
+    digest-pane, watchers), and Home Assistant's announcements."""
+    md = event.metadata or {}
+    return bool(md.get("alert")) or event.source == Source.HA_SSE
+
+
+def _people_message(event: Event) -> bool:
+    """A person's message being read out, which the `people` tone loops
+    under: a Matrix room's text from anyone but the owner (the intake never
+    speaks the owner's own sends; agent_media_intake_matrix)."""
+    return event.source == Source.MATRIX
+
+
+def _reply_folder(metadata) -> str:
+    """The folder a reply's agent works in, for its `reply` tone's key: the
+    hook's `cwd`, else the project a workspace's tmux session is named for
+    (`p-agent-media`). "" when neither is known (the tone is in E)."""
+    md = metadata or {}
+    cwd = str(md.get("cwd") or "").strip()
+    if cwd:
+        return cwd
+    tmux = str(md.get("tmux") or "").strip()
+    return tmux[2:] if tmux.startswith("p-") else ""
+
+
 _DEFAULT_ENGINE = "edge"
 _DEFAULT_VOICE: Optional[str] = None
 
@@ -4108,6 +4138,7 @@ def _submit_event(event: Event,
     # iterator over a list that is already complete.
     thinking = bool((event.metadata or {}).get("thinking"))
     reply_tone = False   # set once the claim is in hand; read in the finally
+    people_tone = False  # likewise
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -4269,14 +4300,22 @@ def _submit_event(event: Event,
     source_session = _source_session(event.metadata)
     source_ask = bool((event.metadata or {}).get("ask"))
     # A tone just before the voice (earcons.py): `question` before a question
-    # card is read out, `done` / `fail` before a reply its agent marked so.
-    # Played on the player, waited out, before anything of the reply loads.
+    # card is read out, `done` / `fail` before a reply its agent marked so,
+    # `alert` before speech nobody asked for (_alert_class), `mail` before an
+    # agent's reply to another agent's mail (the hook's `mail_from`), first
+    # of these that applies. Played on the player, waited out, before
+    # anything of the reply loads.
     from .. import earcons as _earcons
     cue_before: Optional[str] = None
     if not thinking:
-        _marked = (event.metadata or {}).get("sound")
+        _md = event.metadata or {}
+        _marked = _md.get("sound")
         cue_before = ("question" if source_ask
-                      else _marked if _marked in _earcons.MARKED else None)
+                      else _marked if _marked in _earcons.MARKED
+                      else "alert" if _alert_class(event)
+                      else "mail" if (_md.get("mail_from")
+                                      and event.source in _AGENT_SOURCES)
+                      else None)
         if cue_before and not _earcons.enabled(cue_before):
             cue_before = None
     order_session = _order_session(source_pane, source_session)
@@ -5103,9 +5142,12 @@ def _submit_event(event: Event,
                     return None
             _claim.join()
             # An agent's own reply (not a thought, a question card, an alert
-            # or a `media say`) gets the `reply` tone under it.
+            # or a `media say`) gets the `reply` tone under it, in its
+            # project's key; a person's message the `people` tone.
             reply_tone = (not thinking and event.source in _AGENT_SOURCES
                           and not (event.metadata or {}).get("ask"))
+            people_tone = (not thinking and not reply_tone
+                           and _people_message(event))
             if thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,
@@ -5117,9 +5159,17 @@ def _submit_event(event: Event,
                 earcons.play_under("think", target, sink, loop=True)
             elif reply_tone:
                 # The `reply` earcon: "Air", looped under an agent's reply
-                # as the think pad is under a thought (David, 26 Oct 2026).
+                # as the think pad is under a thought (David, 26 Oct 2026),
+                # in the key of the reply's project (earcons.reply_key).
                 from .. import earcons
-                earcons.play_under("reply", target, sink, loop=True)
+                earcons.play_under(earcons.reply_name(_reply_folder(event.metadata)),
+                                   target, sink, loop=True)
+            elif people_tone:
+                # The `people` earcon: the harp, looped under a person's
+                # message (David, 26 Oct 2026). A phone is told its kind, for
+                # a phone sound picked in its place.
+                from .. import earcons
+                earcons.play_under("people", target, sink, loop=True)
             else:
                 # The app clears it only when it plays it, so a readout
                 # stopped before it sounded would leave its tone for this
@@ -5954,8 +6004,8 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
-            if thinking or reply_tone:
-                # The `think` / `reply` tone loops under the voice; this
+            if thinking or reply_tone or people_tone:
+                # The `think` / `reply` / `people` tone loops under the voice; this
                 # host's own player of it stops here (a phone's stops with
                 # the reply).
                 try:

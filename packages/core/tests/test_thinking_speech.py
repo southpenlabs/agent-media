@@ -226,8 +226,10 @@ def test_play_under_tells_a_phone_player_the_clip(monkeypatch, tmp_path):
     monkeypatch.setattr(speech.SinkSpeech, "_prefer_url", lambda self, t: False)
     assert sink.play_under(str(tmp_path / "earcon-think-v3.wav"),
                            Target("testphone"), loop=True)
-    # The loop flag first, so the app has it when it takes the clip.
-    assert sent == [("tcp://127.0.0.1:1", speech.UNDER_LOOP_PROPERTY, "1"),
+    # The kind (none here) and the loop flag first, so the app has them when
+    # it takes the clip.
+    assert sent == [("tcp://127.0.0.1:1", speech.TONE_KIND_PROPERTY, ""),
+                    ("tcp://127.0.0.1:1", speech.UNDER_LOOP_PROPERTY, "1"),
                     ("tcp://127.0.0.1:1", speech.UNDER_PROPERTY,
                      "/phone/clips/earcon-think-v3.wav")]
 

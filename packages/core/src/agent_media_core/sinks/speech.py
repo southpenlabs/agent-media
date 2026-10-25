@@ -204,6 +204,14 @@ UNDER_PROPERTY = "user-data/agent-media/under"
 #: Written just before UNDER_PROPERTY: "1" repeats that clip until the reply
 #: is over, "" plays it once.
 UNDER_LOOP_PROPERTY = "user-data/agent-media/under-loop"
+#: The kind of tone on its way, for an app whose listener picked a phone sound
+#: for that kind (David, 26 Oct 2026: "Yes, as a setting"): "alert" (the cue
+#: before a reminder or alert) or "people" (the loop under a person's
+#: message); "" for any other tone. Written before UNDER_LOOP_PROPERTY by
+#: play_under, and in the same batch as (just before) a cue's playlist by
+#: play_cue, and taken back once the cue has played (clear_tone_kind). The app
+#: takes it as the sound begins; without a pick it changes nothing.
+TONE_KIND_PROPERTY = "user-data/agent-media/tone-kind"
 
 #: This host's own under players (play_under), by target name, so the
 #: reply's end can stop a looping one.
@@ -848,7 +856,8 @@ class SinkSpeech:
             threading.Thread(target=earcons.play, args=("cut", target, self),
                              name="earcon-cut").start()
 
-    def play_cue(self, uri: str, target: Target = DEFAULT_TARGET) -> bool:
+    def play_cue(self, uri: str, target: Target = DEFAULT_TARGET, *,
+                 kind: str = "") -> bool:
         """Play one short clip that is not speech (an earcon). True if sent.
 
         The playlist recipe (stop, clear, append, start) rather than a
@@ -868,6 +877,10 @@ class SinkSpeech:
         Unpaused, because a pause left from earlier on an idle player would
         swallow it. The mute is left alone: a listener who muted the voice
         did not ask to hear its punctuation.
+
+        `kind`: told to a phone as TONE_KIND_PROPERTY, first in the batch, so
+        an app with a phone sound picked for it plays that instead ("" for
+        every other cue, which also takes back a stale one).
         """
         sock = _socket_for(target)
         try:
@@ -879,6 +892,8 @@ class SinkSpeech:
             log.info("sink-speech: cue skipped, player is not idle (%s)", st)
             return False
         cmds = self._load_cmds([uri], target, gapless=False)
+        if str(sock).startswith("tcp://"):
+            cmds = [["set_property", TONE_KIND_PROPERTY, kind or ""]] + cmds
         cmds += [["set_property", "pause", False],
                  ["set_property", "playlist-pos", 0]]
         try:
@@ -889,7 +904,7 @@ class SinkSpeech:
             return False
 
     def play_under(self, uri: str, target: Target = DEFAULT_TARGET, *,
-                   loop: bool = False) -> bool:
+                   loop: bool = False, kind: str = "") -> bool:
         """Play one clip that is not speech (an earcon) under the next reply.
 
         Not through the reply's playlist — its index is the sentence index
@@ -907,12 +922,16 @@ class SinkSpeech:
         `loop` repeats it until the reply is over: the phone stops it at the
         reply's end itself, this host's one is stopped by stop_under.
 
+        `kind` ("people", or "" for any other tone) is told to a phone first,
+        as TONE_KIND_PROPERTY, for an app with a phone sound picked for it.
+
         True if sent. Never raises.
         """
         sock = _socket_for(target)
         if str(sock).startswith("tcp://"):
             clip = _clip_uri_for(str(uri), target, self._prefer_url(target))
             try:
+                ipc.set_property(sock, TONE_KIND_PROPERTY, kind or "")
                 ipc.set_property(sock, UNDER_LOOP_PROPERTY, "1" if loop else "")
                 ipc.set_property(sock, UNDER_PROPERTY, clip)
                 return True
@@ -968,8 +987,20 @@ class SinkSpeech:
         try:
             ipc.set_property(sock, UNDER_PROPERTY, "")
             ipc.set_property(sock, UNDER_LOOP_PROPERTY, "")
+            ipc.set_property(sock, TONE_KIND_PROPERTY, "")
         except (ipc.MpvIpcError, OSError) as e:
             log.debug("sink-speech: clearing under failed: %s", e)
+
+    def clear_tone_kind(self, target: Target = DEFAULT_TARGET) -> None:
+        """Take back a cue's TONE_KIND_PROPERTY once it has played, so the
+        reply after it is never taken for the tone. Never raises."""
+        sock = _socket_for(target)
+        if not str(sock).startswith("tcp://"):
+            return
+        try:
+            ipc.set_property(sock, TONE_KIND_PROPERTY, "")
+        except (ipc.MpvIpcError, OSError) as e:
+            log.debug("sink-speech: clearing tone kind failed: %s", e)
 
     # ---- cross-host broker ownership -------------------------------------
     #

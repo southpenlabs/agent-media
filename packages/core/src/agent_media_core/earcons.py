@@ -1,6 +1,6 @@
 """Earcons: short non-speech tones around the speech lane.
 
-Seven, and each says one thing the voice cannot say without words:
+Eleven, and each says one thing the voice cannot say without words:
 
 - **cut** — a soft tick when a reply is ended on purpose before its natural
   end (a per-session stop, a question answered, the listener replying, a
@@ -35,6 +35,25 @@ Seven, and each says one thing the voice cannot say without words:
   David chose these three on 25 Oct 2026 ("more sound effects and voice
   alterations where they make sense") from three of each, made by the same
   recipes as below: "finish 2", "fail 2" and "question 2".
+- **reply** — "Air", a high open chord looped under an agent's own reply
+  (not a thought, a question card, an alert or a `media say`), in one of
+  three keys by the reply's project: `reply-E` (E5, agent-media's), `reply-G`
+  (G5) or `reply-C` (C5). Each project keeps its key (see `reply_key`), so a
+  reply from another project sounds different before a word of it is
+  understood (David, 26 Oct 2026: "Air in a key per project").
+- **people** — "harp": slow pentatonic plucks looped under a person's
+  message being read out (a Matrix chat message from anyone but the owner;
+  the owner's own sends are never spoken).
+- **alert** — "wind chime": six high bells at random moments in 0.6 s, before
+  speech nobody asked for at that moment: alert-class speech (`media say
+  --alert`: agenda alarms, reminders, timers, watchers) and Home Assistant
+  announcements.
+- **mail** — "paper whoosh": half a second of noise opening up, before an
+  agent's reply to agent mail — a turn that began with another agent's
+  `[From Name] …` message (agent-mail-deliver, `media session send`), so the
+  mail reaches the ear marked as mail.
+
+  David chose these four on 26 Oct 2026 from three or four of each.
 
 Synthesised here, stdlib only (``wave`` + ``math`` + ``array``): the repo has
 no audio assets and a binary blob would be one more thing a fresh install has
@@ -51,8 +70,16 @@ next/previous all read it — and a tone at index 0 would shift every one.
 
 Switches: ``MEDIA_EARCONS=0`` turns them all off, and ``MEDIA_EARCON_CUT`` /
 ``MEDIA_EARCON_INTERRUPT`` / ``MEDIA_EARCON_HELD`` / ``MEDIA_EARCON_THINK`` /
-``MEDIA_EARCON_DONE`` / ``MEDIA_EARCON_FAIL`` / ``MEDIA_EARCON_QUESTION`` = 0
-one at a time. On by default.
+``MEDIA_EARCON_DONE`` / ``MEDIA_EARCON_FAIL`` / ``MEDIA_EARCON_QUESTION`` /
+``MEDIA_EARCON_REPLY`` (every key) / ``MEDIA_EARCON_PEOPLE`` /
+``MEDIA_EARCON_ALERT`` / ``MEDIA_EARCON_MAIL`` = 0 one at a time. On by
+default. ``MEDIA_REPLY_TONE_KEYS=off`` plays every reply in E;
+``MEDIA_REPLY_TONE_KEYS="folder=G,other=C"`` pins projects to keys.
+
+A phone is told the kind of two of them (``alert``, ``people``) as
+``user-data/agent-media/tone-kind``, so an app whose listener picked a phone
+sound for that kind can play it instead (`SinkSpeech.play_cue` /
+`play_under`).
 
 Nothing here raises. A tone is a courtesy; a reply that fails because its
 courtesy did is a bug with no upside.
@@ -61,12 +88,15 @@ courtesy did is a bug with no upside.
 from __future__ import annotations
 
 import array
+import inspect
 import logging
 import math
 import os
+import random
 import sys
 import time
 import wave
+import zlib
 from pathlib import Path
 from typing import Optional
 
@@ -83,12 +113,28 @@ PEAK_DBFS = -12.0
 #: done / fail / question at the level David heard them at when he chose
 #: them (-14, the samples' own), in the phone speaker's range: the `think`
 #: lesson was that low and quiet is not heard there at all.
-_PEAK_DBFS = {"think": -26.0, "reply": -28.0, "done": -14.0, "fail": -14.0, "question": -14.0}
+#: people / alert / mail at the levels of the samples David chose them from
+#: (26 Oct 2026); the reply keys at Air's.
+_PEAK_DBFS = {"think": -26.0, "reply-E": -28.0, "reply-G": -28.0,
+              "reply-C": -28.0, "done": -14.0, "fail": -14.0,
+              "question": -14.0, "people": -26.0, "alert": -15.0,
+              "mail": -16.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 9
+VERSION = 10
+
+#: Air's three keys: the chord's root (the fifth and the octave above it
+#: follow), E5 first — agent-media's, and the one before keys.
+REPLY_KEYS = {"E": 659.25, "G": 783.99, "C": 523.25}
 
 NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question",
-         "reply")
+         "reply-E", "reply-G", "reply-C", "people", "alert", "mail")
+
+#: Older names still answered: `reply` is Air in E, as it was before keys.
+_ALIASES = {"reply": "reply-E"}
+
+#: The tones a phone is told the kind of (``tone-kind``), for a listener's
+#: own phone sound in their place.
+KINDS = {"alert": "alert", "people": "people"}
 
 #: The tones a reply can ask for with a `[[sound: <name>]]` marker.
 MARKED = ("done", "fail")
@@ -100,11 +146,89 @@ def _off(value: Optional[str]) -> bool:
     return (value or "").strip().lower() in ("0", "false", "no", "off")
 
 
+def _canon(name: str) -> str:
+    return _ALIASES.get(name, name)
+
+
 def enabled(name: str) -> bool:
-    """On unless MEDIA_EARCONS or MEDIA_EARCON_<NAME> says 0."""
+    """On unless MEDIA_EARCONS or MEDIA_EARCON_<NAME> says 0 (every reply
+    key under the one MEDIA_EARCON_REPLY)."""
     if _off(os.environ.get("MEDIA_EARCONS")):
         return False
-    return not _off(os.environ.get(f"MEDIA_EARCON_{name.upper()}"))
+    base = _canon(name).split("-")[0]
+    return not _off(os.environ.get(f"MEDIA_EARCON_{base.upper()}"))
+
+
+# ---- the reply's key ----------------------------------------------------------
+
+#: Projects whose key is chosen rather than hashed. agent-media keeps Air's
+#: first key.
+_PINNED_KEYS = {"agent-media": "E"}
+
+
+def project_name(folder: str) -> str:
+    """The project a folder belongs to: the repository it is in (a git
+    worktree counts as its main checkout, so `agent-media-wt-x` is
+    agent-media), else the folder's own name. "" for none."""
+    if not folder:
+        return ""
+    try:
+        p = Path(folder).expanduser()
+        for d in (p, *p.parents):
+            git = d / ".git"
+            if git.is_dir():
+                return d.name
+            if git.is_file():
+                # A worktree: "gitdir: <main>/.git/worktrees/<name>".
+                line = git.read_text(errors="replace").strip()
+                if line.startswith("gitdir:"):
+                    gd = Path(line[7:].strip())
+                    if not gd.is_absolute():
+                        gd = (d / gd).resolve()
+                    if gd.parent.name == "worktrees" and gd.parent.parent.name == ".git":
+                        return gd.parent.parent.parent.name
+                return d.name
+        return p.name
+    except (OSError, ValueError):
+        return Path(folder).name
+
+
+def _key_overrides(spec: str) -> dict:
+    out = {}
+    for part in spec.split(","):
+        name, sep, key = part.partition("=")
+        key = key.strip().upper()
+        if sep and name.strip() and key in REPLY_KEYS:
+            out[name.strip().rstrip("/")] = key
+    return out
+
+
+def reply_key(folder: str = "") -> str:
+    """The key (E, G or C) of the `reply` tone for a reply from `folder`.
+
+    Stable per project: MEDIA_REPLY_TONE_KEYS's own choice (by project name,
+    folder name or full path), then the pinned ones (agent-media = E), then a
+    hash of the project's name. No folder, or MEDIA_REPLY_TONE_KEYS=off: E.
+    """
+    spec = os.environ.get("MEDIA_REPLY_TONE_KEYS", "")
+    if _off(spec) or not folder:
+        return "E"
+    name = project_name(folder)
+    own = _key_overrides(spec)
+    for k in (name, Path(folder).name, str(folder).rstrip("/")):
+        if k and k in own:
+            return own[k]
+    if not name:
+        return "E"
+    if name in _PINNED_KEYS:
+        return _PINNED_KEYS[name]
+    keys = tuple(REPLY_KEYS)
+    return keys[zlib.crc32(name.encode("utf-8")) % len(keys)]
+
+
+def reply_name(folder: str = "") -> str:
+    """The earcon to loop under a reply from `folder`: reply-E/-G/-C."""
+    return f"reply-{reply_key(folder)}"
 
 
 # ---- synthesis --------------------------------------------------------------
@@ -179,6 +303,35 @@ def _silence(dur_s: float) -> list[float]:
     return [0.0] * int(RATE * dur_s)
 
 
+def _struck(freq: float, dur_s: float, decay: float, partials,
+            attack_s: float) -> list[float]:
+    """A struck bell as the 26 Oct samples made it: a linear attack, then
+    one exponential decay, no release (the decay is the release)."""
+    n = int(RATE * dur_s)
+    na = RATE * attack_s
+    return [min(1.0, i / na) * math.exp(-decay * i / RATE)
+            * sum(a * math.sin(2 * math.pi * freq * m * i / RATE) for m, a in partials)
+            for i in range(n)]
+
+
+def _air(root: float) -> list[float]:
+    """"Air" in the key of `root`: the root, its fifth and its octave
+    swelling over 3 s with a slow, shallow waver, then 0.8 s of quiet."""
+    dur = 3.0
+    n = int(RATE * dur)
+    chord = (root, root * 1.4983, root * 2)
+    body = []
+    for i in range(n):
+        t = i / RATE
+        env = math.sin(math.pi * t / dur) ** 2
+        body.append(env * sum(
+            math.sin(2 * math.pi * f * t
+                     + 0.3 * math.sin(2 * math.pi * 0.5 * t + k))
+            / (1 + 0.3 * k)
+            for k, f in enumerate(chord)))
+    return body + _silence(0.8)
+
+
 def _recipe(name: str) -> list[float]:
     # A short pad either side: some outputs (Bluetooth, Android's mixer)
     # swallow the first few milliseconds of a stream, which would take the
@@ -197,25 +350,51 @@ def _recipe(name: str) -> list[float]:
         body = (_note(880.0, 0.11, attack_s=0.015, release_s=0.03)
                 + _silence(0.02)
                 + _note(659.25, 0.14, attack_s=0.015, release_s=0.06))
-    elif name == "reply":
-        # "Air": a high, open shimmer (E5 B5 E6) swelling over 3 s with a
-        # slow, shallow waver, then 0.8 s of quiet; looped under an agent's
-        # reply as the think pad is under a thought, calmer and higher so the
-        # two are told apart (David, 26 Oct 2026: "a tone for regular
-        # replies"; he chose this of four tried).
-        dur = 3.0
-        n = int(RATE * dur)
-        chord = (659.25, 987.77, 1318.51)
+    elif name.startswith("reply-") and name[6:] in REPLY_KEYS:
+        # "Air": a high, open shimmer (root, fifth, octave) swelling over 3 s
+        # with a slow, shallow waver, then 0.8 s of quiet; looped under an
+        # agent's reply as the think pad is under a thought, calmer and
+        # higher so the two are told apart (David, 26 Oct 2026: "a tone for
+        # regular replies"; he chose this of four tried). In E5 (as first
+        # made), G5 or C5 by the reply's project (reply_key).
+        body = _air(REPLY_KEYS[name[6:]])
+    elif name == "people":
+        # "Harp": slow pentatonic plucks, C5 D5 E5 G5 A5 G5 E5 D5 every half
+        # second, each a 1.4 s bell (partials 1, 2, 3), cut at 4 s: the loop
+        # under a person's message (David, 26 Oct 2026). A 30 ms fade at the
+        # cut, where the last pluck still rings, so the repeat does not click.
+        notes = (523.25, 587.33, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33)
+        body = []
+        for j, f in enumerate(notes):
+            _mix(body, _struck(f, 1.4, 3.2, ((1, 1), (2.0, 0.25), (3.0, 0.08)), 0.006),
+                 j * 0.5)
+        body = body[:int(RATE * 4.0)]
+        nf = int(RATE * 0.03)
+        for i in range(nf):
+            body[-nf + i] *= 0.5 + 0.5 * math.cos(math.pi * (i + 1) / nf)
+    elif name == "alert":
+        # "Wind chime": six bells from C7 D7 E7 G7 (partials 1 and 2.7), each
+        # 1.2 s, struck at random moments in the first 0.6 s. Seeded, so the
+        # file is the same every time it is made (David, 26 Oct 2026).
+        rng = random.Random(4)
+        body = []
+        for _ in range(6):
+            bell = _struck(rng.choice((2093, 2349.3, 2637, 3136)), 1.2, 3.5,
+                           ((1, 1), (2.7, 0.25)), 0.004)
+            _mix(body, bell, rng.uniform(0, 0.6))
+    elif name == "mail":
+        # "Paper whoosh": half a second of noise through a one-pole low-pass
+        # that opens as it goes, under a sin² swell, then 0.1 s of quiet.
+        # Seeded, so the file is the same every time (David, 26 Oct 2026).
+        rng = random.Random(2)
+        n = int(RATE * 0.5)
+        y = 0.0
         body = []
         for i in range(n):
-            t = i / RATE
-            env = math.sin(math.pi * t / dur) ** 2
-            body.append(env * sum(
-                math.sin(2 * math.pi * f * t
-                         + 0.3 * math.sin(2 * math.pi * 0.5 * t + k))
-                / (1 + 0.3 * k)
-                for k, f in enumerate(chord)))
-        body += _silence(0.8)
+            t = i / n
+            y += (0.03 + 0.25 * t) * (rng.uniform(-1, 1) - y)
+            body.append(math.sin(math.pi * t) ** 2 * y)
+        body += _silence(0.1)
     elif name == "think":
         # A dream pad: a Cmaj9 chord (C4 E4 G4 B4 D5) swelling in and out over
         # 2.2 s, each note with a slow vibrato a little out of step with the
@@ -256,6 +435,7 @@ def _recipe(name: str) -> list[float]:
 def synth(name: str) -> bytes:
     """The tone as 16-bit mono PCM frames at RATE, peaking at PEAK_DBFS
     (or the tone's own, lower, _PEAK_DBFS)."""
+    name = _canon(name)
     samples = _recipe(name)
     peak = max((abs(s) for s in samples), default=0.0) or 1.0
     scale = (10 ** (_PEAK_DBFS.get(name, PEAK_DBFS) / 20.0)) * 32767 / peak
@@ -272,6 +452,7 @@ def _dir() -> Path:
 
 def path(name: str) -> Path:
     """The tone's file, written on first use (atomically) and reused after."""
+    name = _canon(name)
     p = _dir() / f"earcon-{name}-v{VERSION}.wav"
     if p.is_file() and p.stat().st_size > 44:
         return p
@@ -287,7 +468,16 @@ def path(name: str) -> Path:
 
 
 def duration_s(name: str) -> float:
-    return len(_recipe(name)) / RATE
+    return len(_recipe(_canon(name))) / RATE
+
+
+def _takes_kind(fn) -> bool:
+    """Whether a sink's play_cue / play_under takes `kind` (the recording
+    sinks in the tests, and older ones, do not)."""
+    try:
+        return "kind" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 # ---- playing ----------------------------------------------------------------
@@ -414,11 +604,22 @@ def play(name: str, target=None, sink=None, *, wait: bool = False) -> bool:
         pre = getattr(sink, "prefetch", None)
         if pre is not None:
             pre([p], target)
-        if not cue(str(p), target):
+        kind = KINDS.get(_canon(name), "")
+        if kind and _takes_kind(cue):
+            sent = cue(str(p), target, kind=kind)
+        else:
+            sent = cue(str(p), target)
+        if not sent:
             return False
         log.info("earcon: %s on %s", name, getattr(target, "name", target))
         if wait:
             _wait_played(sink, target, name)
+            if kind:
+                # Its kind was for this cue only: taken back, so the reply
+                # after it is never taken for the tone (a no-op off a phone).
+                clear = getattr(sink, "clear_tone_kind", None)
+                if clear is not None:
+                    clear(target)
         return True
     except Exception as e:  # noqa: BLE001 — a tone must never cost a reply
         log.warning("earcon: %s failed: %s", name, e)
@@ -464,7 +665,12 @@ def play_under(name: str, target=None, sink=None, *, loop: bool = False) -> bool
         pre = getattr(sink, "prefetch", None)
         if pre is not None:
             pre([p], target)
-        if not under(str(p), target, loop=loop):
+        kind = KINDS.get(_canon(name), "")
+        if kind and _takes_kind(under):
+            sent = under(str(p), target, loop=loop, kind=kind)
+        else:
+            sent = under(str(p), target, loop=loop)
+        if not sent:
             return False
         log.info("earcon: %s under the next clip on %s", name,
                  getattr(target, "name", target))
