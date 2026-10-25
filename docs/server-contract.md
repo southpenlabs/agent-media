@@ -1488,14 +1488,15 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   recent messages — will add to it. The app opens the card in `last`. Today: `plain` (Tidy), `proofread` (Fix typos),
   `polish`, `professional`, `friendly`, `brief`, `firm`, `apologetic`,
   `decline` (Polite no), `request` (Ask nicely), `emoji` (Emoji, 25 Oct 2026:
-  a small emoji picture that tells the message's story — emoji combined with
-  each other and with drawing characters into a scene, a figure or a larger
-  picture built across lines, the sender's words laid out around it).
-  `emoji` has its own rules and guards: emoji, line breaks, layout spaces and
-  the drawing characters ( ) / \\ | _ - . L ‾ ~ * may be added but no new words
-  (a lone letter used as art aside), the words' length (emoji and whitespace
-  left out) within the plain bound, at most 12 emoji, 10 lines and 40
-  characters a line, swearing kept and none added, every number kept; its
+  a short emoji paragraph, kept simple: the words in a few short lines broken
+  at the beats, each paired with one emoji that acts it out, and now and then a
+  stick-figure arm ". L" beside a face; no drawn figures or scenes). `emoji`
+  has its own rules and guards: emoji, line breaks and the stick arm may be
+  added but no new words (a lone letter used as art aside) and no drawing
+  characters ( ) | _ ‾ ~ * beyond the sender's own (one slash beside a face at
+  most), the words' length (emoji and whitespace left out) within the plain
+  bound, at most 6 emoji, 6 lines and 40 characters a line, swearing kept and
+  none added, every number kept; its
   `tidy` keeps its layout — line breaks (`\n`), leading spaces and runs of
   spaces — which the app shows and sends as they are. Spoken with `say`, the emoji, joiners and
   flourishes are taken out so the voice reads the words. `proofread`, `polish` and

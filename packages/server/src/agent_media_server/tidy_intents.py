@@ -119,15 +119,16 @@ def _emoji_prompt(intent: Intent) -> str:
         "STYLE GUIDANCE (follow it only as far as the RULES allow):\n"
         f"<guidance>\n{pattern(intent)}\n</guidance>\n\n"
         "RULES (they always win over the guidance):\n"
-        "- You may add emoji, line breaks, blank lines, spaces for layout and the drawing "
-        "characters ( ) / \\ | _ - . L ‾ ~ *. Nothing else may be added: no new words, facts, "
-        "names or claims.\n"
+        "- You may add emoji, line breaks and, beside a face emoji, a tiny stick-figure "
+        "arm like \". L\" or \".L\". No other drawing. Nothing else may be added: no new "
+        "words, facts, names or claims.\n"
         "- Keep the sender's own words, their meaning, register and language; keep swearing "
         "as it is and add none. You may fix capitals, punctuation and obvious mis-hearings.\n"
         "- Keep every fact, name, number and date exactly.\n"
-        "- At most 12 emoji, at most 10 lines, each under about 30 characters.\n"
-        "- The picture and words only: no markdown, no code block, no quotes around it, no "
-        "notes. Keep your leading spaces: they are part of the picture.\n"
+        "- Usually one emoji per line; at most 6 emoji, at most 6 lines, each under about 35 "
+        "characters.\n"
+        "- The message itself only: no markdown, no code block, no quotes around it, no "
+        "notes. Line breaks as real new lines.\n"
         "- Answer with JSON only: {\"messy\": true, \"tidy\": \"the emoji paragraph\"}, "
         "with line breaks written as \\n."
     )
@@ -206,16 +207,20 @@ def emoji_text(text: str) -> str:
     return "\n".join(out)
 
 
-#: The emoji picture's size, so it stays phone-sized.
-EMOJI_MAX = 12
-LINES_MAX = 10
+#: The emoji paragraph's size: simple (David, 25 Oct 2026: "keep it fairly simple").
+EMOJI_MAX = 6
+LINES_MAX = 6
 COLUMNS_MAX = 40
+#: Drawing characters: an emoji paragraph may add none of them (the stick arm is
+#: ". L"), but one slash beside a face; the sender's own, if any, stay.
+_DRAWING = "()|_‾~*<>^=+"
 
 
 def emoji_ok(original: str, tidy: str) -> bool:
-    """An emoji picture keeps to its words: none new (a lone letter such as the
+    """An emoji paragraph keeps to its words: none new (a lone letter such as the
     stick arm's "L" aside), their length within the plain bound; and it stays
-    phone-sized: at most EMOJI_MAX emoji, LINES_MAX lines, COLUMNS_MAX characters a line."""
+    simple: at most EMOJI_MAX emoji, LINES_MAX lines, COLUMNS_MAX characters a
+    line, and no drawing beyond the stick arm."""
     def key(w: str) -> str:            # "its" and "it's", "Sunday" and "sunday" are one word
         return re.sub(r"['’]", "", w.lower())
 
@@ -225,8 +230,13 @@ def emoji_ok(original: str, tidy: str) -> bool:
         return False
     if len(" ".join(words_of(tidy))) > len(" ".join(words_of(original))) + 8:
         return False
-    lines = tidy.split("\n")
+    lines = [ln for ln in tidy.split("\n") if ln.strip()]
     if len(lines) > LINES_MAX or any(len(ln) > COLUMNS_MAX for ln in lines):
+        return False
+    # No drawings: none of ( ) | _ ~ * added, and at most one slash beside a face.
+    if any(tidy.count(c) > original.count(c) for c in _DRAWING):
+        return False
+    if (tidy.count("/") + tidy.count("\\")) > (original.count("/") + original.count("\\")) + 1:
         return False
     return emoji_count(tidy) <= EMOJI_MAX
 
