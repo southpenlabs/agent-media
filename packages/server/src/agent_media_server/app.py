@@ -163,7 +163,9 @@ device gets its token):
                   hands-free's check of heard words before they send: `sure`,
                   a one-sentence `gist`; with `say`, an unsure one is asked
                   aloud in the thread (voice_check.py)
-  POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?} →
+  GET /voice/tidy/intents → the registers a message to a person can be
+                  rewritten in, `{key, label}` (tidy_intents.py)
+  POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?, "force"?, "intent"?} →
                   an offer to clean up a dictated message to a person: `messy`,
                   `tidy`; only when the words look messy, never for an agent
                   (voice_tidy.py)
@@ -339,7 +341,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
-    "/session/ask/part", "/voice/check", "/voice/tidy",
+    "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/voice",
     "/settings/language",
     "/sessions/state", "/commands", "/rename",
@@ -1386,6 +1388,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             wait_s = 0.0
         ok, detail = phone.wait((qs.get("id") or [""])[0], wait_s)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        return True
+    if path == "/voice/tidy/intents":
+        # The register chips on the tidy card, from the server (voice_tidy.py).
+        from . import voice_tidy
+
+        ok, detail = voice_tidy.intents(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
         return True
     if path == "/device/location":
         # Where the phone last said it was, when its background share is on

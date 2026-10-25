@@ -1,0 +1,1 @@
+Make the message sincerely apologetic: acknowledge the problem plainly in a short, genuine apology, without grovelling, excuses or blame the sender did not already give. Keep the facts exactly as given and add no new promises.

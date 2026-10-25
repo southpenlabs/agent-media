@@ -1,0 +1,1 @@
+Make the message shorter: say the same thing in as few words as will still read naturally, dropping padding, hedging and repetition. Keep every request, fact, name, number and date. It must not be longer than the original.

@@ -29,6 +29,12 @@ that finds nothing to change (or a tidy equal to the words) answers
 `messy: false` with `why: "model_clean"` or `"unchanged"`, which the app says as
 "Nothing to tidy".
 
+`intent` (25 Oct 2026) rewrites in a chosen register — friendly, brief, firm,
+apologetic and so on, `tidy_intents.py` — with a prompt from `tidy_patterns/`
+(three vendored from Fabric, MIT; the rest ours) wrapped in the same fixed
+rules and the same guards, the length bound set per intent. Any intent but the
+default is an explicit ask and skips the pre-check. An unknown one is a 400.
+
 With `say` (the app's own words, with `{tidy}` in them) a tidy version is
 read aloud in the thread's voice and place, kept out of speech history, for
 the flow where nobody is looking.
@@ -40,7 +46,7 @@ import json
 import os
 import re
 
-from . import auth, sessions
+from . import auth, sessions, tidy_intents
 
 DEFAULT_TIMEOUT_S = 3.0
 MAX_TEXT = 2000
@@ -51,19 +57,6 @@ FILLER = re.compile(r"\b(?:u+m+|u+h+|e+r+m*|a+h+m*|hmm+|you know|i mean|like,|so
 REPEAT = re.compile(r"\b((?:\w+\s+){0,2}\w+)\s+\1\b", re.I)
 #: A dash or ellipsis where a speaker broke off and began again.
 FALSE_START = re.compile(r"(?:\w\s*(?:--|—|\.\.\.|…)\s*\w)|\b(?:no wait|sorry,? i mean|scratch that|rather)\b", re.I)
-
-PROMPT = (
-    "You tidy a message that was dictated by voice, before it is sent to another "
-    "person. You get the words, who they are for, and the last few messages of "
-    "the conversation (for tone). Remove only fillers (um, uh, you know), repeated "
-    "words and false starts, and fix punctuation, capital letters and obvious "
-    "mis-hearings. KEEP the meaning, the sender's own voice, register and "
-    "language, and every name, number, date and fact exactly. Never add content, "
-    "never make it more formal, never make it longer, never answer it. If it is "
-    "already clean, say so. Answer with JSON only: "
-    "{\"messy\": true|false, \"tidy\": \"the tidied message\"}."
-)
-
 
 def _enabled() -> bool:
     return os.environ.get("MEDIA_VOICE_TIDY", "1") != "0"
@@ -96,13 +89,14 @@ def _nums(s: str) -> list[str]:
     return re.findall(r"\d+(?:[.,:]\d+)*", s)
 
 
-def accept(original: str, tidy: str) -> str:
+def accept(original: str, tidy: str, intent: "tidy_intents.Intent | None" = None) -> str:
     """The tidy text if it is a safe one, else ''. It must say something new,
-    be no longer than a little over the original, and keep every number."""
-    tidy = " ".join((tidy or "").split())
+    be within the intent's length bound (the default: no longer than a little
+    over the original) and keep every number."""
+    tidy = " ".join(tidy_intents.plain_text(tidy).split())
     if not tidy or tidy == original:
         return ""
-    if len(tidy) > len(original) + 8:
+    if not tidy_intents.grows_ok(intent or tidy_intents.get(None), original, tidy):
         return ""
     low = tidy.lower()
     if any(n not in low for n in _nums(original)):
@@ -126,35 +120,49 @@ def parse(text: str | None) -> dict | None:
 
 
 def tidy(text: str, recipient: str = "", context: str = "", private: bool = False,
-         force: bool = False) -> dict:
+         force: bool = False, intent: str | None = None) -> dict:
     """`{"messy", "tidy", "why"?}`; never raises. `force` skips the local
-    messy test (an explicit ask) and nothing else."""
+    messy test (an explicit ask) and nothing else; so does any `intent` but the
+    default, which is a request for that register. `intent` is a key of
+    `tidy_intents.INTENTS` (an unknown one is a `ValueError`: the route checks)."""
+    chosen = tidy_intents.get(intent)
+    if chosen is None:
+        raise ValueError(f"unknown intent {intent!r}")
     original = " ".join(str(text or "").split())[:MAX_TEXT]
     if not original:
         return {"messy": False, "tidy": "", "why": "no_words"}
     if not _enabled():
         return {"messy": False, "tidy": "", "why": "off"}
-    if not force and not looks_messy(original):
+    if not force and chosen.key == tidy_intents.DEFAULT and not looks_messy(original):
         return {"messy": False, "tidy": "", "why": "clean"}
     from agent_media_core.intake import fast
 
     user = (f"For: {recipient or 'someone'}\n"
             f"The conversation so far:\n<chat>{' '.join(str(context or '').split())[-MAX_CONTEXT:]}</chat>\n\n"
             f"The dictated message:\n<message>{original}</message>")
-    got = parse(fast.chat(PROMPT, user, _timeout(), purpose_env="MEDIA_TIDY_MODEL", private=private))
+    got = parse(fast.chat(tidy_intents.system_prompt(chosen), user, _timeout(),
+                          purpose_env="MEDIA_TIDY_MODEL", private=private))
     if not got:
         return {"messy": False, "tidy": "", "why": "no_answer"}
     if not got["messy"]:
         return {"messy": False, "tidy": "", "why": "model_clean"}
-    safe = accept(original, got["tidy"])
+    safe = accept(original, got["tidy"], chosen)
     if not safe:
-        same = " ".join(str(got["tidy"]).split()) == original
+        same = " ".join(tidy_intents.plain_text(str(got["tidy"])).split()) == original
         return {"messy": False, "tidy": "", "why": "unchanged" if same else "unsafe"}
     return {"messy": True, "tidy": safe}
 
 
+def intents(bearer: str) -> tuple[bool, dict]:
+    """GET /voice/tidy/intents → the intents the app can offer, `{key, label}` in order."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    return True, {"intents": tidy_intents.listing(), "default": tidy_intents.DEFAULT}
+
+
 def post(body: dict, bearer: str) -> tuple[bool, dict]:
-    """POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?, "force"?}."""
+    """POST /voice/tidy {"text", "session"?, "recipient"?, "context"?, "say"?, "force"?, "intent"?}."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -169,8 +177,11 @@ def post(body: dict, bearer: str) -> tuple[bool, dict]:
 
     recipient = str(body.get("recipient") or "")[:120] if isinstance(body.get("recipient"), str) else ""
     context = body.get("context") if isinstance(body.get("context"), str) else ""
+    intent = body.get("intent")
+    if intent is not None and (not isinstance(intent, str) or tidy_intents.get(intent) is None):
+        return False, {"error": "unknown intent", "status": 400}
     got = tidy(text, recipient, context, private=bool(session) and hidden(session),
-               force=body.get("force") is True)
+               force=body.get("force") is True, intent=intent)
     say = body.get("say")
     spoken = False
     if got["messy"] and session and isinstance(say, str) and "{tidy}" in say:
