@@ -16,6 +16,9 @@ never a network call, so the app can ask on every start.
   contacts  the contacts store exists, or a Google client is set up for it
   bridges   a Matrix bridge config was found (bridges.discover)
   personas  the personas repo is there (personas.repo_dir)
+  quick     quick chat (quick.py, 26 Oct 2026): this server answers
+            `/ask {"agent": "quick"}`; always true here, so an older server,
+            which never says it, has the app leave it out
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -63,7 +66,7 @@ def _personas() -> bool:
 
 
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
-          "bridges": _bridges, "personas": _personas}
+          "bridges": _bridges, "personas": _personas, "quick": lambda: True}
 
 
 def detect() -> dict[str, bool]:
