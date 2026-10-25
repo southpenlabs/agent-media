@@ -2631,6 +2631,10 @@ follow-along at `GET /doc/read?path=<doc>`.
   Wikipedia's `[12]` marks dropped. The title is the page's `og:title`,
   else its `<title>`; the document opens "From <host>." Plain text and
   Markdown pages are read as they are.
+- Under 200 characters of article, the page's `og:description` is read
+  when it says more (a public Facebook post's words). Under 120 characters
+  to read is 422, "<host> sent nothing to read, maybe only a sign-in page":
+  a login wall is not read aloud.
 - Only public addresses are fetched, at every redirect (at most 5): a link
   to this host, the LAN or the tailnet is 403. Asked as `Sasonica/1.0`
   first and as a browser after a 401/403/406/429, 20 s, 5 MB at most.
