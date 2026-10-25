@@ -289,6 +289,11 @@ def test_a_persons_tags_and_labels_reach_every_chat_with_them(server, shelf, sig
     assert rows[0]["tags"] == ["signal_group", "cousins", "Family"]
     assert rows[1]["tags"] == ["cousins", "Family"]     # the same person's other chat
     assert rows[2]["tags"] == [] and "person_tags" not in rows[2]
+    # A label gives way to the same tag in another case.
+    from agent_media_server._jsonmap import JsonMap as _JM
+    _JM("people-tags.json").put(cid, ["cousins", "family"])
+    (r0,) = tags.add_tags([{"session": t2, "harness": "matrix", "contact": {"id": cid}}])
+    assert r0["label_tags"] == [] and r0["tags"] == ["cousins", "family"]
     assert {c["tag"] for c in tags.counts()} >= {"cousins", "signal_group"}
 
 

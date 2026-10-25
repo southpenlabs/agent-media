@@ -267,7 +267,9 @@ def add_tags(rows: list[dict]) -> list[dict]:
             cid = str((r.get("contact") or {}).get("id") or "")
             chat = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
             person = [t for t in (people.get(cid) or []) if isinstance(t, str)] if cid else []
-            label = [t for t in labels.get(cid, []) if t not in person]
+            # A label gives way to a tag of the same name in any case ("Family", "family").
+            mine = {t.lower() for t in chat + person}
+            label = [t for t in labels.get(cid, []) if t.lower() not in mine]
             auto = [t for t in autos.get(sid, []) if t not in chat and t not in person and t not in label]
             r["chat_tags"], r["person_tags"], r["label_tags"] = chat, person, label
             r["auto_tags"] = auto
