@@ -1554,7 +1554,10 @@ ahead.
     another route to models opencode and pi already reach.
 
 27. **An agent can post into another thread** (David, 17 Oct 2026: "add it
-    to the roadmap"). Handing work to an existing conversation — not a fresh
+    to the roadmap"). **DONE 19 Oct 2026** (agent-media `0ffcc95e`): `media
+    session list` and `media session send <id|folder> --from <you>`, queued
+    behind a running turn and never over a question card; `agent-mail-deliver
+    --to <folder>` goes pane, then sessiond, then a new session. Handing work to an existing conversation — not a fresh
     one — has no route now that sessions run headless. `agent-mail-deliver`
     types into a tmux pane, and with no pane in the folder it starts a *new*
     session; `agent-handoff` always starts a fresh chat; and the one way into
@@ -1632,6 +1635,8 @@ ahead.
     `rooms`), so a page is full of what is shown. **Built 19 Oct 2026**,
     not yet deployed (the server change needs a canvas restart).
 31. **Card links open in the app** (David, 19 Oct 2026: "yeah queue it").
+    **DONE** (sasonica-app `784b7ec`): `/app/people/` is claimed beside
+    `/app/t/`, and the card lists the person's linked accounts.
     The contacts write-back (agent-media `contacts_writeback.py`, `9042e77`)
     puts a link per bridged account on the person's Google entry,
     `https://<server>/app/people/<id>?account=<matrix id>`; the app's App
@@ -1709,7 +1714,13 @@ ahead.
     item 33's spaces for chats and coding threads and the Organiser's Org,
     GTD and linked-note foundations. Scope, candidate views and design
     questions: [Unified conversations and views](proposals/2026-10-22-unified-conversations-and-views.md).
-    Direction requested; design proposal only, not started.
+    **Started 25–26 Oct 2026:** tags on threads (kept in their org-roam
+    notes), chats and people, with Auto (local matching and embeddings,
+    private models for chats) and chats tagging themselves; a narrow box on
+    Threads; and a **Chats tab** (sasonica-app `5adf430`) beside Threads and
+    Messages: both kinds in one list, All · People · Agents, what needs you
+    first, Show, Tag and the narrow box across both. Next: saved views (a
+    tag or a person as a view), then Threads and Messages folded into it.
 39. **Background music under long readings** (David, 26 Oct 2026: "maybe
     we could even use dynamically selected music in the background"; "are
     there libraries of different genres we could have selectable in
