@@ -1632,7 +1632,10 @@ Pinned by `packages/server/tests/test_reap.py`.
   in use that fit it, found with no model (their words in the thread, or on
   threads whose titles are like its), then new ones from the fast models
   (`agent_media_core/intake/fast.py`: `MEDIA_TAG_MODEL`, `MEDIA_FAST_MODELS`,
-  `MEDIA_FOLLOWUP_MODEL`, in order). A private thread is read only to
+  `MEDIA_FOLLOWUP_MODEL`, in order). With the server's `tags-embed`
+  extra installed, the matching also goes by meaning: a small embedding model
+  run on the host (`tag_embed.py`, fastembed, in a child process, vectors
+  cached), so it stays private and needs no gateway. A private thread is read only to
   `MEDIA_PRIVATE_MODELS`; with none it gets the matched ones alone. Nothing
   is saved; the app's Auto adds them to the sheet. Its own tags, the
   exporter's and anything that is not a tag are dropped. 503 `"no tags to
