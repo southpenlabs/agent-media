@@ -303,6 +303,11 @@ Everything a message can be pointed at.
 - `tags` (every row, 24 Oct 2026): the thread's own tags, in file order,
   from its org-roam node's `#+filetags` (`POST /session/tags`, §6.4); `[]`
   when it has none or no node, and on a sealed row.
+  A Matrix row's (25 Oct 2026) are kept by the server instead: `chat_tags`
+  (the chat's own, `POST /session/tags`), `person_tags` (the person's own,
+  shared by every chat with them, `POST /contacts/tags`), `label_tags` (the
+  contact's Google and phone labels, made tags; edited on the card) and
+  `tags`, all of them in that order.
 - `speech` (every row, 24 Sep 2026): the thread's speech level —
   `"interrupt"`, `"auto"`, `"normal"` or `"quiet"` — set with
   `POST /session/priority` (§6.4) or `media priority`; a thread with none
@@ -1686,6 +1691,18 @@ Pinned by `packages/server/tests/test_reap.py`.
   `CORS_PATHS`.
 
 Pinned by `packages/server/tests/test_thread_tags.py`.
+
+#### `POST /contacts/tags` — gated, owner (25 Oct 2026)
+
+`{"contact", "tags"?, "add"?, "remove"?}` → `{"ok": true, "contact", "tags"}`:
+a person's own tags, kept in `<state_dir>/people-tags.json` by contact id
+and shown on every chat with them (`person_tags`). Edits as for
+`/session/tags`; their labels are not touched. 400 `"not a contact id"`, 403
+for an account that is not the owner (the rooms are the owner's), 404 `"no
+such contact"`. A chat's own tags go through `POST /session/tags` with the
+room's thread and are kept in `<state_dir>/chat-tags.json`. Auto in a chat is
+always private: only the local matching and `MEDIA_PRIVATE_MODELS`. In
+`CORS_PATHS`. Pinned by `packages/server/tests/test_thread_tags.py`.
 
 #### `POST /session/priority` — gated (24 Sep 2026)
 

@@ -132,6 +132,8 @@ device gets its token):
                   (tags.py); GET /tags lists every tag in use with its count
   POST /session/tags/suggest {"session"} → a few tags for it from the
                   quick model, preferring ones in use; nothing saved (tags.py)
+  POST /contacts/tags {"contact", "add"?, "remove"?, "tags"?} → a person's
+                  own tags, shared by all their chats (tags.py)
   POST /session/priority {"session", "level"} → that thread's speech
                   level: interrupt | auto | pocket | normal | quiet
                   (agent_media_core/speak_priority.py, pins.py)
@@ -340,7 +342,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/tags", "/session/priority", "/session/pocket",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -2725,6 +2727,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = pins.session_pin(str(body.get("session") or ""),
                                       body.get("pinned"), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/contacts/tags":
+        # A person's own tags, shared by every chat with them (tags.py).
+        from . import tags
+
+        body = _read_json(h) or {}
+        ok, detail = tags.contact_tags(str(body.get("contact") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/tags/suggest":
         # Auto in the tags sheet: suggestions only, nothing saved (tags.py).

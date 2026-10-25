@@ -253,3 +253,65 @@ def test_embeddings_failing_fall_back_to_words(server, shelf, signed_in, monkeyp
     monkeypatch.setattr(tag_embed, "_embed_in_child", lambda texts: None)
     res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID}, AUTH)
     assert obj["tags"] == ["mic"]                       # the word match still stands
+
+
+# --- messages: a chat's tags and a person's (chat-tags.json, people-tags.json) ------
+
+def test_a_chats_tags_are_kept_here_and_never_409(server, shelf, signed_in, monkeypatch):
+    from test_matrix_rooms import _room
+    from agent_media_server import matrix
+
+    r, _ = _room([])
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    res, obj = call(server, "POST", "/session/tags", {"session": r.thread, "add": ["book club"]}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "session": r.thread, "tags": ["book_club"]}
+    assert tags.chat_tags(r.thread) == ["book_club"]
+    res, obj = call(server, "POST", "/session/tags", {"session": r.thread, "tags": []}, AUTH)
+    assert obj["tags"] == [] and tags.chat_tags(r.thread) == []
+
+
+def test_a_persons_tags_and_labels_reach_every_chat_with_them(server, shelf, signed_in):
+    from test_contacts_edit import _book
+
+    cid = _book(labels=("Family", "My Contacts"))
+    res, obj = call(server, "POST", "/contacts/tags", {"contact": cid, "add": ["mum's side", "family"]}, AUTH)
+    assert res.status == 400                            # "mum's side" is not a tag
+    res, obj = call(server, "POST", "/contacts/tags", {"contact": cid, "add": ["cousins"]}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "contact": cid, "tags": ["cousins"]}
+    t1, t2 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+    from agent_media_server._jsonmap import JsonMap
+    JsonMap("chat-tags.json").put(t1, ["signal_group"])
+    rows = tags.add_tags([{"session": t1, "harness": "matrix", "contact": {"id": cid}},
+                          {"session": t2, "harness": "matrix", "contact": {"id": cid}},
+                          {"session": SID, "harness": "claude"}])
+    assert rows[0]["chat_tags"] == ["signal_group"] and rows[0]["person_tags"] == ["cousins"]
+    assert rows[0]["label_tags"] == ["Family", "My_Contacts"]
+    assert rows[0]["tags"] == ["signal_group", "cousins", "Family", "My_Contacts"]
+    assert rows[1]["tags"] == ["cousins", "Family", "My_Contacts"]   # the same person's other chat
+    assert rows[2]["tags"] == [] and "person_tags" not in rows[2]
+    assert {c["tag"] for c in tags.counts()} >= {"cousins", "signal_group"}
+
+
+def test_contact_tag_refusals(server, shelf, signed_in):
+    res, obj = call(server, "POST", "/contacts/tags", {"contact": "nope", "add": ["x"]}, AUTH)
+    assert res.status == 400
+    res, obj = call(server, "POST", "/contacts/tags",
+                    {"contact": "33333333-3333-4333-8333-333333333333", "add": ["x"]}, AUTH)
+    assert res.status == 404
+    res, obj = call(server, "POST", "/contacts/tags", {"contact": "33333333-3333-4333-8333-333333333333", "add": ["x"]})
+    assert res.status in (401, 403)                     # no credential, refused
+    assert "/contacts/tags" in app.CORS_PATHS
+
+
+def test_a_chat_is_private_to_auto(server, shelf, signed_in, monkeypatch):
+    from test_matrix_rooms import _room
+    from agent_media_server import matrix
+
+    r, _ = _room([])
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    seen: list[str] = []
+    _fake_model(monkeypatch, "hosted_guess", seen)
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "hosted")
+    monkeypatch.delenv("MEDIA_PRIVATE_MODELS", raising=False)
+    res, obj = call(server, "POST", "/session/tags/suggest", {"session": r.thread}, AUTH)
+    assert res.status == 503 and seen == []             # no hosted model read the chat

@@ -37,6 +37,16 @@ thread and the tags in use. A private thread is read only to
 MEDIA_PRIVATE_MODELS. Nothing is saved: the app adds them to the sheet and
 Save sends them.
 
+Messages (Matrix rooms, §6.25) have no org node, so their tags are kept
+here (David, 25 Oct 2026: "on people and chats"): a chat's own in
+`<state_dir>/chat-tags.json` by thread, and a person's in
+`<state_dir>/people-tags.json` by contact id, shared by every chat with
+them. A room's row carries `chat_tags`, `person_tags` (the person's own,
+editable with `POST /contacts/tags`), `label_tags` (the contact's Google and
+phone labels, shown, not edited here) and `tags`, all of them, for the list
+and its filter. A chat is always treated as private for Auto: only the local
+matching and MEDIA_PRIVATE_MODELS see it.
+
 `MEDIA_THREAD_TAGS_DIR` moves the root (default `~/org/roam/sessions`).
 `MEDIA_TAG_MODEL` is the suggester's own model, or list, tried before
 MEDIA_FAST_MODELS (intake/fast.py).
@@ -163,24 +173,106 @@ def tags_by_session() -> dict[str, list[str]]:
     return out
 
 
+def _jsonmaps():
+    from ._jsonmap import JsonMap
+
+    global _CHAT, _PEOPLE
+    if _CHAT is None:
+        _CHAT, _PEOPLE = JsonMap("chat-tags.json"), JsonMap("people-tags.json")
+    return _CHAT, _PEOPLE
+
+
+_CHAT = _PEOPLE = None
+
+
+def _stored(m, key: str) -> list[str]:
+    v = m.all().get(key)
+    return [t for t in v if isinstance(t, str)] if isinstance(v, list) else []
+
+
+def chat_tags(thread: str) -> list[str]:
+    return _stored(_jsonmaps()[0], thread)
+
+
+def person_tags(contact: str) -> list[str]:
+    return _stored(_jsonmaps()[1], contact)
+
+
+def _labels(ids: list[str]) -> dict[str, list[str]]:
+    """Each contact's Google and phone labels, made tags; one query for all."""
+    if not ids:
+        return {}
+    import json
+
+    from . import contacts
+
+    conn = contacts._connect(create=False)
+    if conn is None:
+        return {}
+    try:
+        marks = ",".join("?" * len(ids))
+        got = conn.execute(f"SELECT id, card FROM contacts WHERE id IN ({marks})", ids).fetchall()
+    finally:
+        conn.close()
+    out: dict[str, list[str]] = {}
+    for cid, raw in got:
+        try:
+            labels = json.loads(raw).get("labels") or []
+        except (ValueError, AttributeError):
+            continue
+        tags = []
+        for lb in labels:
+            t = clean(str(lb))
+            if t and t not in tags:
+                tags.append(t)
+        if tags:
+            out[cid] = tags
+    return out
+
+
 def add_tags(rows: list[dict]) -> list[dict]:
     """Give each row `tags`, in place. A sealed row gets none: it says
-    nothing of its thread but where it was."""
+    nothing of its thread but where it was. A room's (harness `matrix`) are
+    its chat's, its person's and the person's labels (`chat_tags`,
+    `person_tags`, `label_tags`)."""
     try:
         by = tags_by_session()
     except Exception:  # noqa: BLE001 — a thread list never fails on tags
         by = {}
+    rooms = [r for r in rows if r.get("harness") == "matrix" and not r.get("sealed")]
+    try:
+        cids = sorted({str((r.get("contact") or {}).get("id") or "") for r in rooms} - {""})
+        labels = _labels(cids)
+        chat_map, people_map = _jsonmaps()
+        chats, people = chat_map.all(), people_map.all()
+    except Exception:  # noqa: BLE001
+        labels, chats, people = {}, {}, {}
     for r in rows:
-        r["tags"] = [] if r.get("sealed") else list(by.get(str(r.get("session") or ""), []))
+        sid = str(r.get("session") or "")
+        if r.get("sealed"):
+            r["tags"] = []
+        elif r.get("harness") == "matrix":
+            cid = str((r.get("contact") or {}).get("id") or "")
+            chat = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
+            person = [t for t in (people.get(cid) or []) if isinstance(t, str)] if cid else []
+            label = [t for t in labels.get(cid, []) if t not in person]
+            r["chat_tags"], r["person_tags"], r["label_tags"] = chat, person, label
+            r["tags"] = list(dict.fromkeys(chat + person + label))
+        else:
+            r["tags"] = list(by.get(sid, []))
     return rows
 
 
 def counts() -> list[dict]:
     """`[{"tag", "count"}]`, most used first, then by name."""
     n: dict[str, int] = {}
-    for tags in tags_by_session().values():
-        for t in tags:
-            n[t] = n.get(t, 0) + 1
+    chat_map, people_map = _jsonmaps()
+    every = (list(tags_by_session().values()) + list(chat_map.all().values())
+             + list(people_map.all().values()))
+    for tags in every:
+        for t in tags if isinstance(tags, list) else []:
+            if isinstance(t, str):
+                n[t] = n.get(t, 0) + 1
     return [{"tag": t, "count": c} for t, c in sorted(n.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
@@ -246,22 +338,52 @@ def _tag_list(raw, field: str) -> tuple[list[str] | None, str | None]:
     return out, None
 
 
-def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
-    """`POST /session/tags`. Gated like `/session/pin`. 400 for a bad id or a
-    bad tag, 409 when the thread has no org node yet."""
-    from . import auth, sessions
-
-    session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
-        return False, {"error": "not a session id", "status": 400}
+def _edit(body: dict) -> tuple[tuple | None, dict | None]:
+    """`(replace, add, drop)` from a body, or an error."""
     replace = body.get("tags")
     whole, err = _tag_list(replace, "tags")
     add, err2 = _tag_list(body.get("add"), "add")
     drop, err3 = _tag_list(body.get("remove"), "remove")
     if err or err2 or err3:
-        return False, {"error": err or err2 or err3, "status": 400}
+        return None, {"error": err or err2 or err3, "status": 400}
     if replace is None and not add and not drop:
-        return False, {"error": "give tags, add or remove", "status": 400}
+        return None, {"error": "give tags, add or remove", "status": 400}
+    return (whole if replace is not None else None, add, drop), None
+
+
+def _apply(current: list[str], edit: tuple) -> list[str]:
+    whole, add, drop = edit
+    want = list(whole) if whole is not None else list(current)
+    want += [t for t in add if t not in want]
+    return [t for t in want if t not in drop]
+
+
+def _store_edit(m, key: str, edit: tuple) -> tuple[bool, dict]:
+    want = _apply(_stored(m, key), edit)
+    if len(want) > MAX_TAGS:
+        return False, {"error": f"at most {MAX_TAGS} tags", "status": 400}
+    try:
+        if want:
+            m.put(key, want)
+        else:
+            m.drop(key)
+    except OSError as e:
+        return False, {"error": f"could not save the tags ({e})", "status": 500}
+    return True, {"tags": want}
+
+
+def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
+    """`POST /session/tags`. Gated like `/session/pin`. 400 for a bad id or a
+    bad tag, 409 when the thread has no org node yet. A Matrix room's are
+    kept here (`chat-tags.json`), never 409."""
+    from . import auth, matrix, sessions
+
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    edit, err = _edit(body)
+    if err:
+        return False, err
     user, gerr = auth.gate(bearer)
     if not user:
         return False, gerr
@@ -269,6 +391,9 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
 
     if is_sealed(session):
         return False, {"error": "a sealed thread has no tags", "status": 423}
+    if matrix.room(session) is not None:
+        ok, detail = _store_edit(_jsonmaps()[0], session, edit)
+        return ok, ({"session": session, **detail} if ok else detail)
     found = _nodes().get(session)
     if not found:
         return False, {"error": "this thread is not in your org files yet; "
@@ -276,9 +401,7 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
     current: list[str] = []
     for _, node in found:
         current += [t for t in node["tags"] if t not in current]
-    want = list(whole) if replace is not None else list(current)
-    want += [t for t in add if t not in want]
-    want = [t for t in want if t not in drop]
+    want = _apply(current, edit)
     if len(want) > MAX_TAGS:
         return False, {"error": f"at most {MAX_TAGS} tags", "status": 400}
     if want != current:
@@ -288,6 +411,37 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         except OSError as e:
             return False, {"error": f"could not save the tags ({e})", "status": 500}
     return True, {"session": session, "tags": want}
+
+
+def contact_tags(contact: str, body: dict, bearer: str) -> tuple[bool, dict]:
+    """`POST /contacts/tags {"contact", "tags"?, "add"?, "remove"?}` → `{"contact",
+    "tags"}`: a person's own tags, shared by every chat with them. Gated, and
+    the owner's book only, as the contacts are; 404 for a contact the book
+    does not have. Their labels are not touched (edit those on the card)."""
+    from . import auth, contacts
+
+    contact = (contact or "").strip()
+    if not re.fullmatch(r"[0-9a-f-]{36}", contact):
+        return False, {"error": "not a contact id", "status": 400}
+    edit, err = _edit(body)
+    if err:
+        return False, err
+    user, gerr = auth.gate(bearer)
+    if not user:
+        return False, gerr
+    if not contacts.is_owner():
+        return False, {"error": "not allowed", "status": 403}
+    conn = contacts._connect(create=False)
+    try:
+        known = conn is not None and conn.execute(
+            "SELECT 1 FROM contacts WHERE id=?", (contact,)).fetchone() is not None
+    finally:
+        if conn is not None:
+            conn.close()
+    if not known:
+        return False, {"error": "no such contact", "status": 404}
+    ok, detail = _store_edit(_jsonmaps()[1], contact, edit)
+    return ok, ({"contact": contact, **detail} if ok else detail)
 
 
 def tags_list(bearer: str) -> tuple[bool, dict]:
@@ -407,14 +561,18 @@ def suggest(session: str) -> list[str]:
     text = threads._conversation_text(session)
     if not text:
         return []
-    own = set(tags_by_session().get(session, []))
-    picked = matched(session, text)
+    own = set(tags_by_session().get(session, [])) | set(chat_tags(session))
+    picked = [t for t in matched(session, text) if t not in own]
     in_use = [c["tag"] for c in counts()][:60]
     user = ("Existing tags: " + (", ".join(in_use) if in_use else "(none yet)")
             + "\n\nConversation:\n" + text)
     timeout = _int_env("MEDIA_TAG_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
+    from . import matrix
+
+    # A chat with a person is theirs as much as yours: private, always.
+    private = hidden(session) or matrix.room(session) is not None
     out = (fast.chat(SUGGEST_PROMPT, user, timeout, purpose_env="MEDIA_TAG_MODEL",
-                     private=hidden(session)) or "").strip()
+                     private=private) or "").strip()
     line = out.splitlines()[0] if out else ""
     if line.lower().startswith("tags:"):
         line = line[len("tags:"):]
