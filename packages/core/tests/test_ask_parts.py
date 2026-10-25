@@ -155,3 +155,29 @@ def test_a_question_asked_again_is_read_again(isolated, monkeypatch):
     H._handle_pretooluse({**one, "tool_use_id": "t2"})
     assert len(isolated) == 2
     assert isolated[1].text == isolated[0].text
+
+
+def test_a_clips_shared_file_line_is_never_spoken():
+    """An option (or the question) can carry a clip the app plays
+    (`Shared file: <path>`, §6.18); the card is spoken without the path."""
+    card = {"questions": [
+        {"question": "Which chime?\nShared file: /home/u/shared/2026-10-25/q.wav",
+         "options": [
+             {"label": "Soft", "description": "Gentle.\nShared file: /home/u/shared/2026-10-25/soft.mp3"},
+             {"label": "Bright", "description": "Shared file: /home/u/shared/2026-10-25/bright.ogg"},
+             {"label": "Neither", "description": "Keep the old one."}]}]}
+    for text in (H._format_ask_question(card), H.strip_markdown(H._format_ask_question(card))):
+        assert "Shared file" not in text and "/home/u" not in text and ".mp3" not in text
+        assert text.startswith("Which chime?")
+        assert "Option 1: Soft. Gentle." in text
+        assert "Option 2: Bright." in text
+        assert "Option 3: Neither. Keep the old one." in text
+
+
+def test_strip_shared_files_leaves_other_words_alone():
+    from agent_media_core.intake._text import strip_shared_files
+    assert strip_shared_files("warm") == "warm"
+    assert strip_shared_files("") == ""
+    assert strip_shared_files("Gentle.\nShared file: /x/a.mp3") == "Gentle."
+    assert strip_shared_files("Shared file: /x/a.mp3") == ""
+    assert strip_shared_files("It reads Shared file: and goes on") == "It reads Shared file: and goes on"

@@ -422,6 +422,20 @@ def suppress_tables(text: str, describe: bool = False, isolate: bool = False) ->
     return _splice_spans(text, spans, isolate)
 
 
+def strip_shared_files(text: str) -> str:
+    """``text`` without its ``Shared file: <path>`` lines.
+
+    A card's question or option can carry a clip the app plays (David, 25 Oct
+    2026: "I'd like to get these audio options in the cards"); the voice must
+    not read the path out when the card is spoken. ``strip_markdown`` drops
+    the lines from a reply's words; a card is put together from parts first,
+    so each part is cleaned here before they are joined.
+    """
+    if not text or "Shared file: " not in text:
+        return text
+    return _SHARED_FILE_RE.sub("", text).strip()
+
+
 def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -> str:
     """Strip enough markdown that TTS doesn't read backticks / asterisks /
     fence markers aloud, and replace fenced code blocks with a spoken

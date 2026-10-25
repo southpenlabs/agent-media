@@ -63,7 +63,7 @@ from .._paths import state_dir
 from ..state import StateStore
 from ..types import Event, Priority, Source
 from ._env import load_env_file
-from ._text import strip_markdown, strip_system_blocks
+from ._text import strip_markdown, strip_shared_files, strip_system_blocks
 from .submit import submit_event
 
 
@@ -483,7 +483,7 @@ def _format_ask_question(tool_input: dict, part: Optional[int] = None) -> str:
     for i, q in enumerate(questions, 1):
         if part is not None and i != part + 1:
             continue
-        qtext = (q.get("question") or "").strip()
+        qtext = strip_shared_files((q.get("question") or "").strip())
         if part is not None:
             lead = f"Question {i} of {len(questions)}. " if multi else ""
         else:
@@ -496,7 +496,8 @@ def _format_ask_question(tool_input: dict, part: Optional[int] = None) -> str:
             label = (o.get("label") or "").strip()
             if not label:
                 continue
-            desc = (o.get("description") or "").strip().rstrip(".")
+            # A clip's `Shared file:` line is for the app's Play button, not the voice.
+            desc = strip_shared_files((o.get("description") or "").strip()).rstrip(".")
             # A full stop, not a colon, between label and description: after
             # a label ending "(Recommended)" a colon was read with no pause
             # at all (David, 19 Oct 2026).

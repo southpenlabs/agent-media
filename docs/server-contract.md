@@ -4080,6 +4080,19 @@ Authorization: Bearer <device token>
   already there is left where it is) and prints the line; the app draws the
   reply's lines as chips the same way, and speech skips them
   (`intake/_text.py` `strip_markdown`).
+- A question card can carry a clip (25 Oct 2026: "I'd like to get these audio
+  options in the cards"): an AskUserQuestion option whose `description` (or a
+  question whose text) has a line `Shared file: <path>` with an audio
+  extension (mp3, wav, ogg, opus, m4a, aac, flac) gets a small Play button in
+  the app, which fetches the clip from this route and plays it (a tap plays,
+  another stops; it never picks the option) and hides the line from the text.
+  An agent runs `media attach <clip>` and puts the line it prints on its own
+  last line of the option's `description`. Nothing changes on the wire: the
+  card's `description`/`detail` and `question` keep the line as written, and
+  a line for any other kind of file stays visible. When the card is spoken
+  (`hook_claude_code._format_ask_question`) the lines are dropped
+  (`intake/_text.py` `strip_shared_files`), so the voice never reads a path.
+  Pinned by `packages/core/tests/test_ask_parts.py`.
 - Only a file under the upload root: the path is resolved, symlinks included,
   before it is checked. Outside it, a folder, a `.part` still being written
   or a file that is not there is the same 404. 401/403 as `/reply`.
