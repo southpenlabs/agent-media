@@ -31,9 +31,12 @@ _ORG_TITLE = re.compile(r"^#\+title:\s*(.+)$", re.I | re.M)
 
 
 def roots() -> list[Path]:
+    from . import uploads
+
     out = []
+    # The share sheet's Read it writes its documents here (read_it.py).
     for r in [new_project.root(), *(Path(p) for p in layout.projects_roots()),
-              *docs.doc_roots()]:
+              *docs.doc_roots(), uploads.root() / "read"]:
         try:
             r = r.expanduser().resolve()
         except OSError:

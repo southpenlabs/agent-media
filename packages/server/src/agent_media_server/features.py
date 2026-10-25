@@ -19,6 +19,8 @@ never a network call, so the app can ask on every start.
   quick     quick chat (quick.py, 26 Oct 2026): this server answers
             `/ask {"agent": "quick"}`; always true here, so an older server,
             which never says it, has the app leave it out
+  read      the share sheet's Read it (read_it.py, 26 Oct 2026): this server
+            answers `POST /read`; always true here, as quick
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -66,7 +68,8 @@ def _personas() -> bool:
 
 
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
-          "bridges": _bridges, "personas": _personas, "quick": lambda: True}
+          "bridges": _bridges, "personas": _personas, "quick": lambda: True,
+          "read": lambda: True}
 
 
 def detect() -> dict[str, bool]:

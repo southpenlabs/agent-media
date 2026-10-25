@@ -1761,6 +1761,19 @@ ahead.
     streaming music through Mopidy as a Settings choice; the free
     libraries, after their licences are checked.
 
+40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
+    2026: "can we have a Read it option for sharing things to Sasonica ...
+    for links and text and things to be read aloud"). Share → Read it, for
+    a link or words (not files), where `/features` says `read`. agent-media
+    `read_it.py`, `POST /read` (contract §6.7a): a link's article is
+    fetched (public addresses only) and taken out of the page with the
+    stdlib HTML parser, words are read as they are; either is written to
+    `~/shared/read/<day>/<slug>.md` and listened to as a document
+    (`/org/listen {doc}`: the book channel or the app's book player, a
+    place kept, headings as chapters), and the app opens the reader on it
+    for the follow-along. Not yet: PDFs, pages that need JavaScript to
+    show their text, a list of past readings.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)

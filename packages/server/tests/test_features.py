@@ -23,7 +23,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     res, obj = call(server, "GET", "/features", headers=AUTH)
     assert res.status == 200
     # Quick chat is this server's own (quick.py): there on every one.
-    assert obj == {"ok": True, **{p: False for p in PARTS}, "quick": True}
+    assert obj == {"ok": True, **{p: False for p in PARTS}, "quick": True, "read": True}
     assert "/features" in app.CORS_PATHS
 
 
@@ -46,7 +46,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     personas.mkdir()
     monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(personas))
     _, obj = call(server, "GET", "/features", headers=AUTH)
-    assert obj == {"ok": True, **{p: True for p in PARTS}, "quick": True}
+    assert obj == {"ok": True, **{p: True for p in PARTS}, "quick": True, "read": True}
 
 
 def test_music_from_the_play_history(signed_in, monkeypatch, tmp_path):

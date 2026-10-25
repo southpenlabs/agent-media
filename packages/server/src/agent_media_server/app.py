@@ -361,7 +361,7 @@ CORS_PATHS = frozenset({
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account",
-    "/share", "/upload", "/dashboard", "/features",
+    "/share", "/read", "/upload", "/dashboard", "/features",
     "/sessions/events", "/search", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
@@ -2361,6 +2361,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = share.share_from_app(str(body.get("text") or ""),
                                           str(body.get("channel") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/read":
+        # The share sheet's Read it: a link's article, or the words, read
+        # aloud as a document is listened to (read_it.py).
+        from . import read_it
+
+        body = _read_json(h) or {}
+        ok, detail = read_it.read(str(body.get("text") or ""), str(body.get("title") or ""),
+                                  _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/upload":
         try:

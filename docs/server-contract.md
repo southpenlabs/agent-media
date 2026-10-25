@@ -2617,6 +2617,38 @@ behind it. 400 `"nothing shared"`; 422 when the share pipeline refuses.
 
 Clients: S (`SasonicaShareActivity.kt`, the share sheet).
 
+### 6.7a Read it — `auth.may_control_speech` (26 Oct 2026)
+
+`POST /read {"text", "title"?}` → `{"ok", "state", "doc", "title", "chars",
+"url"}` (`read_it.py`). The share sheet's Read it: the share read aloud as a
+document is listened to (§6.10 `POST /org/listen {"doc"}`), so it has the
+book channel's place, its headings as chapters, and the reader's
+follow-along at `GET /doc/read?path=<doc>`.
+- A share that is a link (at most 12 other words beside it) is fetched and
+  its article taken out of the page: the text of `<article>`, else
+  `<main>`, else the body, in paragraphs, headings and list items, with
+  scripts, menus, headers, footers, forms and figures left out, and
+  Wikipedia's `[12]` marks dropped. The title is the page's `og:title`,
+  else its `<title>`; the document opens "From <host>." Plain text and
+  Markdown pages are read as they are.
+- Only public addresses are fetched, at every redirect (at most 5): a link
+  to this host, the LAN or the tailnet is 403. Asked as `Sasonica/1.0`
+  first and as a browser after a 401/403/406/429, 20 s, 5 MB at most.
+- Other words are read as they are. The title is `title`, else the first
+  line when it is short (80 characters, 12 words) and more follows, else
+  "Shared text".
+- Written as Markdown to `<MEDIA_UPLOAD_DIR>/read/<day>/<slug>.md` (a doc
+  root of its own); the same page again is the same file. `state` is
+  `/org/listen`'s; `url` is the page fetched after redirects, "" for words.
+- 400 `"nothing shared"` or not a web link; 403 not public; 422 a page with
+  nothing to read or a link that is not a page (an image, a PDF); 502 the
+  fetch failed or the page answered an error.
+
+`GET /features` says `read: true` (§6.11a): the app offers Read it only
+then.
+
+Clients: S (`routes/share.tsx`, Read it; the reader opens on `doc`).
+
 ### 6.8 ABS-only — not part of the contract
 
 `GET /item?id=` — the ABS library item trimmed to what Sasonica's item
@@ -3577,6 +3609,8 @@ local look, never a network call:
 | `contacts` | the contacts store (`contacts.db`) or a Google client file exists |
 | `bridges` | a Matrix bridge config is found (`MATRIX_BRIDGES`, §6.26) |
 | `personas` | the personas repo is there (`MEDIA_PERSONAS_DIR`, default `~/agent-personas`) |
+| `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
+| `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.
