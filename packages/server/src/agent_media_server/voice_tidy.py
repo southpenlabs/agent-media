@@ -94,9 +94,12 @@ def accept(original: str, tidy: str, intent: "tidy_intents.Intent | None" = None
     be within the intent's length bound (the default: no longer than a little
     over the original) and keep every number."""
     chosen = intent or tidy_intents.get(None)
-    cleaned = tidy_intents.plain_text(tidy)
-    # An emoji paragraph keeps its lines; everything else is one line.
-    tidy = tidy_intents.emoji_text(cleaned) if chosen.emoji else " ".join(cleaned.split())
+    # An emoji picture keeps its layout (lines, leading spaces, runs of spaces);
+    # everything else is one plain line.
+    if chosen.emoji:
+        tidy = tidy_intents.emoji_text(tidy_intents.layout_text(tidy))
+    else:
+        tidy = " ".join(tidy_intents.plain_text(tidy).split())
     if not tidy or tidy == original:
         return ""
     if not tidy_intents.grows_ok(chosen, original, tidy):

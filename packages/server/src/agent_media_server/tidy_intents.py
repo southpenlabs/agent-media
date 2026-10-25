@@ -119,14 +119,15 @@ def _emoji_prompt(intent: Intent) -> str:
         "STYLE GUIDANCE (follow it only as far as the RULES allow):\n"
         f"<guidance>\n{pattern(intent)}\n</guidance>\n\n"
         "RULES (they always win over the guidance):\n"
-        "- You may add emoji, line breaks, blank lines and a tiny text flourish like \". L\". "
-        "Nothing else may be added: no new words, facts, names or claims.\n"
+        "- You may add emoji, line breaks, blank lines, spaces for layout and the drawing "
+        "characters ( ) / \\ | _ - . L ‾ ~ *. Nothing else may be added: no new words, facts, "
+        "names or claims.\n"
         "- Keep the sender's own words, their meaning, register and language; keep swearing "
         "as it is and add none. You may fix capitals, punctuation and obvious mis-hearings.\n"
         "- Keep every fact, name, number and date exactly.\n"
-        "- At most about one emoji per short line, plus two.\n"
-        "- The message itself only: no markdown, no quotes around it, no notes. Line "
-        "breaks as real new lines.\n"
+        "- At most 12 emoji, at most 10 lines, each under about 30 characters.\n"
+        "- The picture and words only: no markdown, no code block, no quotes around it, no "
+        "notes. Keep your leading spaces: they are part of the picture.\n"
         "- Answer with JSON only: {\"messy\": true, \"tidy\": \"the emoji paragraph\"}, "
         "with line breaks written as \\n."
     )
@@ -134,6 +135,16 @@ def _emoji_prompt(intent: Intent) -> str:
 
 _FENCE = re.compile(r"^```[a-z]*\s*|\s*```$", re.I)
 _LEAD = re.compile(r"^(?:here(?:'s| is| are)\b[^\n:]*:|sure[,!.][^\n]*\n|rewritten(?: message)?:|revised(?: message)?:|tidied(?: message)?:)\s*", re.I)
+
+
+def layout_text(text: str) -> str:
+    """For an emoji picture: a code fence or a preamble line the model wraps it in
+    taken off, and nothing else — its spaces, lines and characters are the art."""
+    t = (text or "").replace("\r\n", "\n").strip("\n")
+    t = re.sub(r"^\s*```[a-z]*\s*\n|\n\s*```\s*$", "", t, flags=re.I)
+    t = re.sub(r"^(?:here(?:'s| is| are)\b[^\n:]*:|sure[,!.][^\n]*)\s*\n", "", t, flags=re.I)
+    t = re.sub(r"^\s*```[a-z]*\s*\n|\n\s*```\s*$", "", t.strip("\n"), flags=re.I)
+    return t.strip("\n")
 
 
 def plain_text(text: str) -> str:
@@ -180,9 +191,11 @@ def words_of(text: str) -> list[str]:
 
 
 def emoji_text(text: str) -> str:
-    """An emoji paragraph tidied up: each line's spaces single, no more than one
-    blank line between beats, the lines kept."""
-    lines = [" ".join(ln.split()) for ln in (text or "").replace("\r\n", "\n").split("\n")]
+    """An emoji picture tidied up without moving anything: spaces at a line's
+    end and blank lines at either end go, more than one blank line in a row
+    becomes one; leading spaces and runs of spaces inside a line are the
+    layout, and stay."""
+    lines = [ln.rstrip() for ln in (text or "").replace("\r\n", "\n").replace("\t", "    ").split("\n")]
     out: list[str] = []
     for ln in lines:
         if not ln and (not out or not out[-1]):
@@ -193,10 +206,16 @@ def emoji_text(text: str) -> str:
     return "\n".join(out)
 
 
+#: The emoji picture's size, so it stays phone-sized.
+EMOJI_MAX = 12
+LINES_MAX = 10
+COLUMNS_MAX = 40
+
+
 def emoji_ok(original: str, tidy: str) -> bool:
-    """An emoji paragraph keeps to its words: none new (a lone letter such as the
-    stick arm's "L" aside), their length within the plain bound, and no more
-    emoji than about one per line, plus two."""
+    """An emoji picture keeps to its words: none new (a lone letter such as the
+    stick arm's "L" aside), their length within the plain bound; and it stays
+    phone-sized: at most EMOJI_MAX emoji, LINES_MAX lines, COLUMNS_MAX characters a line."""
     def key(w: str) -> str:            # "its" and "it's", "Sunday" and "sunday" are one word
         return re.sub(r"['’]", "", w.lower())
 
@@ -206,18 +225,26 @@ def emoji_ok(original: str, tidy: str) -> bool:
         return False
     if len(" ".join(words_of(tidy))) > len(" ".join(words_of(original))) + 8:
         return False
-    lines = [ln for ln in tidy.split("\n") if ln.strip()]
-    return emoji_count(tidy) <= len(lines) + 2
+    lines = tidy.split("\n")
+    if len(lines) > LINES_MAX or any(len(ln) > COLUMNS_MAX for ln in lines):
+        return False
+    return emoji_count(tidy) <= EMOJI_MAX
+
+
+#: Characters a picture is drawn with, never read aloud.
+_ART = re.compile(r"[()/\\|_‾~*<>^=+]")
 
 
 def speakable(text: str) -> str:
-    """For the voice: the words only — emoji, joiners and flourishes (the stick
-    arm's ". L") out, a line break a pause — so "Send this one?" reads the
-    message, not emoji names."""
+    """For the voice: the words only — emoji, joiners, drawing characters, lone
+    letters used as art (the stick arm's "L") and runs of dots out, a line break
+    a pause — so "Send this one?" reads the message, not emoji names or slashes."""
     t = _JOIN.sub("", _PICTO.sub("", text or ""))
-    t = re.sub(r"(?:^|(?<=\s)|(?<=[.!?,]))\s*\.\s?[Ll](?![\w'’])", "", t, flags=re.M)
+    t = _ART.sub(" ", t)
+    t = re.sub(r"(?<![\w'’])(?![IiAa](?![\w'’]))[^\W\d_](?![\w'’])", " ", t)   # a lone letter, but "I" and "a"
+    t = re.sub(r"(?:^|(?<=\s))\.(?:\s*\.)*(?=\s|$)", " ", t, flags=re.M)     # dots standing alone
     lines = [" ".join(ln.split()) for ln in t.split("\n")]
-    lines = [ln.strip(" ") for ln in lines if words_of(ln)]
+    lines = [ln.strip(" ,") for ln in lines if any(len(w) > 1 or w in ("I", "a", "A") for w in words_of(ln))]
     out = ""
     for ln in lines:
         if out:

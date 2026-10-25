@@ -170,8 +170,12 @@ def test_the_emoji_prompt_carries_his_examples_and_its_own_rules(model):
     system = model["asked"][0]["system"]
     for example in ("🙂‍↕️ Yes,\n🙏 thank you", "🤟 Fuck\n. L 😝 yeah!", "✊ We got it!\n.L 😁"):
         assert example in system
-    assert "🥗 Can you bring the salad" in system            # an ordinary message too
-    assert "no new words" in system and "swearing" in system and "At most about one emoji per short line, plus two" in system
+    assert "Can you bring the salad" in system              # an ordinary message too
+    # composition, and larger pictures built across lines
+    assert "tells its story" in system and "ONE larger picture across several lines" in system
+    assert "🟫🚪🟫" in system and "🎂🎂🎂" in system and "/|\\" in system
+    assert "no new words" in system and "swearing" in system and "At most 12 emoji, at most 10 lines" in system
+    assert "( ) / \\ | _ - . L ‾ ~ *" in system and "Keep your leading spaces" in system
     assert "no markdown" in system
 
 
@@ -197,11 +201,20 @@ def test_emoji_words_may_not_grow_or_change(model):
     assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["why"] == "unsafe"       # lost the 5
 
 
-def test_emoji_count_is_capped(model):
-    many = "🥗🥗🥗 Can you bring the salad 🥳🥳\non Sunday at 5? 🎉🎉🎉"
-    _answer(model, many)
-    assert tidy_intents.emoji_count(many) == 8
-    assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["why"] == "unsafe"
+def test_the_picture_stays_phone_sized(model):
+    scene = "🥗🥗🥗🥗 Can you bring the salad\non Sunday at 5? 🎉🎉🎉🎉\n👩 Mum said it's for the 12 of us 🍽️🍽️🍽️🍽️"
+    _answer(model, scene)
+    assert tidy_intents.emoji_count(scene) == 13
+    assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["why"] == "unsafe"          # 13 emoji
+    eleven = "🥗🥗🥗🥗 Can you bring the salad\non Sunday at 5? 🎉🎉🎉\n👩 Mum said it's for the 12 of us 🍽️🍽️🍽️"
+    _answer(model, eleven)
+    assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["messy"] is True         # a scene's worth is fine
+    tall = "\n".join(["🥗 Can you bring", "the salad", "on", "Sunday", "at 5?", "Mum", "said", "it's", "for the", "12 of", "us"])
+    _answer(model, tall)
+    assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["why"] == "unsafe"          # 11 lines
+    wide = "🥗 Can you bring the salad on Sunday at 5? Mum said\nit's for the 12 of us"
+    _answer(model, wide)
+    assert voice_tidy.tidy(SALAD, force=True, intent="emoji")["why"] == "unsafe"          # a line over 40
     # a ZWJ sequence with its selectors is one emoji
     assert tidy_intents.emoji_count("🙂‍↕️ Yes") == 1 and tidy_intents.emoji_count("👍🏽 ok") == 1
 
@@ -217,6 +230,11 @@ def test_the_spoken_prompt_has_the_words_not_emoji_names(server, signed_in, mode
     assert res.status == 200 and body["tidy"] == "🤟 Fuck\n. L 😝 yeah!"
     assert said == ["Send this one? Fuck, yeah!"]
     assert tidy_intents.speakable(EMOJI_SALAD) == "Can you bring the salad, on Sunday at 5? Mum said it's for, the 12 of us"
+    # drawing characters and lone art letters are not read out; "I" and "a" are
+    figure = "  🤟\n\\😆/  fuck yeah,\n |    we won!\n/ \\\n  🏆"
+    assert tidy_intents.speakable(figure) == "fuck yeah, we won!"
+    assert tidy_intents.speakable("   👶\n  ( _ )\n  / V \\\n\nthe baby finally\n      fell asleep 💤") == "the baby finally, fell asleep"
+    assert tidy_intents.speakable("I think a 5 is fine.") == "I think a 5 is fine."
     assert tidy_intents.speakable("⏱️ Be there in 20. . L 👍") == "Be there in 20."
     assert tidy_intents.speakable("✊ We got it!\n.L 😁") == "We got it!"
 
@@ -237,3 +255,16 @@ def test_an_emoji_paragraph_reaches_a_matrix_room_with_its_lines(monkeypatch):
     monkeypatch.setattr(auth, "gate", lambda bearer: ({"username": "david"}, None))
     ok, _ = send.reply("", EMOJI_SALAD, "tok", session=S1)
     assert ok and sent == [EMOJI_SALAD]
+
+
+def test_the_layout_survives_the_clean_up_and_art_is_allowed(model):
+    house = "     🔺\n   🟫🚪🟫   we finally got\n   🟫🟫🟫   the keys!\n🔑➡️ to the new flat 🙌"
+    _answer(model, "```\n" + house + "   \n\n\n```")
+    got = voice_tidy.tidy("we finally got the keys to the new flat", force=True, intent="emoji")
+    assert got["tidy"] == house                       # leading spaces, inner runs, every line kept
+    baby = "   👶\n  ( _ )\n  / V \\\n\nthe baby finally\n      fell asleep 💤"
+    _answer(model, baby)
+    assert voice_tidy.tidy("the baby finally fell asleep", force=True, intent="emoji")["tidy"] == baby
+    # a word that is not the sender's is still refused, art or not
+    _answer(model, "   👶\n  ( _ )\nthe sweet baby finally\n fell asleep 💤")
+    assert voice_tidy.tidy("the baby finally fell asleep", force=True, intent="emoji")["why"] == "unsafe"
