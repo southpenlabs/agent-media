@@ -11,6 +11,14 @@ place to resume from, its headings as chapters, and the reader's
 follow-along at `/doc?path=`.
 
   POST /read {"text", "title"?} → {"ok", "state", "doc", "title", "chars", "url"}
+  POST /read {"page": {"url", "title", "text", "description"?}} → the same
+
+A page the phone read (David, 26 Oct 2026: "how do we add signed in options
+for this?"): the app loads the link in a browser of its own that the user
+signed in to (a Facebook post, a paywalled article), on the phone's own
+connection, and sends the text the page showed (`innerText` of its article,
+else its main part, else its body), not the page. Nothing is fetched here,
+and the sign-in never leaves the phone.
 
 The article is found with the standard library's HTML parser, not a
 readability package: the text of the page's `<article>` (else `<main>`, else
@@ -39,6 +47,8 @@ from . import auth, org_listen, uploads
 #: A share this many words long besides its link is words to read, not a link.
 LINK_WORDS = 12
 MAX_BYTES = 5 << 20
+#: The largest /read body: a page the phone read, as its text.
+MAX_BODY = 2 << 20
 TIMEOUT_S = 20.0
 MAX_REDIRECTS = 5
 #: Under this many characters the article is taken from the whole page.
@@ -53,6 +63,9 @@ _CITES = re.compile(r"\[(?:\d+|[a-z]|citation needed|note \d+)\]")
 _URL_RE = re.compile(r"https?://\S+")
 _SKIP = {"script", "style", "noscript", "nav", "header", "footer", "aside", "form",
          "svg", "button", "iframe", "template", "select", "figure", "dialog"}
+#: Roles a page gives its menus, bars and buttons (Facebook's are all divs).
+_SKIP_ROLES = {"navigation", "banner", "contentinfo", "complementary", "button", "menu",
+               "menubar", "toolbar", "dialog", "search", "tablist", "img"}
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
          "meta", "source", "track", "wbr"}
 _BLOCKS = {"p", "li", "blockquote", "pre", "dd", "dt", "td", "div", "section"}
@@ -79,6 +92,7 @@ class _Page(HTMLParser):
         self.description = ""
         self.blocks: list[tuple[str, str, bool, bool]] = []  # (kind, text, in article, in main)
         self._skip = 0
+        self._stack: list[tuple[str, str]] = []   # (tag, "skip" | "article" | "main" | "")
         self._in_title = False
         self._article = 0
         self._main = 0
@@ -94,9 +108,9 @@ class _Page(HTMLParser):
         self._kind = "p"
 
     def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
         if tag in _VOID:
             if tag == "meta":
-                a = dict(attrs)
                 if (a.get("property") or a.get("name")) in ("og:title", "twitter:title") and not self.og_title:
                     self.og_title = (a.get("content") or "").strip()
                 elif (a.get("property") or a.get("name")) in ("og:description", "description") \
@@ -105,17 +119,27 @@ class _Page(HTMLParser):
             elif tag == "br":
                 self._buf.append(" ")
             return
-        if self._skip or tag in _SKIP:
+        role = (a.get("role") or "").lower()
+        mark = ""
+        if tag in _SKIP or role in _SKIP_ROLES or a.get("aria-hidden") == "true":
+            mark = "skip"
+        elif tag == "article" or role == "article":
+            mark = "article"
+        elif tag == "main" or role == "main":
+            mark = "main"
+        self._stack.append((tag, mark))
+        if mark == "skip":
             self._skip += 1
+        if self._skip:
             return
         if tag == "title":
             self._in_title = True
-        elif tag == "article":
+        elif mark in ("article", "main"):
             self._flush()
-            self._article += 1
-        elif tag == "main":
-            self._flush()
-            self._main += 1
+            if mark == "article":
+                self._article += 1
+            else:
+                self._main += 1
         elif tag in _HEADS or tag in _BLOCKS:
             self._flush()
             if tag in _HEADS:
@@ -124,21 +148,28 @@ class _Page(HTMLParser):
                 self._kind = "li"
 
     def handle_endtag(self, tag):
-        if tag in _VOID:
+        if tag in _VOID or not any(t == tag for t, _ in self._stack):
             return
+        # Back to the element it closes: an unclosed <p> or <li> inside it
+        # closes with it, so a skipped part cannot swallow the rest.
+        while self._stack:
+            t, mark = self._stack.pop()
+            if mark == "skip":
+                self._skip -= 1
+            elif not self._skip and mark in ("article", "main"):
+                self._flush()
+                if mark == "article":
+                    self._article = max(0, self._article - 1)
+                else:
+                    self._main = max(0, self._main - 1)
+            if t == tag:
+                break
         if self._skip:
-            self._skip -= 1
             return
         if tag == "title":
             self._in_title = False
         elif tag in _HEADS or tag in _BLOCKS:
             self._flush()
-        elif tag == "article":
-            self._flush()
-            self._article = max(0, self._article - 1)
-        elif tag == "main":
-            self._flush()
-            self._main = max(0, self._main - 1)
 
     def handle_data(self, data):
         if self._skip:
@@ -328,13 +359,39 @@ def document(text: str, title: str = "") -> tuple[str, str, str]:
     return name, markdown(name, blocks, host), final
 
 
-def read(text: str, title: str, bearer: str) -> tuple[bool, dict]:
+def from_page(page: dict) -> tuple[str, str, str]:
+    """A page the phone read: (title, Markdown, its url). Its text is the
+    page as shown, one block a line; the lines kept are those `article`
+    keeps, and the description stands in when they say less."""
+    url = str(page.get("url") or "").strip()
+    if not url.startswith(("https://", "http://")):
+        raise ReadError("that is not a web link", 400)
+    host = (urlparse(url).hostname or "").removeprefix("www.")
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in str(page.get("text") or "").splitlines()]
+    blocks, seen = [], set()
+    for ln in lines:
+        ln = _CITES.sub("", ln)
+        if ln and ln not in seen and _keep("p", ln):
+            seen.add(ln)
+            blocks.append(("p", ln))
+    desc = re.sub(r"\s+", " ", str(page.get("description") or "")).strip()
+    if sum(len(t) for _, t in blocks) < _ARTICLE_MIN and len(desc) > sum(len(t) for _, t in blocks):
+        blocks = [("p", desc)]
+    if sum(len(t) for _, t in blocks) < _THIN:
+        raise ReadError(f"{host} showed nothing to read, even signed in", 422)
+    title = re.sub(r"\s+", " ", str(page.get("title") or "")).strip()[:200] or host
+    if blocks and blocks[0][1] == title:
+        blocks = blocks[1:]
+    return title, markdown(title, blocks, host), url
+
+
+def read(text: str, title: str, bearer: str, page: dict | None = None) -> tuple[bool, dict]:
     """Read the share aloud. Gated like the speech bar: it makes the phone talk."""
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
     try:
-        name, md, url = document(text, title)
+        name, md, url = from_page(page) if page else document(text, title)
     except ReadError as e:
         return False, {"error": str(e), "status": e.status}
     doc = _write(name, md)

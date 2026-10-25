@@ -2648,8 +2648,20 @@ follow-along at `GET /doc/read?path=<doc>`.
   nothing to read or a link that is not a page (an image, a PDF); 502 the
   fetch failed or the page answered an error.
 
+**A page the phone read** (26 Oct 2026, David: "how do we add signed in
+options for this?"). `POST /read {"page": {"url", "title", "text",
+"description"?}}` → the same answer. The app loads the link in a browser
+of its own that the user signed in to (the app's cookie store), on the
+phone's connection, and sends the text the page showed (`innerText` of its
+largest article, else its main part, else its body), not the page; the
+sign-in never leaves the phone and nothing is fetched here. The lines kept
+are those a fetched page keeps (§ above), the description stands in when
+they say less, and under 120 characters is 422 "<host> showed nothing to
+read, even signed in". 400 when `url` is not http(s). The body may be up
+to 2 MiB (`read_it.MAX_BODY`, `body_limit`), not the usual 64 KB.
+
 `GET /features` says `read: true` (§6.11a): the app offers Read it only
-then.
+then, and `read_page: true` when `/read` takes a page.
 
 Clients: S (`routes/share.tsx`, Read it; the reader opens on `doc`).
 
@@ -3615,6 +3627,7 @@ local look, never a network call:
 | `personas` | the personas repo is there (`MEDIA_PERSONAS_DIR`, default `~/agent-personas`) |
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
 | `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
+| `read_page` | always: `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.

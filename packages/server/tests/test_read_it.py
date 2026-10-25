@@ -127,3 +127,36 @@ def test_a_login_wall_is_not_read(reading, server, monkeypatch):
     status, got = _call(server, "POST", "/read", {"text": "https://www.facebook.com/share/p/y/"})
     assert status == 200 and "We walked to the bay" in Path(got["doc"]).read_text()
     assert "Explore the things" not in Path(got["doc"]).read_text()
+
+
+def test_a_page_the_phone_read(reading, server, monkeypatch):
+    # Signed in on the phone: its text comes in, nothing is fetched here.
+    monkeypatch.setattr(read_it, "fetch", lambda url: pytest.fail("fetched"))
+    text = "\n".join(["Facebook", "A walk", "We walked to the bay and back, and the tide was out all the way.",
+                      "Like", "Comment", "12 comments", "Then we had chips on the pier and watched the boats come in."])
+    page = {"url": "https://www.facebook.com/share/p/x/", "title": "A walk", "text": text}
+    status, got = _call(server, "POST", "/read", {"page": page})
+    assert status == 200, got
+    doc = Path(got["doc"]).read_text()
+    assert doc.startswith("# A walk\n\nFrom facebook.com.\n\nWe walked to the bay")
+    assert "chips on the pier" in doc and "Like" not in doc and "12 comments" not in doc
+    assert got["url"] == page["url"]
+    # A big page goes through (the /read body is not the usual 64 KB).
+    big = {**page, "text": text + "\n" + "\n".join(f"Line {i} of a long article goes on." for i in range(4000))}
+    assert _call(server, "POST", "/read", {"page": big})[0] == 200
+    assert _call(server, "POST", "/read", {"page": {**page, "text": "Log in"}})[0] == 422
+    assert _call(server, "POST", "/read", {"page": {**page, "url": "file:///etc/passwd"}})[0] == 400
+
+
+def test_roles_and_hidden_parts_are_left_out():
+    html = ('<div role="banner"><p>Menu words that go on a while here.</p></div>'
+            '<div role="article"><div><span>We walked to the bay and back, and the tide was out.</span></div>'
+            '<div role="button"><p>Like this post now please friend.</p></div>'
+            '<div aria-hidden="true"><p>Hidden words that should not be read.</p></div>'
+            '<p>Unclosed paragraph that is still part of the walk.<li>An unclosed item with words enough</div>'
+            + "<p>More of the walk, said at length so the article is long enough to count here.</p>" * 3)
+    _, blocks = read_it.article(html)
+    texts = [t for _, t in blocks]
+    assert texts[0] == "We walked to the bay and back, and the tide was out."
+    assert not any("Menu" in t or "Like this" in t or "Hidden" in t for t in texts)
+    assert any("More of the walk" in t for t in texts)

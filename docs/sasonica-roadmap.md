@@ -1773,6 +1773,17 @@ ahead.
     place kept, headings as chapters), and the app opens the reader on it
     for the follow-along. Not yet: PDFs, pages that need JavaScript to
     show their text, a list of past readings.
+    **Signed in (26 Oct 2026; David: "how do we add signed in options for
+    this?", he picked the phone fetching):** a link the server cannot read
+    (a sign-in page, 422/502) is read on the phone in a WebView of the
+    app's own (ReadItPlugin) and its text sent as `POST /read {page}`;
+    nothing there either and Sign in to <site> opens the site to sign in
+    once (ReadItBrowserActivity), after which that site is read on the
+    phone first. The sign-in is in the app-wide cookie store, shared with
+    the video viewer (friends-only Facebook videos); a Messenger bridge
+    sign-in expires Facebook's, and Read it asks again. Settings → Read it
+    sign-ins signs out. Unverified on a real Facebook post: which element
+    holds the post text in Facebook's mobile page.
 
 ## Loose ends
 

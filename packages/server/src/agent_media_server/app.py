@@ -483,6 +483,10 @@ def body_limit(path: str) -> int:
         return uploads.max_bytes()
     if path == "/contacts/import":
         from . import contacts
+    if path == "/read":
+        from . import read_it
+
+        return read_it.MAX_BODY        # a page the phone read, as its text
 
         return contacts.IMPORT_MAX
     # A Termux job's output (phone_jobs.py): up to 1 MiB each of out and
@@ -2367,9 +2371,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # aloud as a document is listened to (read_it.py).
         from . import read_it
 
-        body = _read_json(h) or {}
+        try:
+            n = min(int(h.headers.get("Content-Length", "0")), read_it.MAX_BODY)
+            body = json.loads(h.rfile.read(n) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            body = {}
+        page = body.get("page") if isinstance(body.get("page"), dict) else None
         ok, detail = read_it.read(str(body.get("text") or ""), str(body.get("title") or ""),
-                                  _bearer(h))
+                                  _bearer(h), page=page)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/upload":
         try:
