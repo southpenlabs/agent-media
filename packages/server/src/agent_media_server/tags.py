@@ -198,6 +198,10 @@ def person_tags(contact: str) -> list[str]:
     return _stored(_jsonmaps()[1], contact)
 
 
+#: Labels nearly every contact has: as tags they say nothing.
+_EVERYONES_LABELS = frozenset({"my contacts", "starred"})
+
+
 def _labels(ids: list[str]) -> dict[str, list[str]]:
     """Each contact's Google and phone labels, made tags; one query for all."""
     if not ids:
@@ -222,6 +226,8 @@ def _labels(ids: list[str]) -> dict[str, list[str]]:
             continue
         tags = []
         for lb in labels:
+            if str(lb).strip().lower() in _EVERYONES_LABELS:
+                continue
             t = clean(str(lb))
             if t and t not in tags:
                 tags.append(t)

@@ -285,9 +285,9 @@ def test_a_persons_tags_and_labels_reach_every_chat_with_them(server, shelf, sig
                           {"session": t2, "harness": "matrix", "contact": {"id": cid}},
                           {"session": SID, "harness": "claude"}])
     assert rows[0]["chat_tags"] == ["signal_group"] and rows[0]["person_tags"] == ["cousins"]
-    assert rows[0]["label_tags"] == ["Family", "My_Contacts"]
-    assert rows[0]["tags"] == ["signal_group", "cousins", "Family", "My_Contacts"]
-    assert rows[1]["tags"] == ["cousins", "Family", "My_Contacts"]   # the same person's other chat
+    assert rows[0]["label_tags"] == ["Family"]          # not "My Contacts": everyone has it
+    assert rows[0]["tags"] == ["signal_group", "cousins", "Family"]
+    assert rows[1]["tags"] == ["cousins", "Family"]     # the same person's other chat
     assert rows[2]["tags"] == [] and "person_tags" not in rows[2]
     assert {c["tag"] for c in tags.counts()} >= {"cousins", "signal_group"}
 
