@@ -43,6 +43,8 @@ TIMEOUT_S = 20.0
 MAX_REDIRECTS = 5
 #: Under this many characters the article is taken from the whole page.
 _ARTICLE_MIN = 200
+#: Less than this to read, and the page is said to have nothing.
+_THIN = 120
 _UAS = ("Sasonica/1.0 (reading a shared link aloud; https://sasonica.com)",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/130.0 Safari/537.36")
@@ -74,6 +76,7 @@ class _Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title = ""
         self.og_title = ""
+        self.description = ""
         self.blocks: list[tuple[str, str, bool, bool]] = []  # (kind, text, in article, in main)
         self._skip = 0
         self._in_title = False
@@ -96,6 +99,9 @@ class _Page(HTMLParser):
                 a = dict(attrs)
                 if (a.get("property") or a.get("name")) in ("og:title", "twitter:title") and not self.og_title:
                     self.og_title = (a.get("content") or "").strip()
+                elif (a.get("property") or a.get("name")) in ("og:description", "description") \
+                        and len(a.get("content") or "") > len(self.description):
+                    self.description = (a.get("content") or "").strip()
             elif tag == "br":
                 self._buf.append(" ")
             return
@@ -170,6 +176,12 @@ def article(html: str) -> tuple[str, list[tuple[str, str]]]:
         got = [(k, t) for k, t, *where in p.blocks if pick((k, t, *where)) and _keep(k, t)]
         if sum(len(t) for k, t in got if k not in _HEADS) >= _ARTICLE_MIN:
             break
+    # A page that shows little without a sign-in (a Facebook post) often
+    # still says more in its description: that, then, not its login screen.
+    body = sum(len(t) for k, t in got if k not in _HEADS)
+    desc = re.sub(r"\s+", " ", unescape(p.description)).strip()
+    if body < _ARTICLE_MIN and len(desc) > body:
+        got = [("p", desc)]
     # The page's own h1 repeats the title: the document's heading says it.
     if got and got[0][0] == "h1" and (not title or got[0][1].lower() in title.lower()
                                        or title.lower() in got[0][1].lower()):
@@ -308,8 +320,10 @@ def document(text: str, title: str = "") -> tuple[str, str, str]:
     if ctype and "html" not in ctype and "xml" not in ctype:
         raise ReadError(f"a {ctype} link is not something to read", 422)
     got_title, blocks = article(page)
-    if not any(k not in _HEADS for k, _ in blocks):
-        raise ReadError("nothing on that page to read", 422)
+    if sum(len(t) for k, t in blocks if k not in _HEADS) < _THIN:
+        # A login wall (Facebook, Instagram) or a page drawn by script.
+        raise ReadError(f"{host} sent nothing to read, maybe only a sign-in page; "
+                        "copy the text and share that instead", 422)
     name = got_title or (title or "").strip() or host
     return name, markdown(name, blocks, host), final
 

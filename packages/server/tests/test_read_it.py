@@ -107,3 +107,23 @@ def test_the_title_of_words():
     long = "This first line runs on far too long to be anybody's subject line, so it is not one at all."
     assert read_it.document(long + "\nMore.")[0] == "Shared text"
     assert read_it.document("Just one line.")[0] == "Shared text"
+
+
+LOGIN_WALL = """<html><head><title>Facebook</title><meta property="og:title" content="Facebook">
+</head><body><p>Explore the things you love.</p><a>Contact Uploading &amp; Non-Users</a></body></html>"""
+
+
+def test_a_login_wall_is_not_read(reading, server, monkeypatch):
+    # Facebook's answer to a signed-out fetch (26 Oct 2026: "it only played the
+    # metadata and not the page itself"): said so, nothing written or played.
+    monkeypatch.setattr(read_it, "fetch", lambda url: (url, "text/html", LOGIN_WALL))
+    status, got = _call(server, "POST", "/read", {"text": "https://www.facebook.com/share/p/x/"})
+    assert status == 422 and "sign-in" in got["error"] and not reading.calls
+    # A public post's words are in its description: those are read.
+    post = LOGIN_WALL.replace('<meta property="og:title" content="Facebook">',
+                              '<meta property="og:title" content="A walk">'
+                              '<meta property="og:description" content="' + "We walked to the bay and back. " * 6 + '">')
+    monkeypatch.setattr(read_it, "fetch", lambda url: (url, "text/html", post))
+    status, got = _call(server, "POST", "/read", {"text": "https://www.facebook.com/share/p/y/"})
+    assert status == 200 and "We walked to the bay" in Path(got["doc"]).read_text()
+    assert "Explore the things" not in Path(got["doc"]).read_text()
