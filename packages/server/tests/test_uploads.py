@@ -139,3 +139,83 @@ def test_nothing_outside_the_shared_folder(server, shared, tmp_path):
         status, _, body = _get(server, "/upload?path=" + quote(path))
         assert status == 404, path
         assert json.loads(body)["ok"] is False
+
+
+# --- Range, and a signed link for a <video> (David, 26 Oct 2026: video in the app) ---
+
+def _get_h(addr, path, headers=None):
+    conn = http.client.HTTPConnection(*addr, timeout=5)
+    conn.request("GET", path, headers=headers or {})
+    res = conn.getresponse()
+    body = res.read()
+    out = res.status, dict(res.getheaders()), body
+    conn.close()
+    return out
+
+
+@pytest.fixture()
+def video(shared, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))      # the signing key, never the real one
+    d = shared / "2026-10-26"
+    d.mkdir(parents=True)
+    f = d / "clip.mp4"
+    f.write_bytes(bytes(range(256)) * 40)                              # 10240 bytes
+    return f
+
+
+def test_a_range_is_answered_206_with_just_those_bytes(server, video):
+    from urllib.parse import quote
+
+    data = video.read_bytes()
+    url = f"/upload?path={quote(str(video))}"
+    good = {"Authorization": "Bearer good"}
+    st, h, body = _get_h(server, url, good)
+    assert st == 200 and body == data and h["Accept-Ranges"] == "bytes" and h["Content-Type"] == "video/mp4"
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=100-199"})
+    assert st == 206 and body == data[100:200] and h["Content-Range"] == "bytes 100-199/10240" and h["Content-Length"] == "100"
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=10000-"})
+    assert st == 206 and body == data[10000:] and h["Content-Range"] == "bytes 10000-10239/10240"
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=-240"})
+    assert st == 206 and body == data[-240:]
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=0-99999"})
+    assert st == 206 and body == data and h["Content-Range"] == "bytes 0-10239/10240"
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=20000-"})
+    assert st == 416 and h["Content-Range"] == "bytes */10240" and body == b""
+    st, h, body = _get_h(server, url, {**good, "Range": "bytes=0-1,5-9"})        # several: the whole file
+    assert st == 200 and body == data
+
+
+@pytest.mark.parametrize("name,ctype", [("a.mp4", "video/mp4"), ("a.webm", "video/webm"),
+                                        ("a.mov", "video/quicktime"), ("a.m4v", "video/mp4")])
+def test_video_types(shared, name, ctype):
+    d = shared / "2026-10-26"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_bytes(b"x")
+    assert uploads.find(str(d / name), "good")[1]["type"] == ctype
+
+
+def test_a_signed_link_opens_that_file_with_no_bearer_and_seeks(server, video):
+    data = video.read_bytes()
+    st, got = _post(server, "/upload/link", json.dumps({"path": str(video)}).encode())
+    assert st == 200 and got["url"].startswith("/upload?") and got["type"] == "video/mp4", got
+    st, h, body = _get_h(server, got["url"], {"Range": "bytes=0-9"})
+    assert st == 206 and body == data[:10]
+    # a link is for its own file only, unaltered, and not after it expires
+    other = video.parent / "other.mp4"
+    other.write_bytes(b"secret")
+    from urllib.parse import parse_qs, quote, urlparse
+
+    q = parse_qs(urlparse(got["url"]).query)
+    forged = f"/upload?path={quote(str(other))}&exp={q['exp'][0]}&sig={q['sig'][0]}"
+    assert _get_h(server, forged)[0] == 403
+    assert _get_h(server, got["url"].replace(q["sig"][0], "0" * 40))[0] == 403
+    assert _get_h(server, f"/upload?path={quote(str(video))}")[0] == 401           # no bearer, no link
+    assert uploads.signed_ok(str(video), q["exp"][0], q["sig"][0]) is True
+    assert uploads.signed_ok(str(video), q["exp"][0], q["sig"][0], now=int(q["exp"][0]) + 1) is False
+
+
+def test_a_link_needs_a_bearer_and_a_shared_file(server, video, tmp_path):
+    assert _post(server, "/upload/link", json.dumps({"path": str(video)}).encode(), bearer="bad")[0] == 401
+    outside = tmp_path / "elsewhere.mp4"
+    outside.write_bytes(b"x")
+    assert _post(server, "/upload/link", json.dumps({"path": str(outside)}).encode())[0] == 404

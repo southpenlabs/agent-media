@@ -363,7 +363,7 @@ CORS_PATHS = frozenset({
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account",
-    "/share", "/read", "/upload", "/dashboard", "/features",
+    "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
     "/sessions/events", "/search", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
@@ -557,19 +557,60 @@ def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str) -> None
     h.wfile.write(body)
 
 
+def _byte_range(header: str | None, size: int) -> tuple[int, int] | None | bool:
+    """`Range: bytes=…` → `(first, last)` inclusive, None for no (or an
+    unusable) range — the whole file — and False for one past the end (416).
+    One range only: a list of ranges is answered with the whole file."""
+    if not header or not header.strip().lower().startswith("bytes=") or "," in header:
+        return None
+    spec = header.split("=", 1)[1].strip()
+    first, _, last = spec.partition("-")
+    try:
+        if first == "":                      # the last N bytes
+            n = int(last)
+            if n <= 0:
+                return False
+            return (max(0, size - n), size - 1) if size else False
+        a = int(first)
+        b = int(last) if last else size - 1
+    except ValueError:
+        return None
+    if a >= size or a < 0:
+        return False
+    if b < a:
+        return None
+    return a, min(b, size - 1)
+
+
 def _send_file(h: BaseHTTPRequestHandler, file, size: int, ctype: str) -> None:
     """A file as the answer, read and written a chunk at a time — a shared
     video is not held in memory. It never changes once kept, so the caller
-    may keep it for a day; `private`, as it came with a bearer."""
-    h.send_response(200)
+    may keep it for a day; `private`, as it came with a bearer. A `Range`
+    (one, in bytes) is answered 206 with just those bytes, so a video can
+    seek; one past the end is 416 (David, 26 Oct 2026: video in the app)."""
+    rng = _byte_range(h.headers.get("Range"), size)
+    if rng is False:
+        h.send_response(416)
+        h.send_header("Content-Range", f"bytes */{size}")
+        h.send_header("Content-Length", "0")
+        _cors(h)
+        h.end_headers()
+        return
+    start, end = rng if rng else (0, size - 1)
+    length = max(0, end - start + 1)
+    h.send_response(206 if rng else 200)
     h.send_header("Content-Type", ctype)
-    h.send_header("Content-Length", str(size))
+    h.send_header("Content-Length", str(length))
+    h.send_header("Accept-Ranges", "bytes")
+    if rng:
+        h.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     h.send_header("Cache-Control", "private, max-age=86400")
     h.send_header("X-Content-Type-Options", "nosniff")
     _cors(h)
     h.end_headers()
-    left = size
+    left = length
     with open(file, "rb") as f:
+        f.seek(start)
         while left > 0:
             chunk = f.read(min(uploads.CHUNK, left))
             if not chunk:
@@ -1712,7 +1753,14 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/upload":
         # A file shared earlier, back as itself: the app's chip draws a
         # photo from it. Only under the upload root (uploads.find).
-        ok, detail = uploads.find((parse_qs(query).get("path") or [""])[0], _bearer(h))
+        # Or by a signed link (POST /upload/link): a <video> sends no bearer.
+        qs = parse_qs(query)
+        path_q = (qs.get("path") or [""])[0]
+        signed = bool(qs.get("sig")) and uploads.signed_ok(path_q, (qs.get("exp") or [""])[0], (qs.get("sig") or [""])[0])
+        if qs.get("sig") and not signed:
+            _json(h, 403, {"ok": False, "error": "that link is not good (or no longer)"})
+            return True
+        ok, detail = uploads.find(path_q, _bearer(h), signed=signed)
         if not ok:
             _json(h, detail.pop("status", 404), {"ok": False, **detail})
             return True
@@ -2382,6 +2430,17 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = read_it.read(str(body.get("text") or ""), str(body.get("title") or ""),
                                   _bearer(h), page=page)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/link/preview":
+        # A title for a YouTube or Facebook video link's card (link_preview.py).
+        from . import link_preview
+
+        ok, detail = link_preview.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/upload/link":
+        # A link to a shared file that needs no bearer, for a <video> (uploads.link).
+        body = _read_json(h) or {}
+        ok, detail = uploads.link(str(body.get("path") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
     elif path == "/upload":
         try:
             length = int(h.headers.get("Content-Length", "0"))

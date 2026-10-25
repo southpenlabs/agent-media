@@ -106,13 +106,61 @@ def save(body: BinaryIO, length: int, name: str, bearer: str,
     return True, {"path": str(final), "name": final.name, "size": length}
 
 
-def find(path: str, bearer: str) -> tuple[bool, dict]:
+#: How long a signed link to a shared file lasts (`link`): a video watched in one sitting.
+LINK_S = 6 * 3600
+
+
+def _link_sig(path: str, exp: int) -> str:
+    """The signature of a link to `path` until `exp`: an HMAC under the host's
+    signing key (agent_media_core.clip_sign), never a device's own token."""
+    import hashlib
+    import hmac
+
+    from agent_media_core import clip_sign
+
+    return hmac.new(clip_sign._key(), f"upload:{path}:{exp}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def link(path: str, bearer: str, now: float | None = None) -> tuple[bool, dict]:
+    """`POST /upload/link {path}` → a link to a shared file that opens it with
+    no bearer, for a `<video>` (it cannot send one) to stream and seek, good
+    for LINK_S. Only a file `GET /upload` would give the caller."""
+    ok, detail = find(path, bearer)
+    if not ok:
+        return False, detail
+    import time
+    from urllib.parse import urlencode
+
+    real = str(detail["file"])
+    exp = int((now if now is not None else time.time()) + LINK_S)
+    return True, {"url": "/upload?" + urlencode({"path": real, "exp": exp, "sig": _link_sig(real, exp)}),
+                  "expires": exp, "type": detail["type"]}
+
+
+def signed_ok(path: str, exp: str, sig: str, now: float | None = None) -> bool:
+    """A link `link` made for this path, not yet expired."""
+    import hmac
+    import time
+
+    try:
+        when = int(exp)
+        real = str(Path(os.path.expanduser(path)).resolve())
+    except (ValueError, OSError, RuntimeError):
+        return False
+    if when < (now if now is not None else time.time()) or not sig:
+        return False
+    return hmac.compare_digest(_link_sig(real, when), sig)
+
+
+def find(path: str, bearer: str, signed: bool = False) -> tuple[bool, dict]:
     """The shared file at `path`, if it is one: its resolved path, size and
     Content-Type. Anything outside the upload root, a folder, a `.part`
-    still being written, or a file that is not there is the same 404."""
-    user, err = auth.gate(bearer)
-    if not user:
-        return False, err
+    still being written, or a file that is not there is the same 404.
+    `signed`: a link `link` made was checked instead of a bearer."""
+    if not signed:
+        user, err = auth.gate(bearer)
+        if not user:
+            return False, err
     missing = {"error": "no such shared file", "status": 404}
     if not path or "\x00" in path:
         return False, missing

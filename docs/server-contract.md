@@ -4426,6 +4426,42 @@ latest message: **Cancel** takes it back; **Edit** takes it back and puts its
 words in the reply box, to be sent again changed. A correction, not a rewind
 (David, 27 Sep 2026): the original stays in the transcript, struck through.
 
+- **Range** (26 Oct 2026, video in the app): one `Range: bytes=…` (a span,
+  `N-`, or `-N`) is answered `206 Partial Content` with `Content-Range` and
+  just those bytes; past the end is `416` with `Content-Range: bytes */size`;
+  several ranges get the whole file. Every answer says `Accept-Ranges: bytes`,
+  so a video can seek. Videos come back as `video/mp4` (`.mp4`, `.m4v`),
+  `video/webm`, `video/quicktime` (`.mov`).
+- **A signed link instead of a bearer** (a `<video>` cannot send one):
+  `GET /upload?path=…&exp=<unix time>&sig=…`, as made by `POST /upload/link`
+  below, opens that one file until `exp`; a wrong, altered or expired link is
+  403.
+
+#### `POST /link/preview {"url"}` — a video link's card (26 Oct 2026)
+
+For a YouTube or Facebook video link in a message, which the app shows as a
+card that plays in its viewer (David: "let's include YouTube", "Facebook
+too"). Gated. `→ {"ok": true, "url", "title", "image", "site": "YouTube" |
+"Facebook"}`. YouTube's title and picture come from its oEmbed; a Facebook
+page is fetched as Facebook's own previewer (`facebookexternalhit`) for its
+`og:title`, `og:image` and `og:url`, and a short link (fb.watch, `/share/v/`,
+`/share/r/`) comes back resolved to the video's own address, which the embed
+player needs. Through read_it's safe fetch (public addresses only, at every
+redirect, its deadline), kept a day. A fetch that fails still answers 200 with the
+link and no title, so a card always draws. Any other site is a 400. This
+route is the server asking, not the phone: the phone loads nothing from
+Facebook until a card is tapped, and from YouTube only the card's thumbnail
+(i.ytimg.com, once the card is on screen) before a tap. `link_preview.py`.
+
+#### `POST /upload/link {"path"}` — a link for a video (26 Oct 2026)
+
+`→ {"ok": true, "url": "/upload?path=…&exp=…&sig=…", "expires": <unix time>,
+"type": "video/mp4"}`, gated as `GET /upload`, for any file it would give the
+caller. The signature is an HMAC of the path and expiry under the host's own
+signing key (`clip_sign`), never the device's token; the link lasts 6 hours.
+The app's video chip and viewer use it as the `<video>` source (relative to
+the server's base). 404 as `GET /upload`.
+
 #### `POST /session/retract {"session", "id"?, "text"?}`
 
 `id` is the message's (a transcript uuid); absent for a message the app has
