@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from typing import Optional
 
 
 #: Blocks the harness writes into a user prompt that the listener never said:
@@ -436,6 +437,62 @@ def strip_shared_files(text: str) -> str:
     return _SHARED_FILE_RE.sub("", text).strip()
 
 
+#: `[[sound: done]]` / `[[sound: fail]]`: the agent marking its reply as a
+#: long job finished, or as something it was asked to do failing, so its
+#: earcon plays before the voice (earcons.py; David, 25 Oct 2026). Like the
+#: canvas markers, an instruction, never words: stripped from speech here
+#: and from the thread (server transcript.display_text).
+_SOUND_RE = re.compile(r"\[\[\s*sound\s*:\s*([a-z-]+)\s*\]\]", re.IGNORECASE)
+_SOUND_LINE_RE = re.compile(r"(?m)^[ \t]*\[\[\s*sound\s*:\s*[a-z-]+\s*\]\][ \t]*(?:\n|$)",
+                            re.IGNORECASE)
+_SOUND_INLINE_RE = re.compile(r"[ \t]*\[\[\s*sound\s*:\s*[a-z-]+\s*\]\]", re.IGNORECASE)
+
+
+def extract_sound(text: str) -> tuple[str, Optional[str]]:
+    """(`text` without its `[[sound:]]` markers, the first one's sound or None).
+
+    Only the sounds a reply may ask for (earcons.MARKED) are returned; any
+    marker is removed either way. A marker alone on its line takes the line
+    with it; one after words takes the space before it."""
+    if not text or "[[" not in text:
+        return text, None
+    names = [m.group(1).lower() for m in _SOUND_RE.finditer(text)]
+    if not names:
+        return text, None
+    found = next((n for n in names if n in ("done", "fail")), None)
+    out = _SOUND_LINE_RE.sub("", text)
+    out = _SOUND_INLINE_RE.sub("", out)
+    return out.strip(), found
+
+
+_QUOTE_BLOCK_LINE = re.compile(r"^[ \t]{0,3}>[ \t]?(.*)$")
+
+
+def quoted_passages(raw: str) -> list[str]:
+    """The words of each markdown blockquote in `raw`, as they are spoken.
+
+    Someone else's words quoted in a reply (a message, an email) are read
+    with a small room around them (submit's quote effect; David, 25 Oct
+    2026). The quote's markers are gone by the time the reply is split into
+    sentences, so the passages are found here, in the markdown, and the
+    sentences matched against them."""
+    if not raw or ">" not in raw:
+        return []
+    out: list[str] = []
+    block: list[str] = []
+    for line in raw.splitlines() + [""]:
+        m = _QUOTE_BLOCK_LINE.match(line)
+        if m:
+            block.append(m.group(1))
+            continue
+        if block:
+            words = strip_markdown("\n".join(block))
+            if words:
+                out.append(words)
+            block = []
+    return out
+
+
 def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -> str:
     """Strip enough markdown that TTS doesn't read backticks / asterisks /
     fence markers aloud, and replace fenced code blocks with a spoken
@@ -460,6 +517,8 @@ def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -
     if not text:
         return ""
     out = _SHARED_FILE_RE.sub("", text) if "Shared file: " in text else text
+    if "[[" in out:
+        out = extract_sound(out)[0]
     out = suppress_code_blocks(out, describe, paragraphs)
     out = suppress_tables(out, describe, paragraphs)
     if paragraphs:

@@ -424,6 +424,34 @@ def clip_prosody(path: "str | Path") -> tuple[str, str]:
     return _pct(got.get("rate")), _pct(got.get("volume"))
 
 
+#: Beside a clip, an effect it is said with: `room`, someone else's words
+#: quoted in a reply (a markdown blockquote) read in a small room (David,
+#: 25 Oct 2026). The phone adds it to the clip it renders (`&fx=room`); a
+#: clip rendered here gets it from ffmpeg (render.engines.room).
+FX_SUFFIX = ".fx"
+FX_NAMES = ("room",)
+
+
+def quote_fx_enabled() -> bool:
+    """MEDIA_QUOTE_FX=0 turns the quoted words' room off."""
+    return (os.environ.get("MEDIA_QUOTE_FX") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def set_clip_fx(path: "str | Path", fx: str) -> None:
+    """Have `path` said with effect `fx` (one of FX_NAMES; raises OSError)."""
+    if fx in FX_NAMES:
+        Path(path).with_suffix(FX_SUFFIX).write_text(fx, encoding="utf-8")
+
+
+def clip_fx(path: "str | Path") -> str:
+    """The effect `set_clip_fx` gave this clip, or ""."""
+    try:
+        fx = Path(path).with_suffix(FX_SUFFIX).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return fx if fx in FX_NAMES else ""
+
+
 def rate_factor(rate: str) -> float:
     """How much faster than usual `rate` ("-15%") says it: 0.85."""
     try:
@@ -455,6 +483,9 @@ def tts_uri(path: "str | Path", voice: Optional[str] = None) -> str:
         uri += f"&rate={quote(rate, safe='')}"
     if volume:
         uri += f"&volume={quote(volume, safe='')}"
+    fx = clip_fx(p)
+    if fx:
+        uri += f"&fx={fx}"
     if voice:
         uri += f"&voice={quote(voice, safe='')}"
         if voice.startswith("edge:"):

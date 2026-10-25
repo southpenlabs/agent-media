@@ -1,6 +1,6 @@
 """Earcons: short non-speech tones around the speech lane.
 
-Four, and each says one thing the voice cannot say without words:
+Seven, and each says one thing the voice cannot say without words:
 
 - **cut** — a soft tick when a reply is ended on purpose before its natural
   end (a per-session stop, a question answered, the listener replying, a
@@ -24,6 +24,17 @@ Four, and each says one thing the voice cannot say without words:
   words stay on top (David, 25 Oct 2026: "play several times in the
   background while it's being spoken … at a lower volume"). Never with a
   reply.
+- **done** — two bells, the second a fourth up, before a reply the agent
+  marked `[[sound: done]]`: a long job it was asked for has finished.
+- **fail** — one note sliding down before a reply marked `[[sound: fail]]`:
+  what it was asked to do did not work. (The markers are stripped from the
+  words everywhere; intake/_text.py `extract_sound`.)
+- **question** — one note sliding up before a question card is read out
+  (an AskUserQuestion: the event's ``metadata["ask"]``).
+
+  David chose these three on 25 Oct 2026 ("more sound effects and voice
+  alterations where they make sense") from three of each, made by the same
+  recipes as below: "finish 2", "fail 2" and "question 2".
 
 Synthesised here, stdlib only (``wave`` + ``math`` + ``array``): the repo has
 no audio assets and a binary blob would be one more thing a fresh install has
@@ -39,7 +50,8 @@ index IS its sentence index — the highlight, the follow-along clock and
 next/previous all read it — and a tone at index 0 would shift every one.
 
 Switches: ``MEDIA_EARCONS=0`` turns them all off, and ``MEDIA_EARCON_CUT`` /
-``MEDIA_EARCON_INTERRUPT`` / ``MEDIA_EARCON_HELD`` / ``MEDIA_EARCON_THINK`` = 0
+``MEDIA_EARCON_INTERRUPT`` / ``MEDIA_EARCON_HELD`` / ``MEDIA_EARCON_THINK`` /
+``MEDIA_EARCON_DONE`` / ``MEDIA_EARCON_FAIL`` / ``MEDIA_EARCON_QUESTION`` = 0
 one at a time. On by default.
 
 Nothing here raises. A tone is a courtesy; a reply that fails because its
@@ -68,11 +80,17 @@ PEAK_DBFS = -12.0
 #: voice. -27 with the chord an octave down was not heard at all on the
 #: phone's speaker, alone or under the voice (David, 25 Oct 2026); he chose
 #: this level, an octave up, from four tried.
-_PEAK_DBFS = {"think": -18.0}
+#: done / fail / question at the level David heard them at when he chose
+#: them (-14, the samples' own), in the phone speaker's range: the `think`
+#: lesson was that low and quiet is not heard there at all.
+_PEAK_DBFS = {"think": -18.0, "done": -14.0, "fail": -14.0, "question": -14.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 4
+VERSION = 5
 
-NAMES = ("cut", "interrupt", "held", "think")
+NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question")
+
+#: The tones a reply can ask for with a `[[sound: <name>]]` marker.
+MARKED = ("done", "fail")
 
 
 # ---- switches ---------------------------------------------------------------
@@ -114,6 +132,46 @@ def _note(freq: float, dur_s: float, *, attack_s: float, release_s: float,
             env *= math.exp(-decay * t)
         out.append(env * math.sin(2 * math.pi * freq * t))
     return out
+
+
+def _env(n: int, attack_s: float, release_s: float) -> list[float]:
+    """Raised-cosine attack and release over `n` samples, 1.0 between."""
+    na, nr = max(1, int(RATE * attack_s)), max(1, int(RATE * release_s))
+    return [(0.5 - 0.5 * math.cos(math.pi * i / na)) if i < na
+            else (0.5 - 0.5 * math.cos(math.pi * (n - 1 - i) / nr)) if i >= n - nr
+            else 1.0 for i in range(n)]
+
+
+def _bell(freq: float, dur_s: float, decay: float,
+          partials=((1.0, 1.0), (2.0, 0.4), (3.01, 0.15))) -> list[float]:
+    """A struck bell: a few partials (multiple, share) under one decay."""
+    n = int(RATE * dur_s)
+    e = _env(n, 0.004, 0.05)
+    return [e[i] * math.exp(-decay * i / RATE)
+            * sum(a * math.sin(2 * math.pi * freq * m * i / RATE) for m, a in partials)
+            for i in range(n)]
+
+
+def _glide(f1: float, f2: float, dur_s: float, *, attack_s: float,
+           release_s: float, decay: float) -> list[float]:
+    """One sine sliding from `f1` to `f2` (the phase carried, so no jump)."""
+    n = int(RATE * dur_s)
+    e = _env(n, attack_s, release_s)
+    out, ph = [], 0.0
+    for i in range(n):
+        ph += 2 * math.pi * (f1 + (f2 - f1) * i / n) / RATE
+        out.append(e[i] * math.exp(-decay * i / RATE) * math.sin(ph))
+    return out
+
+
+def _mix(dst: list[float], src: list[float], at_s: float) -> list[float]:
+    """`src` added into `dst` from `at_s` on, `dst` grown to fit."""
+    o = int(RATE * at_s)
+    if len(dst) < o + len(src):
+        dst.extend([0.0] * (o + len(src) - len(dst)))
+    for i, v in enumerate(src):
+        dst[o + i] += v
+    return dst
 
 
 def _silence(dur_s: float) -> list[float]:
@@ -160,6 +218,15 @@ def _recipe(name: str) -> list[float]:
                 / (1 + 0.3 * k)
                 for k, f in enumerate(chord)))
         body += _silence(1.0)
+    elif name == "done":
+        # Two bells, G6 then C7 0.18 s later, ringing out together.
+        body = _mix(_bell(1568.0, 1.6, 2.5), _bell(2093.0, 1.6, 2.5), 0.18)
+    elif name == "fail":
+        # One note sliding down, 660 to 520 Hz: "that did not work".
+        body = _glide(660.0, 520.0, 0.45, attack_s=0.01, release_s=0.2, decay=3.0)
+    elif name == "question":
+        # One note sliding up, 880 to 1320 Hz: a voice rising at a question.
+        body = _glide(880.0, 1320.0, 0.28, attack_s=0.01, release_s=0.12, decay=2.0)
     else:
         raise ValueError(f"no earcon called {name!r}")
     return pad + body + pad

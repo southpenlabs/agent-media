@@ -372,7 +372,9 @@ def test_a_question_barging_over_a_live_reply_opens_with_the_interrupt():
 def test_a_question_into_silence_needs_no_warning():
     state, sink = StateStore(), _Sink()
     _say("Which one?", A, state, sink, kind="notif", ask=True)
-    assert len(sink.clips) == 1 and sink.cues == []
+    # Nothing to warn of, so no `interrupt`; the question's own tone, which
+    # every question card opens with (25 Oct 2026).
+    assert len(sink.clips) == 1 and sink.cues == ["question"]
 
 
 def test_a_question_while_another_thread_speaks_is_announced():
@@ -388,7 +390,7 @@ def test_its_own_lead_in_is_not_an_interruption():
     state.set_now_playing("speech", uri="/x.mp3", started_at=time.time(),
                           target="local", extras={"source_session": A})
     _say("Which one?", A, state, sink, kind="notif", ask=True)
-    assert sink.cues == []
+    assert sink.cues == ["question"]      # no `interrupt`; its own tone only
 
 
 def test_the_interrupt_switch(monkeypatch):

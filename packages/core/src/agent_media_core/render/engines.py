@@ -185,6 +185,34 @@ def _soften(outfile: Path, prosody: tuple[str, str]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+#: The quoted words' small room (David chose it, 25 Oct 2026, from four
+#: tried): one early echo and the low end thinned.
+ROOM_FILTER = "aecho=0.8:0.5:40:0.25,highpass=f=200"
+
+
+def room(outfile: Path) -> bool:
+    """Put a rendered clip in a small room with ffmpeg, in place. True if done.
+
+    Best effort, like _soften: without ffmpeg, or if it fails, the clip stays
+    as it was."""
+    outfile = Path(outfile)
+    if not shutil.which("ffmpeg"):
+        return False
+    tmp = outfile.with_name(f"{outfile.stem}.room{outfile.suffix}")
+    try:
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(outfile),
+                            "-filter:a", ROOM_FILTER, str(tmp)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            tmp.replace(outfile)
+            return True
+    except OSError:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+    return False
+
+
 # The only engine bundled with core. Everything else arrives via entry points;
 # `extensions.all_engine_names()` reports built-ins + installed plugins.
 KNOWN_ENGINES = ("edge",)

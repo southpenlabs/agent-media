@@ -12,6 +12,7 @@ land here. The shape is intentionally narrow: take a populated
 from __future__ import annotations
 
 import concurrent.futures
+import dataclasses
 import hashlib
 from functools import partial
 import json
@@ -118,6 +119,23 @@ def _resolve_voice(event: Event, engine: str) -> Optional[str]:
 def _ext_for(engine: str) -> str:
     """qwen / realtime / kokoro emit WAV, others MP3."""
     return "wav" if engine in ("qwen", "realtime", "kokoro") else "mp3"
+
+
+def _norm_ws(s: str) -> str:
+    return " ".join((s or "").split())
+
+
+def _quoted_sentences(passages) -> set[str]:
+    """The sentences of the reply's quoted passages (hook `quoted_passages`),
+    whitespace-normalised: a reply sentence in this set is quoted words."""
+    out: set[str] = set()
+    if not isinstance(passages, list):
+        return out
+    for p in passages:
+        if isinstance(p, str) and p.strip():
+            out.update(_norm_ws(x) for x in _split_sentences_with_paragraphs(p)[0])
+    out.discard("")
+    return out
 
 
 def _split_sentences_with_paragraphs(text: str) -> tuple[list[str], list[int]]:
@@ -2878,6 +2896,9 @@ def render_device_clips(clip_uris: list) -> tuple[list, list[float]]:
             if not ok:
                 log.warning("replay: rendering %s failed: %s", src.name, err)
                 continue
+            if device_voice.clip_fx(src) == "room":
+                from ..render.engines import room
+                room(audio)
         out.append(str(audio))
         durs.append(_clip_duration(audio))
     return out, durs
@@ -4034,6 +4055,17 @@ def submit_event(event: Event,
     Blocks until all clips finish. Callers that need fire-and-forget
     should run this in a thread.
     """
+    if event.text and "[[" in event.text:
+        # A `[[sound: done]]` / `[[sound: fail]]` marker from any source (the
+        # Claude hook takes it out itself): never words, and its earcon is
+        # played before the voice.
+        from ._text import extract_sound
+        clean, sound = extract_sound(event.text)
+        if clean != event.text:
+            meta = dict(event.metadata or {})
+            if sound and not meta.get("sound"):
+                meta["sound"] = sound
+            event = dataclasses.replace(event, text=clean, metadata=meta)
     # One reply makes dozens of calls to the same few players — the broker
     # claim, the music and book probes, a snapshot every tick of the follow
     # loop — and over the phone's link each fresh connect is a whole round
@@ -4187,6 +4219,27 @@ def _submit_event(event: Event,
         renderer = partial(device_voice.write_clip,
                            pinned_voice=voice if voice and voice.startswith("edge:") else None,
                            prosody=prosody)
+    # Someone else's words quoted in the reply (its markdown blockquotes,
+    # carried as metadata["quoted"] since the markers are gone from `text`)
+    # are said in a small room (David, 25 Oct 2026; MEDIA_QUOTE_FX=0 off):
+    # the phone adds it to a clip it renders (a `.fx` sidecar, `&fx=room`),
+    # a clip rendered here gets it from ffmpeg.
+    _quoted = _quoted_sentences((event.metadata or {}).get("quoted"))
+    if _quoted and device_voice.quote_fx_enabled():
+        _plain_renderer = renderer
+
+        def renderer(sentence, outfile, **kw):  # noqa: F811 — the same, with the room
+            ok, err = _plain_renderer(sentence, outfile, **kw)
+            if ok and _norm_ws(sentence) in _quoted:
+                try:
+                    if device_voice.is_clip(outfile):
+                        device_voice.set_clip_fx(outfile, "room")
+                    else:
+                        from ..render.engines import room
+                        room(Path(outfile))
+                except OSError as e:
+                    log.warning("intake: room for %s failed: %s", Path(outfile).name, e)
+            return ok, err
 
     audio_dir = _audio_dir()
     # Per-submission unique: second-resolution time is NOT enough — two
@@ -4208,6 +4261,17 @@ def _submit_event(event: Event,
     # closed — `goto-pane` falls back to `claude --resume <session>`.
     source_session = _source_session(event.metadata)
     source_ask = bool((event.metadata or {}).get("ask"))
+    # A tone just before the voice (earcons.py): `question` before a question
+    # card is read out, `done` / `fail` before a reply its agent marked so.
+    # Played on the player, waited out, before anything of the reply loads.
+    from .. import earcons as _earcons
+    cue_before: Optional[str] = None
+    if not thinking:
+        _marked = (event.metadata or {}).get("sound")
+        cue_before = ("question" if source_ask
+                      else _marked if _marked in _earcons.MARKED else None)
+        if cue_before and not _earcons.enabled(cue_before):
+            cue_before = None
     order_session = _order_session(source_pane, source_session)
     # Claim this reply's place in its session's speech queue *now*, before the
     # renders below: a shorter sibling submitted a moment later would otherwise
@@ -4920,7 +4984,8 @@ def _submit_event(event: Event,
             # else holds the player) or not understood (an older app, mpv):
             # the usual way below.
             fast = getattr(sink, "claim_and_play", None)
-            if (not thinking and fast is not None and not barged_in and _remote_playlist(target)
+            if (not thinking and fast is not None and not barged_in and not cue_before
+                    and _remote_playlist(target)
                     and device_voice.renders_on_device(target.name)
                     and _lead_ready.wait(timeout=1.0) and not _abandon.is_set()):
                 with _clip_lock:
@@ -4937,6 +5002,12 @@ def _submit_event(event: Event,
                 # the tone costs the reply little or nothing in start time.
                 from .. import earcons
                 earcons.play("interrupt", target, sink, wait=True)
+            if (cue_before and not (barged_in and cue_before == "question")
+                    and not _abandon.is_set()):
+                # Its own tone, for the same reason and in the same place as
+                # the interrupt's. A question that barged in has had one.
+                from .. import earcons
+                earcons.play(cue_before, target, sink, wait=True)
             # The lead, once it is in hand. Every way out sets this before
             # joining the thread, so the wait cannot outlive the reply.
             _lead_ready.wait()

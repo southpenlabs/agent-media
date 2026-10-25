@@ -1298,6 +1298,16 @@ def _handle_stop(payload: dict) -> int:
     # the parent opens no DB connection to fork across.
     metadata = {"kind": "stop", "session": payload.get("session_id") or "",
                 **_source_place(payload.get("session_id") or "")}
+    # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
+    # (strip_markdown already took the marker out of the words), and the
+    # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).
+    from ._text import extract_sound, quoted_passages
+    raw, sound = extract_sound(raw)
+    if sound:
+        metadata["sound"] = sound
+    quoted = quoted_passages(raw)
+    if quoted:
+        metadata["quoted"] = quoted
     # Opt-in LLM spoken-summary: carry the raw reply so the detached child can
     # rewrite it for speech (only worth it past a length threshold).
     # Opt-in visual accompaniment: carry the raw reply so the detached child

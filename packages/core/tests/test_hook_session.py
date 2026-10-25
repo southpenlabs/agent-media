@@ -282,3 +282,18 @@ def test_codex_answer_is_translated_and_cleared(monkeypatch):
                          "tool_response": '{"answers":{"place":{"answers":["There"]}}}'}, "codex")
     assert seen == [("codex-question", "There")]
     assert pending_asks.read("codex-question") is None
+
+
+def test_a_sound_marker_and_quotes_ride_along(tmp_path, monkeypatch):
+    """`[[sound: done]]` becomes metadata["sound"] and leaves the words; a
+    blockquote's words go as metadata["quoted"] (25 Oct 2026)."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    seen = _capture_submit(monkeypatch)
+    monkeypatch.setattr(H, "_dedup_seen", lambda *a, **k: False)
+    monkeypatch.setattr(H, "_session_name", lambda: "")
+    raw = "She replied.\n\n> All good on my side.\n\nThe import finished.\n\n[[sound: done]]"
+    assert H._handle_stop({"last_assistant_message": raw, "session_id": "s1"}) == 0
+    ev = seen["event"]
+    assert "[[" not in ev.text and "sound" not in ev.text
+    assert ev.metadata["sound"] == "done"
+    assert ev.metadata["quoted"] == ["All good on my side."]

@@ -1954,6 +1954,23 @@ thinking clip rendered here (edge-tts `--rate`/`--volume`, ffmpeg
 clock stays right. Pinned by `packages/core/tests/test_device_voice.py` and
 the app's `ProsodyTest`.
 
+Quoted words (25 Oct 2026, "more sound effects and voice alterations where
+they make sense"): the sentences of a reply's markdown blockquote (the hook
+carries the passages as `metadata["quoted"]`; their sentences are matched
+against the reply's) are said in a small room. A device-rendered one gets a
+`.fx` sidecar holding `room`, and its `tts:` address `&fx=room` (after
+rate/volume, before voice); the app puts that clip, and only it, in a small
+room. A clip rendered here goes through ffmpeg
+`aecho=0.8:0.5:40:0.25,highpass=f=200`. `MEDIA_QUOTE_FX=0` turns it off.
+Unknown `fx` values are ignored by both. Earcons before the voice, same
+day: `question` (one note sliding up) before a question card is read out,
+and `done` (two bells) / `fail` (one note sliding down) before a reply whose
+agent ended it with `[[sound: done]]` / `[[sound: fail]]` — a marker taken
+out of the words everywhere: speech (`intake/_text.py` `extract_sound`, also
+in `strip_markdown`), the thread (`transcript.display_text`) and search.
+`MEDIA_EARCON_DONE` / `_FAIL` / `_QUESTION=0` turn one off. Pinned by
+`packages/core/tests/test_reply_sounds.py` and the app's `ProsodyTest`.
+
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_device_voice.py`.
 
