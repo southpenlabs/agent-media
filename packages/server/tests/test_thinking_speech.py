@@ -540,6 +540,10 @@ def test_a_step_is_spoken_through_submission_with_the_think_earcon(env, monkeypa
         def play_cue(self, uri, target):
             played.append(("cue", Path(uri).name))
             return True
+        def play_under(self, uri, target, loop=False):
+            played.append(("under", Path(uri).name, loop))
+            return True
+        def stop_under(self, target): pass
         def play_playlist(self, uris, target, **kw):
             played.extend(uris)
             return True
@@ -577,5 +581,6 @@ def test_a_step_is_spoken_through_submission_with_the_think_earcon(env, monkeypa
     env.watcher.speak(SID, T._PREFS.get(SID), ("m", 0), "Check the speech route")
     assert events[0].metadata["thinking"] is True
     assert events[0].priority.value == "low"
-    assert played and played[0] == ("cue", earcons.path("think").name)
+    # Under the voice and looping, not a cue before it (25 Oct 2026).
+    assert played and played[0] == ("under", earcons.path("think").name, True)
     assert len(played) == 2  # the earcon, then the step's one sentence
