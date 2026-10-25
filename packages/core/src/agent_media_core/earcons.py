@@ -65,10 +65,12 @@ RATE = 48000
 #: they read as punctuation, not as a second voice.
 PEAK_DBFS = -12.0
 #: Tones that sit lower still: `think` loops under every thinking readout's
-#: voice.
-_PEAK_DBFS = {"think": -27.0}
+#: voice. -27 with the chord an octave down was not heard at all on the
+#: phone's speaker, alone or under the voice (David, 25 Oct 2026); he chose
+#: this level, an octave up, from four tried.
+_PEAK_DBFS = {"think": -18.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 3
+VERSION = 4
 
 NAMES = ("cut", "interrupt", "held", "think")
 
@@ -137,7 +139,7 @@ def _recipe(name: str) -> list[float]:
                 + _silence(0.02)
                 + _note(659.25, 0.14, attack_s=0.015, release_s=0.06))
     elif name == "think":
-        # A dream pad: a Cmaj9 chord (C4 E4 G4 B4 D5) swelling in and out over
+        # A dream pad: a Cmaj9 chord (C5 E5 G5 B5 D6) swelling in and out over
         # 2.2 s, each note with a slow vibrato a little out of step with the
         # others, so it wavers like a daydream. Under the voice (play_under),
         # so its length costs no wait; low and soft so the words sit on top.
@@ -145,7 +147,9 @@ def _recipe(name: str) -> list[float]:
         # the repeats a slow breath rather than a drone.
         dur = 2.2
         n = int(RATE * dur)
-        chord = (261.63, 329.63, 392.0, 493.88, 587.33)
+        # An octave above where it began: a phone's speaker drops the lower
+        # one almost to nothing.
+        chord = (523.25, 659.25, 783.99, 987.77, 1174.66)
         body = []
         for i in range(n):
             t = i / RATE
