@@ -1,0 +1,1 @@
+Make the message a polite, clear no: decline kindly and without leaving it open, keeping any reason the sender already gave and inventing none. Keep any alternative they offered, and every name, number and date.

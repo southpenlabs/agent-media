@@ -1466,6 +1466,28 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   `messy: false, why: "unsafe"` (`"unchanged"` for the same words).
 - A private or sealed `session` is only ever sent to `MEDIA_PRIVATE_MODELS`;
   with none set it gets no model (`why: "no_answer"`).
+- `intent` (25 Oct 2026): a key from the server's list, to rewrite in a chosen
+  register rather than only clean up. `GET /voice/tidy/intents` (gated) →
+  `{"ok": true, "default": "plain", "intents": [{"key", "label"}, …]}`, in the
+  order the app shows them; the app renders its chips from it and knows only
+  the default by name. Today: `plain` (Tidy), `proofread` (Fix typos),
+  `polish`, `professional`, `friendly`, `brief`, `firm`, `apologetic`,
+  `decline` (Polite no), `request` (Ask nicely). `proofread`, `polish` and
+  `professional` use prompts vendored from Fabric (MIT, pinned commit; see
+  `tidy_patterns/README.md` and the root `NOTICE`); the others are our own.
+  The prompt is the pattern as style guidance inside our fixed rules, which
+  win over anything in a pattern (markdown, headings, greetings, sections):
+  meaning, facts, names, numbers, dates and language kept, nothing added,
+  the message as plain text only. The model's reply is stripped of a code
+  fence, a preamble line, headings, bold markers and wrapping quotes. Length
+  is bounded per intent (`brief` never longer than the words; `plain` and
+  `proofread` about the same length; `polish` +15%, `professional` and
+  `friendly` and `decline` +20%, `firm` +10%, `apologetic` +25%, `request`
+  +15%, each plus 8 characters); a result outside it, or without every
+  number, is `unsafe`. Any intent but `plain` is an explicit ask and skips
+  the messy pre-check. An unknown or non-string `intent` is a 400
+  `"unknown intent"`. The private-model rule, the deadline and every failure
+  answer are the same for all of them.
 - `force: true` (25 Oct 2026, the composer's Tidy button) is an explicit ask:
   it skips the local messy test and nothing else (the private-model rule, the
   deadline and the unsafe-tidy refusals all apply). A model that finds nothing

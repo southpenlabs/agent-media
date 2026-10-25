@@ -1,0 +1,1 @@
+Tidy the message: remove only fillers (um, uh, you know), repeated words and false starts, and fix punctuation, capital letters and obvious mis-hearings. Keep the sender's own words and voice otherwise.

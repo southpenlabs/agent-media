@@ -1,0 +1,1 @@
+Turn what the message says into a polite request: where it is a demand, a complaint or a bare question, put it as a courteous ask ("could you …", "would you mind …") for the same thing. Keep every fact, name, number and date, and add nothing the sender did not mean.

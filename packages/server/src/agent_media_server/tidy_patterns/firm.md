@@ -1,0 +1,1 @@
+Make the message firm and clear: direct, confident and polite, with no softening or apology the sender did not intend and no aggression, threats or insults. Keep what is asked or decided exactly; change only how strongly it is put.

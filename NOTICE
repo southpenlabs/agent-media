@@ -23,3 +23,16 @@ linking libmpv would make the app a derivative work of a GPL program, and the
 app would have to be licensed accordingly. Keeping mpv at arm's length is a
 deliberate architectural choice, not an accident — see
 docs/proposals/2026-08-13-android-companion-app.md.
+
+--------------------------------------------------------------------------
+Vendored text
+--------------------------------------------------------------------------
+
+Three prompts in packages/server/src/agent_media_server/tidy_patterns/fabric/
+(fix_typos, improve_writing, create_formal_email) are copied, unchanged, from
+Fabric (https://github.com/danielmiessler/Fabric, by Daniel Miessler), MIT
+licence, at commit f16de16 (23 Oct 2026). The licence text, with the
+copyright line the repository carries, is kept beside them in
+tidy_patterns/fabric/LICENSE; tidy_patterns/README.md gives the source, the
+pinned commit and how to update. Fabric is not run and is not a dependency:
+only the prompt text is included.

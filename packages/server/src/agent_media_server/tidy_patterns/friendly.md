@@ -1,0 +1,1 @@
+Make the message warmer and friendlier: a relaxed, kind tone, as to someone the sender likes. Keep what is said exactly; change only how it sounds. Do not add greetings, sign-offs, emoji or new sentences of content.
