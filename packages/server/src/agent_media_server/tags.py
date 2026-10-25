@@ -274,6 +274,9 @@ def add_tags(rows: list[dict]) -> list[dict]:
             r["chat_tags"], r["person_tags"], r["label_tags"] = chat, person, label
             r["auto_tags"] = auto
             r["tags"] = list(dict.fromkeys(chat + auto + person + label))
+        elif r.get("harness") == "quick":
+            # A quick chat has no org node: its own, kept as a chat's are.
+            r["tags"] = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
         else:
             r["tags"] = list(by.get(sid, []))
     return rows
@@ -407,7 +410,9 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
 
     if is_sealed(session):
         return False, {"error": "a sealed thread has no tags", "status": 423}
-    if matrix.room(session) is not None:
+    from . import quick
+
+    if matrix.room(session) is not None or quick.has(session):
         ok, detail = _store_edit(_jsonmaps()[0], session, edit)
         kept = body.get("auto")
         if ok and isinstance(kept, list):

@@ -1469,6 +1469,10 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     from . import matrix
 
     out += matrix.rows(flags)
+    # And the quick chats (quick.py): a fast model's, no agent's.
+    from . import quick
+
+    out += quick.rows(flags, pinned)
     # And `speech`, its level (interrupt | auto | normal | quiet), with
     # `priority` kept for older clients: its replies are never held or muted.
     # A thread with no level of its own has its fallback — a Matrix room the

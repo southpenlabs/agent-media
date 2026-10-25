@@ -1708,6 +1708,30 @@ room's thread and are kept in `<state_dir>/chat-tags.json`. Auto in a chat is
 always private: only the local matching and `MEDIA_PRIVATE_MODELS`. In
 `CORS_PATHS`. Pinned by `packages/server/tests/test_thread_tags.py`.
 
+#### Quick chat — `POST /ask {"agent": "quick"}`, `POST /session/handoff` — gated (26 Oct 2026)
+
+Roadmap item 26: a chat answered by a fast model, no agent (`quick.py`).
+`POST /ask {"text", "agent": "quick"}` → `{"ok": true, "session", "agent":
+"quick"}` at once; the answer is written in the background by the fast-model
+chain (`agent_media_core/intake/fast.py`: `MEDIA_QUICK_MODEL`,
+`MEDIA_FAST_MODELS`, `MEDIA_FOLLOWUP_MODEL`), with the newest 30 messages as
+its context, and spoken as an agent's reply is (`Source.QUICK`;
+`MEDIA_QUICK_SPEAK=0` off). `POST /reply {"session", "text"}` adds a message
+(409 while the last is still being answered); a branch or nudge is 409.
+Rows on `/targets` and `/conversations` have `harness: "quick"`, `source:
+"quick"`, `live` while an answer is being written, the last message as
+`recap`, and `handed_to` once handed off. `/conversation/log` and the
+thread stream serve its messages (§6.2.2, as a Matrix room's: no lines, no
+turn; `pending` while it answers). Tags and archive work as on any thread
+(its tags kept as a chat's). A private quick chat is read only to
+`MEDIA_PRIVATE_MODELS`; with none it answers that it cannot.
+
+`POST /session/handoff {"session", "agent"?, "project"?, "cwd"?}` → `{"ok":
+true, "session", "handed_to"}`: a new agent session (`/ask` with those) that
+starts with the quick chat so far; the quick chat then refuses messages (409
+with `handed_to`). Handing off twice answers the first `handed_to`. In
+`CORS_PATHS`. Pinned by `packages/server/tests/test_quick_chat.py`.
+
 #### `POST /tags/auto`, `GET /tags/auto` — gated (26 Oct 2026)
 
 Chats tag themselves: in the background, at most every

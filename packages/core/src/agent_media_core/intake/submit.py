@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 _AGENT_SOURCES = frozenset({
     Source.CLAUDE_CODE, Source.CODEX, Source.HERMES, Source.PI,
     Source.OPENCODE, Source.ANTIGRAVITY, Source.GEMINI, Source.GROK,
+    Source.QUICK,
 })
 
 

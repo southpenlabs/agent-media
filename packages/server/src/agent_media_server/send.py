@@ -716,6 +716,11 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     if not user:
         return False, err
     agent = (agent or os.environ.get("MEDIA_ASK_AGENT") or "claude").strip().lower()
+    if agent == "quick":
+        # A quick chat (quick.py): a fast model, no agent, no folder.
+        from . import quick
+
+        return True, quick.start(text)
     if agent not in panes.AGENT_COMMANDS:
         return False, {"error": f"unknown agent {agent!r}", "status": 400}
     if agent in NOT_STARTED_HERE:
@@ -1138,8 +1143,14 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
     from . import driver
 
     if session:
-        from . import matrix
+        from . import matrix, quick
 
+        if quick.has(session):
+            # A quick chat (quick.py): the fast model answers; nothing to type into.
+            if mode == "branch" or nudge:
+                return False, {"error": "a quick chat cannot be branched or nudged", "status": 409}
+            body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
+            return quick.reply(session, body)
         room = matrix.room(session)
         if room is not None:
             # A Matrix room (matrix.py): sent as the owner, straight to the

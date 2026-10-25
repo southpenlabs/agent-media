@@ -673,8 +673,11 @@ def session_log(session: str, *, limit=None, before: str = "",
     ?session=` answers once the caller is let in, and what the per-thread
     stream sends as its snapshot (thread_events.py). `session` must already
     be a valid id."""
-    from . import matrix
+    from . import matrix, quick
 
+    if quick.has(session):
+        # A quick chat (quick.py): its messages, nothing of a session's.
+        return True, quick.envelope(session, limit=_limit(limit), before=before)
     room = matrix.room(session)
     if room is not None:
         # A Matrix room (matrix.py): its timeline, and none of a session's

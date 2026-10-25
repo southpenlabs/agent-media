@@ -122,6 +122,12 @@ def unarchive_quietly(session: str) -> None:
         pass
 
 
+def _quick(session: str) -> bool:
+    from . import quick
+
+    return quick.has(session)
+
+
 def session_archive(session: str, flag, bearer: str) -> tuple[bool, dict]:
     """`POST /session/archive {"session", "archived"}`. Gated like `/session/close`.
 
@@ -148,7 +154,7 @@ def session_archive(session: str, flag, bearer: str) -> tuple[bool, dict]:
     # its row reads the same flags.
     if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
             or sessions._folder_for_session(session) or is_sealed(session)
-            or matrix.room(session) is not None):
+            or matrix.room(session) is not None or _quick(session)):
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
         set_archived(session, flag)

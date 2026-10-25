@@ -26,6 +26,7 @@ class Source(str, Enum):
     HA_SSE = "ha-sse"
     HA_STT = "ha-stt"
     MATRIX = "matrix"
+    QUICK = "quick"           # a quick chat's reply (agent-media-server quick.py)
     WATCHER = "watcher"
     CLI = "cli"
     MCP = "mcp"
