@@ -110,6 +110,21 @@ empty list when entries exist; `--no-sync` skips the closing vdirsyncer sync.
 A reader that fails must not call it. Source names are lowercase letters,
 digits and dashes (`calendar_write` tags them `X-SASONICA-SOURCE`).
 
+#### Writing a shift reader
+
+Work hours from any roster reach agent-media the same way. A reader prints
+every shift in its window as `put` events and pipes them to `reconcile`
+under a source named `<something>-shift`, with `--refuse-empty` so a bad
+read never empties the calendar, and does not call it at all when its own
+read failed. A shift source is then picked up without further code: the
+app's quiet rules offer "Only during work" for every `*-shift` source with
+events (`quiet.py`; `[[quiet.rules]]` in config.toml names one and labels it),
+and `calendar-publish.json` `shift_sources` can open a booking site that
+long after each shift ends. Give each shift a uid that survives a change of
+times (the roster's own id, or its first-seen start) so a moved shift
+updates in place. `agent-config/bin/roster-mail` is one such reader, for
+Employment Hero's roster emails.
+
 David's Peninsula Hot Springs shifts (`phs-shift`) and treatments
 (`phs-treatment`) are such a reader: `agent-config/bin/phs-calendar-sync` on
 `phs-calendar-sync.timer`, hourly (moved out of agent-media 25 October 2026,
