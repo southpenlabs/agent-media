@@ -1831,7 +1831,13 @@ ahead.
     band), not one per person (David, 26 Oct 2026, picked over a space per
     contact): a person stays a contact (item 29, people not rooms), can be
     in several groups, and their Matrix, SMS and mail threads file into
-    each group they are in; anyone in no group lands in one People space. A chat can sit in more than one space (tags, not a
+    each group they are in; anyone in no group lands in one People space.
+    The groups are Google Contacts labels (David, 26 Oct 2026: "can we use
+    google groups as spaces?"): contacts.py already reads each person's
+    `memberships` as labels, so a label is a space and editing it in
+    Google Contacts (or on the phone) moves people between spaces. Not
+    Google Groups the mailing lists. The hidden system groups (starred,
+    all, blocked, chatBuddies) and My Contacts are not spaces. A chat can sit in more than one space (tags, not a
     single home): a people chat about a project shows in both, and a
     message an agent sends to someone files the chat in both. Chats with
     no clear space land in an Inbox; the server suggests a space from the
