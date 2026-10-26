@@ -4726,7 +4726,7 @@ outbound (sasonica-app `lib/listenLog.ts`). Code: `listen_log.py`; tests in
 
 - `POST /device/listen-log {lines: [{t, at, outcome, text?, partial?, error?,
   confidence?, voiceNear?, session?, recError?, openMs?, speechMs?, ranMs?,
-  chime?, rmsPeak?, playingAtStart?, interlude?, hush?}]}` — a paired device only (401
+  chime?, rmsPeak?, playingAtStart?, interlude?, hush?, segmented?, segments?, onDevice?}]}` — a paired device only (401
   otherwise); 400 without a `lines` list. `at`: `handsfree`, `countdown`,
   `confirm` or `dictation`. `outcome`: `taken`, `command`, `echo` (dropped as
   the reply's own voice; `voiceNear` says a voice was playing), `error`,
@@ -4747,7 +4747,10 @@ outbound (sasonica-app `lib/listenLog.ts`). Code: `listen_log.py`; tests in
   turn still running, `hush` the app's mute of the recogniser's beeps as the
   mic opened, was ready and ended (`what/now` each: what the last mute
   attempt did, `on`, `music` something was playing, `muted` not the app's,
-  `fail`; then whether the app has the stream muted, `on`/`off`). `empty`
+  `fail`; then whether the app has the stream muted, `on`/`off`);
+  `segmented`, `segments`, `onDevice` for the mic key's long listen: whether
+  it ran as one recogniser session, how many stretches of words it sent, and
+  whether it was on the phone's on-device recogniser. `empty`
   lines carry `voiceNear` too, and a countdown or
   confirm listen that hears nothing is logged as `empty` (one cut short by the
   countdown's send is not logged).

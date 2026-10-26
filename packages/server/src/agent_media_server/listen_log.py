@@ -9,7 +9,7 @@ network. So the app sends its lines here, outbound, in batches
 (`text`, `partial`, `error`, `confidence`) and what the app did with it
 (`outcome`: taken, command, echo, error, empty, stale, rescued; `voiceNear`
 when a voice was playing), and how the recogniser went (`recError`, `openMs`,
-`speechMs`, `ranMs`, `chime`, `rmsPeak`, `playingAtStart`, `interlude`, `hush`). A
+`speechMs`, `ranMs`, `chime`, `rmsPeak`, `playingAtStart`, `interlude`, `hush`, `segmented`, `segments`, `onDevice`). A
 paired device only.
 
 One JSON line per listen in `<state>/listen-log.jsonl`, with the device's
@@ -44,7 +44,10 @@ _FIELDS = {"t": (int, float), "at": str, "outcome": str, "text": str, "partial":
            # The app's beep mute (Earcons) as the mic opened, was ready and
            # ended, e.g. "on/on on/on on/on" (David, 26 Oct 2026: beeps still
            # heard between the mic key's listens).
-           "hush": str}
+           "hush": str,
+           # The mic key's long listen: whether it ran as one session, its
+           # stretches, and whether on the phone's on-device recogniser.
+           "segmented": bool, "segments": int, "onDevice": bool}
 _LOCK = threading.Lock()
 
 
