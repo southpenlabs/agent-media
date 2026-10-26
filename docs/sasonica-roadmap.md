@@ -1884,9 +1884,10 @@ ahead.
     state out and names the rules on offer (`GET /session/quiet`; labels
     from `[[quiet.rules]]` in config.toml, else from the events' titles:
     "Only during work (PHS shifts)"); rows carry `quiet` and `quiet_rule`.
-    agent-media `3296176e`, sasonica-app `60e93f1`. The app learns of a
-    shift's end on its next list load, so a reply in the minute after one
-    can still notice.
+    agent-media `3296176e`, sasonica-app `60e93f1`. A rule carries its
+    coming shifts (`quiet_rule.shifts`), so the app follows a shift's start
+    and end with the list left open (agent-media `021d7cc0`, sasonica-app
+    `1ca0b1f`).
 
 ## Loose ends
 
