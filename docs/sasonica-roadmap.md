@@ -1846,6 +1846,24 @@ ahead.
     chip strip becomes Spaces, Inbox first). Not started: needs a
     contract section and a store for spaces and tags.
 
+42. **Quiet for… a busy thread** — **DONE 26 Oct 2026** (David, 26 Oct
+    2026: "Can we have a way of stopping unread messages from busy threads
+    floating to the top for a time?" — he picked a per-thread timed quiet
+    over freezing the whole list). A thread's long press and its ⋮ offer
+    Quiet for… 1 hour, Until tomorrow (the next 7 am, local) or Until I
+    turn it off, and End quiet while quiet. While quiet it keeps its place
+    (sorted by `quiet.at`, its activity time when the quiet began, not its
+    live time; its work does not lift it into Smart's working group), gets
+    no unread dot, arrival notice or Home Unread replies entry, and its row
+    says "Quiet until 3 pm" (the header too). A question or permission
+    from it still notices. When it ends, what came meanwhile is unread.
+    The server keeps it so every device agrees: agent-media `quiet.py`,
+    `POST /session/quiet {"session", "until": epoch | null | false, "at"?}`
+    (contract §6.4), `quiet: {until, at} | null` on the `/targets`,
+    `/conversations` and `/dashboard` `recent` rows, and `/dashboard`'s
+    `replies` leave quiet threads out (agent-media `c8d69353`). The app:
+    `lib/quiet.ts`, `test/quiet.mjs` (sasonica-app `0c6c175`).
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
