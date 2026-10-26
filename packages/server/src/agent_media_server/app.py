@@ -140,6 +140,9 @@ device gets its token):
                   quick model, preferring ones in use; nothing saved (tags.py)
   POST /contacts/tags {"contact", "add"?, "remove"?, "tags"?} → a person's
                   own tags, shared by all their chats (tags.py)
+  GET  /spaces → the spaces chats are filed in: Inbox, the Google Contacts
+                  labels as groups, People, the projects; rows carry
+                  `spaces` and /targets the same list (spaces.py, §6.28)
   POST /session/handoff {"session", "agent"?, "project"?, "cwd"?} → a quick
                   chat handed to a full agent, with the conversation so far (quick.py)
   POST /tags/auto {"force"?} → tag every chat with the tags in use that fit,
@@ -360,7 +363,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/session/priority", "/session/pocket",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -1736,6 +1739,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import tags
 
         ok, detail = tags.tags_list(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
+    elif path == "/spaces":
+        # The spaces chats are filed in: groups, projects, People, Inbox (spaces.py).
+        from . import spaces
+
+        ok, detail = spaces.spaces_list(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
     elif path == "/conversations":
         # What the assistant button can be pointed at: live sessions and

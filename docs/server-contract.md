@@ -6407,6 +6407,34 @@ the message's reactions after the change.
 in the order first seen. `by` (rooms only) is who put the emoji there, by
 name. A change arrives on the stream as a `message` `replace`.
 
+### 6.28 Spaces — gated (built 26 Oct 2026)
+
+Roadmap item 41 (David, 26 Oct 2026): chats organised into spaces,
+projects for agents and groups for people, the groups being his Google
+Contacts labels. A chat can be in more than one space. Nothing new is
+stored: a space is worked out from what a row already carries (spaces.py).
+
+| id | kind | a row is in it when |
+|---|---|---|
+| `project:<project>` | `project` | an agent thread's `project` is it, or any thread is tagged with its last path part (`spl/sasonica-app` → `#sasonica_app`) |
+| `group:<key>` | `group` | its person has the label (`label_tags`), or the thread is tagged with the label's name; `key` is the label as a tag, lower case (`Close friends` → `close_friends`) |
+| `people` | `people` | a people chat (harness `matrix`) in no group |
+| `inbox` | `inbox` | in no other space (a quick chat, an agent thread with no project) |
+
+Labels everyone has (My Contacts, Starred) are not groups. A sealed row is
+in none.
+
+- **Rows:** `/targets` and `/conversations` rows carry `spaces: [id, ...]`,
+  groups first, then projects, then `people` or `inbox`.
+- **The list:** `/targets` carries `spaces: [{"id", "kind", "name",
+  "people"?}]`: Inbox, the groups by name (`people`: how many contacts have
+  the label), People, then the projects in its rows. `GET /spaces` answers
+  `{"ok", "spaces"}` with the same list. The client counts rows per space
+  itself; an older server sends neither, and the client shows no spaces.
+- **Filing:** add a thread to a group or project by tagging it
+  (`POST /session/tags`, `POST /contacts/tags` for a person); move a person
+  between groups by changing their label in Google Contacts.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

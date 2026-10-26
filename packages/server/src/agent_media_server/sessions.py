@@ -877,6 +877,13 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     if mail is not None:
         out["project_mail"] = mail
     out["project_groups"] = project_groups()
+    # The spaces the rows are filed in, for the Chats strip (spaces.py).
+    from . import spaces
+
+    try:
+        out["spaces"] = spaces.catalogue(rows)
+    except Exception:  # noqa: BLE001 — a list without its strip, not no list
+        pass
     from . import sessiond
 
     restart = sessiond.restart_view()
@@ -1425,6 +1432,8 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
 
     And `quiet`: `{"until", "at"}` while the thread is quiet (`quiet`) —
     the app sorts it by `at` and counts nothing of it unread — else None.
+
+    And `spaces`: the ids of the spaces it is in (`spaces`).
     """
     from . import archive, pins, rest
 
@@ -1506,11 +1515,12 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # when it was sealed, so the app can offer to unseal it (seal.py).
     # And `tags`: the thread's own tags, read from its org-roam node (tags.py).
     # And `quiet`: `{until, at}` while Quiet for… holds it, else None (quiet.py).
-    from . import quiet, tags
+    # And `spaces`: the projects and groups it is in, else people or inbox (spaces.py).
+    from . import quiet, spaces, tags
 
-    return quiet.add_quiet(tags.add_tags(
+    return quiet.add_quiet(spaces.add_spaces(tags.add_tags(
         add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
-                             for sid, rec in locked.items() if sid not in gone]))
+                             for sid, rec in locked.items() if sid not in gone])))
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:

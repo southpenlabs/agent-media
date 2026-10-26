@@ -172,8 +172,9 @@ def test_a_user_not_allowed_to_reply_is_403(server, monkeypatch, path):
 def test_targets_shape(server, shelf, signed_in):
     res, obj = call(server, "GET", "/targets", headers=AUTH)
     assert res.status == 200
-    # `project_groups` joined on 18 Oct 2026: which projects sit in a group.
-    assert keys(obj) == {"ok", "sessions", "places", "project_groups"}
+    # `project_groups` joined on 18 Oct 2026: which projects sit in a group;
+    # `spaces` on 26 Oct 2026: the Chats strip's spaces (spaces.py).
+    assert keys(obj) == {"ok", "sessions", "places", "project_groups", "spaces"}
     live, shelved = obj["sessions"]
     # `recap` and `archived` joined on 22 Sep 2026, deliberately: Claude
     # Code's latest "while you were away" summary, the list's preview line,
@@ -192,17 +193,18 @@ def test_targets_shape(server, shelf, signed_in):
     # `priority` joined on 24 Sep 2026: the thread always speaks — never held
     # by the desk toast, never silenced by a pane mute (§6.4 /session/priority);
     # `speech` the same day, its level: interrupt | auto | normal | quiet.
+    # `spaces` on 26 Oct 2026: the spaces it is filed in (spaces.py).
     assert keys(live) == {"session", "title", "live", "pane", "recap", "archived",
                           "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule"}
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces"}
     assert live == {"session": SID2, "title": "Sasonica web", "live": True, "pane": "%42",
                     "recap": None, "archived": False, "rested": None, "pinned": False,
                     "project": None, "cwd": None, "harness": "claude", "priority": False, "speech": "normal", "speech_own": False,
                     "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
-                    "tags": [], "quiet": None, "quiet_rule": None}
+                    "tags": [], "quiet": None, "quiet_rule": None, "spaces": ["inbox"]}
     assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived",
                              "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule"}
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces"}
     assert shelved["project"] == "p-agent-media" and shelved["cwd"] is None
     assert shelved["rested"] is None and shelved["pinned"] is False
     assert shelved["live"] is False and shelved["pane"] is None
