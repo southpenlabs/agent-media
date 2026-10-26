@@ -93,6 +93,31 @@ def _candidates(v) -> list | None:
     return out
 
 
+_PROBE_NUM = ("depth", "x", "y", "w", "h", "children", "wraps", "minW", "maxW", "minH", "maxH",
+              "leftSpan", "topSpan", "right")
+_PROBE_STR = {"position": 12, "overflowX": 12, "display": 20, "childPosition": 12, "tag": 20}
+
+
+def _probe(v) -> list | None:
+    """The top 600 px by shape (sasonica-app public/tray-finder.js, build 1513 on): up to 30 elements
+    with 3 or more items, numbers, flags and CSS keywords only."""
+    if not isinstance(v, list):
+        return None
+    out = []
+    for c in v[:30]:
+        if not isinstance(c, dict):
+            continue
+        row = {k: c[k] for k in _PROBE_NUM if isinstance(c.get(k), (int, float)) and not isinstance(c.get(k), bool)}
+        for k in ("transform", "cards"):
+            if isinstance(c.get(k), bool):
+                row[k] = c[k]
+        for k, n in _PROBE_STR.items():
+            if _s(c.get(k), n):
+                row[k] = _s(c.get(k), n)
+        out.append(row)
+    return out
+
+
 def _clean(r) -> dict | None:
     if not isinstance(r, dict) or r.get("state") not in STATES:
         return None
@@ -115,6 +140,9 @@ def _clean(r) -> dict | None:
     if isinstance(counts, dict):
         out["counts"] = {str(k)[:120]: v for k, v in list(counts.items())[:MAX_SELECTORS]
                          if isinstance(v, int) and not isinstance(v, bool)}
+    probe = _probe(r.get("probe"))
+    if probe is not None:
+        out["probe"] = probe
     cands = _candidates(r.get("candidates"))
     if cands is not None:
         out["candidates"] = cands

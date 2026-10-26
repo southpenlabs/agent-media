@@ -50,6 +50,10 @@ REPORT = {
     "candidates": [{"depth": 6, "x": 0, "y": 120, "w": 411, "h": 214, "children": 9, "aspect": 1.6, "width": 0.29,
                     "overflowX": "auto", "scrolls": True, "cards": False, "tag": "div", "html": "<div>", "text": "Sam"}],
     "viewport": {"w": 411, "h": 200, "x": "y"},
+    "probe": [{"depth": 9, "x": 0, "y": 140, "w": 375, "h": 206, "children": 7, "wraps": 0, "minW": 120, "maxW": 120,
+               "minH": 190, "maxH": 190, "leftSpan": 756, "topSpan": 0, "right": 884, "position": "relative",
+               "overflowX": "hidden", "display": "block", "transform": False, "childPosition": "absolute",
+               "cards": True, "tag": "div", "text": "Nicole", "href": "https://x"}],
     "text": "never kept", "html": "<html>",
 }
 
@@ -69,6 +73,9 @@ def test_a_report_is_kept_as_structure(server, pixel):
     assert got["candidates"] == [{"depth": 6, "x": 0, "y": 120, "w": 411, "h": 214, "children": 9, "aspect": 1.6, "width": 0.29,
                                   "scrolls": True, "cards": False, "overflowX": "auto", "tag": "div"}]
     assert got["viewport"] == {"w": 411, "h": 200}
+    p = got["probe"][0]
+    assert p["leftSpan"] == 756 and p["childPosition"] == "absolute" and p["cards"] is True and p["transform"] is False
+    assert "text" not in p and "href" not in p
 
 
 def test_a_paired_device_only(server):

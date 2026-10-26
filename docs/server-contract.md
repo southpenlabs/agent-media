@@ -4725,7 +4725,11 @@ failed attempt, once, outbound (sasonica-app `lib/storiesTray.ts`). Code:
   cut to 8 characters]}`; `candidates` up to 5 sideways-scrolling rows near
   the top by shape `{depth, x, y, w, h, children, aspect (the children's
   height/width), width (their width / the viewport's), overflowX, scrolls,
-  cards (it passed as a tray), tag}`; `viewport {w, h}`. No text, links or images of the page are sent;
+  cards (it passed as a tray), tag}`; `viewport {w, h}`; `probe` (build 1513 on) up to 30 elements in the top
+  600 px holding 3 or more items, `{depth, x, y, w, h, children, wraps,
+  minW, maxW, minH, maxH, leftSpan, topSpan, right (the items' sizes and
+  spread), position, overflowX, display, transform (bool), childPosition,
+  cards, tag}`. No text, links or images of the page are sent;
   unknown fields are dropped. → `{ok: true, kept}`. One JSON line each in
   `<state>/stories-tray-log.jsonl`, the newest 500 kept.
 
