@@ -1843,8 +1843,15 @@ ahead.
     no clear space land in an Inbox; the server suggests a space from the
     folder, the people in it and the first message, accepted with a tap.
     The server owns spaces and suggestions; the app renders them (the
-    chip strip becomes Spaces, Inbox first). Not started: needs a
-    contract section and a store for spaces and tags.
+    chip strip becomes Spaces, Inbox first). **BUILT 26 Oct 2026**
+    (agent-media spaces.py, contract §6.28; sasonica-app chats): rows carry
+    `spaces`, worked out from project, tags and label_tags with nothing
+    stored, and Chats has a row of space chips under All · People ·
+    Agents (Any space, Inbox, the labels that hold a chat, Everyone else,
+    the projects), each counting what needs you. Filing is tagging: a
+    thread tagged with a label's or a project's name shows there too.
+    Not yet: the server's one-tap suggestion for an Inbox chat, and a
+    label with a comma ("Book club, Tuesdays") is no tag, so no space.
 
 42. **Quiet for… a busy thread** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "Can we have a way of stopping unread messages from busy threads
