@@ -126,11 +126,11 @@ def _clean(r) -> dict | None:
                  ("ua", 200), ("error", 200), ("network", 20)):
         if _s(r.get(k), n):
             out[k] = _s(r.get(k), n)
-    for k in ("status", "ms", "elements"):
+    for k in ("status", "ms", "elements", "viewWidth", "bootWidth", "rootWidth"):
         v = r.get(k)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             out[k] = v
-    for k in ("password", "online"):
+    for k in ("password", "online", "reloaded"):
         if isinstance(r.get(k), bool):
             out[k] = r[k]
     keys = _names(r.get("queryKeys"), 20, 40)

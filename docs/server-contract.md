@@ -4718,7 +4718,10 @@ failed attempt, once, outbound (sasonica-app `lib/storiesTray.ts`). Code:
   `queryKeys`. `status` the main page's HTTP status when known; `title` the
   page's title; `password` a password field is on it; `interstitial` a known
   screen: `open-app`, `continue-browser`, `consent`, `login`. `ms` from load
-  to the state; `elements` the page's element count; `counts` how many
+  to the state; `viewWidth`, `bootWidth`, `rootWidth` the WebView's width, the
+  page's viewport and its widest top-level box as first drawn (CSS px), and
+  `reloaded` whether it was loaded again for being laid out narrow (build
+  1514: the page was 200 px wide in a 375 px WebView); `elements` the page's element count; `counts` how many
   elements each tray selector matched; `layout` the top of the page as
   structure only, up to 60 `{tag, depth, role?, data?: [data-* attribute
   names], aria?: bool (an aria-label is there), id?: bool, cls?: [class names

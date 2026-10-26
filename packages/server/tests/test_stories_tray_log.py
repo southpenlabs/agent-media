@@ -54,6 +54,7 @@ REPORT = {
                "minH": 190, "maxH": 190, "leftSpan": 756, "topSpan": 0, "right": 884, "position": "relative",
                "overflowX": "hidden", "display": "block", "transform": False, "childPosition": "absolute",
                "cards": True, "tag": "div", "text": "Nicole", "href": "https://x"}],
+    "viewWidth": 375, "bootWidth": 200, "rootWidth": 200, "reloaded": True,
     "text": "never kept", "html": "<html>",
 }
 
@@ -73,6 +74,7 @@ def test_a_report_is_kept_as_structure(server, pixel):
     assert got["candidates"] == [{"depth": 6, "x": 0, "y": 120, "w": 411, "h": 214, "children": 9, "aspect": 1.6, "width": 0.29,
                                   "scrolls": True, "cards": False, "overflowX": "auto", "tag": "div"}]
     assert got["viewport"] == {"w": 411, "h": 200}
+    assert (got["viewWidth"], got["bootWidth"], got["rootWidth"], got["reloaded"]) == (375, 200, 200, True)
     p = got["probe"][0]
     assert p["leftSpan"] == 756 and p["childPosition"] == "absolute" and p["cards"] is True and p["transform"] is False
     assert "text" not in p and "href" not in p
