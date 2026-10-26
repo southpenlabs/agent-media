@@ -54,6 +54,8 @@ QUIET = JsonMap("quiet.json")
 SHIFT_DAYS = 60
 #: The calendar is parsed at most this often, in seconds.
 SHIFT_TTL_S = 60.0
+#: How many coming shifts a rule carries to the app.
+SHIFTS_SENT = 6
 
 # (monotonic at, {source: [(start, end), ...]}, {source: label from titles})
 _SHIFTS: tuple[float | None, dict, dict] = (None, {}, {})
@@ -144,7 +146,11 @@ def _public_rule(rule: dict) -> dict:
     # view takes the source off the list, not the rule's name).
     label = (next((r["label"] for r in rules() if r["source"] == src), "")
              or str(rule.get("label") or "") or f"Only during {src}")
-    return {"rule": "shifts", "source": src, "label": label}
+    # The shifts not over yet (up to SHIFTS_SENT), so the app can follow a
+    # shift's start and end between list loads without asking.
+    now = time.time()
+    coming = [[round(a, 3), round(b, 3)] for a, b in shifts(src) if b > now][:SHIFTS_SENT]
+    return {"rule": "shifts", "source": src, "label": label, "shifts": coming}
 
 
 def _is_rule(row) -> bool:

@@ -309,8 +309,10 @@ Everything a message can be pointed at.
   Under a standing rule (below) it also carries `rule: {"rule", "source",
   "label"}`, and `until` is the next shift's start (null: none known).
 - `quiet_rule` (every row, 26 Oct 2026): the thread's standing quiet rule,
-  `{"rule": "shifts", "source", "label"}`, or `null` — there during a shift
-  too, when `quiet` is `null`.
+  `{"rule": "shifts", "source", "label", "shifts": [[start, end], …]}`, or
+  `null` — there during a shift too, when `quiet` is `null`. `shifts` are
+  the next few not over yet (the one under way first), so the app can
+  follow a start or an end between list loads.
 - `tags` (every row, 24 Oct 2026): the thread's own tags, in file order,
   from its org-roam node's `#+filetags` (`POST /session/tags`, §6.4); `[]`
   when it has none or no node, and on a sealed row.

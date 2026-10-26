@@ -145,7 +145,8 @@ def test_a_rule_is_quiet_outside_shifts_and_itself_during_one(server, shelf, sig
     res, obj = call(server, "POST", "/session/quiet",
                     {"session": SID, "rule": rule, "at": 1790000000.0}, AUTH)
     assert res.status == 200, obj
-    label = {"rule": "shifts", "source": "phs-shift", "label": "Only during work (PHS shifts)"}
+    label = {"rule": "shifts", "source": "phs-shift", "label": "Only during work (PHS shifts)",
+             "shifts": [[round(now + 3600, 3), round(now + 7200, 3)]]}
     assert obj["quiet"] == {"until": round(now + 3600, 3), "at": 1790000000.0, "rule": label}
     assert obj["quiet_rule"] == label
     row = _rows(server)[SID]
@@ -153,9 +154,11 @@ def test_a_rule_is_quiet_outside_shifts_and_itself_during_one(server, shelf, sig
     # In a shift: itself, the rule still there.
     _shifts(monkeypatch, _shift(now - 60, now + 3600))
     row = _rows(server)[SID]
-    assert row["quiet"] is None and row["quiet_rule"] == label
+    assert row["quiet"] is None
+    assert row["quiet_rule"] == {**label, "shifts": [[round(now - 60, 3), round(now + 3600, 3)]]}
     # No shift coming: quiet with no end.
     _shifts(monkeypatch)
+    label = {**label, "shifts": []}
     assert _rows(server)[SID]["quiet"] == {"until": None, "at": 1790000000.0, "rule": label}
     # End quiet ends the rule too.
     _, obj = call(server, "POST", "/session/quiet", {"session": SID, "until": False}, AUTH)
