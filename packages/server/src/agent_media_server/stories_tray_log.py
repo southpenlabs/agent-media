@@ -140,6 +140,11 @@ def _clean(r) -> dict | None:
     if isinstance(counts, dict):
         out["counts"] = {str(k)[:120]: v for k, v in list(counts.items())[:MAX_SELECTORS]
                          if isinstance(v, int) and not isinstance(v, bool)}
+    geom = r.get("geom")
+    if isinstance(geom, dict):
+        # About's "Show where the stories tray draws": where the native view and the slot are (px, CSS px).
+        out["geom"] = {str(k)[:30]: v for k, v in list(geom.items())[:60]
+                       if isinstance(v, (int, float, bool)) and not isinstance(v, str)}
     probe = _probe(r.get("probe"))
     if probe is not None:
         out["probe"] = probe

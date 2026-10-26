@@ -4732,7 +4732,10 @@ failed attempt, once, outbound (sasonica-app `lib/storiesTray.ts`). Code:
   600 px holding 3 or more items, `{depth, x, y, w, h, children, wraps,
   minW, maxW, minH, maxH, leftSpan, topSpan, right (the items' sizes and
   spread), position, overflowX, display, transform (bool), childPosition,
-  cards, tag}`. No text, links or images of the page are sent;
+  cards, tag}`; `geom` (with `state: ready`, sent once after About → Show
+  where the stories tray draws) numbers and flags only: the native view's and
+  the app WebView's place in window px, its clip, z and visibility, and the
+  slot's CSS px. No text, links or images of the page are sent;
   unknown fields are dropped. → `{ok: true, kept}`. One JSON line each in
   `<state>/stories-tray-log.jsonl`, the newest 500 kept.
 

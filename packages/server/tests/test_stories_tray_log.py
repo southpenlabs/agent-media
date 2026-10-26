@@ -98,3 +98,10 @@ def test_the_file_is_capped(server, pixel, monkeypatch):
         call(server, "POST", "/device/stories-tray-log", {"report": {"state": "error", "ms": i}}, pixel)
     got = _lines()
     assert len(got) <= 6 and got[-1]["ms"] == 8
+
+
+def test_where_the_tray_draws_is_kept(server, pixel):
+    geom = {"frameY": 374, "frameH": 576, "frameVisible": True, "slotY": 108.5, "label": "x", "deep": {"a": 1}}
+    res, body = call(server, "POST", "/device/stories-tray-log", {"report": {"state": "ready", "site": "facebook.com", "geom": geom}}, pixel)
+    assert res.status == 200, body
+    assert _lines()[-1]["geom"] == {"frameY": 374, "frameH": 576, "frameVisible": True, "slotY": 108.5}
