@@ -1817,6 +1817,22 @@ ahead.
     sign-ins signs out. Unverified on a real Facebook post: which element
     holds the post text in Facebook's mobile page.
 
+41. **Spaces: projects for agents, groups for people** (David, 26 Oct 2026:
+    "an intelligent way to organise chats into spaces... projects for
+    agents and groups for people?" — he picked tags over one home each).
+    One idea, a Space, of two kinds. A project space is today's project
+    (the folder a chat is filed under, the chip strip) with a name, icon
+    and pinned chats. A group space is one per person or group, built on
+    Contacts (item 29, people not rooms): their Matrix, SMS and mail
+    threads together. A chat can sit in more than one space (tags, not a
+    single home): a people chat about a project shows in both, and a
+    message an agent sends to someone files the chat in both. Chats with
+    no clear space land in an Inbox; the server suggests a space from the
+    folder, the people in it and the first message, accepted with a tap.
+    The server owns spaces and suggestions; the app renders them (the
+    chip strip becomes Spaces, Inbox first). Not started: needs a
+    contract section and a store for spaces and tags.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
