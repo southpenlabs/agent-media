@@ -47,6 +47,9 @@ REPORT = {
         {"tag": "a", "text": "Sam's story", "href": "https://www.facebook.com/stories/1"},
         "junk",
     ],
+    "candidates": [{"depth": 6, "x": 0, "y": 120, "w": 411, "h": 214, "children": 9, "aspect": 1.6, "width": 0.29,
+                    "overflowX": "auto", "scrolls": True, "cards": False, "tag": "div", "html": "<div>", "text": "Sam"}],
+    "viewport": {"w": 411, "h": 200, "x": "y"},
     "text": "never kept", "html": "<html>",
 }
 
@@ -63,6 +66,9 @@ def test_a_report_is_kept_as_structure(server, pixel):
     # Text, links and anything not listed are dropped.
     assert got["layout"][1] == {"tag": "a"} and len(got["layout"]) == 2
     assert "text" not in got and "html" not in got
+    assert got["candidates"] == [{"depth": 6, "x": 0, "y": 120, "w": 411, "h": 214, "children": 9, "aspect": 1.6, "width": 0.29,
+                                  "scrolls": True, "cards": False, "overflowX": "auto", "tag": "div"}]
+    assert got["viewport"] == {"w": 411, "h": 200}
 
 
 def test_a_paired_device_only(server):

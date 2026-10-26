@@ -8,9 +8,10 @@ failed attempt: the state (missing, wall, error), where the page ended up
 (host and path; of the query only its keys), the HTTP status if known, the
 page's title, whether a password field or a known "open the app" / "continue
 in browser" / consent screen is there, how many elements each tray selector
-matched, and the top of the page's layout as structure only (tag, role,
+matched, the top of the page's layout as structure only (tag, role,
 data-* attribute names, whether an aria-label is there, class names cut to
-8 characters). No text, links or images of the page.
+8 characters), and the top five sideways-scrolling rows by shape (depth,
+rect, child count, the children's aspect and width, overflow-x). No text, links or images of the page.
 
 A paired device only. One JSON line per report in
 `<state>/stories-tray-log.jsonl`, with the device and the time; the newest
@@ -70,6 +71,28 @@ def _layout(v) -> list | None:
     return out
 
 
+_NUM = ("depth", "x", "y", "w", "h", "children", "aspect", "width")
+
+
+def _candidates(v) -> list | None:
+    """The sideways rows near the page's top, by shape (sasonica-app public/tray-finder.js): numbers and flags only."""
+    if not isinstance(v, list):
+        return None
+    out = []
+    for c in v[:5]:
+        if not isinstance(c, dict):
+            continue
+        row = {k: c[k] for k in _NUM if isinstance(c.get(k), (int, float)) and not isinstance(c.get(k), bool)}
+        for k in ("scrolls", "cards"):
+            if isinstance(c.get(k), bool):
+                row[k] = c[k]
+        for k, n in (("overflowX", 12), ("tag", 20)):
+            if _s(c.get(k), n):
+                row[k] = _s(c.get(k), n)
+        out.append(row)
+    return out
+
+
 def _clean(r) -> dict | None:
     if not isinstance(r, dict) or r.get("state") not in STATES:
         return None
@@ -92,6 +115,12 @@ def _clean(r) -> dict | None:
     if isinstance(counts, dict):
         out["counts"] = {str(k)[:120]: v for k, v in list(counts.items())[:MAX_SELECTORS]
                          if isinstance(v, int) and not isinstance(v, bool)}
+    cands = _candidates(r.get("candidates"))
+    if cands is not None:
+        out["candidates"] = cands
+    vp = r.get("viewport")
+    if isinstance(vp, dict):
+        out["viewport"] = {k: vp[k] for k in ("w", "h") if isinstance(vp.get(k), (int, float)) and not isinstance(vp.get(k), bool)}
     layout = _layout(r.get("layout"))
     if layout is not None:
         out["layout"] = layout
