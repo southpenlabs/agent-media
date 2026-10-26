@@ -1863,6 +1863,23 @@ ahead.
     `/conversations` and `/dashboard` `recent` rows, and `/dashboard`'s
     `replies` leave quiet threads out (agent-media `c8d69353`). The app:
     `lib/quiet.ts`, `test/quiet.mjs` (sasonica-app `0c6c175`).
+    **Only during work** (David, same day: some threads, the Teams chat
+    "Springers PHS", should only come alive while he works at Peninsula Hot
+    Springs) — **DONE 26 Oct 2026**: a standing rule in the same sheet,
+    `POST /session/quiet {"session", "rule": {"rule": "shifts", "source":
+    "phs-shift"}}`. The window is his shifts as the calendar has them
+    (`shift_source == "phs-shift"`, "PHS — designated shift" on
+    davidj4phs, from the roster emails), exactly start..end. Outside a
+    shift the thread is quiet as above and its row says "Quiet until
+    2:30 pm shift" ("Quiet: no shifts coming" when none is known); during
+    one it is itself, with what came meanwhile unread; at a shift's end it
+    goes quiet again holding the place it had then. The server works the
+    state out and names the rules on offer (`GET /session/quiet`; labels
+    from `[[quiet.rules]]` in config.toml, else from the events' titles:
+    "Only during work (PHS shifts)"); rows carry `quiet` and `quiet_rule`.
+    agent-media `3296176e`, sasonica-app `60e93f1`. The app learns of a
+    shift's end on its next list load, so a reply in the minute after one
+    can still notice.
 
 ## Loose ends
 
