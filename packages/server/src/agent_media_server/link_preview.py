@@ -8,7 +8,10 @@ which the embed player needs. The phone loads nothing from either site until
 a card is tapped, so this asks from the server instead: through read_it's
 safe fetch (public addresses only, at every redirect), YouTube's oEmbed for a
 title, a Facebook page's og:title, og:image and og:url (asked as Facebook's
-own link previewer, which public pages answer with their tags).
+own link previewer, which public pages answer with their tags), and whether
+Facebook's embed player will play the video (`embeddable`: it plays public
+videos only, whatever the viewer's sign-in; the app then offers the video
+signed in, in its own browser, instead).
 
 Only YouTube and Facebook links; anything else is a 400. Answers are kept a
 day (CACHE_S), the newest KEEP. A fetch that fails answers what is known —
@@ -29,6 +32,14 @@ from . import auth
 CACHE_S = 24 * 3600
 KEEP = 500
 FB_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+MOBILE_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+PLUGIN = "https://www.facebook.com/plugins/video.php"
+# The player page's marks (26 Oct 2026): a playable one carries its sources,
+# an unplayable one says so ("This video may no longer exist, or you don't
+# have permission to view it").
+PLAYABLE = ("hd_src", "sd_src", "playable_url")
+UNAVAILABLE = ("Video Unavailable", "you don&#039;t have permission to view it", "you don't have permission to view it")
+_LOGIN = re.compile(r"^/(login|checkpoint)(/|\.php|$)")
 _CACHE: dict[str, tuple[float, dict]] = {}
 _LOCK = threading.Lock()
 
@@ -71,13 +82,34 @@ def _youtube(url: str) -> dict:
             "image": str(got.get("thumbnail_url") or ""), "site": "YouTube"}
 
 
+def _embeddable(href: str) -> bool | None:
+    """Whether Facebook's embed player plays this video, read off the player's
+    own page fetched signed out, as the embed sees it: True with a video
+    source in it, False when it says "Video Unavailable" (gone, or not
+    public: the plugin plays public videos only, whoever is signed in),
+    None when it cannot tell (the fetch failed, or neither mark)."""
+    try:
+        _final, _ctype, page = _fetch(f"{PLUGIN}?href={quote(href, safe='')}&show_text=false", MOBILE_UA)
+    except Exception:  # noqa: BLE001 — unknown, not unplayable
+        return None
+    if any(m in page for m in UNAVAILABLE):
+        return False
+    if any(m in page for m in PLAYABLE):
+        return True
+    return None
+
+
 def _facebook(url: str) -> dict:
-    final, _ctype, page = _fetch(url, FB_UA)
+    try:
+        final, _ctype, page = _fetch(url, FB_UA)
+    except Exception:  # noqa: BLE001 — a page we cannot read may still embed
+        final, page = url, ""
     canonical = _meta(page, "og:url") or final
-    if kind_of(canonical) != "facebook":
-        canonical = final
+    if kind_of(canonical) != "facebook" or _LOGIN.search(urlparse(canonical).path or ""):
+        canonical = url
     return {"url": canonical, "title": _meta(page, "og:title")[:200],
-            "image": _meta(page, "og:image"), "site": "Facebook"}
+            "image": _meta(page, "og:image"), "site": "Facebook",
+            "embeddable": _embeddable(canonical)}
 
 
 def preview(url: str, now: float | None = None) -> dict:
@@ -93,6 +125,8 @@ def preview(url: str, now: float | None = None) -> dict:
         got = _youtube(url) if kind == "youtube" else _facebook(url)
     except Exception:  # noqa: BLE001 — a card without a title, not no card
         got = {"url": url, "title": "", "image": "", "site": "YouTube" if kind == "youtube" else "Facebook"}
+        if kind == "facebook":
+            got["embeddable"] = None
     with _LOCK:
         _CACHE[url] = (now, got)
         if len(_CACHE) > KEEP:

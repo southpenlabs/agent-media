@@ -4454,6 +4454,17 @@ route is the server asking, not the phone: the phone loads nothing from
 Facebook until a card is tapped, and from YouTube only the card's thumbnail
 (i.ytimg.com, once the card is on screen) before a tap. `link_preview.py`.
 
+A Facebook answer also has `embeddable` (26 Oct 2026, David: "do private
+videos play with the login?"): Facebook's embed player
+(`plugins/video.php`) plays public videos only, whoever is signed in, so the
+server fetches the player's own page for the video (signed out, as a phone
+browser, through the same safe fetch) and answers `true` when it carries the
+video's sources (`hd_src`, `sd_src`, `playable_url`), `false` when it says
+"Video Unavailable" (gone, or not public), `null` when it cannot tell (a
+failed fetch, neither mark). A `false` card opens the video signed in, in
+the app's own browser, rather than an embed that cannot play. An `og:url`
+that is a login or checkpoint page is not taken as the video's address.
+
 #### `POST /upload/link {"path"}` — a link for a video (26 Oct 2026)
 
 `→ {"ok": true, "url": "/upload?path=…&exp=…&sig=…", "expires": <unix time>,

@@ -19,6 +19,11 @@ FB_PAGE = """<html><head>
 </head><body>login wall</body></html>"""
 
 
+PLUGIN_OK = '<html><body><script>{"hd_src":"https://video.example/v.mp4","sd_src":"https://video.example/s.mp4"}</script></body></html>'
+PLUGIN_GONE = ('<html><body><div class="_3i0o _50f7">Video Unavailable</div><div class="_3i0p">This video may no '
+               'longer exist, or you don&#039;t have permission to view it.</div></body></html>')
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     for k in list(os.environ):
@@ -37,6 +42,13 @@ def web(monkeypatch):
         asked.append((url, ua))
         if url.startswith("https://www.youtube.com/oembed"):
             return url, "application/json", json.dumps({"title": "A talk", "thumbnail_url": "https://i.ytimg.com/vi/abc/hqdefault.jpg"})
+        if url.startswith(link_preview.PLUGIN):
+            # The embed player's page: unavailable for a video not public, else its sources.
+            if "private" in url or "1111" in url:
+                return url, "text/html", PLUGIN_GONE
+            if "nomark" in url:
+                return url, "text/html", "<html><body>something else</body></html>"
+            return url, "text/html", PLUGIN_OK
         if "fb.watch" in url or "/share/" in url:
             return "https://www.facebook.com/somepage/videos/1234567890/", "text/html", FB_PAGE
         if "facebook.com" in url:
@@ -66,15 +78,37 @@ def test_youtube_title_from_oembed(web):
 def test_a_facebook_short_link_is_resolved_with_its_tags(web):
     got = link_preview.preview("https://fb.watch/abcDEF/")
     assert got == {"url": "https://www.facebook.com/somepage/videos/1234567890/", "title": "Our dog & the sea",
-                   "image": "https://scontent.example/pic.jpg", "site": "Facebook"}
+                   "image": "https://scontent.example/pic.jpg", "site": "Facebook", "embeddable": True}
     assert web[0][1] == link_preview.FB_UA                  # asked as Facebook's own previewer
+    # Then the embed player's own page for the video it resolved to, as a phone's browser.
+    assert web[1] == (link_preview.PLUGIN + "?href=https%3A%2F%2Fwww.facebook.com%2Fsomepage%2Fvideos%2F1234567890%2F&show_text=false",
+                      link_preview.MOBILE_UA)
+
+
+def test_a_video_the_embed_will_not_play_says_so(web, monkeypatch):
+    page = FB_PAGE.replace("somepage/videos/1234567890/", "friend/videos/1111/")
+    monkeypatch.setattr(read_it, "_get", lambda url, ua: (url, "text/html", PLUGIN_GONE if url.startswith(link_preview.PLUGIN) else page))
+    got = link_preview.preview("https://www.facebook.com/friend/videos/1111/")
+    assert got["embeddable"] is False and got["url"] == "https://www.facebook.com/friend/videos/1111/"
+
+
+def test_no_mark_either_way_is_not_known(monkeypatch):
+    monkeypatch.setattr(read_it, "_get", lambda url, ua: (url, "text/html", "<html><body>something else</body></html>"))
+    assert link_preview.preview("https://www.facebook.com/watch/?v=5")["embeddable"] is None
+
+
+def test_a_login_page_is_not_the_videos_address(monkeypatch):
+    login = FB_PAGE.replace("https://www.facebook.com/somepage/videos/1234567890/", "https://www.facebook.com/login/?next=x")
+    monkeypatch.setattr(read_it, "_get", lambda url, ua: (url, "text/html", PLUGIN_GONE if url.startswith(link_preview.PLUGIN) else login))
+    got = link_preview.preview("https://www.facebook.com/reel/42")
+    assert got["url"] == "https://www.facebook.com/reel/42" and got["embeddable"] is False
 
 
 def test_a_failed_fetch_is_a_card_without_a_title(monkeypatch):
     def boom(url, ua):
         raise read_it.ReadError("that link is not on the public internet", 403)
     monkeypatch.setattr(read_it, "_get", boom)
-    assert link_preview.preview("https://fb.watch/zzz/") == {"url": "https://fb.watch/zzz/", "title": "", "image": "", "site": "Facebook"}
+    assert link_preview.preview("https://fb.watch/zzz/") == {"url": "https://fb.watch/zzz/", "title": "", "image": "", "site": "Facebook", "embeddable": None}
 
 
 def test_answers_are_kept_a_day(web):
