@@ -7,8 +7,10 @@ Graph API gives a Page's or a business account's own stories only; the
 Instagram Basic Display API was switched off in December 2024), so the
 question is how the wrapper apps do it, and what that would cost us.
 
-**Status: step 1 building; David chose step 1 only, 26 Oct 2026.** Step 2
-(faces read from the pages) is not being built.
+**Status: step 1 built (sasonica-app 1d61da3); step 1b building (David,
+26 Oct 2026: "I was hoping the stories would be scrolled horizontally across
+the top, embedded"; he chose Facebook's own tray shown in the row, not faces
+read and redrawn).** Step 2 (faces read from the pages) is not being built.
 
 Confidence is given per finding: **high**
 (read in code or a primary source), **medium** (several secondary sources
@@ -182,6 +184,48 @@ as it does today.
   server can turn the row off, per the app-stays-generic rule; the sites'
   URLs are generic, not host setup, so they live in the app. Nothing goes
   to red5, not even which sites are signed in.
+
+### Step 1b: the site's own tray, embedded in the row (building)
+
+Signed in to Facebook in the app, the row shows Facebook's own stories tray,
+swiped sideways as Facebook draws it, in place of the Facebook stories button
+(StoriesTrayPlugin.java, lib/storiesTray.ts, StoriesRow.tsx TraySlot).
+
+- **How**: a small native WebView (the app-wide CookieManager, as
+  ReadItBrowserActivity) laid over a 200 px placeholder in the row. The page
+  sends the placeholder's rect (ResizeObserver, scroll, resize, the
+  keyboard's visual viewport) and the native view follows it, clipped below
+  the sticky bar; it hides (and pauses) when the slot is off screen, folded,
+  or under a sheet, menu or dialog, since a native view would cover them.
+- **Which page**: `m.facebook.com/`, whose top is the stories tray. Not
+  verified signed in (no sign-in here): `m.facebook.com/stories/` opens a
+  story viewer rather than the tray (as far as known), and mbasic is
+  reported reduced. The tray is found by a short list of selectors
+  (`lib/storiesTray.ts` TRAYS), tried for 10 s after the page loads.
+- **Display only**: once found, a style hides everything but the tray and
+  pins it to the top. The page is not read: the shell's only answer is a
+  state (ready, missing, wall, error). No automated scrolling; loaded once
+  per visit to Chats, only while the row is open and on screen, destroyed
+  on leaving Chats. Nothing goes to red5.
+- **A tap on a story**: a navigation out of the tray, or the page's own
+  move to a `/stories/` address, opens that page full screen in the Read it
+  browser; Done comes back.
+- **Fallback**: the Facebook stories button, as in step 1, when signed out,
+  when no selector matches (`missing`), on a load error, behind a login or
+  checkpoint (`wall`, said on the button), in a browser tab, on an APK
+  without the plugin, and on e-ink (`(update: slow)`: the row stays still).
+- **Instagram** keeps its button: instagram.com in an app's WebView pushes
+  for its app and a login check, so its tray is not tried.
+- **Text size**: the tray is drawn at 100% text zoom so it fits its slot at
+  Android font scale 1.5.
+- **Risk**: as step 1 for the terms (a page the person sees and drives;
+  hiding the rest of the page is styling), but more fragile: Facebook's
+  markup changes without notice and the selectors will need fixing, in which
+  case the row quietly falls back to the button. The hidden part of the
+  page still loads, so the feed's ads load (and may count impressions)
+  behind the tray each visit; that is the main thing Meta could object to,
+  and the reason it loads at most once per visit and never in the
+  background. Vertical swipes that start on the tray stay in the tray.
 
 ### Step 2 (optional, David's call): avatars from a foreground read
 
