@@ -306,6 +306,11 @@ Everything a message can be pointed at.
   began, not its live time, and counts nothing of it unread (no dot, no
   arrival notice, not in Home's Unread replies); a question or permission
   card from it still shows. `until: null` is "until I turn it off".
+  Under a standing rule (below) it also carries `rule: {"rule", "source",
+  "label"}`, and `until` is the next shift's start (null: none known).
+- `quiet_rule` (every row, 26 Oct 2026): the thread's standing quiet rule,
+  `{"rule": "shifts", "source", "label"}`, or `null` — there during a shift
+  too, when `quiet` is `null`.
 - `tags` (every row, 24 Oct 2026): the thread's own tags, in file order,
   from its org-roam node's `#+filetags` (`POST /session/tags`, §6.4); `[]`
   when it has none or no node, and on a sealed row.
@@ -1684,6 +1689,24 @@ Pinned by `packages/server/tests/test_reap.py`.
 - Rows carry it as `quiet` on `/targets`, `/conversations` and
   `/dashboard`'s `recent`; `/dashboard`'s `replies` leaves quiet threads
   out.
+
+- **Only during work** (David, 26 Oct 2026): `{"session", "rule": {"rule":
+  "shifts", "source": "phs-shift"}, "at"?}` (no `until`) sets a standing
+  rule instead: quiet except during the calendar's shifts from that managed
+  source (`shift_source` on its events, `calendar_sources.py`), exactly
+  start..end, no margin. Outside a shift the row's `quiet` is as above,
+  `until` the next shift's start; during one `quiet` is `null`; after one
+  it is quiet again at `at` = its activity time then (the shift's end for
+  a running thread). It replaces a timed quiet and stays until `until:
+  false` ends it. 400 `"no such rule: shifts from <source>"` for one not
+  on offer, `"a rule takes no until"`. The answer adds `quiet_rule`.
+- `GET /session/quiet` (gated) → `{"ok", "rules": [{"rule": "shifts",
+  "source", "label", "next": {"start", "end"} | null}]}`, the rules on
+  offer for the app's Quiet for… sheet: those `[[quiet.rules]]` in
+  config.toml names (`source`, `label`), else every managed source named
+  `*-shift` with events, labelled from their titles ("PHS — designated
+  shift" → "Only during work (PHS shifts)"). The calendar is read for
+  yesterday to 60 days ahead, at most once a minute.
 
 Pinned by `packages/server/tests/test_quiet.py`.
 

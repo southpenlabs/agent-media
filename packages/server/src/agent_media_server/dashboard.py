@@ -158,7 +158,7 @@ def _transcript_mtime(session: str) -> float | None:
 def _recent(index: list[dict]) -> list[dict]:
     from . import quiet
 
-    hushed = quiet.quieted()      # now, not the cached index's
+    hushed = quiet.quieted(rows={str(r.get("session") or ""): r for r in index})  # now, not the cache's
     rows = []
     for r in index:
         if r.get("archived"):

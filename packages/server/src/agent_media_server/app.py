@@ -129,8 +129,10 @@ device gets its token):
                   open against the idle reaper (pins.py, reap.py)
   POST /session/quiet {"session", "until": epoch|null|false, "at"?} → keep a
                   busy thread from floating to the top: until then, until
-                  turned off (null), or end it (false); rows carry
-                  `quiet: {until, at}` and Home's replies leave it out (quiet.py)
+                  turned off (null), or end it (false); or {"session", "rule"}
+                  for a standing rule (quiet except during shifts); rows carry
+                  `quiet: {until, at, rule?}` and `quiet_rule`, and Home's
+                  replies leave it out (quiet.py). GET → the rules on offer
   POST /session/tags {"session", "add"?, "remove"?, "tags"?} → the
                   thread's own tags, kept in its org-roam node's #+filetags
                   (tags.py); GET /tags lists every tag in use with its count
@@ -1811,6 +1813,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = thinking_speech.default_setting(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/quiet":
+        # Quiet for…'s standing rules on offer, e.g. Only during work (quiet.py).
+        from . import quiet
+
+        ok, detail = quiet.quiet_rules(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
     elif path == "/speech/default":
         # The level of a thread with none of its own (speak_priority.py).
         ok, detail = pins.speech_default(_bearer(h))
