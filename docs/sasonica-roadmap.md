@@ -1683,6 +1683,11 @@ ahead.
     reactions confirmed 22 Oct 2026** (David): attach a recorded voice
     clip to a message in the Messages tab, including when replying to a
     particular message; also offer a quick emoji reaction on a message.
+    **Reactions built 26 Oct 2026** (David: "Can we have reactions to
+    messages in chats?", in both kinds of chat): a long press on any
+    message, six quick emojis, one of yours per message; real `m.reaction`
+    in a room, a note on the next message in an agent's chat
+    (server-contract.md §6.27).
 
 35. **Mail in Sasonica** (David, 20 Oct 2026: "I'd like to handle emails
     from Sasonica"). Both a Mail tab (accounts, folders, search, compose)

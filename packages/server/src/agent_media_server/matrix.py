@@ -115,6 +115,13 @@ class Room:
         self.avatars: dict[str, str] = {}
         self.messages: list[dict] = []
         self._by_id: dict[str, dict] = {}
+        # Reactions (`m.reaction`, reactions.py): by the message reacted to,
+        # key → sender → the reaction's own event id; and each reaction's
+        # event id → (message, key, sender), so a redaction can take it off.
+        # Kept apart from the messages: going back, a reaction arrives before
+        # the message it is on.
+        self.reactions: dict[str, dict[str, dict[str, str]]] = {}
+        self._reaction_of: dict[str, tuple[str, str, str]] = {}
         # The /messages token for what is older than `messages[0]`; None once
         # the start of the room is reached.
         self.back: str | None = None
@@ -217,6 +224,45 @@ class Room:
         return True, {"session": self.thread, "pane": None, "submitted": True,
                       "event_id": ev_id}
 
+    def react(self, ev_id: str, key: str) -> tuple[bool, dict]:
+        """The owner's reaction on message `ev_id` set to `key` ("" for none):
+        one per message, as the bridged apps allow — the one there was is
+        redacted first. `{"reactions"}`, the message's after it."""
+        token = owner_token()
+        if not token:
+            return False, {"error": "this Matrix room is read-only: no owner token "
+                                    "(run matrix-owner-login)", "status": 409}
+        with self.lock:
+            if ev_id not in self._by_id:
+                return False, {"error": "no such message in this room", "status": 404}
+            mine = [(k, rid) for k, by in self.reactions.get(ev_id, {}).items()
+                    for s, rid in by.items() if s == self.owner]
+        try:
+            for k, rid in mine:
+                if k == key:
+                    key = ""             # already there: nothing to add
+                    continue
+                _put(self.config, f"/rooms/{_q(self.id)}/redact/{_q(rid)}/"
+                     f"{uuid.uuid4().hex}", {}, token)
+                self.on_event({"type": "m.room.redaction", "redacts": rid,
+                               "sender": self.owner, "content": {}})
+            if key:
+                content = {"m.relates_to": {"rel_type": "m.annotation",
+                                            "event_id": ev_id, "key": key}}
+                got = _put(self.config, f"/rooms/{_q(self.id)}/send/m.reaction/"
+                           f"{uuid.uuid4().hex}", content, token)
+                rid = got.get("event_id") or ""
+                if rid:
+                    self.on_event({"type": "m.reaction", "event_id": rid,
+                                   "sender": self.owner, "content": content})
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        with self.lock:
+            return True, {"reactions": self._reactions_view(ev_id)}
+
     def on_event(self, ev: dict) -> None:
         """An event from the sync, newest last."""
         with self.lock:
@@ -251,8 +297,28 @@ class Room:
                 else:
                     self.avatars.pop(uid, None)
             return
+        if kind == "m.reaction":
+            rel = content.get("m.relates_to") or {}
+            target, key = rel.get("event_id") or "", rel.get("key") or ""
+            rid, sender = ev.get("event_id") or "", ev.get("sender") or ""
+            if rel.get("rel_type") == "m.annotation" and target and key and rid \
+                    and rid not in self._reaction_of:
+                self.reactions.setdefault(target, {}).setdefault(key, {})[sender] = rid
+                self._reaction_of[rid] = (target, key, sender)
+                self.rev += 1
+            return
         if kind == "m.room.redaction":
             gone = ev.get("redacts") or content.get("redacts")
+            r = self._reaction_of.pop(gone, None) if gone else None
+            if r is not None:
+                target, key, sender = r
+                by = self.reactions.get(target, {}).get(key, {})
+                if by.get(sender) == gone:
+                    by.pop(sender)
+                    if not by:
+                        self.reactions[target].pop(key, None)
+                self.rev += 1
+                return
             m = self._by_id.pop(gone, None) if gone else None
             if m is not None:
                 self.messages.remove(m)
@@ -347,10 +413,20 @@ class Room:
             msgs, older, newer = win
             return self._view(msgs), older or bool(self.back), newer
 
+    def _reactions_view(self, ev_id: str) -> list[dict]:
+        """`reactions` (§6.27): each emoji on the message, in the order
+        first seen, with who put it there."""
+        return [{"key": k, "count": len(by), "mine": self.owner in by,
+                 "by": [self.members.get(u) or u for u in by]}
+                for k, by in self.reactions.get(ev_id, {}).items() if by]
+
     def _view(self, msgs: list[dict]) -> list[dict]:
         out = [dict(m, sender=dict(m["sender"])) for m in msgs]
         who: dict[str, dict] = {}
         for m in out:            # names learnt since the message came in
+            rs = self._reactions_view(m["id"])
+            if rs:
+                m["reactions"] = rs
             uid = m["sender"]["id"]
             m["sender"]["name"] = self.members.get(uid) or m["sender"]["name"]
             if m["role"] == "assistant":

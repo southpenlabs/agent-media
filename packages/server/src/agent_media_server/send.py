@@ -1185,9 +1185,11 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
     elif mode != "branch":
         # A message taken back since the last one (`/session/retract`): this
         # one opens by saying so, since the agent may have read it already.
-        from . import retract
+        from . import reactions, retract
 
-        text = retract.with_note(session, text)
+        # Reactions since the last message (`/session/react`) are told the
+        # same way, after it: a thumbs-up costs no turn of its own.
+        text = retract.with_note(session, reactions.with_notes(session, text))
     # `body` is what a pane is typed (its breaks kept only where the pane can
     # take them, `for_pane`); `text` is recorded with the breaks the reply box
     # had, so the transcript keeps them.

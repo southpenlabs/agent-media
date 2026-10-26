@@ -350,11 +350,12 @@ def messages_for(session: str, lines: list, *, working: bool, live: bool,
                  limit: int = MESSAGES_LIMIT, before: str = "", around: str = "",
                  jump: dict | None = None) -> tuple[list, bool]:
     """`_messages_for`, with the messages taken back marked (retract.py)."""
-    from . import retract
+    from . import reactions, retract
 
     msgs, older = _messages_for(session, lines, working=working, live=live, limit=limit,
                                 before=before, around=around, jump=jump)
     retract.mark(session, msgs)
+    reactions.mark(session, msgs)
     return msgs, older
 
 

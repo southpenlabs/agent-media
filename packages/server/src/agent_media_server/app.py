@@ -360,7 +360,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language",
@@ -2756,6 +2756,19 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/react":
+        # A long press on a message in the app, then an emoji
+        # (server-contract.md §6.27): a Matrix room sends it to the network,
+        # an agent session keeps it and tells the agent with the next
+        # message. See reactions.py.
+        from . import reactions
+
+        body = _read_json(h) or {}
+        ok, detail = reactions.session_react(
+            str(body.get("session") or ""), str(body.get("id") or ""),
+            str(body.get("key") or ""), _bearer(h),
+            text=str(body.get("text") or ""), role=str(body.get("role") or ""))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/archive":
         # Archive or un-archive a thread: a flag kept here, by session, now

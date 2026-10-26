@@ -6340,6 +6340,50 @@ which is enough.
   cookies: it shows the step's `instructions` and a box for the JSON of
   the cookies (what the bridge bot takes), submitted as `values`.
 
+### 6.27 Reactions on messages — gated (built 26 Oct 2026)
+
+Code: `agent_media_server/reactions.py`, `matrix.Room.react`. Pinned by
+`packages/server/tests/test_reactions.py`. David, 26 Oct 2026: "Can we have
+reactions to messages in chats?", in both kinds of chat. A long press on a
+message picks an emoji. You have one reaction per message, as WhatsApp and
+Messenger allow: another emoji replaces it.
+
+#### `POST /session/react`
+
+```json
+{"session": "<thread>", "id": "<message id>", "key": "👍",
+ "text": "<the message's words>", "role": "assistant"}
+```
+
+`key` is one emoji (at most 32 characters, no letters, digits or spaces),
+or `""` to take yours off. Choosing the one already there changes nothing,
+so the app sends `""` for a tap on it. `text` and `role` are only for an
+agent session's note (below). → `{"ok", "session", "id", "reactions"}`:
+the message's reactions after the change.
+
+- **A Matrix room** (§6.1 `source: "matrix"`): sent as the owner
+  (`MATRIX_OWNER_TOKEN`) as an `m.reaction` annotation, so the bridge
+  carries it to the network. The one it replaces is redacted first. 409
+  with no owner token, 404 for a message the room does not hold, 502 when
+  the homeserver refuses it or cannot be reached. Everyone else's
+  reactions come in from the sync and come off with their redaction.
+- **An agent session**: kept in `<state_dir>/reactions.json`. It costs no
+  turn. The **next** message sent to the session opens with a sentence for
+  each reaction since the last one, after any §6.19 note: `(I reacted 👍 to
+  your message, “<first 80 characters>”.)` (`my message` for one of your
+  own). A reaction changed before it is told is told as it ended up, and one
+  taken off before then is never told. The sentence is removed from the
+  bubble when the thread is read. 404 for a session nothing knows.
+
+400 for a bad session id, a missing `id` or a key that is not an emoji.
+
+#### `reactions` on a message (§6.2.2)
+
+`/conversation/log` and the thread stream carry
+`reactions: [{"key", "count", "mine", "by"?}]` on a message that has any,
+in the order first seen. `by` (rooms only) is who put the emoji there, by
+name. A change arrives on the stream as a `message` `replace`.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

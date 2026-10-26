@@ -70,6 +70,8 @@ clip** to a message, including a reply to a particular message, and **react
 with an emoji** on a message. Voice clips are sent as playable audio;
 recording a clip is separate from dictating text. These extend sending
 media (2), reactions (3) and replies (4) above; queued, not built.
+Reactions (3) built 26 Oct 2026, in agent chats as well (server-contract.md
+§6.27).
 
 Second round, all chosen (David, 20 Oct 2026):
 
