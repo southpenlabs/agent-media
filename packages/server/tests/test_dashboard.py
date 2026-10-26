@@ -104,7 +104,8 @@ def test_shape_while_working(server, shelf, signed_in, machine):
     recent = {r["session"]: r for r in obj["recent"]}
     assert set(recent) == {SID, SID2}
     for r in obj["recent"]:
-        assert keys(r) == {"session", "title", "recap", "at", "live", "rested", "project", "cwd"}
+        assert keys(r) == {"session", "title", "recap", "at", "live", "rested", "project", "cwd",
+                           "quiet"}
     assert recent[SID2]["live"] is True and recent[SID]["live"] is False
     # The shelved one is filed under a series: that is its project.
     assert recent[SID]["project"] == "p-agent-media" and recent[SID2]["project"] is None
@@ -312,6 +313,23 @@ def test_replies_are_threads_that_end_on_a_reply(server, shelf, signed_in, machi
     _transcript(SID, [_asked("hi", 1), _said("All done.", 2), _asked("more", 3)])
     res, obj = call(server, "GET", "/dashboard", headers=AUTH)
     assert obj["replies"] == []
+
+
+def test_a_quiet_thread_is_left_out_of_replies(server, shelf, signed_in, machine):
+    """Quiet for… (quiet.py): its reply is not news while quiet, and is again
+    once the quiet ends — nothing was marked seen."""
+    from agent_media_server import quiet
+
+    _transcript(SID, [_asked("hi", 1), _said("All done.", 2)])
+    quiet.set_quiet(SID, None, at=1790000000.0)
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)
+    assert obj["replies"] == []
+    recent = {r["session"]: r for r in obj["recent"]}
+    assert recent[SID]["quiet"] == {"until": None, "at": 1790000000.0}
+    assert recent[SID2]["quiet"] is None
+    quiet.set_quiet(SID, False)
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)
+    assert [r["session"] for r in obj["replies"]] == [SID]
 
 
 def test_replies_from_opencode_and_hermes(monkeypatch):

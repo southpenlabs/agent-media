@@ -300,6 +300,12 @@ Everything a message can be pointed at.
   `/session/close` is never rested.
 - `pinned` (every row, 22 Sep 2026): kept open against the idle reaper, set
   with `POST /session/pin` (§6.4). A pin affects the reaper only.
+- `quiet` (every row, 26 Oct 2026): `{"until": epoch | null, "at": epoch}`
+  while the thread is quiet (`POST /session/quiet`, §6.4), else `null`.
+  The app sorts a quiet row by `at`, its activity time when the quiet
+  began, not its live time, and counts nothing of it unread (no dot, no
+  arrival notice, not in Home's Unread replies); a question or permission
+  card from it still shows. `until: null` is "until I turn it off".
 - `tags` (every row, 24 Oct 2026): the thread's own tags, in file order,
   from its org-roam node's `#+filetags` (`POST /session/tags`, §6.4); `[]`
   when it has none or no node, and on a sealed row.
@@ -1651,6 +1657,35 @@ the book-tracks manifests, and only reads from ABS.
 - In `CORS_PATHS`.
 
 Pinned by `packages/server/tests/test_reap.py`.
+
+#### `POST /session/quiet` — gated (26 Oct 2026)
+
+`{"session", "until": epoch | null | false, "at"?: epoch}` →
+`{"ok": true, "session", "quiet": {"until", "at"} | null}`.
+
+- Quiet for… (David, 26 Oct 2026: "Can we have a way of stopping unread
+  messages from busy threads floating to the top for a time?"): an epoch
+  is "until then" (the app offers an hour, and tomorrow 7 am local), `null`
+  (or absent) "until I turn it off", `false` ends it. While quiet the
+  thread keeps its place in the list and its replies are not news (see the
+  rows' `quiet`, §6.1); when it runs out it is itself again, and what came
+  meanwhile is unread — nothing is marked seen.
+- `at`: the thread's activity time as the caller sorts it, which the
+  thread stays at; default now (where a live thread sorts). Quieting a
+  thread already quiet changes its end and keeps its first `at`.
+- Kept here, per session, in `<state_dir>/quiet.json` (`{"<session>":
+  {"until", "at", "set"}}`, the same atomic write-and-lock as the pin), so
+  every device agrees. A quiet past its `until` is ignored on read and
+  dropped on the next write.
+- 400 `"until must be a time to come, null or false"`, `"at must be a time
+  that has passed"`; the other refusals and CORS exactly as
+  `/session/pin`, except that a Matrix room is a session here (as for
+  `/session/priority`).
+- Rows carry it as `quiet` on `/targets`, `/conversations` and
+  `/dashboard`'s `recent`; `/dashboard`'s `replies` leaves quiet threads
+  out.
+
+Pinned by `packages/server/tests/test_quiet.py`.
 
 #### `POST /session/tags`, `GET /tags` — gated (24 Oct 2026)
 
@@ -3608,11 +3643,13 @@ machines are. Code: `agent_media_server/dashboard.py`. Pinned by
   `/speech/now` poll is the live one.
 - `recent`: up to 8 `/targets` rows, archived ones left out, newest first by
   `at` — a shelved row's own `at`, else the transcript's mtime (a live row),
-  else the recap's. `recap` and `rested` as on `/targets`.
+  else the recap's. `recap` and `rested` as on `/targets`, and `quiet`
+  (26 Oct 2026, `POST /session/quiet`, §6.4), read fresh, not off the cache.
 - `replies` (3 Oct 2026): every thread whose transcript ends on a reply —
   an assistant message with words, its turn over — newest first: Home's
-  Unread replies. Archived threads, and ones working or on a dialog, are
-  left out; of the rest, the 30 written to most recently in the last 3 days
+  Unread replies. Archived threads, quiet ones (`POST /session/quiet`,
+  26 Oct 2026; they come back when the quiet ends) and ones working or on a
+  dialog are left out; of the rest, the 30 written to most recently in the last 3 days
   are asked (`transcript.last_reply`, the file's last 256 KB, read again only
   when it changes). `at` is the transcript's mtime — when the reply
   finished — and `text` its last words as plain words on one line (240

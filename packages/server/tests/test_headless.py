@@ -743,7 +743,8 @@ def test_ask_new_starts_a_headless_session_and_it_is_listed(app_host, server, si
                    "recap": None, "archived": False, "rested": None, "pinned": False, "priority": False, "speech": "normal", "speech_own": False,
                    "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
                    "driver": "headless", "drivable": True, "harness": "claude",
-                   "source": "sessiond", "project": "work", "cwd": row["cwd"], "tags": []}
+                   "source": "sessiond", "project": "work", "cwd": row["cwd"], "tags": [],
+                   "quiet": None}
     # Its directory, from its transcript; outside ~/projects the directory's
     # own name is its project on David's layout.
     assert Path(row["cwd"]).name == "work"

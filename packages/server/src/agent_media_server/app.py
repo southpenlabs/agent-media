@@ -127,6 +127,10 @@ device gets its token):
                   session first; a sealed thread's content answers 423
   POST /session/pin {"session", "pinned": true|false} → keep that session
                   open against the idle reaper (pins.py, reap.py)
+  POST /session/quiet {"session", "until": epoch|null|false, "at"?} → keep a
+                  busy thread from floating to the top: until then, until
+                  turned off (null), or end it (false); rows carry
+                  `quiet: {until, at}` and Home's replies leave it out (quiet.py)
   POST /session/tags {"session", "add"?, "remove"?, "tags"?} → the
                   thread's own tags, kept in its org-roam node's #+filetags
                   (tags.py); GET /tags lists every tag in use with its count
@@ -360,7 +364,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language",
-    "/sessions/state", "/commands", "/rename",
+    "/sessions/state", "/commands", "/rename", "/session/quiet",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -2832,6 +2836,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = pins.session_pin(str(body.get("session") or ""),
                                       body.get("pinned"), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/quiet":
+        # Quiet for…: the thread keeps its place and its replies are not
+        # news until it runs out (quiet.py). Gated like /session/pin.
+        from . import quiet
+
+        body = _read_json(h) or {}
+        ok, detail = quiet.session_quiet(str(body.get("session") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/handoff":
         # A quick chat to a full agent, with what was said (quick.py).

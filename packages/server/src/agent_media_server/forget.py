@@ -14,7 +14,7 @@
 4. Its item on each Audiobookshelf the host publishes to
    (`book_tracks._abs_ready_all`), found by folder the way export finds it.
 5. Its search rows (`search.forget`), and its flags: archived, pinned,
-   rested, moved, draft.
+   quiet, rested, moved, draft.
 
 Nothing is thrown away blind. Before any of it, the history rows and the
 manifest are written, and the folder is moved, under
@@ -149,6 +149,8 @@ def apply(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
             got["search_rows"] = search.forget(s)
             archive.set_archived(s, False)
             pins.set_pinned(s, False)
+            from . import quiet
+            quiet.set_quiet(s, False)
             rest.clear_rested(s)
             moves.forget(s)
             drafts._draft_path(s).unlink(missing_ok=True)

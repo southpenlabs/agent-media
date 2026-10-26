@@ -1422,6 +1422,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     auto.
 
     And `tags`, the thread's own tags from its org-roam node (`tags`).
+
+    And `quiet`: `{"until", "at"}` while the thread is quiet (`quiet`) —
+    the app sorts it by `at` and counts nothing of it unread — else None.
     """
     from . import archive, pins, rest
 
@@ -1502,10 +1505,12 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # A sealed thread is listed with nothing of its content: where it was and
     # when it was sealed, so the app can offer to unseal it (seal.py).
     # And `tags`: the thread's own tags, read from its org-roam node (tags.py).
-    from . import tags
+    # And `quiet`: `{until, at}` while Quiet for… holds it, else None (quiet.py).
+    from . import quiet, tags
 
-    return tags.add_tags(add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
-                                              for sid, rec in locked.items() if sid not in gone])
+    return quiet.add_quiet(tags.add_tags(
+        add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
+                             for sid, rec in locked.items() if sid not in gone]))
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:

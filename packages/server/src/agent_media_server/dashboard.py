@@ -156,6 +156,9 @@ def _transcript_mtime(session: str) -> float | None:
 
 
 def _recent(index: list[dict]) -> list[dict]:
+    from . import quiet
+
+    hushed = quiet.quieted()      # now, not the cached index's
     rows = []
     for r in index:
         if r.get("archived"):
@@ -169,7 +172,7 @@ def _recent(index: list[dict]) -> list[dict]:
         rows.append({"session": sid, "title": str(r.get("title") or ""),
                      "recap": r.get("recap"), "at": at, "live": bool(r.get("live")),
                      "rested": r.get("rested"), "project": r.get("project"),
-                     "cwd": r.get("cwd")})
+                     "cwd": r.get("cwd"), "quiet": hushed.get(sid)})
     rows.sort(key=lambda x: -(x["at"] or 0))
     return rows[:RECENT_ROWS]
 
@@ -222,8 +225,8 @@ def _hermes_said() -> dict[str, dict]:
 def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     """Threads that end on a reply, newest first: Home's Unread replies, which
     the app keeps to the ones that came after it last had the thread open.
-    Archived threads and the ones working or on a dialog (`busy`) are left
-    out. Claude Code, Codex, pi, Gemini and Grok: the end of the transcript
+    Archived threads, quiet ones (`quiet.py`) and the ones working or on a
+    dialog (`busy`) are left out. Claude Code, Codex, pi, Gemini and Grok: the end of the transcript
     (`transcript.last_reply`; Gemini's and Grok's folded whole); opencode: its database
     (`transcript.last_reply_opencode`); Hermes: its newest spoken line."""
     from agent_media_core import harnesses
@@ -235,10 +238,15 @@ def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     hermes: dict[str, dict] | None = None
     from agent_media_core.private import hidden
 
+    from . import quiet
+
+    # Quiet for… (quiet.py): asked now, not off the cached index, so a quiet
+    # set or ended a moment ago already counts.
+    hushed = quiet.quieted()
     cut = time.time() - REPLIES_WINDOW_S
     for r in index:
         sid = str(r.get("session") or "")
-        if not sid or r.get("archived") or sid in busy or hidden(sid):
+        if not sid or r.get("archived") or sid in busy or hidden(sid) or sid in hushed:
             continue
         if harnesses.is_hermes(sid):
             if hermes is None:
