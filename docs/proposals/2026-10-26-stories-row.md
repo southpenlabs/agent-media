@@ -227,6 +227,16 @@ swiped sideways as Facebook draws it, in place of the Facebook stories button
   and the reason it loads at most once per visit and never in the
   background. Vertical swipes that start on the tray stay in the tray.
 
+- **First test (build 1510, 26 Oct 2026)**: signed in, the slot showed
+  "Loading Facebook stories…" and fell back to the button: the tray was not
+  found (or a wall or an error). The tray now reports each failure to the
+  server as structure only (§6.21d, `<state>/stories-tray-log.jsonl`: where
+  the page ended, its title, a password field or a known interstitial, the
+  selectors' match counts, the top 40 elements' tags, roles, data-* names
+  and cut class names), shows the last one on About, offers "Show what
+  loaded" under the button, waits up to 20 s, and asks as a phone's Chrome
+  (the WebView's "; wv" and "Version/4.0" marks dropped).
+
 ### Step 2 (optional, David's call): avatars from a foreground read
 
 If David wants faces: when the Chats tab opens and the last read is over 15

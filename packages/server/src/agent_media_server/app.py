@@ -300,6 +300,10 @@ device gets its token):
   POST /device/listen-log {lines: [...]} → a paired phone's mic listens, what
                   each came to (taken, echo, error, rescued…), appended to
                   <state>/listen-log.jsonl (listen_log.py, §6.21c)
+  POST /device/stories-tray-log {report: {...}} → what a paired phone's
+                  embedded stories tray page came to when it failed (state,
+                  host/path, title, structure only), appended to
+                  <state>/stories-tray-log.jsonl (stories_tray_log.py, §6.21d)
   POST /notes {id, title, text, priority?, ttl_s?, keep?} (host token) → a
                   notification in the phone's shade; POST /notes/clear {id}.
                   Phones on /sessions/events?notes=1 get a `notes` frame
@@ -370,7 +374,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/listen-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -2664,6 +2668,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import listen_log
 
         ok, detail = listen_log.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/stories-tray-log":
+        # What the stories row's embedded tray page came to (stories_tray_log.py, §6.21d).
+        from . import stories_tray_log
+
+        ok, detail = stories_tray_log.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/location":
         # A phone's background location share (§6.21b, phone.py): a paired

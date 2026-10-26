@@ -4699,6 +4699,33 @@ outbound (sasonica-app `lib/listenLog.ts`). Code: `listen_log.py`; tests in
   speech, heard speech but no words, were quiet (`rmsPeak`), began under a
   playing voice or were an interlude, and the recogniser's error codes.
 
+
+### 6.21d The stories tray's failures, reported (built 26 Oct 2026)
+
+David tested build 1510 signed in: the Chats stories row showed "Loading
+Facebook stories…" and fell back to its button, so the embedded tray
+(sasonica-app `StoriesTrayPlugin.java`) did not find Facebook's tray, and
+nobody can sign in to Facebook from here to see why. The phone reports each
+failed attempt, once, outbound (sasonica-app `lib/storiesTray.ts`). Code:
+`stories_tray_log.py`; tests in `test_stories_tray_log.py`.
+
+- `POST /device/stories-tray-log {report: {state, site?, host?, path?,
+  queryKeys?, status?, title?, password?, interstitial?, ms?, elements?,
+  online?, network?, ua?, error?, counts?, layout?}}` — a paired device only
+  (401 otherwise); 400 without a `state` of `missing` (no selector matched),
+  `wall` (a login or checkpoint page), `error` (the page did not load) or
+  `ready`. `host` and `path` are where the page ended up; of its query only
+  `queryKeys`. `status` the main page's HTTP status when known; `title` the
+  page's title; `password` a password field is on it; `interstitial` a known
+  screen: `open-app`, `continue-browser`, `consent`, `login`. `ms` from load
+  to the state; `elements` the page's element count; `counts` how many
+  elements each tray selector matched; `layout` the top of the page as
+  structure only, up to 60 `{tag, depth, role?, data?: [data-* attribute
+  names], aria?: bool (an aria-label is there), id?: bool, cls?: [class names
+  cut to 8 characters]}`. No text, links or images of the page are sent;
+  unknown fields are dropped. → `{ok: true, kept}`. One JSON line each in
+  `<state>/stories-tray-log.jsonl`, the newest 500 kept.
+
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 
 `media restart-services --host p8a` on red5 must not need Tailscale or any
