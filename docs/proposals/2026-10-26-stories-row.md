@@ -7,10 +7,10 @@ Graph API gives a Page's or a business account's own stories only; the
 Instagram Basic Display API was switched off in December 2024), so the
 question is how the wrapper apps do it, and what that would cost us.
 
-**Status: step 1 built (sasonica-app 1d61da3); step 1b building (David,
-26 Oct 2026: "I was hoping the stories would be scrolled horizontally across
-the top, embedded"; he chose Facebook's own tray shown in the row, not faces
-read and redrawn).** Step 2 (faces read from the pages) is not being built.
+**Status: step 1 built (sasonica-app 1d61da3); step 1b works on David's
+phone as of build 1520 (26 Oct 2026): Facebook's own stories tray shows in
+the Chats row, placed by moving the native view.** Step 2 (faces read from
+the pages) is not being built.
 
 Confidence is given per finding: **high**
 (read in code or a primary source), **medium** (several secondary sources
@@ -236,6 +236,28 @@ swiped sideways as Facebook draws it, in place of the Facebook stories button
   and cut class names), shows the last one on About, offers "Show what
   loaded" under the button, waits up to 20 s, and asks as a phone's Chrome
   (the WebView's "; wv" and "Version/4.0" marks dropped).
+
+- **What the phone tests found (builds 1510-1520, 26 Oct 2026)**, from the
+  structure-only reports (§6.21d) and screenshots:
+  - The label selectors never matched: Facebook's new mobile site
+    ("html-ren", Bloks markup) has no labels on the tray. The tray is found
+    by its shape instead (tray-finder.js): a row near the page's top of at
+    least 3 alike portrait cards running off its edge.
+  - At first the WebView was laid out at the slot's 200 px and the page drew
+    for that; even at full size Facebook sized its page from the width it
+    saw at boot (200 px). The page is now loaded only once the WebView has
+    the screen's width, and reloaded once if it laid itself out narrower.
+  - The row (in 1514's report) was 200 px wide with overflow-x auto, about
+    163 CSS px down the page, holding 58 × 106 cards between 1 px spacers,
+    Create story first: card widths are judged in px, spacers skipped, one
+    odd item allowed, a row that scrolls by overflow-x preferred.
+  - Pinning the row from the page (position: fixed, a measured shift, zoom)
+    never held on Facebook's real page, though it did on test copies; the
+    red-tint aid (About, with Advanced on) showed the native view exactly
+    on the slot with the row drawn ~160 CSS px down inside it. So the page
+    only hides everything but the row and reports where the row is, and the
+    shell moves its WebView up by that much (build 1520). The slot is then
+    sized to the row (its height and 8 px above and below).
 
 ### Step 2 (optional, David's call): avatars from a foreground read
 
