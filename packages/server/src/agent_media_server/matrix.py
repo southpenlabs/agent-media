@@ -121,6 +121,11 @@ class Room:
         # Media messages (§6.29): by event id, where its bytes are —
         # `{"mxc", "thumb_mxc"?, "mimetype"}` — for /rooms/<thread>/media.
         self.media: dict[str, dict] = {}
+        # An edit seen before the message it edits (going back, the newer
+        # comes first): its new parts, by the message's event id, put on the
+        # message when it arrives. A bridge posts "Waiting for attachment" and
+        # edits it into the file, or into "Failed to transfer attachment".
+        self._edits: dict[str, list[dict]] = {}
         # Reactions (`m.reaction`, reactions.py): by the message reacted to,
         # key → sender → the reaction's own event id; and each reaction's
         # event id → (message, key, sender), so a redaction can take it off.
@@ -283,6 +288,10 @@ class Room:
     def _take(self, ev: dict, *, front: bool) -> None:
         kind = ev.get("type")
         content = ev.get("content") or {}
+        if kind == "m.sticker" and content:
+            # A sticker is a picture (§6.29).
+            kind, content = "m.room.message", {**content, "msgtype": "m.image"}
+            ev = {**ev, "type": kind, "content": content}
         if kind == "m.room.name":
             if not front:
                 self.name = content.get("name") or ""
@@ -346,11 +355,19 @@ class Room:
                 self.rev += 1
             elif new and not front and rel.get("event_id"):
                 self._amend(rel["event_id"], self._parts(ev.get("sender") or "", new))
+            elif new and front and rel.get("event_id"):
+                if rel["event_id"] not in self._edits:      # the newest edit is the first seen
+                    self._edits[rel["event_id"]] = self._parts(
+                        ev.get("sender") or "", new, rel["event_id"])
+                    while len(self._edits) > 500:
+                        self._edits.pop(next(iter(self._edits)))
             return
         ev_id = ev.get("event_id") or ""
         if not ev_id or ev_id in self._by_id:
             return
         m = self._message(ev)
+        if ev_id in self._edits:
+            m["parts"], m["edited"] = self._edits.pop(ev_id), True
         self._by_id[ev_id] = m
         if front:
             self.messages.insert(0, m)

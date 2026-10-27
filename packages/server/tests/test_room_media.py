@@ -187,3 +187,29 @@ def test_download_streams_and_refuses_too_large(monkeypatch, tmp_path):
     with pytest.raises((ValueError, OSError, urllib.error.URLError)):
         room_media._download("mxc://ryer.org/abc", tmp_path / "g")
     assert not (tmp_path / "g").exists()
+
+
+def test_a_placeholder_edited_into_the_file_or_a_failure_is_shown_as_edited():
+    # Going back, the edit (newer) comes before the "Waiting for attachment" it edits.
+    edit_ok = {"type": "m.room.message", "event_id": "$e1", "sender": ZED, "origin_server_ts": 3,
+               "content": {"msgtype": "m.image", "body": "* a.png",
+                           "m.relates_to": {"rel_type": "m.replace", "event_id": "$w1"},
+                           "m.new_content": {"msgtype": "m.image", "body": "a.png",
+                                             "url": "mxc://ryer.org/a", "info": {"mimetype": "image/png"}}}}
+    edit_bad = {"type": "m.room.message", "event_id": "$e2", "sender": ZED, "origin_server_ts": 5,
+                "content": {"msgtype": "m.notice", "body": "* Failed to transfer attachment b",
+                            "m.relates_to": {"rel_type": "m.replace", "event_id": "$w2"},
+                            "m.new_content": {"msgtype": "m.notice", "body": "Failed to transfer attachment b"}}}
+    waits = [{"type": "m.room.message", "event_id": f"$w{i}", "sender": ZED, "origin_server_ts": i,
+              "content": {"msgtype": "m.notice", "body": "Waiting for attachment x"}} for i in (1, 2)]
+    sticker = {"type": "m.sticker", "event_id": "$s1", "sender": ZED, "origin_server_ts": 6,
+               "content": {"body": "sticker.png", "url": "mxc://ryer.org/st", "info": {"mimetype": "image/png"}}}
+    cfg = core_matrix.Config(homeserver=HS, token="t", rooms={ROOM})
+    r = matrix.Room(ROOM, cfg, ME, get=Homeserver([*waits, edit_ok, edit_bad, sticker]))
+    matrix._ROOMS[r.thread] = r
+    r.load()
+    msgs = _by_id(r)
+    assert msgs["$w1"]["parts"][0]["kind"] == "image" and msgs["$w1"]["edited"] is True
+    assert msgs["$w2"]["parts"] == [{"type": "text", "text": "Failed to transfer attachment b"}]
+    assert msgs["$s1"]["parts"][0]["kind"] == "image" and "$e1" not in msgs
+    assert r.media["$w1"]["mxc"] == "mxc://ryer.org/a" and r.media["$s1"]["mxc"] == "mxc://ryer.org/st"
