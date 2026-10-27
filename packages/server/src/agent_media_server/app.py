@@ -369,7 +369,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language",
-    "/sessions/state", "/commands", "/rename", "/session/quiet",
+    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -1572,6 +1572,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         print(f"commands: {h.client_address[0]} {query} -> "
               f"{len(detail.get('commands') or []) if ok else detail}", file=sys.stderr)
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    elif path == "/usage":
+        # How much of the Claude plan is spent (plan_usage.py): the card's numbers.
+        from . import plan_usage
+
+        ok, detail = plan_usage.get(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/conversation/log":
         # The same conversation, read rather than heard. `?session=` is the
         # v1 form (server-contract.md §10) and wins when both are given; it

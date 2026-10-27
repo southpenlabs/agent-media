@@ -6496,6 +6496,27 @@ asks for it.
 cannot be fetched (the network no longer has it, or the phone that holds
 it is off). A failure is not tried again for ten minutes.
 
+### 6.30 Plan usage — gated, owner only (built 28 Oct 2026)
+
+`GET /usage` answers how much of the Claude plan is spent, for the Coding
+agents page's card (`/usage` typed in a reply box draws a screen nobody
+sees). The numbers come from Anthropic's OAuth usage endpoint, asked with the
+host's own Claude login, and are kept for a minute.
+
+```
+→ {"ok": true,
+   "windows": [{"kind": "session"|"weekly_all"|"weekly_scoped",
+                "label": "Fable"|null,      // the model, for weekly_scoped
+                "percent": 34,
+                "resets_at": 1793145599,    // epoch seconds, or null
+                "severity": "normal"|"warning"|…}],
+   "extra": {"percent": 0.0, "currency": "AUD"} | null}   // paid overflow, when on
+```
+
+404 `no_login` when Claude is not signed in on the host; 502 `unavailable`
+when Anthropic did not answer (an expired login included). A kind the app
+does not know is dropped by the server.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
