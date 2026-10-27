@@ -79,12 +79,25 @@ def _read(session: str) -> tuple[tuple, list[dict]]:
     return identity, got[0] if got else []
 
 
-def _parts(messages: list[dict]) -> dict[tuple[str, int], str]:
+def _interim(harness: str, parts: list[dict], i: int) -> bool:
+    """A Claude thread's words to the listener before a step ("Will do,
+    I'll push this first…"): a text part with a tool after it in the same
+    message. The Stop hook speaks only the turn's last message, so these
+    were never heard (David, 28 Oct 2026: "why don't I get these thought
+    messages read out?"); they are its public progress, as Codex's
+    commentary is."""
+    return harness == "claude" and any(
+        q.get("type") == "tool" for q in parts[i + 1:])
+
+
+def _parts(messages: list[dict], harness: str = "") -> dict[tuple[str, int], str]:
     return {(m["id"], i): str(p.get("text") or "").strip()
             for m in messages if m.get("role") == "assistant"
             for i, p in enumerate(m.get("parts") or [])
             if ((p.get("type") == "reasoning" and not p.get("redacted"))
-                or (p.get("type") == "text" and p.get("channel") == "commentary"))
+                or (p.get("type") == "text" and (
+                    p.get("channel") == "commentary"
+                    or _interim(harness, m.get("parts") or [], i))))
             and str(p.get("text") or "").strip()}
 
 
@@ -160,7 +173,7 @@ class Watcher:
         except OSError:
             identity, messages = (), []
         harness = identity[0] if identity else ""
-        self.cursors[session] = Cursor(token, identity, set(_parts(messages)),
+        self.cursors[session] = Cursor(token, identity, set(_parts(messages, harness)),
                                        steps_seen=set(_steps(harness, messages)))
 
     def allowed(self, session: str, token: str, message: str) -> bool:
@@ -212,7 +225,7 @@ class Watcher:
             return
         cursor = self.cursors[session]
         identity, messages = _read(session)
-        parts = _parts(messages)
+        parts = _parts(messages, identity[0] if identity else "")
         old = cursor.identity
         if (identity[:-1] != old[:-1] or
                 (len(identity) == 5 and len(old) == 5 and identity[-1] < old[-1])):

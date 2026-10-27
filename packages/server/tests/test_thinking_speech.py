@@ -584,3 +584,16 @@ def test_a_step_is_spoken_through_submission_with_the_think_earcon(env, monkeypa
     # Under the voice and looping, not a cue before it (25 Oct 2026).
     assert played and played[0] == ("under", earcons.path("think").name, True)
     assert len(played) == 2  # the earcon, then the step's one sentence
+
+
+def test_claude_words_before_a_step_are_read_but_not_the_final_reply():
+    """David, 28 Oct 2026: 'why don't I get these thought messages read out?'"""
+    msgs = [{"id": "m1", "role": "assistant", "parts": [
+                {"type": "reasoning", "text": "", "redacted": True},
+                {"type": "text", "text": "Will do. I'll push this fix first."},
+                {"type": "tool", "name": "Bash", "description": "Push the fix"}]},
+            {"id": "m2", "role": "assistant", "parts": [
+                {"type": "text", "text": "Pushed and installed."}]}]
+    assert T._parts(msgs, "claude") == {("m1", 1): "Will do. I'll push this fix first."}
+    # Other harnesses keep their rule: only reasoning and commentary.
+    assert T._parts(msgs, "codex") == {}
