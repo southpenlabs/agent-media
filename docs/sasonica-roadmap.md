@@ -1888,6 +1888,14 @@ ahead.
     coming shifts (`quiet_rule.shifts`), so the app follows a shift's start
     and end with the list left open (agent-media `021d7cc0`, sasonica-app
     `1ca0b1f`).
+    **A length and a time of his own** (David, 28 Oct 2026: "Can we make
+    the duration and [unit] selectable from a drop-down ... also a
+    selectable specific date and time") — **DONE 28 Oct 2026**: under the
+    one-tap choices, a count and a unit (minutes, hours, days, weeks) with
+    the end shown as they change, and a date and a time (never past, at
+    most a year off), sent as the epoch `until` the server already takes;
+    app only (sasonica-app `ab0e4e5`). Checked at 1.5× text on a 360 px
+    screen: the sheet scrolls and its rows wrap.
 
 ## Loose ends
 
