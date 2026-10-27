@@ -89,6 +89,9 @@ def _q(room_id: str) -> str:
     return urllib.parse.quote(room_id, safe="")
 
 
+#: A media message's `media` part (§6.29, room_media.py), by msgtype.
+_MEDIA = {"m.image": "image", "m.video": "video", "m.audio": "audio", "m.file": "file"}
+
 _KIND = {"m.image": "sent a photo", "m.video": "sent a video",
          "m.audio": "sent an audio clip", "m.voice": "sent a voice note",
          "m.file": "sent a file", "m.location": "shared a location"}
@@ -115,6 +118,9 @@ class Room:
         self.avatars: dict[str, str] = {}
         self.messages: list[dict] = []
         self._by_id: dict[str, dict] = {}
+        # Media messages (§6.29): by event id, where its bytes are —
+        # `{"mxc", "thumb_mxc"?, "mimetype"}` — for /rooms/<thread>/media.
+        self.media: dict[str, dict] = {}
         # Reactions (`m.reaction`, reactions.py): by the message reacted to,
         # key → sender → the reaction's own event id; and each reaction's
         # event id → (message, key, sender), so a redaction can take it off.
@@ -324,6 +330,7 @@ class Room:
                 self.messages.remove(m)
                 self.rev += 1
             if gone:
+                self.media.pop(gone, None)
                 self._amend(gone, None)
             return
         if kind != "m.room.message" or not content:
@@ -334,7 +341,7 @@ class Room:
             m = self._by_id.get(rel.get("event_id") or "")
             new = content.get("m.new_content") or {}
             if m is not None and new:
-                m["parts"] = self._parts(ev.get("sender") or "", new)
+                m["parts"] = self._parts(ev.get("sender") or "", new, rel["event_id"])
                 m["edited"] = True
                 self.rev += 1
             elif new and not front and rel.get("event_id"):
@@ -351,9 +358,19 @@ class Room:
             self.messages.append(m)
         self.rev += 1
 
-    def _parts(self, sender: str, content: dict) -> list[dict]:
+    def _parts(self, sender: str, content: dict, ev_id: str = "") -> list[dict]:
         msgtype = content.get("msgtype") or "m.text"
         body = (content.get("body") or "").strip()
+        if msgtype in _MEDIA and ev_id and _mxc(content.get("url")):
+            # A photo, video, voice note or file (§6.29): a `media` part the
+            # app draws, its caption a text part after it. A bridge names
+            # the file in `filename` and puts a caption in `body`; without
+            # `filename`, `body` is the name.
+            name = str(content.get("filename") or body or "")
+            out = [self._media_part(ev_id, msgtype, content, name)]
+            if content.get("filename") and body and body != content["filename"]:
+                out.append({"type": "text", "text": body[:32768]})
+            return out
         if msgtype in _KIND:
             text = _KIND[msgtype] + (f": {body}" if msgtype == "m.file" and body else "")
             return [{"type": "text", "text": f"_{text}_"}]
@@ -361,12 +378,33 @@ class Room:
             return [{"type": "text", "text": f"_{self.members.get(sender, sender)} {body}_"}]
         return [{"type": "text", "text": body[:32768]}]
 
+    def _media_part(self, ev_id: str, msgtype: str, content: dict, name: str) -> dict:
+        info = content.get("info") if isinstance(content.get("info"), dict) else {}
+        kind = _MEDIA[msgtype]
+        if kind == "audio" and "org.matrix.msc3245.voice" in content:
+            kind = "voice"
+        thumb = info.get("thumbnail_url") if _mxc(info.get("thumbnail_url")) else ""
+        self.media[ev_id] = {"mxc": content["url"], "mimetype": str(info.get("mimetype") or ""),
+                             **({"thumb_mxc": thumb} if thumb else {})}
+        url = f"/rooms/{self.thread}/media/{_q(ev_id)}"
+        part = {"type": "media", "kind": kind, "url": url, "name": name[:200],
+                # What it is in words, where a part's text is read (the
+                # list's preview line), and for a client that draws no media.
+                "text": _KIND["m.voice" if kind == "voice" else msgtype]}
+        if kind == "image" or thumb:
+            part["thumb"] = f"{url}?thumb=1"
+        for k in ("mimetype", "size", "w", "h", "duration"):
+            v = info.get(k)
+            if isinstance(v, (int, str)) and v != "":
+                part[k] = v
+        return part
+
     def _message(self, ev: dict) -> dict:
         sender = ev.get("sender") or ""
         return {"id": ev.get("event_id"),
                 "role": "user" if sender == self.owner else "assistant",
                 "at": round((ev.get("origin_server_ts") or 0) / 1000, 3),
-                "parts": self._parts(sender, ev.get("content") or {}),
+                "parts": self._parts(sender, ev.get("content") or {}, ev.get("event_id") or ""),
                 "spoken": None, "turn": {"running": False},
                 # A room can have more than two people in it: who said it.
                 "sender": {"id": sender, "name": self.members.get(sender) or sender}}

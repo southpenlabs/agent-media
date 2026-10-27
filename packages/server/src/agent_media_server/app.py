@@ -340,7 +340,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from typing import Callable
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import (abs_item, archive, auth, devices, drafts, harnesses, pins, routing, send,
                sessions, share, speech, threads)
@@ -452,6 +452,8 @@ CONTACT_PHOTO = re.compile(r"/contacts/([0-9a-f-]{36})/photo")
 CONTACT_MAIL = re.compile(r"/contacts/([0-9a-f-]{36})/mail")
 # A Matrix room's picture, or a member's (matrix.py, §6.1, 20 Oct 2026).
 ROOM_AVATAR = re.compile(r"/rooms/([0-9a-f-]{36})/avatar")
+# A room's photo, video, voice note or file, fetched when asked (room_media.py, §6.29).
+ROOM_MEDIA = re.compile(r"/rooms/([0-9a-f-]{36})/media/([^/]+)")
 # An edit from the card, written back to Google (contacts_edit.py, §6.25).
 CONTACT_EDIT = re.compile(r"/contacts/([0-9a-f-]{36})/edit")
 # Their speech level (contacts_level.py, §6.25); /notify is the older form.
@@ -477,7 +479,7 @@ def cors_path(path: str) -> bool:
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
-                                                        CONTACT_FIND, ROOM_AVATAR,
+                                                        CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA,
                                                         CONTACT_EDIT, CONTACT_LEVEL,
                                                         *BRIDGE_ROUTES))
 
@@ -832,6 +834,45 @@ def _room_avatar(h: BaseHTTPRequestHandler, thread: str, query: str) -> None:
     _cors(h)
     h.end_headers()
     h.wfile.write(data)
+
+
+def _room_media(h: BaseHTTPRequestHandler, thread: str, ev_id: str, query: str) -> None:
+    """`GET /rooms/<thread>/media/<event id>[?thumb=1|?ready=1]` (§6.29): a
+    room's photo, video, voice note or file, fetched from the homeserver when
+    first asked for; the owner's, gated as the room's picture is, with
+    `?access_token=` for an <img> or <video>. `ready=1` fetches the whole and
+    answers `{"ok", "size", "type"}`; else the bytes, with `Range`."""
+    from . import matrix as mx, room_media
+
+    bearer = _bearer(h)
+    q = parse_qs(query)
+    if not bearer:
+        bearer = ((q.get("access_token") or [""])[0]).strip()
+        auth.set_request_bearer(bearer)
+    user, err = auth.gate(bearer)
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    r = mx.room(thread) if auth.request_account() == "" else None
+    info = None
+    if r is not None:
+        with r.lock:
+            info = dict(r.media.get(ev_id) or {}) or None
+    if info is None:
+        _json(h, 404, {"ok": False, "error": "no such media in this room"})
+        return
+    thumb = (q.get("thumb") or [""])[0] == "1"
+    path = room_media.fetch(info, thumb=thumb)
+    if path is None:
+        _json(h, 502, {"ok": False, "error": "it could not be fetched: the network may "
+                                             "no longer have it"})
+        return
+    ctype = room_media.content_type(info, thumb, path)
+    size = path.stat().st_size
+    if (q.get("ready") or [""])[0] == "1":
+        _json(h, 200, {"ok": True, "size": size, "type": ctype})
+        return
+    _send_file(h, path, size, ctype)
 
 
 def _contact_photo(h: BaseHTTPRequestHandler, cid: str, query: str) -> None:
@@ -1602,6 +1643,9 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_attachment(h, query)
     elif ROOM_AVATAR.fullmatch(path):
         _room_avatar(h, ROOM_AVATAR.fullmatch(path).group(1), query)
+    elif ROOM_MEDIA.fullmatch(path):
+        m = ROOM_MEDIA.fullmatch(path)
+        _room_media(h, m.group(1), unquote(m.group(2)), query)
     elif path == "/contacts/timeline/backfill":
         _timeline_backfill(h, start=False)
     elif path == "/contacts/google":

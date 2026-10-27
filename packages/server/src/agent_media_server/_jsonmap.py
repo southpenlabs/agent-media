@@ -39,7 +39,10 @@ class JsonMap:
             st = path.stat()
         except OSError:
             return {}
-        key = (str(path), st.st_mtime_ns, st.st_size)
+        # The inode too: each write is a new file (temp + rename), and two
+        # writes of the same size in one clock tick look alike otherwise
+        # (tmpfs, 28 Oct 2026: a 👍 replaced by a ❤️ read back as 👍).
+        key = (str(path), st.st_ino, st.st_mtime_ns, st.st_size)
         if self._cache[0] == key:
             return self._cache[1]
         try:
@@ -84,6 +87,13 @@ class JsonMap:
                     tmp = path.with_suffix(f".tmp.{os.getpid()}.{threading.get_ident()}")
                     tmp.write_text(json.dumps(rows, indent=0, sort_keys=True))
                     tmp.replace(path)
+                    try:
+                        st = path.stat()
+                        # What was just written is what the next read sees.
+                        self._cache = ((str(path), st.st_ino, st.st_mtime_ns, st.st_size),
+                                       json.loads(json.dumps(rows)))
+                    except OSError:
+                        pass
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
         return True

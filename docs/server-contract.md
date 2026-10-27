@@ -6440,6 +6440,54 @@ in none.
   (`POST /session/tags`, `POST /contacts/tags` for a person); move a person
   between groups by changing their label in Google Contacts.
 
+### 6.29 A room's photos, videos, voice notes and files — gated, owner only (built 28 Oct 2026)
+
+Code: `agent_media_server/room_media.py`, `matrix.Room._media_part`. Pinned
+by `packages/server/tests/test_room_media.py`. David, 28 Oct 2026, of a
+"_sent a video_" line in a WhatsApp room: "Can we make these clickable to
+prioritise download?". He chose to have photos shown and everything else
+fetched on a tap.
+
+#### The `media` part (§6.2.2)
+
+A Matrix message that is an `m.image`, `m.video`, `m.audio` or `m.file`
+with a `url` is one part, followed by a text part when it has a caption:
+
+```json
+{"type": "media", "kind": "image" | "video" | "audio" | "voice" | "file",
+ "url": "/rooms/<thread>/media/<event id, %-encoded>",
+ "thumb": "<url>?thumb=1", "name": "clip.mp4", "text": "sent a video",
+ "mimetype": "video/mp4", "size": 2445710, "w": 640, "h": 360, "duration": 25834}
+```
+
+`thumb` is there for a photo, and for a video whose event names a poster.
+`duration` is in milliseconds. `kind` is `voice` for an `m.audio` marked
+as a voice note (`org.matrix.msc3245.voice`). `text` is what the message is
+in words, for a client that draws no media and for the list's preview line.
+`mimetype`, `size`, `w`, `h` and `duration` are present only when the event
+gives them. An encrypted file (no `url`) stays the italic line it was.
+
+#### `GET /rooms/<thread>/media/<event id>`
+
+The bytes, fetched from the homeserver the first time they are asked for
+and kept (`<state>/room-media/`, 0600; the least recently read go past
+2 GB). Gated like the room's picture (§6.1), with `?access_token=` for an
+`<img>` or `<video>`. A bridge fetches WhatsApp's and Telegram's media from
+the network only when it is asked, so nothing is downloaded until a client
+asks for it.
+
+- `?thumb=1`: the thumbnail, at most 480 px a side.
+- `?ready=1`: fetch the whole now and answer `{"ok", "size", "type"}`. A
+  tap on a video, voice note or file asks this first, so the card can say
+  it is downloading.
+- No query: the whole of it, with `Range` (206/416, as `GET /upload`).
+  `Content-Type` is the event's mimetype for a picture, video or sound,
+  else `application/octet-stream`.
+
+404 for an event that is not a media message the room holds, 502 when it
+cannot be fetched (the network no longer has it, or the phone that holds
+it is off). A failure is not tried again for ten minutes.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
