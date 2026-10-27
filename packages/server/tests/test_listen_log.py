@@ -54,7 +54,8 @@ def test_how_the_listen_went_is_kept(server, pixel):
     """The recogniser's diagnostics (David, 25 Oct 2026: "usually the recogniser hears nothing")."""
     diag = {"recError": 7, "openMs": 1480, "speechMs": -1, "ranMs": 5230, "chime": False,
             "rmsPeak": -2.0, "playingAtStart": False, "interlude": True, "voiceNear": False,
-            "hush": "on/on on/on on/on", "segmented": True, "segments": 3, "onDevice": True}
+            "hush": "on/on on/on on/on", "segmented": True, "segments": 3, "onDevice": True,
+            "onDeviceError": 13}
     batch = {"lines": [{"t": 1.0, "at": "handsfree", "outcome": "empty", **diag},
                        {"t": 2.0, "at": "confirm", "outcome": "empty", "recError": "7", "chime": 1}]}
     res, body = call(server, "POST", "/device/listen-log", batch, pixel)
