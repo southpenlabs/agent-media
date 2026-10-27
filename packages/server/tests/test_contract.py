@@ -194,17 +194,18 @@ def test_targets_shape(server, shelf, signed_in):
     # by the desk toast, never silenced by a pane mute (§6.4 /session/priority);
     # `speech` the same day, its level: interrupt | auto | normal | quiet.
     # `spaces` on 26 Oct 2026: the spaces it is filed in (spaces.py).
+    # `mail_from` on 28 Oct 2026: who, when agent mail started it (mail_threads.py).
     assert keys(live) == {"session", "title", "live", "pane", "recap", "archived",
                           "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces"}
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces", "mail_from"}
     assert live == {"session": SID2, "title": "Sasonica web", "live": True, "pane": "%42",
                     "recap": None, "archived": False, "rested": None, "pinned": False,
                     "project": None, "cwd": None, "harness": "claude", "priority": False, "speech": "normal", "speech_own": False,
                     "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
-                    "tags": [], "quiet": None, "quiet_rule": None, "spaces": ["inbox"]}
+                    "tags": [], "quiet": None, "quiet_rule": None, "spaces": ["inbox"], "mail_from": None}
     assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived",
                              "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces"}
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces", "mail_from"}
     assert shelved["project"] == "p-agent-media" and shelved["cwd"] is None
     assert shelved["rested"] is None and shelved["pinned"] is False
     assert shelved["live"] is False and shelved["pane"] is None

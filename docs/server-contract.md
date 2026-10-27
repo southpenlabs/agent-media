@@ -291,6 +291,14 @@ Everything a message can be pointed at.
   set with `POST /session/archive` (§6.4). **Archived rows stay in the list**;
   the app files them under an "Archived" section itself. Talking to a thread
   (a reply, or an `/ask` routed into it) clears the flag.
+- `mail_from` (every row, 28 Oct 2026): the sender's name (`"Cece"`) when
+  another agent's mail started the thread — its first words are
+  `[From Name] …` (agent-mail-deliver, `media session send`; not
+  `[From the session host]`) — and nobody has written in it since but
+  agents and the session host; else `null`. The app files these under an
+  "Agent mail" section, apart from David's chats. Once David writes in one
+  it is `null` for good. Claude threads only (`mail_threads.py`, read once
+  and then only what was added; pinned by `tests/test_mail_threads.py`).
 - `rested` (every row, 22 Sep 2026): `{"at", "reason"}` when the idle reaper
   closed the session (`reap.py`, [Resting](#resting) below), else `null`.
   `reason` is `"idle"` (past `MEDIA_REAP_IDLE_H`, 12 h) or `"idle-tight"`

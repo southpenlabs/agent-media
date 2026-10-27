@@ -1434,6 +1434,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     the app sorts it by `at` and counts nothing of it unread — else None.
 
     And `spaces`: the ids of the spaces it is in (`spaces`).
+
+    And `mail_from`: the sender, while the thread is one another agent's mail
+    started and David has not written in (`mail_threads`), else None.
     """
     from . import archive, pins, rest
 
@@ -1516,11 +1519,12 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # And `tags`: the thread's own tags, read from its org-roam node (tags.py).
     # And `quiet`: `{until, at}` while Quiet for… holds it, else None (quiet.py).
     # And `spaces`: the projects and groups it is in, else people or inbox (spaces.py).
-    from . import quiet, spaces, tags
+    # And `mail_from`: who, when another agent's mail started it (mail_threads.py).
+    from . import mail_threads, quiet, spaces, tags
 
-    return quiet.add_quiet(spaces.add_spaces(tags.add_tags(
+    return mail_threads.add_mail(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
         add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
-                             for sid, rec in locked.items() if sid not in gone])))
+                             for sid, rec in locked.items() if sid not in gone]))))
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:
