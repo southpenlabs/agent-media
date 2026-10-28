@@ -5976,6 +5976,74 @@ one search every 10 s across the server.
 10 s of the last search; 503 the bridge cannot search now (none, signed
 out, down); 400 another network or no name.
 
+#### Texting someone new — `GET|POST /contacts/<id>/text` — gated, owner only (28 Oct 2026)
+
+Step 5 of docs/proposals/2026-10-17-contacts.md (David, 28 Oct 2026: from
+Messages or a person's card, pick a person and a service and land in that
+chat, even when there is no room with them yet). The app's ✎ on Messages
+and Text on a card (`"text": true` on the card when this book has a
+service to text on: the owner's, with a bridge below; `false` otherwise).
+
+**Which services.** The bridges found as §6.26 finds them (a provisioning
+secret in their config) whose bot is in `MATRIX_OWNER_BRIDGES` — a room
+another bridge made would not be read, so it is not offered (red5's
+Telegram bridge, 28 Oct). Each starts a chat by a number or by the
+person's ghost there (contacts_text.py `SERVICES`): Google Messages
+(`gmessages`, "SMS"), Signal and WhatsApp by number (E.164), Telegram by
+ghost or number, Messenger (`facebook`), Instagram, Teams (`msteams`) and
+any other bridge by a ghost the card holds (`handles`, a bridge's
+`sources`), the bridge's `appservice.username_template` telling its ghosts
+apart.
+
+`GET /contacts/<id>/text` →
+
+```json
+{"ok": true, "can_start": true, "why": null,
+ "services": [
+   {"service": "gmessages", "name": "SMS", "address": "@gmessages_1.5:ryer.org",
+    "detail": "Lionel Smith", "network": {"id": "gmessages", "name": "Google Messages"},
+    "room": "<session>"},
+   {"service": "whatsapp", "name": "WhatsApp", "address": "+61412345678",
+    "detail": "0412 345 678", "network": {"id": "whatsapp", "name": "WhatsApp"},
+    "room": null}]}
+```
+
+- Their rooms first, newest first: each one-to-one room of theirs on an
+  offered bridge (a group is no one person's), `address` its number when
+  the ghost says it, else the ghost. Then each number or ghost a chat could
+  be started with, `room` null. gmessages names its ghosts by participant,
+  not number: a person with as many SMS rooms as numbers left gets no new
+  SMS entry, and one picked that is in fact a room's is that room (below).
+- `can_start` false, with `why`, when no chat can be started here: no
+  owner token (`matrix-owner-login`) or no owner's loop. Their rooms still
+  open.
+- Nothing is asked of a bridge to list them.
+
+`POST /contacts/<id>/text {"service", "address"}` (the pair as listed; a
+number may come in any form the book reads) → `{"ok", "session", "room",
+"title", "created"}`:
+
+- A listed room: answered at once, `created` false; no bridge is asked.
+- Otherwise bridgev2's provisioning `POST /v3/create_dm/<address>`
+  (`?user_id=` the owner, the bridge's shared secret, up to 60 s; it finds
+  or makes the chat on the network and its portal room, `dm_room_mxid`).
+  Then the owner joins the room with their own token — a no-op when their
+  double puppet is in it already, the bridge's invitation accepted when it
+  is not, tried every half second for up to 20 s — and it is taken in as
+  a discovered bridge room and read once, so it is a Matrix row (§6.1) when
+  the answer comes. `created` is whether it is new to this server.
+- **It never sends them anything**: no message, reaction or state from
+  here. The network's own app may show a new, empty chat.
+- 400 not one of their services or addresses; 403 another account's book;
+  404 no such person; 409 not drivable (`why` above); 502 the bridge
+  refused (its own words: "SMS would not start it: Identifier not found")
+  or did not answer; 504 it did not answer in 60 s, or the room was made
+  but not read in 20 s (asked again, the same chat is found).
+
+The owner's loop had taken in only rooms it was invited to; with double
+puppeting, a new portal room has the owner joined without an invitation,
+so a chat started here is taken in by the route itself.
+
 #### Reading one email — `GET /mail/message`, `GET /mail/attachment`, `POST /mail/say` — gated, owner only (20 Oct 2026)
 
 Step 1 of docs/proposals/2026-10-20-mail-in-sasonica.md: a person's email

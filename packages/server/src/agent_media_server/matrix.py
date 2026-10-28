@@ -845,6 +845,51 @@ class _Owner:
         threading.Thread(target=run, name="matrix-owner", daemon=True).start()
 
 
+#: The owner's loop, once started (None when there is none): what a room the
+#: owner was just given is taken into (`adopt`).
+_OWNER: list = [None]
+#: How long `adopt` tries, and how often.
+ADOPT_WAIT_S = 20.0
+ADOPT_STEP_S = 0.5
+
+
+def owner_loop() -> "_Owner | None":
+    return _OWNER[0]
+
+
+def adopt(room_id: str, wait_s: float | None = None) -> Room | None:
+    """A portal room a bridge just made for the owner (contacts_text.py, 28
+    Oct 2026): joined as the owner — a no-op when their double puppet is in
+    it already, the bridge's invitation accepted when it is not —, taken in
+    as a discovered room is, and read once, so it is a Matrix row (§6.1)
+    when this returns. The owner's loop takes in only invitations, and a
+    double-puppeted owner is joined without one. None when there is no
+    owner's loop, or it is not read by `wait_s`."""
+    owner = _OWNER[0]
+    if owner is None:
+        return None
+    deadline = time.monotonic() + (ADOPT_WAIT_S if wait_s is None else wait_s)
+    joined = False
+    while True:
+        if not joined:
+            try:
+                _post(owner.config, f"/rooms/{_q(room_id)}/join", {})
+                joined = True
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("matrix: %s not joined yet: %s", room_id, e)
+        if joined:
+            owner.take(room_id)
+            r = _ROOMS.get(thread_of(room_id))
+            if r is not None:
+                r._failed_at = 0.0       # a read that failed is tried again now
+                r.load()
+                if r.loaded:
+                    return r
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(ADOPT_STEP_S)
+
+
 def _post(config: matrix.Config, path: str, body: dict, timeout: float = 15.0) -> dict:
     req = urllib.request.Request(
         f"{config.homeserver}/_matrix/client/v3{path}", method="POST",
@@ -886,7 +931,8 @@ def start() -> None:
                      name="matrix-rooms", daemon=True).start()
     bridges = _bridges()
     if bridges and owner_token():
-        _Owner(config, owner, bridges, intake).start()
+        _OWNER[0] = _Owner(config, owner, bridges, intake)
+        _OWNER[0].start()
     print(f"matrix: sync on for {len(config.rooms)} room(s)"
           f"{', speech intake attached' if intake else ''}"
           f"{', and the rooms of ' + ', '.join(sorted(bridges)) if bridges and owner_token() else ''}",

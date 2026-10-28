@@ -244,6 +244,12 @@ device gets its token):
                   thread level, the level of their chats and mail
                   (contacts_level.py, §6.25); /notify {"channel", "mode"},
                   the older form, is read as one
+  GET  /contacts/<id>/text → the services they can be texted on: their
+                  rooms first, then each number or ghost a chat could be
+                  started with (contacts_text.py, §6.25); owner only
+  POST /contacts/<id>/text {"service", "address"} → that chat found or
+                  started through its bridge, its room joined and read:
+                  {session, room, title, created}; never sends them anything
   GET  /mail/message?id=[&images=1][&format=html] → one email from notmuch:
                   headers, a body made safe, its attachments (mail_read.py)
   GET  /mail/attachment?id=&part= → one attachment's bytes
@@ -460,6 +466,8 @@ CONTACT_EDIT = re.compile(r"/contacts/([0-9a-f-]{36})/edit")
 CONTACT_LEVEL = re.compile(r"/contacts/([0-9a-f-]{36})/(level|notify)")
 # One search for them on a network, and the pick (contacts_find.py, §6.25).
 CONTACT_FIND = re.compile(r"/contacts/([0-9a-f-]{36})/find")
+# The services they can be texted on, and a chat started (contacts_text.py, §6.25).
+CONTACT_TEXT = re.compile(r"/contacts/([0-9a-f-]{36})/text")
 # A bridge's icon, its sign-ins and signing out (bridges.py, §6.26).
 BRIDGE_ICON = re.compile(r"/bridges/([A-Za-z0-9_.-]+)/icon")
 BRIDGE_AVATAR = re.compile(r"/bridges/([A-Za-z0-9_.-]+)/avatar/([^/]+)")
@@ -480,7 +488,7 @@ def cors_path(path: str) -> bool:
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA,
-                                                        CONTACT_EDIT, CONTACT_LEVEL,
+                                                        CONTACT_EDIT, CONTACT_LEVEL, CONTACT_TEXT,
                                                         *BRIDGE_ROUTES))
 
 
@@ -1136,6 +1144,41 @@ def _contact_find(h: BaseHTTPRequestHandler, cid: str) -> None:
         _json(h, 200, {"ok": True, **got})
 
 
+def _contact_text(h: BaseHTTPRequestHandler, cid: str, start: bool) -> None:
+    """`GET /contacts/<id>/text` and `POST /contacts/<id>/text {"service",
+    "address"}` (§6.25 "Texting someone new"): the services they can be
+    texted on, and a chat found or started; gated as the card is, the
+    owner's book only."""
+    from . import contacts_text
+
+    user, err = auth.gate(_bearer(h))
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    try:
+        if start:
+            body = _read_json(h)
+            body = body if isinstance(body, dict) else {}
+            got = contacts_text.start(cid, str(body.get("service") or ""),
+                                      str(body.get("address") or ""))
+        else:
+            got = contacts_text.services(cid)
+    except KeyError:
+        _json(h, 404, {"ok": False, "error": "no such contact"})
+    except contacts_text.NotOwner as e:
+        _json(h, 403, {"ok": False, "error": str(e)})
+    except contacts_text.NotDrivable as e:
+        _json(h, 409, {"ok": False, "error": str(e)})
+    except contacts_text.Refused as e:
+        _json(h, 502, {"ok": False, "error": str(e)})
+    except contacts_text.TimedOut as e:
+        _json(h, 504, {"ok": False, "error": str(e)})
+    except ValueError as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+    else:
+        _json(h, 200, {"ok": True, **got})
+
+
 def _contact_same(h: BaseHTTPRequestHandler, cid: str, act: str) -> None:
     """`POST /contacts/<id>/same|different {"other"}` (§6.25): gated as the
     card is; `{id}` is the contact left (after a join, the other one)."""
@@ -1643,6 +1686,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_photo(h, CONTACT_PHOTO.fullmatch(path).group(1), query)
     elif CONTACT_MAIL.fullmatch(path):
         _contact_mail(h, CONTACT_MAIL.fullmatch(path).group(1), query)
+    elif CONTACT_TEXT.fullmatch(path):
+        _contact_text(h, CONTACT_TEXT.fullmatch(path).group(1), start=False)
     elif path == "/mail/message":
         _mail_message(h, query)
     elif path == "/mail/attachment":
@@ -2457,6 +2502,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_same(h, m.group(1), m.group(2))
     elif CONTACT_FIND.fullmatch(path):
         _contact_find(h, CONTACT_FIND.fullmatch(path).group(1))
+    elif CONTACT_TEXT.fullmatch(path):
+        _contact_text(h, CONTACT_TEXT.fullmatch(path).group(1), start=True)
     elif CONTACT_EDIT.fullmatch(path):
         _contact_edit(h, CONTACT_EDIT.fullmatch(path).group(1))
     elif CONTACT_LEVEL.fullmatch(path):

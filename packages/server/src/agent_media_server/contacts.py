@@ -2026,7 +2026,7 @@ def _card_mail(c: dict) -> dict | None:
 def card(cid: str) -> dict | None:
     """`GET /contacts/<id>`'s contact: the merged card, its sources, and the
     rooms that are this person's."""
-    from . import contacts_edit, contacts_find, contacts_level, contacts_photos
+    from . import contacts_edit, contacts_find, contacts_level, contacts_photos, contacts_text
 
     conn = _connect(create=False)
     if conn is None:
@@ -2055,6 +2055,8 @@ def card(cid: str) -> dict | None:
             "edit": contacts_edit.editable(c), "google_url": contacts_edit.google_url(c) or None,
             # Their speech level (contacts_level.py): None is "default".
             "level": level,
+            # A Text action: some service to text them on (contacts_text.py).
+            "text": contacts_text.offered(),
             "updated": round(got[2], 3) if got[2] else None, "rooms": rooms_of(cid)}
 
 

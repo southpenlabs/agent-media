@@ -1597,8 +1597,14 @@ ahead.
     person chip (their card, the switch between their rooms), People
     (`/people`) and the card (`/people/<id>`: phones, emails, address,
     notes, the CRM's fields, their rooms, the timeline by day, a note box).
-    Still to do: edits (step 4), texting someone new (step 5), and "not in
-    the CRM yet" on an entry whose `synced` is false. **Google per
+    Still to do: "not in the CRM yet" on an entry whose `synced` is false.
+    Edits (step 4) built 20 Oct 2026 (§6.25 "Editing from the card").
+    **Texting someone new (step 5), built 28 Oct 2026** (§6.25 "Texting
+    someone new"; sasonica-app `feat/text-someone`): ✎ on Messages picks a
+    person as you type, then a service; Text on a card goes straight to
+    the services. Their rooms open at once; a new chat is started through
+    the bridge's provisioning `create_dm`, joined as the owner and listed,
+    and nothing is sent to them. Not merged or deployed yet. **Google per
     account, built 18 Oct 2026** (§6.25 "Google, per book"; sasonica-app
     `1a509de`): Settings → Contacts signs this account's own book in to
     Google (a loopback listener on the phone, the browser for consent),

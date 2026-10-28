@@ -328,6 +328,13 @@ class Bridge:
     homeserver: str   # the homeserver it talks to (for the network icon)
     config: str
     unset: tuple[str, ...] = ()   # SETUP fields its config still lacks
+    # Its bot (`@gmessagesbot:ryer.org`) and the localpart its ghosts start
+    # with (`gmessages_`), from `appservice.bot.username`,
+    # `appservice.username_template` and `homeserver.domain`; "" when the
+    # config does not say (contacts_text.py, 28 Oct 2026).
+    bot: str = ""
+    ghost_prefix: str = ""
+    domain: str = ""
 
 
 def _paths() -> list[str]:
@@ -360,9 +367,15 @@ def discover() -> list[Bridge]:
             host = "127.0.0.1"
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
+        domain = conf.get("homeserver.domain") or ""
+        bot = conf.get("appservice.bot.username") or ""
+        template = conf.get("appservice.username_template") or ""
         found[bid] = Bridge(id=bid, url=f"http://{host}:{port}", secret=secret,
                             homeserver=(conf.get("homeserver.address") or "").rstrip("/"),
-                            config=p, unset=_unset(bid, conf))
+                            config=p, unset=_unset(bid, conf),
+                            bot=f"@{bot}:{domain}" if bot and domain else "",
+                            ghost_prefix=template.partition("{{")[0] if "{{" in template else "",
+                            domain=domain)
     return list(found.values())
 
 
