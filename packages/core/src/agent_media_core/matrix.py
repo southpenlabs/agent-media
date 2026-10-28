@@ -128,12 +128,17 @@ class Sync:
 
     def __init__(self, config: Config, *, state_path: Path | None = None,
                  fetch: Callable[[urllib.request.Request, float], dict] = _fetch_json,
-                 on_invite: Callable[[str, list], None] | None = None):
+                 on_invite: Callable[[str, list], None] | None = None,
+                 on_join: Callable[[str, dict], None] | None = None):
         """`config.rooms` is read on every pass, so a caller may add rooms to
         it as it learns of them. `on_invite(room_id, invite_state_events)`
-        is told of each invitation (none are accepted here)."""
+        is told of each invitation (none are accepted here). `on_join(room_id,
+        room)` is told of a joined room not in `config.rooms` (its sync
+        section, state and timeline); one it adds there has this pass's
+        events read too (28 Oct 2026: a room joined without an invitation)."""
         self.config = config
         self._on_invite = on_invite
+        self._on_join = on_join
         self.state_path = state_path or (state_dir() / "sync.json")
         self._fetch = fetch
         self._subs: list[Subscriber] = []
@@ -190,6 +195,11 @@ class Sync:
                     log.warning("matrix: invite handler failed: %s", e)
         joined = (data.get("rooms") or {}).get("join") or {}
         for room_id, room in joined.items():
+            if room_id not in c.rooms and self._on_join is not None:
+                try:
+                    self._on_join(room_id, room)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("matrix: join handler failed: %s", e)
             if room_id not in c.rooms:
                 continue
             for ev in (room.get("timeline") or {}).get("events") or []:

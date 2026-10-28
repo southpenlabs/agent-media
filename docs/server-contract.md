@@ -6042,7 +6042,12 @@ number may come in any form the book reads) → `{"ok", "session", "room",
 
 The owner's loop had taken in only rooms it was invited to; with double
 puppeting, a new portal room has the owner joined without an invitation,
-so a chat started here is taken in by the route itself.
+so a chat started here is taken in by the route itself. **Since 28 Oct
+2026** the loop also takes in a room it first sees joined (someone new
+texting David), when a bridge is among its members: told by the sync
+(`Sync(on_join=)`), its members read from the sync's own section, else
+asked once (`joined_members`); a room with no bridge in it is not asked
+about again.
 
 #### Reading one email — `GET /mail/message`, `GET /mail/attachment`, `POST /mail/say` — gated, owner only (20 Oct 2026)
 

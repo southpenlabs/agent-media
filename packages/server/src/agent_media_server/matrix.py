@@ -784,7 +784,13 @@ class _Owner:
     not in them — and appear one per conversation, so they cannot be an
     allow list: the canvas reads them with the owner's token and takes in
     every room a bridge in `MATRIX_OWNER_BRIDGES` is in, accepting the
-    bridge's invitations. A room taken in starts quiet like any other."""
+    bridge's invitations. A room taken in starts quiet like any other.
+
+    A double-puppeted owner is joined to a new portal without an invitation
+    (someone new texting David, 28 Oct 2026): such a room was taken in only
+    by the next restart's `discover`. `_joined` takes it in as the sync
+    first sees it, when a bridge is among its members; a room found not to
+    be a bridge's is not asked about again."""
 
     def __init__(self, base: matrix.Config, owner: str, bridges: set[str], intake) -> None:
         self.config = matrix.Config(homeserver=base.homeserver, token=owner_token(),
@@ -793,7 +799,8 @@ class _Owner:
         self.bridges = bridges
         self.lock = threading.Lock()
         self.sync = matrix.Sync(self.config, state_path=matrix.state_dir() / "sync-owner.json",
-                                on_invite=self._invited)
+                                on_invite=self._invited, on_join=self._joined)
+        self._not_bridge: set[str] = set()
         if intake is not None:
             on_event, _stop = intake.consumer(self.config, name_of=_name_of, commands=False)
             self.sync.subscribe(on_event)
@@ -820,6 +827,28 @@ class _Owner:
             log.warning("matrix: could not join %s: %s", room_id, e)
             return
         self.take(room_id)
+
+    def _joined(self, room_id: str, room: dict) -> None:
+        if room_id in self._not_bridge:
+            return
+        events = [*((room.get("state") or {}).get("events") or []),
+                  *((room.get("timeline") or {}).get("events") or [])]
+        people = {e.get("sender") or "" for e in events}
+        people |= {e.get("state_key") or "" for e in events if e.get("type") == "m.room.member"}
+        if not any(_bridge_sender(u, self.bridges) for u in people if u):
+            # The sync's section may not name the members: ask, once.
+            try:
+                members = _get(self.config, f"/rooms/{_q(room_id)}/joined_members")
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("matrix: members of %s unreadable: %s", room_id, e)
+                return                 # asked again on its next sync
+            if not any(_bridge_sender(u, self.bridges) for u in (members.get("joined") or {})):
+                self._not_bridge.add(room_id)
+                return
+        self.take(room_id)
+        r = _ROOMS.get(thread_of(room_id))
+        if r is not None:
+            threading.Thread(target=r.load, name="matrix-joined", daemon=True).start()
 
     def discover(self) -> None:
         """The bridge rooms David is already in."""

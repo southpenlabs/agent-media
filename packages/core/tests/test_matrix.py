@@ -77,6 +77,17 @@ def test_config_needs_a_token_and_a_room():
     assert c.rooms == {ROOM} and c.homeserver == "https://hs.test"
 
 
+def test_a_joined_room_not_listed_is_told_and_read_once_added(tmp_path):
+    # 28 Oct 2026: a portal joined without an invitation.
+    page = _page("b1", {ROOM: [], "!new:ryer.org": ["$n"], OTHER: ["$x"]})
+    s = matrix.Sync(_cfg(), state_path=tmp_path / "s.json", fetch=lambda req, t: page,
+                    on_join=lambda r, room: r == "!new:ryer.org" and s.config.rooms.add(r))
+    got = []
+    s.subscribe(lambda room, ev: got.append((room, ev.get("event_id"))))
+    s.poll_once()
+    assert ("!new:ryer.org", "$n") in got and all(r != OTHER for r, _ in got)
+
+
 def test_invitations_are_told_and_rooms_added_later_are_read(tmp_path):
     page = _page("b1", {ROOM: [], OTHER: ["$x"]})
     page["rooms"]["invite"] = {"!new:ryer.org": {"invite_state": {"events": [{"type": "m.room.member"}]}}}

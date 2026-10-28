@@ -271,6 +271,36 @@ def test_anyone_elses_invitation_is_left_alone(owner_loop):
     assert joined == [] and not o.config.rooms
 
 
+def test_a_room_joined_without_an_invitation_is_taken_in(owner_loop, monkeypatch):
+    # David, 28 Oct 2026: someone new texting him (a double-puppeted owner).
+    o, joined = owner_loop
+    monkeypatch.setattr(matrix.Room, "load", lambda self: None)
+    asked = []
+    monkeypatch.setattr(matrix, "_get", lambda *a, **k: asked.append(a[1]) or {"joined": {}})
+    room = {"timeline": {"events": [{"type": "m.room.message", "sender": "@gmessages_1.77:ryer.org",
+                                     "event_id": "$1", "content": {"body": "hi"}}]}}
+    o._joined("!new:ryer.org", room)
+    assert "!new:ryer.org" in o.config.rooms and joined == [] and asked == []
+    assert matrix.thread_of("!new:ryer.org") in matrix._ROOMS
+
+
+def test_a_joined_room_with_no_bridge_is_left_and_not_asked_again(owner_loop, monkeypatch):
+    o, _ = owner_loop
+    asked = []
+    monkeypatch.setattr(matrix, "_get", lambda *a, **k: asked.append(a[1]) or {"joined": {ME: {}, MEL: {}}})
+    o._joined("!family:ryer.org", {"timeline": {"events": []}})
+    o._joined("!family:ryer.org", {"timeline": {"events": []}})
+    assert not o.config.rooms and len(asked) == 1
+
+
+def test_a_joined_room_whose_section_names_no_one_is_asked_about(owner_loop, monkeypatch):
+    o, _ = owner_loop
+    monkeypatch.setattr(matrix.Room, "load", lambda self: None)
+    monkeypatch.setattr(matrix, "_get", lambda *a, **k: {"joined": {ME: {}, BOT: {}}})
+    o._joined("!sms2:ryer.org", {"timeline": {"events": [{"type": "m.room.message", "sender": ME}]}})
+    assert "!sms2:ryer.org" in o.config.rooms
+
+
 def test_discover_takes_the_rooms_a_bridge_is_in(owner_loop, monkeypatch):
     o, _ = owner_loop
 
