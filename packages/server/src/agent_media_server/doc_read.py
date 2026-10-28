@@ -382,44 +382,54 @@ def _walk(base: Path, terms: list[str]) -> list[str]:
     return out
 
 
-def search(terms: list[str], limit: int = 8) -> list[dict]:
-    """Documents under the projects folder holding every term, in their title
-    or name first, then in their text; newest first within each."""
-    terms = [t.lower() for t in terms if t.strip()]
-    base = new_project.root()
-    if not terms or not base.is_dir():
-        return []
+def _found_in(base: Path, terms: list[str]) -> set[str]:
+    """The documents under `base` (relative, forward slashes) that hold every
+    term in their text or any of them, or all of them in their name."""
     args = ["-l", "-i", "-F"] + [x for t in terms for x in ("-e", t)]
     listed = _rg(args, base)
     if listed is None:
-        found = set(_walk(base, terms))
-    else:
-        found = set(listed)
-        found |= {f for f in _rg(["--files"], base) or []
-                  if all(t in Path(f).name.lower() for t in terms)}
+        return set(_walk(base, terms))
+    return set(listed) | {f for f in _rg(["--files"], base) or []
+                          if all(t in Path(f).name.lower() for t in terms)}
+
+
+def search(terms: list[str], limit: int = 8) -> list[dict]:
+    """Documents under the projects folder, and in the project folders of
+    their own (`single_projects`: ~/agent-config), holding every term, in
+    their title or name first, then in their text; newest first within each.
+    The same dot-dir refusals as the reader (`safe_path`)."""
+    terms = [t.lower() for t in terms if t.strip()]
+    base = new_project.root()
+    if not terms:
+        return []
+    # (folder, is a project of its own): a hit's project is the folder's own
+    # name for a single one, else the first part of its path under the root.
+    places = [(b, False) for b in [base] if b.is_dir()]
+    places += [(b, True) for b in single_projects() if b.is_dir() and b != base]
     hits = []
-    for rel in found:
-        p = (base / rel)
-        if not safe_path(str(p)):
-            continue
-        try:
-            text = p.read_text(errors="replace")[:MAX_READ]
-            mtime = p.stat().st_mtime
-        except OSError:
-            continue
-        low = text.lower()
-        if not all(t in low or t in p.name.lower() for t in terms):
-            continue
-        title = title_of(p, text)
-        rank = 0 if all(t in title.lower() for t in terms) else 1 if all(t in p.name.lower() for t in terms) else 2
-        line = next((ln.strip() for ln in text.splitlines() if terms[0] in ln.lower()), "")
-        if len(line) > 160:
-            at = max(0, line.lower().find(terms[0]) - 60)
-            line = ("…" if at else "") + line[at:at + 160] + "…"
-        hits.append((rank, -mtime, {"path": str(p), "title": title,
-                                     "project": _project_of_rel(rel),
-                                     "kind": p.parent.name, "snippet": line},
-                     rel.split("/", 1)[-1]))
+    for base, single in places:
+        for rel in _found_in(base, terms):
+            p = (base / rel)
+            if not safe_path(str(p)):
+                continue
+            try:
+                text = p.read_text(errors="replace")[:MAX_READ]
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            low = text.lower()
+            if not all(t in low or t in p.name.lower() for t in terms):
+                continue
+            title = title_of(p, text)
+            rank = 0 if all(t in title.lower() for t in terms) else 1 if all(t in p.name.lower() for t in terms) else 2
+            line = next((ln.strip() for ln in text.splitlines() if terms[0] in ln.lower()), "")
+            if len(line) > 160:
+                at = max(0, line.lower().find(terms[0]) - 60)
+                line = ("…" if at else "") + line[at:at + 160] + "…"
+            hits.append((rank, -mtime, {"path": str(p), "title": title,
+                                         "project": base.name if single else _project_of_rel(rel),
+                                         "kind": p.parent.name, "snippet": line},
+                         rel if single else rel.split("/", 1)[-1]))
     hits.sort(key=lambda h: (h[0], h[1], h[2]["path"]))
     # A clone or worktree beside the project (agent-media-audio) holds the
     # same files: one hit each, the most recently changed copy.

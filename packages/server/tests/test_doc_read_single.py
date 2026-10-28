@@ -48,3 +48,23 @@ def test_its_documents_open_but_not_a_dot_dir_or_a_folder_not_listed(single, mon
     assert doc_read.safe_path(str(single / "docs" / "notes.md")) is None
     ok, out = doc_read.project_docs("p-agent-config", "", "good")
     assert not ok and out["status"] == 404
+
+
+def test_a_folder_of_its_own_turns_up_in_a_search(single, monkeypatch):
+    """GET /search's `docs` covered only the projects folder: a document in
+    ~/agent-config never turned up (agent-mail #136, David, 28 Oct 2026).
+    Same refusals as the reader: not a dot-dir, not a folder not listed."""
+    (single / "docs" / "notes.md").write_text("# Notes\n\nThe kettle sings.\n")
+    (single / ".claude" / "hidden.md").write_text("# Hidden\n\nThe kettle sings.\n")
+    hits = doc_read.search(["kettle", "sings"])
+    assert [h["title"] for h in hits] == ["Notes"]
+    assert hits[0]["project"] == "agent-config" and hits[0]["snippet"] == "The kettle sings."
+    assert hits[0]["path"] == str(single.resolve() / "docs" / "notes.md") or hits[0]["path"].endswith("agent-config/docs/notes.md")
+    monkeypatch.setenv("MEDIA_PROJECT_DIRS", "")
+    assert doc_read.search(["kettle", "sings"]) == []
+
+
+def test_and_without_rg(single, monkeypatch):
+    (single / "docs" / "notes.md").write_text("# Notes\n\nThe kettle sings.\n")
+    monkeypatch.setattr(doc_read, "_rg", lambda args, cwd: None)
+    assert [h["title"] for h in doc_read.search(["kettle"])] == ["Notes"]
