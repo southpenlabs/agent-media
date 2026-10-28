@@ -88,3 +88,24 @@ NARROW_IDLE = """  ⎿  Tip: Run /install-github-app
 def test_a_narrow_pane_still_reads_as_working():
     assert panes.classify(NARROW_WORKING, "claude") == "working"
     assert panes.classify(NARROW_IDLE, "claude") == "input"
+
+
+# No "esc to interrupt" in the footer at all, and no token count yet on a
+# long turn: the spinner's time is the only tell (David, 28 Oct 2026: a
+# thread said waiting while it worked).
+SPINNER_ONLY = """✻ Discombobulating… (10m 25s)
+  ⎿  Tip: Running multiple Claude
+     sessions? Use /color and /rename
+
+─── Rename a conversation from the app ─
+❯
+────────────────────────────────────────
+  Opus 5 (1M context)  ctx 55% of 1M
+  ⏵⏵ auto mode on (shift+tab to cycle)
+"""
+
+
+def test_a_spinner_with_only_its_time_reads_as_working():
+    assert panes.classify(SPINNER_ONLY, "claude") == "working"
+    done = SPINNER_ONLY.replace("Discombobulating… (10m 25s)", "Cogitated for 10m 25s")
+    assert panes.classify(done, "claude") == "input"

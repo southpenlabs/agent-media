@@ -189,7 +189,11 @@ def test_live_sessions_records_the_pids_it_found(monkeypatch):
 
     from agent_media_core import harnesses
 
+    from agent_media_core import procinfo
+
     monkeypatch.setattr(sessions.glob, "glob", lambda pattern: [])
+    # No real claude on this host may leak in (a live desk session did).
+    monkeypatch.setattr(procinfo, "processes", lambda: [])
     monkeypatch.setattr(harnesses, "running", lambda: [
         SimpleNamespace(pid=4242, session=SID, pane="%9", harness="codex")])
     assert sessions.live_sessions() == {SID: "%9"}

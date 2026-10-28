@@ -313,6 +313,12 @@ def classify_cc(pane: str) -> "str | None":
     # says the same thing and survives any width.
     if re.search(r"· [↑↓] [0-9.]+k? tokens|esc to interrupt|·\s*es?c?…|\(thought for ", pane):
         return "working"
+    # Later builds dropped "esc to interrupt" from the footer altogether, and
+    # a long turn's spinner says only its verb and the time so far: "✻
+    # Discombobulating… (10m 25s)". A finished turn's line has no "…"
+    # ("✻ Cogitated for 10m 25s").
+    if re.search(r"^\s*[^\w\s]\s+[\w-]+… \(\d+[hms]\b", pane, re.M):
+        return "working"
     return "input"
 
 
