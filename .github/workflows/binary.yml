@@ -5,17 +5,11 @@ name: Server binary
 # downloads from. Rebuilt when anything the binary carries changes on main.
 # docs/proposals/2026-09-29-single-binary.md.
 
+# By hand only since 28 Oct 2026 (Actions → binary → Run workflow): its macOS
+# and Windows builds used up the org's free minutes on every push to main
+# (macOS counts 10x, Windows 2x), and then every job in the org was refused
+# for billing. It used to run on pushes touching the packages it bundles.
 on:
-  push:
-    branches: [main]
-    paths:
-      - packages/core/**
-      - packages/server/**
-      - packages/visual/**
-      - packages/sasonica/**
-      - deploy/binary/**
-      - deploy/install.ps1
-      - .github/workflows/binary.yml
   workflow_dispatch:
 
 concurrency:
