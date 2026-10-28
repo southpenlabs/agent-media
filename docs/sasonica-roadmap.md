@@ -1693,7 +1693,12 @@ ahead.
     messages in chats?", in both kinds of chat): a long press on any
     message, six quick emojis, one of yours per message; real `m.reaction`
     in a room, a note on the next message in an agent's chat
-    (server-contract.md §6.27).
+    (server-contract.md §6.27). **Replies built 29 Oct 2026** (David: "All
+    of these should be in the chats tab too"): the long press offers Reply,
+    a strip over the box shows what it answers, the bubble quotes it and a
+    tap goes there; a real `m.in_reply_to` in a room, the quote in front for
+    an agent, lifted off again when read (§6.31; agent-media `ade3f86b`,
+    sasonica-app `7a0a3e7`). Next on the list: read state with a peek.
 
 35. **Mail in Sasonica** (David, 20 Oct 2026: "I'd like to handle emails
     from Sasonica"). Both a Mail tab (accounts, folders, search, compose)

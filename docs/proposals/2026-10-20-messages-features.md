@@ -72,6 +72,10 @@ recording a clip is separate from dictating text. These extend sending
 media (2), reactions (3) and replies (4) above; queued, not built.
 Reactions (3) built 26 Oct 2026, in agent chats as well (server-contract.md
 §6.27).
+Replies (4) built 29 Oct 2026, in agent chats as well (§6.31). David, 29 Oct
+2026: "All of these should be in the chats tab too" — every feature on this
+list is built for agent chats as well as rooms where it means something
+there.
 
 Second round, all chosen (David, 20 Oct 2026):
 
