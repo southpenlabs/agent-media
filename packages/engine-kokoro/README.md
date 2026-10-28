@@ -2,7 +2,7 @@
 
 Local [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) TTS render engine
 for agent-media. POSTs text to a small kokoro-onnx HTTP server (the `kokoro-tts`
-service, normally on red5) and writes back WAV — all on the tailnet, no cloud,
+service) and writes back WAV — nothing leaves your own network, no cloud,
 no API key. On any failure it returns `(False, err)` so core falls back to edge.
 
 ## Use
@@ -10,7 +10,8 @@ no API key. On any failure it returns `(False, err)` so core falls back to edge.
 ```sh
 pip install -e packages/engine-kokoro
 export MEDIA_RENDER_ENGINE=kokoro
-export MEDIA_KOKORO_BASE_URL=http://red5:8880   # MagicDNS name of the host running it
+# Only when the server is on another host (default http://127.0.0.1:8880, this host):
+export MEDIA_KOKORO_BASE_URL=http://<server-host>:8880
 ```
 
 Config (env): `MEDIA_KOKORO_BASE_URL`, `MEDIA_RENDER_VOICE_KOKORO` (default
