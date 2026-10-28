@@ -582,7 +582,8 @@ def test_a_step_is_spoken_through_submission_with_the_think_earcon(env, monkeypa
     assert events[0].metadata["thinking"] is True
     assert events[0].priority.value == "low"
     # Under the voice and looping, not a cue before it (25 Oct 2026).
-    assert played and played[0] == ("under", earcons.path("think").name, True)
+    assert played and played[0][0] == "under" and played[0][2] is True
+    assert played[0][1].startswith("earcon-think-")
     assert len(played) == 2  # the earcon, then the step's one sentence
 
 

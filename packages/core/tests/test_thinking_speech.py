@@ -172,7 +172,9 @@ def test_thinking_readout_opens_with_the_think_earcon_under_it(tones_on):
     say(sink)
     # Under the first clip, not a clip of its own before it, looping under
     # the readout and stopped at its end (25 Oct 2026).
-    assert sink.played[0] == ("under", earcons.path("think").name)
+    # One of the slow harp's takes, picked at random (28 Oct 2026).
+    assert sink.played[0][0] == "under"
+    assert sink.played[0][1].startswith("earcon-think-")
     assert sink.loop is True
     assert sink.played[-1] == ("stop_under", "local")
     assert len([p for p in sink.played if not isinstance(p, tuple)]) == 2
@@ -203,12 +205,11 @@ def test_reply_does_not_open_with_the_think_earcon(tones_on, monkeypatch):
     assert not any(isinstance(p, tuple) and "think" in p[1] for p in sink.played)
 
 
-def test_think_earcon_is_a_short_pad_quieter_than_the_cut_tick():
+def test_think_earcon_is_a_long_harp_take_quieter_than_the_cut_tick():
     import array
     from agent_media_core import earcons
-    # A pass long enough to read as a mood under the voice, with a gap after
-    # it so the loop breathes.
-    assert 2.5 < earcons.duration_s("think") < 4.0
+    # A 45 s take of the slow harp, so a thought never hears a loop.
+    assert 40 < earcons.duration_s("think") < 50
 
     def peak(name):
         return max(abs(s) for s in array.array("h", earcons.synth(name)))
@@ -277,7 +278,8 @@ def test_a_reply_takes_back_an_unplayed_think_tone(tones_on, monkeypatch):
     from agent_media_core import earcons
     assert ("under", earcons.path("reply").name) in sink.played
     assert ("stop_under", "local") in sink.played
-    assert ("under", earcons.path("think").name) not in sink.played
+    assert not any(isinstance(p, tuple) and p[0] == "under"
+                   and p[1].startswith("earcon-think") for p in sink.played)
 
 
 def test_an_announcement_takes_back_an_unplayed_tone_and_gets_none(tones_on, monkeypatch):

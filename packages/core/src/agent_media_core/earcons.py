@@ -115,22 +115,31 @@ PEAK_DBFS = -12.0
 #: lesson was that low and quiet is not heard there at all.
 #: people / alert / mail at the levels of the samples David chose them from
 #: (26 Oct 2026); the reply keys at Air's.
-_PEAK_DBFS = {"think": -26.0, "reply-E": -28.0, "reply-G": -28.0,
+#: The slow harp's peak. A pluck's peak is far above its average, so it sits
+#: higher than the pad's -26 for the same loudness (matched by RMS).
+THINK_PEAK = -23.0
+_PEAK_DBFS = {"think-1": THINK_PEAK, "think-2": THINK_PEAK, "think-3": THINK_PEAK,
+              "think-4": THINK_PEAK, "reply-E": -28.0, "reply-G": -28.0,
               "reply-C": -28.0, "done": -14.0, "fail": -14.0,
               "question": -14.0, "people": -26.0, "alert": -15.0,
               "mail": -16.0}
 #: Bumped whenever a tone's recipe changes, so an old file is never reused.
-VERSION = 10
+VERSION = 11
 
 #: Air's three keys: the chord's root (the fifth and the octave above it
 #: follow), E5 first — agent-media's, and the one before keys.
 REPLY_KEYS = {"E": 659.25, "G": 783.99, "C": 523.25}
 
-NAMES = ("cut", "interrupt", "held", "think", "done", "fail", "question",
+NAMES = ("cut", "interrupt", "held", "think-1", "think-2", "think-3",
+         "think-4", "done", "fail", "question",
          "reply-E", "reply-G", "reply-C", "people", "alert", "mail")
 
 #: Older names still answered: `reply` is Air in E, as it was before keys.
-_ALIASES = {"reply": "reply-E"}
+_ALIASES = {"reply": "reply-E", "think": "think-1"}
+
+#: The thinking harp's takes: one is picked at random for each readout, so
+#: it never sounds like the same loop coming round.
+THINK_TAKES = ("think-1", "think-2", "think-3", "think-4")
 
 #: The tones a phone is told the kind of (``tone-kind``), for a listener's
 #: own phone sound in their place.
@@ -332,6 +341,51 @@ def _air(root: float) -> list[float]:
     return body + _silence(0.8)
 
 
+def _slow_harp(seed: int, dur: float = 45.0) -> list[float]:
+    rng = random.Random(1000 + seed)
+    n = int(RATE * dur)
+    out = [0.0] * n
+    for i in range(n):        # the faint chord under it
+        t = i / RATE
+        out[i] = 0.08 * math.sin(math.pi * i / n) * sum(
+            math.sin(2 * math.pi * f * t) for f in (261.63, 329.63, 392.0))
+    scale = (261.63, 293.66, 329.63, 392.0, 440.0)
+    up = [f * m for m in (1, 2, 4) for f in scale]
+
+    def pluck(f: float, at: float) -> None:
+        o = int(RATE * at)
+        m = min(int(RATE * 4.0), n - o)
+        for i in range(m):
+            t = i / RATE
+            out[o + i] += 0.5 * min(1.0, i / (RATE * 0.004)) * math.exp(-1.2 * t) * (
+                math.sin(2 * math.pi * f * t)
+                + 0.25 * math.sin(4 * math.pi * f * t) * math.exp(-4 * t)
+                + 0.1 * math.sin(6 * math.pi * f * t) * math.exp(-6 * t))
+
+    t = 0.6
+    while t < dur - 4:
+        start = rng.randint(0, 4)
+        notes = up[start:start + rng.randint(5, 7)]
+        if rng.random() < 0.4:
+            notes = notes[::-1]
+        for j, f in enumerate(notes):
+            pluck(f, t + j * 0.14)
+        t += rng.uniform(4.0, 6.5)
+    d1, d2 = int(RATE * 0.3), int(RATE * 0.6)
+    dry = out[:]
+    for i in range(n):        # the echo
+        if i >= d1:
+            out[i] += 0.4 * dry[i - d1]
+        if i >= d2:
+            out[i] += 0.25 * dry[i - d2]
+    fade = int(RATE * 1.5)    # in and out, so a take never starts or ends hard
+    for i in range(fade):
+        g = i / fade
+        out[i] *= g
+        out[n - 1 - i] *= g
+    return out
+
+
 def _recipe(name: str) -> list[float]:
     # A short pad either side: some outputs (Bluetooth, Android's mixer)
     # swallow the first few milliseconds of a stream, which would take the
@@ -395,29 +449,13 @@ def _recipe(name: str) -> list[float]:
             y += (0.03 + 0.25 * t) * (rng.uniform(-1, 1) - y)
             body.append(math.sin(math.pi * t) ** 2 * y)
         body += _silence(0.1)
-    elif name == "think":
-        # A dream pad: a Cmaj9 chord (C4 E4 G4 B4 D5) swelling in and out over
-        # 2.2 s, each note with a slow vibrato a little out of step with the
-        # others, so it wavers like a daydream. Under the voice (play_under),
-        # so its length costs no wait; low and soft so the words sit on top.
-        # Ends in a second of silence: it loops, and the gap is what makes
-        # the repeats a slow breath rather than a drone.
-        dur = 2.2
-        n = int(RATE * dur)
-        # Back at the octave it began at, kept at -18 dBFS (David, 25 Oct
-        # 2026: "go back to the original octave"); the octave up was tried
-        # when -27 was not heard at all on the phone.
-        chord = (261.63, 329.63, 392.0, 493.88, 587.33)
-        body = []
-        for i in range(n):
-            t = i / RATE
-            env = math.sin(math.pi * t / dur) ** 2
-            body.append(env * sum(
-                math.sin(2 * math.pi * f * t
-                         + 0.6 * math.sin(2 * math.pi * 5.2 * t + k))
-                / (1 + 0.3 * k)
-                for k, f in enumerate(chord)))
-        body += _silence(1.0)
+    elif name in THINK_TAKES:
+        # The slow harp (David, 28 Oct 2026, of daydream sounds tried: "the
+        # harp is the closest one yet", then "Slow harp" of four): gentle
+        # pentatonic sweeps, up or down, a note every 0.14 s, every 4-6.5 s,
+        # over a faint C-E-G chord, with an echo at 0.3 and 0.6 s. 45 s a
+        # take, each its own seed, so a thought never hears a loop come round.
+        body = _slow_harp(int(name[-1]))
     elif name == "done":
         # Two bells, G6 then C7 0.18 s later, ringing out together.
         body = _mix(_bell(1568.0, 1.6, 2.5), _bell(2093.0, 1.6, 2.5), 0.18)
@@ -647,6 +685,8 @@ def play_under(name: str, target=None, sink=None, *, loop: bool = False) -> bool
     """
     if not enabled(name) or sink is None or target is None:
         return False
+    if _canon(name) in THINK_TAKES:
+        name = random.choice(THINK_TAKES)
     try:
         under = getattr(sink, "play_under", None)
         if under is None:
