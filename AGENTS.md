@@ -121,6 +121,15 @@ real players, phones and history. These have all happened.
   `PYTHONPATH=<wt>/packages/server/src:<wt>/packages/core/src .venv/bin/pytest -q --rootdir=<wt>/packages/server <wt>/packages/server/tests`,
   or merge first and test on main.
 
+## Branches and the shared checkout
+
+Many sessions share the main checkout (`~/projects/agent-media`) and commit
+straight to `main`. Never `git checkout` / `git switch` a branch in the shared
+checkout; branches live in worktrees
+(`git worktree add ../agent-media-<topic> -b <branch>`). `.githooks/pre-commit`
+refuses a commit in the shared checkout when HEAD is not `main` (activate once
+per clone with `git config core.hooksPath .githooks`).
+
 ## Design rules
 
 - The app stays generic and the server knows the setup: when the app needs
