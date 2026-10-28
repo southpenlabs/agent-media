@@ -1095,7 +1095,7 @@ def _record_turn(session: str, text: str, pane: str = "") -> None:
 def reply(item: str, text: str, bearer: str, *, quote: str = "",
           mode: str = "continue", session: str = "",
           keep_reading: bool = False, voice: bool = False,
-          nudge: bool = False) -> tuple[bool, dict]:
+          nudge: bool = False, reply_to: str = "") -> tuple[bool, dict]:
     """Put `text` into `session`, or into the session behind ABS item `item`.
 
     `session` is the v1 form (server-contract.md §10) and wins when both are
@@ -1121,6 +1121,11 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
     nudge's note in a tag nothing shows or shelves, and is asked again —
     or offers a next step. Not a reply to the speech: nothing is cut, and a
     note owed for a message taken back waits for real words.
+
+    `reply_to` is the id of the message answered, `quote` its words
+    (replies.py, server-contract.md §6.31): a room sends a real reply, an
+    agent session gets the quote as before, kept so that it is shown as
+    `reply_to` when the thread is read.
     """
     if nudge:
         if mode == "branch":
@@ -1160,6 +1165,9 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
                 return False, {"error": "a Matrix room cannot be branched", "status": 409}
             if nudge:
                 return False, {"error": "a Matrix room cannot be nudged", "status": 409}
+            if reply_to.strip():
+                # A real reply (§6.31): the bridge makes it the network's own.
+                return room.send(drawn, reply_to=reply_to.strip())
             body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
             return room.send(body)
         # A session id nothing knows — not running, no transcript — is the
@@ -1183,6 +1191,11 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
         # for the next words.
         quote = ""
     elif mode != "branch":
+        if quote.strip() and reply_to.strip():
+            # The quote comes off the bubble again as `reply_to` (§6.31).
+            from . import replies
+
+            replies.record(session, reply_to.strip(), quote.strip())
         # A message taken back since the last one (`/session/retract`): this
         # one opens by saying so, since the agent may have read it already.
         from . import reactions, retract

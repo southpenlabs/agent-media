@@ -6590,6 +6590,40 @@ host's own Claude login, and are kept for a minute.
 when Anthropic did not answer (an expired login included). A kind the app
 does not know is dropped by the server.
 
+### 6.31 Replies to a message — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by
+`packages/server/tests/test_replies.py`. From the list of what the bridged
+apps do (docs/proposals/2026-10-20-messages-features.md, David, 20 Oct
+2026), in both kinds of chat: a long press on a message offers Reply, and
+a message that answers another shows what it answers.
+
+**Sending.** `POST /reply` (§6.3) takes `reply_to`, the id of the message
+answered, beside `quote`, its words (the app sends both, at most 300
+characters of words).
+
+- **A Matrix room**: sent as a real reply,
+  `m.relates_to: {"m.in_reply_to": {"event_id"}}`, with the words alone, so
+  the bridge makes it the network's own reply. `quote` is not sent. 404
+  when the room does not hold the message. Without `reply_to`, a `quote`
+  rides in front as a Markdown quote, as before.
+- **An agent session**: the quote goes in front as it always has
+  (`Re: "…" — ` for a pane, a Markdown quote paragraph for a headless
+  session) and is kept, with the id, in `<state_dir>/replies.json` (a
+  session's last 100). A `quote` with no `reply_to` is sent the same way
+  and not kept.
+
+**`reply_to` on a message (§6.2.2).** `/conversation/log` and the thread
+stream carry `reply_to: {"id", "text"?, "name"?, "mine"?}` on a message
+that answers another. `text` is the words answered on one line, at most
+140 characters (a photo is its words, "sent a photo"); `name` (rooms) who
+wrote them; `mine: true` when you did. A room's reply to a message not
+held has only `id`. In an agent session `text` is the quote as sent, and
+the quote is taken off the message's words; only a quote the app sent is
+taken off, so a Markdown quote typed by hand stays in the words. A room
+message's quote of what it answers (`> <@who> …`, which older clients put
+in front) is taken off too.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

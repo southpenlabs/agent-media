@@ -63,7 +63,7 @@ import threading
 import time
 import zlib
 
-from . import agents, background, driver, reactions, retract, sessions, threads, transcript
+from . import agents, background, driver, reactions, replies, retract, sessions, threads, transcript
 
 log = logging.getLogger("agent-media.server.thread_events")
 
@@ -309,6 +309,7 @@ class Watcher:
         msgs, _older = got
         transcript.join_speech(msgs, self._lines)
         transcript.strip_markers(msgs)
+        replies.mark(self.session, msgs)
         retract.mark(self.session, msgs)
         reactions.mark(self.session, msgs)
         live = bool(self._last.get("state", {}).get("session_live"))

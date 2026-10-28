@@ -35,6 +35,8 @@ import uuid
 
 from agent_media_core import matrix
 
+from . import replies
+
 log = logging.getLogger("agent-media.server.matrix")
 
 _SYNC: list = [None]
@@ -95,6 +97,18 @@ _MEDIA = {"m.image": "image", "m.video": "video", "m.audio": "audio", "m.file": 
 _KIND = {"m.image": "sent a photo", "m.video": "sent a video",
          "m.audio": "sent an audio clip", "m.voice": "sent a voice note",
          "m.file": "sent a file", "m.location": "shared a location"}
+
+
+def _without_fallback(body: str) -> str:
+    """A reply's words without the quote of what it answers that older
+    clients put in front (`> <@who:server> …` lines, then a blank line)."""
+    if not body.startswith("> <"):
+        return body
+    lines = body.split("\n")
+    i = 0
+    while i < len(lines) and lines[i].startswith(">"):
+        i += 1
+    return "\n".join(lines[i:]).lstrip("\n") or body
 
 
 class Room:
@@ -210,15 +224,21 @@ class Room:
 
     # -- events into messages --
 
-    def send(self, text: str) -> tuple[bool, dict]:
-        """Send `text` as the owner. The message is in the room's thread at
-        once; the sync's copy of it, when it comes, is the same event and is
-        kept once."""
+    def send(self, text: str, reply_to: str = "") -> tuple[bool, dict]:
+        """Send `text` as the owner, as a reply to message `reply_to` when
+        given (§6.31). The message is in the room's thread at once; the
+        sync's copy of it, when it comes, is the same event and is kept
+        once."""
         token = owner_token()
         if not token:
             return False, {"error": "this Matrix room is read-only: no owner token "
                                     "(run matrix-owner-login)", "status": 409}
-        content = {"msgtype": "m.text", "body": text}
+        content: dict = {"msgtype": "m.text", "body": text}
+        if reply_to:
+            with self.lock:
+                if reply_to not in self._by_id:
+                    return False, {"error": "no such message in this room", "status": 404}
+            content["m.relates_to"] = {"m.in_reply_to": {"event_id": reply_to}}
         try:
             got = _put(self.config, f"/rooms/{_q(self.id)}/send/m.room.message/"
                       f"{uuid.uuid4().hex}", content, token)
@@ -418,13 +438,40 @@ class Room:
 
     def _message(self, ev: dict) -> dict:
         sender = ev.get("sender") or ""
-        return {"id": ev.get("event_id"),
-                "role": "user" if sender == self.owner else "assistant",
-                "at": round((ev.get("origin_server_ts") or 0) / 1000, 3),
-                "parts": self._parts(sender, ev.get("content") or {}, ev.get("event_id") or ""),
-                "spoken": None, "turn": {"running": False},
-                # A room can have more than two people in it: who said it.
-                "sender": {"id": sender, "name": self.members.get(sender) or sender}}
+        content = ev.get("content") or {}
+        m = {"id": ev.get("event_id"),
+             "role": "user" if sender == self.owner else "assistant",
+             "at": round((ev.get("origin_server_ts") or 0) / 1000, 3),
+             "parts": self._parts(sender, content, ev.get("event_id") or ""),
+             "spoken": None, "turn": {"running": False},
+             # A room can have more than two people in it: who said it.
+             "sender": {"id": sender, "name": self.members.get(sender) or sender}}
+        rel = content.get("m.relates_to")
+        target = ((rel or {}).get("m.in_reply_to") or {}).get("event_id") \
+            if isinstance(rel, dict) and isinstance(rel.get("m.in_reply_to"), dict) else ""
+        if isinstance(target, str) and target:
+            # A reply (§6.31): its words, name and whose are filled in by
+            # `_view`, since the message answered may come in later.
+            m["reply_to"] = {"id": target}
+            parts = m["parts"]
+            if parts and parts[-1].get("type") == "text":
+                parts[-1]["text"] = _without_fallback(parts[-1]["text"])
+        return m
+
+    def _reply_view(self, ref: dict) -> dict:
+        """`reply_to` (§6.31): the message answered, as far as it is held."""
+        out = {"id": ref["id"]}
+        m = self._by_id.get(ref["id"])
+        if m is None:
+            return out
+        words = " ".join(p.get("text") or "" for p in m.get("parts") or []
+                         if p.get("type") in ("text", "media")).strip()
+        uid = m["sender"]["id"]
+        out.update(text=replies.short(words.strip("_")),
+                   name=self.members.get(uid) or m["sender"]["name"])
+        if uid == self.owner:
+            out["mine"] = True
+        return out
 
     # -- what the app is told --
 
@@ -482,6 +529,8 @@ class Room:
             rs = self._reactions_view(m["id"])
             if rs:
                 m["reactions"] = rs
+            if m.get("reply_to"):
+                m["reply_to"] = self._reply_view(m["reply_to"])
             uid = m["sender"]["id"]
             m["sender"]["name"] = self.members.get(uid) or m["sender"]["name"]
             if m["role"] == "assistant":
