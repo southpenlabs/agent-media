@@ -17,4 +17,4 @@ APK to David off Wi-Fi: CI release asset → `build-app/client/dl/<token>/` → 
 
 ## Open
 - Thinking read-aloud: works but sparse (most thinking blocks signature-only); offered a distinct voice for thoughts — no answer yet.
-- Remove test bookings 20/21 when David says; switch texts from test_to to clients when he says.
+- ~~Remove test bookings 20/21~~ done 28 Oct 2026: set cancelled on the website (no email, no credit) and their Google copies deleted. Still open: switch texts from test_to to clients when David says.
