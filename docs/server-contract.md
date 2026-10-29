@@ -6639,12 +6639,20 @@ bridged apps do (David, 20 Oct 2026): reading a chat here marks it read in
 WhatsApp or Messenger, and sometimes it should not. David, 29 Oct 2026: a
 setting per chat.
 
-A room's **mode** is on its `/targets` row (§6.1) as `read_receipts`:
+A room's **mode** is on its `/targets` row (§6.1) as `read_receipts`, with
+`read_receipts_own: true` when the room has its own rather than the
+default's:
 
-- `"open"` (the default): opening the room, and each message read while it
-  is open, marks it read on the network.
+- `"open"`: opening the room, and each message read while it is open,
+  marks it read on the network.
 - `"reply"`: opening it tells nobody (a peek). Replying marks it read, and
   so does Mark read.
+
+**The default** for every room without its own (David, 29 Oct 2026: "Can
+Mark read when opened also be a system wide setting?") is `"open"` until
+changed: `GET /settings/read-receipts` → `{"ok", "mode"}`, `POST
+/settings/read-receipts {"mode": "open" | "reply"}` → the same. A room's own
+mode wins; `mode: "default"` on `/session/read` puts it back on the default.
 
 The app's own unread dots are not changed by the mode: they are this
 device's (lib/arrivals.ts).
@@ -6653,15 +6661,19 @@ device's (lib/arrivals.ts).
 
 ```json
 {"session": "<thread>", "why": "open" | "reply" | "button", "id"?: "<message id>",
- "mode"?: "open" | "reply"}
+ "mode"?: "open" | "reply" | "default"}
 ```
 
 `why` is what happened in the app: the room opened or a message came in
 while it was open (`open`), a reply (`reply`), Mark read (`button`). `id`
 is the newest message read, the room's newest when absent. `mode` sets the
 room's mode; with no `why`, nothing is marked. → `{"ok", "session",
-"mode", "read"}`: `read` is the message the network was told of, `null`
-when nothing was told (a peek, or that message told already).
+"mode", "own", "read", "up_to"}`: `mode` the room's now, `own` whether it
+is its own; `read` the message the network was told of now, `null` when
+nothing was told (a peek, or that message told already); `up_to` the last
+message it has been told of since the server started, or `null` — the app
+offers Mark read under the newest message when that is someone else's and
+not it.
 
 Marking read is the owner's `m.read` receipt (`MATRIX_OWNER_TOKEN`), which
 the bridge carries to the network. A reply in a room (§6.3) marks it read

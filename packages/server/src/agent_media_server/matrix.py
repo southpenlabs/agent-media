@@ -726,7 +726,8 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
                         "network": r.network,
                         "drivable": bool(owner_token()),
                         # When the network is told it was read (§6.32).
-                        "read_receipts": read_receipts.mode_of(r.thread)})
+                        "read_receipts": read_receipts.mode_of(r.thread),
+                        "read_receipts_own": read_receipts.own(r.thread)})
             if r.avatar:
                 # The room's own picture (20 Oct 2026); a person's row shows
                 # the contact's first.

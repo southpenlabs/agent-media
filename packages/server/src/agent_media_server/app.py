@@ -374,7 +374,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/read", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
-    "/settings/language",
+    "/settings/language", "/settings/read-receipts",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -1939,6 +1939,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The phone's voice or the server's (render/device.py).
         ok, detail = pins.speech_voice(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/read-receipts":
+        # Settings' Mark chats read when opened: every room's default (§6.32).
+        from . import read_receipts
+
+        ok, detail = read_receipts.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/language":
         # The app's language, every device's (language.py).
         ok, detail = pins.settings_language(_bearer(h))
@@ -3090,6 +3096,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = pins.speech_voice(_bearer(h), mode=str(body.get("mode") or ""),
                                        voice=body.get("voice") or None)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/read-receipts":
+        from . import read_receipts
+
+        body = _read_json(h) or {}
+        ok, detail = read_receipts.settings(_bearer(h), str(body.get("mode") or ""))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/language":
         # Settings' Language: every device's.
