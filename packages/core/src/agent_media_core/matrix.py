@@ -213,6 +213,18 @@ class Sync:
                         log.warning("matrix: subscriber failed: %s", e)
                 if ev_id:
                     seen.append(ev_id)
+            # Read receipts (`m.receipt`, ephemeral, no event id): who has read
+            # up to where — the owner's own from another device through a
+            # bridge's double puppeting, the others' for ticks (agent-media
+            # §6.35). Each is handed on once, as it comes.
+            for ev in (room.get("ephemeral") or {}).get("events") or []:
+                if ev.get("type") != "m.receipt":
+                    continue
+                for fn in self._subs:
+                    try:
+                        fn(room_id, ev)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("matrix: subscriber failed: %s", e)
         del seen[:-_SEEN_KEEP]
         self._save()
 

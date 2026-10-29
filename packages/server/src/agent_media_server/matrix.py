@@ -153,6 +153,10 @@ class Room:
         # The message the owner's last read receipt was on (`read`, §6.32):
         # the same one is not told twice.
         self.read_sent = ""
+        # Read receipts (§6.35): each member's newest, `{"id", "ts"}` by user —
+        # the owner's own from another device (the bridge's double puppeting:
+        # read on WhatsApp is read here), the others' for "Read" under yours.
+        self.receipts: dict[str, dict] = {}
         self.loaded = False
         self._failed_at = 0.0
         self.lock = threading.RLock()
@@ -197,6 +201,8 @@ class Room:
             evs, self.back = got
             for ev in evs:           # newest first, as /messages gives them
                 self._take(ev, front=True)
+            for content in _SEEDED.pop(self.id, []):
+                self._receipts(content)
             self.loaded = True
 
     def _page(self, token: str | None) -> tuple[list, str | None] | None:
@@ -312,6 +318,9 @@ class Room:
             return False, {"error": f"the homeserver could not be reached ({e})",
                            "status": 502}
         self.read_sent = ev_id
+        with self.lock:
+            self.receipts[self.owner] = {"id": ev_id, "ts": int(time.time() * 1000)}
+            self.rev += 1
         return True, {"read": ev_id}
 
     def react(self, ev_id: str, key: str) -> tuple[bool, dict]:
@@ -400,6 +409,9 @@ class Room:
                 self.reactions.setdefault(target, {}).setdefault(key, {})[sender] = rid
                 self._reaction_of[rid] = (target, key, sender)
                 self.rev += 1
+            return
+        if kind == "m.receipt":
+            self._receipts(content)
             return
         if kind == "m.room.redaction":
             gone = ev.get("redacts") or content.get("redacts")
@@ -574,6 +586,40 @@ class Room:
             msgs, older, newer = win
             return self._view(msgs), older or bool(self.back), newer
 
+    def _receipts(self, content: dict) -> None:
+        """An `m.receipt`'s content: `{event id: {"m.read" | "m.read.private":
+        {user: {"ts"}}}}`; each user's newest is kept."""
+        changed = False
+        for ev_id, kinds in (content or {}).items():
+            if not isinstance(kinds, dict):
+                continue
+            for kind in ("m.read", "m.read.private"):
+                for user, info in (kinds.get(kind) or {}).items():
+                    ts = (info or {}).get("ts") if isinstance(info, dict) else None
+                    ts = ts if isinstance(ts, (int, float)) else 0
+                    old = self.receipts.get(user)
+                    if old is None or ts >= old["ts"]:
+                        if old != {"id": ev_id, "ts": ts}:
+                            self.receipts[user] = {"id": ev_id, "ts": ts}
+                            changed = True
+        if changed:
+            self.rev += 1
+
+    def _read_at(self, rec: dict | None) -> float | None:
+        """Up to when a receipt reads: its message's time when it is held,
+        else when it was read."""
+        if not rec:
+            return None
+        m = self._by_id.get(rec["id"])
+        return m["at"] if m is not None else round(rec["ts"] / 1000, 3)
+
+    def read_up_to(self) -> dict | None:
+        """The owner's: `{"id", "at"}`, the newest message read here or on
+        another device, or None when none is known (§6.35)."""
+        rec = self.receipts.get(self.owner)
+        at = self._read_at(rec)
+        return None if at is None else {"id": rec["id"], "at": at}
+
     def _reactions_view(self, ev_id: str) -> list[dict]:
         """`reactions` (§6.27): each emoji on the message, in the order
         first seen, with who put it there."""
@@ -584,6 +630,17 @@ class Room:
     def _view(self, msgs: list[dict]) -> list[dict]:
         out = [dict(m, sender=dict(m["sender"])) for m in msgs]
         who: dict[str, dict] = {}
+        # Who has read the owner's messages (§6.35): every other person whose
+        # receipt is on that message or a later one — not the owner, not the
+        # agent.
+        me = (self.owner, os.environ.get("MATRIX_SAM_ID") or "")
+        reads = [(self.members.get(u) or u, self._read_at(rec))
+                 for u, rec in self.receipts.items() if u not in me]
+        for m in out:
+            if m["role"] == "user":
+                by = [n for n, at in reads if at is not None and at >= m["at"]]
+                if by:
+                    m["read_by"] = sorted(by)
         for m in out:            # names learnt since the message came in
             rs = self._reactions_view(m["id"])
             if rs:
@@ -756,7 +813,9 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
                         "drivable": bool(owner_token()),
                         # When the network is told it was read (§6.32).
                         "read_receipts": read_receipts.mode_of(r.thread),
-                        "read_receipts_own": read_receipts.own(r.thread)})
+                        "read_receipts_own": read_receipts.own(r.thread),
+                        # Read up to here, here or on another device (§6.35).
+                        "read_up_to": r.read_up_to()})
             if r.avatar:
                 # The room's own picture (20 Oct 2026); a person's row shows
                 # the contact's first.
@@ -1041,6 +1100,41 @@ def _post(config: matrix.Config, path: str, body: dict, timeout: float = 15.0,
         return json.loads(resp.read())
 
 
+#: Receipts read at start for rooms not yet taken in, by room id (§6.35).
+_SEEDED: dict[str, list[dict]] = {}
+
+
+def _seed_receipts(config: matrix.Config) -> None:
+    """Where each room's receipts stand now (§6.35): one /sync with no
+    `since` that asks only for them — the loop's own sync carries only
+    what changes after its saved token, so a restart would forget who has
+    read what until it changed again."""
+    token = owner_token() or config.token
+    filt = {"room": {"timeline": {"limit": 0}, "state": {"types": []},
+                     "ephemeral": {"types": ["m.receipt"]},
+                     "account_data": {"not_types": ["*"]}},
+            "presence": {"not_types": ["*"]}, "account_data": {"not_types": ["*"]}}
+    try:
+        data = _get(matrix.Config(homeserver=config.homeserver, token=token, rooms=set()),
+                    "/sync", {"filter": json.dumps(filt), "timeout": "0"}, timeout=120.0)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log.warning("matrix: receipts unread at start: %s", e)
+        return
+    for room_id, room in ((data.get("rooms") or {}).get("join") or {}).items():
+        for ev in (room.get("ephemeral") or {}).get("events") or []:
+            if ev.get("type") != "m.receipt":
+                continue
+            r = _ROOMS.get(thread_of(room_id))
+            if r is None:
+                _SEEDED.setdefault(room_id, []).append(ev.get("content") or {})
+                continue
+            with r.lock:             # its first read holds the lock throughout
+                if r.loaded:
+                    r._receipts(ev.get("content") or {})
+                else:
+                    _SEEDED.setdefault(room_id, []).append(ev.get("content") or {})
+
+
 def start() -> None:
     if _SYNC[0] is not None or os.environ.get("MEDIA_MATRIX_SYNC", "1") == "0":
         return
@@ -1071,6 +1165,8 @@ def start() -> None:
     # The rooms' first read off the request path: /targets should not wait on it.
     threading.Thread(target=lambda: [r.load() for r in list(_ROOMS.values())],
                      name="matrix-rooms", daemon=True).start()
+    threading.Thread(target=_seed_receipts, args=(config,), name="matrix-receipts",
+                     daemon=True).start()
     bridges = _bridges()
     if bridges and owner_token():
         _OWNER[0] = _Owner(config, owner, bridges, intake)

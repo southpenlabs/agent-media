@@ -336,3 +336,56 @@ def test_a_room_can_be_archived_and_brought_back(one_room, monkeypatch):
     assert ok and one_room.thread not in archive.archived()
     ok, got = archive.session_archive("8f0e6c1e-0000-4000-8000-000000000000", True, "tok")
     assert not ok and got["status"] == 404
+
+
+# --- read receipts (§6.35) ------------------------------------------------------
+
+def _receipt(ev_id, user, ts, kind="m.read"):
+    return {"type": "m.receipt", "content": {ev_id: {kind: {user: {"ts": ts}}}}}
+
+
+def test_read_on_another_device_and_who_read_yours(monkeypatch):
+    monkeypatch.setenv("MATRIX_SAM_ID", SAM)
+    r, _ = _room([_ev(1, ME, "hi"), _ev(2, MEL, "hello"), _ev(3, ME, "how are you?")])
+    r.load()
+    assert r.read_up_to() is None
+    # Read on WhatsApp on the phone: the bridge's double puppet posts the owner's receipt.
+    r.on_event(_receipt("$2", ME, 1_790_000_002_500))
+    assert r.read_up_to() == {"id": "$2", "at": 1_790_000_002.0}
+    # An older receipt does not move it back; a private one counts.
+    r.on_event(_receipt("$1", ME, 1_000))
+    assert r.read_up_to()["id"] == "$2"
+    # Mel has read up to the first of yours, not the last.
+    r.on_event(_receipt("$1", MEL, 1_790_000_001_500, "m.read.private"))
+    msgs = {m["id"]: m for m in r.page(30)[0]}
+    assert msgs["$1"]["read_by"] == ["Mel"] and "read_by" not in msgs["$3"]
+    assert "read_by" not in msgs["$2"]               # theirs, not yours
+    r.on_event(_receipt("$3", MEL, 1_790_000_009_000))
+    r.on_event(_receipt("$3", SAM, 1_790_000_009_000))   # the agent is not a reader
+    msgs = {m["id"]: m for m in r.page(30)[0]}
+    assert msgs["$3"]["read_by"] == ["Mel"]
+    # A receipt on a message not held reads up to when it was read.
+    r.on_event(_receipt("$gone", ME, 1_790_000_500_000))
+    assert r.read_up_to() == {"id": "$gone", "at": 1_790_000_500.0}
+
+
+def test_the_row_carries_it_and_a_receipt_seen_at_start_waits_for_the_room(monkeypatch):
+    r, _ = _room([_ev(1, MEL, "hello")])
+    matrix._SEEDED[ROOM] = [{"$1": {"m.read": {ME: {"ts": 1_790_000_001_200}}}}]
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    (row,) = matrix.rows()
+    assert row["read_up_to"] == {"id": "$1", "at": 1_790_000_001.0}
+    assert ROOM not in matrix._SEEDED
+
+
+def test_the_sync_hands_receipts_on(tmp_path):
+    got = []
+    data = {"next_batch": "n1", "rooms": {"join": {ROOM: {
+        "timeline": {"events": []},
+        "ephemeral": {"events": [{"type": "m.typing", "content": {}},
+                                 _receipt("$1", ME, 5)]}}}}}
+    cfg = core_matrix.Config(homeserver="https://hs.test", token="t", rooms={ROOM})
+    s = core_matrix.Sync(cfg, state_path=tmp_path / "s.json", fetch=lambda req, t: data)
+    s.subscribe(lambda room, ev: got.append((room, ev["type"])))
+    s.poll_once()
+    assert got == [(ROOM, "m.receipt")]

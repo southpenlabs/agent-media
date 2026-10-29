@@ -6744,6 +6744,61 @@ something to say.
 400 for a bad session id, an empty `text` or another `mode`. A Matrix room
 cannot be branched.
 
+### 6.35 Read receipts from the networks — gated (built 29 Oct 2026)
+
+Code: `matrix.Room._receipts`, `read_up_to`, `_seed_receipts`; the core
+sync's `m.receipt` hand-on (`agent_media_core.matrix.Sync.poll_once`).
+Pinned by `packages/server/tests/test_matrix_rooms.py` ("read receipts").
+David, 29 Oct 2026: "if a network marks a message as read... should we get
+that in the bridge too?". The bridges' double puppeting posts the owner's
+own `m.read` when a chat is read in WhatsApp, Messenger or Google Messages
+on the phone, and each other person's when they read. He chose his reads
+first, then ticks.
+
+- **Read here or elsewhere**: a room's `/targets` row (§6.1) has `read_up_to:
+  {"id", "at"}`, the newest message the owner has read on any device (its
+  `at` when the room holds it, else when it was read), or `null`. The app
+  counts a room as read when `read_up_to.at` is at or after its last
+  message: no unread dot, no notice. A Mark read or an open sent from here
+  (§6.32) moves it too.
+- **Read by them**: each of the owner's messages in a room has `read_by:
+  [names]`, everyone else whose receipt is on it or a later message (not
+  the owner, not the agent, `MATRIX_SAM_ID`); absent when nobody has. The
+  app shows "Read by …" under the latest of them only.
+
+Each member's newest receipt is kept (`m.read` and `m.read.private`); an
+older one never moves it back. The loop's sync hands receipts on as they
+come. At start, one receipts-only `/sync` with no `since` reads where every
+room stands, so a restart does not forget. A room taken in later is given
+its receipts when it is first read.
+
+### 6.35 A voice clip sent to an agent, with its words (built 29 Oct 2026)
+
+Code: `agent_media_server/voice_clips.py`; the speech-to-text is
+`agent_media_core/transcribe`. Pinned by `test_voice_clips.py` and core's
+`test_transcribe.py`. David, 29 Oct 2026: "Maybe we need a speech to text
+solution too" — "maybe even using whichever API key has been set up?".
+
+A message to an agent session (`POST /reply`, §6.3) whose `Shared file:`
+line is a voice clip (§6.33: audio named `voice-clip-…`) gets a line after
+it with the words: `(Voice clip, transcribed: "…")`, or `(Voice clip:
+nothing was said.)`. The agent reads it; the clip is still there to open.
+With no speech-to-text set up, or when it fails, the line goes as before,
+so a send is never refused for it. Nothing changes in a Matrix room, which
+gets the clip as a voice note.
+
+**The speech-to-text** is whichever service is set up, first of: a server
+of OpenAI's `/audio/transcriptions` shape at `MEDIA_STT_URL` (whisper.cpp,
+speaches, a gateway; `MEDIA_STT_KEY` if it needs one), Groq
+(`GROQ_API_KEY`), OpenAI (`OPENAI_API_KEY`, only with OpenAI's own base),
+OpenRouter's Gemini Flash (`OPENROUTER_API_KEY`), Google's Gemini
+(`GEMINI_API_KEY`). `MEDIA_STT_PROVIDER` picks one, `MEDIA_STT_MODEL` its
+model, `MEDIA_STT=0` turns it off. Keys are read from the environment, else
+the LiteLLM gateway's env file (`MEDIA_STT_KEY_FILE`). A clip goes as 16 kHz
+mono MP3 (ffmpeg); a transcript is cached by the clip's SHA-256.
+`python -m agent_media_core.transcribe <file>` says which is in use and
+transcribes.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
