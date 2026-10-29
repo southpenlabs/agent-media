@@ -35,7 +35,7 @@ import uuid
 
 from agent_media_core import matrix
 
-from . import read_receipts, replies
+from . import read_receipts, replies, voice_notes
 
 log = logging.getLogger("agent-media.server.matrix")
 
@@ -366,6 +366,24 @@ class Room:
         """An event from the sync, newest last."""
         with self.lock:
             self._take(ev, front=False)
+        # A voice note as it arrives: its words in the background (§6.37).
+        ev_id = ev.get("event_id") or ""
+        content = ev.get("content") or {}
+        if ev.get("type") == "m.room.message" and "org.matrix.msc3245.voice" in content \
+                and ev_id in self.media:
+            voice_notes.want(self, ev_id)
+
+    def set_transcript(self, ev_id: str, words: str) -> None:
+        """A voice note's words (voice_notes.py, §6.37), on its held message:
+        shown under its play button, and indexed (the room's `rev` moves)."""
+        with self.lock:
+            m = self._by_id.get(ev_id)
+            if m is None:
+                return
+            for p in m["parts"]:
+                if p.get("type") == "media" and p.get("kind") == "voice":
+                    p["transcript"] = words
+                    self.rev += 1
 
     def _amend(self, ev_id: str, parts: list[dict] | None) -> None:
         self.amends.pop(ev_id, None)
@@ -501,6 +519,10 @@ class Room:
                 "text": _KIND["m.voice" if kind == "voice" else msgtype]}
         if kind == "image" or thumb:
             part["thumb"] = f"{url}?thumb=1"
+        if kind == "voice":
+            words = voice_notes.known(ev_id)
+            if words is not None:
+                part["transcript"] = words
         for k in ("mimetype", "size", "w", "h", "duration"):
             v = info.get(k)
             if isinstance(v, (int, str)) and v != "":
@@ -628,6 +650,12 @@ class Room:
                 for k, by in self.reactions.get(ev_id, {}).items() if by]
 
     def _view(self, msgs: list[dict]) -> list[dict]:
+        # An older voice note the first time its page is read (§6.37).
+        for m in msgs:
+            for p in m["parts"]:
+                if p.get("type") == "media" and p.get("kind") == "voice" \
+                        and "transcript" not in p and m["id"] in self.media:
+                    voice_notes.want(self, m["id"])
         out = [dict(m, sender=dict(m["sender"])) for m in msgs]
         who: dict[str, dict] = {}
         # Who has read the owner's messages (§6.35): every other person whose

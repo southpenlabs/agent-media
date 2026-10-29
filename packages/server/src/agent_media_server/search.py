@@ -233,6 +233,9 @@ def bodies(msg: dict) -> tuple[str, str]:
             text.append(transcript.display_text(words) if "[[" in words else words)
         elif t == "reasoning" and not p.get("redacted"):
             text.append(p.get("text") or "")
+        elif t == "media" and p.get("transcript"):
+            # A voice note's words (voice_notes.py, §6.37).
+            text.append(str(p["transcript"]))
         elif t == "ask":
             for q in p.get("ask") or []:
                 text.append(str(q.get("question") or ""))

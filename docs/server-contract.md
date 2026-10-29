@@ -6804,6 +6804,25 @@ mono MP3 (ffmpeg); a transcript is cached by the clip's SHA-256.
 `python -m agent_media_core.transcribe <file>` says which is in use and
 transcribes.
 
+### 6.37 The words of a room's voice notes (built 29 Oct 2026)
+
+Code: `agent_media_server/voice_notes.py`, `matrix.Room.set_transcript`.
+Pinned by `packages/server/tests/test_voice_notes.py`. From the list of what
+the bridged apps do (David, 20 Oct 2026, item 19): the words under the play
+button, and searchable.
+
+A voice note in a room (a §6.29 `media` part of `kind: "voice"`) carries
+`transcript: "<the words>"` once they are known, `""` when nothing was
+said. They are found in the background by the speech-to-text in use
+(§6.36): a voice note as it arrives on the sync, an older one the first
+time a page holding it is read (`/conversation/log`, the stream). The
+message changes on the stream when they come (a `message` `replace`). They
+are kept by event id in `<state_dir>/voice-notes.json` (the newest 5000),
+so a restart does not ask again; one that failed is not tried again for a
+day. The search index (§6.14) takes them as the message's words. With no
+speech-to-text set up, or `MEDIA_VOICE_NOTES=0`, there is no `transcript`.
+At most 200 wait at once; more are asked for when their page is read again.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

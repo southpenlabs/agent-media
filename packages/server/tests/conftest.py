@@ -50,6 +50,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_TAG_EMBED", "0")
     # Nor tag chats in the background (tags_auto.py).
     monkeypatch.setenv("MEDIA_AUTO_TAG_CHATS", "0")
+    # Nor send a clip to a real speech-to-text with this machine's keys
+    # (agent_media_core.transcribe; voice_clips.py, voice_notes.py). A test
+    # that wants one turns it on and replaces the service.
+    monkeypatch.setenv("MEDIA_STT", "0")
     from agent_media_server import tags_auto
 
     tags_auto._reset_for_tests()
