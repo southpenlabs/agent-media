@@ -312,3 +312,24 @@ def _no_music_bed_network(monkeypatch):
     monkeypatch.setattr(music_bed_stream, "_mpd", refuse)
     monkeypatch.setattr(music_bed_stream, "_fetch_local", lambda vid: None)
     monkeypatch.setattr(music_bed_stream, "_set_volume", refuse)
+
+
+_REAL_OS_NAME = os.name
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """A failure is reported with the real os.name, whatever the test left.
+
+    Tests of a Windows branch set os.name to "nt" with monkeypatch, which is
+    undone only at teardown, after the call's report is made. On Python 3.11
+    pathlib.Path() is a WindowsPath while os.name is "nt" and cannot be made
+    off Windows, so a test failing with it set crashed pytest's own report
+    (INTERNALERROR: cannot instantiate 'WindowsPath' on your system) and
+    hid which test failed (CI, 28-29 Oct 2026)."""
+    left = os.name
+    os.name = _REAL_OS_NAME
+    try:
+        yield
+    finally:
+        os.name = left

@@ -154,11 +154,17 @@ CSV = ('"\\Sasonica\\canvas","N/A","Running"\n'
 
 
 def test_our_tasks_are_found_and_named_short(monkeypatch):
-    monkeypatch.setattr(rs.os, "name", "nt")
     monkeypatch.setattr(rs, "_schtasks_query", lambda *a: CSV)
-    assert rs.schtasks_states() == [("Sasonica\\canvas", "up"), ("Sasonica\\sessiond", "down"),
-                                    ("agent-media\\jobs-worker", "up")]
-    svcs = [rs.Service(n, s, "schtasks") for n, s in rs.schtasks_states()]
+    # os.name is "nt" only around the call that asks it. Left in place, it
+    # broke pathlib on Python 3.11 (Path() is WindowsPath when os.name is
+    # "nt", and cannot be made off Windows), so a failure here crashed
+    # pytest's own report (INTERNALERROR) and hid which test had failed.
+    with monkeypatch.context() as m:
+        m.setattr(rs.os, "name", "nt")
+        states = rs.schtasks_states()
+    assert states == [("Sasonica\\canvas", "up"), ("Sasonica\\sessiond", "down"),
+                      ("agent-media\\jobs-worker", "up")]
+    svcs = [rs.Service(n, s, "schtasks") for n, s in states]
     sel, unknown = rs.resolve(["canvas", "jobs-worker"], svcs)
     assert [s.name for s in sel] == ["Sasonica\\canvas", "agent-media\\jobs-worker"]
     assert unknown == []
