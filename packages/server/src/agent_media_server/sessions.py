@@ -907,15 +907,35 @@ def project_groups() -> dict[str, dict]:
             for name, row in layout._index()["projects"].items() if row["group"]}
 
 
-def _manifest_of(session: str) -> dict:
-    for f in sorted(_manifest_dir().glob("*.json")):
+#: `(signature, {session: manifest})`: the shelf's manifests by session, kept
+#: while no file's name, size or mtime changes. `sessions_index` asks once per
+#: thread, and reading all of them each time took 5 s of an 11 s list.
+_MANIFESTS: tuple[tuple, dict] = ((), {})
+
+
+def _manifests() -> dict[str, dict]:
+    global _MANIFESTS
+    try:
+        entries = sorted((e for e in os.scandir(_manifest_dir()) if e.name.endswith(".json")),
+                         key=lambda e: e.name)
+        sig = tuple((e.name, e.stat().st_mtime_ns, e.stat().st_size) for e in entries)
+    except OSError:
+        return {}
+    if sig == _MANIFESTS[0]:
+        return _MANIFESTS[1]
+    found: dict[str, dict] = {}
+    for e in entries:
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(Path(e.path).read_text())
         except (OSError, ValueError):
             continue
-        if str(data.get("session") or f.stem) == session:
-            return data
-    return {}
+        found.setdefault(str(data.get("session") or e.name[:-5]), data)
+    _MANIFESTS = (sig, found)
+    return found
+
+
+def _manifest_of(session: str) -> dict:
+    return _manifests().get(session, {})
 
 
 def _folder_for_session(session: str) -> str:

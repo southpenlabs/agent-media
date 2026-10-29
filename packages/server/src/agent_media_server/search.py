@@ -1145,6 +1145,8 @@ def _owned_headless() -> set[str]:
 #: a keystroke at a time, and each list is a /proc sweep and a tmux call.
 _LISTED: list[tuple[float, dict]] = [(0.0, {})]
 _LISTED_TTL_S = 10.0
+#: A search with no thread list yet waits this long for the first one.
+_LISTED_FIRST_WAIT_S = 1.0
 #: Held while the stale thread list is read again in the background.
 _LISTING = threading.Lock()
 
@@ -1167,19 +1169,25 @@ def _listed() -> dict[str, dict]:
         _LISTED[0] = (time.monotonic(), got)
         return got
 
-    if not at:
-        return fetch()
     # Stale: answer with it and read the list again behind the query. The
     # list takes 2–4 s to build on red5, and every search after the 10 s
     # cache ran out waited for it (find bar timings, 19 Oct 2026).
+    done = threading.Event()
     if _LISTING.acquire(blocking=False):
         def again():
             try:
                 fetch()
             finally:
+                done.set()
                 _LISTING.release()
         threading.Thread(target=again, name="search-listed", daemon=True).start()
-    return rows
+    if at:
+        return rows
+    # Never read yet (a server just started): wait a little, then answer
+    # with the index's own names. The first list after a restart, with
+    # every cache cold, took 8–11 s (30 Oct 2026).
+    done.wait(_LISTED_FIRST_WAIT_S)
+    return _LISTED[0][1]
 
 
 def _thread_view(session: str, t: dict | None, listed: dict | None) -> dict:
@@ -1208,15 +1216,17 @@ def _thread_hits(terms: list[str], rows: dict[str, dict], listed: dict[str, dict
     hits = []
     for sid in set(rows) | set(listed):
         t = rows.get(sid)
-        if t and _hidden(t.get("entrypoint"), sid, owned, t.get("harness")):
-            continue
-        if t and _excluded(t.get("cwd") or ""):
-            continue
         view = _thread_view(sid, t, listed.get(sid))
         fields = {"title": view["title"], "recap": view["recap"] or "",
                   "project": view["project"] or ""}
         hay = " \n".join(fields.values())
         if not all(_mark_terms(hay, [w]) for w in terms):
+            continue
+        # After the words: each check stats its files, and asking all of the
+        # thousands of threads was most of a search's half second.
+        if t and _hidden(t.get("entrypoint"), sid, owned, t.get("harness")):
+            continue
+        if t and _excluded(t.get("cwd") or ""):
             continue
         if since is not None and (view["at"] or 0) < since:
             continue

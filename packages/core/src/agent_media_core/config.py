@@ -54,6 +54,7 @@ because its config file has a typo.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import tomllib
@@ -93,13 +94,19 @@ def config_path() -> Path:
 def load(path: Path | None = None) -> dict:
     """The parsed config, or ``{}``.
 
-    Not cached. It is a small file read at start-up by short-lived CLI calls,
-    and a cache would mean a long-running service holding a stale view of a
-    file the user just edited — the kind of thing that gets diagnosed as "the
-    setting does not work".
+    Kept only while the file's size and mtime stay the same, so a
+    long-running service never holds a stale view of a file the user just
+    edited — the kind of thing that gets diagnosed as "the setting does not
+    work". The server's thread list asks about 1,800 times, and parsing each
+    time was a second of it. A copy each time: callers may change theirs.
     """
     p = path or config_path()
     try:
+        st = p.stat()
+        sig = (str(p), st.st_mtime_ns, st.st_size)
+        hit = _LOADED.get(sig[0])
+        if hit and hit[0] == sig:
+            return copy.deepcopy(hit[1])
         with p.open("rb") as fh:
             data = tomllib.load(fh)
     except FileNotFoundError:
@@ -108,7 +115,13 @@ def load(path: Path | None = None) -> dict:
         # Loud enough to find, quiet enough not to break a boot.
         log.warning("agent-media config: ignoring %s (%s)", p, e)
         return {}
-    return data if isinstance(data, dict) else {}
+    data = data if isinstance(data, dict) else {}
+    _LOADED[sig[0]] = (sig, data)
+    return copy.deepcopy(data)
+
+
+#: `{path: ((path, mtime_ns, size), parsed)}` for `load`.
+_LOADED: dict[str, tuple[tuple, dict]] = {}
 
 
 def _as_roles(value) -> set[str]:
