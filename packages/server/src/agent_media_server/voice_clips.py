@@ -53,3 +53,27 @@ def with_transcripts(text: str) -> str:
         out.append(f'(Voice clip, transcribed: "{words}")' if words
                    else "(Voice clip: nothing was said.)")
     return "\n".join(out)
+
+
+def session_transcribe(path: str, bearer: str) -> tuple[bool, dict]:
+    """`POST /transcribe {"path"}` → `{"text", "provider"}`: the words of a
+    clip you have attached (a shared file, §6.18), to read before sending it
+    (David, 30 Oct 2026: "a way of viewing the transcript of the voice note
+    before we send it"). Cached by the clip, so sending it to an agent after
+    asks nothing again. 404 for anything not a shared file, 409 with no
+    speech-to-text set up, 502 when the service fails."""
+    from agent_media_core import transcribe
+
+    from . import uploads
+
+    ok, found = uploads.find(path or "", bearer)
+    if not ok:
+        return False, found
+    p = transcribe.provider()
+    if p is None:
+        return False, {"error": "no speech-to-text is set up", "status": 409}
+    try:
+        words = transcribe.transcribe(found["file"])
+    except transcribe.SttError as e:
+        return False, {"error": f"not transcribed: {e}", "status": 502}
+    return True, {"text": words, "provider": p["name"]}

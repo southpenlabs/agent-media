@@ -376,7 +376,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts",
@@ -2981,6 +2981,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/transcribe":
+        # A clip's words before it is sent (server-contract.md §6.36,
+        # voice_clips.session_transcribe).
+        from . import voice_clips
+
+        body = _read_json(h) or {}
+        ok, detail = voice_clips.session_transcribe(str(body.get("path") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/forward":
         # A message sent on to one chat or several (server-contract.md §6.40,

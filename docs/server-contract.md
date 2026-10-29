@@ -6885,6 +6885,13 @@ mono MP3 (ffmpeg); a transcript is cached by the clip's SHA-256.
 `python -m agent_media_core.transcribe <file>` says which is in use and
 transcribes.
 
+**Before it is sent** (David, 30 Oct 2026: "a way of viewing the transcript
+of the voice note before we send it"): `POST /transcribe {"path"}` →
+`{"ok", "text", "provider"}`, the words of a shared file (§6.18) — the app
+asks for a clip it has just recorded and shows them under its chip. 404 for
+a path that is not a shared file, 409 with no speech-to-text set up, 502
+when the service fails. Cached by the clip, so the send asks nothing again.
+
 ### 6.37 The words of a room's voice notes (built 29 Oct 2026)
 
 Code: `agent_media_server/voice_notes.py`, `matrix.Room.set_transcript`.

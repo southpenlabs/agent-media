@@ -52,3 +52,19 @@ def test_nothing_set_up_a_failure_or_no_clip_leaves_it(shared, monkeypatch, tmp_
     assert voice_clips.with_transcripts(f"Shared file: {clip}") == f"Shared file: {clip}"
     monkeypatch.setattr(transcribe, "provider", lambda: None)
     assert voice_clips.with_transcripts(f"Shared file: {clip}") == f"Shared file: {clip}"
+
+
+def test_the_words_of_a_clip_before_it_is_sent(shared, monkeypatch, tmp_path):
+    from agent_media_server import auth
+
+    shared, heard = shared
+    monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
+    clip = shared / "voice-clip-3.webm"
+    clip.write_bytes(b"x")
+    assert voice_clips.session_transcribe(str(clip), "tok") == (
+        True, {"text": 'pick up "some" milk', "provider": "fake"})
+    outside = tmp_path / "voice-clip-4.webm"
+    outside.write_bytes(b"x")
+    assert voice_clips.session_transcribe(str(outside), "tok")[1]["status"] == 404
+    monkeypatch.setattr(transcribe, "provider", lambda: None)
+    assert voice_clips.session_transcribe(str(clip), "tok")[1]["status"] == 409
