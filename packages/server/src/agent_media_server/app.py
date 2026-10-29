@@ -373,7 +373,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts",
@@ -2940,6 +2940,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path in ("/session/edit", "/session/unsend"):
+        # Your own message in a room, edited or unsent (server-contract.md
+        # §6.39, room_edit.py): the bridge makes it the network's own.
+        from . import room_edit
+
+        body = _read_json(h) or {}
+        if path == "/session/edit":
+            ok, detail = room_edit.session_edit(str(body.get("session") or ""),
+                                                str(body.get("id") or ""),
+                                                str(body.get("text") or ""), _bearer(h))
+        else:
+            ok, detail = room_edit.session_unsend(str(body.get("session") or ""),
+                                                  str(body.get("id") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/mark":
         # Pin to top and Mark unread, from a chat's long press or ⋮

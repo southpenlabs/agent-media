@@ -323,6 +323,61 @@ class Room:
             self.rev += 1
         return True, {"read": ev_id}
 
+    def _own_message(self, ev_id: str) -> tuple[str, dict | None]:
+        """(the owner's token, None) for a message of the owner's this room
+        holds, else ("", the refusal)."""
+        token = owner_token()
+        if not token:
+            return "", {"error": "this Matrix room is read-only: no owner token "
+                                 "(run matrix-owner-login)", "status": 409}
+        with self.lock:
+            m = self._by_id.get(ev_id)
+            if m is None:
+                return "", {"error": "no such message in this room", "status": 404}
+            if m["sender"]["id"] != self.owner:
+                return "", {"error": "only your own messages can be changed", "status": 403}
+        return token, None
+
+    def edit(self, ev_id: str, text: str) -> tuple[bool, dict]:
+        """Your message `ev_id`'s words changed (§6.39): an `m.replace`
+        edit, which the bridge makes the network's own edit."""
+        token, err = self._own_message(ev_id)
+        if err:
+            return False, err
+        content = {"msgtype": "m.text", "body": f"* {text}",
+                   "m.new_content": {"msgtype": "m.text", "body": text},
+                   "m.relates_to": {"rel_type": "m.replace", "event_id": ev_id}}
+        try:
+            got = _put(self.config, f"/rooms/{_q(self.id)}/send/m.room.message/"
+                       f"{uuid.uuid4().hex}", content, token)
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        self.on_event({"type": "m.room.message", "event_id": got.get("event_id") or "",
+                       "sender": self.owner, "content": content,
+                       "origin_server_ts": int(time.time() * 1000)})
+        return True, {"id": ev_id, "edited": True}
+
+    def unsend(self, ev_id: str) -> tuple[bool, dict]:
+        """Your message `ev_id` taken back for everyone (§6.39): redacted, which
+        the bridge makes the network's own delete."""
+        token, err = self._own_message(ev_id)
+        if err:
+            return False, err
+        try:
+            _put(self.config, f"/rooms/{_q(self.id)}/redact/{_q(ev_id)}/{uuid.uuid4().hex}",
+                 {}, token)
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        self.on_event({"type": "m.room.redaction", "redacts": ev_id, "sender": self.owner,
+                       "content": {"redacts": ev_id}})
+        return True, {"id": ev_id, "unsent": True}
+
     def react(self, ev_id: str, key: str) -> tuple[bool, dict]:
         """The owner's reaction on message `ev_id` set to `key` ("" for none):
         one per message, as the bridged apps allow — the one there was is

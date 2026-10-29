@@ -6866,6 +6866,25 @@ a value not true/false; 404 for a session nothing knows.
 Every `/targets` row (§6.1) carries `top` (epoch or null) and
 `marked_unread`. Kept in `<state_dir>/chat-marks.json`.
 
+### 6.39 Edit and unsend your message in a room — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/room_edit.py`, `matrix.Room.edit` and
+`Room.unsend`. Pinned by `packages/server/tests/test_room_edit.py`. From the
+list of what the bridged apps do (David, 20 Oct 2026, per-chat controls).
+
+- `POST /session/edit {"session", "id", "text"}` → `{"ok", "session", "id",
+  "edited": true}`: an `m.replace` of your message as the owner, which the
+  bridge makes the network's own edit. The message keeps its id and shows
+  `edited` (§6.2.2).
+- `POST /session/unsend {"session", "id"}` → `{"ok", "session", "id",
+  "unsent": true}`: your message redacted for everyone, which the bridge
+  makes the network's own delete. It leaves the thread.
+
+Any of your messages, not only the latest. 403 for someone else's message,
+404 for one the room does not hold, 409 with no owner token, and 409 for an
+agent's chat (Cancel or Edit your latest message there, §6.19); 400 for a
+bad session id, no id, or no words; 502 when the homeserver refuses.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
