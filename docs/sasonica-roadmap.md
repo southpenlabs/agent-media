@@ -1975,6 +1975,29 @@ ahead.
     the roles proposal's step 3 for people who are not the owner. Not
     started.
 
+44. **Bring back… a thread at a time** — **DONE 30 Oct 2026** (David,
+    30 Oct 2026: "I'd like something kind of the opposite too ... make a
+    thread reappear as unread at a certain date and time"). A sibling of
+    Quiet for… (item 42): the thread's ⋮ and a row's long press offer In
+    1 hour, This evening, Tomorrow 7 am, Next Monday 7 am, a length and a
+    date and time of his own (the same pickers, never past, at most a
+    year off) and Cancel reminder. The thread is marked read now and held
+    where it is (as a quiet; "Back Tue 3 Nov, 7 am" on its row); at its
+    time it **comes back unread**: a dot, an entry in Home's replies, a
+    "Back · <title>" notice, floating to the top by `max(activity, time)`,
+    lifting any quiet it has; opening it settles it. Show → Reminders lists
+    the pending ones, soonest first. Server: agent-media `remind.py`,
+    `POST /session/remind {"session", "at": epoch | null | false,
+    "held"?}` (contract §6.4), rows carry `remind` and `reminded`, due ones
+    are in `/dashboard`'s `replies`, kept in `remind.json` (agent-media
+    `d7fb11e6`). **The phone is told with the app shut** through the
+    notifier's own stream: a `reminders` frame on `/sessions/events?remind=1`
+    (§6.13), posted by NotifyService as "Back · <title>", once per thread
+    and time (sasonica-app `4226f3e`); the web app also announces a due one
+    on its own timer while open and on the next open. Not run on a device,
+    and the Android unit tests (NotifyRulesTest) need the SDK that CI has,
+    not this host.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
