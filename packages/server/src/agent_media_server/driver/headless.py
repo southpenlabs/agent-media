@@ -278,7 +278,7 @@ class HeadlessDriver:
         return call("ping", timeout=3.0).get("system_prompt") is True
 
     def start(self, *, agent, cwd, text, host="", flags=(), quote="", model="", mode="",
-              system_prompt_file=""):
+              system_prompt_file="", fork_from="", fork_at=""):
         """A fresh headless session. `host` (the tmux session a pane would
         have opened in) becomes its workspace — what speech is filed and
         voiced under. `flags` are amux's pane flags and are not used: the
@@ -289,8 +289,10 @@ class HeadlessDriver:
 
         r = call("start", cwd=cwd, text=compose(text, quote), agent=agent, workspace=host,
                  model=model, mode=mode, timeout=30.0,
-                 **({"system_prompt_file": system_prompt_file} if system_prompt_file else {}))
-        if not r.get("ok") and r.get("code") == "unsupported" and agent not in ("claude", "antigravity"):
+                 **({"system_prompt_file": system_prompt_file} if system_prompt_file else {}),
+                 **({"fork_from": fork_from, "fork_at": fork_at} if fork_from else {}))
+        if not r.get("ok") and r.get("code") == "unsupported" and agent not in ("claude", "antigravity") \
+                and not fork_from:
             # A sessiond older than this canvas (it restarts only when its own
             # code changes, and a restart ends its chats): the chat opens in a
             # pane, as before it had an adapter for this agent.

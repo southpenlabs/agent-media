@@ -6712,6 +6712,38 @@ Signal play as a voice note. Without ffmpeg it goes as it is.
 400 for a line whose path is not a shared file (outside the upload root, or
 gone); nothing is sent. A failure part-way says how many were sent.
 
+### 6.34 A new chat from a reply — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/branch.py`, sessiond's `start` `fork_from`/`fork_at`.
+Pinned by `packages/server/tests/test_branch.py`. David, 29 Oct 2026: "I
+think I'd like to Branch off from a reply". He chose to be offered both
+kinds each time, from the long press on a reply.
+
+#### `POST /session/branch`
+
+```json
+{"session": "<thread>", "id": "<message id>", "text": "<the first message>",
+ "mode": "history" | "quote", "quote": "<the reply's words, for quote>"}
+```
+
+→ `{"ok", "session": "<the new chat>", "branched": true, ...}`. The thread
+it came from is left as it was. `text` is required: a branch starts with
+something to say.
+
+- **`history`** (the default): a new chat that remembers the conversation up
+  to and including that reply, and nothing after it. Claude Code makes the
+  copy itself (`--resume <thread> --fork-session --resume-session-at
+  <record> --session-id <new>`), started headless by sessiond in the folder
+  the thread ran in. Every later spawn resumes the new chat. `<record>` is
+  the reply's last assistant record (its words after its steps;
+  `branch.fork_point`), so all of the reply is kept. 409 for a thread with
+  no Claude Code transcript, and 404 for a message not in it.
+- **`quote`**: a fresh chat in the same folder, `quote` in front of the
+  first message: `POST /reply` with `mode: "branch"`, for any agent.
+
+400 for a bad session id, an empty `text` or another `mode`. A Matrix room
+cannot be branched.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

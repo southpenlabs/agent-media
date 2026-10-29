@@ -371,7 +371,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/read", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts",
@@ -2888,6 +2888,17 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = read_receipts.session_read(
             str(body.get("session") or ""), _bearer(h), mid=str(body.get("id") or ""),
             why=str(body.get("why") or ""), mode=str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/branch":
+        # A long press on a reply, then Branch (server-contract.md §6.34): a
+        # new chat with the history up to it, or from its words. branch.py.
+        from . import branch
+
+        body = _read_json(h) or {}
+        ok, detail = branch.session_branch(
+            str(body.get("session") or ""), str(body.get("id") or ""),
+            refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
+            mode=str(body.get("mode") or "history"), quote=str(body.get("quote") or ""))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/react":
         # A long press on a message in the app, then an emoji

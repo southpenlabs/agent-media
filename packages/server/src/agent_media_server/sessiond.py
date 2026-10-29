@@ -377,6 +377,11 @@ class Session:
         self.system_prompt_file = ""
         #: What the process last said it runs (`system/init`).
         self.native_session = ""
+        #: A branch with its history (§6.34): the first spawn copies session
+        #: `fork_from` up to its record `fork_at` (`--fork-session
+        #: --resume-session-at`) under this id; every spawn after resumes this one.
+        self.fork_from = ""
+        self.fork_at = ""
         self.agy_text: dict[str, str] = {}
         self.agy_reply: list[str] = []
         self.agy_replied = False
@@ -1592,6 +1597,10 @@ class Supervisor:
             import shlex
 
             argv += shlex.split(extra)
+        if not resume and s.fork_from and s.fork_at:
+            argv += ["--resume", s.fork_from, "--fork-session",
+                     "--resume-session-at", s.fork_at, "--session-id", s.id]
+            return argv
         argv += ["--resume", s.id] if resume else ["--session-id", s.id]
         return argv
 
@@ -2038,7 +2047,10 @@ class Supervisor:
 
     def start(self, cwd: str, text: str, *, session: str = "", agent: str = "claude",
               workspace: str = "", permissions: str = "", model: str = "",
-              mode: str = "", system_prompt_file: str = "") -> dict:
+              mode: str = "", system_prompt_file: str = "", fork_from: str = "",
+              fork_at: str = "") -> dict:
+        """`fork_from`/`fork_at` (§6.34): start as a copy of that Claude
+        session up to that record, not afresh."""
         from . import permissions as perms
 
         if agent not in ("claude", "opencode", "antigravity"):
@@ -2072,6 +2084,11 @@ class Supervisor:
                         mode="plan" if mode == "plan" else "")
             s.system_prompt_file = system_prompt_file
             s.first_text = " ".join(text.split())[:200]
+            if fork_from and fork_at:
+                if agent != "claude":
+                    raise Refused("only a Claude Code chat can be branched with its history",
+                                  "unsupported")
+                s.fork_from, s.fork_at = fork_from, fork_at
             self._spawn(s, resume=False)
             self.sessions[session] = s
         return self.send(session, text, _fresh=True)
@@ -2817,7 +2834,9 @@ class Supervisor:
                     workspace=str(req.get("workspace") or ""),
                     permissions=str(req.get("permissions") or ""),
                     model=str(req.get("model") or ""), mode=str(req.get("mode") or ""),
-                    system_prompt_file=str(req.get("system_prompt_file") or ""))}
+                    system_prompt_file=str(req.get("system_prompt_file") or ""),
+                    fork_from=str(req.get("fork_from") or ""),
+                    fork_at=str(req.get("fork_at") or ""))}
             if op == "antigravity_hook":
                 from .antigravity_adapter import approval
                 return {"ok": True, "hook": approval(self, sid, req.get("payload") or {}, stage=str(req.get("stage") or "pre"))}
