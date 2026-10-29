@@ -232,11 +232,16 @@ class Room:
         given (§6.31). The message is in the room's thread at once; the
         sync's copy of it, when it comes, is the same event and is kept
         once."""
+        return self.send_content({"msgtype": "m.text", "body": text}, reply_to)
+
+    def send_content(self, content: dict, reply_to: str = "") -> tuple[bool, dict]:
+        """Send an `m.room.message` of any kind as the owner: words, or a
+        photo, video, voice note or file already uploaded (room_send.py)."""
         token = owner_token()
         if not token:
             return False, {"error": "this Matrix room is read-only: no owner token "
                                     "(run matrix-owner-login)", "status": 409}
-        content: dict = {"msgtype": "m.text", "body": text}
+        content = dict(content)
         if reply_to:
             with self.lock:
                 if reply_to not in self._by_id:
@@ -257,6 +262,30 @@ class Room:
                            "origin_server_ts": int(time.time() * 1000)})
         return True, {"session": self.thread, "pane": None, "submitted": True,
                       "event_id": ev_id}
+
+    def upload(self, data: bytes, name: str, ctype: str) -> tuple[bool, dict]:
+        """Put a file in the homeserver's media store as the owner: `{"url"}`,
+        its mxc:// address, to send in a message (room_send.py, §6.33)."""
+        token = owner_token()
+        if not token:
+            return False, {"error": "this Matrix room is read-only: no owner token "
+                                    "(run matrix-owner-login)", "status": 409}
+        req = urllib.request.Request(
+            f"{self.config.homeserver}/_matrix/media/v3/upload?filename="
+            f"{urllib.parse.quote(name)}", method="POST", data=data,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": ctype})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                got = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused the file ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        url = got.get("content_uri") or ""
+        if not _mxc(url):
+            return False, {"error": "the homeserver did not keep the file", "status": 502}
+        return True, {"url": url}
 
     def read(self, ev_id: str = "") -> tuple[bool, dict]:
         """Tell the network the room is read up to message `ev_id` (default

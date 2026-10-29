@@ -263,7 +263,7 @@ def test_an_emoji_paragraph_reaches_a_matrix_room_with_its_lines(monkeypatch):
         def read(self, ev_id=""):          # replying is reading (§6.32)
             return True, {"read": None}
 
-        def send(self, body):
+        def send(self, body, reply_to=""):
             sent.append(body)
             return True, {"ok": True}
 
@@ -292,7 +292,7 @@ def test_a_room_send_keeps_the_pictures_first_row(monkeypatch):
         def read(self, ev_id=""):          # replying is reading (§6.32)
             return True, {"read": None}
 
-        def send(self, body):
+        def send(self, body, reply_to=""):
             sent.append(body)
             return True, {"ok": True}
 

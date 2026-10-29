@@ -6684,6 +6684,34 @@ bad session id, mode or why. An agent's chat has no network:
 `{"mode": null, "read": null}`, nothing done. The mode is kept in
 `<state_dir>/read_receipts.json`.
 
+### 6.33 Photos, files and voice clips sent to a room — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/room_send.py`, `matrix.Room.upload`,
+`Room.send_content`. Pinned by `packages/server/tests/test_room_send.py`.
+David, 22 and 29 Oct 2026: send photos and voice clips, in rooms and agent
+chats.
+
+Nothing new is asked of the app: a file is attached as before (`POST
+/upload`, §6.18) and the message carries a `Shared file: <path>` line for
+it. To an agent that line is how it opens the file. To a Matrix room
+(`POST /reply`, §6.3) each line is now the file itself: uploaded to the
+homeserver as the owner (`/_matrix/media/v3/upload`) and sent as an
+`m.image`, `m.video`, `m.audio` or `m.file` (`body` and `filename` its
+name, `info.mimetype`, `info.size`, `info.duration` for sound and video), so
+the bridge sends the network's own photo, video or file. The words follow as
+a message of their own; a reply (`reply_to`, §6.31) is the first message.
+A room is never sent a path on this host.
+
+**A voice clip** is an audio file whose name starts `voice-clip-` (the
+app's recorder names it so; a WebM recording counts too). It goes as a
+voice note: `m.audio` with `org.matrix.msc3245.voice: {}` and
+`org.matrix.msc1767.audio.duration`, made Ogg Opus first when it is not
+(ffmpeg: the Opus copied, else re-encoded), since that is what WhatsApp and
+Signal play as a voice note. Without ffmpeg it goes as it is.
+
+400 for a line whose path is not a shared file (outside the upload root, or
+gone); nothing is sent. A failure part-way says how many were sent.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

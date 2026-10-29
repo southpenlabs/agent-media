@@ -1171,11 +1171,15 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
             if not got:
                 log.info("reply: read receipt for %s not sent: %s", session[:8],
                          detail.get("error"))
+            from . import room_send
+
+            # Attached files go as themselves, never as a path on this host
+            # (room_send.py, §6.33); a room with none is sent as before.
             if reply_to.strip():
                 # A real reply (§6.31): the bridge makes it the network's own.
-                return room.send(drawn, reply_to=reply_to.strip())
+                return room_send.send(room, drawn, reply_to=reply_to.strip())
             body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
-            return room.send(body)
+            return room_send.send(room, body)
         # A session id nothing knows — not running, no transcript — is the
         # same answer an item with no session behind it gets: not there.
         # Checked here rather than left to `deliver`, because `branch` would
