@@ -6889,6 +6889,29 @@ Any of your messages, not only the latest. 403 for someone else's message,
 agent's chat (Cancel or Edit your latest message there, §6.19); 400 for a
 bad session id, no id, or no words; 502 when the homeserver refuses.
 
+### 6.40 Forward a message — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/forward.py`. Pinned by
+`packages/server/tests/test_forward.py`. From the list of what the bridged
+apps do (David, 20 Oct 2026: forward a message; "send to several chats at
+once").
+
+`POST /session/forward {"session", "id", "to": ["<session>", …], "text"?}`
+→ `{"ok", "session", "id", "sent": [...], "failed": [{"session", "error"}]}`.
+`to` is 1 to 20 chats of any kind; the chat it came from is skipped. From a
+Matrix room the message is taken as the room holds it (404 when it does
+not); from an agent's chat `text` is its words (400 when there are none).
+
+- **To a room**: the words as your message; a room's photo, video, voice
+  note or file as itself — the same `mxc://` file, nothing uploaded again —
+  so the bridge sends the network's own.
+- **To an agent's chat**: `Forwarded from <title>:` then the words (§6.3
+  `/reply`); a room's file is fetched (§6.29), copied under the upload root
+  and given as a `Shared file:` line.
+
+Each chat is tried on its own: one that refuses is in `failed` with its
+reason and the rest still get it. 400 for a bad session id or `to`.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
