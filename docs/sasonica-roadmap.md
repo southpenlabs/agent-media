@@ -1758,9 +1758,13 @@ ahead.
     project with people's chats under People), the Docs link and the
     projects' mail counts on the Spaces sheet; ☰ no longer offers Threads,
     and archive, seal, exit, ☰'s projects and Home's All threads land on
-    Chats. `/threads` stays for old links and the e2e suites. Next: saved
-    views (a tag or a person as a view), then Messages folded in and the
-    Threads mode's code removed.
+    Chats. `/threads` stays for old links and the e2e suites. **Messages
+    folded in the same night** (sasonica-app, 29–30 Oct 2026): Show →
+    Service and One row per person (on by default), Sort's Name A–Z and By
+    service or agent; ☰ offers neither Threads nor Messages, and People and
+    the bridge banner's sign-in go back to Chats; `/messages` kept likewise.
+    Next: saved views (a tag or a person as a view), then the Threads and
+    Messages modes' code removed and their suites moved onto Chats.
 39. **Background music under long readings** (David, 26 Oct 2026: "maybe
     we could even use dynamically selected music in the background"; "are
     there libraries of different genres we could have selectable in
