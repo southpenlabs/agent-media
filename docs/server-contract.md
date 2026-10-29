@@ -2468,8 +2468,10 @@ The speech bar.
   alert (a Claude Code notification, an alert), not a reply or a question.
 - `mic` (29 Oct 2026) is true while a paired device's mic is open (§6.21e),
   live or not. hpo's SMTC ducker pauses Windows media while `mic` is true,
-  or `speaking` is and neither `thinking` nor `notif` is (David, 29 Oct
-  2026: "don't pause it for notifications or thinking").
+  or `speaking` is and `thinking` is not, once it has been for 2.2 s: a beep
+  alone (an earcon, at most ~1.8 s) is speaking too, and is no reason to
+  pause (David, 29 and 30 Oct 2026: "don't pause it for … thinking";
+  "spoken notifications are okay, just not for beeps alone").
 
 Clients: S (`SpeechBar.vue`). **Polled 1.5 s while speaking, 5 s idle, 15 s
 after failures.** The server logs one line per device on the first answer
@@ -4846,7 +4848,7 @@ opening and closing of its mic as it happens, outbound (sasonica-app
 - Read as `mic` on `GET /speech/now` (§6.5): any device's mic open.
 - The reader is hpo's SMTC ducker (dotfiles `hpo/smtc/smtc-duck.ps1`): it
   polls `/speech/now` over public HTTPS with its own device token, pauses
-  Windows media while `mic`, or `speaking` but not `thinking` or `notif`
+  Windows media while `mic`, or `speaking` but not `thinking` for 2.2 s
   (§6.5), and resumes what it paused once
   both have been false for a moment.
 
