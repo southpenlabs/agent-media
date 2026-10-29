@@ -22,9 +22,11 @@ chat. The app stays generic: it draws whatever `LoginStep` a bridge sends.
 from __future__ import annotations
 
 import glob
+import base64
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -318,6 +320,56 @@ def owner_networks() -> dict[str, dict]:
     return {str(k): v for k, v in got.items() if isinstance(v, dict)} if isinstance(got, dict) else {}
 
 
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def _jwt_claims(token: str) -> dict:
+    """A JWT's payload, unverified (only read for the account's name, never
+    trusted for anything); {} when it is not one."""
+    parts = token.split(".") if isinstance(token, str) else []
+    if len(parts) != 3:
+        return {}
+    try:
+        got = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except (ValueError, TypeError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def sign_in_emails(b: Bridge) -> dict[str, str]:
+    """`{login id: email}` from the bridge's own record of each sign-in,
+    for what its profile leaves out (David, 30 Oct 2026: "show the email
+    address of the logged in users … for Facebook and Teams"). Teams keeps
+    a work account's Microsoft token, whose `upn` is its address; a
+    `metadata.email` is taken as it is. Read-only; nothing else leaves the
+    server; {} when the database cannot be read."""
+    if not b.database or not Path(b.database).is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        con = sqlite3.connect(f"file:{b.database}?mode=ro", uri=True, timeout=1.0)
+        try:
+            rows = con.execute("SELECT id, metadata FROM user_login").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return {}
+    for lid, raw in rows:
+        try:
+            md = json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(md, dict):
+            continue
+        claims = _jwt_claims(md.get("auth_token") or "")
+        for got in (md.get("email"), claims.get("email"), claims.get("upn"),
+                    claims.get("preferred_username")):
+            if isinstance(got, str) and _EMAIL.fullmatch(got.strip()):
+                out[str(lid)] = got.strip()
+                break
+    return out
+
+
 # --- which bridges ----------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -335,6 +387,9 @@ class Bridge:
     bot: str = ""
     ghost_prefix: str = ""
     domain: str = ""
+    # Its sqlite database (`database.uri`, a `file:` path), "" when it is
+    # not one: where it keeps each sign-in's own record (`sign_in_emails`).
+    database: str = ""
 
 
 def _paths() -> list[str]:
@@ -375,8 +430,20 @@ def discover() -> list[Bridge]:
                             config=p, unset=_unset(bid, conf),
                             bot=f"@{bot}:{domain}" if bot and domain else "",
                             ghost_prefix=template.partition("{{")[0] if "{{" in template else "",
-                            domain=domain)
+                            domain=domain, database=_database(conf, p))
     return list(found.values())
+
+
+def _database(conf: dict[str, str], config: str) -> str:
+    """The bridge's sqlite file from `database.uri` (`file:<path>?…`, or a
+    bare path; relative to its config's folder), "" for anything else."""
+    if not (conf.get("database.type") or "").startswith("sqlite"):
+        return ""
+    uri = (conf.get("database.uri") or "").partition("?")[0]
+    path = uri[len("file:"):] if uri.startswith("file:") else uri
+    if not path or path.startswith(":memory:"):
+        return ""
+    return str(Path(config).parent / os.path.expanduser(path))
 
 
 def find(bridge_id: str) -> Bridge | None:
@@ -491,8 +558,11 @@ def entry(b: Bridge) -> dict:
              for f in (who.get("login_flows") or []) if isinstance(f, dict)]
     logins = [_login(x, b.id) for x in (who.get("logins") or []) if isinstance(x, dict)]
     network = str(net.get("network_id") or net.get("beeper_bridge_type") or b.id)
+    emails = sign_in_emails(b) if any(not lg["profile"].get("email") for lg in logins) else {}
     extra = owner_networks().get(network) or {}
     for lg in logins:
+        if not lg["profile"].get("email") and emails.get(lg["id"]):
+            lg["profile"]["email"] = emails[lg["id"]]
         # What the bridge leaves out, from the owner's own export (Messenger
         # gives no email): filled in, never over what the bridge said.
         for k in ("name", "email", "phone", "username"):

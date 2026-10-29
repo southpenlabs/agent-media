@@ -608,3 +608,33 @@ def test_what_the_bridge_leaves_out_comes_from_the_owners_export(server, signed_
     res, obj = call(server, "GET", "/bridges", headers=AUTH)
     (login,) = [b for b in obj["bridges"] if b["id"] == "msteams"][0]["logins"]
     assert login["profile"] == {"name": "David T", "email": "david@example.com"}
+
+
+def test_a_sign_ins_email_comes_from_the_bridges_own_record(server, signed_in, fake, tmp_path):
+    # Teams gives no email in the profile, but its database keeps the work
+    # account's Microsoft token, whose upn is the address (David, 30 Oct 2026).
+    import base64
+    import sqlite3
+
+    claims = base64.urlsafe_b64encode(json.dumps(
+        {"upn": "david@work.example", "name": "David T"}).encode()).decode().rstrip("=")
+    db = tmp_path / "share" / "mautrix-teams" / "teams.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE user_login (id TEXT, metadata TEXT)")
+    con.execute("INSERT INTO user_login VALUES (?, ?)", (
+        fake.logins[0]["id"], json.dumps({"auth_token": f"h.{claims}.sig", "refresh_token": "x"})))
+    con.commit()
+    con.close()
+    conf = tmp_path / "share" / "mautrix-teams" / "config.yaml"
+    conf.write_text(conf.read_text() + "database:\n    type: sqlite3-fk-wal\n"
+                    "    uri: file:teams.db?_txlock=immediate\n")
+    fake.logins[0]["profile"] = {"name": "David T"}
+    res, obj = call(server, "GET", "/bridges", headers=AUTH)
+    (login,) = [b for b in obj["bridges"] if b["id"] == "msteams"][0]["logins"]
+    assert login["profile"] == {"name": "David T", "email": "david@work.example"}
+    assert "refresh_token" not in json.dumps(obj) and claims not in json.dumps(obj)
+    # What the bridge says comes first.
+    fake.logins[0]["profile"] = {"name": "David T", "email": "bridge@example.com"}
+    res, obj = call(server, "GET", "/bridges", headers=AUTH)
+    (login,) = [b for b in obj["bridges"] if b["id"] == "msteams"][0]["logins"]
+    assert login["profile"]["email"] == "bridge@example.com"

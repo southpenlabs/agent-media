@@ -6343,6 +6343,14 @@ the owner's"`. With no bridges configured, `GET /bridges` is `{"ok": true,
   What each fills varies: Telegram all four and a picture, WhatsApp name
   and phone, Instagram name and username, Messenger name and picture,
   Google Messages and Teams nothing beyond `name`. `{}` when nothing.
+  An `email` the bridge leaves out is next taken from the bridge's own
+  record of the sign-in (30 Oct 2026, David: "show the email address of
+  the logged in users … for Facebook and Teams"): its sqlite database
+  (`database.uri`), read-only, `user_login.metadata` — an `email` there,
+  else the `upn` (or `email`, `preferred_username`) of the Microsoft token
+  Teams keeps for a work or school account. A personal Microsoft account's
+  token names no address, and Messenger keeps none, so those come from
+  the owner's export or not at all. No token leaves the server.
   A field the bridge leaves out is filled from the owner's own data export
   when it has it (`<state_dir>/owner-networks.json`, `{network: {name?,
   email?, phone?, username?}}`, written by the contacts import from
