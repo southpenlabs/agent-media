@@ -4,7 +4,7 @@ David, 30 Oct 2026, after hpo learned to pause its video for him: "So how do
 we make this feature a little bit more distributable? maybe we can have the
 option of assigning a media centre or big screen or something?... which
 would work the same way for using the phone as a remote like we do for the
-TV." Status: **proposal**.
+TV." Status: **proposal, questions decided 30 Oct 2026**.
 
 ## What there is now (29–30 Oct 2026)
 
@@ -94,10 +94,13 @@ phone"), so a guest's phone does not pause David's TV.
 3. Desktop helper: `sasonica screen` with pairing, Windows and Linux, in the
    installer.
 
-## Questions for David
+## Decided (David, 30 Oct 2026: "happy to have suggestions")
 
-- Same-network as the "at home" test, or location?
-- Should a screen also pause for thinking read-outs on request (some may
-  want silence for any voice)? Default no, per 29 Oct.
-- Name in Settings: "Screen", "Media centre", or just a switch on the device
-  with no new noun?
+- **"At home" is the same network** (option 1): no setup, no location share
+  needed. Plus the "Pause for" phone list, so a guest's phone does not pause
+  David's TV.
+- **No pausing for thinking read-outs, and no option for it.** One switch
+  fewer; add it if anyone asks.
+- **No new noun.** Each device in Settings → Devices gets one switch, "Pause
+  what's playing here while I talk or a reply is read out". "Screen" stays
+  the word in the code and this doc only.
