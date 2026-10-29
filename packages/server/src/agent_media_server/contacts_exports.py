@@ -29,7 +29,8 @@ account's book would tell the wrong person):
   `agent-media-contacts-drive-import.timer`). Meta's "Export to external
   service → Google Drive" puts each scheduled export in Drive; this lists
   the `facebook-*`, `instagram-*` and `meta-*` zips under
-  `MEDIA_CONTACTS_DRIVE_REMOTE` (an rclone remote, `gdrive:` by default)
+  `MEDIA_CONTACTS_DRIVE_REMOTE` (an rclone remote, `gdrive:` by default;
+  several comma-separated, e.g. `gdrive:,dropbox:`, are each read)
   and `MEDIA_CONTACTS_DRIVE_DIR` (a folder in it, the whole drive by
   default), newest first, and takes each not seen before (by Drive id,
   size and time) one at a time: copied to a 0700 folder in the state dir,
@@ -549,13 +550,34 @@ def _rclone() -> list[str]:
     return [os.environ.get("MEDIA_RCLONE") or "rclone"]
 
 
-def drive_root() -> str:
-    """`remote:folder` the exports are looked for under."""
-    remote = (os.environ.get("MEDIA_CONTACTS_DRIVE_REMOTE") or DRIVE_REMOTE).strip()
-    if not remote.endswith(":"):
-        remote += ":"
+def drive_roots() -> list[str]:
+    """Each `remote:folder` the exports are looked for under:
+    `MEDIA_CONTACTS_DRIVE_REMOTE` is one rclone remote or several,
+    comma-separated (`gdrive:,dropbox:`; David, 30 Oct 2026, Meta's Drive
+    exports stuck at "Requested" for days, so Dropbox too), each with
+    `MEDIA_CONTACTS_DRIVE_DIR` as its folder."""
     folder = (os.environ.get("MEDIA_CONTACTS_DRIVE_DIR") or "").strip().strip("/")
-    return remote + folder
+    out = []
+    for remote in (os.environ.get("MEDIA_CONTACTS_DRIVE_REMOTE") or DRIVE_REMOTE).split(","):
+        remote = remote.strip()
+        if not remote:
+            continue
+        if not remote.endswith(":"):
+            remote += ":"
+        if remote + folder not in out:
+            out.append(remote + folder)
+    return out or [DRIVE_REMOTE + folder]
+
+
+def drive_root() -> str:
+    """The first `remote:folder` the exports are looked for under."""
+    return drive_roots()[0]
+
+
+def _via(root: str) -> str:
+    """What an import from `root` says it came by: Dropbox for a remote of
+    that name, else Google Drive (Meta's other export service)."""
+    return "Dropbox" if "dropbox" in root.partition(":")[0].lower() else "Google Drive"
 
 
 def _drive(args: list[str], timeout: float) -> str:
@@ -615,17 +637,33 @@ def _drive_tmp() -> Path:
 
 
 def drive_import(*, root: str | None = None) -> dict:
-    """Each new export on Drive, imported and then deleted there:
-    `{imported: [{name, imported, history_days}], kept: {name: why},
-    skipped: {name: why}, errors: {name: why}}` — counts and file names,
-    never a person's. The owner's book only."""
-    from . import contacts, contacts_import
+    """Each new export on Drive (and each other remote, `drive_roots`),
+    imported and then deleted there: `{imported: [{name, imported,
+    history_days}], kept: {name: why}, skipped: {name: why}, errors: {name:
+    why}}` — counts and file names, never a person's. The owner's book only.
+    With several remotes one that cannot be listed is an error under its
+    name and the others are still read; with one it raises, as before."""
+    from . import contacts
 
     got: dict = {"imported": [], "kept": {}, "skipped": {}, "errors": {}}
     if not contacts.is_owner():
         got["errors"]["book"] = "Drive exports are the owner's book's"
         return got
-    root = drive_root() if root is None else root
+    roots = [root] if root is not None else drive_roots()
+    for r in roots:
+        if len(roots) == 1:
+            _import_root(r, got)
+            continue
+        try:
+            _import_root(r, got)
+        except DriveError as e:
+            got["errors"][r] = str(e)
+    return got
+
+
+def _import_root(root: str, got: dict) -> None:
+    from . import contacts, contacts_import
+
     files = drive_files(root)
     state = load()
     seen = state.setdefault("drive", {})
@@ -649,7 +687,7 @@ def drive_import(*, root: str | None = None) -> dict:
             continue
         try:
             os.chmod(local, 0o600)
-            res = contacts.import_path(local, via="Google Drive")
+            res = contacts.import_path(local, via=_via(root))
         except contacts_import.NotAnExport as e:
             seen[key] = {"mark": mark, "name": name, "at": time.time(), "kept": str(e)}
             save(state)
@@ -673,7 +711,6 @@ def drive_import(*, root: str | None = None) -> dict:
                                 "history_days": (res.get("history") or {}).get("days", 0)})
     for d in drive_folders(root):
         _folder_import(d, root, state, tmp, got)
-    return got
 
 
 # --- Meta's folders on Drive --------------------------------------------------------------
@@ -787,7 +824,7 @@ def _folder_import(d: dict, root: str, state: dict, tmp: Path, got: dict,
             return
         _zip_tree(work / "tree", zpath)
         try:
-            res = contacts.import_path(zpath, via="Google Drive")
+            res = contacts.import_path(zpath, via=_via(root))
         except contacts_import.NotAnExport as e:
             seen[key] = {"hash": d["hash"], "name": name, "at": now, "kept": str(e)}
             save(state)
@@ -839,7 +876,7 @@ def cmd_drive_import(a) -> int:
         for name, why in got[kind].items():
             print(f"{name}: {verb}: {why}", file=sys.stderr if kind == "errors" else sys.stdout)
     if not any(got.get(k) for k in ("imported", "kept", "skipped", "errors", "purged")):
-        print(f"nothing new under {a.root or drive_root()}")
+        print(f"nothing new under {a.root or ', '.join(drive_roots())}")
     return 1 if got["errors"] else 0
 
 
@@ -847,5 +884,6 @@ def add_commands(sub) -> None:
     p = sub.add_parser("drive-import", help="import each new Facebook or Instagram export "
                                             "from Google Drive (rclone), then delete it there")
     p.add_argument("--root", default="", help="remote:folder to look under (default: "
-                                              "MEDIA_CONTACTS_DRIVE_REMOTE + _DIR, gdrive:)")
+                                              "MEDIA_CONTACTS_DRIVE_REMOTE + _DIR, each of "
+                                              "a comma-separated list; gdrive:)")
     p.set_defaults(fn=cmd_drive_import)

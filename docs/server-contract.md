@@ -5868,9 +5868,13 @@ gets none of this):
   run daily by `agent-media-contacts-drive-import.timer` (05:00, up to 30
   min late, `Persistent=true`; `deploy/systemd`, installed as links), lists
   the `facebook-*`, `instagram-*` and `meta-*` zips under
-  `MEDIA_CONTACTS_DRIVE_REMOTE` (an rclone remote, `gdrive:`) and
-  `MEDIA_CONTACTS_DRIVE_DIR` (a folder in it; the whole drive when unset)
-  with `rclone lsjson -R`, newest first, and takes each not seen before
+  `MEDIA_CONTACTS_DRIVE_REMOTE` (an rclone remote, `gdrive:`; or several,
+  comma-separated, each read in turn, e.g. `gdrive:,dropbox:` — 30 Oct
+  2026, Meta's Drive exports stuck at "Requested" for days, so its Dropbox
+  service too; one that cannot be listed is an error under its name and
+  the rest still read; an import from a `dropbox` remote says "Dropbox")
+  and `MEDIA_CONTACTS_DRIVE_DIR` (a folder in each; the whole drive when
+  unset) with `rclone lsjson -R`, newest first, and takes each not seen before
   (by Drive id, size and time) one at a time: `rclone copyto` into
   `drive-import/` (0700) in the book's state dir, imported as it goes
   (`import_path`, any size, media never read, said as the

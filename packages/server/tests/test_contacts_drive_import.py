@@ -331,3 +331,24 @@ def test_a_settled_folder_with_no_json_is_kept_on_drive_and_said_once(drive):
     assert "meta-2026-Oct-20-01-00-00" in got["kept"]
     assert folder.exists()
     assert contacts_exports.drive_import()["kept"] == {}
+
+
+def test_several_remotes_are_each_read_and_one_down_does_not_stop_the_rest(monkeypatch):
+    # Meta's Drive exports sat at "Requested" for days; Dropbox too (David,
+    # 30 Oct 2026). One remote that cannot be listed is said, the others read.
+    monkeypatch.setenv("MEDIA_CONTACTS_DRIVE_REMOTE", "gdrive, dropbox:,gdrive:")
+    monkeypatch.setenv("MEDIA_CONTACTS_DRIVE_DIR", "/exports/")
+    assert contacts_exports.drive_roots() == ["gdrive:exports", "dropbox:exports"]
+    assert contacts_exports._via("dropbox:exports") == "Dropbox"
+    assert contacts_exports._via("gdrive:exports") == "Google Drive"
+    read = []
+
+    def fake_root(root, got):
+        read.append(root)
+        if root.startswith("gdrive"):
+            raise contacts_exports.DriveError("no answer")
+
+    monkeypatch.setattr(contacts_exports, "_import_root", fake_root)
+    got = contacts_exports.drive_import()
+    assert read == ["gdrive:exports", "dropbox:exports"]
+    assert got["errors"] == {"gdrive:exports": "no answer"}
