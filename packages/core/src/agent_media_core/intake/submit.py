@@ -5339,6 +5339,14 @@ def _submit_event(event: Event,
                                    if k in event.metadata})
                 if arriving:
                     extras["streaming"] = True
+                # A notification or an alert, not a reply or a question:
+                # hpo's ducker lets the video play on under it (/speech/now
+                # `notif`; David, 29 Oct 2026: "don't pause it for
+                # notifications or thinking").
+                if (event.metadata.get("kind") == "notif"
+                        and not event.metadata.get("ask")) \
+                        or event.metadata.get("alert"):
+                    extras["notif"] = True
                 # Figure-bearing message ([[visual:]]/[[reveal:]]): surfaces as
                 # the ▣ indicator in the status bar / popup / canvas badge.
                 if event.metadata.get("visual"):

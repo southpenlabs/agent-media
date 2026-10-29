@@ -166,3 +166,15 @@ def test_thinking_marker_is_live_only(monkeypatch):
     assert current["thinking"] is True
     assert stopped["thinking"] is False
     assert reply["thinking"] is False
+
+
+def test_notif_marker_is_live_only(monkeypatch):
+    """hpo's ducker lets a notification play over the video (David, 29 Oct
+    2026: "don't pause it for notifications or thinking")."""
+    _as(monkeypatch)
+    _, current = speech.speech_now("tok", {"speaking": True, "notif": True})
+    _, stopped = speech.speech_now("tok", {"speaking": False, "notif": True})
+    _, reply = speech.speech_now("tok", {"speaking": True})
+    assert current["notif"] is True
+    assert stopped["notif"] is False
+    assert reply["notif"] is False

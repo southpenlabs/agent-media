@@ -1235,6 +1235,8 @@ def speech_state() -> dict:
     if state["speaking"] or state.get("paused"):
         if ex.get("thinking"):
             state["thinking"] = True
+        if ex.get("notif"):
+            state["notif"] = True
         # Which turn this is, so a reader can tell whether the sentences it
         # holds are the ones being spoken. Without it the app can see a
         # position but not what the position is *into*.

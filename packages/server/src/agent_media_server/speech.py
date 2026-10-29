@@ -260,6 +260,9 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
     # heard is that reply, under its own session, and not a new one.
     out["replay"] = bool(out["live"] and state.get("replay"))
     out["thinking"] = bool(out["live"] and state.get("thinking"))
+    # A notification or an alert rather than a reply or a question (§6.5):
+    # hpo's ducker does not pause for it, nor for a thinking read-out.
+    out["notif"] = bool(out["live"] and state.get("notif"))
     # A paired device's mic is open (§6.21e): hpo's ducker pauses its video
     # for this as for a speaking voice.
     out["mic"] = mic_state.any_open()

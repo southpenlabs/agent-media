@@ -2464,9 +2464,12 @@ The speech bar.
   `turn.at` against its line and bolds `pos` against the offsets, on the
   player's own clock. That is the path that survives losing the live row.
 - `pos`, `dur` and `speed` may be `null`.
+- `notif` (29 Oct 2026) is true while what is live is a notification or an
+  alert (a Claude Code notification, an alert), not a reply or a question.
 - `mic` (29 Oct 2026) is true while a paired device's mic is open (§6.21e),
-  live or not. hpo's SMTC ducker pauses Windows media while `speaking` or
-  `mic` is true.
+  live or not. hpo's SMTC ducker pauses Windows media while `mic` is true,
+  or `speaking` is and neither `thinking` nor `notif` is (David, 29 Oct
+  2026: "don't pause it for notifications or thinking").
 
 Clients: S (`SpeechBar.vue`). **Polled 1.5 s while speaking, 5 s idle, 15 s
 after failures.** The server logs one line per device on the first answer
@@ -4843,7 +4846,8 @@ opening and closing of its mic as it happens, outbound (sasonica-app
 - Read as `mic` on `GET /speech/now` (§6.5): any device's mic open.
 - The reader is hpo's SMTC ducker (dotfiles `hpo/smtc/smtc-duck.ps1`): it
   polls `/speech/now` over public HTTPS with its own device token, pauses
-  Windows media while `speaking` or `mic`, and resumes what it paused once
+  Windows media while `mic`, or `speaking` but not `thinking` or `notif`
+  (§6.5), and resumes what it paused once
   both have been false for a moment.
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
