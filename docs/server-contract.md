@@ -2464,6 +2464,9 @@ The speech bar.
   `turn.at` against its line and bolds `pos` against the offsets, on the
   player's own clock. That is the path that survives losing the live row.
 - `pos`, `dur` and `speed` may be `null`.
+- `mic` (29 Oct 2026) is true while a paired device's mic is open (§6.21e),
+  live or not. hpo's SMTC ducker pauses Windows media while `speaking` or
+  `mic` is true.
 
 Clients: S (`SpeechBar.vue`). **Polled 1.5 s while speaking, 5 s idle, 15 s
 after failures.** The server logs one line per device on the first answer
@@ -4823,6 +4826,25 @@ failed attempt, once, outbound (sasonica-app `lib/storiesTray.ts`). Code:
   slot's CSS px. No text, links or images of the page are sent;
   unknown fields are dropped. → `{ok: true, kept}`. One JSON line each in
   `<state>/stories-tray-log.jsonl`, the newest 500 kept.
+
+### 6.21e The phone's mic is open, reported live (built 29 Oct 2026)
+
+David, 29 Oct 2026: "if I'm watching something on hpo, is it possible to
+pause it for the mic and speech on Sasonica from my phone?" The listen log
+(§6.21c) comes in batches, minutes late, so the app also reports each
+opening and closing of its mic as it happens, outbound (sasonica-app
+`lib/micReport.ts`). Code: `mic_state.py`; tests in `test_mic_state.py`.
+
+- `POST /device/mic {open: bool}` — a paired device only (401 otherwise);
+  400 when `open` is not a bool. → `{ok: true, open}`.
+- An open lasts 30 s (`OPEN_TTL_S`) unless re-sent; the app re-sends it every
+  10 s while the mic stays open, and sends `open: false` when it closes. Kept
+  in memory per device; a restart forgets them.
+- Read as `mic` on `GET /speech/now` (§6.5): any device's mic open.
+- The reader is hpo's SMTC ducker (dotfiles `hpo/smtc/smtc-duck.ps1`): it
+  polls `/speech/now` over public HTTPS with its own device token, pauses
+  Windows media while `speaking` or `mic`, and resumes what it paused once
+  both have been false for a moment.
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 

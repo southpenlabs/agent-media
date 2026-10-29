@@ -13,7 +13,7 @@ import sys
 import time
 from typing import Callable
 
-from . import audio, auth, sessions, threads
+from . import audio, auth, mic_state, sessions, threads
 
 #: What the app's speech player may do: the popup's listening keys — pause,
 #: the sentence and paragraph steps, older/newer turn and replay, speed,
@@ -260,6 +260,9 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
     # heard is that reply, under its own session, and not a new one.
     out["replay"] = bool(out["live"] and state.get("replay"))
     out["thinking"] = bool(out["live"] and state.get("thinking"))
+    # A paired device's mic is open (§6.21e): hpo's ducker pauses its video
+    # for this as for a speaking voice.
+    out["mic"] = mic_state.any_open()
     # Which turn the player is on, keyed the way the log's lines are
     # (`{"at", "id"}`). The transcript can then match `pos` to a line it
     # already holds — which is the whole point of a line carrying its

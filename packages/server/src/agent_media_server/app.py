@@ -312,6 +312,8 @@ device gets its token):
   POST /device/location {lat, lon, accuracy_m?, at?, precise?} | {off: true}
                   (a device, its background share switch) → kept in memory;
                   GET /device/location (host token) → {location: … | null}
+  POST /device/mic {open} → a paired device's mic is open (for 30 s unless
+                  re-sent) or closed; GET /speech/now's `mic` (mic_state.py, §6.21e)
   POST /device/listen-log {lines: [...]} → a paired phone's mic listens, what
                   each came to (taken, echo, error, rescued…), appended to
                   <state>/listen-log.jsonl (listen_log.py, §6.21c)
@@ -389,7 +391,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -2841,6 +2843,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         ok, detail = speech_frames.report(dev, _read_json(h),
                                           channel=path.split("/")[1])
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/mic":
+        # A paired device's mic opened or closed (§6.21e, mic_state.py): hpo's
+        # ducker pauses its video while one is open.
+        from . import mic_state
+
+        ok, detail = mic_state.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/listen-log":
         # The phone's mic listens and what came of each (§6.21c, listen_log.py).
