@@ -76,6 +76,10 @@ Replies (4) built 29 Oct 2026, in agent chats as well (§6.31). David, 29 Oct
 2026: "All of these should be in the chats tab too" — every feature on this
 list is built for agent chats as well as rooms where it means something
 there.
+Read state (5) built 29 Oct 2026 as a setting per chat (David: "A setting
+per chat"): Mark read when opened, on by default; off is a peek, marked
+read by a reply or Mark read (§6.32). Rooms only: an agent's chat has no
+network to tell. Ticks and "typing…" are not built yet.
 
 Second round, all chosen (David, 20 Oct 2026):
 

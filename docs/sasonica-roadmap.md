@@ -1698,7 +1698,13 @@ ahead.
     a strip over the box shows what it answers, the bubble quotes it and a
     tap goes there; a real `m.in_reply_to` in a room, the quote in front for
     an agent, lifted off again when read (§6.31; agent-media `ade3f86b`,
-    sasonica-app `7a0a3e7`). Next on the list: read state with a peek.
+    sasonica-app `7a0a3e7`). **Read state built 29 Oct 2026** (David: "A
+    setting per chat"): an open room is marked read on the network (the
+    owner's `m.read` receipt); a room's ⋮ has Mark read when opened, off
+    being a peek, with Mark read beside it; a reply always marks it read
+    (§6.32; agent-media `eb0578b9`, sasonica-app `512239d`). Still to do
+    in that group: ticks (others' receipts on yours) and "typing…". Next on
+    the list: sending media.
 
 35. **Mail in Sasonica** (David, 20 Oct 2026: "I'd like to handle emails
     from Sasonica"). Both a Mail tab (accounts, folders, search, compose)
