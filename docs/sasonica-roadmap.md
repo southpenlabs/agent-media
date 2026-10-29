@@ -1929,6 +1929,21 @@ ahead.
     app only (sasonica-app `ab0e4e5`). Checked at 1.5× text on a 360 px
     screen: the sheet scrolls and its rows wrap.
 
+43. **A server per person on one machine** (David, 29 Oct 2026: "if
+    they're stored in each other's home directory on their server, they
+    wouldn't be able to access each other's files anyway would they?" —
+    chose a server per person over agents per user or approvals). A second
+    person gets their own agent-media install under their own Linux user on
+    red5, paired from the app as another server, so the kernel keeps their
+    agents and logins apart; no thread filter or approvals needed. Steps:
+    try it by hand with a throwaway user, `sasonica install` making room for
+    another (free ports, `MEDIA_SERVER_NAME`, no house speakers or adb),
+    `media add-person NAME`, the shared-path leftovers, then shared
+    speakers, music, a shared folder and rooms. Plan, collisions and open
+    questions: docs/proposals/2026-10-29-a-server-per-person.md. Replaces
+    the roles proposal's step 3 for people who are not the owner. Not
+    started.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
