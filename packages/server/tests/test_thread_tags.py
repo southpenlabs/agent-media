@@ -399,3 +399,26 @@ def test_the_private_model_picks_only_from_the_list(monkeypatch):
     tags_auto.run()
     assert tags_auto.auto_tags(T_A) == ["music", "calendar"]   # "concerts" is not in use
     assert len(seen) == 1                               # one ask, to the private model
+
+
+def test_a_new_threads_tags_are_held_until_its_node(server, shelf, signed_in):
+    # The app's new chat, filed in the spaces in view: no node yet, so held.
+    res, obj = call(server, "POST", "/session/tags", {"session": SID, "add": ["family"], "hold": True}, AUTH)
+    assert res.status == 200 and obj["tags"] == ["family"] and obj["held"] is True
+    res, obj = call(server, "POST", "/session/tags", {"session": SID, "add": ["Work stuff"], "hold": True}, AUTH)
+    assert obj["tags"] == ["family", "Work_stuff"]
+    # Then the exporter writes the node: the held tags go into it, after its own.
+    p = _node(SID, ":claude:inbox:voice:")
+    _, targets = call(server, "GET", "/targets", headers=AUTH)
+    assert _row(targets, SID)["tags"] == ["voice", "family", "Work_stuff"]
+    assert ":voice:family:Work_stuff:" in p.read_text()
+    assert tags._held().all() == {}
+    # Without hold, a thread with no node is still a 409.
+    res, obj = call(server, "POST", "/session/tags", {"session": SID2, "add": ["x"]}, AUTH)
+    assert res.status == 409
+
+
+def test_held_tags_expire(server, shelf, signed_in):
+    tags._held().put(SID, {"tags": ["family"], "at": 1.0})
+    tags._settle_held({})
+    assert tags._held().all() == {}

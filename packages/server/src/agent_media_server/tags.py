@@ -182,7 +182,59 @@ def _jsonmaps():
     return _CHAT, _PEOPLE
 
 
-_CHAT = _PEOPLE = None
+_CHAT = _PEOPLE = _HELD = None
+
+#: A held thread's tags are dropped after this long with no node (an id that
+#: never became a thread).
+HELD_FOR_S = 7 * 86400
+
+
+def _held():
+    """`held-tags.json`: `{session: {"tags", "at"}}`, a new thread's tags
+    (`POST /session/tags {"hold": true}`) until the exporter writes its node."""
+    from ._jsonmap import JsonMap
+
+    global _HELD
+    if _HELD is None:
+        _HELD = JsonMap("held-tags.json")
+    return _HELD
+
+
+def _settle_held(nodes: dict) -> dict[str, list[str]]:
+    """The held tags of threads still without a node, by session. A thread
+    whose node has appeared gets them written into it and leaves the file;
+    one held too long is dropped."""
+    import time
+
+    held = _held().all()
+    if not held:
+        return {}
+    now = time.time()
+    out: dict[str, list[str]] = {}
+    done: list[str] = []
+    for sid, v in held.items():
+        tags = [t for t in (v.get("tags") or []) if isinstance(t, str)] if isinstance(v, dict) else []
+        found = nodes.get(sid)
+        if found:
+            current: list[str] = []
+            for _, node in found:
+                current += [t for t in node["tags"] if t not in current]
+            want = (current + [t for t in tags if t not in current])[:MAX_TAGS]
+            try:
+                if want != current:
+                    for path, _ in found:
+                        _rewrite(path, want)
+            except OSError:
+                out[sid] = tags                     # next time
+                continue
+            done.append(sid)
+        elif now - float((v or {}).get("at") or 0) > HELD_FOR_S:
+            done.append(sid)
+        else:
+            out[sid] = tags
+    if done:
+        _held().update(lambda m: any([m.pop(s, None) is not None for s in done]))
+    return out
 
 
 def _stored(m, key: str) -> list[str]:
@@ -242,8 +294,14 @@ def add_tags(rows: list[dict]) -> list[dict]:
     its chat's, its person's and the person's labels (`chat_tags`,
     `person_tags`, `label_tags`)."""
     try:
-        by = tags_by_session()
+        # A new thread's held tags: written into its node once there is one
+        # (so read back with it below), shown from the hold until then.
+        held = _settle_held(_nodes())
     except Exception:  # noqa: BLE001 — a thread list never fails on tags
+        held = {}
+    try:
+        by = tags_by_session()
+    except Exception:  # noqa: BLE001
         by = {}
     rooms = [r for r in rows if r.get("harness") == "matrix" and not r.get("sealed")]
     from . import tags_auto
@@ -278,7 +336,7 @@ def add_tags(rows: list[dict]) -> list[dict]:
             # A quick chat has no org node: its own, kept as a chat's are.
             r["tags"] = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
         else:
-            r["tags"] = list(by.get(sid, []))
+            r["tags"] = list(dict.fromkeys(by.get(sid, []) + held.get(sid, [])))
     return rows
 
 
@@ -423,6 +481,24 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
             detail["auto"] = tags_auto.auto_tags(session)
         return ok, ({"session": session, **detail} if ok else detail)
     found = _nodes().get(session)
+    if not found and body.get("hold") is True:
+        # A thread just started (the app's new chat, filed in the spaces in
+        # view): kept until the exporter writes its node, then put in it.
+        import time
+
+        h = _held()
+        cur = h.get(session)
+        want = _apply([t for t in (cur or {}).get("tags") or [] if isinstance(t, str)], edit)
+        if len(want) > MAX_TAGS:
+            return False, {"error": f"at most {MAX_TAGS} tags", "status": 400}
+        try:
+            if want:
+                h.put(session, {"tags": want, "at": time.time()})
+            else:
+                h.drop(session)
+        except OSError as e:
+            return False, {"error": f"could not save the tags ({e})", "status": 500}
+        return True, {"session": session, "tags": want, "held": True}
     if not found:
         return False, {"error": "this thread is not in your org files yet; "
                                 "try again in a few minutes", "status": 409}

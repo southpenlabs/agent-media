@@ -1869,6 +1869,14 @@ ahead.
     thread tagged with a label's or a project's name shows there too.
     Not yet: the server's one-tap suggestion for an Inbox chat, and a
     label with a comma ("Book club, Tuesdays") is no tag, so no space.
+    **Picking them** (David, 29 Oct 2026: "an easier way to select from
+    spaces... select multiples... new chats kept the selected spaces") —
+    **BUILT 29 Oct 2026**: one Spaces button on the All · People · Agents
+    row opens a sheet of tick boxes (Inbox and Everyone else, Groups,
+    Projects; a find box past ten), a chat showing when it is in any ticked
+    one; the + files a new chat in them (one project is where it starts,
+    groups and other projects are tags, set with `POST /session/tags
+    {"hold": true}` so a thread with no org node yet keeps them).
 
 42. **Quiet for… a busy thread** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "Can we have a way of stopping unread messages from busy threads

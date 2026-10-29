@@ -1743,6 +1743,13 @@ Pinned by `packages/server/tests/test_quiet.py`.
 - 409 `"this thread is not in your org files yet; try again in a few
   minutes"` when no node has the session (newer than the last export); 423
   on a sealed thread; 400 `"not a session id"`.
+- `"hold": true` (29 Oct 2026): a thread just started, as the app's new
+  chat filed in the spaces in view (§6.28) — with no node yet the tags are
+  kept in `held-tags.json` instead of a 409 and answered with `"held":
+  true`; rows show them at once, and the first `/targets` after the
+  exporter writes the node puts them in its `#+filetags` and drops the
+  hold. A hold with no node after 7 days is dropped. With a node, `hold`
+  changes nothing.
 - `GET /tags` → `{"ok": true, "tags": [{"tag", "count"}]}`: every thread tag
   in use, most used first, for a filter and for suggestions.
 - Both in `CORS_PATHS`.
