@@ -105,7 +105,7 @@ def test_shape_while_working(server, shelf, signed_in, machine):
     assert set(recent) == {SID, SID2}
     for r in obj["recent"]:
         assert keys(r) == {"session", "title", "recap", "at", "live", "rested", "project", "cwd",
-                           "quiet"}
+                           "quiet", "remind", "reminded"}
     assert recent[SID2]["live"] is True and recent[SID]["live"] is False
     # The shelved one is filed under a series: that is its project.
     assert recent[SID]["project"] == "p-agent-media" and recent[SID2]["project"] is None

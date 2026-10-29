@@ -156,9 +156,11 @@ def _transcript_mtime(session: str) -> float | None:
 
 
 def _recent(index: list[dict]) -> list[dict]:
-    from . import quiet
+    from . import quiet, remind
 
     hushed = quiet.quieted(rows={str(r.get("session") or ""): r for r in index})  # now, not the cache's
+    held = remind.reminders()
+    now = time.time()
     rows = []
     for r in index:
         if r.get("archived"):
@@ -173,6 +175,15 @@ def _recent(index: list[dict]) -> list[dict]:
                      "recap": r.get("recap"), "at": at, "live": bool(r.get("live")),
                      "rested": r.get("rested"), "project": r.get("project"),
                      "cwd": r.get("cwd"), "quiet": hushed.get(sid)})
+        # Bring back… (remind.py): as on /targets rows, a pending one holds the
+        # thread as a quiet, a due one lifts its quiet.
+        mine = held.get(sid)
+        rows[-1]["remind"] = {"at": mine["at"], "held": mine["held"]} if mine else None
+        rows[-1]["reminded"] = bool(mine and mine["at"] <= now)
+        if mine and mine["at"] <= now:
+            rows[-1]["quiet"] = None
+        elif mine and not rows[-1]["quiet"]:
+            rows[-1]["quiet"] = {"until": mine["at"], "at": mine["held"], "remind": True}
     rows.sort(key=lambda x: -(x["at"] or 0))
     return rows[:RECENT_ROWS]
 
@@ -225,8 +236,11 @@ def _hermes_said() -> dict[str, dict]:
 def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     """Threads that end on a reply, newest first: Home's Unread replies, which
     the app keeps to the ones that came after it last had the thread open.
-    Archived threads, quiet ones (`quiet.py`) and the ones working or on a
-    dialog (`busy`) are left out. Claude Code, Codex, pi, Gemini and Grok: the end of the transcript
+    Archived threads, quiet ones (`quiet.py`), ones held for a reminder not
+    yet due (`remind.py`) and the ones working or on a dialog (`busy`) are
+    left out. A reminder that is due is in, whatever its quiet says, with
+    `reminded: true` and `at` the later of the reply's and the reminder's —
+    even for a thread that does not end on a reply (its recap, then). Claude Code, Codex, pi, Gemini and Grok: the end of the transcript
     (`transcript.last_reply`; Gemini's and Grok's folded whole); opencode: its database
     (`transcript.last_reply_opencode`); Hermes: its newest spoken line."""
     from agent_media_core import harnesses
@@ -238,12 +252,16 @@ def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     hermes: dict[str, dict] | None = None
     from agent_media_core.private import hidden
 
-    from . import quiet
+    from . import quiet, remind
 
     # Quiet for… (quiet.py): asked now, not off the cached index, so a quiet
-    # set or ended a moment ago already counts.
-    hushed = quiet.quieted()
-    cut = time.time() - REPLIES_WINDOW_S
+    # set or ended a moment ago already counts. Bring back… (remind.py): held
+    # until due, and a due one is in whatever its quiet says.
+    held = remind.reminders()
+    now = time.time()
+    hushed = {k for k in quiet.quieted()} | {k for k, v in held.items() if v["at"] > now}
+    hushed -= {k for k, v in held.items() if v["at"] <= now}
+    cut = now - REPLIES_WINDOW_S
     for r in index:
         sid = str(r.get("session") or "")
         if not sid or r.get("archived") or sid in busy or hidden(sid) or sid in hushed:
@@ -289,6 +307,24 @@ def _replies(index: list[dict], busy: set[str]) -> list[dict]:
             rows.append({"session": str(r.get("session")), "title": str(r.get("title") or ""),
                          "at": reply["at"], "text": reply["text"], "live": bool(r.get("live")),
                          "project": r.get("project"), "cwd": r.get("cwd")})
+    # A reminder that is due brings its thread back (remind.py): its time is
+    # when it came back if that is later than the reply's, and a thread with no
+    # reply to show comes with its recap.
+    shown = {r["session"]: r for r in rows}
+    for r in index:
+        sid = str(r.get("session") or "")
+        mine = held.get(sid)
+        if not mine or mine["at"] > now or r.get("archived") or hidden(sid) or sid in busy:
+            continue
+        if sid in shown:
+            shown[sid]["at"] = max(shown[sid]["at"], mine["at"])
+            shown[sid]["reminded"] = True
+        else:
+            rows.append({"session": sid, "title": str(r.get("title") or ""),
+                         "at": mine["at"], "text": str((r.get("recap") or {}).get("text") or ""),
+                         "live": bool(r.get("live")), "project": r.get("project"),
+                         "cwd": r.get("cwd"), "reminded": True})
+    rows.sort(key=lambda x: -x["at"])
     return rows
 
 

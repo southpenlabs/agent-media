@@ -1433,6 +1433,10 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     And `quiet`: `{"until", "at"}` while the thread is quiet (`quiet`) —
     the app sorts it by `at` and counts nothing of it unread — else None.
 
+    And `remind`, `reminded`: `{"at", "held"}` while a Bring back… reminder
+    is set and true once it is due (`remind`); a pending one holds the thread
+    down as a quiet (`quiet.remind`), a due one lifts its quiet.
+
     And `spaces`: the ids of the spaces it is in (`spaces`).
 
     And `mail_from`: the sender, while the thread is one another agent's mail
@@ -1520,12 +1524,12 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # And `quiet`: `{until, at}` while Quiet for… holds it, else None (quiet.py).
     # And `spaces`: the projects and groups it is in, else people or inbox (spaces.py).
     # And `mail_from`: who, when another agent's mail started it (mail_threads.py).
-    from . import chat_marks, mail_threads, quiet, spaces, tags
+    from . import chat_marks, mail_threads, quiet, remind, spaces, tags
 
     # And `top` and `marked_unread`: pinned to the top, marked unread (chat_marks.py).
-    return chat_marks.add_marks(mail_threads.add_mail(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
+    return chat_marks.add_marks(mail_threads.add_mail(remind.add_remind(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
         add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
-                             for sid, rec in locked.items() if sid not in gone])))))
+                             for sid, rec in locked.items() if sid not in gone]))))))
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:

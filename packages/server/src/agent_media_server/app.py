@@ -133,6 +133,12 @@ device gets its token):
                   for a standing rule (quiet except during shifts); rows carry
                   `quiet: {until, at, rule?}` and `quiet_rule`, and Home's
                   replies leave it out (quiet.py). GET → the rules on offer
+  POST /session/remind {"session", "at": epoch|null|false, "held"?} → bring a
+                  thread back as unread at a time (the opposite of quiet): held
+                  down until then, then unread, in Home's replies and told to
+                  the phone (a `reminders` frame on /sessions/events?remind=1);
+                  null or false cancels; rows carry `remind` and `reminded`
+                  (remind.py)
   POST /session/tags {"session", "add"?, "remove"?, "tags"?} → the
                   thread's own tags, kept in its org-roam node's #+filetags
                   (tags.py); GET /tags lists every tag in use with its count
@@ -380,7 +386,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts",
-    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet",
+    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -2076,6 +2082,8 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
         qs.get("book") or [""])[0] == "frames" else None
     # `?notes=1`: notifications agents here put in the phone's shade (§6.23).
     wants_notes = (qs.get("notes") or [""])[0] in ("1", "true")
+    # `?remind=1`: a `reminders` frame for the Bring back… reminders that are due (remind.py).
+    wants_remind = (qs.get("remind") or [""])[0] in ("1", "true")
 
     def _after(k: str) -> int | None:
         try:
@@ -2096,7 +2104,7 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
                          handoff_device=handoff_dev,
                          handoff_after=_after("handoff_after"),
                          book_device=book_dev, book_after=_after("book_after"),
-                         want_notes=wants_notes)
+                         want_notes=wants_notes, want_remind=wants_remind)
 
 
 def _thread_agents(h: BaseHTTPRequestHandler, session: str, agent_id: str | None,
@@ -3156,6 +3164,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = quiet.session_quiet(str(body.get("session") or ""), body, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/remind":
+        # Bring back…: the thread reappears as unread at a time (remind.py).
+        # Gated like /session/quiet.
+        from . import remind
+
+        body = _read_json(h) or {}
+        ok, detail = remind.session_remind(str(body.get("session") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/handoff":
         # A quick chat to a full agent, with what was said (quick.py).

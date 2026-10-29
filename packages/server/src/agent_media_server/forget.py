@@ -151,6 +151,8 @@ def apply(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
             pins.set_pinned(s, False)
             from . import quiet
             quiet.set_quiet(s, False)
+            from . import remind
+            remind.set_remind(s, None)
             rest.clear_rested(s)
             moves.forget(s)
             drafts._draft_path(s).unlink(missing_ok=True)

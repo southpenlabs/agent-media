@@ -316,6 +316,15 @@ Everything a message can be pointed at.
   card from it still shows. `until: null` is "until I turn it off".
   Under a standing rule (below) it also carries `rule: {"rule", "source",
   "label"}`, and `until` is the next shift's start (null: none known).
+- `remind`, `reminded` (every row, 30 Oct 2026): a Bring back… reminder
+  (`POST /session/remind`, §6.4): `remind` is `{"at", "held"}` while one is
+  set, pending or due, else `null`; `reminded` is true once `at` has
+  passed and nobody has opened the thread since. While it is pending the
+  row's `quiet` is `{"until": at, "at": held, "remind": true}` (the thread
+  held where it was, and nothing of it news) unless it is really quiet too,
+  which then shows as it is; once due, `quiet` is `null` whatever the
+  thread's own quiet says. The app sorts a due row by `max(activity, at)`
+  and counts it unread.
 - `quiet_rule` (every row, 26 Oct 2026): the thread's standing quiet rule,
   `{"rule": "shifts", "source", "label", "shifts": [[start, end], …]}`, or
   `null` — there during a shift too, when `quiet` is `null`. `shifts` are
@@ -1719,6 +1728,37 @@ Pinned by `packages/server/tests/test_reap.py`.
   yesterday to 60 days ahead, at most once a minute.
 
 Pinned by `packages/server/tests/test_quiet.py`.
+
+#### `POST /session/remind` — gated (30 Oct 2026)
+
+`{"session", "at": epoch | null | false, "held"?: epoch}` → `{"ok": true,
+"session", "remind": {"at", "held"} | null, "reminded", "quiet"}`.
+
+- Bring back… (David, 30 Oct 2026: "I'd like to be able to make a thread
+  reappear as unread at a certain date and time"): the opposite of Quiet
+  for… (`/session/quiet`). From now until `at` the thread is held down —
+  where it sits in the list is `held`, its activity time when it was set
+  (default now), and nothing of it is news (the app marks it read when it
+  sets one). At `at` it **comes back as unread**: it floats to the top by
+  `max(last activity, at)`, is in `/dashboard`'s `replies`, and the phone
+  is told (a `reminders` frame, §6.13, which the phone's notifier posts as
+  "Back · <title>"), even with the app shut. `null` or `false` cancels; the
+  app cancels a due one when the thread is opened, which is also its seen
+  mark. Moving a pending one keeps its first `held`.
+- It combines with a quiet: the answer's `quiet` (and the rows') is what
+  the lists show — the thread's own quiet while pending, `null` once due
+  (the due time lifts it regardless; cancelling lets it take hold again).
+- Kept here, per session, in `<state_dir>/remind.json` (`{"<session>":
+  {"at", "held", "set"}}`, the same atomic write-and-lock as the pin), so
+  every device agrees. Forgetting a thread drops it.
+- 400 `"at must be a time to come, null or false"`, `"at must be within a
+  year"` (a cap of 366 days), `"held must be a time that has passed"`; the
+  other refusals and CORS exactly as `/session/quiet` (a Matrix room is a
+  session here).
+- Rows carry `remind` and `reminded` (§6.1) on `/targets`, `/conversations`
+  and `/dashboard`'s `recent`.
+
+Pinned by `packages/server/tests/test_remind.py`.
 
 #### `POST /session/tags`, `GET /tags` — gated (24 Oct 2026)
 
@@ -3707,8 +3747,12 @@ machines are. Code: `agent_media_server/dashboard.py`. Pinned by
 - `replies` (3 Oct 2026): every thread whose transcript ends on a reply —
   an assistant message with words, its turn over — newest first: Home's
   Unread replies. Archived threads, quiet ones (`POST /session/quiet`,
-  26 Oct 2026; they come back when the quiet ends) and ones working or on a
-  dialog are left out; of the rest, the 30 written to most recently in the last 3 days
+  26 Oct 2026; they come back when the quiet ends), ones held for a
+  reminder that is not due yet (`POST /session/remind`, 30 Oct 2026) and
+  ones working or on a dialog are left out. A reminder that is due is in,
+  whatever its quiet says, with `reminded: true` and `at` the later of the
+  reply's and the reminder's (a thread that ends on no reply comes with its
+  recap as `text`); of the rest, of the rest, the 30 written to most recently in the last 3 days
   are asked (`transcript.last_reply`, the file's last 256 KB, read again only
   when it changes). `at` is the transcript's mtime — when the reply
   finished — and `text` its last words as plain words on one line (240
@@ -3988,6 +4032,14 @@ data: {}
   a TV does not). Sent after the first `sessions` frame only if there are
   any, then whenever the set changes — an ask, a cancel, an expiry. The
   client diffs by `id`: a new one is a notification, a gone one takes it down.
+- `reminders` (30 Oct 2026; only with `?remind=1`): `{"due": [{"session",
+  "title", "at"}]}` — the Bring back… reminders (`POST /session/remind`,
+  §6.4) that have come due and nobody has opened since, soonest first. Sent
+  after the first `sessions` frame only if there are any, then whenever the
+  set changes: one coming due (the watcher notices within its 3 s tick) or
+  being opened and cancelled (`due` then shrinks). The client keeps the
+  `session`+`at` pairs it has already told, so a reconnect does not post one
+  twice. The notifier posts "Back · <title>", tapping it opens the thread.
 - `ping`: `{}` after `?ping=` seconds of silence — 15 to 300, default 15,
   clamped. A phone asks for a long one so an idle connection wakes the radio
   only for real changes.

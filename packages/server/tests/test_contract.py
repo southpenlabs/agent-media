@@ -198,17 +198,17 @@ def test_targets_shape(server, shelf, signed_in):
     # `top` and `marked_unread` on 29 Oct 2026: Pin to top, Mark unread (chat_marks.py).
     assert keys(live) == {"session", "title", "live", "pane", "recap", "archived",
                           "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces", "mail_from",
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "spaces", "mail_from",
                           "top", "marked_unread"}
     assert live == {"session": SID2, "title": "Sasonica web", "live": True, "pane": "%42",
                     "recap": None, "archived": False, "rested": None, "pinned": False,
                     "project": None, "cwd": None, "harness": "claude", "priority": False, "speech": "normal", "speech_own": False,
                     "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
-                    "tags": [], "quiet": None, "quiet_rule": None, "spaces": ["inbox"], "mail_from": None,
+                    "tags": [], "quiet": None, "quiet_rule": None, "remind": None, "reminded": False, "spaces": ["inbox"], "mail_from": None,
                     "top": None, "marked_unread": False}
     assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived",
                              "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
-                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "spaces", "mail_from",
+                          "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "spaces", "mail_from",
                           "top", "marked_unread"}
     assert shelved["project"] == "p-agent-media" and shelved["cwd"] is None
     assert shelved["rested"] is None and shelved["pinned"] is False

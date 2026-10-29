@@ -31,6 +31,13 @@ thread's one word.
                notes.py): every open note an agent put in the phone's shade.
                Like `phone`: after the first frame if there are any, then
                whenever the set changes
+    reminders  {"due": [{"session", "title", "at"}]} — only when asked,
+               `?remind=1` (remind.py, "Bring back…"): the threads whose
+               reminder has come due and nobody has opened since. After the
+               first `sessions` frame if there are any, then whenever the set
+               changes (one coming due, or opened and cleared). The client
+               keeps what it has already told (session and `at`) so a
+               reconnect does not tell it twice
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -60,7 +67,7 @@ import logging
 import threading
 import time
 
-from . import alerts, auth, mic, notes, phone, sessions
+from . import alerts, auth, mic, notes, phone, remind, sessions
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -130,6 +137,19 @@ def with_approvals(rows: list[dict], raw: list[dict]) -> list[dict]:
     return out
 
 
+def reminders_due() -> list[dict]:
+    """The `reminders` frame's rows: each due reminder with its thread's
+    title, the soonest first."""
+    out = []
+    for sid, r in sorted(remind.due().items(), key=lambda kv: kv[1]["at"]):
+        try:
+            title = sessions.title_of(sid)
+        except Exception:  # noqa: BLE001 — a reminder without its title still goes
+            title = ""
+        out.append({"session": sid, "title": title, "at": r["at"]})
+    return out
+
+
 class _Watcher:
     """The shared sweep reader. `version` goes up when the list changes."""
 
@@ -141,6 +161,7 @@ class _Watcher:
         self.mic_head = 0
         self.phone_head = 0
         self.notes_head = 0
+        self.remind_head: tuple = ()
         self.version = 0
         self.thread: threading.Thread | None = None
 
@@ -156,10 +177,14 @@ class _Watcher:
         mic_head = mic.version()
         phone_head = phone.version()
         notes_head = notes.version()
+        # A reminder coming due is a change, noticed here (≤ POLL_S late).
+        remind_head = remind.due_key()
         with self.cond:
             if (rows != self.rows or head != self.alerts_head or mic_head != self.mic_head
-                    or phone_head != self.phone_head or notes_head != self.notes_head):
+                    or phone_head != self.phone_head or notes_head != self.notes_head
+                    or remind_head != self.remind_head):
                 self.rows = rows
+                self.remind_head = remind_head
                 self.alerts_head = head
                 self.mic_head = mic_head
                 self.phone_head = phone_head
@@ -258,7 +283,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
           speech_after: int | None = None, music_device: str | None = None,
           music_after: int | None = None, handoff_device: str | None = None,
           handoff_after: int | None = None, book_device: str | None = None,
-          book_after: int | None = None, want_notes: bool = False) -> bool:
+          book_after: int | None = None, want_notes: bool = False,
+          want_remind: bool = False) -> bool:
     """Hold the connection and stream the session list until it goes. Auth
     is the caller's (app.py), done before this. `mic_for` is None when the
     client did not ask for `mic` frames, else the connecting device's id
@@ -279,6 +305,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     or document heard with Listen).
     `want_notes`: `notes` frames (notes.py) — the notifications agents on
     this host used to put up over `ssh termux-notification`.
+    `want_remind`: `reminders` frames (remind.py) — the Bring back… reminders
+    that have come due, for the phone to post "Back · <title>".
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
@@ -330,6 +358,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         seen_asks: list[dict] = []
         seen_phone: list[dict] = []
         seen_notes: list[dict] = []
+        seen_remind: list[dict] | None = None
         from agent_media_core import catchup as _catchup
         latest = _catchup.last() if catchup else None
         # Only a recent one on connecting: the phone keeps the last id it posted.
@@ -393,6 +422,14 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                         seen_phone = asks
                         send("phone", {"asks": asks})
                         last_sent = time.monotonic()
+                if want_remind:
+                    due_now = reminders_due()
+                    if due_now != seen_remind and (due_now or seen_remind is not None):
+                        seen_remind = due_now
+                        send("reminders", {"due": due_now})
+                        last_sent = time.monotonic()
+                    elif seen_remind is None:
+                        seen_remind = due_now
                 if want_notes:
                     open_notes = notes.open_notes()
                     if open_notes != seen_notes:
