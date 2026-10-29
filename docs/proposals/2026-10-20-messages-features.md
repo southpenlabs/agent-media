@@ -86,7 +86,11 @@ Ticks and "typing…" are not built yet.
 Sending media (2) built 29 Oct 2026 (§6.33): attached photos and files go
 to a room as themselves, and a voice clip (a key beside attach: record, ✕
 or ✓, then Send, as a reply too) goes as a voice note. In an agent chat a
-clip is an attached audio file; the agent cannot hear it.
+clip is an attached audio file, sent with its words since speech-to-text
+came the same evening (§6.36: whichever service has a key).
+Voice notes transcribed (19) built 29 Oct 2026 (§6.37): a room's voice
+notes get their words under the play button, in the background, and search
+finds them.
 
 Second round, all chosen (David, 20 Oct 2026):
 
