@@ -6772,7 +6772,7 @@ come. At start, one receipts-only `/sync` with no `since` reads where every
 room stands, so a restart does not forget. A room taken in later is given
 its receipts when it is first read.
 
-### 6.35 A voice clip sent to an agent, with its words (built 29 Oct 2026)
+### 6.36 A voice clip sent to an agent, with its words (built 29 Oct 2026)
 
 Code: `agent_media_server/voice_clips.py`; the speech-to-text is
 `agent_media_core/transcribe`. Pinned by `test_voice_clips.py` and core's

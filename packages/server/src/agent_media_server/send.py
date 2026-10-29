@@ -1213,6 +1213,10 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
         # Reactions since the last message (`/session/react`) are told the
         # same way, after it: a thumbs-up costs no turn of its own.
         text = retract.with_note(session, reactions.with_notes(session, text))
+        # A voice clip goes with its words, so the agent hears it (§6.36).
+        from . import voice_clips
+
+        text = voice_clips.with_transcripts(text)
     # `body` is what a pane is typed (its breaks kept only where the pane can
     # take them, `for_pane`); `text` is recorded with the breaks the reply box
     # had, so the transcript keeps them.
