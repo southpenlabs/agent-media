@@ -1702,7 +1702,10 @@ ahead.
     setting per chat"): an open room is marked read on the network (the
     owner's `m.read` receipt); a room's ⋮ has Mark read when opened, off
     being a peek, with Mark read beside it; a reply always marks it read
-    (§6.32; agent-media `eb0578b9`, sasonica-app `512239d`). Still to do
+    (§6.32; agent-media `eb0578b9`, sasonica-app `512239d`). Also a
+    setting for every chat in Settings → Messages, which a chat's ⋮ can
+    override, and with it off a Mark read button under the newest message
+    (David, 29 Oct 2026; `37caf4a6`, sasonica-app `3986485`). Still to do
     in that group: ticks (others' receipts on yours) and "typing…". Next on
     the list: sending media.
 

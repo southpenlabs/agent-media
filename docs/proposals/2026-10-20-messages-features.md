@@ -79,7 +79,10 @@ there.
 Read state (5) built 29 Oct 2026 as a setting per chat (David: "A setting
 per chat"): Mark read when opened, on by default; off is a peek, marked
 read by a reply or Mark read (§6.32). Rooms only: an agent's chat has no
-network to tell. Ticks and "typing…" are not built yet.
+network to tell. The same day, also a setting for every chat (Settings →
+Messages; David: "Can Mark read when opened also be a system wide
+setting?"), and with it off a Mark read button under the newest message.
+Ticks and "typing…" are not built yet.
 
 Second round, all chosen (David, 20 Oct 2026):
 
