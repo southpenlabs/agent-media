@@ -371,7 +371,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts",
@@ -2931,6 +2931,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/mark":
+        # Pin to top and Mark unread, from a chat's long press or ⋮
+        # (server-contract.md §6.38, chat_marks.py).
+        from . import chat_marks
+
+        body = _read_json(h) or {}
+        ok, detail = chat_marks.session_mark(str(body.get("session") or ""), _bearer(h),
+                                             top=body.get("top"), unread=body.get("unread"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/read":
         # A room opened, replied to or Mark read pressed in the app, or its

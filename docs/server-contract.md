@@ -6823,6 +6823,27 @@ day. The search index (§6.14) takes them as the message's words. With no
 speech-to-text set up, or `MEDIA_VOICE_NOTES=0`, there is no `transcript`.
 At most 200 wait at once; more are asked for when their page is read again.
 
+### 6.38 Pin to top and Mark unread — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/chat_marks.py`. Pinned by
+`packages/server/tests/test_chat_marks.py`. From the list of what the
+bridged apps do (David, 20 Oct 2026, per-chat controls), in every kind of
+chat. Not `/session/pin`, which keeps a session from the idle reaper.
+
+`POST /session/mark {"session", "top"?: bool, "unread"?: bool}` →
+`{"ok", "session", "top", "marked_unread"}`. `top: true` pins the chat to
+the top of the list (`top` is when, epoch seconds; pinning again keeps the
+first time), `false` unpins it. `unread: true` marks it unread until it is
+opened; the app sends `unread: false` when it opens a chat so marked. In a
+Matrix room `unread` is also written as the owner's room account data
+`m.marked_unread` and `com.famedly.marked_unread` (`{"unread"}`), which
+the bridges carry to the network's own mark; a failure there is logged
+and the mark here still holds. 400 for a bad session id, neither field, or
+a value not true/false; 404 for a session nothing knows.
+
+Every `/targets` row (§6.1) carries `top` (epoch or null) and
+`marked_unread`. Kept in `<state_dir>/chat-marks.json`.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
