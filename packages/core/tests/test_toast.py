@@ -101,7 +101,7 @@ def test_hold_archives_unplayed_then_play_replays_the_row(monkeypatch):
     monkeypatch.setattr(hook, "_play_detached", rendered.append)
     monkeypatch.setattr(cli, "main", lambda argv: replayed.append(argv) or 0)
     rows = {}
-    monkeypatch.setattr(toast, "_row_for", lambda key: rows.get(key))
+    monkeypatch.setattr(toast, "_row_for", lambda key, limit=200: rows.get(key))
 
     toast.hold(_event("first"))
     toast.hold(_event("second"))
@@ -128,7 +128,7 @@ def test_play_gives_up_on_a_reply_that_never_rendered(monkeypatch):
     shown = _fake_tmux(monkeypatch)
     import agent_media_core.intake.hook_claude_code as hook
     monkeypatch.setattr(hook, "_play_detached", lambda e: None)
-    monkeypatch.setattr(toast, "_row_for", lambda key: None)
+    monkeypatch.setattr(toast, "_row_for", lambda key, limit=200: None)
     toast.hold(_event())
     assert toast.play() == 1
     assert "never rendered" in shown[-1]
@@ -145,7 +145,39 @@ def test_expired_reply_is_dropped(monkeypatch):
     old = time.time() - 120
     os.utime(path, (old, old))
     assert toast.listing() == []
+    assert path.exists()                              # opening the chat still finds it
+    old = time.time() - 4 * 86400                     # past MEDIA_TOAST_OPEN_TTL
+    os.utime(path, (old, old))
+    assert toast.listing() == []
     assert not path.exists()
+
+
+def test_a_chat_opened_the_next_day_still_plays_its_reply(monkeypatch):
+    """Past the desk's toast, within MEDIA_TOAST_OPEN_TTL (David, 30 Oct 2026)."""
+    import hashlib
+
+    from agent_media_core.state import StateStore
+
+    monkeypatch.setenv("TMUX_PANE", "%3")
+    monkeypatch.setenv("MEDIA_TOAST_RENDER_WAIT_S", "0")
+    _fake_tmux(monkeypatch)
+    import agent_media_core.intake.hook_claude_code as hook
+    monkeypatch.setattr(hook, "_play_detached", lambda e: None)
+    st = StateStore()
+    toast.hold(_event("from yesterday"))
+    rid = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time() - 86400,
+                         target="phone", source="claude-code", text="from yesterday",
+                         extras={"held": True, "session": "s1",
+                                 "dedup_key": hashlib.sha1(b"from yesterday").hexdigest()})
+    for i in range(300):                              # a day of other replies since
+        st.add_history(sink="speech", uri="/y.mp3", started_at=time.time(),
+                       target="phone", source="claude-code", text=f"other {i}",
+                       extras={"source_session": "s2"})
+    [path] = list(toast._pending_dir().glob("*.json"))
+    old = time.time() - 86400
+    os.utime(path, (old, old))
+    assert toast.listing() == []                      # gone from the desk
+    assert toast.take_for_opened("s1") == rid
 
 
 def test_a_held_row_is_unheard_until_marked_heard():

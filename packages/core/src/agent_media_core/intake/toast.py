@@ -12,8 +12,15 @@ A held reply is rendered and archived at once, like a muted pane's
 unheard, with a big Play — and playing it is a replay of that history row,
 which marks it heard. What the toast keeps is only which row it is waiting
 on: JSON files under state_dir()/toast-pending, newest last. A toast older
-than MEDIA_TOAST_TTL seconds (default 21600) is dropped; the reply stays in
-the transcript, still unheard.
+than MEDIA_TOAST_TTL seconds (default 21600) is no longer shown at the desk;
+the reply stays in the transcript, still unheard.
+
+Opening the conversation in the app still finds it for longer:
+MEDIA_TOAST_OPEN_TTL seconds (default 259200, three days) — a chat come back
+to the next day plays what it was holding (David, 30 Oct 2026: "when I come
+back to an unread chat that has been there for some time, sometimes it
+doesn't seem to autoplay"; every open-play that week was under six hours).
+Past that the file is removed.
 
 Opening the conversation in the app plays its waiting replies that have never
 been played, oldest first (`take_for_opened`, called by the server's thread
@@ -42,6 +49,15 @@ def _ttl() -> int:
         return int(os.environ.get("MEDIA_TOAST_TTL", "21600"))
     except ValueError:
         return 21600
+
+
+def _open_ttl() -> int:
+    """How long a held reply is still played by opening its conversation;
+    never shorter than the desk's toast."""
+    try:
+        return max(_ttl(), int(os.environ.get("MEDIA_TOAST_OPEN_TTL", "259200")))
+    except ValueError:
+        return max(_ttl(), 259200)
 
 
 def _tmux(args: list[str]) -> str:
@@ -233,18 +249,23 @@ def drop_asks(session: str) -> None:
                 StateStore().mark_heard(rid)
 
 
-def _pending() -> list[Path]:
-    """Live held replies, oldest first; expired ones are removed."""
-    cutoff = time.time() - _ttl()
+def _pending(opened: bool = False) -> list[Path]:
+    """Live held replies, oldest first: the desk's within MEDIA_TOAST_TTL,
+    or with `opened` the app's longer MEDIA_TOAST_OPEN_TTL. Past that they
+    are removed."""
+    now = time.time()
+    gone, cutoff = now - _open_ttl(), now - (_open_ttl() if opened else _ttl())
     live = []
     for p in sorted(_pending_dir().glob("*.json")):
         try:
-            if p.stat().st_mtime < cutoff:
+            mtime = p.stat().st_mtime
+            if mtime < gone:
                 p.unlink()
                 continue
         except OSError:
             continue
-        live.append(p)
+        if mtime >= cutoff:
+            live.append(p)
     return live
 
 
@@ -258,22 +279,22 @@ def show(where: str) -> None:
         _tmux(["display-message", "-c", desk[0], "-d", ms, msg])
 
 
-def _row_for(key: str) -> Optional[int]:
+def _row_for(key: str, limit: int = 200) -> Optional[int]:
     """The history row the held reply was archived as, or None (yet)."""
     from ..state import StateStore
 
-    for row in StateStore().recent_history(sink="speech", limit=200):
+    for row in StateStore().recent_history(sink="speech", limit=limit):
         ex = row.get("extras")
         if isinstance(ex, dict) and ex.get("held") and ex.get("dedup_key") == key:
             return int(row["id"])
     return None
 
 
-def _wait_for_row(key: str) -> Optional[int]:
+def _wait_for_row(key: str, limit: int = 200) -> Optional[int]:
     """A reply held a moment ago may still be rendering: wait for its row."""
     deadline = time.time() + float(os.environ.get("MEDIA_TOAST_RENDER_WAIT_S", "30"))
     while True:
-        rid = _row_for(key)
+        rid = _row_for(key, limit)
         if rid is not None or time.time() >= deadline:
             return rid
         time.sleep(0.5)
@@ -338,7 +359,7 @@ def take_for_opened(session: str) -> Optional[int]:
     if not session:
         return None
     mine = []
-    for p in _pending():
+    for p in _pending(opened=True):
         try:
             r = json.loads(p.read_text())
         except (OSError, ValueError):
@@ -360,7 +381,8 @@ def take_for_opened(session: str) -> Optional[int]:
         if not key:
             continue
         # Only the newest may still be rendering.
-        rid = _wait_for_row(key) if i == len(mine) - 1 else _row_for(key)
+        # A day or more back is past the desk's 200 rows (about 100 a day).
+        rid = _wait_for_row(key, 2000) if i == len(mine) - 1 else _row_for(key, 2000)
         if rid is None:
             continue
         ex = (store.history_row(rid) or {}).get("extras") or {}
