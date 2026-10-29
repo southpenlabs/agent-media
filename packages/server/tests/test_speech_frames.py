@@ -583,7 +583,7 @@ def test_a_report_behind_only_on_appends_still_says_where_the_phone_is(endpoint)
     ipc.close()
 
 
-def test_a_report_behind_frames_the_phone_lost_is_its_word(endpoint, monkeypatch):
+def test_a_report_behind_frames_the_phone_lost_is_its_word(endpoint):
     """17 Oct 2026: a chime's frames never reached the phone, every report
     after was behind them, and the model said "playing" for nine hours with
     its playhead running on by the clock."""
@@ -598,8 +598,15 @@ def test_a_report_behind_frames_the_phone_lost_is_its_word(endpoint, monkeypatch
     # Just sent: still in flight, so its report is old news.
     speech_frames.report("d_test", dict(idle))
     assert ipc("get_property", "idle-active")["data"] is False
-    # Long unacknowledged: lost, and the phone is right.
-    monkeypatch.setattr(speech_frames, "LOST_S", 0.0, raising=False)
+    # Long unacknowledged: lost, and the phone is right. The frames are
+    # made old rather than LOST_S made 0: a frame's "at" is rounded to the
+    # millisecond, so it can be up to 0.5 ms ahead of the clock, and a
+    # report that soon after it (0.36 ms measured here) was "younger" than
+    # 0 s and still old news (the CI flake, assert False is True).
+    hub = speech_frames._HUBS["speech"]
+    with hub.lock:
+        for f in hub.frames:
+            f["at"] -= speech_frames.LOST_S + 1
     speech_frames.report("d_test", dict(idle))
     assert ipc("get_property", "idle-active")["data"] is True
     assert ipc("get_property", "playlist-count")["data"] == 0
