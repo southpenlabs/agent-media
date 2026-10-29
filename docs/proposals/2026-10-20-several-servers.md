@@ -125,9 +125,14 @@ same server replaces the first.
   (or one person's two hats), so their threads are not merged; the filter
   picks which account's view of that server is showing, and notifications
   name the account they are for.
-- **What a second account sees** waits on the roles proposal's open
-  question (does a member see every thread?): today the server lists every
-  thread to every device, so a second account sees the owner's chats.
+- **What a second account sees**: its own chats only, and what is shared is
+  shared in a room (David, 29 Oct 2026: "We can make rooms with multiple
+  people if we need to, right?"). Messages' Matrix rooms already hold
+  several people and each is a thread, so the list a member gets is its own
+  chats plus the rooms it is in; the admin still sees everything. Today the
+  server lists every thread to every device, so this needs `owners.json`
+  (roles step 3) and a filter on the thread list. An agent taking part in a
+  room of two people is not built.
 
 ## Open questions
 
