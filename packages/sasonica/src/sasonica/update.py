@@ -181,8 +181,13 @@ def _restart_launchd(force_sessiond: bool) -> None:
               "you run `sasonica update --restart-sessiond` (that ends them)")
     else:
         labels.append(LABELS["sasonica-sessiond"])
+    from sasonica.install import LAUNCH_DAEMONS
     for label in labels:
-        subprocess.run(["launchctl", "kickstart", "-k", f"{domain}/{label}"])
+        # Installed --signed-out: a daemon in the system domain (sudo asks).
+        if (LAUNCH_DAEMONS / f"{label}.plist").exists():
+            subprocess.run(["sudo", "launchctl", "kickstart", "-k", f"system/{label}"])
+        else:
+            subprocess.run(["launchctl", "kickstart", "-k", f"{domain}/{label}"])
     print("  restarted " + ", ".join(labels))
 
 

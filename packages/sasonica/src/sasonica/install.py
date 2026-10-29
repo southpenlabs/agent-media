@@ -29,7 +29,15 @@ has the binary instead of a checkout:
      ~/Library/Logs/sasonica), logon tasks on Windows (Task Scheduler →
      Sasonica: canvas, sessiond, quick-tunnel; registered from task XML so
      they restart when they fail; an older install's tasks are replaced). Not when the host already runs a canvas from a
-     checkout (agent-media-visual-canvas.service), unless --force;
+     checkout (agent-media-visual-canvas.service), unless --force.
+     Kept running when nobody is logged in: on Linux, lingering is checked
+     and turned on (`loginctl enable-linger`), else the sudo line to do it
+     is printed; on Windows and a Mac, `--signed-out` (once, remembered)
+     makes them start with the computer instead of at logon — a task at
+     boot that runs whether you are signed in or not (S4U: no password
+     kept), or launchd daemons running as you (/Library/LaunchDaemons) —
+     which asks for an administrator; `--signed-out off` goes back. Every
+     platform is reminded that sleep stops them all the same;
   6. with --local-speech, on Windows: a speech player on this computer, the
      logon task Sasonica\\speech running your own mpv (`sasonica
      media-sink-speech`) on the speech pipe, restarted when it fails. Speech
@@ -161,13 +169,69 @@ def plist_text(label: str, binary: str, word: str, bind: str, port: int) -> str:
     }).decode()
 
 
+LAUNCH_DAEMONS = Path("/Library/LaunchDaemons")
+
+
+def daemon_plist_text(label: str, binary: str, word: str, bind: str, port: int, user: str) -> str:
+    """The same service as a launchd daemon (`--signed-out`): started with the
+    computer, run as `user`, so it keeps going while nobody is logged in."""
+    import plistlib
+
+    d = plistlib.loads(plist_text(label, binary, word, bind, port).encode())
+    d["UserName"] = user
+    d["EnvironmentVariables"]["HOME"] = str(Path.home())
+    return plistlib.dumps(d).decode()
+
+
+def _mac_signed_out(a) -> bool:
+    """Whether the services run as daemons: `--signed-out` says, else what an
+    earlier install chose (a daemon's plist is there)."""
+    choice = getattr(a, "signed_out", None)
+    if choice:
+        return choice == "on"
+    return any((LAUNCH_DAEMONS / f"{LABELS[n]}.plist").exists() for n in UNITS)
+
+
 def _launchd(binary: str, a) -> int:
     """The two services as launchd agents in the login session (`gui/<uid>`),
-    replaced if they are there already, so a new binary starts."""
+    replaced if they are there already, so a new binary starts — or, with
+    `--signed-out`, as daemons in the system domain running as this user
+    (sudo asks for an administrator's password)."""
     domain = f"gui/{os.getuid()}"
     agents = launch_agents()
     rc = 0
+    signed_out = _mac_signed_out(a)
+    import getpass
+    user = getpass.getuser()
     for name, (word, _what) in a.units.items():
+        label = LABELS[name]
+        daemon = LAUNCH_DAEMONS / f"{label}.plist"
+        if signed_out:
+            # Never both: the login agent goes first.
+            if not a.dry_run:
+                subprocess.run(["launchctl", "bootout", f"{domain}/{label}"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                (agents / f"{label}.plist").unlink(missing_ok=True)
+                (Path.home() / "Library" / "Logs" / "sasonica").mkdir(parents=True, exist_ok=True)
+            print(f"  {daemon} (as {user})")
+            import tempfile
+            fd, tmp = tempfile.mkstemp(suffix=".plist")
+            os.close(fd)
+            try:
+                Path(tmp).write_text(daemon_plist_text(label, binary, word, a.bind, a.port, user))
+                rc = _run(["sudo", "install", "-m", "644", "-o", "root", "-g", "wheel", tmp, str(daemon)],
+                          dry_run=a.dry_run) or rc
+            finally:
+                Path(tmp).unlink(missing_ok=True)
+            if not a.dry_run:
+                subprocess.run(["sudo", "launchctl", "bootout", f"system/{label}"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            rc = _run(["sudo", "launchctl", "bootstrap", "system", str(daemon)], dry_run=a.dry_run) or rc
+            continue
+        if daemon.exists():
+            # `--signed-out off`: the daemon goes, the login agent comes back.
+            _run(["sudo", "launchctl", "bootout", f"system/{label}"], dry_run=a.dry_run)
+            _run(["sudo", "rm", "-f", str(daemon)], dry_run=a.dry_run)
         label = LABELS[name]
         plist = agents / f"{label}.plist"
         print(f"  {plist}")
@@ -180,7 +244,15 @@ def _launchd(binary: str, a) -> int:
             subprocess.run(["launchctl", "bootout", f"{domain}/{label}"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         rc = _run(["launchctl", "bootstrap", domain, str(plist)], dry_run=a.dry_run) or rc
-    print("  (they start at login; logs in ~/Library/Logs/sasonica)")
+    if signed_out:
+        print("  (they start with this Mac and run while nobody is logged in; logs in "
+              "~/Library/Logs/sasonica)")
+        print("  FileVault: after a restart nothing runs until someone unlocks the disk at the")
+        print("  login screen. Claude Code keeps its login in your Keychain, which is locked")
+        print("  while you are logged out: check a chat works then, and sign it in again if not.")
+    else:
+        print("  (they start at login; logs in ~/Library/Logs/sasonica)")
+        print("  To keep them running when you log out: sasonica install --signed-out")
     return rc
 
 
@@ -210,29 +282,38 @@ def _task_user() -> str:
     return f"{dom}\\{user}" if dom else user
 
 
-def task_xml(arguments: str, user: str, description: str) -> str:
+def task_xml(arguments: str, user: str, description: str, signed_out: bool = False) -> str:
     """Task Scheduler XML for one of Sasonica's tasks: at this user's logon,
     in their session, `conhost.exe <arguments>`; restarted every minute when
     it fails (up to 999 times), never stopped for running long or on battery.
-    `schtasks /Create /SC ONLOGON` cannot say the restart part, hence XML."""
+    `schtasks /Create /SC ONLOGON` cannot say the restart part, hence XML.
+
+    `signed_out` (`sasonica install --signed-out`): at the computer's start
+    instead, as this user whether they are signed in or not (S4U: no
+    password kept, and no network credentials — a shared drive is out of
+    reach, the internet is not). Registering one takes an administrator."""
     from xml.sax.saxutils import escape
 
     args, u, d = escape(arguments), escape(user), escape(description)
+    trigger = (f"""    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>""" if signed_out else f"""    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{u}</UserId>
+    </LogonTrigger>""")
+    logon = "S4U" if signed_out else "InteractiveToken"
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>{d}</Description>
   </RegistrationInfo>
   <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <UserId>{u}</UserId>
-    </LogonTrigger>
+{trigger}
   </Triggers>
   <Principals>
     <Principal id="Author">
       <UserId>{u}</UserId>
-      <LogonType>InteractiveToken</LogonType>
+      <LogonType>{logon}</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
@@ -311,21 +392,43 @@ def upgrade_task(name: str, description: str) -> bool:
                                         description), dry_run=False) == 0
 
 
+def _win_signed_out(a) -> bool:
+    """Whether the tasks run signed out: `--signed-out` says, else what an
+    earlier install chose (the canvas task is S4U)."""
+    choice = getattr(a, "signed_out", None)
+    if choice:
+        return choice == "on"
+    return "<LogonType>S4U</LogonType>" in _task_definition(TASKS["sasonica-canvas"])
+
+
 def _schtasks(binary: str, a) -> int:
     """The services (two, or three with the quick tunnel) as Task Scheduler
-    tasks that start at logon, registered from task XML (restarted when they
-    fail), replacing whatever had the name — an install made before task XML
-    included — then started now."""
+    tasks that start at logon — or, signed out, with the computer —
+    registered from task XML (restarted when they fail), replacing whatever
+    had the name — an install made before task XML included — then started
+    now."""
     rc = 0
+    signed_out = _win_signed_out(a)
     for name, (word, what) in getattr(a, "units", UNITS).items():
         task = TASKS[name]
-        print(f"  task {task}")
-        rc = register_task(task, task_xml(task_args(binary, word, a.bind, a.port),
-                                          _task_user(), what),
-                           dry_run=a.dry_run) or rc
+        print(f"  task {task}" + (" (at startup, signed in or not)" if signed_out else ""))
+        got = register_task(task, task_xml(task_args(binary, word, a.bind, a.port),
+                                           _task_user(), what, signed_out=signed_out),
+                            dry_run=a.dry_run)
+        if got and signed_out:
+            print("  Task Scheduler refused: a task that runs while you are signed out needs an")
+            print("  administrator. Run this again from a terminal opened with Run as administrator,")
+            print("  or without --signed-out (`--signed-out off`) to start them at logon.")
+        rc = got or rc
         _run(["schtasks", "/End", "/TN", task], dry_run=a.dry_run)
         rc = _run(["schtasks", "/Run", "/TN", task], dry_run=a.dry_run) or rc
-    print("  (they start at logon and restart when they fail; Task Scheduler → Sasonica)")
+    if signed_out:
+        print("  (they start with the computer, run whether you are signed in or not, and restart")
+        print("  when they fail; Task Scheduler → Sasonica)")
+    else:
+        print("  (they start at logon and restart when they fail; Task Scheduler → Sasonica)")
+        print("  Signing out stops them; a locked screen does not. To keep them running when you")
+        print("  sign out: sasonica install --signed-out (asks for an administrator)")
     return rc
 
 
@@ -432,6 +535,17 @@ def _tunnel_step(a, env_file: Path) -> bool:
     return True
 
 
+#: Said after the services on each platform: sleep stops them however they start.
+SLEEP_NOTE = {
+    "darwin": "  A sleeping Mac answers nobody: System Settings → Energy (or Battery → Options)\n"
+              "  → prevent automatic sleeping when the display is off, on power.",
+    "nt": "  A sleeping PC answers nobody: Settings → System → Power → Sleep: Never when\n"
+          "  plugged in.",
+    "linux": "  A sleeping computer answers nobody: on a laptop or desktop, turn off automatic\n"
+             "  suspend in its power settings.",
+}
+
+
 def _run(argv: list[str], *, dry_run: bool) -> int:
     print("  $ " + " ".join(argv))
     if dry_run:
@@ -459,6 +573,11 @@ def main(argv: list[str] | None = None) -> int:
                          "(your own mpv, started at logon); `off` removes it. "
                          "Speech still goes to the phone until you choose this "
                          "computer in the app")
+    ap.add_argument("--signed-out", nargs="?", const="on", choices=("on", "off"),
+                    help="Windows and Mac: start the services with the computer and keep "
+                         "them running when nobody is signed in (asks for an administrator "
+                         "once; remembered); `off` goes back to starting at logon. Linux "
+                         "does this by itself (linger)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     # Its lines in order with the commands it runs, when piped (curl | bash).
@@ -519,9 +638,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print("== Services")
     if sys.platform == "darwin":
-        return _launchd(binary, a)
+        rc = _launchd(binary, a)
+        print(SLEEP_NOTE["darwin"])
+        return rc
     if os.name == "nt":
-        return _schtasks(binary, a)
+        rc = _schtasks(binary, a)
+        print(SLEEP_NOTE["nt"])
+        return rc
     # A container, or an ssh login with no user manager, has systemctl but no
     # --user bus to reach.
     if shutil.which("systemctl") is None or subprocess.run(
@@ -545,5 +668,37 @@ def main(argv: list[str] | None = None) -> int:
               dry_run=a.dry_run)
     # Restart too: after a new binary, enable --now leaves the old one running.
     _run(["systemctl", "--user", "restart", *(f"{n}.service" for n in a.units)], dry_run=a.dry_run)
-    print("  (they stop at logout unless lingering is on: loginctl enable-linger)")
+    _linger_step(a)
+    print(SLEEP_NOTE["linux"])
     return rc
+
+
+def _linger_step(a) -> None:
+    """systemd stops a user's services at their last logout unless lingering
+    is on for them. Checked, and turned on when it is off: logind lets most
+    users do that for themselves; when it does not, the sudo line to run."""
+    import getpass
+
+    if shutil.which("loginctl") is None:
+        return
+    user = getpass.getuser()
+
+    def lingering() -> bool:
+        r = subprocess.run(["loginctl", "show-user", user, "-p", "Linger", "--value"],
+                           capture_output=True, text=True)
+        return r.stdout.strip() == "yes"
+
+    if lingering():
+        print("  linger is on: they keep running when you log out")
+        return
+    print("  linger is off: they would stop when you log out; turning it on")
+    if a.dry_run:
+        print(f"  $ loginctl enable-linger {user}")
+        return
+    subprocess.run(["loginctl", "enable-linger", "--no-ask-password", user],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if lingering():
+        print("  linger is on now: they keep running when you log out")
+    else:
+        print("  not allowed without an administrator. To keep them running when you log out:")
+        print(f"    sudo loginctl enable-linger {user}")

@@ -79,7 +79,9 @@ full stack, so most of this does not arise for a second person.
    (instead of failing or, worse, binding a port that another user has on
    another interface), asks for or sets `MEDIA_SERVER_NAME` ("red5 · sam")
    when another install is on the host, leaves the house speakers, Mopidy
-   and adb alone unless asked, and checks that linger is on.
+   and adb alone unless asked, and checks that linger is on (**built 29 Oct
+   2026**: every Linux install checks linger and turns it on, or prints the
+   sudo line; `--signed-out` does the same job on Windows and a Mac).
 3. **`media add-person NAME`** for the machine's owner: creates the user,
    turns on linger, runs the install as that user, sets their server's
    `MEDIA_OIDC_ALLOW` and `MEDIA_OIDC_ENROL` to the person's Sasonica
@@ -94,6 +96,18 @@ full stack, so most of this does not arise for a second person.
    snapserver), music control through the shared Mopidy, a shared folder
    (`/srv/shared`, group-owned), and rooms with both people in once each has
    a Matrix login.
+
+## Tried by hand, 29 Oct 2026
+
+`sasonica-test` on red5: `useradd -m`, `loginctl enable-linger` (both sudo),
+the binary copied to `~/.local/opt/sasonica`, `~/.config/agent-media.env`
+written first with `MEDIA_SERVER_NAME=red5 · test`,
+`MEDIA_VISUAL_PUBLIC=127.0.0.1:8799` and `MEDIA_SERVERS_REPORT=0`, then
+`sasonica install --port 8791` as that user (`XDG_RUNTIME_DIR=/run/user/<uid>`
+for its systemd). Canvas, sessiond and quick tunnel came up at once on their
+own address, with the owner's server untouched. Not set up by the install:
+any coding agent for that user (Claude Code "not installed"), which each
+person signs in to themselves. `~/.local/bin` is not on that user's PATH.
 
 ## Open questions
 
