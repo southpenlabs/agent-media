@@ -18,8 +18,8 @@ def _as(monkeypatch, user=ROOT, status=200):
 
 def test_live_speech_is_named(monkeypatch):
     _as(monkeypatch)
-    monkeypatch.setattr(sessions, "sessions_index",
-                        lambda: [{"session": SID, "title": "Sasonica music", "live": True}])
+    monkeypatch.setattr(sessions, "title_of",
+                        lambda s: "Sasonica music")
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: ("li_42", True))
     ok, out = speech.speech_now("tok", {"speaking": True, "session": SID,
                                        "sentence": "Hello.", "pos": 3, "dur": 9})
@@ -30,7 +30,7 @@ def test_live_speech_is_named(monkeypatch):
 
 def test_paused_speech_is_still_live(monkeypatch):
     _as(monkeypatch)
-    monkeypatch.setattr(sessions, "sessions_index", lambda: [])
+    monkeypatch.setattr(sessions, "title_of", lambda s: "")
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     ok, out = speech.speech_now("tok", {"speaking": False, "paused": True, "session": SID})
     assert ok and out["live"] and out["paused"] and out["session"] == SID
@@ -46,7 +46,7 @@ def test_quiet_names_nothing(monkeypatch):
 
 def test_an_unready_item_is_not_offered(monkeypatch):
     _as(monkeypatch)
-    monkeypatch.setattr(sessions, "sessions_index", lambda: [])
+    monkeypatch.setattr(sessions, "title_of", lambda s: "")
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: ("li_42", False))
     _, out = speech.speech_now("tok", {"speaking": True, "session": SID})
     assert out["item"] is None
@@ -55,7 +55,7 @@ def test_an_unready_item_is_not_offered(monkeypatch):
 def test_the_title_is_asked_once_per_reply(monkeypatch):
     _as(monkeypatch)
     asks = []
-    monkeypatch.setattr(sessions, "sessions_index", lambda: asks.append(1) or [])
+    monkeypatch.setattr(sessions, "title_of", lambda s: asks.append(1) or "")
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     for _ in range(3):
         speech.speech_now("tok", {"speaking": True, "session": SID})
@@ -144,7 +144,7 @@ def test_a_reply_left_paused_is_listed(monkeypatch):
     from agent_media_core.state import StateStore
 
     _as(monkeypatch)
-    monkeypatch.setattr(sessions, "sessions_index", lambda: [])
+    monkeypatch.setattr(sessions, "title_of", lambda s: "")
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     monkeypatch.setattr(speech, "_LEFT_PAUSED", ([], 0.0))
     StateStore().add_history(

@@ -179,10 +179,11 @@ _NOW_TTL_S = 60.0
 
 
 def _session_title(session: str) -> str:
-    for row in sessions.sessions_index():
-        if row.get("session") == session:
-            return str(row.get("title") or "")
-    return ""
+    # The one thread's name (the live sweep, else its manifest), not the
+    # whole thread list: building that took 7–12 s, and the first live
+    # answer waited on it, so the bar came up that long after the voice
+    # (David, 29 Oct 2026: "still takes quite a while to come up").
+    return sessions.title_of(session)
 
 
 #: `{session: (title, at)}` for the waiting replies: same TTL, no ABS call.

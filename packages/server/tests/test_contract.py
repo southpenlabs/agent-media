@@ -498,9 +498,8 @@ def test_speech_now_names_a_replay_and_what_waits(server, shelf, signed_in, monk
         "kind": "state", "speaking": True, "session": replayed, "replay": True,
         "sentence": "An older sentence.",
         "queued": [{"session": waiting, "urgent": False, "at": 1790031449.7}]})
-    monkeypatch.setattr(sessions, "sessions_index", lambda: [
-        {"session": waiting, "title": "Speech bar"},
-        {"session": replayed, "title": "Filters"}])
+    monkeypatch.setattr(sessions, "title_of", lambda s: {
+        waiting: "Speech bar", replayed: "Filters"}.get(s, ""))
     from agent_media_server import threads
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     speech._NOW_CACHE.clear()
@@ -525,8 +524,8 @@ def test_speech_now_names_the_turn_it_is_on(server, shelf, signed_in, monkeypatc
     monkeypatch.setattr(canvas, "speech_state", lambda: {
         "kind": "state", "speaking": True, "session": sid, "pos": 4.2,
         "turn": {"at": 1790031449.7, "id": 91}})
-    monkeypatch.setattr(sessions, "sessions_index", lambda: [
-        {"session": sid, "title": "Filters"}])
+    monkeypatch.setattr(sessions, "title_of",
+                        lambda s: "Filters" if s == sid else "")
     from agent_media_server import threads
     monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     speech._NOW_CACHE.clear()
