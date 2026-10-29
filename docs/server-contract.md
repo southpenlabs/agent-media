@@ -6624,6 +6624,47 @@ taken off, so a Markdown quote typed by hand stays in the words. A room
 message's quote of what it answers (`> <@who> …`, which older clients put
 in front) is taken off too.
 
+### 6.32 Read on the network, or a peek — gated (built 29 Oct 2026)
+
+Code: `agent_media_server/read_receipts.py`, `matrix.Room.read`. Pinned by
+`packages/server/tests/test_read_receipts.py`. From the list of what the
+bridged apps do (David, 20 Oct 2026): reading a chat here marks it read in
+WhatsApp or Messenger, and sometimes it should not. David, 29 Oct 2026: a
+setting per chat.
+
+A room's **mode** is on its `/targets` row (§6.1) as `read_receipts`:
+
+- `"open"` (the default): opening the room, and each message read while it
+  is open, marks it read on the network.
+- `"reply"`: opening it tells nobody (a peek). Replying marks it read, and
+  so does Mark read.
+
+The app's own unread dots are not changed by the mode: they are this
+device's (lib/arrivals.ts).
+
+#### `POST /session/read`
+
+```json
+{"session": "<thread>", "why": "open" | "reply" | "button", "id"?: "<message id>",
+ "mode"?: "open" | "reply"}
+```
+
+`why` is what happened in the app: the room opened or a message came in
+while it was open (`open`), a reply (`reply`), Mark read (`button`). `id`
+is the newest message read, the room's newest when absent. `mode` sets the
+room's mode; with no `why`, nothing is marked. → `{"ok", "session",
+"mode", "read"}`: `read` is the message the network was told of, `null`
+when nothing was told (a peek, or that message told already).
+
+Marking read is the owner's `m.read` receipt (`MATRIX_OWNER_TOKEN`), which
+the bridge carries to the network. A reply in a room (§6.3) marks it read
+before it is sent, whatever the mode, so the server does that without the
+app asking. 409 with no owner token, 404 for a message the room does not
+hold, 502 when the homeserver refuses it or cannot be reached; 400 for a
+bad session id, mode or why. An agent's chat has no network:
+`{"mode": null, "read": null}`, nothing done. The mode is kept in
+`<state_dir>/read_receipts.json`.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

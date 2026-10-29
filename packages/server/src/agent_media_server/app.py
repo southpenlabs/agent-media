@@ -371,7 +371,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/read", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
     "/settings/language",
@@ -2871,6 +2871,17 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"retract: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/read":
+        # A room opened, replied to or Mark read pressed in the app, or its
+        # mode changed (server-contract.md §6.32): whether the network is
+        # told is the room's mode, here. See read_receipts.py.
+        from . import read_receipts
+
+        body = _read_json(h) or {}
+        ok, detail = read_receipts.session_read(
+            str(body.get("session") or ""), _bearer(h), mid=str(body.get("id") or ""),
+            why=str(body.get("why") or ""), mode=str(body.get("mode") or ""))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/react":
         # A long press on a message in the app, then an emoji

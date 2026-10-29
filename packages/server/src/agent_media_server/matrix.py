@@ -35,7 +35,7 @@ import uuid
 
 from agent_media_core import matrix
 
-from . import replies
+from . import read_receipts, replies
 
 log = logging.getLogger("agent-media.server.matrix")
 
@@ -150,6 +150,9 @@ class Room:
         # The /messages token for what is older than `messages[0]`; None once
         # the start of the room is reached.
         self.back: str | None = None
+        # The message the owner's last read receipt was on (`read`, §6.32):
+        # the same one is not told twice.
+        self.read_sent = ""
         self.loaded = False
         self._failed_at = 0.0
         self.lock = threading.RLock()
@@ -254,6 +257,33 @@ class Room:
                            "origin_server_ts": int(time.time() * 1000)})
         return True, {"session": self.thread, "pane": None, "submitted": True,
                       "event_id": ev_id}
+
+    def read(self, ev_id: str = "") -> tuple[bool, dict]:
+        """Tell the network the room is read up to message `ev_id` (default
+        the newest): the owner's `m.read` receipt, which the bridge carries
+        (read_receipts.py, §6.32). `{"read"}`: the message told of, or None
+        when there was nothing new to tell."""
+        token = owner_token()
+        if not token:
+            return False, {"error": "this Matrix room is read-only: no owner token "
+                                    "(run matrix-owner-login)", "status": 409}
+        with self.lock:
+            if ev_id and ev_id not in self._by_id:
+                return False, {"error": "no such message in this room", "status": 404}
+            if not ev_id:
+                ev_id = self.messages[-1]["id"] if self.messages else ""
+            if not ev_id or ev_id == self.read_sent:
+                return True, {"read": None}
+        try:
+            _post(self.config, f"/rooms/{_q(self.id)}/receipt/m.read/{_q(ev_id)}", {},
+                  token=token)
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        self.read_sent = ev_id
+        return True, {"read": ev_id}
 
     def react(self, ev_id: str, key: str) -> tuple[bool, dict]:
         """The owner's reaction on message `ev_id` set to `key` ("" for none):
@@ -694,7 +724,9 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
                         "archived": r.thread in flags, "rested": None, "pinned": False,
                         "harness": "matrix", "source": "matrix", "room": r.id,
                         "network": r.network,
-                        "drivable": bool(owner_token())})
+                        "drivable": bool(owner_token()),
+                        # When the network is told it was read (§6.32).
+                        "read_receipts": read_receipts.mode_of(r.thread)})
             if r.avatar:
                 # The room's own picture (20 Oct 2026); a person's row shows
                 # the contact's first.
@@ -968,11 +1000,13 @@ def adopt(room_id: str, wait_s: float | None = None) -> Room | None:
         time.sleep(ADOPT_STEP_S)
 
 
-def _post(config: matrix.Config, path: str, body: dict, timeout: float = 15.0) -> dict:
+def _post(config: matrix.Config, path: str, body: dict, timeout: float = 15.0,
+          token: str = "") -> dict:
     req = urllib.request.Request(
         f"{config.homeserver}/_matrix/client/v3{path}", method="POST",
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {config.token}", "Content-Type": "application/json"})
+        headers={"Authorization": f"Bearer {token or config.token}",
+                 "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 

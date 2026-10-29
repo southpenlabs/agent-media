@@ -1165,6 +1165,12 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
                 return False, {"error": "a Matrix room cannot be branched", "status": 409}
             if nudge:
                 return False, {"error": "a Matrix room cannot be nudged", "status": 409}
+            # Replying is reading (§6.32): the network is told first, in
+            # either mode, so the reply never sits under unread messages.
+            got, detail = room.read()
+            if not got:
+                log.info("reply: read receipt for %s not sent: %s", session[:8],
+                         detail.get("error"))
             if reply_to.strip():
                 # A real reply (§6.31): the bridge makes it the network's own.
                 return room.send(drawn, reply_to=reply_to.strip())

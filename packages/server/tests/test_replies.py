@@ -96,6 +96,8 @@ def test_replying_in_a_room_sends_a_real_reply(monkeypatch):
 
     monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
     monkeypatch.setattr(matrix, "_put", put)
+    # Replying is reading (§6.32): the receipt goes by POST, not counted here.
+    monkeypatch.setattr(matrix, "_post", lambda *a, **k: {})
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
     ok, d = send.reply("", "hi back", "tok", session=r.thread, reply_to="$1", quote="hello")
     assert ok, d
