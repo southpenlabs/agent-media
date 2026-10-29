@@ -263,14 +263,16 @@ def _public(host: str) -> bool:
 
 
 def _get(url: str, ua: str) -> tuple[str, str, str]:
-    import httpx
-
     for _ in range(MAX_REDIRECTS + 1):
         u = urlparse(url)
         if u.scheme not in ("http", "https") or not u.hostname:
             raise ReadError("that is not a web link", 400)
         if not _public(u.hostname):
             raise ReadError("that link is not on the public internet", 403)
+        # Imported once the address is known to be public: a refusal needs
+        # no HTTP client.
+        import httpx
+
         try:
             with httpx.stream("GET", url, headers={"User-Agent": ua, "Accept": "text/html,*/*;q=0.8"},
                               timeout=TIMEOUT_S, follow_redirects=False) as r:
