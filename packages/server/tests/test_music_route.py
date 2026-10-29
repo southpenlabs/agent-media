@@ -16,6 +16,8 @@ from test_contract import AUTH, audio_host, call, keys, server, signed_in, typed
 NOW = {"backend": "phone", "uri": "yt:https://www.youtube.com/watch?v=nMDHjVVj3bA", "media_id": "nMDHjVVj3bA", "path": "http://localhost:6616/nMDHjVVj3bA.mka",
        "title": "A Mix", "chapter": None, "pos_ms": 7000, "dur_ms": 3019000,
        "paused": False, "speed": 1.0, "volume": 100, "held": False}
+#: NOW as answered: the artist lookup knows nothing here, so the title is the song.
+SAID = {**NOW, "artist": None, "song": "A Mix"}
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +25,9 @@ def _no_phone(monkeypatch):
     """A track's chapters are read on the phone over ssh; never here."""
     from agent_media_core.sinks import music_sasonica
     monkeypatch.setattr(music_sasonica, "chapters", lambda url: [])
+    from agent_media_core import media_meta
+    monkeypatch.setattr(media_meta, "known", lambda key: None)
+    monkeypatch.setattr(media_meta, "fill", lambda wanted: None)
 
 
 @pytest.fixture()
@@ -42,7 +47,15 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio"}
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
     assert obj["art"] == "https://i.ytimg.com/vi/nMDHjVVj3bA/hqdefault.jpg"
-    assert obj["now"] == NOW and obj["chapters"] == []
+    assert obj["now"] == SAID and obj["chapters"] == []
+
+
+def test_now_names_the_artist(server, signed_in, audio_host, player, monkeypatch):
+    from agent_media_core import media_meta
+    monkeypatch.setattr(media_meta, "known", lambda key: {"artist": "Massive Attack", "song": "Teardrop", "found": True}
+                        if key == "yt:nMDHjVVj3bA" else None)
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["now"]["artist"] == "Massive Attack" and obj["now"]["song"] == "Teardrop"
     assert keys(obj["where"]) == {"current", "next", "overridden", "options", "rooms"}
     assert obj["where"]["rooms"] == []  # no music stream on this host
 
@@ -68,7 +81,7 @@ def test_controls_are_the_cli_verbs(server, signed_in, audio_host, player, body,
     res, obj = call(server, "POST", "/music", body, AUTH)
     assert res.status == 200, obj
     assert player == [argv]
-    assert obj["now"] == NOW
+    assert obj["now"] == SAID
 
 
 @pytest.mark.parametrize("body", [{}, {"action": "quit"}, {"action": "seek"},
@@ -84,7 +97,7 @@ def test_a_bad_control_is_400_and_runs_nothing(server, signed_in, audio_host, pl
 def test_a_failed_control_is_502_with_the_state(server, signed_in, audio_host, player, monkeypatch):
     monkeypatch.setattr(music, "_run", lambda argv: (False, "nothing playing"))
     res, obj = call(server, "POST", "/music", {"action": "next"}, AUTH)
-    assert res.status == 502 and obj["error"] == "nothing playing" and obj["now"] == NOW
+    assert res.status == 502 and obj["error"] == "nothing playing" and obj["now"] == SAID
 
 
 @pytest.mark.parametrize("who,status", [((None, 401), 401),
@@ -124,7 +137,7 @@ def test_a_failed_read_after_a_track_keeps_the_track(server, signed_in, audio_ho
     _, first = call(server, "GET", "/music", headers=AUTH)
     music._reset_cache()
     _, second = call(server, "GET", "/music", headers=AUTH)
-    assert first["now"] == NOW and second["now"] == NOW
+    assert first["now"] == SAID and second["now"] == SAID
     music._reset_cache(forget=True)
 
 

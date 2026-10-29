@@ -2908,6 +2908,11 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
   "pos_ms", "dur_ms", "paused", "speed", "volume", "held"}`, every field
   nullable. A phone player is `"backend": "phone"`; nothing playing is
   `"backend": "mopidy"` with the rest null.
+- `now.artist`, `now.song` (29 Oct 2026): who and what for a YouTube track,
+  from the server's MusicBrainz lookup (the one Recently played uses; a
+  track not yet looked up is looked up in the background), else what the
+  title says; null when neither knows. The app's song-change banner reads
+  them.
 - `chapters` are a mix's tracks (one file, many tracks) when the live file
   is played by Sasonica from the phone's cache, read on the phone with
   ffprobe and kept per file; `[]` otherwise. `now.chapter` names the one

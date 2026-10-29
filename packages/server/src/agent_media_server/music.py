@@ -198,8 +198,28 @@ def _move_state() -> dict | None:
     return {k: m[k] for k in ("to", "state", "error")}
 
 
+def _who(now: dict) -> dict:
+    """`artist` and `song` for a YouTube track (media_meta: MusicBrainz,
+    else what the title says), so the app's banner can name both when the
+    song changes (David, 29 Oct 2026); null for anything else."""
+    from agent_media_core import media_meta
+    from agent_media_core.music_recent import _music_meta
+
+    vid = now.get("media_id") or ""
+    if not vid or len(vid) != 11:
+        return {"artist": None, "song": None}
+    try:
+        got = _music_meta(f"yt:{vid}", now.get("title") or "")
+        if not media_meta.known(f"yt:{vid}"):
+            media_meta.fill([(f"yt:{vid}", "music", {"vid": vid, "title": now.get("title") or ""})])
+        return {"artist": got.get("artist"), "song": got.get("song")}
+    except Exception:  # noqa: BLE001 — the title alone will do
+        return {"artist": None, "song": None}
+
+
 def _answer() -> dict:
     now, chapters = _now()
+    now = {**now, **_who(now)}
     where = audio.channel_block("music")
     out = {"now": now, "art": _art(now), "chapters": chapters,
            "where": {**where, "rooms": _rooms()}, "radio": _radio()}
