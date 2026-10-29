@@ -1998,6 +1998,25 @@ ahead.
     and the Android unit tests (NotifyRulesTest) need the SDK that CI has,
     not this host.
 
+45. **Hands-free from the player** (David, 30 Oct 2026: "a button to turn
+    on hands-free for that thread... the input field would have to pop up
+    for the thread in the media player, not whatever is on the current
+    page"; chose "open thread, then dock"). **Step 1 DONE 30 Oct 2026**
+    (sasonica-app `bcd942a`): Hands-free in the speech sheet, beside Replay
+    latest, opens the thread the player names and starts hands-free there,
+    through the black screen swipe's path (`lib/handsFreeIn.ts`); the loop
+    waits for the reply to end, then listens. **Step 2, the dock: not
+    started.** He stays on his page; a slim box over the player shows the
+    thread's name, the heard words, the countdown, Send and Cancel. Needs
+    the loop lifted out of `Thread.tsx` (`useHandsFree` ends on leaving the
+    thread and borrows its composer's `useDictation`) into an app-level
+    provider keyed by session; that thread's question cards answered by
+    voice from elsewhere (`lib/voicePick.ts` lands on the card's DOM, which
+    is not there off the thread: needs the card's options and a POST); the
+    dock steps aside when that thread is opened, handing the loop to its
+    composer; the black screen's caption and full screen's input field
+    follow the dock.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
