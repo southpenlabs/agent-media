@@ -408,8 +408,13 @@ def test_the_snapshot_counts_agents_and_an_event_says_when_they_change(
 # --- the project line (§6.1) ----------------------------------------------------------
 
 
-def test_project_of_follows_the_layout(monkeypatch):
-    home = os.path.expanduser("~/projects")
+def test_project_of_follows_the_layout(monkeypatch, tmp_path):
+    # A root that is not there is left out (layout.projects_roots, since
+    # b2e2dbb5), so the projects root has to exist: a CI runner has no
+    # ~/projects, and this passed only on a desk that has one.
+    home = str(tmp_path / "projects")
+    (tmp_path / "projects" / "agent-media" / ".git").mkdir(parents=True)
+    monkeypatch.setenv("MEDIA_PROJECTS_DIR", home)
     assert sessions.project_of(f"{home}/agent-media") == "p-agent-media"
     assert sessions.project_of(f"{home}/agent-media/.claude/worktrees/x") == "p-agent-media"
     assert sessions.project_of("/tmp/x", "/lib/Conversations/p-music/A title") == "p-music"
