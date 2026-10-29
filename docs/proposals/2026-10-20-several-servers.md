@@ -104,6 +104,31 @@ today, by its own address and `lookup` (docs/decisions/2026-10-18-off-the-tailne
    falling back to the server's.
 6. **Add from Your servers** on the pairing screen.
 
+## Two accounts on one server
+
+David, 29 Oct 2026: "what if you want two accounts with separate logins on
+the same server?" The server already allows it: each account enrols its own
+device row with its own role, and has its own address book
+(`auth.device_account`, contacts proposal). The app does not: a pairing is
+keyed by the server alone (`sameServer` in sasonica-app `api/auth.ts`: by
+`server.id`, else the address), so signing in with a second account on the
+same server replaces the first.
+
+- **Key a pairing by server and account**: (`server_id`, the account's
+  `iss|sub`, or the device id for a code pairing). Two entries for red5 then
+  sit side by side, each its own token.
+- **Name it by both**: "red5 · david", "red5 · sam" in the filter, the
+  header and Settings, wherever a server name stands alone today; the
+  account's picture beside it. A server with one pairing keeps its bare
+  name.
+- **One at a time per server**: two accounts on one server are two people
+  (or one person's two hats), so their threads are not merged; the filter
+  picks which account's view of that server is showing, and notifications
+  name the account they are for.
+- **What a second account sees** waits on the roles proposal's open
+  question (does a member see every thread?): today the server lists every
+  thread to every device, so a second account sees the owner's chats.
+
 ## Open questions
 
 - **One list or one at a time?** The switcher shows one server's threads.

@@ -405,6 +405,13 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 MUSIC_PATHS = frozenset({"/music", "/music/recent"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
+# The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
+# guest reads and listens): pairing and signing out, the speech bar and
+# music controls, where to listen, and the phone's own playback reports.
+GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/balance",
+                         "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
+                         "/book/state"}) | AUDIO_PATHS | MUSIC_PATHS
+
 # The Organiser: browsing and capturing in the Org tree (org.py). The same
 # arrangement.
 ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
@@ -705,6 +712,12 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     auth.set_client_ip(h.client_address[0] if h.client_address else "")
     # And whose it is, for whose address book a contact join reads (§6.25).
     auth.set_request_bearer(_bearer(h))
+    if method == "POST" and path not in GUEST_POSTS and auth.is_guest(_bearer(h)):
+        # A guest reads and listens (roles proposal): every other POST is a
+        # change, refused here whatever the route's own gate would say.
+        _json(h, 403, {"ok": False, "code": "guest",
+                       "error": "a guest may read and listen here, not change anything"})
+        return True
     if path in AUDIO_PATHS and method in ("GET", "POST"):
         return _audio(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
@@ -1765,7 +1778,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             _refresh_profile_soon(dev)
             _json(h, 200, {"ok": True, "device_id": dev.get("id"), "name": dev.get("name"),
-                           "enrol": devices.may_enrol(dev),
+                           "enrol": devices.may_enrol(dev), "role": devices.role_of(dev),
                            "account": dev.get("account") or None,
                            "username": dev.get("username") or None,
                            "picture": dev.get("picture") or None,
@@ -2155,7 +2168,7 @@ def _pair(h: BaseHTTPRequestHandler) -> None:
     if lookup:
         server["lookup"] = lookup
     _json(h, 200, {"ok": True, "token": got["token"], "device_id": got["device_id"],
-                   "name": got["name"], "enrol": bool(got.get("enrol")),
+                   "name": got["name"], "enrol": bool(got.get("enrol")), "role": got["role"],
                    "server": server, "server_id": _server_id(),
                    # Only for a jobs-only device (`pair --jobs`): `media jobs
                    # pair` checks it; the app's answer is unchanged.
@@ -2390,7 +2403,8 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
         return
     got = devices.enrol_account(claims, str(body.get("device") or ""), ip,
                                 enrol=oidc.may_enrol(claims), refresh_token=refresh_token,
-                                username=oidc.username_of(claims), picture=oidc.picture_of(claims))
+                                username=oidc.username_of(claims), picture=oidc.picture_of(claims),
+                                role=oidc.role_of(claims))
     print(f"enrol: {got['device_id']} ({got['name']!r}) for "
           f"{claims.get('email') or claims.get('sub')} from {ip}", file=sys.stderr)
     if refresh_token:
@@ -2398,7 +2412,7 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
         from . import servers_report
         servers_report.report_soon(got["device_id"], _base_url(h))
     _json(h, 200, {"ok": True, "token": got["token"], "device_id": got["device_id"],
-                   "name": got["name"], "enrol": got["enrol"],
+                   "name": got["name"], "enrol": got["enrol"], "role": got["role"],
                    "account": str(claims.get("email") or ""), "username": got["username"],
                    "picture": oidc.picture_of(claims) or None,
                    "server": {"name": _server_name(), "base": _base_url(h)},
@@ -2428,7 +2442,7 @@ def _server_id() -> str:
 
 
 def _devices_code(h: BaseHTTPRequestHandler) -> None:
-    """`POST /devices/code {"device", "enrol"}` — mint a pairing code (§9).
+    """`POST /devices/code {"device", "enrol", "role"?}` — mint a pairing code (§9).
 
     The couch half of `media-visual-canvas pair --device`: the same code, the
     same store, the same 30-minute window, asked for by a device that carries
@@ -2438,7 +2452,9 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
     it has — which is trivially true here, since only an enrolled device
     reaches this line at all. The name is the body's, because the person
     holding the phone is the one deciding what the tablet is called; that is
-    the same rule as the desk's, not an exception to it.
+    the same rule as the desk's, not an exception to it. `role` is the new
+    device's (admin, member or guest; absent, an admin, as the desk's
+    default); only an admin reaches here, so it can grant no more than it has.
     """
     import socket
 
@@ -2453,7 +2469,12 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
         _json(h, 400, {"ok": False, "code": "no_device_name",
                        "error": "a device needs a name"})
         return
-    code, expires = devices.mint_code(name, enrol=bool(body.get("enrol")))
+    role = str(body.get("role") or "")
+    if role and role not in devices.ROLES:
+        _json(h, 400, {"ok": False, "code": "bad_role",
+                       "error": "role must be admin, member or guest"})
+        return
+    code, expires = devices.mint_code(name, enrol=bool(body.get("enrol")), role=role)
     base = _base_url(h)
     host, _, port = base.partition("://")[2].partition(":")
     # Over https (a tunnel), the whole base: http://host:8781 would be wrong.
@@ -2462,7 +2483,8 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
         server=base if base.startswith("https://") else "", lookup=_lookup_for(base))
     print(f"devices: {user.get('device')} minted a code for {name!r}", file=sys.stderr)
     _json(h, 200, {"ok": True, "code": code, "expires": round(expires, 3),
-                   "name": name, "enrol": bool(body.get("enrol")),
+                   "name": name, "enrol": bool(body.get("enrol")) and role in ("", "admin"),
+                   "role": role or "admin",
                    "links": {"app": app_link, "browser": browser_link},
                    "server": {"name": _server_name(), "base": base}})
 
@@ -2488,6 +2510,36 @@ def _devices_revoke(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
+def _devices_role(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/role {"id", "role"}` — set a device's role (§9 "Roles"),
+    as `devices --role ID ROLE` does at the desk. Asked of a device that may
+    manage devices (an admin with the enrol bit). An admin may not make its
+    own device anything less, so the last admin cannot lock the app out by
+    accident (the shell still can)."""
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    role = str(body.get("role") or "")
+    if role not in devices.ROLES:
+        _json(h, 400, {"ok": False, "code": "bad_role",
+                       "error": "role must be admin, member or guest"})
+        return
+    if device_id == user.get("device") and role != "admin":
+        _json(h, 409, {"ok": False, "code": "own_role",
+                       "error": "a device cannot take its own admin role away"})
+        return
+    if not devices.set_role(device_id, role):
+        _json(h, 404, {"ok": False, "code": "no_such_device",
+                       "error": "no device with that id"})
+        return
+    print(f"devices: {user.get('device')} made {device_id} {role}", file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "role": role, "devices": devices.list_devices()})
+
+
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
@@ -2497,6 +2549,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_code(h)
     elif path == "/devices/revoke":
         _devices_revoke(h)
+    elif path == "/devices/role":
+        _devices_role(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
     elif path == "/contacts/import":

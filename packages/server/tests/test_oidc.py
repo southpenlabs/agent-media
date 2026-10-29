@@ -302,3 +302,19 @@ def test_me_account_errors(server, monkeypatch):
     assert res.status == 403 and out["code"] == "wrong_password"
     res, _ = call(server, "GET", "/me/account", headers={"Authorization": "Bearer nope"})
     assert res.status == 401
+
+
+def test_an_accounts_role(server, monkeypatch):
+    """MEDIA_OIDC_ROLES names a role; without an entry an account that may
+    enrol others is an admin, any other allowed one a member — and only an
+    admin keeps the enrol bit (docs/proposals/2026-10-18-roles.md)."""
+    owner = oidc.verify(token())
+    by_sub = oidc.verify(token(sub="99", email="x@example.com"))
+    assert oidc.role_of(owner) == "admin" and oidc.role_of(by_sub) == "member"
+    monkeypatch.setenv("MEDIA_OIDC_ROLES", f"{ISS}|99=guest, {ISS}|email=owner@example.com=member")
+    assert oidc.role_of(by_sub) == "guest" and oidc.role_of(owner) == "member"
+    res, obj = call(server, "POST", "/enrol", {"id_token": token(), "device": "Pixel 8a"})
+    assert res.status == 200, obj
+    assert obj["role"] == "member" and obj["enrol"] is False
+    res, me = call(server, "GET", "/me", headers={"Authorization": f"Bearer {obj['token']}"})
+    assert me["role"] == "member" and me["enrol"] is False

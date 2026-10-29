@@ -9,7 +9,7 @@ instead:
   may_control_speech(bearer)  → (ok, error)                    — the speech bar, harnesses
   identity(bearer)            → (user, status)                 — who, without the may-reply check
   may_reply(user)             → (ok, why)
-  may_admin(bearer)           → (user, {}) or (None, error)   — host setup (project roots)
+  may_admin(bearer)           → (user, {}) or (None, error)   — host setup (project roots); admins only
   abs_bearer(bearer)          → the credential to show ABS for an item lookup
 
 The device check comes first because it is local and cheap: a hash and a
@@ -79,10 +79,11 @@ def _owner(dev: dict) -> dict:
     `may_reply` and `abs_bearer` can tell.
 
     `enrol` is the one right a device does not automatically have (§9): it
-    rides here so a route can ask without reading the store again.
+    rides here so a route can ask without reading the store again, as does
+    `role` (admin, member or guest; docs/proposals/2026-10-18-roles.md).
     """
     return {"username": f"device:{dev.get('name') or dev.get('id')}", "type": "root",
-            "device": dev.get("id"), "enrol": devices.may_enrol(dev),
+            "device": dev.get("id"), "enrol": devices.may_enrol(dev), "role": devices.role_of(dev),
             "account_key": device_account(dev)}
 
 
@@ -166,6 +167,8 @@ def identity(bearer: str) -> tuple[dict | None, int]:
 
 def may_reply(user: dict | None) -> tuple[bool, str]:
     if user and user.get("device"):
+        if user.get("role") == "guest":
+            return False, "a guest may read and listen, not type"
         return True, str(user.get("username") or "")
     return auth_abs.may_reply(user)
 
@@ -183,11 +186,17 @@ def may_admin(bearer: str) -> tuple[dict | None, dict]:
     """`(user, {})` when this bearer may change how the host is set up — the
     folders new projects go in (project_roots.py) — else `(None, error)`.
 
-    Today exactly `gate`: every device is the owner. Roles will narrow it to
-    admin devices (docs/proposals/2026-10-18-roles.md), and the routes that
-    ask here already are the ones that will then refuse a member or a guest.
+    `gate`, and then the role: a member or guest device is 403 `not_admin`
+    (docs/proposals/2026-10-18-roles.md). A device without a role is an admin,
+    and an ABS login is as it was (it leaves at the ABS exit).
     """
-    return gate(bearer)
+    user, err = gate(bearer)
+    if not user:
+        return None, err
+    if user.get("device") and user.get("role", "admin") != "admin":
+        return None, {"status": 403, "code": "not_admin",
+                      "error": "only an admin may change how this server is set up"}
+    return user, {}
 
 
 def may_control_speech(bearer: str) -> tuple[bool, dict]:
@@ -196,6 +205,12 @@ def may_control_speech(bearer: str) -> tuple[bool, dict]:
     if _device(bearer):
         return True, {}
     return auth_abs.may_control_speech(bearer)
+
+
+def is_guest(bearer: str) -> bool:
+    """Whether this bearer is a guest device (it may read and listen only)."""
+    dev = _device(bearer)
+    return bool(dev) and devices.role_of(dev) == "guest"
 
 
 def is_device(bearer: str) -> bool:

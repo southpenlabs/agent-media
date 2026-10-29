@@ -13,6 +13,9 @@ the issuer):
     MEDIA_OIDC_CLIENTS    sasonica-app[, …]                the `aud` an ID token must carry
     MEDIA_OIDC_ALLOW      <iss>|<sub>, <iss>|email=<addr>, …   who may enrol here
     MEDIA_OIDC_ENROL      the same form: who gets the enrol bit (may pair others)
+    MEDIA_OIDC_ROLES      the same form with =admin|member|guest after each:
+                          an account's role (else admin with the enrol bit,
+                          member without)
 
 An issuer is trusted to say who someone is; MEDIA_OIDC_ALLOW says whether that
 someone may have a device on *this* server. Nothing is allowed by default.
@@ -325,6 +328,20 @@ def allowed(claims: dict) -> bool:
 def may_enrol(claims: dict) -> bool:
     """Does this account's device get the enrol bit (MEDIA_OIDC_ENROL)?"""
     return _matches(claims, _list("MEDIA_OIDC_ENROL"))
+
+
+def role_of(claims: dict) -> str:
+    """This account's role on this server (docs/proposals/2026-10-18-roles.md):
+    the first MEDIA_OIDC_ROLES entry that matches it (MEDIA_OIDC_ALLOW's
+    form with `=ROLE` after it: `<iss>|<sub>=admin,<iss>|email=x@y=guest`),
+    else admin for an account with the enrol bit (MEDIA_OIDC_ENROL: whoever
+    may pair others already runs the place), else member."""
+    for rule in _list("MEDIA_OIDC_ROLES"):
+        who, sep, role = rule.rpartition("=")
+        role = role.strip().lower()
+        if sep and role in ("admin", "member", "guest") and _matches(claims, [who.strip()]):
+            return role
+    return "admin" if may_enrol(claims) else "member"
 
 
 def _reset_for_tests() -> None:

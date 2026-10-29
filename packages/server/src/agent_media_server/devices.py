@@ -297,9 +297,11 @@ def lookup(token: str, ip: str = "") -> dict | None:
 
 
 def list_devices() -> list[dict]:
-    """Every paired device, without its hash."""
+    """Every paired device, without its hash, with its role and its enrol bit
+    as they take effect (a member's stored bit is no bit)."""
     with _LOCK:
-        return [{k: v for k, v in d.items() if k not in _PRIVATE} for d in _load()]
+        return [{**{k: v for k, v in d.items() if k not in _PRIVATE},
+                 "role": role_of(d), "enrol": may_enrol(d)} for d in _load()]
 
 
 def revoke(device_id: str) -> bool:
@@ -332,6 +334,34 @@ def set_enrol(device_id: str, on: bool = True) -> bool:
         return True
 
 
+#: A device's role (docs/proposals/2026-10-18-roles.md): what it may do here.
+#: admin sets the host up, member chats, guest reads and listens.
+ROLES = ("admin", "member", "guest")
+
+
+def role_of(device: dict | None) -> str:
+    """This device's role. A row without one is an admin: every device paired
+    before roles existed keeps exactly what it had."""
+    role = str((device or {}).get("role") or "")
+    return role if role in ROLES else "admin"
+
+
+def set_role(device_id: str, role: str) -> bool:
+    """Give a paired device a role, from the shell (`devices --role ID ROLE`)
+    or an admin's app (`POST /devices/role`). False for an unknown id;
+    ValueError for a role that is not one."""
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        if hit.get("role") != role:
+            _save([{**d, "role": role} if d is hit else d for d in rows])
+        return True
+
+
 def may_enrol(device: dict | None) -> bool:
     """Whether this device may pair another one, list them, or revoke one.
 
@@ -339,9 +369,10 @@ def may_enrol(device: dict | None) -> bool:
     existed (and every one minted without `--enrol`) simply cannot: the shell
     is still the only way in, which is where this started. It is a property
     of the device, not of the person — the owner at the desk has a shell and
-    needs no bit.
+    needs no bit. Only an admin may hold it: a member or guest with the bit
+    set is treated as without.
     """
-    return bool((device or {}).get("enrol"))
+    return bool((device or {}).get("enrol")) and role_of(device) == "admin"
 
 
 # --- pairing ----------------------------------------------------------------------
@@ -366,7 +397,8 @@ def is_jobs_worker(device: dict | None) -> bool:
     return bool((device or {}).get("jobs"))
 
 
-def mint_code(name: str, enrol: bool = False, jobs: bool = False) -> tuple[str, float]:
+def mint_code(name: str, enrol: bool = False, jobs: bool = False,
+              role: str = "") -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
     Several may be outstanding at once (pairing a phone and a tablet in the
@@ -374,8 +406,14 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False) -> tuple[str, 
 
     `enrol` rides on the code, not on the redemption: the right to enrol
     other devices is granted by whoever mints, and a device cannot ask for
-    it any more than it can name itself (see `redeem`).
+    it any more than it can name itself (see `redeem`). `role` rides the same
+    way ("" is an admin, as every device was before roles); a member or guest
+    never carries `enrol`.
     """
+    if role and role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    if role in ("member", "guest"):
+        enrol = False
     code = secrets.token_hex(4)
     expires = time.time() + pair_ttl()
     with _locked():
@@ -388,6 +426,8 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False) -> tuple[str, 
             # Like `enrol`, granted by whoever mints: a device cannot make
             # itself a jobs worker any more than it can name itself.
             codes[code]["jobs"] = True
+        if role:
+            codes[code]["role"] = role
         _write(codes_path(), codes)
     return code, expires
 
@@ -445,9 +485,11 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
                "enrol": bool(entry.get("enrol"))}
         if entry.get("jobs"):
             row["jobs"] = True
+        if entry.get("role") in ROLES:
+            row["role"] = entry["role"]
         _save(list(_load(fresh=True)) + [row])
     return {"token": token, "device_id": row["id"], "name": name,
-            "enrol": bool(row["enrol"]), "jobs": bool(row.get("jobs"))}
+            "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row)}
 
 
 #: Fields that never leave the store: the token's hash, and an account's
@@ -495,12 +537,17 @@ def update_profile(device_id: str, email: str, username: str, picture: str = "")
 
 
 def enrol_account(claims: dict, device: str, ip: str = "", *, enrol: bool = False,
-                  refresh_token: str = "", username: str = "", picture: str = "") -> dict:
+                  refresh_token: str = "", username: str = "", picture: str = "",
+                  role: str = "admin") -> dict:
     """A device token for a signed-in account (`POST /enrol`, accounts
     proposal step 3): the same token and row `redeem` makes, plus who
     enrolled it (`iss`, `sub`, and the email as a label), so revoking the
     account can drop its devices. The account's word is the device's name
-    only when the device sent none."""
+    only when the device sent none. `role` is the account's
+    (oidc.role_of); a member or guest never gets `enrol`."""
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    enrol = bool(enrol) and role == "admin"
     now = time.time()
     token = secrets.token_urlsafe(32)
     name = " ".join((device or "").split())[:80] or str(claims.get("email") or "device")
@@ -508,12 +555,12 @@ def enrol_account(claims: dict, device: str, ip: str = "", *, enrol: bool = Fals
            "created": round(now, 3), "last_seen": round(now, 3), "last_ip": ip or "",
            "enrol": bool(enrol), "iss": str(claims.get("iss") or ""),
            "sub": str(claims.get("sub") or ""), "account": str(claims.get("email") or ""),
-           "username": username, "picture": picture, "profile_at": round(now, 3),
+           "username": username, "picture": picture, "profile_at": round(now, 3), "role": role,
            **({"rt": refresh_token} if refresh_token else {})}
     with _locked():
         _save(list(_load(fresh=True)) + [row])
     return {"token": token, "device_id": row["id"], "name": name, "enrol": bool(enrol),
-            "username": username}
+            "username": username, "role": role}
 
 
 def revoke_account(who: str) -> int:
@@ -567,8 +614,9 @@ def links(code: str, host: str, port: int, server: str = "",
 
 
 def cli_devices(argv: list[str]) -> int:
-    """`media-visual-canvas devices [--revoke ID | --enrol ID | --no-enrol ID]`
-    — list, forget one, or give one the enrol bit (or take it back)."""
+    """`media-visual-canvas devices [--revoke ID | --enrol ID | --no-enrol ID |
+    --role ID ROLE]` — list, forget one, give one the enrol bit (or take it
+    back), or set its role."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="media-visual-canvas devices",
@@ -578,6 +626,9 @@ def cli_devices(argv: list[str]) -> int:
     act.add_argument("--enrol", metavar="ID",
                      help="let this device pair and revoke devices from the app (Settings → Devices)")
     act.add_argument("--no-enrol", metavar="ID", help="take that right back")
+    act.add_argument("--role", nargs=2, metavar=("ID", "ROLE"),
+                     help="admin (sets the host up), member (chats) or guest (reads and "
+                          "listens); a device without one is an admin")
     act.add_argument("--jobs", metavar="ID",
                      help="make this device a jobs worker: restart/update jobs down "
                           "its own stream, and no other route (phone_jobs.py)")
@@ -585,6 +636,18 @@ def cli_devices(argv: list[str]) -> int:
     act.add_argument("--revoke-account", metavar="WHO",
                      help="forget every device an account enrolled (its sub, or its email)")
     args = ap.parse_args(argv)
+    if args.role:
+        device_id, role = args.role
+        try:
+            ok = set_role(device_id, role)
+        except ValueError as e:
+            print(str(e), flush=True)
+            return 2
+        if ok:
+            print(f"{device_id} is {'an' if role == 'admin' else 'a'} {role}")
+            return 0
+        print(f"no device {device_id}", flush=True)
+        return 1
     if args.revoke_account:
         n = revoke_account(args.revoke_account)
         print(f"revoked {n} device(s) of {args.revoke_account}" if n else f"no devices of {args.revoke_account}")
@@ -620,6 +683,7 @@ def cli_devices(argv: list[str]) -> int:
     for d in rows:
         print(f"{d.get('id'):<16} {d.get('name', ''):<24} paired {when(d.get('created'))}"
               f"  seen {when(d.get('last_seen'))} from {d.get('last_ip') or '-'}"
+              f"  {role_of(d)}"
               f"{'  [enrols]' if may_enrol(d) else ''}"
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}")

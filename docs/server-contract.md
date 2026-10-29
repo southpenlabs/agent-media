@@ -6931,8 +6931,7 @@ they find nothing, and the item fields stay `null`.
   key sets are unchanged. It is also not a 503 unless ABS is down, in which
   case the §4.1 mapping applies to it as to any unknown bearer.
 - A device token carries the rights `may_reply` grants the owner, plus one
-  bit of its own: `enrol` (below). Otherwise a single scope in v1. Scopes
-  arrive with the hosted tier, if it needs them.
+  bit of its own: `enrol` (below), and a role ("Roles", below).
 
 ### Enrolling from the app — BUILT 23 Sep 2026
 
@@ -6962,7 +6961,7 @@ there, and an ABS login is not a way round it.
 ```
 GET  /devices
   → {"ok": true, "self": "d_7f3a…", "devices": [ {id, name, created,
-      last_seen, last_ip, enrol}, … ]}          (never the sha256)
+      last_seen, last_ip, enrol, role}, … ]}    (never the sha256)
 
 POST /devices/code {"device": "Pixel Tablet", "enrol": false}
   → {"ok": true, "code": "7f3a09c1", "expires": <ts>, "name", "enrol",
@@ -6986,6 +6985,34 @@ what the new device is called, and on the couch that is the phone.
 A device may revoke itself, and the last enrolled device may throw itself
 out. That is not a lockout: `media-visual-canvas devices --revoke` is the
 floor under all of this, and the desk can always mint again.
+
+### Roles — step 1 BUILT 29 Oct 2026
+
+docs/proposals/2026-10-18-roles.md. A device row carries `role`: `admin`
+(sets the host up), `member` (chats) or `guest` (reads and listens). A row
+without one is an **admin**, so every device paired before roles keeps what
+it had. Only an admin holds `enrol`: a member's or guest's stored bit counts
+for nothing.
+
+- **Set at pairing**: `pair --device NAME --role member|guest` (default
+  admin; `--enrol` is refused with member or guest), `POST /devices/code
+  {"role"}` (default admin; 400 `bad_role`), and for an account
+  `MEDIA_OIDC_ROLES` (above). Changed later with `devices --role ID ROLE` or
+  `POST /devices/role {"id", "role"}` (`auth.may_enrol`; 400 `bad_role`, 404
+  `no_such_device`, 409 `own_role` for a device taking its own admin role
+  away; the shell can).
+- **Told**: `role` on `POST /pair`, `POST /enrol`, `GET /me`, `POST
+  /devices/code` and each row of `GET /devices` (whose `enrol` is now the bit
+  as it takes effect).
+- **Gates**: `auth.may_admin` (project roots, `/services/restart`,
+  `/jobs/devices`, `/jobs/restart|update`, `/alerts/action`) is 403
+  `{"code": "not_admin"}` for a member or guest. A guest's POST is 403 `{"code": "guest"}` on every route
+  but `/pair`, `/enrol`, `/me/signout`, `/speech/ctl`, `/speech/balance`,
+  `/follow/trace`, the phone's `/speech|music|handoff|book/state` reports,
+  `/audio/target(s)` and `/music*`. An ABS login is as it was.
+- **Not yet** (the proposal's steps 2 and 3): harnesses, presets, personas,
+  bridges and contacts setup still take any member; a member's chats are not
+  yet permission-checked, so a member's agent can do what the owner's can.
 
 ### Enrolling with an account — BUILT 29 Sep 2026
 
@@ -7054,7 +7081,9 @@ Configuration: `MEDIA_OIDC_ISSUERS` (exact `iss`, comma-separated),
 `MEDIA_OIDC_CLIENTS` (the `aud` an ID token must carry), `MEDIA_OIDC_ALLOW`
 (`<iss>|<sub>` or `<iss>|email=<addr>`, a verified email only: who may have a
 device here; nothing by default) and `MEDIA_OIDC_ENROL` (the same form: whose
-device gets the enrol bit). RS256 only, checked with the standard library; the
+device gets the enrol bit) and `MEDIA_OIDC_ROLES` (the same form with
+`=admin|member|guest` after each entry: the account's role; without one, admin
+for an account in `MEDIA_OIDC_ENROL`, else member). RS256 only, checked with the standard library; the
 discovery document and JWKS are cached an hour and an unreachable issuer is a
 refusal. The device row gains `iss`, `sub` and `account` (the email);
 `media-visual-canvas devices --revoke-account <sub|email>` drops every device
