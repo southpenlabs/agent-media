@@ -312,6 +312,9 @@ device gets its token):
   POST /device/location {lat, lon, accuracy_m?, at?, precise?} | {off: true}
                   (a device, its background share switch) → kept in memory;
                   GET /device/location (host token) → {location: … | null}
+  GET  /screen/now → {on, pause, why}: should this device pause what is
+                  playing on it now (screens.py, §6.21f); POST /devices/pause
+                  {id, on, for?} sets its switch (an admin, like a role)
   POST /device/mic {open} → a paired device's mic is open (for 30 s unless
                   re-sent) or closed; GET /speech/now's `mic` (mic_state.py, §6.21e)
   POST /device/listen-log {lines: [...]} → a paired phone's mic listens, what
@@ -391,7 +394,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -1973,6 +1976,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, detail.pop("status", 400), {"ok": False, **detail})
             return True
         _send_file(h, detail["file"], detail["size"], detail["type"])
+    elif path == "/screen/now":
+        # Should this device pause what is playing on it (screens.py): its
+        # switch, a phone's mic or a voice, the phone at home.
+        from . import screens
+
+        ok, detail = screens.now(_bearer(h), speech.current_state())
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/now":
         # The app's speech bar: /speech's live bit, named — the session's
         # title and library item — and gated by the caller's ABS bearer.
@@ -2542,6 +2552,35 @@ def _devices_role(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "role": role, "devices": devices.list_devices()})
 
 
+def _devices_pause(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/pause {"id", "on", "for"?}` — whether a device pauses
+    what is playing on it while someone talks to the assistant or a reply is
+    read out, and for whose phones (`for`: device ids, [] for any member's
+    or admin's). Asked of a device that may manage devices, like a role
+    (screens.py)."""
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    on = body.get("on")
+    only = body.get("for", [])
+    if not isinstance(on, bool) or not isinstance(only, list) \
+            or not all(isinstance(x, str) for x in only):
+        _json(h, 400, {"ok": False, "code": "bad_pause",
+                       "error": 'expected {"id", "on": bool, "for"?: [device ids]}'})
+        return
+    if not devices.set_pause(device_id, on, only):
+        _json(h, 404, {"ok": False, "code": "no_such_device",
+                       "error": "no device with that id"})
+        return
+    print(f"devices: {user.get('device')} set pause {'on' if on else 'off'} on {device_id}",
+          file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
@@ -2553,6 +2592,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_revoke(h)
     elif path == "/devices/role":
         _devices_role(h)
+    elif path == "/devices/pause":
+        _devices_pause(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
     elif path == "/contacts/import":

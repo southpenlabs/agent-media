@@ -362,6 +362,24 @@ def set_role(device_id: str, role: str) -> bool:
         return True
 
 
+def set_pause(device_id: str, on: bool, pause_for: list[str] | None = None) -> bool:
+    """Whether this device pauses what is playing on it while someone talks
+    to the assistant or a reply is read out (`pause_here`), and for whose
+    phones (`pause_for`: device ids, empty for any member's or admin's).
+    From an admin's app (`POST /devices/pause`; screens.py). False for an
+    unknown id."""
+    keep = [str(x) for x in (pause_for or []) if str(x).strip()]
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        if bool(hit.get("pause_here")) != on or list(hit.get("pause_for") or []) != keep:
+            _save([{**d, "pause_here": bool(on), "pause_for": keep} if d is hit else d
+                   for d in rows])
+        return True
+
+
 def may_enrol(device: dict | None) -> bool:
     """Whether this device may pair another one, list them, or revoke one.
 

@@ -384,6 +384,12 @@ def playing_stream(token: int | None, channel: str = "speech", frame: dict | Non
         return bool(eligible) and _newest(eligible) == token
 
 
+def playing_device(channel: str = "speech") -> str | None:
+    """The device id frames for `channel` go to now (the phone playing the
+    voice), or None when no device plays it (this host's own players)."""
+    return _HUBS[channel].device()
+
+
 def output_device(channel: str) -> str | None:
     """Explicit destination, persisted separately for speech and music."""
     from agent_media_core._paths import state_dir

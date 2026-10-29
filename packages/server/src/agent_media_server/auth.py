@@ -51,6 +51,12 @@ def set_client_ip(ip: str) -> None:
     _REQ.ip = ip or ""
 
 
+def client_ip() -> str:
+    """The source address of the request this thread is answering ("" when
+    none was set)."""
+    return getattr(_REQ, "ip", "") or ""
+
+
 def set_request_bearer(bearer: str) -> None:
     """The bearer of the request this thread is answering, for
     `request_account` — set by `app.dispatch` beside the address."""

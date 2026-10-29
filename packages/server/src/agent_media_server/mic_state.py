@@ -24,7 +24,7 @@ from . import auth
 OPEN_TTL_S = 30.0
 
 _LOCK = threading.Lock()
-_OPEN: dict[str, float] = {}  # device id -> monotonic deadline
+_OPEN: dict[str, tuple[float, str]] = {}  # device id -> (monotonic deadline, address)
 
 
 def post(body, bearer: str) -> tuple[bool, dict]:
@@ -38,7 +38,7 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         return False, {"status": 400, "error": 'expected {"open": true|false}'}
     with _LOCK:
         if is_open:
-            _OPEN[dev] = time.monotonic() + OPEN_TTL_S
+            _OPEN[dev] = (time.monotonic() + OPEN_TTL_S, auth.client_ip())
         else:
             _OPEN.pop(dev, None)
     return True, {"open": is_open}
@@ -46,12 +46,18 @@ def post(body, bearer: str) -> tuple[bool, dict]:
 
 def any_open() -> bool:
     """Whether some paired device's mic is open now."""
+    return bool(open_mics())
+
+
+def open_mics() -> dict[str, str]:
+    """The devices whose mic is open now, each with the address its last
+    report came from (screens.py: is that phone at home?)."""
     now = time.monotonic()
     with _LOCK:
-        for dev, until in list(_OPEN.items()):
+        for dev, (until, _ip) in list(_OPEN.items()):
             if until <= now:
                 del _OPEN[dev]
-        return bool(_OPEN)
+        return {dev: ip for dev, (_until, ip) in _OPEN.items()}
 
 
 def _reset() -> None:

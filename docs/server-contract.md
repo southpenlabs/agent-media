@@ -2470,6 +2470,8 @@ The speech bar.
 - `pos`, `dur` and `speed` may be `null`.
 - `notif` (29 Oct 2026) is true while what is live is a notification or an
   alert (a Claude Code notification, an alert), not a reply or a question.
+- A device that pauses for speech asks `GET /screen/now` (§6.21f), not
+  this; hpo's ducker read the fields below until 30 Oct 2026.
 - `mic` (29 Oct 2026) is true while a paired device's mic is open (§6.21e),
   live or not. hpo's SMTC ducker pauses Windows media while `mic` is true,
   or `speaking` is and `thinking` is not, once it has been for 2.2 s: a beep
@@ -4855,6 +4857,41 @@ opening and closing of its mic as it happens, outbound (sasonica-app
   Windows media while `mic`, or `speaking` but not `thinking` for 2.2 s
   (§6.5), and resumes what it paused once
   both have been false for a moment.
+
+### 6.21f Devices that pause while you talk — the switch and the question (built 30 Oct 2026)
+
+David, 30 Oct 2026: "how do we make this feature a little bit more
+distributable? maybe we can have the option of assigning a media centre or
+big screen". Any paired device can pause what is playing on it while
+someone talks to the assistant or a reply is read out: a TV, a media centre,
+a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
+`docs/proposals/2026-10-30-screens-that-pause.md`.
+
+- `POST /devices/pause {"id", "on": bool, "for"?: [device ids]}` — a device
+  that may manage devices, as `/devices/role` (401/403 otherwise); 400 for a
+  bad body, 404 for an unknown id. → `{ok, id, devices}`. Every `/devices`
+  row then has `pause_here` (bool, absent until set) and `pause_for` (the
+  phones whose mic or voice may pause it; `[]` for any member's or admin's,
+  never a guest's).
+- `GET /screen/now` — any paired device, for itself. → `{ok, on, pause,
+  why}`: `on` its switch; `pause` whether it should be paused now; `why`
+  `"mic"`, `"reply"` or null. The device only pauses on `true` and resumes
+  what it paused on `false`; the rule is decided here:
+  - a counted phone's mic open (§6.21e): at once;
+  - a voice speaking, not a thinking read-out, for 2.2 s (`SPEAK_HOLD_S`): a
+    beep alone (an earcon, at most ~1.8 s) is no reason to pause (David, 30
+    Oct 2026: "spoken notifications are okay, just not for beeps alone");
+    once paused, a gap between sentences does not count;
+  - false again 1.5 s (`RESUME_AFTER_S`) after both stop.
+- **At home only.** The phone must be on the screen's network: the same
+  public address as the screen's request. For the mic, the address of its
+  last `/device/mic`; for a voice, the playing device's (`speech_frames`
+  frames device) `last_ip`, seen in the last 15 min; a voice on this host's
+  own players counts while a counted phone was so seen. A tailnet address
+  is placed at the public endpoint `tailscale status` knows its peer by (a
+  fallback). A screen whose own address is unknown (loopback) never pauses.
+- Polled: a screen with `on` false may ask once a minute; with `on`, every
+  300 ms (hpo's ducker does).
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 
