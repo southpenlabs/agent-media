@@ -744,6 +744,61 @@ class Room:
                 m["sender"].update(who[uid])
         return out
 
+    def info(self) -> dict:
+        """The log's `room` (§6.41): its name, the people in it with their
+        pictures and cards, and whether it is a group (more than one person
+        besides you and the agent)."""
+        me = (self.owner, os.environ.get("MATRIX_SAM_ID") or "")
+        with self.lock:
+            members = sorted(self.members.items())
+        out = []
+        for u, n in members:
+            m = {"id": u, "name": n}
+            if u == self.owner:
+                m["you"] = True
+            elif u not in me:
+                m.update(self._sender_extra(u))
+            out.append(m)
+        others = [m for m in out if m["id"] not in me]
+        return {"id": self.id, "name": self.title(), "members": out,
+                "group": len(others) > 1, "named": bool(self.name),
+                "network": self.network}
+
+    def rename_group(self, name: str) -> tuple[bool, dict]:
+        """The room's name as the owner (§6.41), which the bridge makes the
+        group's own name on the network."""
+        token = owner_token()
+        if not token:
+            return False, {"error": "this Matrix room is read-only: no owner token "
+                                    "(run matrix-owner-login)", "status": 409}
+        try:
+            _put(self.config, f"/rooms/{_q(self.id)}/state/m.room.name", {"name": name}, token)
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        with self.lock:
+            self.name = name
+            self.rev += 1
+        return True, {"name": name}
+
+    def leave(self) -> tuple[bool, dict]:
+        """The owner leaves the room (§6.41), which the bridge makes leaving
+        the group on the network."""
+        token = owner_token()
+        if not token:
+            return False, {"error": "this Matrix room is read-only: no owner token "
+                                    "(run matrix-owner-login)", "status": 409}
+        try:
+            _post(self.config, f"/rooms/{_q(self.id)}/leave", {}, token=token)
+        except urllib.error.HTTPError as e:
+            return False, {"error": f"the homeserver refused it ({e.code})", "status": 502}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return False, {"error": f"the homeserver could not be reached ({e})",
+                           "status": 502}
+        return True, {"left": True}
+
     def _sender_extra(self, uid: str) -> dict:
         extra: dict = {}
         mxc = self.avatars.get(uid) or ""
@@ -960,8 +1015,7 @@ def envelope(r: Room, *, limit: int, before: str = "", around: str = "",
     out = {"session": r.thread, "lines": [], "messages": messages, "older": older,
            "pending": False, "working": None, "approval": None, "suggestion": "",
            "recap": None, "context": None,
-           "room": {"id": r.id, "name": r.title(),
-                    "members": [{"id": u, "name": n} for u, n in sorted(r.members.items())]}}
+           "room": r.info()}
     if jump is not None:
         out["around"], out["newer"] = jump, jump["newer"]
     return out

@@ -6974,6 +6974,29 @@ not); from an agent's chat `text` is its words (400 when there are none).
 Each chat is tried on its own: one that refuses is in `failed` with its
 reason and the rest still get it. 400 for a bad session id or `to`.
 
+### 6.41 Group info: members, rename, leave — gated (built 30 Oct 2026)
+
+Code: `agent_media_server/room_group.py`, `matrix.Room.info`,
+`Room.rename_group`, `Room.leave`. Pinned by
+`packages/server/tests/test_room_group.py`. From the list of what the
+bridged apps do (David, 20 Oct 2026, per-chat controls: group info).
+
+**The log's `room`** (`/conversation/log` for a room, §6.2): `{"id", "name",
+"members": [{"id", "name", "you"?, "avatar"?, "contact"?}], "group",
+"named", "network"}`. `group` is true with more than one person besides
+you and the agent; `you` marks your own entry; `avatar` and `contact` as
+on a message's `sender` (§6.1).
+
+- `POST /session/group {"session", "name"}` → `{"ok", "session", "name"}`:
+  the room's `m.room.name` set as the owner, which the bridge makes the
+  group's own name. 1 to 100 characters.
+- `POST /session/leave {"session"}` → `{"ok", "session", "left": true,
+  "archived": true}`: the owner leaves the room, which the bridge makes
+  leaving the group on the network; the thread is archived.
+
+Groups only: 409 for a chat with one person, an agent's chat, or no owner
+token; 400 for a bad session id or name; 502 when the homeserver refuses.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the
