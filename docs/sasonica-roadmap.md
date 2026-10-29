@@ -1949,6 +1949,16 @@ ahead.
     most a year off), sent as the epoch `until` the server already takes;
     app only (sasonica-app `ab0e4e5`). Checked at 1.5× text on a 360 px
     screen: the sheet scrolls and its rows wrap.
+    **See what is quiet** (David, 30 Oct 2026: "how do you know which
+    [threads] and for how long they have been quieted for?") — **DONE
+    30 Oct 2026**: a Quiet choice in the Show menu of Threads, Chats and
+    Messages lists only what is quiet now, the soonest end first (until-off
+    and no-shifts last), each row with its mark, the end carrying its date
+    when it is not today ("Quiet until Tue 3 Nov, 7 am"); "Nothing is
+    quiet" when none. App only, from the rows' `quiet` and `quiet_rule`
+    (sasonica-app `2d30aa0`); a quiet mark now wraps on a narrow screen at
+    large text. A thread on a shift rule that is on shift is not quiet
+    then, so not listed.
 
 43. **A server per person on one machine** (David, 29 Oct 2026: "if
     they're stored in each other's home directory on their server, they
