@@ -1751,8 +1751,16 @@ ahead.
     private models for chats) and chats tagging themselves; a narrow box on
     Threads; and a **Chats tab** (sasonica-app `5adf430`) beside Threads and
     Messages: both kinds in one list, All · People · Agents, what needs you
-    first, Show, Tag and the narrow box across both. Next: saved views (a
-    tag or a person as a view), then Threads and Messages folded into it.
+    first, Show, Tag and the narrow box across both. **Threads folded in
+    29 Oct 2026** (David: "let's work on deprecating the threads section"):
+    Chats took Threads' Live and Closed, state, speech level, agent, Older
+    than 30 days, the server strip, Sort (Needs you first, Most recent, By
+    project with people's chats under People), the Docs link and the
+    projects' mail counts on the Spaces sheet; ☰ no longer offers Threads,
+    and archive, seal, exit, ☰'s projects and Home's All threads land on
+    Chats. `/threads` stays for old links and the e2e suites. Next: saved
+    views (a tag or a person as a view), then Messages folded in and the
+    Threads mode's code removed.
 39. **Background music under long readings** (David, 26 Oct 2026: "maybe
     we could even use dynamically selected music in the background"; "are
     there libraries of different genres we could have selectable in
