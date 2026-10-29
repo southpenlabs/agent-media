@@ -1797,6 +1797,15 @@ ahead.
     source) says it rains. `MEDIA_MUSIC_BED=off|auto|<mood>` (default
     auto); Settings → Music under long readings (`/speech/music-bed`, the
     server's list) wins.
+    **Landed 30 Oct 2026 (every reading, a bed per kind)** (David: "can we
+    have music backing on all clips… not just long ones?"; "an alert or a
+    person's message should get different music"): red5's env sets
+    `MEDIA_MUSIC_BED_MIN_S=0` and `_MIN_SENTENCES=0`; a streamed reply now
+    gets a bed too (judged on its sentences so far; the phone needs `under`
+    before the reply starts, so no late fade-in); a person's message, a
+    question card and an alert each get their own generated bed (people:
+    open major, up high; question: suspended chords, a note a bar, -27
+    dBFS; alert: Am F Dm E, a steady pulse), `MEDIA_MUSIC_BED_KINDS`.
     **Landed 26 Oct 2026 (three sources)** (David: "let's go with the
     three options for music that you gave me earlier"; "it will be good to
     use some kind of online library"). Settings → Music under long

@@ -18,11 +18,28 @@ for a LONG reading — at least ``MEDIA_MUSIC_BED_MIN_S`` (45) seconds by the
 device renderer's estimate (route/dj.py `estimate_seconds`), or at least
 ``MEDIA_MUSIC_BED_MIN_SENTENCES`` (12) sentences — and only when the
 reading's own duck found nothing playing (no music, no book, no paused
-players: `Coordinator.other_audio`). A thinking readout keeps `think`, a
-person's message `people`, a question card, an alert and anything short keep
-what they had. A streamed reply, whose length is not known when it starts,
-gets no bed. `media doc`, books and Listen play through the book channel,
-not through submit, so they get none either.
+players: `Coordinator.other_audio`). A thinking readout keeps `think`;
+anything short keeps what it had. A streamed reply is judged on the
+sentences it has when it starts (its length is not known yet), so with the
+thresholds at 0 it gets a bed too. `media doc`, books and Listen play
+through the book channel, not through submit, so they get none either.
+
+**Its own bed for each kind** (David, 30 Oct 2026: "an alert or a person's
+message should get different music"; "maybe the music can be alert
+appropriate"): an agent's reply or a `media say` gets the Settings choice;
+the other three always get a generated bed of their own (`KIND_BEDS`),
+whatever the choice's source, and nothing when the choice is off:
+
+- **people** — a person's message: open major chords in a higher, warmer
+  register than any mood, in place of the harp.
+- **question** — a question card: suspended chords that never resolve, one
+  note a bar, quieter than the rest (-27 dBFS).
+- **alert** — an alarm, reminder, timer or Home Assistant announcement: A
+  minor to E, a steady four-to-the-bar pulse and nothing waiting, so it
+  still sounds like something to look at.
+
+``MEDIA_MUSIC_BED_KINDS`` (``people,question,alert``) lists which of the
+three get theirs; ``none`` gives them back their tones.
 
 **Which mood** (`mood_for`): MEDIA_MUSIC_BED / the Settings choice, else by
 the local hour — morning 6–11, calm 11–14, blend 14–17, dusk 17–21, night
@@ -113,6 +130,13 @@ LABELS.update({"ambient": "Ambient", "piano": "Piano", "lofi": "Lo-fi",
                "jazz": "Jazz chords", "nature": "Nature (rain, stream, birds)"})
 #: Everything the generated source can play.
 GENERATED = MOODS + GENRES
+#: The beds under readings that are not an agent's reply (`wanted`'s kind):
+#: always generated, never a Settings choice.
+KIND_BEDS = ("people", "question", "alert")
+LABELS.update({"people": "A person's message", "question": "A question",
+               "alert": "An alert"})
+#: Everything rendered here.
+RENDERED = GENERATED + KIND_BEDS
 
 SOURCES = ("generated", "streaming", "library")
 SOURCE_LABELS = {"generated": "Generated", "streaming": "Your streaming music",
@@ -405,13 +429,30 @@ def pick_for(pick: Optional[str] = None, when: Optional[datetime] = None,
     return Pick(src, genre, mood if style == "auto" and mood else GENERATED_FOR[genre])
 
 
-def wanted(est_s: Optional[float], n_sentences: int) -> Optional[Pick]:
+def kinds_on() -> tuple[str, ...]:
+    """The KIND_BEDS that play (MEDIA_MUSIC_BED_KINDS, all three)."""
+    raw = os.environ.get("MEDIA_MUSIC_BED_KINDS")
+    if raw is None:
+        return KIND_BEDS
+    words = {w.strip().lower() for w in raw.split(",")}
+    return tuple(k for k in KIND_BEDS if k in words)
+
+
+def wanted(est_s: Optional[float], n_sentences: int,
+           kind: str = "reply") -> Optional[Pick]:
     """What a reading of this length should have under it, if anything,
-    before asking whether anything else is playing or a file is ready."""
+    before asking whether anything else is playing or a file is ready.
+    `kind`: "reply" (an agent's reply or a say: the Settings choice), or one
+    of KIND_BEDS (its own generated bed, while the choice is not off)."""
     try:
         if not is_long(est_s, n_sentences):
             return None
-        return pick_for()
+        pick = pick_for()
+        if kind == "reply" or pick is None:
+            return pick
+        if kind not in kinds_on():
+            return None
+        return Pick("generated", kind, kind)
     except Exception as e:  # noqa: BLE001
         log.warning("music-bed: choosing failed: %s", e)
         return None
@@ -493,7 +534,22 @@ _RECIPES = {
     "night": ([(50, [50, 57, 60, 64]), (46, [46, 53, 57, 62]),
                (43, [43, 50, 53, 57]), (45, [45, 52, 55, 60])],
               5.6, 2, 0.12, 0.4, 1.8, 1.4, 0.12, 7),
+    # The kind beds (KIND_BEDS). people: Fmaj9 G6 Em7 Am7, rootless and up
+    # high, three long notes a bar.
+    "people": ([(53, [57, 60, 64, 67]), (55, [59, 62, 64, 69]),
+                (52, [55, 59, 62, 67]), (57, [60, 64, 67, 69])],
+               4.2, 3, 0.35, 0.25, 2.0, 1.2, 0.15, 13),
+    # question: Dsus4 Gsus2 Fsus2 Asus4, one note a bar, loosely placed.
+    "question": ([(50, [50, 55, 57, 62]), (55, [55, 57, 62, 67]),
+                  (53, [53, 55, 60, 65]), (57, [57, 62, 64, 69])],
+                 5.0, 1, 0.15, 0.35, 2.6, 1.0, 0.3, 17),
+    # alert: Am F Dm E, a bar of 2.4 s, four short bright notes on the beat.
+    "alert": ([(57, [57, 60, 64, 69]), (53, [57, 60, 65, 69]),
+               (50, [57, 62, 65, 69]), (52, [56, 59, 64, 68])],
+              2.4, 4, 0.55, 0.15, 0.9, 2.4, 0.0, 19),
 }
+#: A recipe's own peak, where it is not PEAK_DBFS.
+_PEAKS = {"question": -27.0}
 
 
 def loop_seconds(mood: str) -> float:
@@ -538,10 +594,11 @@ def render(mood: str) -> list[float]:
 
 
 def synth(mood: str) -> bytes:
-    """`mood` as 16-bit mono PCM at RATE, peaking at PEAK_DBFS."""
+    """`mood` as 16-bit mono PCM at RATE, peaking at PEAK_DBFS (or its own,
+    _PEAKS)."""
     samples = render(mood)
     peak = max((abs(v) for v in samples), default=0.0) or 1.0
-    scale = (10 ** (PEAK_DBFS / 20.0)) * 32767 / peak
+    scale = (10 ** (_PEAKS.get(mood, PEAK_DBFS) / 20.0)) * 32767 / peak
     pcm = array.array("h", (int(round(v * scale)) for v in samples))
     if sys.byteorder != "little":
         pcm.byteswap()
@@ -601,7 +658,7 @@ def warm_needed() -> bool:
     """Whether the background process has work: a generated style not yet
     rendered, the weather due, or the chosen library or streaming genre
     short of tracks (and not tried lately)."""
-    if any(ready(m) is None for m in GENERATED) or weather_stale():
+    if any(ready(m) is None for m in RENDERED) or weather_stale():
         return True
     parsed = parse(choice())
     if parsed is None:
@@ -658,7 +715,7 @@ def warm() -> int:
             refresh_weather()
         done = 0
         first = pick_for()
-        order = ([first.fallback] if first else []) + list(GENERATED)
+        order = ([first.fallback] if first else []) + list(RENDERED)
         for style in dict.fromkeys(order):
             if ready(style) is None:
                 write(style)
@@ -1002,7 +1059,7 @@ def main(argv: list[str]) -> int:
     if cmd == "warm":
         warm()
         return 0
-    if cmd == "render" and len(argv) > 2 and argv[2] in GENERATED:
+    if cmd == "render" and len(argv) > 2 and argv[2] in RENDERED:
         print(write(argv[2]))
         return 0
     print("usage: python -m agent_media_core.music_bed warm | render <style>",

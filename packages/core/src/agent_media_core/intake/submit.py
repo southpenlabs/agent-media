@@ -5151,22 +5151,24 @@ def _submit_event(event: Event,
                           and not (event.metadata or {}).get("ask"))
             people_tone = (not thinking and not reply_tone
                            and _people_message(event))
-            # The music bed (music_bed.py, roadmap 39): in place of the reply
+            # The music bed (music_bed.py, roadmap 39): in place of the
             # tone, or of no tone, under a LONG reading with nothing else
-            # playing. Never under a thought, a person's message, a question
-            # card or an alert, and never for a streamed reply (its length is
-            # unknown as it starts). Whether anything else plays is what the
-            # duck found, so it waits on before_speech, bounded and only for
-            # a reading that wants a bed.
-            # The source (generated, his streaming music, the online
+            # playing (a streamed reply is judged on the sentences it has so
+            # far). Never under a thought. A person's message, a question
+            # card and an alert each get a bed of their own kind (David,
+            # 30 Oct 2026). Whether anything else plays is what the duck
+            # found, so it waits on before_speech, bounded and only for a
+            # reading that wants a bed.
+            # A reply's source (generated, his streaming music, the online
             # library) is Settings'; `choose` falls back to generated.
             bed_plan = None
-            if (not thinking and not people_tone and not arriving
-                    and not (event.metadata or {}).get("ask")
-                    and not _alert_class(event)):
+            if not thinking:
                 from .. import music_bed
+                _bed_kind = ("alert" if _alert_class(event)
+                             else "question" if (event.metadata or {}).get("ask")
+                             else "people" if people_tone else "reply")
                 _bed_pick = music_bed.wanted(_dj.estimate_seconds(text),
-                                             len(sentences))
+                                             len(sentences), _bed_kind)
                 if _bed_pick and music_bed.ready_or_warm(_bed_pick, target):
                     _before_thread.join(timeout=music_bed.probe_wait_s())
                     bed_plan = music_bed.choose(
@@ -5175,10 +5177,11 @@ def _submit_event(event: Event,
             if bed_plan is not None:
                 from .. import music_bed
                 bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
-                if not bed_tone and bed_stop is None and reply_tone:
+                if not bed_tone and bed_stop is None and (reply_tone or people_tone):
                     from .. import earcons
-                    earcons.play_under(earcons.reply_name(_reply_folder(event.metadata)),
-                                       target, sink, loop=True)
+                    earcons.play_under(
+                        earcons.reply_name(_reply_folder(event.metadata))
+                        if reply_tone else "people", target, sink, loop=True)
             elif thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,

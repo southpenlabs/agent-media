@@ -218,9 +218,20 @@ def night(monkeypatch):
 
 
 def test_every_mood_has_a_recipe_of_30_to_45_seconds():
-    assert set(B.MOODS) == set(B._RECIPES)
+    assert set(B.MOODS) | set(B.KIND_BEDS) == set(B._RECIPES)
     for mood in B.MOODS:
         assert 28.0 <= B.loop_seconds(mood) <= 45.0
+
+
+def test_each_kind_bed_is_its_own_loop():
+    """people, question and alert: a recipe each, unlike any mood's, an
+    alert's loop the quickest and a question's the quietest."""
+    recipes = [B._RECIPES[k][0] for k in B.MOODS + B.KIND_BEDS]
+    assert len({repr(r) for r in recipes}) == len(recipes)
+    assert B.loop_seconds("alert") < min(B.loop_seconds(m) for m in B.MOODS)
+    assert B._PEAKS["question"] < B.PEAK_DBFS
+    assert set(B.KIND_BEDS) <= set(B.RENDERED)
+    assert not set(B.KIND_BEDS) & set(B.CHOICES)       # never a Settings choice
 
 
 def test_the_loop_seam_has_no_click(night):
@@ -306,14 +317,56 @@ def test_off_keeps_the_tone(monkeypatch, tmp_path):
     assert len(unders) == 1 and unders[0].startswith("earcon-reply-")
 
 
-def test_thoughts_people_questions_and_alerts_keep_theirs(monkeypatch, tmp_path):
+def test_a_thought_keeps_its_tone(monkeypatch, tmp_path):
     _fake_ready(monkeypatch, tmp_path)
     monkeypatch.setattr(S, "_thinking_done", lambda: False, raising=False)
     assert all(not u.startswith("music-bed") for u in speak(LONG, thinking=True).unders())
+
+
+def test_people_questions_and_alerts_get_a_bed_of_their_own(monkeypatch, tmp_path):
+    """Whatever the reply's choice (here his streaming music), each kind
+    gets its own generated bed."""
+    _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_MUSIC_BED", "streaming:jazz")
+    v = B.VERSION
+    assert speak(LONG, source=Source.MATRIX).unders() == [f"music-bed-people-v{v}.wav"]
+    assert speak(LONG, ask=True).unders() == [f"music-bed-question-v{v}.wav"]
+    assert speak(LONG, source=Source.CLI, alert=True).unders() == [
+        f"music-bed-alert-v{v}.wav"]
+
+
+def test_kind_beds_follow_off_and_their_own_switch(monkeypatch, tmp_path):
+    _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_MUSIC_BED", "off")
     assert speak(LONG, source=Source.MATRIX).unders()[0].startswith("earcon-people")
-    assert all(not u.startswith("music-bed") for u in speak(LONG, ask=True).unders())
+    monkeypatch.setenv("MEDIA_MUSIC_BED", "auto")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_KINDS", "question")
+    assert speak(LONG, source=Source.MATRIX).unders()[0].startswith("earcon-people")
     assert all(not u.startswith("music-bed")
                for u in speak(LONG, source=Source.CLI, alert=True).unders())
+    assert speak(LONG, ask=True).unders() == [f"music-bed-question-v{B.VERSION}.wav"]
+
+
+def test_a_short_reading_gets_one_with_the_thresholds_at_zero(monkeypatch, tmp_path):
+    _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_MUSIC_BED", "calm")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_MIN_S", "0")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_MIN_SENTENCES", "0")
+    assert speak(SHORT).unders() == [f"music-bed-calm-v{B.VERSION}.wav"]
+    assert speak(SHORT, source=Source.MATRIX).unders() == [
+        f"music-bed-people-v{B.VERSION}.wav"]
+
+
+def test_a_streamed_reply_gets_one(monkeypatch, tmp_path):
+    _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_MUSIC_BED", "dusk")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_MIN_SENTENCES", "0")
+    sink = Sink()
+    S.submit_stream(iter(["The first sentence.", "And the second."]),
+                    Event("", Source.PI, Priority.NORMAL, target=Target("local"),
+                          metadata={"session": "bed-test"}),
+                    state=StateStore(), sink=sink, coordinator=Coord())
+    assert sink.unders() == [f"music-bed-dusk-v{B.VERSION}.wav"]
 
 
 def test_a_long_reply_plays_a_library_track_with_its_credit(monkeypatch, tmp_path):
