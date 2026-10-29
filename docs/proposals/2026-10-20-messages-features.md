@@ -83,6 +83,10 @@ network to tell. The same day, also a setting for every chat (Settings →
 Messages; David: "Can Mark read when opened also be a system wide
 setting?"), and with it off a Mark read button under the newest message.
 Ticks and "typing…" are not built yet.
+Sending media (2) built 29 Oct 2026 (§6.33): attached photos and files go
+to a room as themselves, and a voice clip (a key beside attach: record, ✕
+or ✓, then Send, as a reply too) goes as a voice note. In an agent chat a
+clip is an attached audio file; the agent cannot hear it.
 
 Second round, all chosen (David, 20 Oct 2026):
 

@@ -1706,8 +1706,12 @@ ahead.
     setting for every chat in Settings → Messages, which a chat's ⋮ can
     override, and with it off a Mark read button under the newest message
     (David, 29 Oct 2026; `37caf4a6`, sasonica-app `3986485`). Still to do
-    in that group: ticks (others' receipts on yours) and "typing…". Next on
-    the list: sending media.
+    in that group: ticks (others' receipts on yours) and "typing…".
+    **Sending media built 29 Oct 2026**: a room gets an attached photo or
+    file as itself (never a path), and a voice clip recorded beside attach
+    as the network's voice note (§6.33; agent-media `2181d2e4`,
+    sasonica-app `d045654`). In an agent chat the clip is an attached file
+    the agent can open but not hear (no speech-to-text on the server).
 
 35. **Mail in Sasonica** (David, 20 Oct 2026: "I'd like to handle emails
     from Sasonica"). Both a Mail tab (accounts, folders, search, compose)
