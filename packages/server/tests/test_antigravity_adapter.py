@@ -35,6 +35,12 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(sessiond, 'mem_available_mb', lambda: None)
     spoken = []
     monkeypatch.setattr(agy, 'speak', lambda s, text: spoken.append((s.id, text)))
+    # The question hooks run the real intake in daemon threads (agy-ask-pre,
+    # agy-ask-post). Left real, one was still opening the test's state.db when
+    # pytest tore the tmp dir down, and the process hung at exit for a day
+    # (28 Oct 2026, pid stuck in futex_wait at interpreter shutdown).
+    monkeypatch.setattr(agy, '_ask_pre', lambda *a, **k: None)
+    monkeypatch.setattr(agy, '_ask_post', lambda *a, **k: None)
     fake = tmp_path / 'fake-agy'
     fake.write_text('''#!/usr/bin/env python3
 import json,sys,uuid,os
