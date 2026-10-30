@@ -9,8 +9,10 @@ Every assistant line in a transcript carries the request's `message.usage`:
 The three input counts together are what the model was sent: the context in
 use at that reply. The newest such line is the answer, so it is found by
 reading backwards from the end, which is one chunk on any live session (it
-writes one every turn). After a /compact the next reply's count is the
-smaller context, so nothing special is done for it.
+writes one every turn). A /compact writes a `compact_boundary` line whose
+`compactMetadata.postTokens` is the smaller context; until the next reply
+that is the answer, with the model of the reply before it (a compacted
+thread showed 88% until it was next spoken to, David, 30 Oct 2026).
 
 The transcript does not say how big the window is. It is worked out the
 way the context hook does it (`agent_media_core.intake.context.window`):
@@ -33,6 +35,8 @@ from . import recaps
 
 #: Every line with a usage block has this; a line without it is never parsed.
 _MARK = b'"cache_read_input_tokens"'
+#: And a /compact's line has this.
+_COMPACT = b'"compact_boundary"'
 _CHUNK = 256 * 1024
 #: Give up after this much of the end without a usage line: a transcript
 #: whose last reply is further back than this is not worth a full read.
@@ -49,15 +53,26 @@ def _reset_for_tests() -> None:
         _CACHE.clear()
 
 
-def _used(raw: bytes) -> tuple[int, str] | None:
+def _compacted(rec: dict) -> int | None:
+    """The context left by a /compact, if `rec` is its boundary line."""
+    if rec.get("type") != "system" or rec.get("subtype") != "compact_boundary":
+        return None
+    meta = rec.get("compactMetadata")
+    post = meta.get("postTokens") if isinstance(meta, dict) else None
+    return post if isinstance(post, int) and post > 0 else None
+
+
+def _used(raw: bytes) -> tuple[int, str] | int | None:
     """The input tokens of one transcript line and the model that answered,
-    or None if it has none."""
+    the context a /compact left (an int), or None if it has neither."""
     try:
         rec = json.loads(raw)
     except ValueError:
         return None
-    if not isinstance(rec, dict) or rec.get("type") != "assistant" or rec.get("isSidechain"):
+    if not isinstance(rec, dict):
         return None
+    if rec.get("type") != "assistant" or rec.get("isSidechain"):
+        return _compacted(rec)
     msg = rec.get("message")
     usage = msg.get("usage") if isinstance(msg, dict) else None
     if not isinstance(usage, dict):
@@ -69,7 +84,9 @@ def _used(raw: bytes) -> tuple[int, str] | None:
 
 
 def _last_used(path: str, size: int) -> tuple[int, str] | None:
-    """The newest usage in the file, reading backwards from `size`."""
+    """The newest usage in the file, reading backwards from `size`: a
+    /compact newer than the last reply gives its count, that reply's model."""
+    post = None
     with open(path, "rb") as fh:
         carry = b""
         pos = size
@@ -89,7 +106,7 @@ def _last_used(path: str, size: int) -> tuple[int, str] | None:
                 carry = b""
             end = len(buf)
             while True:
-                i = buf.rfind(_MARK, 0, end)
+                i = max(buf.rfind(_MARK, 0, end), buf.rfind(_COMPACT, 0, end))
                 if i < 0:
                     break
                 start = buf.rfind(b"\n", 0, i) + 1
@@ -97,10 +114,13 @@ def _last_used(path: str, size: int) -> tuple[int, str] | None:
                 if stop < 0:
                     stop = len(buf)
                 used = _used(buf[start:stop])
-                if used is not None:
-                    return used
+                if isinstance(used, int):
+                    if post is None:
+                        post = used
+                elif used is not None:
+                    return (post, used[1]) if post is not None else used
                 end = start
-    return None
+    return (post, "") if post is not None else None
 
 
 def _window(session: str, used: int, model: str) -> int:

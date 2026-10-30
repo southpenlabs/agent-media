@@ -51,6 +51,22 @@ def test_sidechain_and_synthetic_lines_do_not_count():
     assert context.context_for(SID)["used"] == 30000
 
 
+def _compact(post: int) -> str:
+    return json.dumps({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+                       "content": "Conversation compacted",
+                       "compactMetadata": {"trigger": "manual", "preTokens": 176_819,
+                                           "postTokens": post}})
+
+
+def test_a_compact_is_the_context_until_the_next_reply():
+    # A thread compacted from 177k showed 88% until it was next spoken to.
+    path = _transcript(SID, [_reply(1, 0, 0, 176_819, model="claude-opus-5-5"),
+                             _compact(14_499), _user(1)])
+    assert context.context_for(SID) == {"used": 14_499, "window": 1_000_000}
+    _append(path, [_reply(2, 0, 0, 20_000)])
+    assert context.context_for(SID)["used"] == 20_000
+
+
 def test_no_reply_yet_is_none():
     _transcript(SID, [_user(1), _msg(1)])
     assert context.context_for(SID) is None
