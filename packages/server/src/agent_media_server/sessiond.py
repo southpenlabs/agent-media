@@ -3021,6 +3021,18 @@ def main(argv: list[str] | None = None) -> int:
     log.info("sessiond: listening on %s (%d records)", where, len(sup.sessions))
     done = threading.Event()
 
+    def memory() -> None:
+        # The host's memory watch (memwatch.py): only the daemon runs it, not
+        # serve(), so a test's sessiond never reports an alert.
+        from . import memwatch
+        w = memwatch.Watch()
+        while not done.wait(30.0):
+            try:
+                w.tick()
+            except Exception:  # noqa: BLE001
+                log.exception("sessiond: memory watch")
+    threading.Thread(target=memory, daemon=True, name="sessiond-memwatch").start()
+
     def on_term(*_a) -> None:
         done.set()
     signal.signal(signal.SIGTERM, on_term)

@@ -165,10 +165,26 @@ def test_an_unreadable_root_is_unknown_and_a_vanished_child_is_skipped(fake_proc
     assert procmem.tree_mem_mb({"a": 100, "b": 200}) == {"a": 150, "b": None}
 
 
+NONE = {"swap_total_mb": None, "swap_free_mb": None, "mem_stall_pct": None}
+
+
 def test_host_memory_from_meminfo(fake_proc):
-    assert procmem.host_mem() == {"mem_total_mb": 7866, "mem_available_mb": 1434}
+    assert procmem.host_mem() == {"mem_total_mb": 7866, "mem_available_mb": 1434, **NONE}
     (fake_proc / "meminfo").write_text("MemTotal: 8054400 kB\n")
-    assert procmem.host_mem() == {"mem_total_mb": 7866, "mem_available_mb": None}
+    assert procmem.host_mem() == {"mem_total_mb": 7866, "mem_available_mb": None, **NONE}
+
+
+def test_host_memory_carries_swap_and_the_stall(fake_proc):
+    (fake_proc / "meminfo").write_text("MemTotal: 8054400 kB\nMemAvailable: 1468000 kB\n"
+                                       "SwapTotal: 10151932 kB\nSwapFree: 1048576 kB\n")
+    (fake_proc / "pressure").mkdir()
+    (fake_proc / "pressure" / "memory").write_text(
+        "some avg10=8.09 avg60=6.33 avg300=3.56 total=25287968401\n"
+        "full avg10=2.87 avg60=2.35 avg300=1.56 total=16323835624\n")
+    assert procmem.host_mem() == {"mem_total_mb": 7866, "mem_available_mb": 1434,
+                                  "swap_total_mb": 9914, "swap_free_mb": 1024,
+                                  "mem_stall_pct": 2.4}
+    assert procmem.pressure("some", "avg300") == 3.56
 
 
 def test_sessions_state_carries_memory_and_the_host(server, shelf, signed_in, fake_proc,
@@ -179,8 +195,8 @@ def test_sessions_state_carries_memory_and_the_host(server, shelf, signed_in, fa
     res, obj = call(server, "GET", "/sessions/state", headers=AUTH)
     assert res.status == 200, obj
     assert {r["session"]: r["mem_mb"] for r in obj["sessions"]} == {SID2: 175, SID: 10}
-    assert obj["host"] == {"mem_total_mb": 7866, "mem_available_mb": 1434,
-                           "sessions_mem_mb": 185}
+    assert obj["host"] == {"mem_total_mb": 7866, "mem_available_mb": 1434, **NONE,
+                           "strained": None, "sessions_mem_mb": 185}
 
 
 def test_live_sessions_records_the_pids_it_found(monkeypatch):

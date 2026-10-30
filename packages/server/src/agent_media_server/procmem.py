@@ -102,14 +102,44 @@ def tree_mem_mb(roots: dict[str, int | None]) -> dict[str, int | None]:
     return out
 
 
-def host_mem() -> dict[str, int | None]:
-    """`{"mem_total_mb", "mem_available_mb"}` from `/proc/meminfo`; None for a
-    value that is missing or unreadable (MemAvailable is absent before 3.14)."""
+def pressure(kind: str = "full", window: str = "avg60") -> float | None:
+    """A memory-pressure average from `/proc/pressure/memory` (PSI, Linux 4.20+):
+    the % of the last `window` (avg10 / avg60 / avg300) in which `some` task,
+    or with `full` every task, was stalled waiting for memory — swapping in,
+    reclaiming. None where PSI is absent (an old kernel, Termux, a container).
+
+    It is what tells a host that is full apart from one that is thrashing: on
+    red5 on 30 Oct 2026, with swap 99% full, `full avg60` sat at ~2 % once one
+    stale Gradle daemon was gone, while the load of ~80 before it was the
+    stall itself."""
+    try:
+        text = (PROC / "pressure" / "memory").read_text()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and parts[0] == kind:
+            for field in parts[1:]:
+                k, _, v = field.partition("=")
+                if k == window:
+                    try:
+                        return float(v)
+                    except ValueError:
+                        return None
+    return None
+
+
+def host_mem() -> dict:
+    """`{"mem_total_mb", "mem_available_mb", "swap_total_mb", "swap_free_mb",
+    "mem_stall_pct"}`: the first four from `/proc/meminfo`, None for a value
+    that is missing or unreadable (MemAvailable is absent before 3.14);
+    `mem_stall_pct` is `pressure("full", "avg60")`, rounded to 0.1."""
+    keys = ("MemTotal", "MemAvailable", "SwapTotal", "SwapFree")
     found: dict[str, int] = {}
     try:
         for line in (PROC / "meminfo").read_text().splitlines():
             key, _, rest = line.partition(":")
-            if key in ("MemTotal", "MemAvailable"):
+            if key in keys:
                 parts = rest.split()
                 if parts and parts[0].isdigit():
                     kb = int(parts[0])
@@ -122,4 +152,38 @@ def host_mem() -> dict[str, int | None]:
     def mb(key: str) -> int | None:
         return round(found[key] / _MB) if key in found else None
 
-    return {"mem_total_mb": mb("MemTotal"), "mem_available_mb": mb("MemAvailable")}
+    stall = pressure("full", "avg60")
+    return {"mem_total_mb": mb("MemTotal"), "mem_available_mb": mb("MemAvailable"),
+            "swap_total_mb": mb("SwapTotal"), "swap_free_mb": mb("SwapFree"),
+            "mem_stall_pct": None if stall is None else round(stall, 1)}
+
+
+def top_processes(n: int = 5) -> list[dict]:
+    """The `n` processes holding the most memory, resident plus swapped:
+    `[{"pid", "name", "rss_mb", "swap_mb"}]`, biggest first. For the memory
+    alert's detail — what to stop when the host is thrashing."""
+    rows = []
+    try:
+        entries = [e for e in os.listdir(PROC) if e.isdigit()]
+    except OSError:
+        return []
+    for pid in entries:
+        name, rss, swap = "", 0, 0
+        try:
+            for line in (PROC / pid / "status").read_text().splitlines():
+                k, _, v = line.partition(":")
+                if k == "Name":
+                    name = v.strip()
+                elif k in ("VmRSS", "VmSwap"):
+                    kb = int(v.split()[0])
+                    if k == "VmRSS":
+                        rss = kb
+                    else:
+                        swap = kb
+        except (OSError, ValueError, IndexError):
+            continue
+        if rss or swap:
+            rows.append({"pid": int(pid), "name": name, "rss_mb": round(rss / 1024),
+                         "swap_mb": round(swap / 1024)})
+    rows.sort(key=lambda r: r["rss_mb"] + r["swap_mb"], reverse=True)
+    return rows[:n]

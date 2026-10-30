@@ -236,7 +236,8 @@ def test_sessions_state_shape(server, shelf, signed_in):
     title = next(r["title"] for r in targets["sessions"] if r["session"] == SID2)
     assert obj["sessions"] == [{"session": SID2, "tail": "", "state": "working",
                                 "mem_mb": None, "title": title}]
-    assert keys(obj["host"]) == {"mem_total_mb", "mem_available_mb", "sessions_mem_mb"}
+    assert keys(obj["host"]) == {"mem_total_mb", "mem_available_mb", "swap_total_mb",
+                                 "swap_free_mb", "mem_stall_pct", "strained", "sessions_mem_mb"}
     assert obj["host"]["sessions_mem_mb"] == 0
 
 

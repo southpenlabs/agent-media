@@ -566,7 +566,9 @@ What each live session is doing.
 {"ok": true,
  "sessions": [{"session": "0f1e…", "tail": "p-agent-media/Sasonica web", "state": "working",
                "mem_mb": 364, "title": "Sasonica web"}],
- "host": {"mem_total_mb": 7758, "mem_available_mb": 1568, "sessions_mem_mb": 3009}}
+ "host": {"mem_total_mb": 7758, "mem_available_mb": 1568, "swap_total_mb": 9914,
+          "swap_free_mb": 1210, "mem_stall_pct": 2.4, "strained": false,
+          "sessions_mem_mb": 3009}}
 ```
 
 - `state`: `working` | `waiting` (has answered, waiting on you) |
@@ -607,6 +609,17 @@ What each live session is doing.
   `/proc/meminfo` (`null` if missing), and `sessions_mem_mb`, the sum of the
   rows' known `mem_mb` (0 with no rows). What the phone needs to say "ten
   sessions hold 3 GB of 7.7, 1.5 left — close some".
+  `swap_total_mb` and `swap_free_mb` (30 Oct 2026) are `/proc/meminfo`'s
+  SwapTotal and SwapFree (`null` if missing). `mem_stall_pct` is the share
+  of the last minute in which every task was stalled waiting for memory
+  (`/proc/pressure/memory`, `full avg60`, to 0.1; `null` without PSI), and
+  `strained` is `mem_stall_pct ≥ MEDIA_MEM_STRAIN_PCT` (10): the host is
+  thrashing, not merely full — swap can sit at 99 % with a stall near 0
+  (`null` without PSI). sessiond watches the same figure every 30 s and
+  raises the status alert `memory.<host>` (§6.17, `warn`) after four
+  strained samples in a row, naming the processes holding the most memory;
+  it clears under half the line (`memwatch.py`; `MEDIA_MEM_STRAIN_TICKS`,
+  `MEDIA_MEMWATCH=0` for none).
 - Cached 3 s server-side (each poll is a /proc sweep and a capture per pane).
   Memory is computed inside the same cached sweep: the pids come from the
   sweep that finds the sessions, and one more pass over `/proc` (each
@@ -3709,12 +3722,14 @@ machines are. Code: `agent_media_server/dashboard.py`. Pinned by
             {"name": "pi", "present": true}, {"name": "hermes", "present": true}],
  "hosts": [{"name": "red5", "role": "origin,render", "local": true, "online": true, "last_seen": null,
             "sessions": 3, "mem_used_mb": 5269, "mem_total_mb": 7758, "mem_available_mb": 2489,
+            "swap_total_mb": 9914, "swap_free_mb": 1210, "mem_stall_pct": 2.4, "strained": false,
             "sessions_mem_mb": 943, "tight": false,
             "reaper": {"mode": "apply", "last_run_at": 1790053206.0, "closed_last_run": 0},
             "shell": {"service": "sasonica-shell", "active": true},
             "sessiond": {"service": "agent-media-sessiond", "active": true}},
            {"name": "hpo", "role": "peer", "local": false, "online": true, "last_seen": 1790000400.1,
             "sessions": null, "mem_used_mb": null, "mem_total_mb": null, "mem_available_mb": null,
+            "swap_total_mb": null, "swap_free_mb": null, "mem_stall_pct": null, "strained": null,
             "sessions_mem_mb": null, "tight": null, "reaper": null, "shell": null, "sessiond": null}]}
 ```
 
@@ -3784,7 +3799,8 @@ machines are. Code: `agent_media_server/dashboard.py`. Pinned by
   joined, `""` when none are declared; memory from `/proc/meminfo`
   (`mem_used_mb` = total − available), `sessions` and `sessions_mem_mb` from
   the `/sessions/state` sweep, `tight` the idle reaper's rule (§6.1
-  Resting); `reaper` is the last run in `session-reap.log` (the lines sharing
+  Resting); `swap_total_mb`, `swap_free_mb`, `mem_stall_pct` and `strained`
+  as in `/sessions/state`'s `host` (§6.1, 30 Oct 2026); `reaper` is the last run in `session-reap.log` (the lines sharing
   its newest stamp: its `mode`, when, how many it closed; all null/0 with no
   log); `shell` and `sessiond` are `systemctl --user is-active` of
   `sasonica-shell` and `agent-media-sessiond` (`MEDIA_DASHBOARD_SHELL_UNIT`,

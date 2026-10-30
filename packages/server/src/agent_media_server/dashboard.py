@@ -481,7 +481,9 @@ def _machines() -> tuple[list[dict], list[dict]]:
                       "online": seen["online"] if seen else None,
                       "last_seen": seen["last_seen"] if seen else None,
                       "sessions": None, "mem_used_mb": None, "mem_total_mb": None,
-                      "mem_available_mb": None, "sessions_mem_mb": None, "tight": None,
+                      "mem_available_mb": None, "swap_total_mb": None, "swap_free_mb": None,
+                      "mem_stall_pct": None, "strained": None,
+                      "sessions_mem_mb": None, "tight": None,
                       "reaper": None, "shell": None, "sessiond": None})
     agents = [{"name": n, "present": bool(harnesses.program(n))} for n in harnesses.HARNESSES]
     return [local] + peers, agents
@@ -503,7 +505,7 @@ def _hosts_cached() -> tuple[list[dict], list[dict]]:
 
 
 def _hosts(live_rows: list[dict], host: dict) -> tuple[list[dict], list[dict]]:
-    from . import reap
+    from . import memwatch, reap
 
     fixed, agents = _hosts_cached()
     local, peers = dict(fixed[0]), [dict(p) for p in fixed[1:]]
@@ -512,10 +514,13 @@ def _hosts(live_rows: list[dict], host: dict) -> tuple[list[dict], list[dict]]:
         "local": True, "online": True, "last_seen": None, "sessions": len(live_rows),
         "mem_used_mb": total - avail if total is not None and avail is not None else None,
         "mem_total_mb": total, "mem_available_mb": avail,
+        "swap_total_mb": host.get("swap_total_mb"), "swap_free_mb": host.get("swap_free_mb"),
+        "mem_stall_pct": host.get("mem_stall_pct"), "strained": memwatch.strained(host),
         "sessions_mem_mb": host.get("sessions_mem_mb"),
         "tight": reap.is_tight(host, reap.Config.from_env()) if avail is not None else None})
     order = ("name", "role", "local", "online", "last_seen", "sessions", "mem_used_mb",
-             "mem_total_mb", "mem_available_mb", "sessions_mem_mb", "tight", "reaper",
+             "mem_total_mb", "mem_available_mb", "swap_total_mb", "swap_free_mb",
+             "mem_stall_pct", "strained", "sessions_mem_mb", "tight", "reaper",
              "shell", "sessiond")
     return [{k: local[k] for k in order}] + peers, agents
 

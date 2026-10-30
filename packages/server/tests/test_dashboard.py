@@ -22,7 +22,8 @@ from test_contract import (AUTH, SID, SID2, call, keys, server, shelf,  # noqa: 
 
 TOP = {"ok", "at", "needs_you", "working", "speech", "recent", "replies", "places", "agents", "hosts", "digests", "alerts", "signins"}
 HOST = {"name", "role", "local", "online", "last_seen", "sessions", "mem_used_mb",
-        "mem_total_mb", "mem_available_mb", "sessions_mem_mb", "tight", "reaper",
+        "mem_total_mb", "mem_available_mb", "swap_total_mb", "swap_free_mb",
+        "mem_stall_pct", "strained", "sessions_mem_mb", "tight", "reaper",
         "shell", "sessiond"}
 TAILSCALE = {"Self": {"HostName": "red5"},
              "Peer": {"k1": {"HostName": "hpo", "DNSName": "hpo.example.ts.net.",
@@ -129,8 +130,9 @@ def test_shape_while_working(server, shelf, signed_in, machine):
     assert red5["sessiond"] == {"service": "agent-media-sessiond", "active": False}
     assert hpo == {"name": "hpo", "role": "peer", "local": False, "online": False,
                    "last_seen": 1790000400.1, "sessions": None, "mem_used_mb": None,
-                   "mem_total_mb": None, "mem_available_mb": None, "sessions_mem_mb": None,
-                   "tight": None, "reaper": None, "shell": None, "sessiond": None}
+                   "mem_total_mb": None, "mem_available_mb": None, "swap_total_mb": None,
+                   "swap_free_mb": None, "mem_stall_pct": None, "strained": None,
+                   "sessions_mem_mb": None, "tight": None, "reaper": None, "shell": None, "sessiond": None}
 
 
 def test_a_permission_prompt_needs_you_with_its_approval(server, shelf, signed_in, machine,

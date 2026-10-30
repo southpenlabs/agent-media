@@ -1074,8 +1074,11 @@ def _live_states() -> list[dict]:
 
 def _host(rows: list[dict]) -> dict:
     """The envelope's `host` block: the machine's memory, and how much of it
-    the listed sessions hold (the sum of the rows' known `mem_mb`)."""
-    return {**procmem.host_mem(),
+    the listed sessions hold (the sum of the rows' known `mem_mb`), and
+    whether it is thrashing (`memwatch.strained`)."""
+    from . import memwatch
+    host = procmem.host_mem()
+    return {**host, "strained": memwatch.strained(host),
             "sessions_mem_mb": sum(r.get("mem_mb") or 0 for r in rows)}
 
 
