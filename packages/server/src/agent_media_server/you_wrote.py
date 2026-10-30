@@ -41,8 +41,14 @@ import re
 import threading
 
 #: User-side words that are not the listener: agent mail and the session
-#: host's notes (`[From …]`), an interrupt, another session's raw message.
-_NOT_YOU = re.compile(r"^(\[(From |Request interrupted)|<cross-session-message\b)")
+#: host's notes (`[From …]`), an interrupt, another session's raw message, a
+#: subagent's hand-back or a task's notice (`<agent-message`,
+#: `<task-notification`, a system reminder or notification), and a job run
+#: on a timer, whose prompt opens with `[Scheduled: <what>]` (David, 30 Oct
+#: 2026: "leave out the ones not sent by me").
+_NOT_YOU = re.compile(
+    r"^(\[(From |Request interrupted|Scheduled[:\]]|SYSTEM NOTIFICATION)"
+    r"|<(cross-session-message|agent-message|task-notification|system-reminder)\b)")
 
 
 def yours(msg: dict) -> bool:

@@ -125,3 +125,17 @@ def test_targets_rows_carry_both(monkeypatch, path):
     monkeypatch.setattr(sessions, "_agent_of_pane", lambda p: "claude")
     row = next(r for r in sessions.sessions_index() if r["session"] == SID)
     assert (row["you_at"], row["last_from_you"]) == (200.0, True)
+
+
+def test_not_the_listeners_words():
+    # Agent mail, a subagent's hand-back, a task's notice, a system note and a
+    # job on a timer are not David's (David, 30 Oct 2026: "leave out the ones
+    # not sent by me"); his own words are, a bracket or angle in them or not.
+    msg = lambda t: {"role": "user", "parts": [{"type": "text", "text": t}]}  # noqa: E731
+    for t in ("[From Cece] hello", '<agent-message from="a1"> done', "<task-notification> x",
+              "<system-reminder> y", "[SYSTEM NOTIFICATION - NOT USER INPUT] z",
+              "[Scheduled: landscape watch] You are the weekly landscape watch",
+              "[Request interrupted by user]", "<cross-session-message> m"):
+        assert not you_wrote.yours(msg(t)), t
+    for t in ("play me some tunes", "[draft] my own words", "<b>bold</b> idea", "Scheduled the dentist?"):
+        assert you_wrote.yours(msg(t)), t

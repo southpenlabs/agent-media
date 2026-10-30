@@ -19,7 +19,7 @@ MODEL="${LANDSCAPE_MODEL:-sonnet}"
 cd "$REPO"
 prev="$(ls "$DIR"/20??-??-??.md 2>/dev/null | grep -v "$TODAY" | sort | tail -1 || true)"
 
-prompt="You are the weekly landscape watch for agent-media and Sasonica (a phone
+prompt="[Scheduled: landscape watch] You are the weekly landscape watch for agent-media and Sasonica (a phone
 chat/voice front-end for coding agents; see docs/sasonica-roadmap.md for what we
 are building now).
 
