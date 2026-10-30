@@ -327,3 +327,24 @@ def test_a_phone_is_told_the_bed_before_the_playlist_starts(monkeypatch, tmp_pat
     assert sink.unders() == [f"music-bed-dusk-v{B.VERSION}.wav"]
     # The app ends it with the reply: the follower is not handed it too.
     assert spawned and "--under" not in spawned[0]
+
+
+def test_a_held_reply_with_nothing_recorded_gets_a_bed_chosen_now(monkeypatch):
+    """A held reply never went through submit's bed; Play then found no
+    record and played nothing (David, 31 Oct 2026: 'that one was silent')."""
+    from agent_media_core import music_bed as mb
+    from agent_media_core import music_bed_replay as R
+    pick = mb.Pick("generated", "calm", "calm")
+    plan = mb.Plan("under", "generated", "calm", path=None)
+    monkeypatch.setattr(mb, "wanted", lambda est, n, kind="reply": pick)
+    monkeypatch.setattr(mb, "ready_or_warm", lambda p, target=None: True)
+    monkeypatch.setattr(mb, "choose", lambda p, other, target=None: plan if other is False else None)
+    ex = {"cwd": "/home/x/projects/agent-media", "held": True,
+          "clip_durations_s": [3.0, 4.0], "clip_sentences": ["a", "b"]}
+    out = R.resolve(ex, None, other_audio=lambda: False)
+    assert out["plan"] is plan and out["tone"].startswith("reply-")
+    # Something else playing: the reply's tone instead.
+    out = R.resolve(ex, None, other_audio=lambda: True)
+    assert "plan" not in out and out["tone"].startswith("reply-")
+    # The listener's own words get nothing.
+    assert R.resolve({"listener": True}, None, other_audio=lambda: False) is None

@@ -144,6 +144,31 @@ def _same_plan(rec: dict, target):
     return mb.Plan("under", source, style, path=p, credit=credit)
 
 
+def _afresh(ex: dict, target, other_audio=None) -> Optional[dict]:
+    """A bed chosen now for a row that recorded none: an agent's reply (it
+    names its folder) by its length; anything else, nothing."""
+    from . import music_bed as mb
+    folder = ex.get("cwd")
+    if not folder:
+        return None
+    try:
+        from . import earcons
+        tone = earcons.reply_name(folder)
+    except Exception:  # noqa: BLE001
+        tone = ""
+    durs = [float(x) for x in (ex.get("clip_durations_s") or [])
+            if isinstance(x, (int, float))]
+    n = len(ex.get("clip_sentences") or ex.get("clip_uris") or [])
+    pick = mb.wanted(sum(durs) if durs else None, n, "reply")
+    if pick is None or not mb.ready_or_warm(pick, target):
+        return {"tone": tone} if tone else None
+    probe = other_audio or other_audio_now
+    plan = mb.choose(pick, probe(), target)
+    if plan is None:
+        return {"tone": tone} if tone else None
+    return {"plan": plan, "tone": tone}
+
+
 def resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]] = None
             ) -> Optional[dict]:
     """What to play under a replay of the row whose extras are `ex` on
@@ -158,6 +183,13 @@ def resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]
             # Never a bed under a thought; its `think` tone, as submit gives.
             return {"tone": "think"}
         rec = ex.get("bed")
+        if not isinstance(rec, dict) and not tone and not ex.get("listener"):
+            # Nothing recorded: a held reply never went through submit's bed
+            # (its words waited for Play, David, 31 Oct 2026: "that one was
+            # silent"), or a row from before beds were kept. Choose as submit
+            # would now, by the row's own length, with the reply's tone
+            # behind it.
+            return _afresh(ex, target, other_audio)
         if not isinstance(rec, dict):
             return {"tone": tone} if tone else None
         pick = _pick_now(str(rec.get("for") or "reply"))
