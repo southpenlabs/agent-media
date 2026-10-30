@@ -507,7 +507,7 @@ def test_routes_shape_and_auth(server, signed_in, rooms):
     assert set(obj["contact"]) == {"id", "name", "names", "phones", "emails", "addresses",
                                    "organizations", "notes", "sources", "updated", "rooms",
                                    "crm", "labels", "handles", "suggestions", "mail", "old_addresses",
-                                   "photo", "find", "edit", "google_url", "phone_edit", "level", "text"}
+                                   "photo", "find", "edit", "google_url", "phone_edit", "level", "text", "websites", "birthday"}
     assert obj["contact"]["crm"] is None             # no CRM connection here
     assert [x["room"] for x in obj["contact"]["rooms"]] == ["!b:ryer.org"]
     res, obj = call(server, "GET", "/contacts/00000000-0000-0000-0000-000000000000", headers=AUTH)
@@ -684,6 +684,20 @@ def test_records_one_per_person_by_lookup_key():
     assert c["organizations"] == [{"company": "Acme, Inc.", "title": "Boss"}]
     zoe = recs["3789r21-ZZ"]["card"]
     assert zoe["phones"] == [{"value": "+61398765432", "raw": "(03) 9876 5432", "type": "Studio"}]
+
+
+def test_records_read_websites_and_a_birthday():
+    """For the editor's fields (David, 30 Oct 2026: "the same fields that
+    Google contacts has"): websites with their labels, and the birthday
+    event (an anniversary is not it)."""
+    raw, data = phone_book()
+    data += [_d(11, "1", "11", LIONEL_LOOKUP, "website", "Lionel Smith", "https://lionel.example", "1"),
+             _d(12, "1", "11", LIONEL_LOOKUP, "contact_event", "Lionel Smith", "1999-01-01", "1"),
+             _d(13, "1", "11", LIONEL_LOOKUP, "contact_event", "Lionel Smith", "--03-14", "3")]
+    c = ca.records(ca.parse(phone_output("n", raw, data), "n"))[LIONEL_LOOKUP]["card"]
+    assert c["websites"] == [{"url": "https://lionel.example", "type": "Homepage"}]
+    assert c["birthday"] == "--03-14"
+    assert "websites" not in ca.records(ca.parse(phone_output("n", *phone_book()), "n"))["3789r21-ZZ"]["card"]
 
 
 def test_the_script_reads_only_what_it_needs():

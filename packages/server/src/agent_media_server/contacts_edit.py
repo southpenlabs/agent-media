@@ -44,10 +44,26 @@ PHONE = "vnd.android.cursor.item/phone_v2"
 EMAIL = "vnd.android.cursor.item/email_v2"
 NOTE = "vnd.android.cursor.item/note"
 GROUP = "vnd.android.cursor.item/group_membership"
+POSTAL = "vnd.android.cursor.item/postal-address_v2"
+ORG = "vnd.android.cursor.item/organization"
+EVENT = "vnd.android.cursor.item/contact_event"
+WEBSITE = "vnd.android.cursor.item/website"
 #: Phone.TYPE_MOBILE, Email.TYPE_OTHER.
 PHONE_MOBILE = 2
 EMAIL_OTHER = 3
-FIELDS = ("name", "phones", "emails", "notes", "labels")
+FIELDS = ("name", "phones", "emails", "notes", "labels", "addresses", "organization",
+          "birthday", "websites")
+#: The typed lists (David, 30 Oct 2026: "where do the labels for each number
+#: or email go?"): each item `{value, type}`, `type` one of the kind's names
+#: below or any other words (Android's custom label); a plain string, as older
+#: apps send, is a value whose label is left as it is (a new one: the default).
+#: The value's key on the card, and the kind's types and default.
+TYPED = {
+    "phones": ("raw", contacts_android._PHONE_TYPES, PHONE_MOBILE, PHONE),
+    "emails": ("value", contacts_android._EMAIL_TYPES, EMAIL_OTHER, EMAIL),
+    "addresses": ("formatted", contacts_android._POSTAL_TYPES, 1, POSTAL),
+    "websites": ("url", contacts_android._WEBSITE_TYPES, 7, WEBSITE),
+}
 
 
 class Conflict(Exception):
@@ -108,39 +124,128 @@ def reread(cid: str) -> dict:
     return {"ok": True}
 
 
+def _items(card: dict, field: str) -> list[dict]:
+    """A typed list as the card shows it: `[{value, type}]`."""
+    key = TYPED[field][0]
+    rows = card.get(field) or []
+    if field == "emails":
+        rows = [e for e in rows if not e.get("derived")]
+    out = []
+    for r in rows:
+        v = r.get(key) or (r.get("value") if field == "phones" else "") or ""
+        if field == "emails":
+            v = v or r.get("address") or ""
+        if v:
+            out.append({"value": v, "type": r.get("type") or ""})
+    return out
+
+
 def _now(card: dict, field: str):
     """A field as the card shows it, in the form `set` takes."""
     if field == "name":
         return card.get("name") or ""
-    if field == "phones":
-        return [p.get("raw") or p.get("value") or "" for p in card.get("phones") or []]
-    if field == "emails":
-        return [e.get("value") or e.get("address") or "" for e in card.get("emails") or []
-                if not e.get("derived")]
+    if field in TYPED:
+        return _items(card, field)
     if field == "notes":
         return card.get("notes") or ""
+    if field == "organization":
+        o = (card.get("organizations") or [{}])[0]
+        return {"company": o.get("company") or "", "title": o.get("title") or ""}
+    if field == "birthday":
+        return card.get("birthday") or ""
     return list(card.get("labels") or [])
 
 
-def _same(field: str, a, b) -> bool:
+def _key(field: str, value: str) -> str:
+    """What makes two values one: a number's E.164 (else its digits), an
+    address's words, the rest folded."""
     if field == "phones":
-        reg = contacts.region()
-        norm = lambda xs: sorted(contacts.e164(x, reg) or re.sub(r"\D", "", x) for x in xs)  # noqa: E731
-        return norm(a or []) == norm(b or [])
-    if field in ("emails", "labels"):
+        return contacts.e164(value, contacts.region()) or re.sub(r"\D", "", value)
+    if field == "addresses":
+        return " ".join(value.split()).lower()
+    if field == "websites":
+        return wb._norm(value)
+    return value.strip().lower()
+
+
+def _as_items(field: str, xs) -> list[dict]:
+    return [x if isinstance(x, dict) else {"value": x, "type": None} for x in xs or []]
+
+
+def _same(field: str, a, b) -> bool:
+    if field in TYPED:
+        # A label counts only where both sides say one (an older app's plain
+        # strings say none).
+        def norm(xs, other):
+            typed = all(x.get("type") is not None for x in _as_items(field, other))
+            return sorted((_key(field, x["value"]),
+                           (x.get("type") or "").casefold() if typed and x.get("type") is not None else "")
+                          for x in _as_items(field, xs))
+        return norm(a, b) == norm(b, a)
+    if field == "labels":
         return sorted(x.strip().lower() for x in a or []) == \
             sorted(x.strip().lower() for x in b or [])
+    if field == "organization":
+        a, b = a or {}, b or {}
+        return all((a.get(k) or "").strip() == (b.get(k) or "").strip() for k in ("company", "title"))
     return (a or "").strip() == (b or "").strip()
 
 
 def _clean(field: str, v):
-    if field in ("phones", "emails", "labels"):
+    if field in TYPED:
+        if not isinstance(v, list):
+            raise ValueError(f"{field} must be a list")
+        out = []
+        for x in v[:50]:
+            if isinstance(x, str):
+                x = {"value": x, "type": None}
+            if not isinstance(x, dict) or not isinstance(x.get("value"), str) \
+                    or not isinstance(x.get("type"), (str, type(None))):
+                raise ValueError(f"{field} items are strings or {{value, type}}")
+            val = x["value"].strip()[:1000]
+            if val:
+                t = x["type"].strip()[:60] if isinstance(x["type"], str) else None
+                out.append({"value": val, "type": t})
+        return out
+    if field == "labels":
         if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
             raise ValueError(f"{field} must be a list of strings")
         return [x.strip() for x in v if x.strip()][:50]
+    if field == "organization":
+        if not isinstance(v, dict):
+            raise ValueError("organization must be {company, title}")
+        return {k: (v.get(k) or "").strip()[:300] if isinstance(v.get(k) or "", str) else ""
+                for k in ("company", "title")}
     if not isinstance(v, str):
         raise ValueError(f"{field} must be a string")
+    if field == "birthday" and v.strip() and not re.fullmatch(r"(\d{4}|-)-\d{2}-\d{2}", v.strip()):
+        raise ValueError("birthday is YYYY-MM-DD or --MM-DD")
     return v.strip()[:4000 if field == "notes" else 300]
+
+
+def _type_binds(field: str, label: str | None) -> list[str]:
+    """A typed row's data2 and data3: the kind's number for a name it knows,
+    else Android's custom label (TYPE_CUSTOM 0 with the words in data3)."""
+    _, types, default, _ = TYPED[field]
+    if not label:
+        return [f"data2:i:{default}", "data3:n:"]
+    for n, name in types.items():
+        if name.casefold() == label.casefold():
+            return [f"data2:i:{n}", "data3:n:"]
+    return ["data2:i:0", f"data3:s:{label}"]
+
+
+def _col(raw: str, mimetype: str, col: str) -> dict[str, str]:
+    """One column of a raw contact's rows of a kind, by row id. Queried on
+    its own, as the last column: its value can hold ", data3=" itself."""
+    where = f"raw_contact_id={raw} AND mimetype='{mimetype}'"
+    out = wb._shell(f"content query --uri {URI}/data --projection _id:{col} --where \"{where}\"")
+    got = {}
+    for line in out.splitlines():
+        m = re.match(rf"^Row: \d+ _id=(\d+), {col}=(.*)$", line)
+        if m:
+            got[m.group(1)] = "" if m.group(2) == "NULL" else m.group(2)
+    return got
 
 
 def _rows(raw: str, mimetype: str, cols: str = "_id:data1") -> list[dict]:
@@ -200,30 +305,54 @@ def _write(raw: str, card: dict, want: dict) -> dict:
         else:
             _insert(raw, NAME, [f"data1:s:{want['name']}"])
         done.append("name")
-    if "phones" in want:
-        reg = contacts.region()
-        key = lambda x: contacts.e164(x, reg) or re.sub(r"\D", "", x)  # noqa: E731
-        rows = _rows(raw, PHONE)
-        wanted = {key(x): x for x in want["phones"]}
-        have = {key(r["data1"]): r for r in rows}
+    for field in ("phones", "emails", "addresses", "websites"):
+        if field not in want:
+            continue
+        mime, types = TYPED[field][3], TYPED[field][1]
+        rows = _rows(raw, mime)
+        wanted = {_key(field, x["value"]): x for x in want[field]}
+        have = {_key(field, r["data1"]): r for r in rows}
+        typed = [x for k, x in wanted.items() if k in have and x.get("type") is not None]
+        d2 = _col(raw, mime, "data2") if typed else {}
+        d3 = _col(raw, mime, "data3") if typed else {}
         for k, r in have.items():
             if k not in wanted:
                 _delete(r["id"])
         for k, x in wanted.items():
             if k not in have:
-                _insert(raw, PHONE, [f"data1:s:{x}", f"data2:i:{PHONE_MOBILE}"])
-        done.append("phones")
-    if "emails" in want:
-        rows = _rows(raw, EMAIL)
-        wanted = {x.lower(): x for x in want["emails"]}
-        have = {r["data1"].strip().lower(): r for r in rows}
-        for k, r in have.items():
-            if k not in wanted:
+                _insert(raw, mime, [f"data1:s:{x['value']}", *_type_binds(field, x.get("type"))])
+            elif x.get("type") is not None:
+                rid = have[k]["id"]
+                was = contacts_android._label(types, d2.get(rid), d3.get(rid))
+                if was.casefold() != x["type"].casefold():
+                    _update(rid, _type_binds(field, x["type"]))
+        done.append(field)
+    if "organization" in want:
+        rows = _rows(raw, ORG)
+        o = want["organization"]
+        b = [f"data1:s:{o['company']}" if o["company"] else "data1:n:",
+             f"data4:s:{o['title']}" if o["title"] else "data4:n:"]
+        if not (o["company"] or o["title"]):
+            for r in rows:
                 _delete(r["id"])
-        for k, x in wanted.items():
-            if k not in have:
-                _insert(raw, EMAIL, [f"data1:s:{x}", f"data2:i:{EMAIL_OTHER}"])
-        done.append("emails")
+        elif rows:
+            _update(rows[0]["id"], b)
+        else:
+            _insert(raw, ORG, [x for x in b if not x.endswith(":n:")])
+        done.append("organization")
+    if "birthday" in want:
+        kinds = _col(raw, EVENT, "data2")
+        mine = [rid for rid, t in kinds.items() if t == contacts_android.BIRTHDAY]
+        if want["birthday"]:
+            if mine:
+                _update(mine[0], [f"data1:s:{want['birthday']}"])
+            else:
+                _insert(raw, EVENT, [f"data1:s:{want['birthday']}",
+                                     f"data2:i:{contacts_android.BIRTHDAY}"])
+        else:
+            for rid in mine:
+                _delete(rid)
+        done.append("birthday")
     if "notes" in want:
         rows = _rows(raw, NOTE)
         if rows:

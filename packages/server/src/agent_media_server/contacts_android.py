@@ -50,7 +50,7 @@ MIME = "vnd.android.cursor.item/"
 #: The kinds of row read: everything else (photos, groups, WhatsApp's own
 #: action rows) is left on the phone.
 KINDS = ("phone_v2", "email_v2", "postal-address_v2", "note", "name", "organization",
-         "group_membership")
+         "group_membership", "website", "contact_event")
 RAW_COLS = ("_id", "contact_id", "account_type", "version")
 DATA_COLS = ("_id", "contact_id", "raw_contact_id", "lookup", "mimetype", "data_version")
 FREE_COLS = ("display_name", "data1", "data2", "data3", "data4")
@@ -68,6 +68,10 @@ _PHONE_TYPES = {"1": "Home", "2": "Mobile", "3": "Work", "4": "Work fax", "5": "
                 "12": "Main", "17": "Work mobile"}
 _EMAIL_TYPES = {"1": "Home", "2": "Work", "3": "Other", "4": "Mobile"}
 _POSTAL_TYPES = {"1": "Home", "2": "Work", "3": "Other"}
+_WEBSITE_TYPES = {"1": "Homepage", "2": "Blog", "3": "Profile", "4": "Home", "5": "Work",
+                  "6": "FTP", "7": "Other"}
+#: Event.TYPE_BIRTHDAY: the one event the card shows.
+BIRTHDAY = "3"
 
 
 class Unreachable(Exception):
@@ -303,6 +307,8 @@ def records(parsed: dict, default_region: str = "AU") -> dict[str, dict]:
             seen.add(key)
             return True
 
+        websites: list = []
+        birthday = ""
         display = ""
         for d in ds:
             kind = (d.get("mimetype") or "").removeprefix(MIME)
@@ -329,6 +335,11 @@ def records(parsed: dict, default_region: str = "AU") -> dict[str, dict]:
             elif kind == "organization" and (d1 or d4):
                 if once(("o", d1 or "", d4 or "")):
                     orgs.append({"company": d1 or "", "title": d4 or ""})
+            elif kind == "website" and d1:
+                if once(("w", d1.strip().lower())):
+                    websites.append({"url": d1.strip(), "type": _label(_WEBSITE_TYPES, d2, d3)})
+            elif kind == "contact_event" and d2 == BIRTHDAY and d1:
+                birthday = birthday or d1.strip()
             elif kind == "group_membership" and (d1 or "") in group_of:
                 label = group_of[d1]
                 labels.setdefault(label.casefold(), label)
@@ -344,6 +355,10 @@ def records(parsed: dict, default_region: str = "AU") -> dict[str, dict]:
                 "notes": "\n\n".join(notes), "organizations": orgs}
         if labels:
             card["labels"] = sorted(labels.values(), key=str.casefold)
+        if websites:
+            card["websites"] = websites
+        if birthday:
+            card["birthday"] = birthday
         out[lookup] = {"card": card,
                        "meta": {"raw": [int(i) if i.isdigit() else i for i in raw_ids],
                                 "accounts": accounts, "version": version}}

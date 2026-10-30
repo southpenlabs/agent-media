@@ -39,8 +39,13 @@ def phone(monkeypatch, tmp_path, rows=None, groups=None, google=True):
     log = tmp_path / "phone.log"
     rows = rows or {}
     groups = groups or []
-    data = {m: "".join(f"Row: {i} _id={rid}, data1={d}\n" for i, (rid, d) in enumerate(rs))
-            or "No result found.\n" for m, rs in rows.items()}
+    def out(rs, col):
+        n = {"data1": 1, "data2": 2, "data3": 3}[col]
+        return "".join(f"Row: {i} _id={r[0]}, {col}={r[n] if len(r) > n else 'NULL'}\n"
+                       for i, r in enumerate(rs)) or "No result found.\n"
+    data = {m: out(rs, "data1") for m, rs in rows.items()}
+    data2 = {m: out(rs, "data2") for m, rs in rows.items()}
+    data3 = {m: out(rs, "data3") for m, rs in rows.items()}
     grp = "".join(f"Row: {i} _id={g}, system_id={s}, title={t}\n"
                   for i, (g, s, t) in enumerate(groups)) or "No result found.\n"
     raw = "Row: 0 _id=12\n" if google else "No result found.\n"
@@ -50,12 +55,15 @@ import sys
 s = sys.argv[-1]
 open({str(log)!r}, "a").write(s + "\\n")
 data = {data!r}
+data2 = {data2!r}
+data3 = {data3!r}
 if "/raw_contacts" in s:
     print({raw!r}, end="")
 elif "/groups" in s:
     print({grp!r}, end="")
 elif s.startswith("content query"):
-    for m, out in data.items():
+    table = data2 if "_id:data2" in s else data3 if "_id:data3" in s else data
+    for m, out in table.items():
         if m in s:
             print(out, end="")
             break
@@ -191,7 +199,7 @@ def test_nothing_changed_writes_nothing(monkeypatch, tmp_path):
 
 def test_bad_bodies_are_refused():
     cid = _book()
-    for body in ({}, {"set": {}}, {"set": {"addresses": []}}, {"set": {"phones": "0412"}}):
+    for body in ({}, {"set": {}}, {"set": {"nicknames": []}}, {"set": {"phones": "0412"}}):
         with pytest.raises(ValueError):
             contacts_edit.edit(cid, body)
 
@@ -212,3 +220,57 @@ def test_the_route(server, monkeypatch, tmp_path):
     assert res.status == 409 and obj["conflict"]["notes"]["theirs"] == "old note"
     res, obj = call(server, "POST", f"/contacts/{cid}/edit", {"set": {"colour": "x"}}, H)
     assert res.status == 400
+
+
+def test_each_number_and_email_carries_its_own_label(monkeypatch, tmp_path):
+    """David, 30 Oct 2026: "where do the labels for each number or email
+    go?" — `{value, type}` items: a known name is Android's type number, other
+    words a custom label; an unchanged label writes nothing."""
+    cid = _book(phones=("0412 345 678", "03 9876 5432"))
+    log = phone(monkeypatch, tmp_path, rows={
+        PHONE: [("41", "0412 345 678", "2"), ("44", "03 9876 5432", "1")],
+        EMAIL: [("42", "peter@example.test", "1")]})
+    got = contacts_edit.edit(cid, {"set": {
+        "phones": [{"value": "0412 345 678", "type": "Mobile"},
+                   {"value": "03 9876 5432", "type": "Work"},
+                   {"value": "0400 111 222", "type": "Boat"}],
+        "emails": [{"value": "peter@example.test", "type": "Home"},
+                   {"value": "pete@work.test", "type": "Work"}]}})
+    assert set(got["done"]) == {"phones", "emails"}
+    w = _writes(log)
+    assert not any("_id=41" in x for x in w)                      # Mobile already
+    assert any(x.startswith("content update") and "_id=44" in x and "data2:i:3" in x for x in w)
+    assert any(x.startswith("content insert") and "0400 111 222" in x and "data2:i:0" in x
+               and "data3:s:Boat" in x for x in w)
+    assert not any("_id=42" in x for x in w)
+    assert any(x.startswith("content insert") and "pete@work.test" in x and "data2:i:2" in x
+               for x in w)
+
+
+def test_address_company_birthday_and_websites(monkeypatch, tmp_path):
+    cid = _book()
+    log = phone(monkeypatch, tmp_path, rows={contacts_edit.EVENT: [("50", "1970-01-02", "3")]})
+    got = contacts_edit.edit(cid, {"set": {
+        "addresses": [{"value": "1 Main Rd\nDonvale VIC 3111", "type": "Home"}],
+        "organization": {"company": "South Pen Labs", "title": "Founder"},
+        "birthday": "--03-14",
+        "websites": [{"value": "https://example.test", "type": "Homepage"}]}})
+    assert set(got["done"]) == {"addresses", "organization", "birthday", "websites"}
+    w = _writes(log)
+    assert any(contacts_edit.POSTAL in x and "1 Main Rd" in x for x in w)
+    assert "Donvale VIC 3111' --bind data2:i:1" in log.read_text()   # its second line, then Home
+    assert any(contacts_edit.ORG in x and "South Pen Labs" in x and "Founder" in x for x in w)
+    assert any(x.startswith("content update") and "_id=50" in x and "--03-14" in x for x in w)
+    assert any(contacts_edit.WEBSITE in x and "example.test" in x and "data2:i:1" in x for x in w)
+    with pytest.raises(ValueError):
+        contacts_edit.edit(cid, {"set": {"birthday": "14 March"}})
+
+
+def test_an_older_apps_plain_strings_leave_labels_alone(monkeypatch, tmp_path):
+    cid = _book()
+    log = phone(monkeypatch, tmp_path, rows={PHONE: [("41", "0412 345 678", "1")]})
+    contacts_edit.edit(cid, {"base": {"phones": ["0412 345 678"]},
+                             "set": {"phones": ["0412 345 678", "0400 111 222"]}})
+    w = _writes(log)
+    assert not any("_id=41" in x for x in w)
+    assert any("0400 111 222" in x and f"data2:i:{contacts_edit.PHONE_MOBILE}" in x for x in w)

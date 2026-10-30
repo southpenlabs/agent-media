@@ -624,12 +624,14 @@ def _fold_gateways(conn: sqlite3.Connection, cid: str, card: dict, now: float) -
 
 #: The card's list fields. Google's value wins where it has one (the
 #: proposal's "Google wins"); the phone's fills the rest.
-_FIELDS = ("names", "phones", "emails", "addresses", "organizations")
+_FIELDS = ("names", "phones", "emails", "addresses", "organizations", "websites")
 
 
 def _merge(google: dict, phone: dict) -> dict:
     out = {f: list(google.get(f) or []) or list(phone.get(f) or []) for f in _FIELDS}
     out["notes"] = google.get("notes") or phone.get("notes") or ""
+    if google.get("birthday") or phone.get("birthday"):
+        out["birthday"] = google.get("birthday") or phone.get("birthday")
     gname = google.get("name") or ""
     out["name"] = gname if gname and gname != "(no name)" else (phone.get("name") or gname)
     # Labels and a bridge's handles are every source's, not one's.
@@ -2046,6 +2048,7 @@ def card(cid: str) -> dict | None:
             "find": contacts_find.findable(c, said_none),
             "phones": c.get("phones") or [], "emails": c.get("emails") or [],
             "addresses": c.get("addresses") or [], "organizations": c.get("organizations") or [],
+            "websites": c.get("websites") or [], "birthday": c.get("birthday") or None,
             "notes": c.get("notes") or "", "sources": c.get("sources") or [],
             "labels": c.get("labels") or [], "handles": c.get("handles") or [],
             "suggestions": suggestions(cid),

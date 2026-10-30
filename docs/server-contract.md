@@ -6254,6 +6254,8 @@ is not tried again for a day. No `photo` field changes: the app adds
 
 #### Editing from the card — `POST /contacts/<id>/edit` — gated, owner only (20 Oct 2026)
 
+A card's `websites` (`[{"url", "type"}]`) and `birthday` (`YYYY-MM-DD`,
+`--MM-DD` or null) come from the phone's address book (30 Oct 2026).
 A card says `"edit": true` when it can be edited here — the owner's book,
 write-back on (`MEDIA_CONTACTS_WRITEBACK`), and a Google entry on the phone
 behind it — and carries `"google_url"`, the person in Google Contacts
@@ -6271,9 +6273,19 @@ the server routes GET and POST.)
 ```
 
 - `set` — the fields to change, any of `name`, `phones`, `emails`,
-  `notes`, `labels`; `phones`, `emails` and `labels` are the whole list
-  wanted (a value gone is deleted, a new one added — a mobile number, an
-  "other" address — the rest left as they are). A label joins or leaves
+  `addresses`, `websites`, `organization`, `birthday`, `notes`, `labels`.
+  `phones`, `emails`, `addresses`, `websites` and `labels` are the whole
+  list wanted (a value gone is deleted, a new one added, the rest left as
+  they are). Each item of the first four is `{"value", "type"}` (30 Oct
+  2026, David: "where do the labels for each number or email go?"): `type`
+  is one of the kind's names (a phone's Mobile, Home, Work, Main, Other, …;
+  an email's Home, Work, Other, Mobile; an address's Home, Work, Other; a
+  website's Homepage, Blog, Profile, Home, Work, Other) or any other words,
+  kept as a custom label; a kept value whose type differs is relabelled. A
+  plain string (an older app) is a value whose label is left alone, a new
+  one getting the default (a mobile number, an "other" address).
+  `organization` is `{"company", "title"}` (both empty removes it);
+  `birthday` is `YYYY-MM-DD` or `--MM-DD` (no year), "" to remove it. A label joins or leaves
   the Google group of that name; one Google has no group for is not made
   and comes back in `skipped`.
 - `base` — what the app showed for those fields. A field whose value now
