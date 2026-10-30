@@ -1976,6 +1976,14 @@ ahead.
     Contract §`/speech/music-bed` "Singing it out". Not yet: the section
     finder is a plain novelty curve, so a chorus is "the most repeated
     section" and can miss.
+    **Landed 31 Oct 2026 (the level on the player)** (David: "maybe the
+    slider could go on the media player under the other speech and music
+    slider... collapsible though or only available on the full player"):
+    the full player (the speech sheet and Media's music player) has a
+    folding Levels group, open until folded and remembered per device:
+    Speech and music while music plays, and the Music level from the
+    server's `gain_db` range, sent on release; an older server shows only
+    the balance. The mini player has none. sasonica-app `1747195`.
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...
