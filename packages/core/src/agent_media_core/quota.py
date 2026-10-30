@@ -702,13 +702,17 @@ def check_rate_limit_info(
     resets_at = reset_from_info(info)
     kind = str(info.get("rateLimitType") or info.get("limit_name") or info.get("window") or "")
     thresh = warn_pct_threshold()
-    # Upstream flags allowed_warning on pace, not level (a 25% seven_day,
-    # 30 Oct 2026): with a reading, only the threshold decides.
-    if (pct is not None and pct >= thresh) or (pct is None and status == "allowed_warning"):
+    # Upstream flags allowed_warning on pace, not level. With a reading only
+    # the threshold decides, except the week's: a 25% seven_day warned
+    # because it went fast, and David keeps that one (30 Oct 2026).
+    pace = status == "allowed_warning" and kind == "seven_day" and (pct is None or pct < thresh)
+    if (pct is not None and pct >= thresh) or (pct is None and status == "allowed_warning") or pace:
         msg = str(info.get("message") or info.get("warning") or "")
         if not msg:
             pct_str = f"{pct:.0f}%" if pct is not None else f"{thresh:.0f}%+"
             msg = f"{agent.capitalize()} usage is at {pct_str}" + (f" ({kind})" if kind else "")
+            if pace:
+                msg += ", going fast for the week"
         return note_warning(
             agent=agent,
             utilization=pct if pct is not None else thresh,
@@ -803,8 +807,11 @@ def expire_warnings(now: Optional[float] = None) -> list[dict]:
 def below_warning(info: Optional[dict]) -> bool:
     """A request went through with every window it reports below the warning
     threshold: any warning standing for the agent is out of date."""
-    if not isinstance(info, dict) or str(info.get("status") or "").lower() not in ("allowed", "allowed_warning"):
+    status = str(info.get("status") or "").lower() if isinstance(info, dict) else ""
+    if status not in ("allowed", "allowed_warning"):
         return False
+    if status == "allowed_warning" and info.get("rateLimitType") == "seven_day":
+        return False  # the week's pace warning stands (check_rate_limit_info)
     pcts = [_normalize_pct(info.get(k)) for k in ("utilization", "used_percent", "used_percentage")
             if info.get(k) is not None]
     windows = info.get("unifiedWindows")

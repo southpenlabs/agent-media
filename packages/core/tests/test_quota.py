@@ -269,8 +269,14 @@ def test_below_warning():
 
 
 def test_allowed_warning_below_threshold_is_quiet():
-    # 30 Oct 2026: "Claude quota at 25%" from an allowed_warning seven_day.
+    # 30 Oct 2026: below the threshold only the week's pace warning alerts.
     assert quota.check_rate_limit_info({"status": "allowed_warning", "utilization": 0.25,
-                                        "rateLimitType": "seven_day"}) is None
+                                        "rateLimitType": "five_hour"}) is None
+    w = quota.check_rate_limit_info({"status": "allowed_warning", "utilization": 0.25,
+                                     "rateLimitType": "seven_day"})
+    assert w and "going fast for the week" in w["text"]
+    assert not quota.below_warning({"status": "allowed_warning", "utilization": 0.25,
+                                    "rateLimitType": "seven_day"})
+    quota.clear_warnings()
     assert quota.check_rate_limit_info({"status": "allowed_warning",
                                         "rateLimitType": "seven_day"}) is not None
