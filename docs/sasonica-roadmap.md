@@ -2005,7 +2005,12 @@ ahead.
     (sasonica-app `bcd942a`): Hands-free in the speech sheet, beside Replay
     latest, opens the thread the player names and starts hands-free there,
     through the black screen swipe's path (`lib/handsFreeIn.ts`); the loop
-    waits for the reply to end, then listens. **Step 2, the dock: not
+    waits for the reply to end, then listens. Then (sasonica-app `6c3981b`)
+    it became **Talk**, a mic key like the rest: a tap opens the thread and
+    dictates once, a hold starts hands-free. Alongside (`8e74772`): off the
+    speaking thread the bar puts its title and sentence on their own lines
+    above the keys, foldable back beside them (kept), and play sits clear
+    of the progress sliver. **Step 2, the dock: not
     started.** He stays on his page; a slim box over the player shows the
     thread's name, the heard words, the countdown, Send and Cancel. Needs
     the loop lifted out of `Thread.tsx` (`useHandsFree` ends on leaving the
