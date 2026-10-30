@@ -347,6 +347,26 @@ def test_a_held_open_plays_nothing_until_released(server, convo, signed_in, monk
     st.close()
 
 
+def test_an_open_left_at_once_plays_nothing(server, convo, signed_in, monkeypatch):
+    """A thread the app only passes through (opened, then closed before
+    OPEN_DWELL_S) plays none of its waiting replies; one that stays open does
+    (David, 30 Oct 2026: another thread's question was read out while he was
+    on a different one)."""
+    played: list = []
+    monkeypatch.setattr(thread_events, "_play_waiting", lambda s, d="": played.append(s))
+    monkeypatch.setattr(thread_events, "OPEN_DWELL_S", 0.4)
+    st = Stream(server, f"/threads/{SID}/events", AUTH)
+    assert st.status == 200 and st.event()[0] == "snapshot"
+    st.close()
+    assert _wait(lambda: thread_events.watching() == {})
+    time.sleep(0.6)
+    assert played == []
+    st = Stream(server, f"/threads/{SID}/events", AUTH)
+    assert st.status == 200 and st.event()[0] == "snapshot"
+    assert _wait(lambda: played == [SID])
+    st.close()
+
+
 def test_preflight_and_the_token_is_never_logged(server, convo, monkeypatch, capsys):
     res, _ = call(server, "OPTIONS", f"/threads/{SID}/events")
     assert res.status == 204 and res.getheader("Access-Control-Allow-Origin") == "*"

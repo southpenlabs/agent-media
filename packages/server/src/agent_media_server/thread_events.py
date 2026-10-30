@@ -84,6 +84,12 @@ MAX_PER_SESSION = 8
 MAX_TOTAL = 32
 #: Events a connection may fall behind before it is dropped.
 QUEUE_MAX = 256
+# A thread's held replies play once its screen has stayed open this long, not
+# on the open itself: a page the app only passes through (opened and left at
+# once, on the way to another thread) is not the listener there (David, 30 Oct
+# 2026: a question from another thread was read out "while I'm on a different
+# thread"; its log fetch was cut off in the same second).
+OPEN_DWELL_S = 1.5
 #: Messages in the snapshot unless the client asks (`?limit=`). A busy
 #: thread's 60 were ~390 KB of JSON; the phone draws the end first and pages
 #: back with `/conversation/log?before=`.
@@ -105,6 +111,10 @@ class Subscriber:
         # app's What's new): streamed as usual, but not on screen — nothing
         # plays for it until `release`.
         self.held = held
+        # Whether the client has hung up, asked without writing (the stream
+        # handler sets it): a closed stream is otherwise noticed only at its
+        # next write, up to PING_S later.
+        self.gone = lambda: False
 
     def put(self, event: str, data) -> None:
         try:
@@ -429,7 +439,7 @@ def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watch
         w.prime()
         w.start()
     if not held:
-        threading.Thread(target=_play_waiting, args=(session, device), daemon=True,
+        threading.Thread(target=_play_if_stayed, args=(session, device, sub), daemon=True,
                          name=f"opened:{session[:8]}").start()
     return w, sub
 
@@ -449,9 +459,43 @@ def release(session: str, device: str = "") -> int:
             _publish()
             log.info("thread %s released (%d)", session[:8], len(mine))
     if mine:
-        threading.Thread(target=_play_waiting, args=(session, device), daemon=True,
+        threading.Thread(target=_play_if_stayed, args=(session, device, mine[0]), daemon=True,
                          name=f"opened:{session[:8]}").start()
     return len(mine)
+
+
+def _play_if_stayed(session: str, device: str, sub: Subscriber) -> None:
+    """`_play_waiting` once `sub` has stayed open OPEN_DWELL_S, still on
+    screen (not closed, not held); nothing when it went in the meantime — its
+    replies keep their Play, and the next open plays them."""
+    if OPEN_DWELL_S > 0:
+        time.sleep(OPEN_DWELL_S)
+    with _LOCK:
+        w = _WATCHERS.get(session)
+        stayed = w is not None and sub in w.subs and not sub.held
+    if stayed and sub.gone():
+        stayed = False
+    if not stayed:
+        log.info("thread %s left within %.1f s: its waiting replies wait", session[:8], OPEN_DWELL_S)
+        return
+    _play_waiting(session, device)
+
+
+def _peer_closed(sock) -> bool:
+    """Has the other end of `sock` closed it? It sends nothing on a stream,
+    so readable means its FIN (an empty peek) or an error. Never blocks."""
+    import select
+    import socket
+
+    try:
+        ready, _, _ = select.select([sock], [], [], 0)
+        if not ready:
+            return False
+        return sock.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
+    except BlockingIOError:
+        return False
+    except (OSError, ValueError):
+        return True
 
 
 def _play_waiting(session: str, device: str = "") -> None:
@@ -605,6 +649,7 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
         return True
     w, sub = got
     h.close_connection = True
+    sub.gone = lambda: _peer_closed(h.connection)
     out = None
     try:
         h.send_response(200)

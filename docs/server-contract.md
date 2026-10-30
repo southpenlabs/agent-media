@@ -7726,6 +7726,15 @@ many of the caller's streams were released; at 0 nothing plays (the next
 open does). A server without it ignores `hold` and plays on the open, as
 before.
 
+**Only a thread that stays open plays (30 Oct 2026).** Its held Normal
+replies play once the stream has stayed open `OPEN_DWELL_S` (1.5 s), not on
+the open itself; a stream closed before then plays nothing (checked on the
+socket, since a closed stream is otherwise noticed only at its next write),
+and its replies keep their Play for the next open. An app that only passed
+through the thread (opened and left at once, on the way to another) had its
+question read out while David was on a different thread
+(`thread_events._play_if_stayed`).
+
 **Compression.** With `Accept-Encoding: gzip` (not `q=0`) the stream is
 gzipped: `Content-Encoding: gzip`, `Vary: Accept-Encoding`, still
 `Cache-Control: no-store` and `X-Accel-Buffering: no`, no Content-Length.
