@@ -399,3 +399,39 @@ def test_antigravity_and_rate_limit_warning_notifications(host, monkeypatch):
     assert quota.limited(agent="antigravity") is not None
     # Claude is NOT blocked by Antigravity's limit
     assert quota.limited(agent="claude") is None
+
+
+def test_a_stale_warning_alert_clears(host, monkeypatch):
+    """30 Oct 2026: a 95% warning outlived its window by twelve hours. A
+    reading back under the threshold clears it; so does the window's reset."""
+    from agent_media_server import alerts, notes
+
+    monkeypatch.setattr(notes, "post", lambda *a, **kw: True)
+    s = sessiond.Session("6a1e0000-0000-4000-8000-0000000000dd", str(host.work))
+    host.sup.sessions[s.id] = s
+
+    def open_quota():
+        return [a for a in alerts.listing(open_only=True)["alerts"] if a["id"] == "quota.claude"]
+
+    reset = time.time() + 1800
+    host.sup._on_event(s, {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed_warning", "utilization": 0.92, "rateLimitType": "five_hour",
+        "resetsAt": reset}})
+    wait_for(lambda: len(open_quota()) == 1)
+    host.sup._on_event(s, {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed", "utilization": 0.35, "rateLimitType": "five_hour",
+        "resetsAt": reset + 18000,
+        "unifiedWindows": {"five_hour": {"utilization": 0.35}, "seven_day": {"utilization": 0.24}}}})
+    wait_for(lambda: open_quota() == [])
+    assert quota.warnings(agent="claude") == []
+
+    # The window resets with no reading since: deliver_due clears it.
+    host.sup._quota_settled.clear()
+    host.sup._on_event(s, {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed_warning", "utilization": 0.96, "rateLimitType": "five_hour",
+        "resetsAt": time.time() + 1800}})
+    wait_for(lambda: len(open_quota()) == 1)
+    quota._update_warnings(lambda d: {"warnings": {k: {**v, "resets_at": time.time() - 1}
+                                                   for k, v in d["warnings"].items()}})
+    host.sup.deliver_due()
+    assert open_quota() == []

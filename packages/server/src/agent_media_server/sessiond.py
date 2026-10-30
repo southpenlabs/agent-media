@@ -752,6 +752,20 @@ def _quota_lifted(agent: str = "claude") -> None:
         pass
 
 
+def _settle_quota_warning(agent: str) -> None:
+    """Clear an approaching-limit warning that is out of date (its window has
+    reset, or usage is back under the threshold), unless a limit is on record:
+    a window that peaks below the limit has no lift to clear it (30 Oct 2026)."""
+    q = _quota()
+    try:
+        if q.path().exists() and q.limited(agent=agent) is not None:
+            return
+        q.clear_warnings(agent)
+    except OSError:
+        return
+    _clear_quota_alert(agent, "usage back under the warning level")
+
+
 def _emit_quota_warning(w: dict) -> None:
     try:
         from . import alerts, notes
@@ -806,13 +820,13 @@ def _emit_quota_limit(agent: str, reset: float | None, text: str, *, session: st
         pass
 
 
-def _clear_quota_alert(agent: str = "claude") -> None:
+def _clear_quota_alert(agent: str = "claude", title: str = "usage limit reset") -> None:
     try:
         from . import alerts
         alerts.report({
             "id": f"quota.{agent or 'claude'}",
             "level": "ok",
-            "title": f"{(agent or 'claude').capitalize()} usage limit reset",
+            "title": f"{(agent or 'claude').capitalize()} {title}",
         })
     except Exception:
         pass
@@ -950,6 +964,7 @@ class Supervisor:
         #: The pending-restart record as last read, and when (`draining`).
         self._restart_rec: dict | None = None
         self._restart_read_at: float | None = None
+        self._quota_settled: dict[str, float] = {}   # agent -> when a stale warning was last cleared
         from .sessiond_opencode import Host
 
         #: The shared `opencode serve` (sessiond_opencode.py).
@@ -1148,6 +1163,8 @@ class Supervisor:
             return []
         q = _quota()
         if q.warnings_path().exists():
+            for w in q.expire_warnings():
+                _settle_quota_warning(str(w.get("agent") or "claude"))
             for w in q.pop_unnotified_warnings():
                 _emit_quota_warning(w)
         rec = q.read() if q.path().exists() else None
@@ -1852,6 +1869,12 @@ class Supervisor:
                         threading.Thread(target=_quota_lifted, args=(s.agent,), daemon=True,
                                          name="quota-lifted").start()
                     w = _quota().check_rate_limit_info(info, agent=s.agent, session=s.id, cwd=s.cwd, now=now)
+                    if not w and _quota().below_warning(info) \
+                            and now - self._quota_settled.get(s.agent, 0.0) > 600:
+                        # At most every 10 min: clearing an already-clear alert is a no-op.
+                        self._quota_settled[s.agent] = now
+                        threading.Thread(target=_settle_quota_warning, args=(s.agent,), daemon=True,
+                                         name="quota-settle").start()
                     if w:
                         for uw in _quota().pop_unnotified_warnings(now=now):
                             threading.Thread(target=_emit_quota_warning, args=(uw,), daemon=True,

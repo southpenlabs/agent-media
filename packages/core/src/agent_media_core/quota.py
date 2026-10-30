@@ -739,13 +739,8 @@ def warnings(now: Optional[float] = None, *, agent: Optional[str] = None) -> lis
             continue
         if agent and k != agent:
             continue
-        r_at = float(row.get("resets_at") or 0)
-        at = float(row.get("at") or 0)
-        if r_at > 0 and r_at <= now:
-            continue
-        if r_at == 0 and now - at > 6 * 3600:
-            continue
-        out.append(row)
+        if not _warning_expired(row, now):
+            out.append(row)
     return out
 
 
@@ -762,11 +757,8 @@ def pop_unnotified_warnings(now: Optional[float] = None) -> list[dict]:
             if not isinstance(row, dict):
                 del by_agent[k]
                 continue
-            r_at = float(row.get("resets_at") or 0)
-            at = float(row.get("at") or 0)
-            if (r_at > 0 and r_at <= now) or (r_at == 0 and now - at > 6 * 3600):
-                del by_agent[k]
-                continue
+            if _warning_expired(row, now):
+                continue           # left for expire_warnings, which clears its alert
             if not row.get("notified"):
                 updated = {**row, "notified": True}
                 by_agent[k] = updated
@@ -775,6 +767,50 @@ def pop_unnotified_warnings(now: Optional[float] = None) -> list[dict]:
 
     _update_warnings(fn)
     return fresh
+
+
+def _warning_expired(row: dict, now: float) -> bool:
+    r_at = float(row.get("resets_at") or 0)
+    at = float(row.get("at") or 0)
+    return (r_at > 0 and r_at <= now) or (r_at == 0 and now - at > 6 * 3600)
+
+
+def expire_warnings(now: Optional[float] = None) -> list[dict]:
+    """Drop the warnings whose window has reset (or, with no reset known, that
+    are 6 h old) and return them, so their alerts can be cleared: a window
+    that peaks below the limit has no lift to clear it (30 Oct 2026)."""
+    now = time.time() if now is None else now
+    if not warnings_path().exists():
+        return []
+    gone: list[dict] = []
+
+    def fn(data: dict) -> Optional[dict]:
+        by_agent = dict(data.get("warnings") or {}) if isinstance(data.get("warnings"), dict) else {}
+        for k, row in list(by_agent.items()):
+            if not isinstance(row, dict):
+                del by_agent[k]
+            elif _warning_expired(row, now):
+                del by_agent[k]
+                gone.append(row)
+        return {"warnings": by_agent} if by_agent else None
+
+    _update_warnings(fn)
+    return gone
+
+
+def below_warning(info: Optional[dict]) -> bool:
+    """A request went through with every window it reports below the warning
+    threshold: any warning standing for the agent is out of date."""
+    if not isinstance(info, dict) or str(info.get("status") or "").lower() != "allowed":
+        return False
+    pcts = [_normalize_pct(info.get(k)) for k in ("utilization", "used_percent", "used_percentage")
+            if info.get(k) is not None]
+    windows = info.get("unifiedWindows")
+    if isinstance(windows, dict):
+        pcts += [_normalize_pct(w.get("utilization")) for w in windows.values()
+                 if isinstance(w, dict) and w.get("utilization") is not None]
+    thresh = warn_pct_threshold()
+    return bool(pcts) and all(p is not None and p < thresh for p in pcts)
 
 
 def clear_warnings(agent: Optional[str] = None) -> None:

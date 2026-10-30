@@ -233,3 +233,34 @@ def test_quota_approaching_warning_steps_and_dedup():
     # Hitting the limit clears the warning
     quota.note_limit({"kind": "headless", "session": "s1"}, reset, agent="claude", now=now + 30)
     assert quota.warnings(now=now + 31, agent="claude") == []
+
+
+def test_a_warning_expires_with_its_window():
+    # 30 Oct 2026: a 95% warning for a window that reset at 3 am stayed up all
+    # day — nothing cleared a warning whose window peaked below the limit.
+    now = 1_700_000_000.0
+    reset = now + 3600
+    quota.check_rate_limit_info({"status": "allowed_warning", "utilization": 0.92,
+                                 "rateLimitType": "five_hour", "resetsAt": reset},
+                                agent="claude", now=now)
+    assert quota.expire_warnings(now=now + 10) == []
+    assert len(quota.pop_unnotified_warnings(now=now + 10)) == 1
+    # Past the reset: pop leaves it for expire, which hands it back once.
+    assert quota.pop_unnotified_warnings(now=reset + 1) == []
+    (gone,) = quota.expire_warnings(now=reset + 1)
+    assert gone["agent"] == "claude" and gone["step"] == 90
+    assert quota.expire_warnings(now=reset + 2) == []
+    assert not quota.warnings_path().exists()
+
+
+def test_below_warning():
+    low = {"status": "allowed", "utilization": 0.35, "rateLimitType": "five_hour",
+           "unifiedWindows": {"five_hour": {"utilization": 0.35}, "seven_day": {"utilization": 0.24}}}
+    assert quota.below_warning(low)
+    # Another window still over the threshold keeps the warning.
+    high_week = {**low, "unifiedWindows": {"five_hour": {"utilization": 0.35},
+                                           "seven_day": {"utilization": 0.91}}}
+    assert not quota.below_warning(high_week)
+    assert not quota.below_warning({"status": "allowed_warning", "utilization": 0.35})
+    assert not quota.below_warning({"status": "allowed"})          # no reading
+    assert not quota.below_warning({"status": "rejected", "utilization": 0.1})
