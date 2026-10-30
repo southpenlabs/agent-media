@@ -327,6 +327,24 @@ def _no_music_bed_network(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_personal_prefs(monkeypatch):
+    """The personal settings (personal_prefs.py) fall back to the env file's
+    place, Astro Tunes switch and ListenBrainz account: none of the host's
+    here, and no geocoder, forecast or astrotunes run. A test of them sets
+    what it needs and fakes the one call it makes. With MEDIA_ASTRO gone,
+    Astro Tunes is off, so astrotunes is never run."""
+    from agent_media_core import personal_prefs
+
+    def refuse(*a, **k):
+        raise OSError("no network in the tests (conftest)")
+
+    monkeypatch.setattr(personal_prefs, "_http_json", refuse)
+    for key in [k for k in os.environ if k.startswith(("MEDIA_ASTRO", "MEDIA_LISTENBRAINZ"))]:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("MEDIA_MUSIC_BED_WEATHER", raising=False)
+
+
 _REAL_OS_NAME = os.name
 
 

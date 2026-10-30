@@ -30,6 +30,10 @@ def isolated(monkeypatch, tmp_path):
         monkeypatch.setenv(name, str(tmp_path / name))
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
     monkeypatch.setenv("MEDIA_AUDIO_DIR", str(tmp_path / "audio"))
+    # YouTube Music reachable (personal_prefs.youtube_why), as the streaming
+    # source needs; test_personal_prefs.py has it unreachable.
+    monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")
+    monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
 
 
 def _fake_generated(monkeypatch, tmp_path, only=None):

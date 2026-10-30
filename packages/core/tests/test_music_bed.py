@@ -170,7 +170,7 @@ def test_nothing_known_playing_counts_as_playing(tmp_path, monkeypatch):
 
 
 def test_weather_is_read_from_a_fresh_cache_only(monkeypatch, tmp_path):
-    monkeypatch.delenv("MEDIA_MUSIC_BED_WEATHER")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "-42.88,147.33")
     from agent_media_core._paths import state_dir
     state_dir().mkdir(parents=True, exist_ok=True)
     assert B.weather_label() is None and B.weather_stale()
@@ -185,6 +185,10 @@ def test_weather_is_read_from_a_fresh_cache_only(monkeypatch, tmp_path):
     assert B.weather_label() == "code 0" and not B.weather_stale()
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
     assert B.weather_label() is None and not B.weather_stale()
+    # No place anywhere (nothing in Settings, nothing in the env): no weather,
+    # not someone else's city.
+    monkeypatch.delenv("MEDIA_MUSIC_BED_WEATHER")
+    assert B._latlon() is None and B.weather_label() is None
 
 
 def test_not_ready_plays_nothing_and_starts_the_renderer(monkeypatch):
@@ -389,6 +393,8 @@ def test_a_long_reply_plays_a_library_track_with_its_credit(monkeypatch, tmp_pat
 def test_a_long_reply_on_this_host_can_have_his_streaming_music(monkeypatch, tmp_path):
     from agent_media_core import music_bed_stream as T
     _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")   # YouTube Music reachable
+    monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
     B.set_choice("streaming:jazz")
     entry = {"id": "aaaaaaaaaaa", "title": "Late Jazz", "artist": "Trio",
              "genre": "jazz", "file": "/x.mka"}

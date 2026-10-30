@@ -2128,7 +2128,7 @@ The app renders the list it is given, so a new mood needs no app change; it
 may put its own words on `off` and `auto`. `set` is whether Settings chose
 (`choice: null` forgets it, back to `MEDIA_MUSIC_BED`, default `auto`).
 `auto_now` is the mood `auto` would play now, `weather` the weather words
-it read (null when none is known or the weather is off), `ready` the moods
+it read (null when none is known, no place is set (§6.42) or the weather is off), `ready` the moods
 rendered so far. The server's, so every device's; kept in
 `<state_dir>/music-bed.json`. 400 for an unknown choice or no `choice` key;
 in `CORS_PATHS`.
@@ -3917,6 +3917,11 @@ local look, never a network call:
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
 | `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
 | `read_page` | always: `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) |
+| `personal` | always: this server answers `/settings/personal` (§6.42) |
+| `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
+| `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
+| `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
+| `youtube` | YouTube Music is reachable: `MEDIA_RADIO_YOUTUBE=1` and a phone to fetch through (`MEDIA_PHONE_JOBS=1` or `MEDIA_MUSIC_LOCAL_SSH`) |
 | `stories` | unless `MEDIA_STORIES` is `off` (or `0`, `false`, `no`): the app's Chats tab offers its stories row, which opens Facebook's and Instagram's own stories in the phone's signed-in browser; nothing about it is sent to the server |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
@@ -7137,6 +7142,59 @@ on a message's `sender` (§6.1).
 
 Groups only: 409 for a chat with one person, an agent's chat, or no owner
 token; 400 for a bad session id or name; 502 when the homeserver refuses.
+
+### 6.42 Personal settings: place, Astro Tunes, music accounts — admins (built 30 Oct 2026)
+
+Code: `agent_media_core/personal_prefs.py`, `agent_media_server/personal.py`.
+Pinned by `packages/core/tests/test_personal_prefs.py` and
+`packages/server/tests/test_personal.py`. The personal parts of the sound
+features, so nothing assumes one person's city, chart or accounts (David,
+30 Oct 2026). The app's Settings → Music → About you.
+
+`GET /settings/personal` → `{"ok": true, "scope": "server", "groups":
+[<group>], "sources": [<source>], "privacy"}`; `POST {"values": {<field id>:
+value | null}}` sets those fields, all or nothing, and answers the same
+(null forgets one, back to the env file's). `auth.may_admin` for both, the
+read included (it holds birth details): a member or guest is 403
+`not_admin`. 400 `{"error", "field"}` for a value refused; the error never
+repeats the value. In `CORS_PATHS`.
+
+A `<group>` is `{"id", "label", "fields": [<field>], "available", "reason"}`
+— `weather`, `astro`, `accounts`, in that order; `reason` is English words
+(null when available). `accounts` also has `"signin": {"service":
+"listenbrainz", "label", "signed_in", "user", "token_url"}`. A `<field>` is
+`{"id", "kind", "label", "hint", "value", "set", "source"}`: `kind` is
+`place`, `bool`, `date` (YYYY-MM-DD), `time` (HH:MM), `text` or `secret`;
+`value` is what to show (a place's label; a secret is always null, with
+`set` true once kept); `source` is `"app"`, `"env"` or null. `location`
+has `"device_location": true` (the app may offer to send its position
+once); `listenbrainz.token` has `"link"` (where the token is copied from).
+Labels and hints are the server's; the app adds only its button words.
+
+| field | kind | notes |
+|---|---|---|
+| `location` | place | a city (Open-Meteo's geocoder, when set; "Paris, France" filters by what follows the comma), `"lat,lon"`, or `{"lat", "lon", "label"?}` from the phone, rounded to 2 decimals. Unset: the weather plays no part. Env: `MEDIA_MUSIC_BED_WEATHER` (`off` stops it even when set here) |
+| `astro.enabled` | bool | off by default. Env: `MEDIA_ASTRO=1` (astrotunes finds the chart itself) |
+| `astro.birth_date`, `astro.birth_time`, `astro.birth_place` | date, time, place | given to astrotunes on its stdin as year, month, day, hour, minute, city, country code, time zone; never logged, never to a model |
+| `astro.to_model` | bool | the radio DJ's model is told the reading (six axes, posture, novelty, themes), never the birth details. Off by default. Env: `MEDIA_ASTRO_TO_MODEL=1` |
+| `listenbrainz.user` | text | a public profile's name; set from ListenBrainz on sign-in. Env: `MEDIA_LISTENBRAINZ_USER`, then `MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER` |
+| `listenbrainz.token` | secret | sign-in: checked with `GET https://api.listenbrainz.org/1/validate-token` as it is set (400 "ListenBrainz did not accept that token", or "could not reach ListenBrainz"), its `user_name` becoming `listenbrainz.user`. Sign out is both null. Env: `MEDIA_LISTENBRAINZ_TOKEN` |
+
+A `<source>` is `{"id", "label", "available", "reason"}` for `weather`,
+`astro`, `listenbrainz`, `youtube` (downloads on, `MEDIA_RADIO_YOUTUBE=1`,
+and a phone to fetch through), `streaming` and `favourites` (each needs
+YouTube; favourites also something to pick from: likes or ListenBrainz) and
+`dj`; `reason` begins "Not available:" (or "Off", "Not set", "Needs") and
+says what to set. The music bed's streaming source answers the same
+YouTube reason in `/speech/music-bed`'s `sources`.
+
+Kept in `<state_dir>/personal.json`, mode 0600, written atomically; a save
+drops the radio DJ's kept moment (`radio-dj-context.json`) so the next
+reading uses the new place or chart. The server's, one set for everyone
+paired with it: every reader takes a `user` (an account key) and ignores
+it for now — the per-user step
+(`docs/proposals/2026-09-23-accounts-and-the-identity-seam.md`) is a file
+per account key and the readers passing the listener's.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 

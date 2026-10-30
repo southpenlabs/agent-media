@@ -17,6 +17,12 @@ def _bare(monkeypatch, tmp_path):
     monkeypatch.setenv("MATRIX_BRIDGES", str(tmp_path / "mautrix-*" / "config.yaml"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.delenv("MEDIA_STORIES", raising=False)
+    # astrotunes may be installed on the machine running the tests.
+    monkeypatch.setenv("MEDIA_RADIO_ASTROTUNES", str(tmp_path / "no-astrotunes"))
+
+
+#: The personal settings' parts (personal_prefs.features), all off on a bare server.
+PERSONAL = {"weather", "astro", "listenbrainz", "youtube"}
 
 
 def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path):
@@ -24,7 +30,8 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     res, obj = call(server, "GET", "/features", headers=AUTH)
     assert res.status == 200
     # Quick chat is this server's own (quick.py): there on every one.
-    assert obj == {"ok": True, **{p: False for p in PARTS}, "quick": True, "read": True, "read_page": True, "stories": True}
+    assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
+                   "read_page": True, "stories": True, "personal": True}
     assert "/features" in app.CORS_PATHS
 
 
@@ -46,8 +53,18 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     personas = tmp_path / "personas"
     personas.mkdir()
     monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(personas))
+    monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "-42.88,147.33")
+    astrotunes = tmp_path / "astrotunes"
+    astrotunes.write_text("#!/bin/sh\n")
+    astrotunes.chmod(0o755)
+    monkeypatch.setenv("MEDIA_RADIO_ASTROTUNES", str(astrotunes))
+    monkeypatch.setenv("MEDIA_ASTRO", "1")
+    monkeypatch.setenv("MEDIA_LISTENBRAINZ_USER", "someone")
+    monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")
+    monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
     _, obj = call(server, "GET", "/features", headers=AUTH)
-    assert obj == {"ok": True, **{p: True for p in PARTS}, "quick": True, "read": True, "read_page": True, "stories": True}
+    assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
+                   "read_page": True, "stories": True, "personal": True}
 
 
 def test_music_from_the_play_history(signed_in, monkeypatch, tmp_path):

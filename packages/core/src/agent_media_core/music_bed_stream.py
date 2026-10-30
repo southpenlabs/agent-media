@@ -116,6 +116,12 @@ def available(name: Optional[str]) -> Optional[str]:
     else why not (in words for the Settings list)."""
     if not enabled():
         return "Switched off on this server (MEDIA_MUSIC_BED_STREAM=0)."
+    # Its tracks are fetched from YouTube on a phone: not reachable, say
+    # what to set rather than assume one (personal_prefs.youtube_why).
+    from .personal_prefs import youtube_why
+    why = youtube_why()
+    if why:
+        return why
     if not name:
         return "No speech target."
     if _is_remote(name):

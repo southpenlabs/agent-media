@@ -1872,6 +1872,26 @@ ahead.
     hour and the weather. Settings shows why (`auto_why`).
     Not yet: the nightly waker is a host timer, outside this repo; tempo
     is a cheap estimate (it can land on double or half the beat).
+    **Anyone's, not his (30 Oct 2026)** (David: "are these features
+    distributable? how do we get user preferences for them?"; "we need a
+    place to sign into listenbrainz in the music settings"): Settings →
+    Music → About you (`GET`/`POST /settings/personal`, contract §6.42,
+    `personal_prefs.py`), admins only, kept 0600 on the server. Your town
+    for the weather (a city, lat,lon, or the phone's location sent once,
+    rounded to ~1 km); no place, no weather — no more Melbourne by default.
+    Astro Tunes: off by default, on with your own birth date, time and
+    place (fed to astrotunes on its stdin), and a second switch before the
+    DJ's model sees the reading (axes and themes, never birth details).
+    ListenBrainz: sign in with your user token (checked with ListenBrainz,
+    never shown again; Sign out forgets it), or a public username. YouTube
+    Music, the streaming bed, favourites and the DJ each say "Not
+    available: <what to set>" when they can't work. Each falls back to the
+    env file (`MEDIA_MUSIC_BED_WEATHER`, `MEDIA_ASTRO`,
+    `MEDIA_ASTRO_TO_MODEL`, `MEDIA_LISTENBRAINZ_USER`/`_TOKEN`), where an
+    existing host keeps its own. Per server for now; the per-user seam is
+    the `user` argument (accounts proposal).
+    Not yet: astrotunes still reads its own weather for a fixed city, so it
+    is run with `--no-weather` and its axes miss the weather's nudge.
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

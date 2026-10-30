@@ -176,6 +176,11 @@ device gets its token):
                   pins.py)
   GET|POST /settings/language {"locale"|"language"} → the app's language, site-wide;
                   Settings offers its voices (language.py, pins.py)
+  GET|POST /settings/personal {"values": {field: value|null}} → your town for
+                  the weather, Astro Tunes with your birth details, your
+                  ListenBrainz account, and what each music source needs;
+                  the server's, admins only, secrets never shown
+                  (agent_media_core/personal_prefs.py, personal.py, §6.42)
   POST /session/move {"session", "project"|"cwd"} → move a conversation to
                   another project: file it there, move its transcript and its
                   library folder, and bring a live session back in that
@@ -387,7 +392,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
-    "/settings/language", "/settings/read-receipts",
+    "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -1977,6 +1982,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The app's language, every device's (language.py).
         ok, detail = pins.settings_language(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/personal":
+        # Settings → Music → About you (personal.py, §6.42).
+        from . import personal
+
+        ok, detail = personal.personal_settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/clip":
         # A sentence's audio, for the app in a browser speaking replies
         # itself: the words of a `tts:` load op it was sent (speech.clip).
@@ -3323,6 +3334,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = read_receipts.settings(_bearer(h), str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/personal":
+        # Settings → Music → About you: some fields at once, null forgets one.
+        from . import personal
+
+        body = _read_json(h) or {}
+        ok, detail = personal.personal_settings(_bearer(h), values=body.get("values"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/language":
         # Settings' Language: every device's.

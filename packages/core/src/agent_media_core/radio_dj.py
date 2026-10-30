@@ -5,12 +5,17 @@ how it should pick: "Mood + moment"). The station is agent_media_core.radio
 with another source: where a Mix station lists YouTube's Mix, a DJ station
 asks a model for the next few songs, and the phone finds each on YouTube.
 
-**What it picks from.** The moment as astrotunes reads it (the time of day,
-Melbourne's weather, the transits to David's chart turned into six axes —
-tempo, energy, warmth, brightness, lyric density, texture — and the day's
-themes; the music-transit skill's brief), what the station has played, what
-was liked, and what was 👎'd. Reading the chart takes a few seconds, so it is
-kept half an hour. Without astrotunes the DJ goes by the clock alone.
+**What it picks from.** The time of day, the weather where the listener
+set their place (personal_prefs.py, Settings → Music → About you; none
+unset), what the station has played, what was liked, and what was 👎'd.
+With Astro Tunes switched on there (off by default), also the moment as
+astrotunes reads it from their own chart: the transits turned into six
+axes — tempo, energy, warmth, brightness, lyric density, texture — and the
+day's themes (the music-transit skill's brief). The model is told that
+reading only when "Let the DJ's model see the reading" is on too; never the
+birth details. Reading the chart takes a few seconds, so it is kept half an
+hour (`moment`, which the music bed's Auto reads too). Without it the DJ
+goes by the clock and the weather.
 
 **The model** is the follow-up's (MEDIA_FOLLOWUP_MODEL, a small hosted one)
 through the summary gateway, unless MEDIA_RADIO_DJ_MODEL names another. It
@@ -40,12 +45,12 @@ PICKS = 6
 _CONTEXT_TTL_S = 1800
 
 SYSTEM = (
-    "You are the DJ of a personal radio station with one listener, David, in "
-    "Melbourne. Pick the next {n} songs to play, in order, for this moment. "
-    "The brief gives the time of day, the weather, and a reading of the "
+    "You are the DJ of a personal radio station with one listener. Pick the "
+    "next {n} songs to play, in order, for this moment. The brief gives the "
+    "time of day, the weather when known, and sometimes a reading of the "
     "moment as six axes from 0 to 1 (tempo, energy, warmth, brightness, "
     "lyric density, texture); on an amplified axis do not go to extremes. "
-    "Songs he liked show his taste; never pick an avoided song or artist, or "
+    "Songs they liked show their taste; never pick an avoided song or artist, or "
     "one already played. Flow from what just played: no jarring jumps, and "
     "no more than two songs by one artist. Only real, well-known recordings "
     "you are sure exist, so a YouTube search finds them.\n\n"
@@ -59,41 +64,64 @@ def _context_path():
     return state_dir() / "radio-dj-context.json"
 
 
+#: What of the moment is the astrotunes reading: told to a model only with
+#: astro.to_model.
+ASTRO_KEYS = ("axes", "posture", "novelty", "themes")
+
+
+def _moment_key() -> str:
+    """What the kept moment was read for: a changed setting reads again."""
+    from . import personal_prefs as pp
+
+    return json.dumps([pp.astro_enabled(), pp.latlon(), pp.natal_stdin() is not None])
+
+
 def moment() -> dict:
-    """astrotunes' brief, trimmed to what the DJ reads; kept half an hour."""
+    """The moment, kept half an hour: the local time, the weather where the
+    listener set their place, and astrotunes' reading when Astro Tunes is on."""
+    from . import personal_prefs as pp
+
     p = _context_path()
+    key = _moment_key()
     try:
         kept = json.loads(p.read_text())
-        if time.time() - kept.get("at", 0) < _CONTEXT_TTL_S:
+        if time.time() - kept.get("at", 0) < _CONTEXT_TTL_S and kept.get("key") == key:
             return kept["moment"]
     except (OSError, ValueError, KeyError):
         pass
     out: dict = {"local_time": time.strftime("%A %H:%M")}
-    try:
-        # In the state dir: its chart library leaves a cache/ where it runs.
-        state_dir().mkdir(parents=True, exist_ok=True)
-        r = subprocess.run([os.environ.get("MEDIA_RADIO_ASTROTUNES", "astrotunes"), "context"],
-                           capture_output=True, text=True, timeout=90, cwd=state_dir())
-        ctx = json.loads(r.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
-        log.info("radio-dj: no astrotunes (%s); the clock alone", e)
-        return out
-    out["time_of_day"] = ctx.get("time_of_day")
-    w = ctx.get("weather") or {}
+    w = pp.weather_now()
     if w:
-        out["weather"] = f"{w.get('label')}, {w.get('temperature_c')}°C"
-    q = ctx.get("qualities") or {}
-    out["axes"] = {k: {"value": v.get("value"), "label": v.get("label"), "amplified": v.get("amplified")}
-                   for k, v in (q.get("axes") or {}).items()}
-    for k in ("posture", "novelty", "themes"):
-        if q.get(k):
-            out[k] = q[k]
+        out["weather"] = f"{w['label']}, {w['temperature_c']}°C" if w.get("temperature_c") is not None \
+            else w["label"]
+    ctx = pp.astro_context() if pp.astro_enabled() else None
+    if ctx is None:
+        if pp.astro_enabled():
+            log.info("radio-dj: no astrotunes reading; the clock and the weather")
+    else:
+        out["time_of_day"] = ctx.get("time_of_day")
+        q = ctx.get("qualities") or {}
+        out["axes"] = {k: {"value": v.get("value"), "label": v.get("label"), "amplified": v.get("amplified")}
+                       for k, v in (q.get("axes") or {}).items()}
+        for k in ("posture", "novelty", "themes"):
+            if q.get(k):
+                out[k] = q[k]
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"at": time.time(), "moment": out}))
+        p.write_text(json.dumps({"at": time.time(), "key": key, "moment": out}))
     except OSError:
         pass
     return out
+
+
+def told(m: dict) -> dict:
+    """The moment as the model may see it: without the reading unless
+    astro.to_model says so."""
+    from . import personal_prefs as pp
+
+    if pp.astro_to_model():
+        return m
+    return {k: v for k, v in m.items() if k not in ASTRO_KEYS}
 
 
 def _likes() -> list[str]:
@@ -112,7 +140,7 @@ def brief(st: dict) -> str:
     banned = [titles[v] for v in st["banned"] if v in titles]
     struck = [c for c, n in st["strikes"].items() if n >= 2]
     return json.dumps({
-        "moment": moment(),
+        "moment": told(moment()),
         "just_played": played,
         "still_to_come": [titles[s["id"]] for s in st["queue"]][:5],
         "liked": _likes(),

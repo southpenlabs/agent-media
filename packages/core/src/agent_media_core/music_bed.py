@@ -48,8 +48,9 @@ from 6 to 21. The weather is Open-Meteo's current weather code, the source
 astrotunes (the music-transit skill, radio_dj.py) uses: read from a cache
 kept by the render process (`warm`), or from radio_dj's own cache, each at
 most an hour old; never fetched while a reply waits. Where: the
-``MEDIA_MUSIC_BED_WEATHER`` "lat,lon" (Melbourne by default, as astrotunes);
-``off`` stops the fetch, and the hour alone decides.
+the place set in Settings (personal_prefs.location), else
+``MEDIA_MUSIC_BED_WEATHER`` "lat,lon"; unset, or ``off``, the hour alone
+decides.
 
 **Auto reads the moment from astrotunes** (David, 30 Oct 2026: "The music
 picker should probably also use Astro Tunes"): the reading radio_dj.py
@@ -197,8 +198,6 @@ CHOICES = (("off", "auto") + GENERATED
                    for g in ("auto",) + NET_GENRES)
            + tuple(f"favourites:{s}" for s in ("auto",) + FAV_STYLES))
 
-#: Melbourne, as astrotunes.
-DEFAULT_LATLON = (-37.8136, 144.9631)
 #: Open-Meteo weather codes that are rain: drizzle, rain, showers, storms.
 RAIN_CODES = frozenset({51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82,
                         95, 96, 99})
@@ -306,17 +305,10 @@ def _weather_cache() -> Path:
 
 
 def _latlon() -> Optional[tuple[float, float]]:
-    raw = (os.environ.get("MEDIA_MUSIC_BED_WEATHER") or "").strip().lower()
-    if raw in ("off", "0", "no", "false", "none"):
-        return None
-    if raw:
-        try:
-            lat, lon = (float(x) for x in raw.split(","))
-            return lat, lon
-        except ValueError:
-            log.info("music-bed: MEDIA_MUSIC_BED_WEATHER %r is not lat,lon", raw)
-            return None
-    return DEFAULT_LATLON
+    """Where the weather is read: Settings' place, else the env's; None
+    (no weather) when neither is set."""
+    from . import personal_prefs
+    return personal_prefs.latlon()
 
 
 def is_rain(label: Optional[str]) -> bool:

@@ -22,6 +22,14 @@ never a network call, so the app can ask on every start.
   read      the share sheet's Read it (read_it.py, 26 Oct 2026): this server
             answers `POST /read`; always true here, as quick
   read_page `POST /read {"page"}` takes a page the phone read (signed in)
+  personal  this server answers /settings/personal (personal.py, 30 Oct
+            2026): always true here, so an older server leaves it out
+  weather   a place for the weather is set (Settings or MEDIA_MUSIC_BED_WEATHER)
+  astro     Astro Tunes can read the moment: astrotunes installed, switched
+            on, its birth details there (personal_prefs.astro_why)
+  listenbrainz  a ListenBrainz username is set
+  youtube   YouTube Music is reachable: downloads on (MEDIA_RADIO_YOUTUBE)
+            and a phone to fetch through
   stories   the Chats tab's stories row (26 Oct 2026): a tap opens Facebook's
             or Instagram's own stories in the app's signed-in browser; on
             unless MEDIA_STORIES is off/0/false/no. Nothing about it reaches
@@ -78,9 +86,20 @@ def _personas() -> bool:
     return personas.repo_dir().is_dir()
 
 
+def _personal(name: str):
+    def check() -> bool:
+        from agent_media_core import personal_prefs
+
+        return personal_prefs.features()[name]
+    return check
+
+
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
-          "read": lambda: True, "read_page": lambda: True, "stories": _stories}
+          "read": lambda: True, "read_page": lambda: True, "stories": _stories,
+          "personal": lambda: True, "weather": _personal("weather"),
+          "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
+          "youtube": _personal("youtube")}
 
 
 def detect() -> dict[str, bool]:
