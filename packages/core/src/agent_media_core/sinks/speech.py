@@ -12,6 +12,7 @@ import logging
 import os
 import socket as _socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -214,8 +215,56 @@ UNDER_LOOP_PROPERTY = "user-data/agent-media/under-loop"
 TONE_KIND_PROPERTY = "user-data/agent-media/tone-kind"
 
 #: This host's own under players (play_under), by target name, so the
-#: reply's end can stop a looping one.
+#: reply's end can stop a looping one: `_Under` records.
 _UNDER_PROCS: dict = {}
+#: Under players fading out (under_fade.Fade), by target name, so a new
+#: reply's under sound hurries the old one's fade rather than playing over
+#: its tail.
+_UNDER_FADING: dict = {}
+_UNDER_SEQ = [0]
+
+
+class _Under:
+    """A looping under player on this host: its process, its own IPC
+    socket (None: no fades, as before), its full volume and the level the
+    fade in last set."""
+
+    def __init__(self, proc, sock, vol: float):
+        self.proc = proc
+        self.sock = sock
+        self.vol = vol
+        self.level = 0.0 if sock else vol
+        self.fading_in = threading.Event()
+
+    def set_level(self, v: float) -> None:
+        ipc.command(str(self.sock), "set_property", "volume", round(float(v), 2),
+                    timeout=0.5, retry_errors=False)
+        self.level = float(v)
+
+    def kill(self) -> None:
+        try:
+            self.proc.terminate()
+        except OSError:
+            pass
+        if self.sock:
+            try:
+                Path(self.sock).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _under_socket(target_name: str) -> Optional[Path]:
+    """A private IPC socket for one under player, under the state dir; None
+    when it cannot be made or its path is too long for a unix socket."""
+    try:
+        from .._paths import state_dir
+        d = state_dir() / "under"
+        d.mkdir(parents=True, exist_ok=True)
+        _UNDER_SEQ[0] += 1
+        p = d / f"{target_name}-{os.getpid()}-{_UNDER_SEQ[0]}.sock"
+        return p if len(str(p)) < 100 else None
+    except OSError:
+        return None
 
 
 #: mpv `user-data` key carrying whether the *device* wants to be quiet.
@@ -952,32 +1001,81 @@ class SinkSpeech:
                 argv.append(f"--volume={float(vol):g}")
         except (ipc.MpvIpcError, OSError):
             pass
+        full = 100.0
+        for a in argv:
+            if a.startswith("--volume="):
+                full = float(a.split("=", 1)[1])
+        usock = None
         if loop:
             argv.append("--loop-file=inf")
+            from .. import under_fade
+            # Faded in from silence through its own socket (under_fade). Not
+            # mpv's afade filter: a looped file starts its timestamps again
+            # each time round, and the fade would dip every loop.
+            if under_fade.fade_in_ms() > 0:
+                usock = _under_socket(target.name)
+            if usock is not None:
+                argv = [a for a in argv if not a.startswith("--volume=")]
+                argv += ["--volume=0", f"--input-ipc-server={usock}"]
         argv.append(str(uri))
-        self.stop_under(target)
+        self.stop_under(target, quick=True)
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL,
                                     start_new_session=True)
-            if loop:
-                _UNDER_PROCS[target.name] = proc
-            return True
         except OSError as e:
             log.info("sink-speech: under %s failed: %s", Path(uri).name, e)
             return False
+        if loop:
+            rec = _Under(proc, usock, full)
+            _UNDER_PROCS[target.name] = rec
+            if usock is not None:
+                from .. import under_fade
+                rec.fading_in.set()
 
-    def stop_under(self, target: Target = DEFAULT_TARGET) -> None:
-        """The reply is over: stop this host's looping under player, if one
-        runs for `target`. (A phone stops its own.) Never raises."""
-        proc = _UNDER_PROCS.pop(getattr(target, "name", target), None)
-        if proc is None:
+                def step(v: float, rec=rec) -> None:
+                    if rec.fading_in.is_set():
+                        rec.set_level(v)
+                under_fade.fade_in(step, full, ready=lambda: Path(usock).exists())
+        return True
+
+    def stop_under(self, target: Target = DEFAULT_TARGET, *, quick: bool = False) -> None:
+        """The reply is over: fade out this host's looping under player, if
+        one runs for `target`, and stop it (A phone fades its own.) At the
+        reply's natural end it carries on past the last word and fades
+        (under_fade: 1 s, then 2.5 s); `quick` (a cut, a new reply taking
+        over) fades in half a second. On its own thread: the reply's cleanup
+        never waits on it. Never raises."""
+        name = getattr(target, "name", target)
+        if quick:
+            for f in _UNDER_FADING.get(name, []):
+                f.hurry()
+        rec = _UNDER_PROCS.pop(name, None)
+        if rec is None:
             return
+        if not isinstance(rec, _Under):
+            rec = _Under(rec, None, 0.0)
+        if rec.sock is None:
+            rec.kill()
+            return
+        rec.fading_in.clear()
         try:
-            proc.terminate()
-        except OSError:
-            pass
+            from .. import under_fade
+            fades = _UNDER_FADING.setdefault(name, [])
+
+            def done(rec=rec) -> None:
+                rec.kill()
+                try:
+                    fades.remove(fade)
+                except ValueError:
+                    pass
+            fade = under_fade.Fade(rec.set_level, rec.level, done, quick=quick)
+            fades.append(fade)
+            fade.run_async()
+        except Exception as e:  # noqa: BLE001 — never cost the cleanup
+            log.debug("sink-speech: under fade failed: %s", e)
+            rec.kill()
 
     def clear_under(self, target: Target = DEFAULT_TARGET) -> None:
         """Take back a play_under the phone has not played yet. Never raises."""

@@ -167,7 +167,7 @@ device gets its token):
                   full while it is (agent_media_core/question_gate.py, pins.py)
   GET|POST /speech/default {"level"} → the level of every thread with none
                   of its own; the server's, so every device's (pins.py)
-  GET|POST /speech/music-bed {"choice"} | {"source", "style"} → music under
+  GET|POST /speech/music-bed {"choice"} | {"source", "style"} | {"settings"} → music under
                   long readings: off, generated (a mood or style), his
                   streaming music or the online library, each with Auto;
                   the server's (music_bed.py)
@@ -3322,9 +3322,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/speech/music-bed":
         # Settings' Music under long readings.
         body = _read_json(h) or {}
-        if "choice" not in body and "source" not in body:
-            _json(h, 400, {"ok": False, "error": "choice (or source and style) is required "
-                                                "(null forgets it)"})
+        if "choice" not in body and "source" not in body and "settings" not in body:
+            _json(h, 400, {"ok": False, "error": "choice (or source and style, or settings) "
+                                                "is required (null forgets it)"})
+        elif "settings" in body and "choice" not in body and "source" not in body:
+            ok, detail = pins.speech_music_bed(_bearer(h), settings=body.get("settings"))
+            _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
         elif "source" in body:
             ok, detail = pins.speech_music_bed(_bearer(h), source=body.get("source"),
                                                style=body.get("style"))

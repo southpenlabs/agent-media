@@ -34,6 +34,9 @@ def isolated(monkeypatch, tmp_path):
     # source needs; test_personal_prefs.py has it unreachable.
     monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")
     monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
+    # Every tempo allowed here; slow only has its own tests
+    # (test_music_bed_slow.py).
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SLOW", "0")
 
 
 def _fake_generated(monkeypatch, tmp_path, only=None):
@@ -395,6 +398,7 @@ class FakeMopidy:
 
 
 def test_stream_plays_after_his_queue_quietly_and_tidies_up(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_UNDER_TAIL_MS", "0")
     mop = FakeMopidy(random="1")
     vols = []
     monkeypatch.setattr(T, "_mpd", mop)
@@ -407,7 +411,7 @@ def test_stream_plays_after_his_queue_quietly_and_tidies_up(monkeypatch, tmp_pat
     assert stop is not None
     assert mop.queue == ["local:track:his.mp3", f"mpv:{tmp_path}/a.mka", f"mpv:{tmp_path}/d.mka"]
     assert "play 1" in mop.lines and "random 0" in mop.lines
-    stop()
+    stop(wait=True)
     assert mop.queue == ["local:track:his.mp3"] and mop.state == "stop"
     assert mop.random == "1"
     assert vols[0] == 0 and T.volume() in vols and vols[-1] == 80
@@ -525,6 +529,8 @@ SHORT = {
     "lofi": {"bpm": 120.0, "rounds": 1, "seed": 4, "chords": [(41, [57, 64])],
              "hiss": 0.05},
     "jazz": {"bpm": 240.0, "rounds": 1, "seed": 13, "chords": [(43, [58, 65]), (48, [58, 64])]},
+    "bossa": {"bpm": 240.0, "rounds": 1, "seed": 27,
+              "chords": [(48, [60, 64, 67]), (45, [57, 60, 64])]},
     "nature": {"seconds": 2.0, "seed": 31, "birds": 2},
 }
 
@@ -569,11 +575,11 @@ def test_the_seamless_crossfade_meets_itself():
     assert out[-1] == xs[n - 1]
 
 
-def test_a_style_file_is_mono_48k_at_minus_24(short_styles):
+def test_a_style_file_is_mono_48k_at_minus_28(short_styles):
     p = B.write("lofi")
     assert p.name == f"music-bed-lofi-v{B.VERSION}.wav"
     with wave.open(str(p)) as w:
         assert (w.getnchannels(), w.getframerate(), w.getsampwidth()) == (1, 48000, 2)
         pcm = array.array("h", w.readframes(w.getnframes()))
-    assert abs(20 * math.log10(max(abs(v) for v in pcm) / 32767) + 24) < 0.2
+    assert abs(20 * math.log10(max(abs(v) for v in pcm) / 32767) + 28) < 0.2
     assert B.synth("jazz") == B.synth("jazz")          # seeded

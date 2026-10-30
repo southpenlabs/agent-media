@@ -25,6 +25,9 @@ def isolated(monkeypatch, tmp_path):
                  "XDG_DATA_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name))
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
+    # These pin what plays with every tempo allowed; slow only (on by
+    # default) has its own tests (test_music_bed_slow.py).
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SLOW", "0")
     monkeypatch.setenv("MEDIA_AUDIO_DIR", str(tmp_path / "audio"))
     monkeypatch.setattr(F, "_host_mem", lambda: {"mem_available_mb": 6000,
                                                  "mem_stall_pct": 0.0})

@@ -26,6 +26,9 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.setenv("MEDIA_FOLLOW_AUTO", "0")
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
+    # These pin what plays with every tempo allowed; slow only (on by
+    # default) has its own tests (test_music_bed_slow.py).
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SLOW", "0")
     monkeypatch.setattr(S, "render_text", _render)
     monkeypatch.setattr(S, "_clip_duration", lambda p: 0.0)
     monkeypatch.setattr(S, "_gate_hold", lambda *a: False)
@@ -233,7 +236,7 @@ def test_each_kind_bed_is_its_own_loop():
     recipes = [B._RECIPES[k][0] for k in B.MOODS + B.KIND_BEDS]
     assert len({repr(r) for r in recipes}) == len(recipes)
     assert B.loop_seconds("alert") < min(B.loop_seconds(m) for m in B.MOODS)
-    assert B._PEAKS["question"] < B.PEAK_DBFS
+    assert B.peak_dbfs("question") < B.peak_dbfs("calm") == B.PEAK_DBFS
     assert set(B.KIND_BEDS) <= set(B.RENDERED)
     assert not set(B.KIND_BEDS) & set(B.CHOICES)       # never a Settings choice
 
@@ -270,7 +273,7 @@ def test_rain_is_crossfaded_across_the_seam(monkeypatch):
     assert abs(s[0] - s[-1]) <= max(steps)
 
 
-def test_the_file_is_mono_48k_at_minus_24(tmp_path, monkeypatch):
+def test_the_file_is_mono_48k_at_minus_28(tmp_path, monkeypatch):
     import wave
     monkeypatch.setattr(B, "_RECIPES", {**B._RECIPES, "calm": (
         [(57, [57, 60, 64, 67])], 0.6, 2, 0.25, 0.3, 0.5, 1.6, 0.1, 5)})
@@ -280,7 +283,7 @@ def test_the_file_is_mono_48k_at_minus_24(tmp_path, monkeypatch):
         assert (w.getnchannels(), w.getframerate(), w.getsampwidth()) == (1, 48000, 2)
         pcm = array.array("h", w.readframes(w.getnframes()))
     import math
-    assert abs(20 * math.log10(max(abs(v) for v in pcm) / 32767) + 24) < 0.2
+    assert abs(20 * math.log10(max(abs(v) for v in pcm) / 32767) + 28) < 0.2
     assert B.ready("calm") == p
     assert B.synth("calm") == B.synth("calm")       # seeded
 

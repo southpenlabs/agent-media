@@ -325,6 +325,10 @@ def _no_music_bed_network(monkeypatch):
     monkeypatch.setattr(music_bed_favourites, "_run", refuse)
     for key in [k for k in os.environ if k.startswith("MEDIA_MUSIC_BED_FAVOURITES")]:
         monkeypatch.delenv(key, raising=False)
+    # A track's tempo is measured with ffmpeg (music_bed_tempo.measure): a
+    # test of the slow rule gives its tracks their features itself.
+    from agent_media_core import music_bed_tempo
+    monkeypatch.setattr(music_bed_tempo, "measure", lambda *a, **k: {})
 
 
 @pytest.fixture(autouse=True)

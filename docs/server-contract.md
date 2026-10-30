@@ -2323,6 +2323,50 @@ library/streaming the genre, for favourites the fit) and `"astro"` (the
 axes `{tempo, energy, warmth, brightness, lyric_density, texture}` 0–1, or
 null).
 
+**Slow only, bossa nova, quieter, faded (30 Oct 2026).** `GET` adds
+`"slow"` (bool) and `"settings"`: switches beside the choice, for the app
+to render as they come — `[{"id": "slow", "kind": "bool", "label": "Slow
+music only", "hint", "value", "set"}]` (`set`: chosen in Settings rather
+than `MEDIA_MUSIC_BED_SLOW`, default on); an app skips a kind it does not
+know. `POST {"settings": {"slow": true|false|null}}` sets it (null: back to
+the env) and answers the same; kept in `music-bed.json` beside the choice,
+which it leaves alone; 400 for an unknown id or a non-bool. With slow on:
+Auto never picks a quick variation — energetic and bright gives calm (piano),
+warm gives blend (bossa nova), no lo-fi or jazz genre (by the hour: morning
+is calm, blend is bossa nova, dusk is piano), the 21–6 guardrail as before —
+and `auto_why` ends `" — slow only"` (`"auto: calm — energetic, bright, kept
+slow (astrotunes) — slow only"`). A fixed `lofi`, `jazz` or `morning` plays
+its slow render (`music-bed-<id>-slow-v<N>.wav`: lo-fi at 54 bpm with a kick
+and one brush a bar, jazz at 60 bpm with one held chord a bar and a two-feel
+bass, morning in 5 s bars of three notes). A favourites, library or
+streaming track plays only when measured slow (`music_bed_tempo.py`, once
+per track as it is made or fetched, older ones by the background process):
+BPM at most `MEDIA_MUSIC_BED_MAX_BPM` (95) and at most
+`MEDIA_MUSIC_BED_MAX_ONSETS` (2.5) onsets a second, both agreeing — a BPM
+reading above the limit whose half is under it (the estimate's usual
+doubling) counts when the onsets are under 2.0, a reading under it that is
+really half a quick tempo is caught by its onsets, a raw master louder than
+energy 0.85 never counts, an unmeasured track never. Nothing slow kept: the
+generated stand-in, slow. The source's `note` says how many are slow.
+**Bossa nova**: a generated style `bossa` (nylon-string maj7/m9/6/9 chords in
+the bossa comping at 72 bpm, a soft rim click, a bass on roots and fifths)
+and a streaming and library genre `bossa` (`streaming:bossa`,
+`library:bossa`, under the same licence rules; stand-in `bossa`).
+**Quieter**: every bed 4 dB down (`MEDIA_MUSIC_BED_GAIN_DB`, -4): generated
+beds peak at -28 dBFS (the question's -31; render version 2, older files
+deleted), library and favourites tracks are loudnormed to -34 LUFS (kept ones
+re-levelled from their own files in the background, never fetched again),
+Mopidy's streaming bed at 8 of 100, not 12. The under tones are not moved.
+**Fades** (`under_fade.py`): what loops under the voice — the beds and the
+looping tones — fades in from silence over `MEDIA_UNDER_FADE_IN_MS` (1500),
+carries on `MEDIA_UNDER_TAIL_MS` (1000) past the last word and fades out over
+`MEDIA_UNDER_FADE_OUT_MS` (2500); a cut by the listener or a new reply's
+under sound fades it in `MEDIA_UNDER_QUICK_FADE_MS` (500). This host's under
+mpv by its volume on its own IPC socket (`<state_dir>/under/`); the streaming
+bed by the DJ fader; the phone's under player in the app, with the same times
+built in (nothing new on the wire). Pinned by
+`packages/core/tests/test_music_bed_slow.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

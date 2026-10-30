@@ -1911,6 +1911,34 @@ ahead.
     it starts when the reading ends (never over it, never cutting it off,
     and out of reach of a streaming bed's tidy-up). Replies from before
     this have no song recorded.
+    **Landed 30 Oct 2026 (slow only, bossa nova, quieter, faded)** (David:
+    "I think the music should be restricted to slower variations"; "Bossa
+    Nova versions are good too"; "a little bit quieter"; "it would be nice
+    if it faded in and out rather than just a cold stop start"). Slow only,
+    on by default (`MEDIA_MUSIC_BED_SLOW`; Settings' "Slow music only"
+    switch, a generic `settings` entry the app renders): Auto never picks
+    morning, lo-fi or jazz (calm, dusk, night, rainy, blend; piano, ambient,
+    classical, bossa nova), the 21–6 guardrail kept, `auto_why` says "slow
+    only"; a fixed lo-fi, jazz or morning plays a slower render (54 bpm,
+    a kick and one brush a bar; 60 bpm, a held chord a bar; 5 s bars of
+    three notes). Favourites, library and streaming tracks play only when
+    measured slow (`music_bed_tempo.py`): ≤ 95 BPM and ≤ 2.5 onsets a second
+    agreeing, a doubled BPM reading allowed when its onsets are under 2.0,
+    a loud raw master never — measured once each, older ones by the
+    background process. On this host's cache the estimate read most calm
+    pieces at 150–180 BPM (a Chopin nocturne 176); their onsets (0.7–1.8 a
+    second, against 3–4 for lo-fi and swing) are what tells them apart.
+    Nothing slow kept: the generated bed. Bossa nova: a generated style
+    (nylon-string Karplus-Strong chords at 72 bpm, rim click, roots and
+    fifths) and a streaming/library genre. Every bed 4 dB quieter
+    (`MEDIA_MUSIC_BED_GAIN_DB`): -28 dBFS generated (render v2), -34 LUFS
+    kept tracks (re-levelled in place), Mopidy at 8. Fades (`under_fade.py`):
+    1.5 s in, 1 s past the last word then 2.5 s out, 0.5 s on a cut or a new
+    reply — this host's under mpv through its own IPC socket, the streaming
+    bed through the DJ fader, the phone in the app (sasonica-app 28fa32a,
+    needs the new APK). Not yet: favourites have no "bossa nova version of"
+    search; the alert bed keeps its quick pulse (it is meant to be looked
+    at).
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

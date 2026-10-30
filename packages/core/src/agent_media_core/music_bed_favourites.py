@@ -111,6 +111,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from .music_bed_tempo import bpm_of  # noqa: F401 — kept here for its callers
+
 log = logging.getLogger(__name__)
 
 STYLES = ("official", "separated")
@@ -368,6 +370,37 @@ def counts(data: Optional[dict] = None) -> dict:
     return {s: len(tracks(s, data)) for s in STYLES}
 
 
+def playable(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
+    """The ready tracks (of `style`) the bed may play: the slow ones while
+    slow is on (music_bed_tempo.keep)."""
+    from .music_bed_tempo import keep
+    return keep(tracks(style, data))
+
+
+def upkeep_due(data: Optional[dict] = None) -> bool:
+    """Whether a ready track waits to be measured or re-levelled."""
+    from .music_bed_library import DEFAULT_LUFS, target_lufs
+    from .music_bed_tempo import needs_measure
+    data = load() if data is None else data
+    want = target_lufs()
+    return any(needs_measure(e) or float(e.get("lufs_target", DEFAULT_LUFS)) != want
+               for e in tracks(None, data))
+
+
+def upkeep() -> int:
+    """Each ready track measured once more for the slow rule (its onsets,
+    from its kept file; the loudness measured as it was made stays) and
+    brought to the bed's level (music_bed_library.relevel). How many."""
+    from .music_bed_library import relevel
+    from .music_bed_tempo import backfill
+    data = load()
+    have = tracks(None, data)
+    n = backfill(have, _file) + relevel(have, _file)
+    if n:
+        save(data)
+    return n
+
+
 def _cache_bytes(data: dict) -> int:
     total = 0
     for e in tracks(None, data):
@@ -423,7 +456,7 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
     (features_fit), so the nearest come up most but not always. Marks it
     played. Never fetches."""
     try:
-        have = tracks(style)
+        have = playable(style)
         if not have:
             return None
         hour = (when or datetime.now()).hour
@@ -781,70 +814,22 @@ def _state(data: dict, key: str) -> dict:
 
 # ---- making a bed from a track -------------------------------------------------------------
 
+def _lufs_target() -> float:
+    from .music_bed_library import target_lufs
+    return target_lufs()
+
+
 def _normalise(src: Path, dst: Path) -> bool:
     from .music_bed_library import normalise
     return normalise(src, dst)
 
 
-def bpm_of(env: list[float], rate: float) -> Optional[float]:
-    """The tempo of an onset envelope (`rate` frames a second): the lag of
-    the strongest autocorrelation between 60 and 180 BPM."""
-    n = len(env)
-    if n < rate * 10:
-        return None
-    onset = [max(0.0, env[i] - env[i - 1]) for i in range(1, n)]
-    mean = sum(onset) / len(onset)
-    onset = [x - mean for x in onset]
-    def corr(lag: int) -> float:
-        return sum(onset[i] * onset[i - lag] for i in range(lag, len(onset)))
-    best, best_lag = 0.0, None
-    for lag in range(int(rate * 60 / 180), int(rate * 60 / 60) + 1):
-        c = corr(lag)
-        if c > best:
-            best, best_lag = c, lag
-    if not best_lag:
-        return None
-    # A beat found at half the tempo (the usual mistake): the double when
-    # it is nearly as strong.
-    half = round(best_lag / 2)
-    if 60.0 * rate / half <= 180 and corr(half) >= 0.6 * best:
-        best_lag = half
-    return round(60.0 * rate / best_lag, 1)
-
-
 def _measure(src: Path) -> dict:
-    """A track's tempo and loudness, measured once as it is made: `{"bpm",
-    "lufs", "tempo", "energy"}` (the last two 0..1 like astrotunes' axes:
-    60 → 180 BPM, -20 → -8 LUFS), or {} when ffmpeg cannot say."""
-    out: dict = {}
-    try:
-        r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-nostats", "-t", "90",
-                            "-i", str(src), "-af", "ebur128", "-f", "null", "-"],
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
-        m = re.findall(r"I:\s+(-?[0-9.]+) LUFS", r.stderr.decode(errors="replace"))
-        if m:
-            out["lufs"] = float(m[-1])
-        rate = 100
-        r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-t", "90",
-                            "-i", str(src), "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
-        import array
-        pcm = array.array("h")
-        pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
-        if sys.byteorder != "little":
-            pcm.byteswap()
-        hop = 8000 // rate
-        env = [sum(abs(x) for x in pcm[i:i + hop]) / hop for i in range(0, len(pcm) - hop, hop)]
-        bpm = bpm_of(env, rate)
-        if bpm:
-            out["bpm"] = bpm
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
-        log.info("music-bed favourites: measuring %s: %s", src, e)
-    if "bpm" in out:
-        out["tempo"] = round(max(0.0, min(1.0, (out["bpm"] - 60) / 120)), 2)
-    if "lufs" in out:
-        out["energy"] = round(max(0.0, min(1.0, (out["lufs"] + 20) / 12)), 2)
-    return out
+    """A track's tempo, busyness and loudness, measured once as it is made
+    (music_bed_tempo.measure): `{"bpm", "onsets", "lufs", "tempo",
+    "energy"}`, or what ffmpeg could tell."""
+    from . import music_bed_tempo
+    return music_bed_tempo.measure(src)
 
 
 def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
@@ -859,7 +844,8 @@ def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
     entry = {"key": fav["key"], "file": name, "title": fav["title"], "artist": fav["artist"],
              "method": method, "original_id": fav.get("id") or "", "instrumental_id": inst_id,
              "made": datetime.now().strftime("%Y-%m-%d"), "added": time.time(),
-             "bytes": dst.stat().st_size, "features": features}
+             "bytes": dst.stat().st_size, "features": features,
+             "lufs_target": _lufs_target()}
     if karaoke:
         entry["karaoke"] = True
     data["tracks"] = [e for e in data["tracks"] if e.get("key") != fav["key"]] + [entry]
@@ -1161,6 +1147,12 @@ def note(style: str = "auto", when: Optional[datetime] = None) -> str:
     if have:
         parts.append(f"{have} ready{of} ({n['official']} official, {n['separated']} with "
                      f"the vocals removed)." if style not in STYLES else f"{have} ready{of}.")
+        from . import music_bed
+        if music_bed.slow_on():
+            slow = len(playable(style if style in STYLES else None, data))
+            parts.append(f"{slow} of them slow enough to play (slow only)."
+                         if slow else "None of them slow enough yet (slow only); "
+                         "generated music plays.")
     elif not data["favourites"] and data.get("favourites_at"):
         parts.append("No favourites found yet (likes, most played"
                      + (", ListenBrainz" if listenbrainz_user() else "") + ").")

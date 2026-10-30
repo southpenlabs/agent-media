@@ -205,14 +205,16 @@ _UNSET = object()
 
 
 def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
-                     style=None) -> tuple[bool, dict]:
+                     style=None, settings=_UNSET) -> tuple[bool, dict]:
     """`GET /speech/music-bed` and `POST /speech/music-bed {"choice"}` or
     `{"source", "style"?}`: the music under a long reading
     (agent_media_core/music_bed.py) — "off", "auto" (generated, by time and
     weather), a generated mood or style, or "<source>:<style>" for the
     streaming and library sources, as the answer lists them; null forgets
-    the choice (back to MEDIA_MUSIC_BED). The server's, so every device's.
-    Without either, only read."""
+    the choice (back to MEDIA_MUSIC_BED). `settings` `{id: value}` sets the
+    switches the answer lists (`slow`: true, false, or null for
+    MEDIA_MUSIC_BED_SLOW). The server's, so every device's. Without any,
+    only read."""
     from agent_media_core import music_bed
 
     if source is not _UNSET:
@@ -228,9 +230,21 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
     if choice is not _UNSET and choice is not None and music_bed.normalise(choice) is None:
         return False, {"error": "choice must be off, auto or one of the choices listed",
                        "status": 400}
+    if settings is not _UNSET:
+        ids = {s["id"] for s in music_bed.settings()}
+        if (not isinstance(settings, dict) or not settings
+                or any(k not in ids or not (v is None or isinstance(v, bool))
+                       for k, v in settings.items())):
+            return False, {"error": "settings must be {id: true|false|null} for the "
+                                    "settings listed", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    if settings is not _UNSET:
+        try:
+            music_bed.set_settings(settings)
+        except OSError as e:
+            return False, {"error": f"could not save the music settings ({e})", "status": 500}
     if choice is not _UNSET:
         try:
             music_bed.set_choice(choice)

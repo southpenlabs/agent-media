@@ -6062,15 +6062,24 @@ def _submit_event(event: Event,
                 # The `think` / `reply` / `people` tone (or the music bed) loops under the voice; this
                 # host's own player of it stops here (a phone's stops with
                 # the reply).
+                # Faded out (under_fade): past the last word and slowly at
+                # the natural end, quickly when the listener cut it.
                 try:
-                    getattr(sink, "stop_under", lambda *a: None)(target)
+                    stop = getattr(sink, "stop_under", lambda *a, **k: None)
+                    try:
+                        stop(target, quick=bool(ended_by_cut))
+                    except TypeError:
+                        stop(target)
                 except Exception:  # noqa: BLE001 — never cost the cleanup
                     log.debug("stop_under failed", exc_info=True)
             if bed_stop is not None:
                 # The music bed's own end: Mopidy's tracks faded and taken
                 # back, the credit no longer playing (music_bed.start).
                 try:
-                    bed_stop()
+                    try:
+                        bed_stop(quick=bool(ended_by_cut))
+                    except TypeError:
+                        bed_stop()
                 except Exception:  # noqa: BLE001 — never cost the cleanup
                     log.debug("music bed stop failed", exc_info=True)
             # A claim still in flight (before_speech raised) must finish

@@ -12,7 +12,25 @@ Settings (Auto still picks among the moods):
   (kick, brush snare on 2 and 4, swung ticks) and vinyl hiss with crackle.
 - **jazz** — rootless ii-V-I voicings in F, comped in a swung Charleston
   rhythm over a walking bass and brushes.
+- **bossa** — bossa nova (David, 30 Oct 2026: "Bossa Nova versions are good
+  too"): plucked nylon-string chords (maj7, m9, 6/9) in the bossa's
+  syncopated comping at 72 bpm, a soft rim click on the clave, a gentle bass
+  on roots and fifths. Slow by nature.
 - **nature** — rain, a stream and birds, no music.
+
+**Slow versions** (SLOW_RECIPES; David, 30 Oct 2026: "I think the music
+should be restricted to slower variations"): while slow is on
+(music_bed.slow_on) lo-fi and jazz play as `lofi-slow` and `jazz-slow`:
+
+- lo-fi at 54 bpm, not 66: a soft kick on one and a brush on three only, no
+  ticks and no pushed chord;
+- jazz at 60 bpm, not a swung 100: one held chord a bar, the bass on one and
+  three (root and fifth), the brushes' swish alone.
+
+Tempo of each, as rendered: ambient a chord every 10 s, no beat; piano 60
+bpm, up to five soft notes a bar, no beat; lo-fi 66 bpm with a brushed beat
+and swung ticks (quick in feel); jazz 100 bpm swung with a walking bass
+(quick); bossa 72 bpm, rim clicks on the clave only; nature no music.
 
 Stdlib only, like the moods, and rendered by the same background process
 (music_bed.warm). Every style is one seamless loop: notes that ring past the
@@ -32,16 +50,17 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Callable
+from typing import Callable, Optional
 
 from . import music_bed as B
 
 RATE = B.RATE
 TAU = 2 * math.pi
 
-STYLES = ("ambient", "piano", "lofi", "jazz", "nature")
+STYLES = ("ambient", "piano", "lofi", "jazz", "bossa", "nature")
 LABELS = {"ambient": "Ambient", "piano": "Piano", "lofi": "Lo-fi",
-          "jazz": "Jazz chords", "nature": "Nature (rain, stream, birds)"}
+          "jazz": "Jazz chords", "bossa": "Bossa nova",
+          "nature": "Nature (rain, stream, birds)"}
 
 
 # ---- building blocks ------------------------------------------------------------
@@ -225,6 +244,38 @@ def _chirp(rng: random.Random) -> list[float]:
     return out
 
 
+def _nylon(f: float, d: float, vel: float = 1.0, seed: int = 0) -> list[float]:
+    """A plucked nylon string (Karplus-Strong): a burst of soft noise
+    through a delay line one period long, averaged as it goes round, so the
+    highs die first and it rings warm."""
+    n = int(RATE * d)
+    period = max(2, int(round(RATE / f)))
+    rng = random.Random(seed or int(f * 7))
+    # A thumb, not a pick: the burst low-passed.
+    buf = _lp(_noise(period, rng), min(4000.0, f * 6))
+    peak = max(abs(v) for v in buf) or 1.0
+    buf = [v / peak for v in buf]
+    out = [0.0] * n
+    damp = 0.996
+    for i in range(n):
+        j = i % period
+        v = buf[j]
+        out[i] = v
+        buf[j] = damp * 0.5 * (v + buf[(j + 1) % period])
+    for i in range(min(n, int(RATE * 0.003))):
+        out[i] *= i / (RATE * 0.003)
+    return [vel * v for v in _release(out, 60)]
+
+
+def _rim(vel: float, rng: random.Random) -> list[float]:
+    """A soft rim click: a short knock with a woody ring near 1.7 kHz."""
+    n = int(RATE * 0.07)
+    w = TAU * 1700 / RATE
+    knock = _lp(_hp(_noise(n, rng), 1500), 5000)
+    return [vel * (0.6 * math.sin(w * i) + 0.4 * knock[i]) * math.exp(-i / (RATE * 0.012))
+            for i in range(n)]
+
+
 def _mix(dst: list[float], src: list[float], at_s: float, g: float) -> None:
     B._wrap_mix(dst, src, at_s, g)
 
@@ -256,23 +307,45 @@ RECIPES: dict[str, dict] = {
                         (41, [57, 60, 64, 67]), (50, [60, 63, 66, 69]),
                         (43, [58, 62, 65, 69]), (48, [58, 62, 64, 69]),
                         (41, [57, 60, 64, 67]), (41, [57, 60, 64, 67])]},
+    # | Cmaj7 | Cmaj7 | Am9 | Am9 | Dm9 | Dm9 | F6/9 | G6/9 | at 72 bpm:
+    # 26.7 s. Guitar voicings from A3 up; the bass an octave over its root.
+    "bossa": {"bpm": 72.0, "rounds": 1, "seed": 27,
+              "chords": [(48, [60, 64, 67, 71]), (48, [59, 64, 67, 72]),
+                         (45, [57, 60, 64, 67, 71]), (45, [59, 64, 67, 72]),
+                         (50, [57, 60, 64, 65, 69]), (50, [60, 64, 65, 69]),
+                         (41, [57, 62, 65, 67, 69]), (43, [59, 62, 64, 67, 69])]},
     # 40 s of rain, water and birds.
     "nature": {"seconds": 40.0, "seed": 31, "birds": 7},
 }
 
+#: The slow versions (music_bed.SLOWED: `<style>-slow`), played while slow
+#: is on: the same chords, slower and sparser, the beat much softer or gone.
+SLOW_RECIPES: dict[str, dict] = {
+    # 54 bpm, twice round: 35.6 s.
+    "lofi": {**RECIPES["lofi"], "bpm": 54.0, "slow": True},
+    # 60 bpm, once round: 32 s.
+    "jazz": {**RECIPES["jazz"], "bpm": 60.0, "rounds": 1, "slow": True},
+}
 
-def loop_seconds(style: str) -> float:
-    r = RECIPES[style]
+
+def _recipe(style: str, slow: bool = False) -> dict:
+    return SLOW_RECIPES[style] if slow and style in SLOW_RECIPES else RECIPES[style]
+
+
+def loop_seconds(style: str, slow: bool = False) -> float:
+    r = _recipe(style, slow)
     if style == "ambient":
         return len(r["chords"]) * r["bar"]
     if style == "piano":
         return r["rounds"] * len(r["chords"]) * r["bar"]
-    if style in ("lofi", "jazz"):
+    if style in ("lofi", "jazz", "bossa"):
         return r["rounds"] * len(r["chords"]) * 4 * 60.0 / r["bpm"]
     return r["seconds"]
 
 
-def _n(style: str) -> int:
+def _n(style: str, r: Optional[dict] = None) -> int:
+    if r is not None and "bpm" in r:
+        return int(round(RATE * r["rounds"] * len(r["chords"]) * 4 * 60.0 / r["bpm"]))
     return int(round(RATE * loop_seconds(style)))
 
 
@@ -319,7 +392,8 @@ def _piano(r: dict) -> list[float]:
 
 def _lofi(r: dict) -> list[float]:
     rng = random.Random(r["seed"])
-    n = _n("lofi")
+    slow = bool(r.get("slow"))
+    n = _n("lofi", r)
     s = [0.0] * n
     beat = 60.0 / r["bpm"]
     bar = 4 * beat
@@ -330,12 +404,18 @@ def _lofi(r: dict) -> list[float]:
         for root, ch in r["chords"]:
             for m in ch:
                 _mix(s, _rhodes(B._hz(m), bar * 0.9, 0.5), t + rng.uniform(0, 0.02), 0.45)
-            if rng.random() < 0.5:
+            if not slow and rng.random() < 0.5:
                 # A push on the and of two: the top of the chord again.
                 for m in ch[-2:]:
                     _mix(s, _rhodes(B._hz(m), beat * 1.2, 0.35),
                          t + 1.5 * beat + swing, 0.4)
             _mix(s, _pluck_bass(B._hz(root), bar * 0.8), t, 0.25)
+            if slow:
+                # A soft kick on one and a brush on three: a pulse, no groove.
+                _mix(drums, _kick(0.3), t, 1.0)
+                _mix(drums, _brush(0.35, 0.3, rng), t + 2 * beat, 1.0)
+                t += bar
+                continue
             _mix(drums, _kick(0.5), t, 1.0)
             _mix(drums, _kick(0.32), t + 2.5 * beat + swing, 1.0)
             for b in (1, 3):
@@ -366,7 +446,8 @@ def _lofi(r: dict) -> list[float]:
 
 def _jazz(r: dict) -> list[float]:
     rng = random.Random(r["seed"])
-    n = _n("jazz")
+    slow = bool(r.get("slow"))
+    n = _n("jazz", r)
     s = [0.0] * n
     beat = 60.0 / r["bpm"]
     bar = 4 * beat
@@ -376,6 +457,16 @@ def _jazz(r: dict) -> list[float]:
     k = 0
     for _ in range(r["rounds"]):
         for idx, (root, ch) in enumerate(chords):
+            if slow:
+                # One chord held through the bar, the bass on one and three.
+                for m in ch:
+                    _mix(s, _felt(B._hz(m), bar * 0.9, rng.uniform(0.45, 0.6), 1.0),
+                         t + rng.uniform(0, 0.03), 0.42)
+                for b, m in ((0, root), (2, root + 7)):
+                    _mix(s, _pluck_bass(B._hz(m + 12), beat * 1.8), t + b * beat, 0.2)
+                t += bar
+                k += 1
+                continue
             # Comping: the Charleston (one, and the and of two), varied.
             hits = [(0.0, 0.5), (beat + off, 1.2)] if rng.random() < 0.6 else \
                    [(off, 0.6), (2 * beat + off, 1.0)]
@@ -404,7 +495,40 @@ def _jazz(r: dict) -> list[float]:
     swish = [v * (0.4 + 0.6 * math.sin(math.pi * ((i % beats_n) / beats_n)) ** 2)
              for i, v in enumerate(sw)]
     for i, v in enumerate(_seamless(swish, n)):
-        s[i] += 0.05 * v
+        s[i] += (0.03 if slow else 0.05) * v
+    return s
+
+
+def _bossa(r: dict) -> list[float]:
+    rng = random.Random(r["seed"])
+    n = _n("bossa", r)
+    s = [0.0] * n
+    beat = 60.0 / r["bpm"]
+    eighth = beat / 2
+    bar = 4 * beat
+    chords = r["chords"]
+    # The bossa's comping, in eighths of a two-bar phrase: on one, the and
+    # of two, the and of three; then two, the and of three (the clave's
+    # three and two, which the rim follows).
+    comp = ((0, 3, 5), (2, 5))
+    rim = ((0, 3, 6), (2, 4))
+    t = 0.0
+    for _ in range(r["rounds"]):
+        for idx, (root, ch) in enumerate(chords):
+            half = idx % 2
+            for e in comp[half]:
+                # Fingers on the strings at once, a hair apart, lowest first.
+                vel = rng.uniform(0.5, 0.7) * (1.0 if e == 0 else 0.8)
+                for j, m in enumerate(ch):
+                    _mix(s, _nylon(B._hz(m), 1.6, vel, seed=idx * 31 + e * 7 + j),
+                         t + e * eighth + j * 0.008 + rng.uniform(0, 0.01), 0.3)
+            # The bass: root on one, the fifth on three, an octave up so a
+            # phone hears it; quiet.
+            for b, m in ((0, root), (2, root + 7)):
+                _mix(s, _pluck_bass(B._hz(m + 12), beat * 1.6), t + b * beat, 0.2)
+            for e in rim[half]:
+                _mix(s, _rim(0.25, rng), t + e * eighth, 1.0)
+            t += bar
     return s
 
 
@@ -445,9 +569,10 @@ def _nature(r: dict) -> list[float]:
 
 _RENDER: dict[str, Callable[[dict], list[float]]] = {
     "ambient": _ambient, "piano": _piano, "lofi": _lofi, "jazz": _jazz,
-    "nature": _nature}
+    "bossa": _bossa, "nature": _nature}
 
 
-def render(style: str) -> list[float]:
-    """One seamless loop of `style`, about -1..1 before music_bed scales it."""
-    return _RENDER[style](RECIPES[style])
+def render(style: str, slow: bool = False) -> list[float]:
+    """One seamless loop of `style` (its slow version with `slow`, where it
+    has one), about -1..1 before music_bed scales it."""
+    return _RENDER[style](_recipe(style, slow))

@@ -78,6 +78,17 @@ why (`auto_why`: "dusk — low energy, warm (astrotunes)"). For favourites
 the ready tracks are weighted by how near their tempo and energy (BPM and
 loudness, measured once as each is made) are to the reading's.
 
+**Slow only** (David, 30 Oct 2026: "I think the music should be restricted
+to slower variations"), on unless MEDIA_MUSIC_BED_SLOW=0 or Settings'
+"Slow music only" switch is off (`slow_on`; kept beside the choice): Auto
+never picks a quick variation — energetic and bright gives **calm**
+(piano), warm gives **blend** (bossa nova), and no genre is lo-fi or jazz;
+by the hour morning is calm, blend's genre bossa nova and dusk's piano
+(SLOW_GENRE_FOR_MOOD). A fixed lo-fi, jazz or morning plays its slow render
+(SLOWED, `played`). A favourites, library or streaming track plays only
+when measured slow (music_bed_tempo.py); with none, the generated stand-in.
+Settings is told "— slow only" at the end of `auto_why`.
+
 **The choice**: ``off``, ``auto`` (by time and weather) or a mood. Settings
 stores one on the server (`<state_dir>/music-bed.json`, ``GET``/``POST
 /speech/music-bed``), which wins; without one, ``MEDIA_MUSIC_BED`` (default
@@ -96,17 +107,22 @@ tests set it).
 Each file is one seamless loop: the notes that ring past the loop's end are
 mixed back in at its start (so the last sample leads straight into the
 first), and rain is crossfaded across the seam. Mono, 48 kHz, peaking at
--24 dBFS, as the samples, so the voice stays on top.
+-28 dBFS: the samples' -24 and MEDIA_MUSIC_BED_GAIN_DB (-4; David, 30 Oct
+2026: "a little bit quieter"), which also sets the kept tracks' level
+(-34 LUFS) and Mopidy's (8). A gain other than -4 is in the file's name.
+What loops under the voice fades in and out (under_fade.py).
 
 **The sources** (David, 26 Oct 2026: "let's go with the three options for
 music that you gave me earlier"; "it will be good to use some kind of online
 library"), one Settings choice:
 
 - **Generated** (this module and music_bed_styles.py): the six moods above
-  and five genre styles — ambient, piano, lo-fi, jazz chords, nature — all
+  and six genre styles — ambient, piano, lo-fi, jazz chords, bossa nova,
+  nature — all
   rendered here. Auto picks a mood; a mood or style fixes it.
 - **Your streaming music** (music_bed_stream.py): a quiet genre playlist
-  (lo-fi, ambient, classical, jazz, piano) from YouTube Music through Mopidy,
+  (lo-fi, ambient, classical, jazz, piano, bossa nova) from YouTube Music
+  through Mopidy,
   on the house speakers and red5 only; a phone says why not.
 - **Online library** (music_bed_library.py): public-domain, CC0 and CC BY
   recordings from archive.org (and ccMixter), fetched in the background,
@@ -151,17 +167,24 @@ from typing import Callable, NamedTuple, Optional
 log = logging.getLogger(__name__)
 
 RATE = 48000
-PEAK_DBFS = -24.0
-#: Bumped whenever a recipe changes, so an old file is never reused.
-VERSION = 1
+#: The generated beds' peak before MEDIA_MUSIC_BED_GAIN_DB (`peak_dbfs`).
+BASE_PEAK_DBFS = -24.0
+#: MEDIA_MUSIC_BED_GAIN_DB's default: every bed 4 dB under the levels it
+#: had first (David, 30 Oct 2026: "a little bit quieter").
+DEFAULT_GAIN_DB = -4.0
+PEAK_DBFS = BASE_PEAK_DBFS + DEFAULT_GAIN_DB
+#: Bumped whenever a recipe changes, so an old file is never reused. 2: the
+#: slow versions, bossa nova, and 4 dB quieter (30 Oct 2026).
+VERSION = 2
 
 MOODS = ("calm", "dusk", "blend", "morning", "rainy", "night")
 LABELS = {"calm": "Calm", "dusk": "Dusk", "blend": "Calm and dusk",
           "morning": "Morning", "rainy": "Rainy day", "night": "Late night"}
 #: The generated genre styles (music_bed_styles.py), beside the moods.
-GENRES = ("ambient", "piano", "lofi", "jazz", "nature")
+GENRES = ("ambient", "piano", "lofi", "jazz", "bossa", "nature")
 LABELS.update({"ambient": "Ambient", "piano": "Piano", "lofi": "Lo-fi",
-               "jazz": "Jazz chords", "nature": "Nature (rain, stream, birds)"})
+               "jazz": "Jazz chords", "bossa": "Bossa nova",
+               "nature": "Nature (rain, stream, birds)"})
 #: Everything the generated source can play.
 GENERATED = MOODS + GENRES
 #: The beds under readings that are not an agent's reply (`wanted`'s kind):
@@ -169,8 +192,14 @@ GENERATED = MOODS + GENRES
 KIND_BEDS = ("people", "question", "alert")
 LABELS.update({"people": "A person's message", "question": "A question",
                "alert": "An alert"})
+#: The generated styles with a quick feel, each also rendered slower
+#: (`<style>-slow`: longer bars, sparser notes, a much softer beat or none),
+#: which is what plays while slow is on (`played`).
+SLOWED = ("morning", "lofi", "jazz")
+SLOW_IDS = tuple(f"{s}-slow" for s in SLOWED)
+LABELS.update({f"{s}-slow": f"{LABELS[s]} (slow)" for s in SLOWED})
 #: Everything rendered here.
-RENDERED = GENERATED + KIND_BEDS
+RENDERED = GENERATED + SLOW_IDS + KIND_BEDS
 
 SOURCES = ("generated", "streaming", "library", "favourites")
 SOURCE_LABELS = {"generated": "Generated", "streaming": "Your streaming music",
@@ -181,15 +210,19 @@ FAV_STYLES = ("official", "separated")
 FAV_LABELS = {"official": "Official instrumentals only",
               "separated": "Vocals removed only"}
 #: The genres the streaming and library sources offer.
-NET_GENRES = ("lofi", "ambient", "classical", "jazz", "piano")
+NET_GENRES = ("lofi", "ambient", "classical", "jazz", "piano", "bossa")
 NET_LABELS = {"lofi": "Lo-fi", "ambient": "Ambient", "classical": "Classical",
-              "jazz": "Jazz", "piano": "Piano"}
+              "jazz": "Jazz", "piano": "Piano", "bossa": "Bossa nova"}
 #: The generated style that stands in for a genre with nothing cached.
 GENERATED_FOR = {"lofi": "lofi", "ambient": "ambient", "classical": "piano",
-                 "jazz": "jazz", "piano": "piano"}
+                 "jazz": "jazz", "piano": "piano", "bossa": "bossa"}
 #: Auto for the streaming and library sources: the genre for Auto's mood.
 GENRE_FOR_MOOD = {"morning": "classical", "calm": "piano", "blend": "lofi",
                   "dusk": "jazz", "night": "ambient", "rainy": "piano"}
+#: The same with slow on: no lo-fi or jazz; bossa nova for the warm blend.
+SLOW_GENRE_FOR_MOOD = {**GENRE_FOR_MOOD, "blend": "bossa", "dusk": "piano"}
+#: The moods Auto may pick with slow on (morning is quick: calm instead).
+SLOW_MOODS = ("calm", "dusk", "night", "rainy", "blend")
 
 AUTO_LABEL = "Auto (by time and weather)"
 
@@ -251,30 +284,91 @@ def parse(choice: Optional[str]) -> Optional[tuple[str, str]]:
     return "generated", c
 
 
+def _stored() -> dict:
+    """Everything Settings saved: the choice, the slow switch."""
+    try:
+        d = json.loads(_settings_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _store(d: dict) -> None:
+    p = _settings_path()
+    if not any(k in d for k in ("choice", "slow")):
+        p.unlink(missing_ok=True)
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}")
+    tmp.write_text(json.dumps({**d, "at": time.time()}))
+    os.replace(tmp, p)
+
+
 def stored_choice() -> Optional[str]:
     """The Settings choice, or None when none was made."""
-    try:
-        c = json.loads(_settings_path().read_text()).get("choice")
-    except (OSError, ValueError, AttributeError):
-        return None
-    return normalise(c)
+    return normalise(_stored().get("choice"))
 
 
 def set_choice(choice: Optional[str]) -> Optional[str]:
     """Save the Settings choice (None forgets it, back to MEDIA_MUSIC_BED)."""
-    p = _settings_path()
+    d = _stored()
     if choice is None:
-        p.unlink(missing_ok=True)
+        d.pop("choice", None)
+        _store(d)
         return None
     canon = normalise(choice)
     if canon is None:
         raise ValueError(f"no music bed choice {choice!r}")
-    choice = canon
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(f".{p.name}.{os.getpid()}")
-    tmp.write_text(json.dumps({"choice": choice, "at": time.time()}))
-    os.replace(tmp, p)
-    return choice
+    d["choice"] = canon
+    _store(d)
+    return canon
+
+
+# ---- slow only ------------------------------------------------------------------
+
+def stored_slow() -> Optional[bool]:
+    """The Settings slow switch, or None when it was never set."""
+    v = _stored().get("slow")
+    return v if isinstance(v, bool) else None
+
+
+def env_slow() -> bool:
+    """MEDIA_MUSIC_BED_SLOW: on unless 0, off, false or no."""
+    return (os.environ.get("MEDIA_MUSIC_BED_SLOW") or "").strip().lower() not in (
+        "0", "off", "false", "no")
+
+
+def slow_on() -> bool:
+    """Slow only (David, 30 Oct 2026: "I think the music should be restricted
+    to slower variations"): Settings' switch, else MEDIA_MUSIC_BED_SLOW (on)."""
+    s = stored_slow()
+    return env_slow() if s is None else s
+
+
+def set_slow(value: Optional[bool]) -> Optional[bool]:
+    """Save the slow switch (None forgets it, back to MEDIA_MUSIC_BED_SLOW)."""
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(f"slow must be true, false or null, not {value!r}")
+    d = _stored()
+    if value is None:
+        d.pop("slow", None)
+    else:
+        d["slow"] = value
+    _store(d)
+    return value
+
+
+def played(style: str, slow: Optional[bool] = None) -> str:
+    """The generated file id that plays for `style`: its slow version
+    (`<style>-slow`) while slow is on and it has one, else itself."""
+    if style in SLOWED and (slow_on() if slow is None else slow):
+        return f"{style}-slow"
+    return style
+
+
+#: What GET /speech/music-bed lists as `settings`: switches beside the choice.
+SLOW_LABEL = "Slow music only"
+SLOW_HINT = "Only slow, quiet pieces: no beat-driven or quick ones."
 
 
 def env_choice() -> str:
@@ -468,9 +562,12 @@ class Auto(NamedTuple):
     axes: Optional[dict] = None
 
 
-def astro_auto(axes: dict, hour: int, raining: bool = False) -> Auto:
+def astro_auto(axes: dict, hour: int, raining: bool = False,
+               slow: Optional[bool] = None) -> Auto:
     """The mood and genre for astrotunes' axes at `hour` (the mapping in the
-    module's docstring), with the words for why."""
+    module's docstring), with the words for why. `slow` (default
+    `slow_on()`): never an energetic or quick one."""
+    slow = slow_on() if slow is None else slow
     g = lambda k: float(axes.get(k, 0.5))  # noqa: E731
     energy, tempo, warmth = g("energy"), g("tempo"), g("warmth")
     bright, texture = g("brightness"), g("texture")
@@ -494,6 +591,15 @@ def astro_auto(axes: dict, hour: int, raining: bool = False) -> Auto:
         words.append("late, so kept low")
     if is_late(hour) and genre == "lofi":
         genre = "piano"
+    if slow:
+        if mood == "morning":
+            # Energetic and bright: the brightest slow mood.
+            mood = "calm"
+            words.append("kept slow")
+        if genre == "lofi":
+            genre = "piano"
+        elif genre == "jazz":
+            genre = "bossa"
     return Auto(mood, genre, f"{mood} — {', '.join(words)} (astrotunes)", axes)
 
 
@@ -521,14 +627,18 @@ def auto_now(when: Optional[datetime] = None, weather: Optional[str] = "?",
         weather = weather_label()
     if axes == "?":
         axes = astro_reading()
+    slow = slow_on()
     if axes:
-        return astro_auto(axes, when.hour, is_rain(weather))
+        return astro_auto(axes, when.hour, is_rain(weather), slow)
+    genres = SLOW_GENRE_FOR_MOOD if slow else GENRE_FOR_MOOD
     mood = mood_by_hour(when.hour)
     if mood != "night" and is_rain(weather):
-        return Auto("rainy", GENRE_FOR_MOOD["rainy"], "rainy — it is raining")
+        return Auto("rainy", genres["rainy"], "rainy — it is raining")
     span = {"morning": "6–11", "calm": "11–14", "blend": "14–17", "dusk": "17–21",
             "night": "21–6"}[mood]
-    return Auto(mood, GENRE_FOR_MOOD[mood], f"{mood} — by the hour ({span})")
+    if slow and mood not in SLOW_MOODS:
+        return Auto("calm", genres[mood], f"calm — by the hour ({span}), kept slow")
+    return Auto(mood, genres[mood], f"{mood} — by the hour ({span})")
 
 
 def mood_for(when: Optional[datetime] = None, weather: Optional[str] = "?",
@@ -587,13 +697,13 @@ def pick_for(pick: Optional[str] = None, when: Optional[datetime] = None,
     mood = auto.mood
     if src == "generated":
         s = mood if style == "auto" else style
-        return Pick("generated", s, s)
+        return Pick("generated", s, played(s))
     if src == "favourites":
         # Its style stays "auto" (any ready track) or a method; the stand-in
         # is Auto's mood.
-        return Pick("favourites", style, mood or "calm")
+        return Pick("favourites", style, played(mood or "calm"))
     genre = auto.genre if style == "auto" else style
-    return Pick(src, genre, mood if style == "auto" and mood else GENERATED_FOR[genre])
+    return Pick(src, genre, played(mood if style == "auto" and mood else GENERATED_FOR[genre]))
 
 
 def kinds_on() -> tuple[str, ...]:
@@ -715,24 +825,54 @@ _RECIPES = {
                (50, [57, 62, 65, 69]), (52, [56, 59, 64, 68])],
               2.4, 4, 0.55, 0.15, 0.9, 2.4, 0.0, 19),
 }
-#: A recipe's own peak, where it is not PEAK_DBFS.
-_PEAKS = {"question": -27.0}
+#: The slow versions of the quick moods (SLOWED), played while slow is on:
+#: morning's chords in bars of 5 s, not 3.6, three notes a bar, not four,
+#: and darker.
+_SLOW_RECIPES = {
+    "morning": ([(60, [60, 64, 67, 71]), (65, [65, 69, 72, 76]),
+                 (57, [57, 60, 64, 67]), (67, [67, 71, 74, 77])],
+                5.0, 3, 0.3, 0.3, 2.0, 1.2, 0.12, 7),
+}
+#: A recipe's peak against the rest's, where it is not the same.
+_PEAK_OFFSETS = {"question": -3.0}
+
+
+def gain_db() -> float:
+    """MEDIA_MUSIC_BED_GAIN_DB: every bed's level against the first ones'
+    (-24 dBFS peak generated, -30 LUFS kept tracks, Mopidy at 12): -4."""
+    return _num_env("MEDIA_MUSIC_BED_GAIN_DB", DEFAULT_GAIN_DB)
+
+
+def peak_dbfs(mood: str = "") -> float:
+    """A generated bed's peak: -24 dBFS and the gain (-28), the question's
+    3 dB under the rest."""
+    return BASE_PEAK_DBFS + gain_db() + _PEAK_OFFSETS.get(mood, 0.0)
+
+
+def _split_slow(mood: str) -> tuple[str, bool]:
+    if mood.endswith("-slow") and mood[:-5] in SLOWED:
+        return mood[:-5], True
+    return mood, False
 
 
 def loop_seconds(mood: str) -> float:
-    if mood in GENRES:
+    base, slow = _split_slow(mood)
+    if base in GENRES:
         from . import music_bed_styles
-        return music_bed_styles.loop_seconds(mood)
-    prog, bar = _RECIPES[mood][0], _RECIPES[mood][1]
-    return 2 * len(prog) * bar
+        return music_bed_styles.loop_seconds(base, slow)
+    recipe = _SLOW_RECIPES[base] if slow else _RECIPES[base]
+    return 2 * len(recipe[0]) * recipe[1]
 
 
 def render(mood: str) -> list[float]:
-    """One seamless loop of `mood` (or genre style), -1..1 before scaling."""
-    if mood in GENRES:
+    """One seamless loop of `mood` (or genre style, or the slow version of
+    either: `<id>-slow`), -1..1 before scaling."""
+    base, slow = _split_slow(mood)
+    if base in GENRES:
         from . import music_bed_styles
-        return music_bed_styles.render(mood)
-    prog, bar, notes, bright, wob, mel_d, mel_dec, jit, seed = _RECIPES[mood]
+        return music_bed_styles.render(base, slow)
+    recipe = _SLOW_RECIPES[base] if slow else _RECIPES[base]
+    prog, bar, notes, bright, wob, mel_d, mel_dec, jit, seed = recipe
     rng = random.Random(seed)
     n = int(round(RATE * loop_seconds(mood)))
     s = [0.0] * n
@@ -761,11 +901,10 @@ def render(mood: str) -> list[float]:
 
 
 def synth(mood: str) -> bytes:
-    """`mood` as 16-bit mono PCM at RATE, peaking at PEAK_DBFS (or its own,
-    _PEAKS)."""
+    """`mood` as 16-bit mono PCM at RATE, peaking at `peak_dbfs` (-28)."""
     samples = render(mood)
     peak = max((abs(v) for v in samples), default=0.0) or 1.0
-    scale = (10 ** (_PEAKS.get(mood, PEAK_DBFS) / 20.0)) * 32767 / peak
+    scale = (10 ** (peak_dbfs(mood) / 20.0)) * 32767 / peak
     pcm = array.array("h", (int(round(v * scale)) for v in samples))
     if sys.byteorder != "little":
         pcm.byteswap()
@@ -780,7 +919,26 @@ def _dir() -> Path:
 
 
 def file_for(mood: str) -> Path:
-    return _dir() / f"music-bed-{mood}-v{VERSION}.wav"
+    """The bed's file: versioned, and named for its gain when that is not
+    the default, so a changed MEDIA_MUSIC_BED_GAIN_DB renders afresh."""
+    g = gain_db()
+    tag = "" if g == DEFAULT_GAIN_DB else f"-g{g:g}"
+    return _dir() / f"music-bed-{mood}-v{VERSION}{tag}.wav"
+
+
+def prune_old() -> int:
+    """Delete the generated beds of other versions or gains (the clip dir
+    keeps only what plays now). How many went."""
+    keep = {file_for(m).name for m in RENDERED}
+    n = 0
+    try:
+        for p in _dir().glob("music-bed-*-v*.wav"):
+            if p.name not in keep:
+                p.unlink(missing_ok=True)
+                n += 1
+    except OSError:
+        pass
+    return n
 
 
 def ready(mood: str) -> Optional[Path]:
@@ -834,13 +992,13 @@ def warm_needed() -> bool:
     try:
         if src == "library":
             from . import music_bed_library as lib
-            return any(lib.needs(g) for g in _net_genres(style))
+            return lib.upkeep_due() or any(lib.needs(g) for g in _net_genres(style))
         if src == "streaming":
             from . import music_bed_stream as st
-            return any(st.needs(g) for g in _net_genres(style))
+            return st.upkeep_due() or any(st.needs(g) for g in _net_genres(style))
         if src == "favourites":
             from . import music_bed_favourites as fav
-            return fav.needs()
+            return fav.upkeep_due() or fav.needs()
     except Exception as e:  # noqa: BLE001
         log.info("music-bed: %s", e)
     return False
@@ -892,7 +1050,19 @@ def warm() -> int:
             if ready(style) is None:
                 write(style)
                 done += 1
+        prune_old()
         parsed = parse(choice())
+        if parsed:
+            # The chosen source's kept tracks: measured for the slow rule
+            # and brought to the bed's level, once each (music_bed_tempo).
+            try:
+                mod = {"library": "music_bed_library", "streaming": "music_bed_stream",
+                       "favourites": "music_bed_favourites"}.get(parsed[0])
+                if mod:
+                    import importlib
+                    importlib.import_module(f".{mod}", __package__).upkeep()
+            except Exception as e:  # noqa: BLE001
+                log.warning("music-bed: measuring kept tracks failed: %s", e)
         if parsed and parsed[0] == "favourites":
             try:
                 from . import music_bed_favourites as fav
@@ -932,15 +1102,15 @@ def _source_ready(pick: Pick, target=None) -> bool:
     try:
         if pick.source == "library":
             from . import music_bed_library as lib
-            return bool(lib.tracks(pick.style))
+            return bool(lib.playable(pick.style))
         if pick.source == "favourites":
             from . import music_bed_favourites as fav
-            return fav.enabled() and bool(fav.tracks(pick.style))
+            return fav.enabled() and bool(fav.playable(pick.style))
         if pick.source == "streaming":
             from . import music_bed_stream as st
             if target is not None and st.available(_target_name(target)) is not None:
                 return False
-            return bool(st.tracks(pick.style))
+            return bool(st.playable(pick.style))
     except Exception as e:  # noqa: BLE001
         log.info("music-bed: %s", e)
     return False
@@ -1100,19 +1270,22 @@ def start(plan: Plan, target=None, sink=None) -> tuple[bool, Optional[Callable[[
                     return False, None
                 plan = Plan("under", "generated", alt, path=p)
                 _note_now(plan, True)
-                return True, lambda: _note_now(None, False)
+                return True, lambda quick=False: _note_now(None, False)
             _note_now(plan, True)
 
-            def done() -> None:
+            def done(quick: bool = False) -> None:
                 try:
-                    stop()
+                    try:
+                        stop(quick=quick)
+                    except TypeError:
+                        stop()
                 finally:
                     _note_now(None, False)
             return False, done
         if plan.path is None or not play_under(plan.path, target, sink):
             return False, None
         _note_now(plan, True)
-        return True, lambda: _note_now(None, False)
+        return True, lambda quick=False: _note_now(None, False)
     except Exception as e:  # noqa: BLE001 — a bed must never cost a reply
         log.warning("music-bed: starting failed: %s", e)
         return False, None
@@ -1184,21 +1357,47 @@ def _note(source: str, current: Optional[tuple[str, str]]) -> Optional[str]:
             return fav.note(current[1])
         except Exception:  # noqa: BLE001
             return None
+    style = current[1]
     try:
         if source == "library":
-            from . import music_bed_library as lib
-            n = lib.counts()
+            from . import music_bed_library as mod
         else:
-            from . import music_bed_stream as st
-            n = st.counts()
+            from . import music_bed_stream as mod
+        n = mod.counts()
+        slow = len(mod.playable(None if style == "auto" else style))
     except Exception:  # noqa: BLE001
         return None
-    style = current[1]
     have = sum(n.values()) if style == "auto" else n.get(style, 0)
     if have:
-        return f"{have} track{'s' if have != 1 else ''} kept on the server."
+        line = f"{have} track{'s' if have != 1 else ''} kept on the server."
+        if slow_on():
+            line += (f" {slow} slow enough to play (slow only)." if slow else
+                     " None slow enough yet (slow only); generated music plays.")
+        return line
     return ("Fetching a few tracks in the background; generated music plays "
             "until they are here.")
+
+
+def settings() -> list[dict]:
+    """The switches beside the choice, for an app to render as they come
+    (`kind` "bool": a checkbox with `label` and `hint`); `set` is whether
+    Settings chose rather than the server's default."""
+    return [{"id": "slow", "kind": "bool", "label": SLOW_LABEL, "hint": SLOW_HINT,
+             "value": slow_on(), "set": stored_slow() is not None}]
+
+
+def set_settings(values: dict) -> None:
+    """Save `{id: value}` from POST /speech/music-bed's `settings` (null
+    forgets one). ValueError for an unknown id or a bad value, before any
+    is saved."""
+    if not isinstance(values, dict) or not values:
+        raise ValueError("settings must be an object of {id: value}")
+    for k, v in values.items():
+        if k != "slow":
+            raise ValueError(f"no music bed setting {k!r}")
+        if v is not None and not isinstance(v, bool):
+            raise ValueError("slow must be true, false or null")
+    set_slow(values["slow"])
 
 
 def status() -> dict:
@@ -1240,7 +1439,8 @@ def status() -> dict:
         auto_why = f"{auto.genre} — " + auto.why.split(" — ", 1)[1]
     else:
         auto_why = auto.why
-    auto_why = f"auto: {auto_why}"
+    slow = slow_on()
+    auto_why = f"auto: {auto_why}" + (" — slow only" if slow else "")
     try:
         now = json.loads(_now_path().read_text())
         if not isinstance(now, dict):
@@ -1263,6 +1463,8 @@ def status() -> dict:
     except Exception:  # noqa: BLE001
         fav_counts = {}
     return {"choice": c, "set": stored is not None,
+            "slow": slow,
+            "settings": settings(),
             "source": parsed[0] if parsed else "off",
             "style": parsed[1] if parsed else None,
             "choices": flat,

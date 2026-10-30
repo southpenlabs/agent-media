@@ -31,10 +31,21 @@ bed plays instead.
 is left alone) and the reading's duck found nothing else playing. The
 tracks are added after whatever is in his queue, Mopidy's volume (and the
 Mopidy-Mpv renderer's, through SinkMusic.duck) is faded up from nothing to
-MEDIA_MUSIC_BED_STREAM_VOLUME (12 of 100) with the DJ duck's fader
-(route/dj.py `fade`), and the first of them played. When the reading ends
-it fades down, stops, takes its tracks back out of the queue and puts the
+MEDIA_MUSIC_BED_STREAM_VOLUME (8 of 100: 12, the first level, 4 dB down by
+music_bed's MEDIA_MUSIC_BED_GAIN_DB) with the DJ duck's fader
+(route/dj.py `fade`) over MEDIA_UNDER_FADE_IN_MS (1.5 s), and the first of
+them played. When the reading ends it carries on MEDIA_UNDER_TAIL_MS (1 s)
+and fades down over MEDIA_UNDER_FADE_OUT_MS (2.5 s) — half a second
+(MEDIA_UNDER_QUICK_FADE_MS) when the listener cut the reading — on its own
+thread, then stops, takes its tracks back out of the queue and puts the
 volume (and random) back as they were.
+
+**Slow only** (music_bed.slow_on, on by default): each fetched track is
+measured once (music_bed_tempo.measure; one from before by `upkeep`), only
+the slow ones play, and a genre counts as short until it has per_style slow
+ones (at most twice that fetched a pass). The files are the rooms cache,
+shared with every house play, so they are never re-levelled here: the
+volume above is the bed's level.
 """
 
 from __future__ import annotations
@@ -49,13 +60,13 @@ from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
 
-GENRES = ("lofi", "ambient", "classical", "jazz", "piano")
+GENRES = ("lofi", "ambient", "classical", "jazz", "piano", "bossa")
 LABELS = {"lofi": "Lo-fi", "ambient": "Ambient", "classical": "Classical",
-          "jazz": "Jazz", "piano": "Piano"}
+          "jazz": "Jazz", "piano": "Piano", "bossa": "Bossa nova"}
 #: What Mopidy is asked for, per genre.
 QUERIES = {"lofi": "lofi hip hop instrumental", "ambient": "ambient instrumental",
            "classical": "classical music instrumental", "jazz": "jazz instrumental",
-           "piano": "solo piano instrumental"}
+           "piano": "solo piano instrumental", "bossa": "bossa nova instrumental guitar"}
 
 PHONE_WHY = ("Not on a phone: your streaming music would come from the phone's own "
              "music app (the radio's hand-off player), which takes the phone's audio "
@@ -90,7 +101,17 @@ def targets() -> tuple[str, ...]:
 
 
 def volume() -> int:
-    return max(1, min(100, int(_num_env("MEDIA_MUSIC_BED_STREAM_VOLUME", DEFAULT_VOLUME))))
+    """MEDIA_MUSIC_BED_STREAM_VOLUME, else 12 moved by music_bed's gain
+    (-4 dB: 8)."""
+    raw = (os.environ.get("MEDIA_MUSIC_BED_STREAM_VOLUME") or "").strip()
+    try:
+        v = float(raw) if raw else None
+    except ValueError:
+        v = None
+    if v is None:
+        from .music_bed import gain_db
+        v = round(DEFAULT_VOLUME * 10 ** (gain_db() / 20.0))
+    return max(1, min(100, int(v)))
 
 
 def per_style() -> int:
@@ -204,11 +225,34 @@ def counts() -> dict:
     return {g: len(tracks(g, data)) for g in GENRES}
 
 
+def playable(genre: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
+    """The cached tracks (of `genre`) the bed may play: the slow ones while
+    slow is on (music_bed_tempo.keep)."""
+    from .music_bed_tempo import keep
+    return keep(tracks(genre, data))
+
+
+def upkeep_due(data: Optional[dict] = None) -> bool:
+    from .music_bed_tempo import needs_measure
+    return any(needs_measure(e) for e in tracks(None, load() if data is None else data))
+
+
+def upkeep() -> int:
+    """Each kept track measured once for the slow rule (its loudness too:
+    the rooms cache's files are not normalised). How many."""
+    from .music_bed_tempo import backfill
+    data = load()
+    n = backfill(tracks(None, data), lambda e: Path(e["file"]), loudness=True)
+    if n:
+        save(data)
+    return n
+
+
 def needs(genre: str, now: Optional[float] = None) -> bool:
     if not enabled() or genre not in GENRES:
         return False
     data = load()
-    if len(tracks(genre, data)) >= per_style():
+    if len(playable(genre, data)) >= per_style():
         return False
     now = time.time() if now is None else now
     return now - float(data["tried"].get(genre, 0)) >= DEFAULT_RETRY_S
@@ -264,12 +308,15 @@ def fill(genres, now: Optional[float] = None) -> int:
             songs = []
         data = load()
         have = {e.get("id") for e in data["tracks"]}
-        want = per_style() - len(tracks(g, data))
+        want = per_style() - len(playable(g, data))
+        tries = 2 * max(0, want)
+        from . import music_bed_tempo
         for s in songs:
-            if want <= 0:
+            if want <= 0 or tries <= 0:
                 break
             if s["id"] in have:
                 continue
+            tries -= 1
             try:
                 local = _fetch_local(s["id"])
             except Exception as e:  # noqa: BLE001
@@ -277,14 +324,17 @@ def fill(genres, now: Optional[float] = None) -> int:
                 local = None
             if not local:
                 continue
+            entry = {**s, "genre": g, "file": local, "added": time.time(),
+                     "features": music_bed_tempo.measure(Path(local))}
             data = load()
-            data["tracks"].append({**s, "genre": g, "file": local, "added": time.time()})
+            data["tracks"].append(entry)
             # Only the index is ours to cap: the files are the rooms cache,
             # shared with every house play.
             data["tracks"] = data["tracks"][-len(GENRES) * per_style() * 2:]
             save(data)
             got += 1
-            want -= 1
+            if music_bed_tempo.keep([entry]):
+                want -= 1
         data = load()
         data["tried"][g] = time.time() if now is None else now
         save(data)
@@ -292,8 +342,9 @@ def fill(genres, now: Optional[float] = None) -> int:
 
 
 def pick(genre: str) -> list[dict]:
-    """The genre's cached tracks, the one played longest ago first."""
-    have = tracks(genre)
+    """The genre's cached tracks it may play (the slow ones while slow is
+    on), the one played longest ago first."""
+    have = playable(genre)
     have.sort(key=lambda e: float(e.get("played", 0)))
     return have
 
@@ -333,19 +384,35 @@ def start(entries: list[dict]) -> Optional[Callable[[], None]]:
     except OSError:
         pass
     level = volume()
+    from . import under_fade
     from .route import dj
 
-    up = threading.Thread(target=lambda: _quiet(lambda: dj.fade(_set_volume, 0, level, 1500)),
+    up = threading.Thread(target=lambda: _quiet(lambda: dj.fade(
+                              _set_volume, 0, level, under_fade.fade_in_ms())),
                           daemon=True, name="music-bed-fade-up")
     up.start()
     done = threading.Event()
+    hurry = threading.Event()
 
-    def stop() -> None:
+    def stop(quick: bool = False, wait: bool = False) -> None:
+        """Fade down (after the tail; quickly with `quick`) and tidy up, on
+        its own thread unless `wait`. A second call only hurries it."""
+        if quick:
+            hurry.set()
         if done.is_set():
             return
         done.set()
-        up.join(timeout=3)
-        _quiet(lambda: dj.fade(_set_volume, level, 0, 600))
+        th = threading.Thread(target=_finish, name="music-bed-fade-down", daemon=False)
+        th.start()
+        if wait:
+            th.join()
+
+    def _finish() -> None:
+        up.join(timeout=under_fade.fade_in_ms() / 1000.0 + 2)
+        if not hurry.is_set():
+            hurry.wait(under_fade.tail_ms() / 1000.0)
+        ms = under_fade.quick_ms() if hurry.is_set() else under_fade.fade_out_ms()
+        _quiet(lambda: dj.fade(_set_volume, level, 0, ms))
         try:
             _mpd("stop")
             listing = _mpd("playlistinfo")[0]

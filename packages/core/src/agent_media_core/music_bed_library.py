@@ -9,8 +9,8 @@ beside the generated moods and styles and his own streaming music.
 public-domain classical recordings (the complete Chopin is solo piano) and
 Kevin MacLeod's CC BY albums are both there. ccMixter's query API is the
 second, CC BY uploads tagged `instrumental` only (`lic=by`), which is where
-most of the lo-fi is. Each genre (lo-fi, ambient, classical, jazz, piano)
-has its searches in IA_QUERIES and CC_TAGS.
+most of the lo-fi is. Each genre (lo-fi, ambient, classical, jazz, piano,
+bossa nova) has its searches in IA_QUERIES and CC_TAGS.
 
 **Which licences.** Only those that allow any use, with no conditions
 beyond credit: public domain (the Public Domain Mark, the old CC public
@@ -25,9 +25,11 @@ file name that says it is sung, spoken or an audiobook (opera, choir, aria,
 lyrics, LibriVox …) is skipped all the same (`_BAD`).
 
 **The cache.** A few tracks a genre (MEDIA_MUSIC_BED_LIBRARY_PER_STYLE, 3),
-normalised with ffmpeg — leading silence trimmed, loudnorm to -30 LUFS
-integrated (MEDIA_MUSIC_BED_LIBRARY_LUFS), so it sits under speech as the
-generated beds do, at most ten minutes, 48 kHz stereo mp3 — and written to
+normalised with ffmpeg — leading silence trimmed, loudnorm to -34 LUFS
+integrated (-30 and music_bed's MEDIA_MUSIC_BED_GAIN_DB, -4; or
+MEDIA_MUSIC_BED_LIBRARY_LUFS outright), so it sits under speech as the
+generated beds do; a track kept at another level is brought to it by the
+background process (`upkeep`), from its own file, never fetched again — at most ten minutes, 48 kHz stereo mp3 — and written to
 the speech clip dir (`<state_dir>/audio/music-bed-lib-<key>.mp3`), the one
 place every player can fetch from: the phone by its signed clip URL
 (clip_sign.py), this host's own mpv by path. What each one is — title,
@@ -35,6 +37,13 @@ creator, licence, the item's page — is kept in
 `<state_dir>/music-bed-library.json`, which is also the cache's index.
 Total size is capped (MEDIA_MUSIC_BED_LIBRARY_MAX_MB, 300); the least
 recently played go first.
+
+**Slow only** (music_bed.slow_on, on by default): each track is measured
+once as it is fetched (music_bed_tempo.measure, before normalising), one
+kept from before by `upkeep`; only the slow ones play (music_bed_tempo's
+rule), and a genre counts as short until it has per_style slow ones — at
+most twice that many fetched a pass, so a quick genre does not fetch on and
+on. Nothing slow kept: the generated bed.
 
 **When.** Only in music_bed's detached background process (`warm`), never
 while a reply waits; a genre that came up short is not searched again for
@@ -64,9 +73,9 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-GENRES = ("lofi", "ambient", "classical", "jazz", "piano")
+GENRES = ("lofi", "ambient", "classical", "jazz", "piano", "bossa")
 LABELS = {"lofi": "Lo-fi", "ambient": "Ambient", "classical": "Classical",
-          "jazz": "Jazz", "piano": "Piano"}
+          "jazz": "Jazz", "piano": "Piano", "bossa": "Bossa nova"}
 
 USER_AGENT = ("agent-media-music-bed/1.0 "
               "(+https://github.com/southpenlabs/agent-media; quiet music "
@@ -79,7 +88,10 @@ MAX_DOWNLOAD = 60 * 1024 * 1024
 DEFAULT_PER_STYLE = 3
 DEFAULT_MAX_MB = 300.0
 DEFAULT_RETRY_S = 6 * 3600.0
+#: The level before MEDIA_MUSIC_BED_GAIN_DB (`target_lufs`).
 DEFAULT_LUFS = -30.0
+#: The most kept tracks measured or re-levelled in one pass (`upkeep`).
+UPKEEP_PER_PASS = 12
 #: Tracks shorter than this are not worth a fetch; longer ones are cut.
 MIN_TRACK_S = 90.0
 MAX_TRACK_S = 900.0
@@ -107,10 +119,15 @@ IA_QUERIES = {
                 f'OR subject:relaxing) AND mediatype:audio {_NOT_SPOKEN}'],
     "lofi": [f'creator:"Kevin MacLeod" AND (subject:chill OR subject:lounge OR subject:lofi '
              f'OR subject:"lo-fi") AND mediatype:audio {_NOT_SPOKEN}'],
+    "bossa": [f'creator:"Kevin MacLeod" AND (subject:bossa OR title:bossa OR subject:"bossa nova") '
+              f'AND mediatype:audio {_NOT_SPOKEN}',
+              f'(subject:"bossa nova" OR title:"bossa nova") AND (subject:instrumental OR '
+              f'subject:guitar) AND mediatype:audio {_NOT_SPOKEN}'],
 }
 #: ccMixter tags per genre (all of them must match); `instrumental` always.
 CC_TAGS = {"lofi": "instrumental,chill,hip_hop", "ambient": "instrumental,ambient",
-           "jazz": "instrumental,jazz", "piano": "instrumental,piano"}
+           "jazz": "instrumental,jazz", "piano": "instrumental,piano",
+           "bossa": "instrumental,bossa_nova"}
 
 _BAD = re.compile(
     r"\b(vocals?|voice|sung|singing|songs?|lyrics?|choir|choral|chorus|opera|"
@@ -147,6 +164,19 @@ def _num_env(name: str, default: float) -> float:
         return float(os.environ.get(name, "") or default)
     except ValueError:
         return default
+
+
+def target_lufs() -> float:
+    """The level kept tracks are normalised to: MEDIA_MUSIC_BED_LIBRARY_LUFS
+    when set, else -30 LUFS and music_bed's gain (-4): -34."""
+    raw = (os.environ.get("MEDIA_MUSIC_BED_LIBRARY_LUFS") or "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    from .music_bed import gain_db
+    return DEFAULT_LUFS + gain_db()
 
 
 def per_style() -> int:
@@ -232,13 +262,21 @@ def counts() -> dict:
     return {g: len(tracks(g, data)) for g in GENRES}
 
 
+def playable(genre: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
+    """The cached tracks (of `genre`) the bed may play: the slow ones while
+    slow is on (music_bed_tempo.keep)."""
+    from .music_bed_tempo import keep
+    return keep(tracks(genre, data))
+
+
 def needs(genre: str, now: Optional[float] = None) -> bool:
     """Whether the background process should look for more of `genre`:
-    fewer than per_style cached, and not tried in the last retry_s."""
+    fewer than per_style playable (slow, while slow is on) cached, and not
+    tried in the last retry_s."""
     if not enabled() or genre not in GENRES:
         return False
     data = load()
-    if len(tracks(genre, data)) >= per_style():
+    if len(playable(genre, data)) >= per_style():
         return False
     now = time.time() if now is None else now
     return now - float(data["tried"].get(genre, 0)) >= retry_s()
@@ -258,7 +296,7 @@ def track_for(genre: str) -> Optional[tuple[Path, dict]]:
     """A cached track of `genre` to play now — the one played longest ago —
     and its credit; None with none cached. Marks it played. Never fetches."""
     try:
-        have = tracks(genre)
+        have = playable(genre)
         if not have:
             return None
         have.sort(key=lambda e: _file(e).stat().st_mtime)
@@ -455,8 +493,8 @@ def search_ccmixter(genre: str, limit: int = 15) -> list[dict]:
 
 def normalise(src: Path, dst: Path, timeout: float = 600.0) -> bool:
     """`src` as a bed: leading silence trimmed, at most KEEP_S long,
-    loudnorm to -30 LUFS integrated, 48 kHz stereo mp3."""
-    lufs = _num_env("MEDIA_MUSIC_BED_LIBRARY_LUFS", DEFAULT_LUFS)
+    loudnorm to `target_lufs` (-34 LUFS) integrated, 48 kHz stereo mp3."""
+    lufs = target_lufs()
     af = ("silenceremove=start_periods=1:start_duration=0.2:start_threshold=-50dB,"
           f"loudnorm=I={lufs:g}:TP=-9:LRA=11")
     tmp = dst.with_name(f".{dst.stem}.{os.getpid()}.mp3")
@@ -487,8 +525,11 @@ def fetch(cand: dict) -> Optional[dict]:
     name = f"music-bed-lib-{cand['key']}.mp3"
     dst = _dir() / name
     dst.parent.mkdir(parents=True, exist_ok=True)
+    from . import music_bed_tempo
     try:
         _download(cand["download"], raw, referer=cand.get("url") or None)
+        # Measured before loudnorm, which would make every track as loud.
+        features = music_bed_tempo.measure(raw)
         if not normalise(raw, dst):
             return None
     except Exception as e:  # noqa: BLE001
@@ -498,8 +539,64 @@ def fetch(cand: dict) -> Optional[dict]:
         raw.unlink(missing_ok=True)
     entry = {k: v for k, v in cand.items() if k != "download"}
     entry.update(file=name, bytes=dst.stat().st_size, added=time.time(),
-                 download=cand["download"])
+                 download=cand["download"], features=features, lufs_target=target_lufs())
     return entry
+
+
+def relevel(entries: list[dict], path_of, limit: int = UPKEEP_PER_PASS) -> int:
+    """Bring up to `limit` kept beds normalised to another level (before
+    MEDIA_MUSIC_BED_GAIN_DB, -30) to `target_lufs`, from their own files,
+    in place; the caller saves. How many."""
+    want = target_lufs()
+    done = 0
+    for e in entries:
+        if done >= limit:
+            break
+        if float(e.get("lufs_target", DEFAULT_LUFS)) == want:
+            continue
+        try:
+            p = path_of(e)
+            if not p.is_file():
+                continue
+        except (OSError, KeyError, TypeError):
+            continue
+        tmp = p.with_name(f".{p.stem}.relevel.{os.getpid()}{p.suffix}")
+        try:
+            os.replace(p, tmp)
+            ok = normalise(tmp, p)
+            if not ok:
+                os.replace(tmp, p)
+                continue
+        except OSError as err:
+            log.info("music-bed library: re-levelling %s: %s", p.name, err)
+            continue
+        finally:
+            tmp.unlink(missing_ok=True)
+        e["lufs_target"] = want
+        done += 1
+    return done
+
+
+def upkeep_due(data: Optional[dict] = None) -> bool:
+    """Whether a kept track waits to be measured or re-levelled."""
+    from .music_bed_tempo import needs_measure
+    data = load() if data is None else data
+    want = target_lufs()
+    return any(needs_measure(e) or float(e.get("lufs_target", DEFAULT_LUFS)) != want
+               for e in tracks(None, data))
+
+
+def upkeep() -> int:
+    """The background process's care of the kept tracks: each measured once
+    for the slow rule (from its normalised file: tempo and busyness, not
+    loudness) and brought to the bed's level. How many were touched."""
+    from .music_bed_tempo import backfill
+    data = load()
+    have = tracks(None, data)
+    n = backfill(have, _file) + relevel(have, _file)
+    if n:
+        save(data)
+    return n
 
 
 def prune(data: dict, cap: Optional[int] = None) -> dict:
@@ -538,10 +635,15 @@ def fill(genres, now: Optional[float] = None) -> int:
         have = {e.get("key") for e in data["tracks"]}
         cands = [c for c in search_ia(g) + search_ccmixter(g) if c["key"] not in have]
         random.Random(f"{g}-{int(time.time() // 86400)}").shuffle(cands)
-        want = per_style() - len(tracks(g, data))
+        want = per_style() - len(playable(g, data))
+        # A quick genre's tracks mostly measure fast: at most twice what is
+        # wanted fetched a pass, so it does not fetch on and on.
+        tries = 2 * max(0, want)
+        from .music_bed_tempo import keep
         for c in cands:
-            if want <= 0:
+            if want <= 0 or tries <= 0:
                 break
+            tries -= 1
             entry = fetch(c)
             if entry is None:
                 continue
@@ -550,7 +652,8 @@ def fill(genres, now: Optional[float] = None) -> int:
             data = prune(data)
             save(data)
             got += 1
-            want -= 1
+            if keep([entry]):
+                want -= 1
         data = load()
         data["tried"][g] = time.time() if now is None else now
         save(data)
