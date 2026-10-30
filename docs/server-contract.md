@@ -1647,6 +1647,24 @@ Clients: S (`ReplyBox.vue`).
 
 Clients: S (`ReplyBox.vue`), W (`useConversationSession.ts`).
 
+#### `POST /session/discard` — gated (30 Oct 2026)
+
+`{"session"}` → `{"ok": true, "session", "discarded": true}`.
+
+- Take back a new chat moments after it started, so it can start again
+  elsewhere: the app's new-chat screen calls it when the place or agent was
+  changed while it said Opening…, then sends the same words to `/ask` with
+  the new pick (David, 30 Oct 2026).
+- Only a session this server started on `/ask` with `target: "new"` in the
+  last 10 minutes, once (kept in memory, so a restart forgets them): any
+  other is 409 `"only a chat just started here can be discarded"`.
+- It is stopped (`/session/stop` with `speech: "silence"`), closed, and
+  deleted as `media session-delete --apply` deletes one (backed up first,
+  `forget.py`). A folder the ask made (`new_project`, `worktree`) stays.
+- 400 `"not a session id"`, 401 unpaired. In `CORS_PATHS`.
+
+Pinned by `packages/server/tests/test_discard.py`.
+
 #### `POST /session/archive` — gated (22 Sep 2026)
 
 `{"session", "archived": true | false}` → `{"ok": true, "session", "archived"}`.

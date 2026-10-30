@@ -107,6 +107,8 @@ device gets its token):
   POST /session/resume {"session"} → bring that session back in a tmux
                   window (a reply's revive, without the reply)
   POST /session/close  {"session"} → close the pane it runs in
+  POST /session/discard {"session"} → take back a new chat /ask started
+                       in the last 10 minutes: stopped, closed, deleted
   POST /session/stop {"session", "speech"?: "auto"|"silence"} → stop what
                   is happening: interrupt the turn while it works (a headless
                   session's interrupt, or Escape into a working pane), else
@@ -379,7 +381,7 @@ from . import app_links, web_app
 # needed it — a native HTTP client is not subject to the same-origin policy.
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
-    "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/draft",
+    "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
@@ -2818,6 +2820,10 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             role=str(body.get("role") or ""),
             worktree=body.get("worktree") if isinstance(body.get("worktree"), dict) else None)
         status = detail.pop("status", 400)
+        if ok and str(body.get("target") or "") == "new" and detail.get("session"):
+            from . import discard
+
+            discard.note_started(str(detail["session"]))
         if not ok:
             print(f"ask: refused {status} ({detail.get('error')}) "
                   f"from {h.client_address[0]}", file=sys.stderr)
@@ -2829,6 +2835,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         fn = send.session_resume if path.endswith("resume") else send.session_close
         ok, detail = fn(str(body.get("session") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/discard":
+        # A new chat taken back while it opened, to start again where the
+        # picker now says (discard.py).
+        from . import discard
+
+        body = _read_json(h) or {}
+        ok, detail = discard.discard(str(body.get("session") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/stop":
         # The app's stop button (server-contract.md §12): interrupt the turn
