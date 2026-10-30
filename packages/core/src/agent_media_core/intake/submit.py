@@ -4147,6 +4147,8 @@ def _submit_event(event: Event,
     bed_tone = False     # likewise: the music bed (music_bed.py) is under it
     bed_stop = None      # likewise: what ends the bed (Mopidy's tracks, its credit)
     bed_song = None      # the song the bed played, for the row (music_bed_song)
+    bed_rec = None       # the bed as it played, for a replay (music_bed_replay)
+    under_tone = ""      # the tone it takes without a bed, likewise
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -4857,6 +4859,13 @@ def _submit_event(event: Event,
             extras["fallback"] = fallback_info
         if bed_song:
             extras["bed_song"] = bed_song
+        # What was under it, for a replay to play again (music_bed_replay;
+        # David, 31 Oct 2026: "when I replayed it, there didn't seem to be
+        # any backing music").
+        if bed_rec:
+            extras["bed"] = bed_rec
+        if under_tone:
+            extras["under_tone"] = under_tone
         if muted:
             extras["muted"] = True   # rendered but never played (popup can replay)
         if flushed:
@@ -5170,6 +5179,12 @@ def _submit_event(event: Event,
             # A reply's source (generated, his streaming music, the online
             # library) is Settings'; `choose` falls back to generated.
             bed_plan = None
+            if reply_tone or people_tone:
+                from .. import earcons
+                under_tone = (earcons.reply_name(_reply_folder(event.metadata))
+                              if reply_tone else "people")
+            elif thinking:
+                under_tone = "think"
             if not thinking:
                 from .. import music_bed
                 _bed_kind = ("alert" if _alert_class(event)
@@ -5189,6 +5204,9 @@ def _submit_event(event: Event,
                 # "Play the song" (music_bed_song; David, 30 Oct 2026).
                 from .. import music_bed_song
                 bed_song = music_bed_song.started(bed_plan, bed_tone, bed_stop)
+                from .. import music_bed_replay
+                bed_rec = music_bed_replay.record(bed_plan, bed_tone, bed_stop,
+                                                  _bed_kind)
                 if not bed_tone and bed_stop is None and (reply_tone or people_tone):
                     from .. import earcons
                     earcons.play_under(

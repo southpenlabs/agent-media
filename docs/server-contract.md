@@ -2367,6 +2367,30 @@ bed by the DJ fader; the phone's under player in the app, with the same times
 built in (nothing new on the wire). Pinned by
 `packages/core/tests/test_music_bed_slow.py`.
 
+**On a replay (31 Oct 2026)** (`music_bed_replay.py`; David: "when I
+replayed it, there didn't seem to be any backing music"): a reply's history
+row keeps what was under it — `extras.bed` `{kind ("under"|"stream"),
+source, style, file (its name in the clip dir), tracks (Mopidy's, a
+streaming bed), fallback, loop, tone_kind, credit, for ("reply", "people",
+"question", "alert")}` when a bed played (a streaming bed that fell back is
+kept as the generated stand-in it played), and `extras.under_tone`, the tone
+it takes without one (`reply-E|G|C`, `people`, `think`). Every replay —
+`/speech/ctl replay`, `replay-id` (also from a `sentence`), `again`, the
+held-reply toast's Play, `media replay` / `replay-prev` / `replay-at-cursor`
+— plays it again under the replay, by submit's rules: no bed when the
+choice is off (or the kind's bed is off), when anything else is playing
+(music, book or a player on the server, asked without pausing anything,
+within `MEDIA_MUSIC_BED_PROBE_S`), or under a thinking readout (which gets
+`think`, as when first read); then the reading's tone instead. The same
+track when its file is still there; a generated mood plays the current
+level's file of the same mood; a file pruned since is chosen afresh. A phone
+is told it as any under sound (`tone-kind`, `under-loop`, `under`) before
+the replay's start commands, and its app ends it with the replay (no app
+change); the server's own players get it from the replay's follower,
+started with the replay and faded out at its end (quickly when stopped, cut
+or superseded). A row from before keeps playing with nothing under it.
+Pinned by `packages/core/tests/test_music_bed_replay.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

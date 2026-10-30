@@ -3804,6 +3804,28 @@ def _seek_when_loaded(sock, secs: float, tries: int = 20) -> bool:
     return False
 
 
+def _replay_under(ex: dict, speech_target: Target, sink) -> str:
+    """Start what was under the reply on a phone now, or hand it to the
+    follower: the JSON for its `--under` ("" for nothing to hand on). Only
+    a row that recorded one asks anything (music_bed_replay). Never raises."""
+    if not (ex.get("bed") or ex.get("under_tone") or ex.get("thinking")):
+        return ""
+    try:
+        if str(_socket_for(speech_target)).startswith("tcp://"):
+            from . import music_bed_replay
+            music_bed_replay.start(music_bed_replay.resolve(ex, speech_target),
+                                   speech_target, sink)
+            return ""
+        # Resolved by the follower, so the probe for other audio does not
+        # hold the push back.
+        return json.dumps({"ex": {k: ex[k] for k in ("bed", "under_tone", "thinking")
+                                  if ex.get(k)},
+                           "target": speech_target.name})
+    except Exception as e:  # noqa: BLE001 — never cost the replay
+        print(f"media replay: no music under it ({e})", file=sys.stderr)
+        return ""
+
+
 def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
                  replay_text: str, speech_target: Target, pane: str,
                  recorded: bool, replay_lock, start: int = 0,
@@ -3836,6 +3858,14 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
     # were already sitting next to the player.
     if not ex.get("clips_remote"):
         getattr(sink, "prefetch", lambda *a, **k: True)(clip_uris, speech_target)
+    # The music bed (or tone) that was under it when it was first spoken,
+    # played again under the replay (music_bed_replay; David, 31 Oct 2026:
+    # "when I replayed it, there didn't seem to be any backing music"). A
+    # phone is told it now, before the start commands below: the app takes
+    # it as the reply sounds and ends it with the reply. This host's players
+    # get it from the follower, which lasts as long as the replay and fades
+    # it out at its end; with no follower (no clip lengths), none.
+    under_arg = _replay_under(ex, speech_target, sink)
     # Push the whole turn in ONE batched round-trip (stop/clear/append-all/
     # unpause/jump-to-0) rather than 1 play + N queues + 2 state-sets — each a
     # ~600ms hop over the phone bridge. Traversing (< / >) or replaying a long
@@ -4054,7 +4084,8 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
             + (["--lock-fd", str(lock_fd)] if lock_fd is not None else [])
             + (["--rank", str(rank)] if lock_fd is not None and rank is not None else [])
             + (["--then-id", str(then_id)] if then_id is not None else [])
-            + (["--heard-id", str(held_id)] if held_id is not None else []),
+            + (["--heard-id", str(held_id)] if held_id is not None else [])
+            + (["--under", under_arg] if under_arg else []),
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -4619,7 +4650,76 @@ def _trace_anchor(ex: dict, snap: dict, base: float, before: list,
         pass
 
 
+#: Set by a replay follower that stopped its replay itself (a barge-in, End
+#: of reply, an answer): the music under it fades out quickly.
+_REPLAY_CUT = {"cut": False}
+
+
 def cmd_replay_track(a) -> int:
+    """Internal: follow a replay (`_follow_replay`), with what was under the
+    reply when it was first spoken (`--under`, music_bed_replay) playing
+    under it on this host's player for as long as the follower lives: faded
+    out slowly at the natural end, quickly when it was stopped, cut, barged
+    in on or superseded (SIGTERM from the next replay's
+    `_stop_replay_trackers`). Its mpv runs in a session of its own, so the
+    killpg that ends this follower would leave it looping; the handler is
+    what stops it."""
+    spec = None
+    raw = getattr(a, "under", "") or ""
+    if raw:
+        try:
+            from . import music_bed_replay
+            data = json.loads(raw)
+            target = Target(name=str(data.get("target") or _speech_target().name))
+            spec = music_bed_replay.resolve(data.get("ex") or {}, target)
+        except Exception:  # noqa: BLE001 — never cost the replay
+            spec = None
+    if not spec:
+        return _follow_replay(a)
+    import signal as _signal
+
+    from . import music_bed_replay
+    sink = SinkSpeech()
+    under, stop = music_bed_replay.start(spec, target, sink)
+    if not under and stop is None:
+        return _follow_replay(a)
+
+    def _term(signum, frame):  # noqa: ARG001
+        _REPLAY_CUT["cut"] = True
+        raise SystemExit(0)
+
+    began = time.time()
+    try:
+        _signal.signal(_signal.SIGTERM, _term)
+    except (ValueError, OSError):
+        pass
+    try:
+        return _follow_replay(a)
+    finally:
+        try:
+            _signal.signal(_signal.SIGTERM, _signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
+        try:
+            from .sinks.speech import speech_stopped_since
+            quick = bool(_REPLAY_CUT["cut"] or speech_stopped_since(began))
+        except Exception:  # noqa: BLE001
+            quick = True
+        if under:
+            try:
+                sink.stop_under(target, quick=quick)
+            except Exception:  # noqa: BLE001
+                pass
+        if stop is not None:
+            try:
+                stop(quick=quick)
+            except TypeError:
+                stop()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _follow_replay(a) -> int:
     """Internal: follow a replay the way the live intake path follows a reply.
 
     Spawned detached by _do_replay so it outlives the media-replay process.
@@ -4707,6 +4807,7 @@ def cmd_replay_track(a) -> int:
         copy of something already said, so it is not resumed; stopping it
         here (rather than leaving the newcomer's load to cut it) keeps the
         audio and the cleared row in step."""
+        _REPLAY_CUT["cut"] = True
         try:
             ipc.command(_sock(), "stop", critical=True)
         except Exception:  # noqa: BLE001
@@ -9621,6 +9722,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # A held reply's row, marked heard only once the replay reaches its last
     # sentence (not when its clips were pushed).
     s.add_argument("--heard-id", type=int, default=None)
+    # What was under the reply as it was first spoken (its music bed or
+    # tone, music_bed_replay), as JSON: started here and faded out when the
+    # replay ends, on this host's players (a phone's is told before the push).
+    s.add_argument("--under", default="")
     s.set_defaults(func=cmd_replay_track)
 
     s = sub.add_parser("errors", help="recent errors from every component")

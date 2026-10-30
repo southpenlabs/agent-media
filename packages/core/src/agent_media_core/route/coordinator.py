@@ -511,6 +511,23 @@ class Coordinator:
         """What the music channel is playing. Asked concurrently."""
         return self.music.now_playing_uri(self.music_target)
 
+    def audio_playing(self) -> bool:
+        """Whether anything else is playing now — the music (audibly), the
+        book, a player on this host — asked without pausing or ducking
+        anything: `other_audio` for a reading that has no duck of its own (a
+        replay's music bed, music_bed_replay). Unsure means playing. Never
+        raises."""
+        try:
+            if self._probe_book_active():
+                return True
+            if self._probe_music_uri() and self._music_audible():
+                return True
+            if audio_backend.pause_enabled() and audio_backend.backend().playing_players():
+                return True
+        except Exception:  # noqa: BLE001
+            return True
+        return False
+
     def before_speech(self, title: str = "", priority: str = "",
                       defer_music: bool = False, text: str = "",
                       ask: bool = False,

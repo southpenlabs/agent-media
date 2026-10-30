@@ -1939,6 +1939,13 @@ ahead.
     needs the new APK). Not yet: favourites have no "bossa nova version of"
     search; the alert bed keeps its quick pulse (it is meant to be looked
     at).
+    **Landed 31 Oct 2026 (on a replay)** (David: "I heard the backing music
+    the first time but when I replayed it, there didn't seem to be any
+    backing music"): the reply's row keeps the bed it had (`extras.bed`) and
+    its tone (`extras.under_tone`), and every replay (the app's Play and
+    "read from here", the bar's Replay, the toast's Play, `media replay`,
+    `replay-prev`, `replay-at-cursor`) plays them again by submit's rules
+    (`music_bed_replay.py`, contract §`/speech/music-bed` "On a replay").
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...
