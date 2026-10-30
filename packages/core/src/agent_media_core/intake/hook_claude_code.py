@@ -777,31 +777,27 @@ def _emit_ask(ask: str, payload: dict, lead: str = "", structure: list | None = 
         os.environ.get("MEDIA_NOTIF_NO_INTERRUPT_FOCUSED", "1") != "0"
         and _client_pane_focused()) else Priority.HIGH
     session = payload.get("session_id") or ""
-    # The conversation's speech level (speak_priority.py): interrupt and auto
-    # speak a question at once; normal holds it like a reply, unless someone
-    # is looking at the conversation, and so does quiet — a question needs an
-    # answer, so it still gets its toast.
-    from . import toast
-    from ..speak_priority import level_of
+    # Read in full only where it can be answered (question_gate.py: its
+    # thread on screen, black screen mode, hands-free), whatever the level;
+    # otherwise held with its toast, and a short cue said in its place (not
+    # for a quiet thread). The later parts of a held card are held too
+    # (`speak_ask_part`): the card shows them.
+    from .. import question_gate
 
-    held = level_of(session) in ("pocket", "normal", "quiet") and toast.should_hold(session)
-    if held and payload.get("tool_use_id"):
-        # Held for the screen: the later parts of a card are not spoken
-        # either (`speak_ask_part`), the card shows them.
-        try:
-            from agent_media_core import pending_asks
-
-            pending_asks.update(session, str(payload["tool_use_id"]), held=True)
-        except Exception:  # noqa: BLE001
-            pass
+    held = not question_gate.answerable(session)
     event = Event(text=msg, source=_source_for_harness(str(payload.get("harness") or "")),
                   priority=Priority.NORMAL if held else priority,
                   voice=voice_for_session(sess),
                   metadata={"kind": "notif", "voice_from": "session", "ask": structure or True,
-                            "session": session,
+                            "session": session, "tool_use_id": tool_use_id,
                             **_source_place(session)})
+    cue = None
     if held:
-        toast.remember(event, ask=True)
+        cue = question_gate.hold(event, session)
+    else:
+        # Asked again when its turn to speak comes (submit's rewatch).
+        event.metadata["ask_answerable_at"] = time.time()
+    question_gate.speak_cue(cue, submit=lambda e: submit_event(e, state=state))
     submit_event(event, state=state)
     return 0
 
@@ -903,9 +899,9 @@ def speak_ask_part(session: str, part: int, tool_use_id: str = "") -> str:
     # 2026: the second question was never read after the first was played
     # from the screen). Looked away again, it is held like the first.
     from . import toast
-    from ..speak_priority import level_of
+    from .. import question_gate
 
-    held = level_of(session) in ("pocket", "normal", "quiet") and toast.should_hold(session)
+    held = not question_gate.answerable(session)
     # The part before is answered, so its read-out has nothing left to ask:
     # skip to this one rather than queue behind it — the one speaking stops,
     # a queued one is dropped (David, 19 Oct 2026: "once I answer one, the
@@ -927,9 +923,12 @@ def speak_ask_part(session: str, part: int, tool_use_id: str = "") -> str:
                   priority=Priority.NORMAL,
                   voice=cur.get("voice") or None,
                   metadata={"kind": "notif", "voice_from": "session", "ask": True, "ask_part": part,
-                            "session": session, **place})
+                            "session": session, "tool_use_id": str(cur.get("tool_use_id") or ""),
+                            **place})
     if held:
-        toast.remember(event, ask=True)
+        question_gate.hold(event, session)       # no cue: the card had its one
+    else:
+        event.metadata["ask_answerable_at"] = time.time()
     submit_event(event, state=StateStore())
     return "held" if held else ""
 

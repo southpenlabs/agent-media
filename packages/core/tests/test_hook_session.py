@@ -84,7 +84,8 @@ def test_ask_read_once_across_pretooluse_and_notification(tmp_path, monkeypatch)
     calls = []
 
     def fake_submit(event, **_):
-        calls.append(event)
+        if not event.metadata.get("ask_cue"):      # the short cue, held or not
+            calls.append(event)
         return "rid"
 
     monkeypatch.setattr(H, "submit_event", fake_submit)
@@ -249,8 +250,8 @@ def test_codex_question_uses_shared_storage_and_speech(tmp_path, monkeypatch):
     monkeypatch.setattr(H, "_ask_location_label", lambda: "")
     monkeypatch.setattr(H, "_source_place", lambda session: {})
     monkeypatch.setattr(H, "_client_pane_focused", lambda: False)
-    from agent_media_core.intake import toast
-    monkeypatch.setattr(toast, "should_hold", lambda session: False)
+    from agent_media_core import question_gate
+    monkeypatch.setattr(question_gate, "answerable", lambda session: True)
     seen = _capture_submit(monkeypatch)
     question = {"question": "Where?", "header": "Place", "options": [{"label": "Here"}, {"label": "There"}]}
     payload = {"hook_event_name": "PreToolUse", "session_id": "codex-question",

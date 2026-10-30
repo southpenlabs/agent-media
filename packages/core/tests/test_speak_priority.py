@@ -95,9 +95,11 @@ def test_interrupt_is_high_and_quiet_is_held(tmp_path, monkeypatch):
     assert played[-1].priority == Priority.NORMAL
 
 
-def test_a_question_follows_the_level(tmp_path, monkeypatch):
-    """Normal holds a question nobody is looking at, and so does quiet (it
-    needs an answer); auto speaks it at once. Answering drops the toast."""
+def test_a_question_is_held_where_it_cannot_be_answered(tmp_path, monkeypatch):
+    """Not answerable (question_gate.py): held at every level, toast and all,
+    with a short cue said instead — none for quiet. Answerable: read as
+    before. Answering drops the toast."""
+    from agent_media_core import question_gate
     from agent_media_core.intake import hook_claude_code as hook
     from agent_media_core.intake import toast
 
@@ -108,19 +110,33 @@ def test_a_question_follows_the_level(tmp_path, monkeypatch):
     monkeypatch.setattr(hook, "_dedup_seen", lambda state, msg: False)
     monkeypatch.setattr(hook, "_ask_location_label", lambda: "")
     monkeypatch.setattr(hook, "_client_pane_focused", lambda: False)
-    monkeypatch.setattr(toast, "should_hold", lambda session="": True)
+    monkeypatch.setattr(hook, "_source_place", lambda s="": {"title": "Fix the speech bed"})
+    monkeypatch.setattr(question_gate, "answerable", lambda session: False)
+    monkeypatch.setattr(question_gate, "CUE_AGAIN_S", 0.0)
     monkeypatch.setattr(toast, "show", lambda where: None)
     monkeypatch.setattr(toast, "_where", lambda pane: "")
-    payload = {"session_id": SID}
+    monkeypatch.setattr(toast, "chime_held", lambda session="": False)
 
-    hook._emit_ask("Which one?", payload)
-    assert sent[-1].metadata.get("held") and len(toast.listing()) == 1
+    def asked(text, tool_use_id):
+        n = len(sent)
+        hook._emit_ask(text, {"session_id": SID, "tool_use_id": tool_use_id})
+        return sent[n:]
+
+    cue, q = asked("Which one?", "t1")
+    assert cue.text == "A question in Fix the speech bed." and cue.metadata["ask_cue"]
+    assert "ask" not in cue.metadata and not cue.metadata.get("held")
+    assert q.metadata.get("held") and q.metadata["ask"] and len(toast.listing()) == 1
     speak_priority.set_level(SID, "quiet")
-    hook._emit_ask("Which two?", payload)
-    assert sent[-1].metadata.get("held") and len(toast.listing()) == 2
-    speak_priority.set_level(SID, "auto")
-    hook._emit_ask("Which three?", payload)
-    assert not sent[-1].metadata.get("held") and len(toast.listing()) == 2
+    [q] = asked("Which two?", "t2")                        # quiet: no cue
+    assert q.metadata.get("held") and len(toast.listing()) == 2
+    for level, prio in (("auto", Priority.NORMAL), ("interrupt", Priority.HIGH)):
+        speak_priority.set_level(SID, level)
+        cue, q = asked(f"Which {level}?", f"t-{level}")    # held, not read at once
+        assert q.metadata.get("held") and cue.priority == prio
+    monkeypatch.setattr(question_gate, "answerable", lambda session: True)
+    [q] = asked("Which three?", "t3")
+    assert not q.metadata.get("held") and q.metadata.get("ask_answerable_at")
+    assert len(toast.listing()) == 4
 
     monkeypatch.setattr(toast, "_row_for", lambda key: None)
     toast.drop_asks(SID)

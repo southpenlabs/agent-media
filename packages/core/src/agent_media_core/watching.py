@@ -180,3 +180,60 @@ def is_open(session: str, pocketed: bool = False) -> bool:
         return False
     sessions = data.get("sessions")
     return isinstance(sessions, dict) and bool(sessions.get(session))
+
+
+# --- black screen mode --------------------------------------------------------
+#
+# The app's black screen (a phone face-down in the car, the screen black but
+# the app still up and listening) is where a question can be answered by
+# voice without its card in view (question_gate.py; David, 30 Oct 2026). The
+# server cannot see it, so the app leases it on (`POST /device/black`) when
+# the black screen goes up, renews the lease every 30 s while it is up, and
+# gives it back when it goes. `<state_dir>/device-black.json` is
+# `{"<device>": <until, epoch s>}`; a lease runs out after MEDIA_BLACK_S
+# (default 90), so an app killed with the black screen up stops counting
+# within a minute and a half.
+
+BLACK_NAME = "device-black.json"
+
+
+def black_s() -> int:
+    try:
+        return int(os.environ.get("MEDIA_BLACK_S", "90"))
+    except ValueError:
+        return 90
+
+
+def _blacks() -> dict[str, float]:
+    """The unexpired black screen leases."""
+    try:
+        data = json.loads((state_dir() / BLACK_NAME).read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    now = time.time()
+    return {d: t for d, t in data.items()
+            if isinstance(t, (int, float)) and t > now}
+
+
+def black(device: str, on: bool) -> float:
+    """Lease black screen mode on for `device` for `black_s()`, or give the
+    lease back (`on` false). Answers the lease's end, 0 for none."""
+    device = (device or "").strip() or "app"
+    leases = _blacks()
+    leases.pop(device, None)
+    until = time.time() + black_s() if on and black_s() > 0 else 0.0
+    if until:
+        leases[device] = until
+    path = state_dir() / BLACK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(leases))
+    tmp.replace(path)
+    return until
+
+
+def black_screen_on() -> bool:
+    """Is black screen mode up on some device (an unexpired lease)?"""
+    return bool(_blacks())

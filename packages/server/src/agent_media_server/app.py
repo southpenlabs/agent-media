@@ -162,6 +162,9 @@ device gets its token):
                   off on that thread (true), or it shows again (false): a
                   pocket-level reply plays for MEDIA_POCKET_S after
                   (agent_media_core/watching.py, pins.py)
+  POST /device/black {"on": true|false, "device"?} → the app's black screen
+                  is up (renewed every 30 s) or down: a question is read in
+                  full while it is (agent_media_core/question_gate.py, pins.py)
   GET|POST /speech/default {"level"} → the level of every thread with none
                   of its own; the server's, so every device's (pins.py)
   GET|POST /speech/music-bed {"choice"} | {"source", "style"} → music under
@@ -387,7 +390,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -3292,6 +3295,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = pins.session_pocket(str(body.get("session") or ""),
                                          body.get("pocketed"), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/black":
+        # The app's black screen is up: questions can be answered by voice.
+        body = _read_json(h) or {}
+        ok, detail = pins.device_black(body.get("on"), _bearer(h),
+                                       device=body.get("device"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/thinking":
         from . import thinking_speech

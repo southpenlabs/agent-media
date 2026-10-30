@@ -1904,7 +1904,7 @@ A tag taken off (the sheet's `auto`) is never put back on that chat.
 follows its person's level, else quiet (§6.25 "Speech level").
 
 What happens to the thread's replies (a Claude Code Stop read-out; its
-questions are never touched):
+questions follow their own rule, `POST /device/black`):
 
 | level | the reply |
 |---|---|
@@ -2040,6 +2040,42 @@ replies play. A `normal` one ignores it (screen-on only).
 
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_toast.py`.
+
+#### `POST /device/black` — gated (30 Oct 2026)
+
+`{"on": true|false, "device"?}` → `{"ok": true, "device", "on", "until"}`.
+
+The app's black screen is up (`true`) or down (`false`). The app sends
+`true` when it goes up and again every 30 s while it stays, and `false`
+when it goes. While a lease lasts, a question card (an AskUserQuestion
+read-out) is read in full even with its card out of view: it can be
+answered by voice there.
+
+A question is read in full only where it can be answered: its thread on
+screen in the app (its event stream, §11; a `/session/pocket` lease is the
+screen off and does not count), its pane the one the desk is on, black
+screen mode up on some device, or the thread hands-free (the app's loop,
+`/reply` with `voice: true`). Otherwise, at every speech level, it is held
+with its Play (`extras.held`) like an unwatched reply, and opening the thread
+plays it — an `auto` or `interrupt` thread's too — and a short cue is spoken
+instead: "A question in <thread title>." (the first six words of it). A
+`quiet` thread's question gets no cue. One cue per card, and at most one a
+minute per thread. A question read while answerable whose turn to speak
+comes after the listener left is held and cued then.
+
+- `device`: the app's name for itself, default `"app"`; each device has its
+  own lease. `until`: the lease's end, epoch seconds; 0 after `false`. A
+  lease runs out after `MEDIA_BLACK_S` (default 90; 0 turns leases off), so
+  an app killed with its black screen up stops counting.
+- An older server answers 404: the app stops reporting.
+- Kept in core (`agent_media_core/watching.py`,
+  `<state_dir>/device-black.json`); the rule is
+  `agent_media_core/question_gate.py`.
+- 400 `"on must be true or false"`; the other refusals and CORS exactly as
+  `/session/pin`.
+
+Pinned by `packages/server/tests/test_reap.py` and
+`packages/core/tests/test_question_gate.py`.
 
 #### `GET` / `POST /session/settings` — gated (26 Sep 2026)
 

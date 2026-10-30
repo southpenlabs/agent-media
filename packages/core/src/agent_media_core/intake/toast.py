@@ -136,9 +136,15 @@ def should_hold(session: str = "") -> bool:
         return False
     if watching.is_open(session, pocketed=level_of(session) == "pocket"):
         return False
+    return not desk_shows_pane()
+
+
+def desk_shows_pane() -> bool:
+    """Is this hook's pane the one the desk's freshest client shows (idle no
+    longer than MEDIA_TOAST_LOOKING_S)?"""
     pane = os.environ.get("TMUX_PANE")
     desk = _desk(_looking_s()) if pane else None
-    return desk is None or desk[1] != pane
+    return desk is not None and desk[1] == pane
 
 
 def _where(pane: str) -> str:
@@ -365,19 +371,28 @@ def take_for_opened(session: str) -> Optional[int]:
         except (OSError, ValueError):
             continue
         if r.get("session") == session:
-            mine.append((p, r.get("key") or ""))
+            mine.append((p, r.get("key") or "", bool(r.get("ask"))))
     if not mine:
         return None
-    for p, _key in mine:
+    for p, _key, _ask in mine:
         try:
             p.unlink()
         except OSError:
             pass
     _after_take()
-    if level_of(session) not in HOLDS:
-        return None
+    level = level_of(session)
+    if level not in HOLDS:
+        # An auto or interrupt thread holds only a question that could not
+        # be answered where it would have been read (question_gate.py):
+        # opening the thread is where it can be, so it plays. Nothing else
+        # of theirs, and nothing of a quiet thread's.
+        if level == "quiet":
+            return None
+        mine = [m for m in mine if m[2]]
+        if not mine:
+            return None
     store = StateStore()
-    for i, (_p, key) in enumerate(mine):
+    for i, (_p, key, _ask) in enumerate(mine):
         if not key:
             continue
         # Only the newest may still be rendering.

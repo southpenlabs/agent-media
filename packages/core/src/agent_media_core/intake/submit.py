@@ -3015,6 +3015,10 @@ def _unwatched_by_now(event: Event, source_session: str) -> bool:
     md = event.metadata
     if not isinstance(md, dict) or md.get("held"):
         return False
+    if md.get("ask"):
+        # A question: held, and cued, if it can no longer be answered.
+        from .. import question_gate
+        return question_gate.left_by_now(event, source_session)
     try:
         watched_at = float(md.get("watched_at") or 0)
     except (TypeError, ValueError):
@@ -5151,7 +5155,8 @@ def _submit_event(event: Event,
             # or a `media say`) gets the `reply` tone under it, in its
             # project's key; a person's message the `people` tone.
             reply_tone = (not thinking and event.source in _AGENT_SOURCES
-                          and not (event.metadata or {}).get("ask"))
+                          and not (event.metadata or {}).get("ask")
+                          and not (event.metadata or {}).get("ask_cue"))
             people_tone = (not thinking and not reply_tone
                            and _people_message(event))
             # The music bed (music_bed.py, roadmap 39): in place of the

@@ -18,9 +18,12 @@ What happens to a reply when it is ready:
   gets no toast: it waits in the transcript unheard (`extras.held`), with a
   Play in the app.
 
-Questions (AskUserQuestion read-outs) follow the level too, except that a
-quiet conversation's question is held as a normal one's is, toast and all: it
-needs an answer. An answered question's waiting read-out is dropped.
+Questions (AskUserQuestion read-outs) do not follow the level: at every
+level one is read only where it can be answered (question_gate.py: its
+thread on screen, black screen mode, hands-free), and is otherwise held,
+toast and all, with a short "A question in <thread>." said instead — except
+in a quiet conversation, which says nothing (30 Oct 2026). An answered
+question's waiting read-out is dropped.
 
 Keyed by the agent's session id (the app's thread), not a tmux pane, so the
 level follows the conversation across a resume or a move to another pane, and

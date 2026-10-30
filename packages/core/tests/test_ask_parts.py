@@ -30,8 +30,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(H, "submit_event", lambda ev, state=None: spoken.append(ev))
     monkeypatch.setattr(H, "_ask_lead_text", lambda tp: "")
     # Someone is looking unless a test says not; a held part is a toast.
+    from agent_media_core import question_gate
     from agent_media_core.intake import toast
-    monkeypatch.setattr(toast, "should_hold", lambda session="": False)
+    monkeypatch.setattr(question_gate, "answerable", lambda session: True)
     monkeypatch.setattr(toast, "remember",
                         lambda ev, ask=False, **kw: ev.metadata.update(held=True))
     return spoken
@@ -95,7 +96,8 @@ def test_a_held_first_part_does_not_silence_the_next(isolated):
 
 def test_a_later_part_is_held_when_nobody_is_looking(isolated, monkeypatch):
     from agent_media_core.intake import toast
-    monkeypatch.setattr(toast, "should_hold", lambda session="": True)
+    from agent_media_core import question_gate
+    monkeypatch.setattr(question_gate, "answerable", lambda session: False)
     pending_asks.record("s1", "t1", CARD)
     assert H.speak_ask_part("s1", 1) == "held"
     (ev,) = isolated

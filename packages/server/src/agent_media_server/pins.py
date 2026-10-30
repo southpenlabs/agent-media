@@ -130,6 +130,29 @@ def session_pocket(session: str, flag, bearer: str) -> tuple[bool, dict]:
     return True, {"session": session, "until": until}
 
 
+def device_black(flag, bearer: str, device="") -> tuple[bool, dict]:
+    """`POST /device/black {"on", "device"?}`: the app's black screen went up
+    (true; renewed every 30 s while it stays) or down (false). While the lease
+    lasts a question card is read in full even with its card out of view: it
+    can be answered by voice there (`agent_media_core.question_gate`). Gated
+    as `/session/pocket`; answers `until`, the lease's end, 0 for none."""
+    from agent_media_core import watching
+
+    if not isinstance(flag, bool):
+        return False, {"error": "on must be true or false", "status": 400}
+    if device is not None and not isinstance(device, str):
+        return False, {"error": "device must be a string", "status": 400}
+    device = (device or "").strip()[:80] or "app"
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    try:
+        until = watching.black(device, flag)
+    except OSError as e:
+        return False, {"error": f"could not save the lease ({e})", "status": 500}
+    return True, {"device": device, "on": bool(until), "until": until}
+
+
 def speech_default(bearer: str, level=None) -> tuple[bool, dict]:
     """`GET /speech/default` and `POST /speech/default {"level"}`: the speech
     level of every thread with none of its own (`speak_priority.default_level`).

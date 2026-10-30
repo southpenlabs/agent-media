@@ -691,6 +691,36 @@ def test_pocket_is_gated(server, shelf, monkeypatch):
     assert res.status == 401 and not watching.is_open(SID2, pocketed=True)
 
 
+def test_black_screen_is_leased_on_and_off(server, shelf, signed_in, typed):
+    """The app's black screen (question_gate.py): a question is read in full
+    while a device's lease lasts."""
+    from agent_media_core import question_gate, watching
+
+    assert not question_gate.answerable(SID2)
+    res, obj = call(server, "POST", "/device/black", {"on": True, "device": "p8a"}, AUTH)
+    assert res.status == 200 and obj["ok"] and obj["on"] and obj["until"] > time.time()
+    assert obj["device"] == "p8a" and watching.black_screen_on()
+    assert question_gate.answerable(SID2)
+    res, obj = call(server, "POST", "/device/black", {"on": False, "device": "p8a"}, AUTH)
+    assert obj == {"ok": True, "device": "p8a", "on": False, "until": 0}
+    assert not watching.black_screen_on() and not question_gate.answerable(SID2)
+    res, obj = call(server, "POST", "/device/black", {"on": True}, AUTH)
+    assert obj["device"] == "app" and watching.black_screen_on()
+    res, obj = call(server, "POST", "/device/black", {}, AUTH)
+    assert res.status == 400 and obj["error"] == "on must be true or false"
+    assert "/device/black" in app.CORS_PATHS
+
+
+def test_black_screen_is_gated(server, shelf, monkeypatch):
+    from agent_media_core import watching
+    from agent_media_server import auth_abs
+
+    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
+    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
+    res, _ = call(server, "POST", "/device/black", {"on": True})
+    assert res.status == 401 and not watching.black_screen_on()
+
+
 def test_speech_level_is_set_and_shows_on_the_rows(server, shelf, signed_in, typed):
     for level, prio in (("interrupt", True), ("quiet", False), ("pocket", False), ("auto", True)):
         res, obj = call(server, "POST", "/session/priority", {"session": SID2, "level": level}, AUTH)
