@@ -285,7 +285,7 @@ def parse(choice: Optional[str]) -> Optional[tuple[str, str]]:
 
 
 def _stored() -> dict:
-    """Everything Settings saved: the choice, the slow switch."""
+    """Everything Settings saved: the choice, the slow switch, the level."""
     try:
         d = json.loads(_settings_path().read_text())
         return d if isinstance(d, dict) else {}
@@ -295,7 +295,7 @@ def _stored() -> dict:
 
 def _store(d: dict) -> None:
     p = _settings_path()
-    if not any(k in d for k in ("choice", "slow")):
+    if not any(k in d for k in ("choice", "slow", "gain_db")):
         p.unlink(missing_ok=True)
         return
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -837,10 +837,44 @@ _SLOW_RECIPES = {
 _PEAK_OFFSETS = {"question": -3.0}
 
 
+#: The range a stored level may take (dB against the first beds' levels).
+GAIN_RANGE = (-24.0, 6.0)
+
+
+def stored_gain() -> Optional[float]:
+    """The level Settings chose (POST /speech/music-bed settings `gain_db`),
+    or None. Kept in the settings file, so every process reads the same one
+    at once: an env value is fixed per process at its start, and a service
+    started before a change kept the old level (David, 31 Oct 2026)."""
+    try:
+        v = _stored().get("gain_db")
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def gain_db() -> float:
-    """MEDIA_MUSIC_BED_GAIN_DB: every bed's level against the first ones'
-    (-24 dBFS peak generated, -30 LUFS kept tracks, Mopidy at 12): -4."""
-    return _num_env("MEDIA_MUSIC_BED_GAIN_DB", DEFAULT_GAIN_DB)
+    """Every bed's level against the first ones' (-24 dBFS peak generated,
+    -30 LUFS kept tracks, Mopidy at 12): Settings' `gain_db`, else
+    MEDIA_MUSIC_BED_GAIN_DB, else -4."""
+    g = stored_gain()
+    return g if g is not None else _num_env("MEDIA_MUSIC_BED_GAIN_DB", DEFAULT_GAIN_DB)
+
+
+def set_gain(value: Optional[float]) -> Optional[float]:
+    """Save the level (None forgets it, back to MEDIA_MUSIC_BED_GAIN_DB)."""
+    d = _stored()
+    if value is None:
+        d.pop("gain_db", None)
+    else:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"gain_db must be a number of dB, not {value!r}")
+        lo, hi = GAIN_RANGE
+        if not lo <= float(value) <= hi:
+            raise ValueError(f"gain_db must be between {lo:g} and {hi:g}")
+        d["gain_db"] = float(value)
+    _store(d)
+    return value
 
 
 def peak_dbfs(mood: str = "") -> float:
@@ -1393,11 +1427,20 @@ def set_settings(values: dict) -> None:
     if not isinstance(values, dict) or not values:
         raise ValueError("settings must be an object of {id: value}")
     for k, v in values.items():
-        if k != "slow":
+        if k == "slow":
+            if v is not None and not isinstance(v, bool):
+                raise ValueError("slow must be true, false or null")
+        elif k == "gain_db":
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                                  or not GAIN_RANGE[0] <= float(v) <= GAIN_RANGE[1]):
+                raise ValueError(f"gain_db must be a number from {GAIN_RANGE[0]:g} "
+                                 f"to {GAIN_RANGE[1]:g}, or null")
+        else:
             raise ValueError(f"no music bed setting {k!r}")
-        if v is not None and not isinstance(v, bool):
-            raise ValueError("slow must be true, false or null")
-    set_slow(values["slow"])
+    if "slow" in values:
+        set_slow(values["slow"])
+    if "gain_db" in values:
+        set_gain(values["gain_db"])
 
 
 def status() -> dict:

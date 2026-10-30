@@ -486,3 +486,21 @@ def test_the_renderer_reads_the_env_file_itself(monkeypatch):
     monkeypatch.setattr(M, "warm", lambda: 0)
     assert M.main(["x", "warm"]) == 0
     assert seen == ["music-bed"]
+
+
+def test_a_stored_level_wins_over_the_env_and_is_checked(monkeypatch, tmp_path):
+    """The level lives in the settings file, so every process agrees at once
+    (David, 31 Oct 2026: 'now it's a bit too quiet')."""
+    import pytest
+    from agent_media_core import music_bed as M
+    monkeypatch.setattr(M, "_settings_path", lambda: tmp_path / "music-bed.json")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_GAIN_DB", "-12")
+    assert M.gain_db() == -12
+    M.set_settings({"gain_db": -10})
+    assert M.gain_db() == -10
+    with pytest.raises(ValueError):
+        M.set_settings({"gain_db": -99})
+    with pytest.raises(ValueError):
+        M.set_settings({"gain_db": True})
+    M.set_settings({"gain_db": None})
+    assert M.gain_db() == -12
