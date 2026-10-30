@@ -504,3 +504,30 @@ def test_a_stored_level_wins_over_the_env_and_is_checked(monkeypatch, tmp_path):
         M.set_settings({"gain_db": True})
     M.set_settings({"gain_db": None})
     assert M.gain_db() == -12
+
+
+class SlowCoord(Coord):
+    """A duck still asking when the bed's wait runs out (a phone's ~2 s
+    probes), with this host's own quick answer."""
+
+    def __init__(self, playing):
+        super().__init__(other_audio=False)
+        self._playing = playing
+
+    def before_speech(self, **kw):
+        import time as _t
+        _t.sleep(0.5)
+        self.other_audio = False
+
+    def audio_playing(self):
+        return self._playing
+
+
+def test_a_late_duck_asks_this_host_instead_of_skipping_the_bed(monkeypatch, tmp_path):
+    """David, 31 Oct 2026: 'I didn't get any backing music for that one'."""
+    _fake_ready(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_MUSIC_BED_PROBE_S", "0.05")
+    unders = speak(LONG, coord=SlowCoord(playing=False)).unders()
+    assert len(unders) == 1 and unders[0].startswith("music-bed-")
+    unders = speak(LONG, coord=SlowCoord(playing=True)).unders()
+    assert len(unders) == 1 and unders[0].startswith("earcon-reply-")

@@ -5194,9 +5194,22 @@ def _submit_event(event: Event,
                                              len(sentences), _bed_kind)
                 if _bed_pick and music_bed.ready_or_warm(_bed_pick, target):
                     _before_thread.join(timeout=music_bed.probe_wait_s())
-                    bed_plan = music_bed.choose(
-                        _bed_pick, None if _before_thread.is_alive()
-                        else getattr(coordinator, "other_audio", None), target)
+                    _other = (None if _before_thread.is_alive()
+                              else getattr(coordinator, "other_audio", None))
+                    if _other is None:
+                        # The duck still asking (a phone's two ~2 s probes
+                        # outlast the wait) used to count as playing, so
+                        # nearly every reply on the phone went without its
+                        # bed (David, 31 Oct 2026: "I didn't get any backing
+                        # music for that one"). Ask this host instead,
+                        # without pausing anything.
+                        _probe = getattr(coordinator, "audio_playing", None)
+                        if _probe is not None:
+                            try:
+                                _other = bool(_probe())
+                            except Exception:  # noqa: BLE001
+                                _other = None
+                    bed_plan = music_bed.choose(_bed_pick, _other, target)
             if bed_plan is not None:
                 from .. import music_bed
                 bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
