@@ -458,6 +458,8 @@ CORS_POST_PATHS = frozenset({"/pair", "/enrol"})
 # like the ones above, but a path with the thread in it, so it is matched
 # rather than listed. `cors_path` is the one test for both.
 THREAD_EVENTS = re.compile(r"/threads/([^/]+)/events")
+# The sheet a held stream was opened under is closed (§11 `?hold=1`).
+THREAD_RELEASE = re.compile(r"/threads/([^/]+)/release")
 # A thread's background agents (§6.12), and one agent's own log.
 THREAD_AGENTS = re.compile(r"/threads/([^/]+)/agents")
 AGENT_LOG = re.compile(r"/threads/([^/]+)/agents/([^/]+)/log")
@@ -501,7 +503,7 @@ def cors_path(path: str) -> bool:
     """Whether `path` is an app route a browser on another origin may reach
     (any method): `CORS_PATHS`, a thread's event stream, or its agents."""
     return path in CORS_PATHS or any(r.fullmatch(path)
-                                     for r in (THREAD_EVENTS, THREAD_AGENTS, AGENT_LOG,
+                                     for r in (THREAD_EVENTS, THREAD_RELEASE, THREAD_AGENTS, AGENT_LOG,
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
@@ -2016,6 +2018,8 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
     logged: nothing here prints it, and the canvas's request log redacts it.
     Refusals are ordinary JSON answers, before the stream opens. `?limit=`
     is the snapshot's message count (default `thread_events.SNAPSHOT_LIMIT`).
+    `?hold=1`: opened under a sheet (the app's What's new): nothing plays for
+    it until `POST /threads/{session}/release`.
     """
     from . import thread_events
 
@@ -2038,9 +2042,15 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
     limit = threads._limit(raw) if raw else None
     # Who opened it: a device by its name (auth._owner's "device:<name>"),
     # else the login — what a waiting reply played on the open is noted with.
-    who = str(user.get("username") or user.get("device") or "").removeprefix("device:")
+    who = _opener(user)
+    held = (qs.get("hold") or [""])[0] == "1"
     return thread_events.serve(h, session, limit=limit, gzip=thread_events.accepts_gzip(h),
-                               device=who)
+                               device=who, held=held)
+
+
+def _opener(user: dict) -> str:
+    """A device by its name (auth._owner's "device:<name>"), else the login."""
+    return str(user.get("username") or user.get("device") or "").removeprefix("device:")
 
 
 def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
@@ -2959,6 +2969,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             ok, detail = notes.clear((body or {}).get("id") if isinstance(body, dict) else "")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif THREAD_RELEASE.fullmatch(path):
+        # The What's new sheet a thread was opened under is closed (§11
+        # `?hold=1`): its waiting replies play now, as on an open.
+        from . import thread_events
+
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        session = THREAD_RELEASE.fullmatch(path).group(1)
+        if not sessions._SESSION.fullmatch(session):
+            _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        _json(h, 200, {"ok": True, "released": thread_events.release(session, _opener(user))})
     elif AGENT_ACT.fullmatch(path):
         # Stop one background agent, or send it a message, from the agents
         # strip (§6.12a, agent_actions.py).

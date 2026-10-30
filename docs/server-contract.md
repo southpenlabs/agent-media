@@ -7546,6 +7546,18 @@ before its first message, plus a live one) whenever `older` is true.
 Measured on red5's busiest thread (22 Sep 2026): `lines` were 184 KB of a
 268 KB snapshot.
 
+**Held (30 Oct 2026).** `?hold=1` opens the stream under a sheet the user
+has not closed yet (the app's What's new, after an update or a new
+install): it streams as usual, but the thread is not on screen — its held
+Normal replies are not played on the open, and a reply that comes in
+meanwhile waits rather than playing. `POST /threads/{session}/release`
+(gated like the stream, body ignored) → `{"ok": true, "released": N}` when
+the sheet closes: the caller's held streams of that thread count as on
+screen from then, and its waiting replies play as on an open. `N` is how
+many of the caller's streams were released; at 0 nothing plays (the next
+open does). A server without it ignores `hold` and plays on the open, as
+before.
+
 **Compression.** With `Accept-Encoding: gzip` (not `q=0`) the stream is
 gzipped: `Content-Encoding: gzip`, `Vary: Accept-Encoding`, still
 `Cache-Control: no-store` and `X-Accel-Buffering: no`, no Content-Length.

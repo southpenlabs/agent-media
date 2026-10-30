@@ -97,9 +97,14 @@ _TICKING = ("sentence", "elapsed", "server_time", "paused", "delay")
 class Subscriber:
     """One connection's end of a watcher: a queue of `(event, data)`."""
 
-    def __init__(self) -> None:
+    def __init__(self, device: str = "", held: bool = False) -> None:
         self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self.dropped = False
+        self.device = device
+        # Opened under a sheet the user has not closed yet (`?hold=1`, the
+        # app's What's new): streamed as usual, but not on screen — nothing
+        # plays for it until `release`.
+        self.held = held
 
     def put(self, event: str, data) -> None:
         try:
@@ -398,16 +403,17 @@ def renamed(session: str, title: str) -> None:
         w._update("title", {"title": title}, emit=True)
 
 
-def subscribe(session: str, device: str = "") -> tuple[Watcher, Subscriber] | None:
+def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watcher, Subscriber] | None:
     """A new subscriber to `session`'s watcher (started if it is the first),
     or None when a cap is reached. `device`: who opened it, for the row a
-    waiting reply is played from (`_play_waiting`)."""
+    waiting reply is played from (`_play_waiting`). `held`: opened under a
+    sheet (`Subscriber.held`): its waiting replies wait for `release`."""
     with _LOCK:
         total = sum(len(w.subs) for w in _WATCHERS.values())
         w = _WATCHERS.get(session)
         if total >= MAX_TOTAL or (w and len(w.subs) >= MAX_PER_SESSION):
             return None
-        sub = Subscriber()
+        sub = Subscriber(device, held)
         # A watcher in the table always has subscribers: the last one out
         # takes it out (`unsubscribe`).
         start = w is None
@@ -418,13 +424,34 @@ def subscribe(session: str, device: str = "") -> tuple[Watcher, Subscriber] | No
         # Which threads were on screen when: what decides whether a Normal
         # reply plays or waits behind a Play, so the log can answer "why did
         # that play?" afterwards.
-        log.info("thread %s open (%d)", session[:8], len(w.subs))
+        log.info("thread %s open (%d)%s", session[:8], len(w.subs), " held" if held else "")
     if start:
         w.prime()
         w.start()
-    threading.Thread(target=_play_waiting, args=(session, device), daemon=True,
-                     name=f"opened:{session[:8]}").start()
+    if not held:
+        threading.Thread(target=_play_waiting, args=(session, device), daemon=True,
+                         name=f"opened:{session[:8]}").start()
     return w, sub
+
+
+def release(session: str, device: str = "") -> int:
+    """The sheet `device`'s streams of `session` were opened under is closed
+    (`POST /threads/{session}/release`): they count as on screen from now,
+    and the thread's waiting replies play as on an open. How many were
+    released; nothing plays when none was (the stream is shut, say: its
+    next open plays them)."""
+    with _LOCK:
+        w = _WATCHERS.get(session)
+        mine = [s for s in (w.subs if w else []) if s.held and s.device == device]
+        for s in mine:
+            s.held = False
+        if mine:
+            _publish()
+            log.info("thread %s released (%d)", session[:8], len(mine))
+    if mine:
+        threading.Thread(target=_play_waiting, args=(session, device), daemon=True,
+                         name=f"opened:{session[:8]}").start()
+    return len(mine)
 
 
 def _play_waiting(session: str, device: str = "") -> None:
@@ -492,7 +519,10 @@ def _publish() -> None:
     `watching.pin()`); nothing in a process that did not, such as a test."""
     from agent_media_core import watching as _watching
 
-    _watching.publish_pinned({s: len(w.subs) for s, w in _WATCHERS.items()})
+    # A held stream is not on screen: a reply that comes in under the sheet
+    # waits, and plays on `release` with the rest.
+    on = {s: n for s, w in _WATCHERS.items() if (n := sum(not x.held for x in w.subs))}
+    _watching.publish_pinned(on)
 
 
 def watching() -> dict[str, int]:
@@ -555,7 +585,7 @@ class _Out:
 
 
 def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
-          device: str = "") -> bool:
+          device: str = "", held: bool = False) -> bool:
     """Hold the connection open and stream `session` to it until it goes.
 
     Runs on the handler's own thread. Auth and the session check are the
@@ -567,7 +597,7 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
     client went, it fell too far behind, the snapshot failed, or a bug): a
     caller must never write a second answer onto this socket.
     """
-    got = subscribe(session, device)
+    got = subscribe(session, device, held)
     if got is None:
         from .app import _json
 

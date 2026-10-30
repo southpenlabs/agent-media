@@ -322,6 +322,31 @@ def test_a_reply_played_on_open_notes_it_on_its_row(monkeypatch):
     assert "device" not in st.history_row(rid)["extras"]["opened_play"]
 
 
+def test_a_held_open_plays_nothing_until_released(server, convo, signed_in, monkeypatch):
+    """`?hold=1` (the app's What's new is up): the stream streams, but the
+    thread is not on screen and its waiting replies wait; `POST .../release`
+    plays them, once, and only for the device that held it."""
+    from agent_media_core import watching
+
+    played: list = []
+    monkeypatch.setattr(thread_events, "_play_waiting", lambda s, d="": played.append(s))
+    tables: list = []
+    monkeypatch.setattr(watching, "publish_pinned", lambda t: tables.append(dict(t)))
+    st = Stream(server, f"/threads/{SID}/events?hold=1", AUTH)
+    assert st.status == 200 and st.event()[0] == "snapshot"
+    time.sleep(0.1)
+    assert played == [] and tables[-1] == {}
+    res, body = call(server, "POST", f"/threads/{SID}/release", {}, AUTH)
+    assert res.status == 200 and body["released"] == 1
+    assert _wait(lambda: played == [SID]) and tables[-1] == {SID: 1}
+    # Released already: nothing more.
+    res, body = call(server, "POST", f"/threads/{SID}/release", {}, AUTH)
+    assert body["released"] == 0
+    time.sleep(0.1)
+    assert played == [SID]
+    st.close()
+
+
 def test_preflight_and_the_token_is_never_logged(server, convo, monkeypatch, capsys):
     res, _ = call(server, "OPTIONS", f"/threads/{SID}/events")
     assert res.status == 204 and res.getheader("Access-Control-Allow-Origin") == "*"
