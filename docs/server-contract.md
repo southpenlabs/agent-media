@@ -6286,6 +6286,16 @@ the server routes GET and POST.)
   edited or a bad shape; **403** not editable here; **404** no such
   contact; **503** the phone cannot be reached; **502** it refused.
 
+**Google's own editor** (30 Oct 2026). An editable card also carries
+`"phone_edit"`, the person's lookup key in the phone's address book (else
+null). The app on that phone opens Android's editor for
+`content://com.android.contacts/contacts/lookup/<phone_edit>` (Google
+Contacts, with every field and label), and on coming back asks
+`POST /contacts/<id>/reread`: the phone's address book is read again now
+(the same read as the sync loop's), **200** `{"ok": true}`, then the card is
+fetched again. **404** no such contact; **503** the phone cannot be reached
+(the last good copy stays).
+
 #### Find on a network — `POST /contacts/<id>/find` — gated, owner only (19 Oct 2026)
 
 A card's `find` lists the networks it may be searched on: `["messenger"]`

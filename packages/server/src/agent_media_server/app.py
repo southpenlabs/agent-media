@@ -256,6 +256,8 @@ device gets its token):
   GET  /contacts/<id>/mail[?limit=] → their newest mail (from, subject,
                   date, a link to the message), live from notmuch
                   (contacts_mail.py, §6.25)
+  POST /contacts/<id>/reread → the phone's address book read again now,
+                  back from Google's editor (card's `phone_edit`, §6.25)
   POST /contacts/<id>/level {"level"} → their speech level, default or a
                   thread level, the level of their chats and mail
                   (contacts_level.py, §6.25); /notify {"channel", "mode"},
@@ -492,6 +494,8 @@ ROOM_AVATAR = re.compile(r"/rooms/([0-9a-f-]{36})/avatar")
 ROOM_MEDIA = re.compile(r"/rooms/([0-9a-f-]{36})/media/([^/]+)")
 # An edit from the card, written back to Google (contacts_edit.py, §6.25).
 CONTACT_EDIT = re.compile(r"/contacts/([0-9a-f-]{36})/edit")
+# The phone's address book read again, back from Google's editor (contacts_edit.py, §6.25).
+CONTACT_REREAD = re.compile(r"/contacts/([0-9a-f-]{36})/reread")
 # Their speech level (contacts_level.py, §6.25); /notify is the older form.
 CONTACT_LEVEL = re.compile(r"/contacts/([0-9a-f-]{36})/(level|notify)")
 # One search for them on a network, and the pick (contacts_find.py, §6.25).
@@ -518,7 +522,7 @@ def cors_path(path: str) -> bool:
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA,
-                                                        CONTACT_EDIT, CONTACT_LEVEL, CONTACT_TEXT,
+                                                        CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
                                                         *BRIDGE_ROUTES))
 
 
@@ -987,6 +991,26 @@ def _contact_edit(h: BaseHTTPRequestHandler, cid: str) -> None:
         _json(h, 502, {"ok": False, "error": "the phone refused the change"})
     except ValueError as e:
         _json(h, 400, {"ok": False, "error": str(e)})
+    else:
+        _json(h, 200, got)
+
+
+def _contact_reread(h: BaseHTTPRequestHandler, cid: str) -> None:
+    """`POST /contacts/<id>/reread` (§6.25): the phone's address book read
+    again now, back from Google's editor; gated as the card is. 503 when the
+    phone cannot be reached (the last good copy stays)."""
+    from . import contacts_android, contacts_edit
+
+    user, err = auth.gate(_bearer(h))
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    try:
+        got = contacts_edit.reread(cid)
+    except contacts_edit.NotEditable as e:
+        _json(h, 404, {"ok": False, "error": str(e)})
+    except contacts_android.Unreachable:
+        _json(h, 503, {"ok": False, "error": "the phone cannot be reached"})
     else:
         _json(h, 200, got)
 
@@ -2643,6 +2667,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_text(h, CONTACT_TEXT.fullmatch(path).group(1), start=True)
     elif CONTACT_EDIT.fullmatch(path):
         _contact_edit(h, CONTACT_EDIT.fullmatch(path).group(1))
+    elif CONTACT_REREAD.fullmatch(path):
+        _contact_reread(h, CONTACT_REREAD.fullmatch(path).group(1))
     elif CONTACT_LEVEL.fullmatch(path):
         m = CONTACT_LEVEL.fullmatch(path)
         _contact_level(h, m.group(1), m.group(2) == "notify")

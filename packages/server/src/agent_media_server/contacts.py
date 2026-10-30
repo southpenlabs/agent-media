@@ -2053,6 +2053,9 @@ def card(cid: str) -> dict | None:
             "mail": _card_mail(c),
             # Edit from the card (contacts_edit.py), and the person in Google.
             "edit": contacts_edit.editable(c), "google_url": contacts_edit.google_url(c) or None,
+            # Google's own editor on the phone (Android's lookup key), and
+            # POST /contacts/<id>/reread when the app comes back from it.
+            "phone_edit": contacts_edit.phone_lookup(c) or None,
             # Their speech level (contacts_level.py): None is "default".
             "level": level,
             # A Text action: some service to text them on (contacts_text.py).

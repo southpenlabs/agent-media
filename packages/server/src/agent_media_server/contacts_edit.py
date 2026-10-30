@@ -77,6 +77,37 @@ def google_url(card: dict) -> str:
     return ""
 
 
+def phone_lookup(card: dict) -> str:
+    """The person's lookup key in the phone's address book (its Google
+    entry's contact), for the app's "Edit in Google Contacts": Android opens
+    its own editor on `content://com.android.contacts/contacts/lookup/<key>`
+    (David, 30 Oct 2026: "even if it linked to the Google contacts app would
+    be quite handy"). "" where the card cannot be edited here."""
+    if not editable(card):
+        return ""
+    for s in card.get("sources") or []:
+        if s.get("kind") == "android" and wb.GOOGLE in (s.get("accounts") or []) and s.get("id"):
+            return str(s["id"])
+    return ""
+
+
+def reread(cid: str) -> dict:
+    """`POST /contacts/<id>/reread`: read the phone's address book again now,
+    so a change made in Google's editor shows when the app comes back to the
+    card. `{ok}`; NotEditable for no such person, the phone's Unreachable."""
+    conn = contacts._connect(create=False)
+    if conn is None:
+        raise NotEditable("no such contact")
+    try:
+        row = conn.execute("SELECT 1 FROM contacts WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise NotEditable("no such contact")
+    contacts.sync_android()
+    return {"ok": True}
+
+
 def _now(card: dict, field: str):
     """A field as the card shows it, in the form `set` takes."""
     if field == "name":

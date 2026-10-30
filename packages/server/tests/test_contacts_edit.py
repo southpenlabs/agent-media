@@ -103,6 +103,23 @@ def test_the_card_says_editable_and_where_it_is_in_google():
     assert c["google_url"] == "https://contacts.google.com/person/c123"
 
 
+def test_the_card_names_its_phone_entry_for_googles_editor(monkeypatch):
+    """`phone_edit` is the Android lookup key Google's editor opens on, and
+    reread reads the phone again (David, 30 Oct 2026)."""
+    cid = _book()
+    assert contacts.card(cid)["phone_edit"] == "lookup-1"
+    read = []
+    monkeypatch.setattr(contacts, "sync_android", lambda: read.append(1) or {})
+    assert contacts_edit.reread(cid) == {"ok": True} and read == [1]
+    with pytest.raises(contacts_edit.NotEditable):
+        contacts_edit.reread("00000000-0000-0000-0000-000000000000")
+
+
+def test_no_phone_edit_without_a_google_entry_on_the_phone():
+    cid = _book(accounts=("com.whatsapp",), google_id="")
+    assert contacts.card(cid)["phone_edit"] is None
+
+
 def test_no_google_entry_on_the_phone_is_not_editable():
     cid = _book(accounts=("com.whatsapp",), google_id="")
     c = contacts.card(cid)
