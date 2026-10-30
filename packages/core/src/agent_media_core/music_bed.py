@@ -1484,6 +1484,15 @@ def status() -> dict:
 
 
 def main(argv: list[str]) -> int:
+    # The renderer reads the env file itself: it inherits whatever its
+    # spawner had, and a service started before a setting changed (the
+    # level, MEDIA_MUSIC_BED_GAIN_DB) rendered at the old one and pruned the
+    # new files as another gain's (David, 31 Oct 2026: still not quieter).
+    try:
+        from .intake._env import load_env_file
+        load_env_file("music-bed")
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed: env file not read: %s", e)
     cmd = argv[1] if len(argv) > 1 else "warm"
     if cmd == "warm":
         warm()

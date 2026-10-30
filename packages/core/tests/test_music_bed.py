@@ -474,3 +474,15 @@ def test_other_audio_is_known_only_once_the_duck_has_looked(monkeypatch):
     with pytest.raises(RuntimeError):
         c.before_speech(title="t")
     assert c.other_audio is None
+
+
+def test_the_renderer_reads_the_env_file_itself(monkeypatch):
+    """A spawner started before a setting changed must not render at the old
+    level (David, 31 Oct 2026)."""
+    from agent_media_core import music_bed as M
+    from agent_media_core.intake import _env
+    seen = []
+    monkeypatch.setattr(_env, "load_env_file", lambda label="hook": seen.append(label))
+    monkeypatch.setattr(M, "warm", lambda: 0)
+    assert M.main(["x", "warm"]) == 0
+    assert seen == ["music-bed"]
