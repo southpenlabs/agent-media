@@ -930,6 +930,8 @@ def room(thread: str) -> Room | None:
 def rows(flags: set | frozenset = frozenset()) -> list[dict]:
     """`/targets` rows for the allowed rooms (§6.1): never live, never rested
     or pinned; the last message is the preview line."""
+    from . import you_wrote
+
     out = []
     for r in list(_ROOMS.values()):
         if not r.loaded:
@@ -954,6 +956,9 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
                         "read_receipts_own": read_receipts.own(r.thread),
                         # Read up to here, here or on another device (§6.35).
                         "read_up_to": r.read_up_to()})
+            # When the listener last wrote here, and whether nobody has
+            # answered since: Show → Sent, Waiting for reply (you_wrote.py).
+            out[-1]["you_at"], out[-1]["last_from_you"] = you_wrote.of_chat(r.messages)
             if r.avatar:
                 # The room's own picture (20 Oct 2026); a person's row shows
                 # the contact's first.

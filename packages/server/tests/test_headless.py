@@ -739,8 +739,12 @@ def test_ask_new_starts_a_headless_session_and_it_is_listed(app_host, server, si
 
     st, body = req(server, "GET", "/targets", headers=AUTH)
     row = next(r for r in body["sessions"] if r["session"] == sid)
+    # The listener wrote its first words (you_wrote.py); whether the fake's
+    # reply, which carries no stop_reason, has ended its turn is not this test's.
+    assert isinstance(row["you_at"], float)
     assert row == {"session": sid, "title": "reply: hi there", "live": True, "pane": None,
-                   "recap": None, "archived": False, "archived_at": None, "draft_at": None, "rested": None, "pinned": False, "priority": False, "speech": "normal", "speech_own": False,
+                   "recap": None, "archived": False, "archived_at": None, "draft_at": None,
+                   "you_at": row["you_at"], "last_from_you": row["last_from_you"], "rested": None, "pinned": False, "priority": False, "speech": "normal", "speech_own": False,
                    "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
                    "driver": "headless", "drivable": True, "harness": "claude",
                    "source": "sessiond", "project": "work", "cwd": row["cwd"], "tags": [],

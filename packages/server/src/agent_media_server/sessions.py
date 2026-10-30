@@ -1525,6 +1525,7 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     from .drafts import draft_times
 
     drafted = draft_times()
+    paths = {r.session: (r.harness, r.path) for r in store}
     for row in out:
         sid = row["session"]
         fb = _fallback(sid)
@@ -1541,6 +1542,12 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
         # When its unsent draft was written (the writer's clock), else None:
         # Show → Drafts (David, 30 Oct 2026).
         row["draft_at"] = drafted.get(sid)
+        # When the listener last wrote in it, and whether that is still
+        # unanswered: Show → Sent and Waiting for reply (David, 30 Oct 2026).
+        # A Matrix room or quick chat says so itself; an agent's thread is
+        # read from its transcript's end, cached per file (you_wrote.py).
+        if "you_at" not in row:
+            row["you_at"], row["last_from_you"] = _you_wrote(row, paths)
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted
@@ -1562,6 +1569,23 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     return chat_marks.add_marks(mail_threads.add_mail(remind.add_remind(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
         add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
                              for sid, rec in locked.items() if sid not in gone]))))))
+
+
+def _you_wrote(row: dict, paths: dict) -> tuple[float | None, bool]:
+    """`(you_at, last_from_you)` for an agent's thread (`you_wrote`), its
+    transcript found through the store sweep `sessions_index` already made."""
+    from . import you_wrote
+
+    harness, path = paths.get(row["session"]) or (str(row.get("harness") or ""), "")
+    if harness in ("hermes", "matrix", "quick"):
+        return None, False
+    try:
+        return you_wrote.of_session(row["session"], harness, path)
+    except Exception as e:  # noqa: BLE001 — a row without the fields, not no list
+        import logging
+
+        logging.getLogger(__name__).warning("you_wrote %s: %s", row["session"][:8], e)
+        return None, False
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:

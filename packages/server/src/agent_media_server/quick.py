@@ -217,6 +217,8 @@ def envelope(session: str, *, limit: int = 30, before: str = "") -> dict:
 
 def rows(flags=frozenset(), pinned=frozenset()) -> list[dict]:
     """The thread list's rows for every quick chat (`harness: "quick"`)."""
+    from . import you_wrote
+
     out = []
     try:
         files = sorted(_dir().glob("*.json"))
@@ -239,6 +241,8 @@ def rows(flags=frozenset(), pinned=frozenset()) -> list[dict]:
                     "archived": session in flags, "rested": None, "pinned": session in pinned,
                     "harness": "quick", "source": "quick", "drivable": True,
                     **({"handed_to": data["handed_to"]} if data.get("handed_to") else {})})
+        # Show → Sent, Waiting for reply (you_wrote.py).
+        out[-1]["you_at"], out[-1]["last_from_you"] = you_wrote.of_chat(msgs)
     return out
 
 

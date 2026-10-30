@@ -297,6 +297,19 @@ Everything a message can be pointed at.
 - `draft_at` (every row, 30 Oct 2026): when its unsent draft was written
   (the writer's clock, §6.2 `/draft`), else `null`. The app's Show → Drafts
   lists these, merged with its own copies (the newer wins).
+- `you_at`, `last_from_you` (every row, 30 Oct 2026): when the listener
+  last wrote in the thread (epoch s, that message's own time), else `null`;
+  and whether that message is still unanswered (`false` when `you_at` is
+  `null`). Unanswered: for an agent's thread, no reply with words whose turn
+  is over has come after it, so a thread whose agent is working on it right
+  now is still waiting; for a Matrix room or a quick chat, nobody else has
+  written since. Not the listener's, though on the user side of a
+  transcript: another session's message (`<cross-session-message>`), agent
+  mail and the session host's notes (`[From …]`), an interrupt, a `!` shell
+  command. Read from the transcript's end and cached per file
+  (`you_wrote.py`); Hermes threads have `null`/`false`. The app's Show →
+  Sent lists the rows with `you_at` (newest first) and Waiting for reply
+  those with `last_from_you`.
 - `mail_from` (every row, 28 Oct 2026): the sender's name (`"Cece"`) when
   another agent's mail started the thread — its first words are
   `[From Name] …` (agent-mail-deliver, `media session send`; not
