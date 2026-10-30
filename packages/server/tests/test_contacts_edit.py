@@ -299,3 +299,34 @@ def test_a_new_label_is_made_in_the_persons_google_account(monkeypatch):
     monkeypatch.setattr(contacts_edit.wb, "_shell", shell)
     assert contacts_edit._new_group("12", "Book club") == "31"
     assert "account_name:s:david@example.test" in made[0] and "'title:s:Book club'" in made[0]
+
+
+def test_a_number_in_a_second_google_entry_is_deleted_too(monkeypatch):
+    """David, 30 Oct 2026: "I deleted a phone number and it was still there
+    after I saved" — the person was two Google entries joined (and WhatsApp's),
+    the number in the second, saved with a line break before it. A delete
+    reaches every Google entry; a kept number that runs over two lines is
+    read whole, so it is not deleted as an empty one."""
+    PH = contacts_edit.PHONE
+    rows = {"995": [("41", "+61 400 000 001")], "3418": [("42", "\n+61400000002"), ("43", "0400 111 222")]}
+    writes = []
+
+    def shell(script):
+        if "/raw_contacts" in script:
+            return "Row: 0 _id=995\nRow: 1 _id=3418\n"
+        if script.startswith("content ") and not script.startswith("content query"):
+            writes.append(script)
+            return ""
+        for raw, rs in rows.items():
+            if f"raw_contact_id={raw} " in script and PH in script:
+                return "".join(f"Row: {i} _id={rid}, data1={v}\n" for i, (rid, v) in enumerate(rs))
+        return "No result found.\n"
+
+    monkeypatch.setattr(contacts_edit.wb, "_shell", shell)
+    cid = _book(phones=("+61 400 000 001", "+61400000002", "0400 111 222"))
+    contacts_edit.edit(cid, {"set": {"phones": ["+61 400 000 001", "+61400000002"]}})
+    assert [w for w in writes if "delete" in w] == [w for w in writes if "_id=43" in w]   # only 0400 …
+    assert not any("_id=42" in w or "_id=41" in w for w in writes)
+    writes.clear()
+    contacts_edit.edit(cid, {"set": {"phones": ["+61 400 000 001", "0400 111 222"]}})
+    assert any(w.startswith("content delete") and "_id=42" in w for w in writes)   # the second entry's

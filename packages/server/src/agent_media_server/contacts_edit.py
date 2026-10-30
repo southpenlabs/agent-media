@@ -240,22 +240,33 @@ def _col(raw: str, mimetype: str, col: str) -> dict[str, str]:
     its own, as the last column: its value can hold ", data3=" itself."""
     where = f"raw_contact_id={raw} AND mimetype='{mimetype}'"
     out = wb._shell(f"content query --uri {URI}/data --projection _id:{col} --where \"{where}\"")
-    got = {}
+    got: dict[str, str] = {}
+    last = None
     for line in out.splitlines():
         m = re.match(rf"^Row: \d+ _id=(\d+), {col}=(.*)$", line)
         if m:
-            got[m.group(1)] = "" if m.group(2) == "NULL" else m.group(2)
+            last = m.group(1)
+            got[last] = "" if m.group(2) == "NULL" else m.group(2)
+        elif last is not None:
+            got[last] += "\n" + line
     return got
 
 
 def _rows(raw: str, mimetype: str, cols: str = "_id:data1") -> list[dict]:
     where = f"raw_contact_id={raw} AND mimetype='{mimetype}'"
     out = wb._shell(f"content query --uri {URI}/data --projection {cols} --where \"{where}\"")
-    rows = []
+    rows: list[dict] = []
     for line in out.splitlines():
         m = re.match(r"^Row: \d+ _id=(\d+)(?:, data1=(.*))?$", line)
         if m:
             rows.append({"id": m.group(1), "data1": m.group(2) or ""})
+        elif rows:
+            # A value with a line break runs on (a number saved as "\n+614…"
+            # read as empty, and so was deleted as one not wanted).
+            rows[-1]["data1"] += "\n" + line
+    for r in rows:
+        if r["data1"] == "NULL":
+            r["data1"] = ""
     return rows
 
 
@@ -309,7 +320,13 @@ def _new_group(raw: str, title: str) -> str | None:
     return _groups().get(contacts.fold(title))
 
 
-def _write(raw: str, card: dict, want: dict) -> dict:
+def _write(raws: list[str], card: dict, want: dict) -> dict:
+    """`raws`: every live Google entry behind the person, oldest first (David,
+    30 Oct 2026: "I deleted a phone number and it was still there after I
+    saved" — it was in the second of two joined entries). A value gone, a
+    relabel and a label taken off reach every entry; a new value, the name
+    and the other single fields go to the first."""
+    raw = raws[0]
     done, skipped = [], []
     if "name" in want and want["name"]:
         rows = _rows(raw, NAME)
@@ -324,23 +341,29 @@ def _write(raw: str, card: dict, want: dict) -> dict:
         if field not in want:
             continue
         mime, types = TYPED[field][3], TYPED[field][1]
-        rows = _rows(raw, mime)
         wanted = {_key(field, x["value"]): x for x in want[field]}
-        have = {_key(field, r["data1"]): r for r in rows}
+        have: dict[str, list[dict]] = {}
+        for r_ in raws:
+            for r in _rows(r_, mime):
+                have.setdefault(_key(field, r["data1"]), []).append({**r, "raw": r_})
         typed = [x for k, x in wanted.items() if k in have and x.get("type") is not None]
-        d2 = _col(raw, mime, "data2") if typed else {}
-        d3 = _col(raw, mime, "data3") if typed else {}
-        for k, r in have.items():
+        d2: dict[str, str] = {}
+        d3: dict[str, str] = {}
+        for r_ in {r["raw"] for k in have for r in have[k]} if typed else ():
+            d2.update(_col(r_, mime, "data2"))
+            d3.update(_col(r_, mime, "data3"))
+        for k, rs in have.items():
             if k not in wanted:
-                _delete(r["id"])
+                for r in rs:
+                    _delete(r["id"])
         for k, x in wanted.items():
             if k not in have:
                 _insert(raw, mime, [f"data1:s:{x['value']}", *_type_binds(field, x.get("type"))])
             elif x.get("type") is not None:
-                rid = have[k]["id"]
-                was = contacts_android._label(types, d2.get(rid), d3.get(rid))
-                if was.casefold() != x["type"].casefold():
-                    _update(rid, _type_binds(field, x["type"]))
+                for r in have[k]:
+                    was = contacts_android._label(types, d2.get(r["id"]), d3.get(r["id"]))
+                    if was.casefold() != x["type"].casefold():
+                        _update(r["id"], _type_binds(field, x["type"]))
         done.append(field)
     if "organization" in want:
         rows = _rows(raw, ORG)
@@ -356,11 +379,13 @@ def _write(raw: str, card: dict, want: dict) -> dict:
             _insert(raw, ORG, [x for x in b if not x.endswith(":n:")])
         done.append("organization")
     if "birthday" in want:
-        kinds = _col(raw, EVENT, "data2")
-        mine = [rid for rid, t in kinds.items() if t == contacts_android.BIRTHDAY]
+        mine = [rid for r_ in raws for rid, t in _col(r_, EVENT, "data2").items()
+                if t == contacts_android.BIRTHDAY]
         if want["birthday"]:
             if mine:
                 _update(mine[0], [f"data1:s:{want['birthday']}"])
+                for rid in mine[1:]:
+                    _delete(rid)
             else:
                 _insert(raw, EVENT, [f"data1:s:{want['birthday']}",
                                      f"data2:i:{contacts_android.BIRTHDAY}"])
@@ -369,6 +394,11 @@ def _write(raw: str, card: dict, want: dict) -> dict:
                 _delete(rid)
         done.append("birthday")
     if "notes" in want:
+        # The card shows every entry's note joined: the edited whole goes in
+        # the first entry, and the others' notes (part of what was edited) go.
+        for r_ in raws[1:]:
+            for r in _rows(r_, NOTE):
+                _delete(r["id"])
         rows = _rows(raw, NOTE)
         if rows:
             if want["notes"]:
@@ -380,8 +410,10 @@ def _write(raw: str, card: dict, want: dict) -> dict:
         done.append("notes")
     if "labels" in want:
         groups = _groups()
-        rows = _rows(raw, GROUP)
-        member = {r["data1"]: r for r in rows}
+        member: dict[str, list[dict]] = {}
+        for r_ in raws:
+            for r in _rows(r_, GROUP):
+                member.setdefault(r["data1"], []).append(r)
         wanted: set[str] = set()
         for label in want["labels"]:
             gid = groups.get(contacts.fold(label))
@@ -396,11 +428,12 @@ def _write(raw: str, card: dict, want: dict) -> dict:
                 groups[contacts.fold(label)] = gid
             wanted.add(gid)
         mine = {contacts.fold(x) for x in _now(card, "labels")}
-        for gid, r in member.items():
+        for gid, rs in member.items():
             # Only a membership the card shows as a label is taken away.
             title = next((t for t, g in groups.items() if g == gid), None)
             if gid not in wanted and title in mine:
-                _delete(r["id"])
+                for r in rs:
+                    _delete(r["id"])
         for gid in wanted - set(member):
             _insert(raw, GROUP, [f"data1:i:{gid}"])
         done.append("labels")
@@ -440,10 +473,10 @@ def edit(cid: str, body: dict) -> dict:
     want = {f: v for f, v in want.items() if not _same(f, v, _now(card, f))}
     if not want:
         return {"ok": True, "done": [], "skipped": []}
-    raw = wb._google_raw(wb._raw_ids(card))
-    if raw is None:
+    raws = wb._google_raws(wb._raw_ids(card))
+    if not raws:
         raise NotEditable("no Google entry on the phone any more")
-    got = _write(raw, card, want)
+    got = _write(raws, card, want)
     _later(_reread, contacts.account())
     return {"ok": True, **got}
 

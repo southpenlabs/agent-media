@@ -171,12 +171,18 @@ def _shell(script: str) -> str:
     return got.stdout
 
 
-def _google_raw(raw_ids: list[str]) -> str | None:
-    """The first of `raw_ids` that is a live `com.google` raw contact now."""
+def _google_raws(raw_ids: list[str]) -> list[str]:
+    """Those of `raw_ids` that are live `com.google` raw contacts now, oldest
+    first: one person on the phone can be several Google entries joined."""
     where = f"_id IN ({','.join(raw_ids)}) AND deleted=0 AND account_type='{GOOGLE}'"
     out = _shell(f"content query --uri {URI}/raw_contacts --projection _id "
                  f"--where \"{where}\" --sort _id")
-    ids = re.findall(r"^Row: \d+ _id=(\d+)\s*$", out, re.M)
+    return re.findall(r"^Row: \d+ _id=(\d+)\s*$", out, re.M)
+
+
+def _google_raw(raw_ids: list[str]) -> str | None:
+    """The first of `raw_ids` that is a live `com.google` raw contact now."""
+    ids = _google_raws(raw_ids)
     return ids[0] if ids else None
 
 
