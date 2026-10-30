@@ -1719,7 +1719,12 @@ ahead.
     accounts already in red5's notmuch, msmtp set up), Outlook next through
     the calendar's Microsoft Graph sign-in. The plan and its open questions
     (All Mail or Gmail's API, mbsync or lieer, spam, read aloud) are in
-    docs/proposals/2026-10-20-mail-in-sasonica.md. Not started.
+    docs/proposals/2026-10-20-mail-in-sasonica.md. Not started. First
+    piece being built (30 Oct 2026): the thread list's Show → Sent (threads you
+    wrote in, latest first) and Waiting for reply (your message last,
+    unanswered), built generic so mail threads join them like Gmail's Sent
+    label (David: "I was thinking of eventually including email and was
+    thinking of the Gmail Sent label").
 
 36. **Several servers, and settings by server** (David, 20 Oct 2026: "with
     multi-server pairing, there are some settings and sign in features that
@@ -2087,6 +2092,29 @@ ahead.
     gaps: the dock's thread is not marked seen while it is open; native
     hands-free controls and the black screen caption are shared with the
     page's composer (fine while only one listens).
+
+46. **Phone calls in Sasonica** (David, 30 Oct 2026: "I was wondering about
+    phone calls... do you think that can be managed through sasonica
+    too?"). Not started; open questions first. Steps, each useful alone:
+    1. *Calls you can see:* the phone's call log (READ_CALL_LOG) on each
+       person's timeline and Messages row (the contacts timeline already
+       has a calls kind, off), a missed call as an item that needs you, and
+       Show → Sent / Waiting counting a call you made or missed.
+    2. *Calls from the app:* a Call key on a person (the phone's own dialer
+       by intent: no dialer role needed), answer, decline or "text back"
+       from a notification card (ANSWER_PHONE_CALLS), speech and music
+       paused for the call as call-guard does now.
+    3. *An agent on the phone:* a number of its own (Twilio; red5 has an
+       account set up) so an agent can screen a call, take a message,
+       transcribe voicemail into a thread, or place a call you ask for,
+       with the voice the replies use. Outward-facing and paid per minute:
+       every call it places is confirmed with you first.
+    Questions: which phone number (the p8a's own line, or a new one for the
+    agent); whether calls go in the CRM timeline; recording and consent
+    rules (Victoria: a party to the call may record it, but tell the other
+    side); whether Google Voice or a SIP line matters. Stays generic: the
+    server says which call services it has (`/features`), the app renders
+    them.
 
 ## Loose ends
 
