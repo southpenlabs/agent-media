@@ -137,7 +137,7 @@ else:
         sys.exit(1)
     for i in ids:
         if i in d["bad_ids"]:
-            out += [f"{{m}} addr-{{i}}", "Row: 0 address=+61415584499, type=151"]
+            out += [f"{{m}} addr-{{i}}", "Row: 0 address=+61400000099, type=151"]
             print("\\n".join(out))
             sys.exit(255)
         out += [f"{{m}} addr-{{i}}", rows(d["addrs"].get(i, []))]
@@ -278,7 +278,7 @@ def test_an_error_never_says_a_number_or_an_address(book, tmp_path, monkeypatch)
         return bool(_re.search(r"(?:\d[\s().-]?){6,}", text or ""))   # 6+ digits
 
     leaky = tmp_path / "leaky-adb"
-    leaky.write_text("#!/bin/sh\necho 'Row: 2 address=+61415584499, type=151'\n"
+    leaky.write_text("#!/bin/sh\necho 'Row: 2 address=+61400000099, type=151'\n"
                      "echo 'body=meet at 0412 345 678' >&2\nexit 255\n")
     leaky.chmod(0o755)
     monkeypatch.setenv("MEDIA_CONTACTS_ADB", f"{leaky} shell")
@@ -289,7 +289,7 @@ def test_an_error_never_says_a_number_or_an_address(book, tmp_path, monkeypatch)
     for line in timeline_backfill.say(got):
         assert not says_a_number(line)
     from agent_media_server import contacts_android
-    for text in ("Row: 2 address=+61415584499, type=151",
+    for text in ("Row: 2 address=+61400000099, type=151",
                  "Error while accessing provider: content://mms/8/addr 0412 345 678"):
         assert not says_a_number(contacts_android.scrub(text))
     try:
