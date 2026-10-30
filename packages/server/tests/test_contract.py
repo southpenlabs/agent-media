@@ -197,17 +197,17 @@ def test_targets_shape(server, shelf, signed_in):
     # `mail_from` on 28 Oct 2026: who, when agent mail started it (mail_threads.py).
     # `top` and `marked_unread` on 29 Oct 2026: Pin to top, Mark unread (chat_marks.py).
     # `archived_at` on 30 Oct 2026: when it was archived, else None (archive.py).
-    assert keys(live) == {"session", "title", "live", "pane", "recap", "archived", "archived_at",
+    assert keys(live) == {"session", "title", "live", "pane", "recap", "archived", "archived_at", "draft_at",
                           "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
                           "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "spaces", "mail_from",
                           "top", "marked_unread"}
     assert live == {"session": SID2, "title": "Sasonica web", "live": True, "pane": "%42",
-                    "recap": None, "archived": False, "archived_at": None, "rested": None, "pinned": False,
+                    "recap": None, "archived": False, "archived_at": None, "draft_at": None, "rested": None, "pinned": False,
                     "project": None, "cwd": None, "harness": "claude", "priority": False, "speech": "normal", "speech_own": False,
                     "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
                     "tags": [], "quiet": None, "quiet_rule": None, "remind": None, "reminded": False, "spaces": ["inbox"], "mail_from": None,
                     "top": None, "marked_unread": False}
-    assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived", "archived_at",
+    assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived", "archived_at", "draft_at",
                              "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
                           "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "spaces", "mail_from",
                           "top", "marked_unread"}
@@ -413,6 +413,19 @@ def test_draft_round_trip(server, shelf, signed_in):
     _, obj = call(server, "GET", f"/draft?session={SID}", headers=AUTH)
     assert obj["text"] == "" and obj["at"] == 0
 
+
+
+def test_a_row_says_when_its_draft_was_written(server, shelf, signed_in):
+    # `draft_at` on /targets rows: Show → Drafts (David, 30 Oct 2026).
+    row = lambda o: {r["session"]: r for r in o["sessions"]}[SID]  # noqa: E731
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert row(obj)["draft_at"] is None
+    call(server, "POST", "/draft", {"session": SID, "text": "half", "at": 7}, AUTH)
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert row(obj)["draft_at"] == 7.0
+    call(server, "POST", "/draft", {"session": SID, "text": ""}, AUTH)
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert row(obj)["draft_at"] is None
 
 # --- managing a thread --------------------------------------------------------------
 

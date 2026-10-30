@@ -1522,6 +1522,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # the default (/speech/default); `speech_from` says which (20 Oct 2026).
     from agent_media_core.speak_priority import SPEAKS, _fallback, default_level, levels
     lv, dflt = levels(), default_level()
+    from .drafts import draft_times
+
+    drafted = draft_times()
     for row in out:
         sid = row["session"]
         fb = _fallback(sid)
@@ -1535,6 +1538,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
         # When it was archived (epoch), else None: the Archived view's
         # "Recently archived" sort (David, 30 Oct 2026).
         row["archived_at"] = flags.get(sid) if row.get("archived") else None
+        # When its unsent draft was written (the writer's clock), else None:
+        # Show → Drafts (David, 30 Oct 2026).
+        row["draft_at"] = drafted.get(sid)
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted

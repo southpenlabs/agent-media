@@ -294,6 +294,9 @@ Everything a message can be pointed at.
 - `archived_at` (every row, 30 Oct 2026): when it was archived (epoch s,
   the time kept in `archived.json`), else `null`. The app's Archived view
   sorts by it ("Recently archived").
+- `draft_at` (every row, 30 Oct 2026): when its unsent draft was written
+  (the writer's clock, §6.2 `/draft`), else `null`. The app's Show → Drafts
+  lists these, merged with its own copies (the newer wins).
 - `mail_from` (every row, 28 Oct 2026): the sender's name (`"Cece"`) when
   another agent's mail started the thread — its first words are
   `[From Name] …` (agent-mail-deliver, `media session send`; not

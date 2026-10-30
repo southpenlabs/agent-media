@@ -39,6 +39,28 @@ def _draft_path(session: str) -> Path:
     return _drafts_dir() / f"{session}.json"
 
 
+def draft_times() -> dict[str, float]:
+    """`{session: at}` for every draft held, for the thread list's Show →
+    Drafts (`/targets` rows' `draft_at`). A file per draft, a handful at a
+    time, so a directory read per list."""
+    out: dict[str, float] = {}
+    try:
+        paths = list(_drafts_dir().glob("*.json"))
+    except OSError:
+        return out
+    for path in paths:
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("text") or "").strip():
+            try:
+                out[path.stem] = float(data.get("at") or 0)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def draft_read(session: str, bearer: str) -> tuple[bool, dict]:
     """The draft held for a session — `{"text": "", "at": 0}` when there is none."""
     session = (session or "").strip()
