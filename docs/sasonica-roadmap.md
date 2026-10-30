@@ -1946,6 +1946,24 @@ ahead.
     "read from here", the bar's Replay, the toast's Play, `media replay`,
     `replay-prev`, `replay-at-cursor`) plays them again by submit's rules
     (`music_bed_replay.py`, contract §`/speech/music-bed` "On a replay").
+    **Landed 31 Oct 2026 (DJ mixing and a level slider)** (David: "DJ
+    mixing" under the voice, and a music volume slider): Settings → Music
+    has a Music level slider (a generic `range` setting, -24..6 dB, played
+    at once by a live offset while the files re-render) and six switches,
+    all on: breathe (the music dips 6 dB under the words, back up in the
+    pauses), carve (a 6 dB cut of 300 Hz–3 kHz while the voice sounds),
+    intro (1.5 s of music before the first word), outro (a closing chord
+    per generated style; tracks fade through a closing filter), sweep
+    (fades through a low-pass from 400 Hz), carry (a bed held up to 20 s
+    for a reading about to start: the same bed carries on, another
+    crossfades over 3 s, a thought between replies keeps it 8 dB lower
+    under its harp). Phone: the app (sasonica-app `0db98b0`, needs the new
+    APK); desk and rooms: the under mpv's lavfi filters through IPC.
+    `music_bed_mix.py`, `under_mix.py`, `music_bed_outro.py`; contract
+    §`/speech/music-bed` "DJ mixing". Not yet: the streaming (Mopidy) bed
+    keeps its plain fade; the desk's "voice" is a clip playing, not the
+    voice's level (no meter on the broker); a phone's first-sentence
+    timing may be stamped up to the intro early.
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

@@ -285,7 +285,8 @@ def parse(choice: Optional[str]) -> Optional[tuple[str, str]]:
 
 
 def _stored() -> dict:
-    """Everything Settings saved: the choice, the slow switch, the level."""
+    """Everything Settings saved: the choice, the slow switch, the level,
+    the DJ mix's switches."""
     try:
         d = json.loads(_settings_path().read_text())
         return d if isinstance(d, dict) else {}
@@ -295,7 +296,9 @@ def _stored() -> dict:
 
 def _store(d: dict) -> None:
     p = _settings_path()
-    if not any(k in d for k in ("choice", "slow", "gain_db")):
+    # Anything saved but the stamp: the choice, slow, the level, the DJ
+    # mix's switches (music_bed_mix).
+    if not any(k != "at" for k in d):
         p.unlink(missing_ok=True)
         return
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -839,6 +842,9 @@ _PEAK_OFFSETS = {"question": -3.0}
 
 #: The range a stored level may take (dB against the first beds' levels).
 GAIN_RANGE = (-24.0, 6.0)
+GAIN_LABEL = "Music level"
+GAIN_HINT = ("How loud the music is under the voice, against where it started. "
+             "A change plays at once; the files catch up in the background.")
 
 
 def stored_gain() -> Optional[float]:
@@ -962,8 +968,13 @@ def file_for(mood: str) -> Path:
 
 def prune_old() -> int:
     """Delete the generated beds of other versions or gains (the clip dir
-    keeps only what plays now). How many went."""
+    keeps only what plays now), endings included. How many went."""
     keep = {file_for(m).name for m in RENDERED}
+    try:
+        from . import music_bed_outro
+        keep |= music_bed_outro.names_kept()
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed: %s", e)
     n = 0
     try:
         for p in _dir().glob("music-bed-*-v*.wav"):
@@ -975,13 +986,30 @@ def prune_old() -> int:
     return n
 
 
-def ready(mood: str) -> Optional[Path]:
-    """The mood's file if it is rendered, else None. Never renders."""
+def rendered(mood: str) -> Optional[Path]:
+    """The mood's file at the chosen level if it is rendered, else None."""
     try:
         p = file_for(mood)
         return p if p.is_file() and p.stat().st_size > 44 else None
     except OSError:
         return None
+
+
+def ready(mood: str) -> Optional[Path]:
+    """The mood's file at the chosen level, else (until the renderer catches
+    up) its file at another level, played at the chosen one by the
+    difference (music_bed_mix.level_offset); None with neither. Never
+    renders."""
+    p = rendered(mood)
+    if p is not None:
+        return p
+    try:
+        for q in sorted(_dir().glob(f"music-bed-{mood}-v{VERSION}*.wav")):
+            if q.stat().st_size > 44:
+                return q
+    except OSError:
+        pass
+    return None
 
 
 def write(mood: str) -> Path:
@@ -1017,8 +1045,14 @@ def warm_needed() -> bool:
     """Whether the background process has work: a generated style not yet
     rendered, the weather due, or the chosen library or streaming genre
     short of tracks (and not tried lately)."""
-    if any(ready(m) is None for m in RENDERED) or weather_stale() or astro_stale():
+    if any(rendered(m) is None for m in RENDERED) or weather_stale() or astro_stale():
         return True
+    try:
+        from . import music_bed_outro
+        if any(music_bed_outro.rendered(m) is None for m in music_bed_outro.styles()):
+            return True
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed: %s", e)
     parsed = parse(choice())
     if parsed is None:
         return False
@@ -1081,9 +1115,18 @@ def warm() -> int:
         first = pick_for()
         order = ([first.fallback] if first else []) + list(RENDERED)
         for style in dict.fromkeys(order):
-            if ready(style) is None:
+            if rendered(style) is None:
                 write(style)
                 done += 1
+        try:
+            # Each bed's ending (music_bed_outro), after every bed.
+            from . import music_bed_outro
+            for style in music_bed_outro.styles():
+                if music_bed_outro.rendered(style) is None:
+                    music_bed_outro.write(style)
+                    done += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("music-bed: rendering endings failed: %s", e)
         prune_old()
         parsed = parse(choice())
         if parsed:
@@ -1161,7 +1204,9 @@ def ready_or_warm(pick, target=None):
             return None
         src_ok = pick.source != "generated" and _source_ready(pick, target)
         p = ready(pick.fallback)
-        if (p is None or weather_stale()
+        # A file at another level plays now (its offset), but the renderer
+        # is still due for the chosen level's.
+        if (p is None or p.name != file_for(pick.fallback).name or weather_stale()
                 or (pick.source != "generated" and not src_ok)):
             spawn_warm()
         return True if src_ok else p
@@ -1224,11 +1269,12 @@ def choose(pick, other_audio: Optional[bool], target=None) -> Optional[Plan]:
 
 def probe_wait_s() -> float:
     """How long a long reading waits for its duck to say whether anything is
-    playing (MEDIA_MUSIC_BED_PROBE_S, 1 s). Past it: no bed this time."""
+    playing (MEDIA_MUSIC_BED_PROBE_S, 1 s). Past it, submit asks this host
+    instead (Coordinator.audio_playing), without pausing anything."""
     return max(0.0, _num_env("MEDIA_MUSIC_BED_PROBE_S", 1.0))
 
 
-def play_under(p: Path, target=None, sink=None) -> bool:
+def play_under(p: Path, target=None, sink=None, mix: Optional[dict] = None) -> bool:
     """Loop bed file `p` under the reading about to start on `target`, as
     earcons.play_under does a tone (SinkSpeech.play_under: a phone is told
     it as `under`, this host starts a second mpv that stop_under ends).
@@ -1249,8 +1295,17 @@ def play_under(p: Path, target=None, sink=None) -> bool:
             pass
         pre = getattr(sink, "prefetch", None)
         if pre is not None:
-            pre([p], target)
-        if not under(str(p), target, loop=True):
+            pre([p] + ([Path(mix["outro"])] if mix and mix.get("outro") else []), target)
+        if mix:
+            # The DJ mix (music_bed_mix): told to a phone beside the clip,
+            # ridden on this host's under player.
+            try:
+                ok = under(str(p), target, loop=True, mix=mix)
+            except TypeError:
+                ok = under(str(p), target, loop=True)
+        else:
+            ok = under(str(p), target, loop=True)
+        if not ok:
             return False
         log.info("music-bed: %s under the reading on %s", p.name,
                  getattr(target, "name", target))
@@ -1316,7 +1371,9 @@ def start(plan: Plan, target=None, sink=None) -> tuple[bool, Optional[Callable[[
                 finally:
                     _note_now(None, False)
             return False, done
-        if plan.path is None or not play_under(plan.path, target, sink):
+        from . import music_bed_mix
+        if plan.path is None or not play_under(plan.path, target, sink,
+                                               music_bed_mix.for_plan(plan)):
             return False, None
         _note_now(plan, True)
         return True, lambda quick=False: _note_now(None, False)
@@ -1413,17 +1470,26 @@ def _note(source: str, current: Optional[tuple[str, str]]) -> Optional[str]:
 
 
 def settings() -> list[dict]:
-    """The switches beside the choice, for an app to render as they come
-    (`kind` "bool": a checkbox with `label` and `hint`); `set` is whether
-    Settings chose rather than the server's default."""
-    return [{"id": "slow", "kind": "bool", "label": SLOW_LABEL, "hint": SLOW_HINT,
-             "value": slow_on(), "set": stored_slow() is not None}]
+    """The settings beside the choice, for an app to render as they come:
+    `kind` "bool" (a checkbox with `label` and `hint`) or "range" (a slider:
+    `min`, `max`, `step`, `unit`, its value a number); `set` is whether
+    Settings chose rather than the server's default. The level, slow, and
+    the DJ mix's switches (music_bed_mix)."""
+    from . import music_bed_mix
+    lo, hi = GAIN_RANGE
+    return ([{"id": "gain_db", "kind": "range", "label": GAIN_LABEL, "hint": GAIN_HINT,
+              "min": lo, "max": hi, "step": 1, "unit": "dB",
+              "value": gain_db(), "set": stored_gain() is not None},
+             {"id": "slow", "kind": "bool", "label": SLOW_LABEL, "hint": SLOW_HINT,
+              "value": slow_on(), "set": stored_slow() is not None}]
+            + music_bed_mix.settings())
 
 
 def set_settings(values: dict) -> None:
     """Save `{id: value}` from POST /speech/music-bed's `settings` (null
     forgets one). ValueError for an unknown id or a bad value, before any
     is saved."""
+    from . import music_bed_mix
     if not isinstance(values, dict) or not values:
         raise ValueError("settings must be an object of {id: value}")
     for k, v in values.items():
@@ -1435,12 +1501,21 @@ def set_settings(values: dict) -> None:
                                   or not GAIN_RANGE[0] <= float(v) <= GAIN_RANGE[1]):
                 raise ValueError(f"gain_db must be a number from {GAIN_RANGE[0]:g} "
                                  f"to {GAIN_RANGE[1]:g}, or null")
+        elif k in music_bed_mix.IDS:
+            if v is not None and not isinstance(v, bool):
+                raise ValueError(f"{k} must be true, false or null")
         else:
             raise ValueError(f"no music bed setting {k!r}")
+    for k in music_bed_mix.IDS:
+        if k in values:
+            music_bed_mix.set_switch(k, values[k])
     if "slow" in values:
         set_slow(values["slow"])
     if "gain_db" in values:
         set_gain(values["gain_db"])
+        # The files at the new level, rendered and re-levelled in the
+        # background; until then each plays at the new level by its offset.
+        spawn_warm()
 
 
 def status() -> dict:

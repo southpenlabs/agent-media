@@ -230,6 +230,7 @@ def test_play_under_tells_a_phone_player_the_clip(monkeypatch, tmp_path):
     # The kind (none here) and the loop flag first, so the app has them when
     # it takes the clip.
     assert sent == [("tcp://127.0.0.1:1", speech.TONE_KIND_PROPERTY, ""),
+                    ("tcp://127.0.0.1:1", speech.UNDER_MIX_PROPERTY, ""),
                     ("tcp://127.0.0.1:1", speech.UNDER_LOOP_PROPERTY, "1"),
                     ("tcp://127.0.0.1:1", speech.UNDER_PROPERTY,
                      "/phone/clips/earcon-think-v3.wav")]

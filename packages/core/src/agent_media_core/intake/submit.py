@@ -5213,6 +5213,11 @@ def _submit_event(event: Event,
             if bed_plan is not None:
                 from .. import music_bed
                 bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
+                if bed_tone:
+                    # The intro (music_bed_mix): this host's bed leads the
+                    # first word in; a phone holds its first sentence itself.
+                    from .. import music_bed_mix
+                    music_bed_mix.intro_wait(sink, target)
                 # Which song it was, kept on the reply's row: the reply's ⋯
                 # "Play the song" (music_bed_song; David, 30 Oct 2026).
                 from .. import music_bed_song
@@ -6089,6 +6094,15 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
+            # Another reading about to start: the bed is held for it rather
+            # than ended (music_bed_mix carry); else one held across this
+            # reading plays its ending.
+            try:
+                from .. import music_bed_mix
+                music_bed_mix.at_end(sink, target, bed=bool(bed_tone),
+                                     thought=bool(thinking), cut=bool(ended_by_cut))
+            except Exception:  # noqa: BLE001 — never cost the cleanup
+                log.debug("music bed hold failed", exc_info=True)
             if thinking or reply_tone or people_tone or bed_tone:
                 # The `think` / `reply` / `people` tone (or the music bed) loops under the voice; this
                 # host's own player of it stops here (a phone's stops with

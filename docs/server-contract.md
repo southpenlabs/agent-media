@@ -2391,6 +2391,64 @@ started with the replay and faded out at its end (quickly when stopped, cut
 or superseded). A row from before keeps playing with nothing under it.
 Pinned by `packages/core/tests/test_music_bed_replay.py`.
 
+**DJ mixing and the music level (31 Oct 2026)** (`music_bed_mix.py`,
+`under_mix.py`, `music_bed_outro.py`; David: "DJ mixing" and a volume
+slider). `settings` gains a second kind, **`"range"`** — a slider, `{"id",
+"kind": "range", "label", "hint", "min", "max", "step", "unit", "value"
+(number), "set"}` — and lists, in order: `gain_db` (range, "Music level",
+-24..6 step 1 "dB"; the level `POST {"settings": {"gain_db": n|null}}` has
+set since 83dcd049), `slow` (bool), and six bools, all on by default (each
+`MEDIA_MUSIC_BED_<ID>=0|off` turns its default off; Settings wins): `breathe`,
+`carve`, `intro`, `outro`, `sweep`, `carry`. `POST {"settings": {"<id>":
+true|false|null}}`; 400 for a non-bool. An app renders any `bool` and `range`
+setting as it comes and skips other kinds.
+
+- **The level, live.** A generated bed's file is named for the level it was
+  rendered at; until the renderer (started by the change) has the new one,
+  the old file plays and the player is told the difference (`gain_db` in the
+  mix below; a kept track's: its `lufs_target` against the current one).
+- **breathe**: under the words the music dips `MEDIA_MUSIC_BED_BREATHE_DB`
+  (6) dB — down in `_ATTACK_MS` (80), back up in `_RELEASE_MS` (400) once the
+  voice has been quiet `_HOLD_MS` (250), so word gaps never pump.
+- **carve**: a peaking cut of `_CARVE_DB` (6) dB at the geometric mean of
+  `_CARVE_LO_HZ` (300) and `_CARVE_HI_HZ` (3000), log2(hi/lo) octaves wide,
+  on the same envelope.
+- **intro**: the bed leads the first word by `_INTRO_MS` (1500): this host's
+  submit waits that long after starting its under player; a phone holds its
+  first sentence. Never without a bed, nor for a bed carried on.
+- **outro**: at a natural end a generated bed plays its ending (its last
+  chord then its tonic on its own instrument, 3.6 s,
+  `music-bed-<style>-end-v<N>[-g<dB>].wav`, rendered beside the beds; none
+  for nature) once while the loop fades in `_OUTRO_MS` (800); a track fades
+  as before with the sweep closing.
+- **sweep**: fades go through a low-pass, `_SWEEP_HZ` (400) at silence to
+  open (20 kHz, exponential in the fade's level).
+- **carry**: a reading that ends by itself while another is about to start
+  (an entry in the speech queue's registry, waiting or still rendering)
+  holds its bed for up to `_CARRY_S` (20) s. The next reading's bed: the same
+  clip carries on (no restart, no intro); another crossfades over
+  `_XFADE_MS` (3000); a tone (the thinking harp) plays over it with the bed
+  `_THOUGHT_DB` (8) dB lower and its window paused until that reading ends
+  (held again if more is coming, else the ending). Nothing within the
+  window: the ending.
+
+On the wire to a phone, beside `under`: **`user-data/agent-media/under-mix`**
+(written before `under-loop`; "" for a tone, which plays as before) — JSON
+`{"v": 1, "gain_db", "breathe_db", "attack_ms", "release_ms", "hold_ms",
+"carve_db", "carve_lo_hz", "carve_hi_hz", "intro_ms", "sweep_hz", "outro"
+(the ending's clip URI, prefetched; "" none), "outro_ms", "carry_ms",
+"xfade_ms", "thought_db"}`, an effect switched off sent as 0; and
+**`user-data/agent-media/under-hold`** — the carry window in ms, written at
+a reading's natural end when another is coming. The app does it all
+(sasonica-app `0db98b0`: a voice meter on the speech player, a Media3
+AudioProcessor on the under player). On this host the under mpv runs
+`--af=@ride:lavfi-volume,@carve:lavfi-equalizer,@sweep:lavfi-lowpass`, moved
+by `af-command` from a rider polling the speech broker (a clip playing short
+of its last 120 ms counts as voice); a held bed is
+`<state_dir>/under/held-<target>.json`, taken by the next reading by an
+atomic rename. The streaming source (Mopidy) keeps its plain fade. Pinned by
+`packages/core/tests/test_music_bed_mix.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

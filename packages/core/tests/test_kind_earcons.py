@@ -357,6 +357,7 @@ def test_play_under_tells_a_phone_the_kind_first(monkeypatch, tmp_path):
     assert sink.play_under(str(tmp_path / "earcon-people-v10.wav"),
                            Target("testphone"), loop=True, kind="people")
     assert sent == [(speech.TONE_KIND_PROPERTY, "people"),
+                    (speech.UNDER_MIX_PROPERTY, ""),
                     (speech.UNDER_LOOP_PROPERTY, "1"),
                     (speech.UNDER_PROPERTY, "/phone/clips/earcon-people-v10.wav")]
     sent.clear()

@@ -72,12 +72,14 @@ def test_the_choice_and_the_switch_keep_each_other():
 def test_status_lists_the_switch_and_says_slow_only():
     st = B.status()
     assert st["slow"] is True
-    assert st["settings"] == [{"id": "slow", "kind": "bool", "label": "Slow music only",
-                               "hint": B.SLOW_HINT, "value": True, "set": False}]
+    slow = [x for x in st["settings"] if x["id"] == "slow"]
+    assert slow == [{"id": "slow", "kind": "bool", "label": "Slow music only",
+                     "hint": B.SLOW_HINT, "value": True, "set": False}]
     assert st["auto_why"].startswith("auto: ") and st["auto_why"].endswith(" — slow only")
     B.set_settings({"slow": False})
     st = B.status()
-    assert st["slow"] is False and st["settings"][0]["set"] is True
+    assert st["slow"] is False and [x["set"] for x in st["settings"]
+                                    if x["id"] == "slow"] == [True]
     assert not st["auto_why"].endswith("slow only")
     for bad in ({}, {"fast": True}, {"slow": "yes"}, []):
         with pytest.raises(ValueError):

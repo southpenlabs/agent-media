@@ -71,14 +71,19 @@ class Fade:
     quick), ramp `set_level` from `start` to 0, then `done()`. `hurry()`
     turns a fade under way into a quick one (a new reply took over): the
     tail is cut and what is left of the ramp is done in the quick time.
+    `tail_ms` and `ms` override the tail and the fade's length (a bed's
+    ending, a crossfade: under_mix).
 
     The thread is not a daemon, so a process that ends just after a reply
     still finishes the fade and stops the player (at most tail + fade)."""
 
     def __init__(self, set_level: Callable[[float], None], start: float,
                  done: Callable[[], None], quick: bool = False,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep,
+                 tail_ms: Optional[int] = None, ms: Optional[int] = None):
         self.set_level = set_level
+        self.tail_ms = tail_ms
+        self.ms = ms
         self.start = float(start)
         self.done = done
         self._hurry = threading.Event()
@@ -100,11 +105,13 @@ class Fade:
 
     def _run(self) -> None:
         try:
-            if not self._hurry.is_set():
-                self._hurry.wait(tail_ms() / 1000.0)
+            tail = tail_ms() if self.tail_ms is None else self.tail_ms
+            if not self._hurry.is_set() and tail > 0:
+                self._hurry.wait(tail / 1000.0)
             level = self.start
             began = time.monotonic()
-            ms = quick_ms() if self._hurry.is_set() else fade_out_ms()
+            ms = quick_ms() if self._hurry.is_set() else (
+                fade_out_ms() if self.ms is None else self.ms)
             top = level
             while ms > 0:
                 if self._hurry.is_set() and ms > quick_ms():

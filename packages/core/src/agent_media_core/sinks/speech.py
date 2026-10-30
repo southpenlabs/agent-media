@@ -213,6 +213,13 @@ UNDER_LOOP_PROPERTY = "user-data/agent-media/under-loop"
 #: play_cue, and taken back once the cue has played (clear_tone_kind). The app
 #: takes it as the sound begins; without a pick it changes nothing.
 TONE_KIND_PROPERTY = "user-data/agent-media/tone-kind"
+#: The DJ mix of a music bed (music_bed_mix.params, as JSON), written by
+#: play_under before UNDER_LOOP_PROPERTY; "" for a tone. The app rides the
+#: bed by it and takes it with the clip.
+UNDER_MIX_PROPERTY = "user-data/agent-media/under-mix"
+#: Written at a reading's natural end when another is about to start
+#: (hold_under): the window, ms, the app keeps the bed playing for it.
+UNDER_HOLD_PROPERTY = "user-data/agent-media/under-hold"
 
 #: This host's own under players (play_under), by target name, so the
 #: reply's end can stop a looping one: `_Under` records.
@@ -235,11 +242,17 @@ class _Under:
         self.vol = vol
         self.level = 0.0 if sock else vol
         self.fading_in = threading.Event()
+        #: A music bed's mix on this player (under_mix.Bed), or None.
+        self.bed = None
+        #: How long the voice waits for this bed to lead in (the intro).
+        self.lead_ms = 0
 
     def set_level(self, v: float) -> None:
         ipc.command(str(self.sock), "set_property", "volume", round(float(v), 2),
                     timeout=0.5, retry_errors=False)
         self.level = float(v)
+        if self.bed is not None:
+            self.bed.on_level(self.level / self.vol if self.vol else 1.0)
 
     def kill(self) -> None:
         try:
@@ -953,7 +966,8 @@ class SinkSpeech:
             return False
 
     def play_under(self, uri: str, target: Target = DEFAULT_TARGET, *,
-                   loop: bool = False, kind: str = "") -> bool:
+                   loop: bool = False, kind: str = "",
+                   mix: Optional[dict] = None) -> bool:
         """Play one clip that is not speech (an earcon) under the next reply.
 
         Not through the reply's playlist — its index is the sentence index
@@ -974,13 +988,26 @@ class SinkSpeech:
         `kind` ("people", or "" for any other tone) is told to a phone first,
         as TONE_KIND_PROPERTY, for an app with a phone sound picked for it.
 
+        `mix` (a looping music bed's, music_bed_mix.params): told to a phone
+        as UNDER_MIX_PROPERTY; on this host the bed is ridden by under_mix,
+        and a bed held from the reading before is carried on (the same
+        clip), crossfaded (another) or kept quieter under a tone.
+
         True if sent. Never raises.
         """
         sock = _socket_for(target)
         if str(sock).startswith("tcp://"):
             clip = _clip_uri_for(str(uri), target, self._prefer_url(target))
             try:
+                mixed = ""
+                if mix and loop:
+                    m = dict(mix)
+                    if m.get("outro"):
+                        m["outro"] = _clip_uri_for(str(m["outro"]), target,
+                                                   self._prefer_url(target))
+                    mixed = json.dumps(m)
                 ipc.set_property(sock, TONE_KIND_PROPERTY, kind or "")
+                ipc.set_property(sock, UNDER_MIX_PROPERTY, mixed)
                 ipc.set_property(sock, UNDER_LOOP_PROPERTY, "1" if loop else "")
                 ipc.set_property(sock, UNDER_PROPERTY, clip)
                 return True
@@ -1005,6 +1032,27 @@ class SinkSpeech:
         for a in argv:
             if a.startswith("--volume="):
                 full = float(a.split("=", 1)[1])
+        bed_mix = mix if (mix and loop) else None
+        xfade_ms = None
+        try:
+            from .. import under_mix
+            held = under_mix.take_held(target.name)
+            if held is not None:
+                if bed_mix and held.get("uri") == str(uri):
+                    return self._adopt_under(held, target, bed_mix)
+                if bed_mix:
+                    # Another bed: crossfaded.
+                    xfade_ms = int(float(bed_mix.get("xfade_ms") or 3000))
+                    under_mix.let_go(held, fade_ms=xfade_ms)
+                else:
+                    # A tone over a held bed (a thought between replies):
+                    # the bed carries on quieter, its window paused.
+                    under_mix.bed_of(held).duck(
+                        float((held.get("mix") or {}).get("thought_db") or 8))
+                    held.update(paused=True, paused_at=time.time())
+                    under_mix.write_held(target.name, held)
+        except Exception as e:  # noqa: BLE001 — never cost the reading
+            log.debug("sink-speech: held bed: %s", e)
         usock = None
         if loop:
             argv.append("--loop-file=inf")
@@ -1017,6 +1065,10 @@ class SinkSpeech:
             if usock is not None:
                 argv = [a for a in argv if not a.startswith("--volume=")]
                 argv += ["--volume=0", f"--input-ipc-server={usock}"]
+                if bed_mix:
+                    from .. import under_mix
+                    argv.append(under_mix.af_arg(bed_mix))
+        base_argv = list(argv)
         argv.append(str(uri))
         self.stop_under(target, quick=True)
         try:
@@ -1030,6 +1082,16 @@ class SinkSpeech:
         if loop:
             rec = _Under(proc, usock, full)
             _UNDER_PROCS[target.name] = rec
+            if usock is not None and bed_mix:
+                try:
+                    from .. import under_mix
+                    rec.bed = under_mix.Bed(usock, bed_mix, sock, uri=str(uri),
+                                            argv=base_argv)
+                    rec.lead_ms = 0 if xfade_ms is not None else int(
+                        float(bed_mix.get("intro_ms") or 0))
+                    rec.bed.ride()
+                except Exception as e:  # noqa: BLE001
+                    log.debug("sink-speech: bed mix: %s", e)
             if usock is not None:
                 from .. import under_fade
                 rec.fading_in.set()
@@ -1037,8 +1099,85 @@ class SinkSpeech:
                 def step(v: float, rec=rec) -> None:
                     if rec.fading_in.is_set():
                         rec.set_level(v)
-                under_fade.fade_in(step, full, ready=lambda: Path(usock).exists())
+                under_fade.fade_in(step, full, ms=xfade_ms,
+                                   ready=lambda: Path(usock).exists())
         return True
+
+    def _adopt_under(self, held: dict, target: Target, mix: dict) -> bool:
+        """The bed held from the reading before is this reading's too: carry
+        it on as this process's own under player (no new player, no intro)."""
+        from .. import under_mix
+        self.stop_under(target, quick=True)
+        rec = _Under(under_mix.PidProc(int(held["pid"])), Path(held["sock"]),
+                     float(held.get("vol") or 100.0))
+        rec.level = float(held.get("level") or rec.vol)
+        rec.bed = under_mix.Bed(held["sock"], mix, _socket_for(target),
+                                uri=str(held.get("uri") or ""),
+                                argv=held.get("argv") or [], adopted=True)
+        _UNDER_PROCS[target.name] = rec
+        rec.bed.apply(0.0)
+        rec.bed.ride()
+        log.info("sink-speech: the bed carries on under the next reading on %s",
+                 target.name)
+        return True
+
+    def under_lead_ms(self, target: Target = DEFAULT_TARGET) -> int:
+        """How long the voice should wait for this host's bed to lead in (its
+        intro); 0 for a phone, a tone, or a bed carried on. Never raises."""
+        rec = _UNDER_PROCS.get(getattr(target, "name", target))
+        bed = getattr(rec, "bed", None)
+        if bed is None or bed.adopted:
+            return 0
+        return int(getattr(rec, "lead_ms", 0) or 0)
+
+    def hold_under(self, target: Target = DEFAULT_TARGET, window_ms: int = 20000) -> bool:
+        """Another reading is about to start as this one ends: keep its bed
+        for it (music_bed_mix.at_end). A phone is told the window
+        (UNDER_HOLD_PROPERTY) and keeps its own; this host's bed is taken out
+        of stop_under's reach and held (under_mix), or, after a thought, the
+        bed held across it is put back to its level with a new window. True
+        when held. Never raises."""
+        try:
+            sock = _socket_for(target)
+            if str(sock).startswith("tcp://"):
+                ipc.set_property(sock, UNDER_HOLD_PROPERTY, str(int(window_ms)))
+                return True
+            from .. import under_mix
+            name = target.name
+            rec = _UNDER_PROCS.get(name)
+            bed = getattr(rec, "bed", None)
+            if rec is not None and bed is not None and rec.sock is not None:
+                _UNDER_PROCS.pop(name, None)
+                rec.fading_in.clear()
+                bed.stop(settle=True)
+                h = under_mix.held_record(rec.sock, getattr(rec.proc, "pid", 0), bed,
+                                          rec.vol, rec.level, window_ms)
+                under_mix.write_held(name, h)
+                under_mix.watch(name, h["token"])
+                return True
+            h = under_mix.take_held(name)
+            if h is None:
+                return False
+            under_mix.bed_of(h).duck(0.0)
+            h.update(paused=False, paused_at=None, until=time.time() + window_ms / 1000.0)
+            under_mix.write_held(name, h)
+            return True
+        except Exception as e:  # noqa: BLE001 — never cost the cleanup
+            log.debug("sink-speech: hold under failed: %s", e)
+            return False
+
+    def release_held(self, target: Target = DEFAULT_TARGET, *, quick: bool = False) -> None:
+        """Nothing more is coming: a bed held on this host (across a thought)
+        plays its ending now. A phone decides for itself. Never raises."""
+        try:
+            if str(_socket_for(target)).startswith("tcp://"):
+                return
+            from .. import under_mix
+            h = under_mix.take_held(target.name)
+            if h is not None:
+                under_mix.let_go(h, quick=quick)
+        except Exception as e:  # noqa: BLE001
+            log.debug("sink-speech: releasing the held bed failed: %s", e)
 
     def stop_under(self, target: Target = DEFAULT_TARGET, *, quick: bool = False) -> None:
         """The reply is over: fade out this host's looping under player, if
@@ -1070,7 +1209,13 @@ class SinkSpeech:
                     fades.remove(fade)
                 except ValueError:
                     pass
-            fade = under_fade.Fade(rec.set_level, rec.level, done, quick=quick)
+            bed = getattr(rec, "bed", None)
+            if bed is not None:
+                # A music bed: its ending, the sweep closing (under_mix).
+                from .. import under_mix
+                fade = under_mix.end_fade(bed, rec.set_level, rec.level, done, quick)
+            else:
+                fade = under_fade.Fade(rec.set_level, rec.level, done, quick=quick)
             fades.append(fade)
             fade.run_async()
         except Exception as e:  # noqa: BLE001 — never cost the cleanup
@@ -1085,6 +1230,7 @@ class SinkSpeech:
         try:
             ipc.set_property(sock, UNDER_PROPERTY, "")
             ipc.set_property(sock, UNDER_LOOP_PROPERTY, "")
+            ipc.set_property(sock, UNDER_MIX_PROPERTY, "")
             ipc.set_property(sock, TONE_KIND_PROPERTY, "")
         except (ipc.MpvIpcError, OSError) as e:
             log.debug("sink-speech: clearing under failed: %s", e)
