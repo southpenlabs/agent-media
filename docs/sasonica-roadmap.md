@@ -1720,7 +1720,7 @@ ahead.
     the calendar's Microsoft Graph sign-in. The plan and its open questions
     (All Mail or Gmail's API, mbsync or lieer, spam, read aloud) are in
     docs/proposals/2026-10-20-mail-in-sasonica.md. Not started. First
-    piece being built (30 Oct 2026): the thread list's Show → Sent (threads you
+    piece built (30 Oct 2026): the thread list's Show → Sent (threads you
     wrote in, latest first) and Waiting for reply (your message last,
     unanswered), built generic so mail threads join them like Gmail's Sent
     label (David: "I was thinking of eventually including email and was
