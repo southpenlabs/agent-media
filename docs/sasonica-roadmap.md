@@ -2074,17 +2074,19 @@ ahead.
     dictates once, a hold starts hands-free. Alongside (`8e74772`): off the
     speaking thread the bar puts its title and sentence on their own lines
     above the keys, foldable back beside them (kept), and play sits clear
-    of the progress sliver. **Step 2, the dock: not
-    started.** He stays on his page; a slim box over the player shows the
-    thread's name, the heard words, the countdown, Send and Cancel. Needs
-    the loop lifted out of `Thread.tsx` (`useHandsFree` ends on leaving the
-    thread and borrows its composer's `useDictation`) into an app-level
-    provider keyed by session; that thread's question cards answered by
-    voice from elsewhere (`lib/voicePick.ts` lands on the card's DOM, which
-    is not there off the thread: needs the card's options and a POST); the
-    dock steps aside when that thread is opened, handing the loop to its
-    composer; the black screen's caption and full screen's input field
-    follow the dock.
+    of the progress sliver. **Step 2, the dock: DONE 30 Oct 2026** (sasonica-app `7ac7ffd`; David:
+    "let's get this one going"). Off the speaking thread, Talk opens the
+    Talk dock over the player (`lib/talkDock.ts`): `routes/thread.tsx`
+    `ThreadDock` is that thread's page drawn small (name, ×, Keep reading,
+    question card, composer), so the loop, dictation, voice answers and
+    sends are its own, unheld so its replies speak; docked it leaves the
+    page's title, marks, question fold and navigation alone, and the box is
+    found through `lib/composerBox.ts`. Speed keys joined the titled bar
+    (`b1e235d`); Keep reading lives in the dock, not on the mini player (a
+    send elsewhere never stops the read-out). Not run on a device. Known
+    gaps: the dock's thread is not marked seen while it is open; native
+    hands-free controls and the black screen caption are shared with the
+    page's composer (fine while only one listens).
 
 ## Loose ends
 
