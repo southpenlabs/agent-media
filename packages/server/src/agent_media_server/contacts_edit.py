@@ -294,6 +294,21 @@ def _groups() -> dict[str, str]:
     return got
 
 
+def _new_group(raw: str, title: str) -> str | None:
+    """A new Google group (label) named `title` in the account of raw contact
+    `raw`, which Android syncs to Google: its `_id`, or None when the account
+    cannot be told or the phone made none."""
+    out = wb._shell(f"content query --uri {URI}/raw_contacts --projection _id:account_name "
+                    f"--where \"_id={raw} AND account_type='com.google'\"")
+    m = re.search(r"^Row: \d+ _id=\d+, account_name=(.+)$", out, re.M)
+    if not m or m.group(1) == "NULL":
+        return None
+    wb._shell(f"content insert --uri {URI}/groups " + _binds([
+        "account_type:s:com.google", f"account_name:s:{m.group(1)}", f"title:s:{title}",
+        "group_visible:i:1"]))
+    return _groups().get(contacts.fold(title))
+
+
 def _write(raw: str, card: dict, want: dict) -> dict:
     done, skipped = [], []
     if "name" in want and want["name"]:
@@ -371,9 +386,15 @@ def _write(raw: str, card: dict, want: dict) -> dict:
         for label in want["labels"]:
             gid = groups.get(contacts.fold(label))
             if gid is None:
-                skipped.append(label)
-            else:
-                wanted.add(gid)
+                # A label Google has no group for yet is made, in the
+                # person's own Google account (David, 30 Oct 2026: "a way
+                # there adding people to groups"); skipped if it cannot be.
+                gid = _new_group(raw, label)
+                if gid is None:
+                    skipped.append(label)
+                    continue
+                groups[contacts.fold(label)] = gid
+            wanted.add(gid)
         mine = {contacts.fold(x) for x in _now(card, "labels")}
         for gid, r in member.items():
             # Only a membership the card shows as a label is taken away.

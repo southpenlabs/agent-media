@@ -6285,9 +6285,10 @@ the server routes GET and POST.)
   plain string (an older app) is a value whose label is left alone, a new
   one getting the default (a mobile number, an "other" address).
   `organization` is `{"company", "title"}` (both empty removes it);
-  `birthday` is `YYYY-MM-DD` or `--MM-DD` (no year), "" to remove it. A label joins or leaves
-  the Google group of that name; one Google has no group for is not made
-  and comes back in `skipped`.
+  `birthday` is `YYYY-MM-DD` or `--MM-DD` (no year), "" to remove it.
+  A label joins or leaves the Google group of that name; one Google has no group for is made
+  (30 Oct 2026), in the person's own Google account, and comes back in
+  `skipped` only when it cannot be.
 - `base` — what the app showed for those fields. A field whose value now
   differs was changed elsewhere since (in Google Contacts, by a sync):
   **409** `{"error", "conflict": {field: {"yours", "theirs"}}}`, nothing

@@ -174,7 +174,7 @@ def test_labels_join_and_leave_googles_groups(monkeypatch, tmp_path):
                         ("9", "Contacts", "My Contacts")])
     got = contacts_edit.edit(cid, {"base": {"labels": ["Family"]},
                                    "set": {"labels": ["Work", "Book club"]}})
-    assert got["skipped"] == ["Book club"]                    # no such group: not made
+    assert got["skipped"] == ["Book club"]                    # no account to make it in
     w = _writes(log)
     assert any(x.startswith("content delete") and "_id=50" in x for x in w)
     assert any(x.startswith("content insert") and GROUP in x and "data1:i:8" in x for x in w)
@@ -274,3 +274,28 @@ def test_an_older_apps_plain_strings_leave_labels_alone(monkeypatch, tmp_path):
     w = _writes(log)
     assert not any("_id=41" in x for x in w)
     assert any("0400 111 222" in x and f"data2:i:{contacts_edit.PHONE_MOBILE}" in x for x in w)
+
+
+def test_a_new_label_is_made_in_the_persons_google_account(monkeypatch):
+    """David, 30 Oct 2026: "a way there adding people to groups": a label
+    Google has no group for is made (in the raw contact's account), then
+    joined."""
+    calls, made = [], []
+
+    def shell(script):
+        calls.append(script)
+        if "/raw_contacts" in script:
+            return "Row: 0 _id=12, account_name=david@example.test\n"
+        if script.startswith("content insert") and "/groups" in script:
+            made.append(script)
+            return ""
+        if "/groups" in script:
+            rows = "Row: 0 _id=7, system_id=NULL, title=Family\n"
+            if made:
+                rows += "Row: 1 _id=31, system_id=NULL, title=Book club\n"
+            return rows
+        return "No result found.\n"
+
+    monkeypatch.setattr(contacts_edit.wb, "_shell", shell)
+    assert contacts_edit._new_group("12", "Book club") == "31"
+    assert "account_name:s:david@example.test" in made[0] and "'title:s:Book club'" in made[0]
