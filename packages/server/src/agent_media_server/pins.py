@@ -199,7 +199,8 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
             choice = (music_bed.compose(source, style if isinstance(style, str) else None)
                       if isinstance(source, str) else None)
             if choice is None:
-                return False, {"error": "source must be off, generated, streaming or library, "
+                return False, {"error": "source must be off, generated, streaming, library "
+                                        "or favourites, "
                                         "with one of its styles", "status": 400}
     if choice is not _UNSET and choice is not None and music_bed.normalise(choice) is None:
         return False, {"error": "choice must be off, auto or one of the choices listed",

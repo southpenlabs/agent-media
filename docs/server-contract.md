@@ -2213,6 +2213,61 @@ streaming), null for a generated bed — for the app's "Now playing: <title> —
 <creator> (CC BY)" with a link. `"library"` and `"streaming"` count the
 tracks kept per genre. Pinned by `packages/core/tests/test_music_bed_sources.py`.
 
+**A fourth source: `favourites` (30 Oct 2026).** "Your favourites,
+instrumental" (`music_bed_favourites.py`): instrumental versions of his
+favourite tracks — the music he liked (`media music like`), the YouTube
+tracks he asked for most (the music history), and, with
+`MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER`, his ListenBrainz top
+recordings and loves; the best `MEDIA_MUSIC_BED_FAVOURITES_MAX` (30),
+refreshed daily. Styles: `auto` (any ready track), `official`, `separated`.
+Each favourite gets an official instrumental when Mopidy's YouTube Music
+search has a confident one (the same title without its brackets, the artist
+in its artist or title, within 15 % of the original's length, marked
+Instrumental, Karaoke or Backing track, never a cover, remix, nightcore,
+slowed or sped up), fetched as the streaming source's are; else, in a
+nightly window (`MEDIA_MUSIC_BED_FAVOURITES_WINDOW`, `02:00-05:00`), its
+vocals removed by Demucs (a separate process, optional; the `no_vocals`
+stem), one at a time, at most `_PER_NIGHT` (3) attempts a night, niced and
+ioniced, under a memory ceiling (`systemd-run --user --scope -p
+MemoryMax=<_MEMORY_MAX_MB, 2500>M -p MemorySwapMax=0`), and skipped to the
+next night while the host's memory is strained (PSI stall ≥
+`MEDIA_MEM_STRAIN_PCT`) or below `_MIN_FREE_MB` (2000) free; a failure
+waits for the next night and three end it. Both kinds are trimmed and
+loudnormed to -30 LUFS and kept as `music-bed-fav-<key>.mp3` in the clip
+dir (cap `_MAX_MB`, 300), played as any bed (`under`, `under-loop` "1"),
+every target. **Private:** they are his own music for his own listening,
+reachable only by path on the server and by a signed clip URL
+(`/speech/clip`, clip_sign.py) on his devices; the server never lists,
+links or serves them anywhere else, and no route makes them public. Its
+`credit` is `{"title": "Instrumental of <title>", "creator": <artist>,
+"license": "official"|"karaoke"|"separated" (a karaoke or backing-track
+version is usually a re-recording, so it says so;
+`MEDIA_MUSIC_BED_FAVOURITES_KARAOKE=0` refuses them), "url": <the original
+on YouTube Music>, "source": "Your favourites", "method", "original_title", "made"}`,
+so an app that shows "<title> — <creator> (<license>)" reads "Instrumental
+of Angel — Massive Attack (separated)". The source's `note` says how many
+are ready (official and separated), when vocals are next removed, and why
+the last night was skipped; `"favourites"` counts `{official, separated}`.
+None ready: the generated stand-in (Auto's mood). Pinned by
+`packages/core/tests/test_music_bed_favourites.py`.
+
+**Auto reads astrotunes (30 Oct 2026).** For every source, Auto goes by
+astrotunes' reading of the moment when one at most half an hour old is kept
+(radio_dj's, `radio-dj-context.json`; refreshed only by the background
+process, never while a reply waits; `MEDIA_MUSIC_BED_ASTRO=off` stops it):
+raining by day → rainy (piano); energetic and bright → morning (lo-fi);
+dense texture → rainy (ambient); low energy and warm → dusk (piano); low
+energy and cool → night (ambient); warm → blend (jazz); else calm (piano).
+The mood is the generated pick, the genre the streaming and library pick;
+favourites weight their ready tracks by nearness to the reading's tempo and
+energy (each track's BPM and loudness, measured once). From 21 to 6 nothing
+bright or energetic, whatever the axes say. Without a fresh reading, the
+hour and the weather as before. `GET` adds `"auto_why"` (`"auto: dusk — low
+energy, warm (astrotunes)"`, `"auto: dusk — by the hour (17–21)"`, for
+library/streaming the genre, for favourites the fit) and `"astro"` (the
+axes `{tempo, energy, warmth, brightness, lyric_density, texture}` 0–1, or
+null).
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

@@ -467,7 +467,7 @@ def test_status_lists_sources_with_availability_per_target(monkeypatch, tmp_path
     ids = [c["id"] for c in s["choices"]]
     assert ids[:2] == ["off", "auto"] and "library:jazz" in ids and "lofi" in ids
     src = {x["id"]: x for x in s["sources"]}
-    assert list(src) == ["generated", "streaming", "library"]
+    assert list(src) == ["generated", "streaming", "library", "favourites"]
     assert src["generated"]["styles"][0] == {"id": "auto", "label": B.AUTO_LABEL}
     assert {"id": "nature", "label": "Nature (rain, stream, birds)"} in src["generated"]["styles"]
     assert [x["id"] for x in src["library"]["styles"]] == ["auto"] + list(B.NET_GENRES)

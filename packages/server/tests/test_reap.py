@@ -741,7 +741,14 @@ def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
     res, obj = call(server, "POST", "/speech/music-bed", {"choice": None}, AUTH)
     assert res.status == 200 and obj["set"] is False and obj["choice"] == "auto"
     # The three sources (26 Oct 2026): {source, style}, or a source:style choice.
-    assert [s["id"] for s in obj["sources"]] == ["generated", "streaming", "library"]
+    assert [s["id"] for s in obj["sources"]] == ["generated", "streaming", "library",
+                                                 "favourites"]
+    assert obj["auto_why"].startswith("auto: ")
+    # The fourth (30 Oct 2026): his favourites, instrumental.
+    res, obj = call(server, "POST", "/speech/music-bed",
+                    {"source": "favourites", "style": "separated"}, AUTH)
+    assert res.status == 200 and obj["choice"] == "favourites:separated"
+    assert obj["source"] == "favourites" and "favourites" in obj
     res, obj = call(server, "POST", "/speech/music-bed", {"source": "library", "style": "jazz"}, AUTH)
     assert res.status == 200 and obj["choice"] == "library:jazz" and obj["source"] == "library"
     res, obj = call(server, "POST", "/speech/music-bed", {"source": "streaming"}, AUTH)

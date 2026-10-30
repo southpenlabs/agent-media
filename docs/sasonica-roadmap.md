@@ -1842,6 +1842,36 @@ ahead.
     through the book channel, not submit, so they get no bed; streaming on
     the phone (needs the app to start the music app before the voice and
     hold it ducked, or Media3 to play the stream itself).
+    **Landed 30 Oct 2026 (a fourth source: your favourites, instrumental)**
+    (David: "I wonder if we could get instrumental versions of favourite
+    tracks for playing as background music for replies"; he chose both
+    ways). `music_bed_favourites.py`, contract §6.4. Favourites: his likes
+    and most-asked-for YouTube tracks from the state store, plus
+    ListenBrainz top recordings and loves when
+    `MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER` is set; the best 30,
+    named through Mopidy's YouTube Music. First an official instrumental
+    (search "<artist> <title> instrumental", then "karaoke"; taken only
+    with the same title, the artist, within 15 % of the length, marked
+    Instrumental/Karaoke/Backing track, never a cover or remix), fetched on
+    the phone's address as the streaming source does. Else Demucs removes
+    the vocals (its own venv, never a dependency) in a 02:00–05:00 window,
+    up to 3 a night, niced, ioniced, under `systemd-run` MemoryMax 2500 MB
+    with no swap, skipped while memory is strained or under 2 GB free;
+    measured on red5: a 3 min track in 2 min 41 s, peak 1.76 GB. Kept as
+    private clips (signed URL only), -30 LUFS, cap 300 MB; credit
+    "Instrumental of <title> — <artist> (separated)". Styles: Auto,
+    official only, separated only; no app change (the app renders the
+    server's list).
+    **Auto reads astrotunes (30 Oct 2026)** (David: "The music picker
+    should probably also use Astro Tunes"): every source's Auto goes by
+    the radio DJ's kept reading (six axes) when fresh — energetic and
+    bright → morning/lo-fi, dense → rainy/ambient, low energy and warm →
+    dusk/piano, low and cool → night/ambient, warm → blend/jazz, else
+    calm/piano; favourites weighted by each track's measured BPM and
+    loudness — and nothing bright or energetic 21–6. No fresh reading: the
+    hour and the weather. Settings shows why (`auto_why`).
+    Not yet: the nightly waker is a host timer, outside this repo; tempo
+    is a cheap estimate (it can land on double or half the beat).
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

@@ -306,7 +306,7 @@ def _no_music_bed_network(monkeypatch):
     one of those goes through a function patched here to refuse, so no test
     reaches the internet, the queue or the phone; a test of them fakes the
     one it needs."""
-    from agent_media_core import music_bed_library, music_bed_stream
+    from agent_media_core import music_bed_favourites, music_bed_library, music_bed_stream
 
     def refuse(*a, **k):
         raise OSError("no network in the tests (conftest)")
@@ -316,6 +316,15 @@ def _no_music_bed_network(monkeypatch):
     monkeypatch.setattr(music_bed_stream, "_mpd", refuse)
     monkeypatch.setattr(music_bed_stream, "_fetch_local", lambda vid: None)
     monkeypatch.setattr(music_bed_stream, "_set_volume", refuse)
+    # The favourites source (music_bed_favourites.py) reads ListenBrainz,
+    # searches and looks up through Mopidy, fetches on the phone and runs
+    # Demucs (under systemd-run): all four refused here.
+    monkeypatch.setattr(music_bed_favourites, "_http", refuse)
+    monkeypatch.setattr(music_bed_favourites, "_mpd", refuse)
+    monkeypatch.setattr(music_bed_favourites, "_fetch_local", lambda vid: None)
+    monkeypatch.setattr(music_bed_favourites, "_run", refuse)
+    for key in [k for k in os.environ if k.startswith("MEDIA_MUSIC_BED_FAVOURITES")]:
+        monkeypatch.delenv(key, raising=False)
 
 
 _REAL_OS_NAME = os.name

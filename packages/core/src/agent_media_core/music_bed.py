@@ -51,6 +51,32 @@ most an hour old; never fetched while a reply waits. Where: the
 ``MEDIA_MUSIC_BED_WEATHER`` "lat,lon" (Melbourne by default, as astrotunes);
 ``off`` stops the fetch, and the hour alone decides.
 
+**Auto reads the moment from astrotunes** (David, 30 Oct 2026: "The music
+picker should probably also use Astro Tunes"): the reading radio_dj.py
+keeps (`radio_dj.moment`, in ``<state_dir>/radio-dj-context.json``, half an
+hour) — six axes from 0 to 1, tempo, energy, warmth, brightness, lyric
+density and texture, and the day's themes — when one at most half an hour
+old is there. Only the background process (`warm`) asks astrotunes for a
+new one; a reply only reads the file. ``MEDIA_MUSIC_BED_ASTRO=off`` stops
+both. The mapping (`astro_auto`), first rule that holds:
+
+- raining, by day → **rainy** (piano), as before;
+- energetic and bright (energy and tempo averaging ≥ 0.6, brightness ≥ 0.5)
+  → **morning** (lo-fi);
+- dense texture (≥ 0.65) → **rainy** (ambient);
+- low energy (< 0.4) and warm (≥ 0.6) → **dusk** (piano);
+- low energy and cool → **night** (ambient);
+- warm (≥ 0.6) → **blend** (jazz);
+- otherwise → **calm** (piano).
+
+Time of day stays a guardrail: from 21 to 6 nothing bright or energetic
+(morning becomes dusk if warm, else night; lo-fi becomes piano), whatever the
+axes say, as the music-transit skill's "time of day matters more". With no
+fresh reading Auto is the hour and the weather, as above. Settings is told
+why (`auto_why`: "dusk — low energy, warm (astrotunes)"). For favourites
+the ready tracks are weighted by how near their tempo and energy (BPM and
+loudness, measured once as each is made) are to the reading's.
+
 **The choice**: ``off``, ``auto`` (by time and weather) or a mood. Settings
 stores one on the server (`<state_dir>/music-bed.json`, ``GET``/``POST
 /speech/music-bed``), which wins; without one, ``MEDIA_MUSIC_BED`` (default
@@ -71,7 +97,7 @@ mixed back in at its start (so the last sample leads straight into the
 first), and rain is crossfaded across the seam. Mono, 48 kHz, peaking at
 -24 dBFS, as the samples, so the voice stays on top.
 
-**Three sources** (David, 26 Oct 2026: "let's go with the three options for
+**The sources** (David, 26 Oct 2026: "let's go with the three options for
 music that you gave me earlier"; "it will be good to use some kind of online
 library"), one Settings choice:
 
@@ -84,11 +110,18 @@ library"), one Settings choice:
 - **Online library** (music_bed_library.py): public-domain, CC0 and CC BY
   recordings from archive.org (and ccMixter), fetched in the background,
   normalised and played as clips, their credit shown in Settings.
+- **Your favourites, instrumental** (music_bed_favourites.py; David, 30 Oct
+  2026): his most liked and played tracks, as an official instrumental when
+  YouTube Music has a confident one, else with the vocals removed by Demucs
+  in a guarded nightly window; played as clips, at random. Styles: Auto
+  (either), official only, separated only.
 
 For the streaming and library sources Auto is a genre by the same hour and
-weather (GENRE_FOR_MOOD). The choice is one string: ``off``, ``auto`` or a
+weather (GENRE_FOR_MOOD); for favourites it is any ready track, and the
+generated stand-in is Auto's mood. The choice is one string: ``off``, ``auto`` or a
 generated style (the values from before there were sources), or
-``<source>:<style>`` — ``streaming:jazz``, ``library:auto``.
+``<source>:<style>`` — ``streaming:jazz``, ``library:auto``,
+``favourites:separated``.
 
 **Fallback** (`choose`): the chosen source when it can play on the reading's
 target and has something cached; else the generated style nearest it
@@ -138,9 +171,14 @@ LABELS.update({"people": "A person's message", "question": "A question",
 #: Everything rendered here.
 RENDERED = GENERATED + KIND_BEDS
 
-SOURCES = ("generated", "streaming", "library")
+SOURCES = ("generated", "streaming", "library", "favourites")
 SOURCE_LABELS = {"generated": "Generated", "streaming": "Your streaming music",
-                 "library": "Online library"}
+                 "library": "Online library",
+                 "favourites": "Your favourites, instrumental"}
+#: The favourites source's styles beside Auto (music_bed_favourites.py).
+FAV_STYLES = ("official", "separated")
+FAV_LABELS = {"official": "Official instrumentals only",
+              "separated": "Vocals removed only"}
 #: The genres the streaming and library sources offer.
 NET_GENRES = ("lofi", "ambient", "classical", "jazz", "piano")
 NET_LABELS = {"lofi": "Lo-fi", "ambient": "Ambient", "classical": "Classical",
@@ -156,7 +194,8 @@ AUTO_LABEL = "Auto (by time and weather)"
 
 CHOICES = (("off", "auto") + GENERATED
            + tuple(f"{src}:{g}" for src in ("streaming", "library")
-                   for g in ("auto",) + NET_GENRES))
+                   for g in ("auto",) + NET_GENRES)
+           + tuple(f"favourites:{s}" for s in ("auto",) + FAV_STYLES))
 
 #: Melbourne, as astrotunes.
 DEFAULT_LATLON = (-37.8136, 144.9631)
@@ -187,7 +226,7 @@ def normalise(choice) -> Optional[str]:
     src, sep, style = c.partition(":")
     if src == "generated":
         c = style if sep and style else "auto"
-    elif src in ("streaming", "library") and not sep:
+    elif src in ("streaming", "library", "favourites") and not sep:
         c = f"{src}:auto"
     return c if c in CHOICES else None
 
@@ -349,6 +388,123 @@ def refresh_weather(timeout: float = 8.0) -> Optional[str]:
     return label
 
 
+# ---- astrotunes' reading of the moment ---------------------------------------------
+
+#: How old a reading may be (radio_dj's own: half an hour).
+ASTRO_TTL_S = 1800.0
+
+
+def astro_on() -> bool:
+    return (os.environ.get("MEDIA_MUSIC_BED_ASTRO") or "").strip().lower() not in (
+        "0", "off", "false", "no")
+
+
+def _astro_path() -> Path:
+    from ._paths import state_dir
+    return state_dir() / "radio-dj-context.json"
+
+
+def astro_reading(now: Optional[float] = None) -> Optional[dict]:
+    """astrotunes' axes `{name: 0..1}` (tempo, energy, warmth, brightness,
+    lyric_density, texture) from radio_dj's kept reading at most half an
+    hour old, or None. Reads the file only: never runs astrotunes."""
+    if not astro_on():
+        return None
+    now = time.time() if now is None else now
+    try:
+        kept = json.loads(_astro_path().read_text())
+        if now - float(kept.get("at", 0)) > ASTRO_TTL_S:
+            return None
+        axes = (kept.get("moment") or {}).get("axes") or {}
+        out = {}
+        for k, v in axes.items():
+            val = v.get("value") if isinstance(v, dict) else v
+            if isinstance(val, (int, float)):
+                out[k] = max(0.0, min(1.0, float(val)))
+        return out if "energy" in out else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def astro_stale(now: Optional[float] = None) -> bool:
+    """Whether the background process should ask astrotunes again: on, the
+    program there, and no reading or one older than three quarters of its
+    life."""
+    if not astro_on():
+        return False
+    try:
+        # The personal settings' Astro Tunes switch, where there is one.
+        from . import personal_prefs
+        if not personal_prefs.astro_enabled():
+            return False
+    except (ImportError, AttributeError):
+        pass
+    except Exception:  # noqa: BLE001
+        return False
+    import shutil
+    if not shutil.which(os.environ.get("MEDIA_RADIO_ASTROTUNES", "astrotunes")):
+        return False
+    now = time.time() if now is None else now
+    try:
+        kept = json.loads(_astro_path().read_text())
+        return now - float(kept.get("at", 0)) > ASTRO_TTL_S * 0.75
+    except (OSError, ValueError, TypeError):
+        return True
+
+
+def refresh_astro() -> None:
+    """A new reading (radio_dj.moment runs astrotunes and keeps it). The
+    background process's job, never a reply's."""
+    try:
+        from . import radio_dj
+        radio_dj.moment()
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed: astrotunes: %s", e)
+
+
+def is_late(hour: int) -> bool:
+    """21 to 6: nothing bright or energetic, whatever the axes say."""
+    return hour >= 21 or hour < 6
+
+
+class Auto(NamedTuple):
+    """What Auto picks now: the generated mood, the genre for the streaming
+    and library sources, why, and the reading it went by (None: the clock)."""
+    mood: str
+    genre: str
+    why: str
+    axes: Optional[dict] = None
+
+
+def astro_auto(axes: dict, hour: int, raining: bool = False) -> Auto:
+    """The mood and genre for astrotunes' axes at `hour` (the mapping in the
+    module's docstring), with the words for why."""
+    g = lambda k: float(axes.get(k, 0.5))  # noqa: E731
+    energy, tempo, warmth = g("energy"), g("tempo"), g("warmth")
+    bright, texture = g("brightness"), g("texture")
+    lively = (energy + tempo) / 2
+    if raining and not is_late(hour):
+        mood, genre, words = "rainy", "piano", ["raining"]
+    elif lively >= 0.6 and bright >= 0.5:
+        mood, genre, words = "morning", "lofi", ["energetic", "bright"]
+    elif texture >= 0.65:
+        mood, genre, words = "rainy", "ambient", ["dense texture"]
+    elif energy < 0.4 and warmth >= 0.6:
+        mood, genre, words = "dusk", "piano", ["low energy", "warm"]
+    elif energy < 0.4:
+        mood, genre, words = "night", "ambient", ["low energy", "cool"]
+    elif warmth >= 0.6:
+        mood, genre, words = "blend", "jazz", ["steady", "warm"]
+    else:
+        mood, genre, words = "calm", "piano", ["steady"]
+    if is_late(hour) and mood in ("morning", "calm", "blend"):
+        mood = "dusk" if warmth >= 0.6 else "night"
+        words.append("late, so kept low")
+    if is_late(hour) and genre == "lofi":
+        genre = "piano"
+    return Auto(mood, genre, f"{mood} — {', '.join(words)} (astrotunes)", axes)
+
+
 # ---- which mood -------------------------------------------------------------------
 
 def mood_by_hour(hour: int) -> str:
@@ -363,6 +519,26 @@ def mood_by_hour(hour: int) -> str:
     return "night"
 
 
+def auto_now(when: Optional[datetime] = None, weather: Optional[str] = "?",
+             axes="?") -> Auto:
+    """What Auto picks: by astrotunes' reading when a fresh one is kept
+    (`axes` "?" reads it; None: the clock alone), else by the hour and the
+    weather."""
+    when = when or datetime.now()
+    if weather == "?":
+        weather = weather_label()
+    if axes == "?":
+        axes = astro_reading()
+    if axes:
+        return astro_auto(axes, when.hour, is_rain(weather))
+    mood = mood_by_hour(when.hour)
+    if mood != "night" and is_rain(weather):
+        return Auto("rainy", GENRE_FOR_MOOD["rainy"], "rainy — it is raining")
+    span = {"morning": "6–11", "calm": "11–14", "blend": "14–17", "dusk": "17–21",
+            "night": "21–6"}[mood]
+    return Auto(mood, GENRE_FOR_MOOD[mood], f"{mood} — by the hour ({span})")
+
+
 def mood_for(when: Optional[datetime] = None, weather: Optional[str] = "?",
              pick: Optional[str] = None) -> Optional[str]:
     """The mood to play now, or None for off. `weather` "?" reads the cache;
@@ -375,13 +551,7 @@ def mood_for(when: Optional[datetime] = None, weather: Optional[str] = "?",
     if ":" in pick:
         # Another source's choice: the mood its Auto goes by.
         pick = "auto"
-    when = when or datetime.now()
-    mood = mood_by_hour(when.hour)
-    if weather == "?":
-        weather = weather_label()
-    if mood != "night" and is_rain(weather):
-        return "rainy"
-    return mood
+    return auto_now(when, weather).mood
 
 
 def _num_env(name: str, default: float) -> float:
@@ -421,11 +591,16 @@ def pick_for(pick: Optional[str] = None, when: Optional[datetime] = None,
     if parsed is None:
         return None
     src, style = parsed
-    mood = mood_for(when, weather, "auto")
+    auto = auto_now(when, weather)
+    mood = auto.mood
     if src == "generated":
         s = mood if style == "auto" else style
         return Pick("generated", s, s)
-    genre = GENRE_FOR_MOOD.get(mood or "calm", "piano") if style == "auto" else style
+    if src == "favourites":
+        # Its style stays "auto" (any ready track) or a method; the stand-in
+        # is Auto's mood.
+        return Pick("favourites", style, mood or "calm")
+    genre = auto.genre if style == "auto" else style
     return Pick(src, genre, mood if style == "auto" and mood else GENERATED_FOR[genre])
 
 
@@ -658,7 +833,7 @@ def warm_needed() -> bool:
     """Whether the background process has work: a generated style not yet
     rendered, the weather due, or the chosen library or streaming genre
     short of tracks (and not tried lately)."""
-    if any(ready(m) is None for m in RENDERED) or weather_stale():
+    if any(ready(m) is None for m in RENDERED) or weather_stale() or astro_stale():
         return True
     parsed = parse(choice())
     if parsed is None:
@@ -671,6 +846,9 @@ def warm_needed() -> bool:
         if src == "streaming":
             from . import music_bed_stream as st
             return any(st.needs(g) for g in _net_genres(style))
+        if src == "favourites":
+            from . import music_bed_favourites as fav
+            return fav.needs()
     except Exception as e:  # noqa: BLE001
         log.info("music-bed: %s", e)
     return False
@@ -713,6 +891,8 @@ def warm() -> int:
             pass
         if weather_stale():
             refresh_weather()
+        if astro_stale():
+            refresh_astro()
         done = 0
         first = pick_for()
         order = ([first.fallback] if first else []) + list(RENDERED)
@@ -721,7 +901,13 @@ def warm() -> int:
                 write(style)
                 done += 1
         parsed = parse(choice())
-        if parsed and parsed[0] in ("library", "streaming"):
+        if parsed and parsed[0] == "favourites":
+            try:
+                from . import music_bed_favourites as fav
+                done += fav.fill()
+            except Exception as e:  # noqa: BLE001
+                log.warning("music-bed: preparing favourites failed: %s", e)
+        elif parsed and parsed[0] in ("library", "streaming"):
             src, style = parsed
             genres = _net_genres(style)
             if first is not None and first.style in genres:
@@ -755,6 +941,9 @@ def _source_ready(pick: Pick, target=None) -> bool:
         if pick.source == "library":
             from . import music_bed_library as lib
             return bool(lib.tracks(pick.style))
+        if pick.source == "favourites":
+            from . import music_bed_favourites as fav
+            return fav.enabled() and bool(fav.tracks(pick.style))
         if pick.source == "streaming":
             from . import music_bed_stream as st
             if target is not None and st.available(_target_name(target)) is not None:
@@ -817,6 +1006,11 @@ def choose(pick, other_audio: Optional[bool], target=None) -> Optional[Plan]:
             got = lib.track_for(pick.style)
             if got is not None:
                 return Plan("under", "library", pick.style, path=got[0], credit=got[1])
+        elif pick.source == "favourites":
+            from . import music_bed_favourites as fav
+            got = fav.track_for(pick.style, astro_reading()) if fav.enabled() else None
+            if got is not None:
+                return Plan("under", "favourites", pick.style, path=got[0], credit=got[1])
         elif pick.source == "streaming":
             from . import music_bed_stream as st
             if st.available(_target_name(target)) is None:
@@ -934,16 +1128,26 @@ def start(plan: Plan, target=None, sink=None) -> tuple[bool, Optional[Callable[[
 
 # ---- what Settings is told ----------------------------------------------------------------------
 
+#: Auto for the favourites source: any ready track.
+FAV_AUTO_LABEL = "Auto (any, at random)"
+
+
 def _style_label(source: str, style: str) -> str:
     if style == "auto":
-        return AUTO_LABEL
+        return FAV_AUTO_LABEL if source == "favourites" else AUTO_LABEL
     if source == "generated":
         return LABELS.get(style, style)
+    if source == "favourites":
+        return FAV_LABELS.get(style, style)
     return NET_LABELS.get(style, style)
 
 
 def _styles(source: str) -> list[str]:
-    return list(GENERATED) if source == "generated" else list(NET_GENRES)
+    if source == "generated":
+        return list(GENERATED)
+    if source == "favourites":
+        return list(FAV_STYLES)
+    return list(NET_GENRES)
 
 
 def _targets() -> list[dict]:
@@ -971,6 +1175,10 @@ def _why_not(source: str, target: Optional[str]) -> Optional[str]:
         from . import music_bed_library as lib
         if not lib.enabled():
             return "Switched off on this server (MEDIA_MUSIC_BED_LIBRARY=0)."
+    if source == "favourites":
+        from . import music_bed_favourites as fav
+        if not fav.enabled():
+            return "Switched off on this server (MEDIA_MUSIC_BED_FAVOURITES=0)."
     return None
 
 
@@ -978,6 +1186,12 @@ def _note(source: str, current: Optional[tuple[str, str]]) -> Optional[str]:
     """A line about the chosen source's cache, for Settings."""
     if current is None or current[0] != source or source == "generated":
         return None
+    if source == "favourites":
+        try:
+            from . import music_bed_favourites as fav
+            return fav.note(current[1])
+        except Exception:  # noqa: BLE001
+            return None
     try:
         if source == "library":
             from . import music_bed_library as lib
@@ -1012,7 +1226,7 @@ def status() -> dict:
         why_here = _why_not(src, current)
         sources.append({
             "id": src, "label": SOURCE_LABELS[src],
-            "styles": [{"id": "auto", "label": AUTO_LABEL}]
+            "styles": [{"id": "auto", "label": _style_label(src, "auto")}]
                       + [{"id": s, "label": _style_label(src, s)} for s in _styles(src)],
             "available": why_here is None, "reason": why_here,
             "targets": per, "note": _note(src, parsed)})
@@ -1022,7 +1236,19 @@ def status() -> dict:
         flat += [{"id": f"{src}:{s}",
                   "label": f"{SOURCE_LABELS[src]}: {_style_label(src, s)}"}
                  for s in ("auto",) + NET_GENRES]
+    flat += [{"id": f"favourites:{s}",
+              "label": f"{SOURCE_LABELS['favourites']}: {_style_label('favourites', s)}"}
+             for s in ("auto",) + FAV_STYLES]
     auto_pick = pick_for(compose(parsed[0], "auto") if parsed else "auto")
+    auto = auto_now()
+    if parsed and parsed[0] == "favourites":
+        auto_why = (("by fit to tempo and energy — " + auto.why) if auto.axes
+                    else "a ready track at random")
+    elif parsed and parsed[0] in ("streaming", "library"):
+        auto_why = f"{auto.genre} — " + auto.why.split(" — ", 1)[1]
+    else:
+        auto_why = auto.why
+    auto_why = f"auto: {auto_why}"
     try:
         now = json.loads(_now_path().read_text())
         if not isinstance(now, dict):
@@ -1039,17 +1265,26 @@ def status() -> dict:
         st_counts = st.counts()
     except Exception:  # noqa: BLE001
         st_counts = {}
+    try:
+        from . import music_bed_favourites as fav
+        fav_counts = fav.counts()
+    except Exception:  # noqa: BLE001
+        fav_counts = {}
     return {"choice": c, "set": stored is not None,
             "source": parsed[0] if parsed else "off",
             "style": parsed[1] if parsed else None,
             "choices": flat,
             "sources": sources,
             "target": current,
-            "auto_now": mood_for(pick="auto"),
-            "auto_style": auto_pick.style if auto_pick else None,
+            "auto_now": auto.mood,
+            "auto_why": auto_why,
+            "astro": auto.axes,
+            "auto_style": (auto_pick.style if auto_pick and auto_pick.source != "favourites"
+                           else None),
             "weather": weather_label(),
             "ready": [m for m in GENERATED if ready(m) is not None],
             "library": lib_counts, "streaming": st_counts,
+            "favourites": fav_counts,
             "now": now,
             "credit": (now or {}).get("credit")}
 
