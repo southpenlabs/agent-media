@@ -1892,20 +1892,6 @@ ahead.
     the `user` argument (accounts proposal). App: sasonica-app a772283.
     Not yet: astrotunes still reads its own weather for a fixed city, so it
     is run with `--no-weather` and its axes miss the weather's nudge.
-    **Landed 30 Oct 2026 (Play the song)** (David: "let's also add to the
-    reply menu, a way of playing the actual song through the music
-    player"). When a bed starts under a reply, its song is kept on the
-    reply's history row (`extras.bed_song`, `music_bed_song.py`): for
-    favourites the ORIGINAL, with vocals (artist, title, video id,
-    `yt:<id>`); for streaming the first track (video id, Mopidy URI, the
-    cached copy); for the library the track (page, file, download
-    address); generated, nothing. The reply's `spoken.song` (§6.2.2) says
-    so, and its ⋯ menu shows "Play “<title>”": `POST /music {"action":
-    "song", "id"}` (§6.9a) plays it with `media music play`, so it is in
-    the Media tab with its controls; tapped while a reply is being read,
-    it starts when the reading ends (never over it, never cutting it off,
-    and out of reach of a streaming bed's tidy-up). Replies from before
-    this have no song recorded.
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...
