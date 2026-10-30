@@ -62,16 +62,18 @@ def test_switches_are_saved_forgotten_and_checked(monkeypatch):
 def test_params_carry_every_effect_and_zero_for_one_switched_off(monkeypatch):
     monkeypatch.setenv("MEDIA_MUSIC_BED_BREATHE_DB", "4")
     p = M.params("generated", "calm", B.file_for("calm"))
-    assert p["breathe_db"] == 4.0 and p["carve_db"] == 6.0 and p["intro_ms"] == 1500.0
+    assert p["breathe_db"] == 4.0 and p["carve_db"] == 3.0 and p["intro_ms"] == 1500.0
     assert (p["attack_ms"], p["release_ms"], p["hold_ms"]) == (80.0, 400.0, 250.0)
     assert (p["carve_lo_hz"], p["carve_hi_hz"], p["sweep_hz"]) == (300.0, 3000.0, 400.0)
     assert p["carry_ms"] == 20000.0 and p["xfade_ms"] == 3000.0 and p["thought_db"] == 8.0
     assert p["outro"] == ""               # no ending rendered yet
-    assert p["gain_db"] == 0.0
+    # The chosen level is under the words: the pauses swell 4 dB above it.
+    assert p["gain_db"] == 4.0
     B.set_settings({"breathe": False, "carve": False, "intro": False,
                     "sweep": False, "carry": False})
     p = M.params("generated", "calm", B.file_for("calm"))
     assert p["breathe_db"] == p["carve_db"] == p["intro_ms"] == p["sweep_hz"] == p["carry_ms"] == 0
+    assert p["gain_db"] == 0.0                 # no swell without breathing
     json.dumps(p)                          # what a phone is told
 
 
@@ -173,12 +175,12 @@ def test_voiced_is_a_clip_playing_short_of_its_tail():
 def test_af_arg_and_the_sweep_curve():
     mix = M.params("generated", "calm", B.file_for("calm"))
     arg = U.af_arg(mix)
-    assert arg.startswith("--af=@ride:lavfi-volume=volume=1.0000")
+    assert arg.startswith(f"--af=@ride:lavfi-volume=volume={10 ** (6 / 20):.4f}")
     assert "@carve:lavfi-equalizer=f=949:t=o:w=3.32:g=0" in arg
     assert "@sweep:lavfi-lowpass=f=400" in arg
     assert U.cutoff(400, 0) == pytest.approx(400) and U.cutoff(400, 1) == pytest.approx(20000)
     assert U.cutoff(0, 0) == 20000
-    mix.update(carve_db=0, sweep_hz=0)
+    mix.update(carve_db=0, sweep_hz=0, gain_db=0)
     assert U.af_arg(mix) == "--af=@ride:lavfi-volume=volume=1.0000"
 
 
@@ -189,8 +191,13 @@ def test_bed_sends_ride_carve_and_sweep_through_af_command(monkeypatch):
     mix = M.params("generated", "calm", B.file_for("calm"))
     b = U.Bed("/tmp/x.sock", mix)
     b.apply(1.0)
-    assert ("af-command", "ride", "volume", f"{10 ** (-6 / 20):.4f}", "volume") in sent
-    assert ("af-command", "carve", "g", "-6.0000", "equalizer") in sent
+    # Under the words: the chosen level (the swell taken off), the carve in.
+    assert ("af-command", "ride", "volume", "1.0000", "volume") in sent
+    assert ("af-command", "carve", "g", "-3.0000", "equalizer") in sent
+    sent.clear()
+    b.apply(0.0)
+    assert ("af-command", "ride", "volume", f"{10 ** (6 / 20):.4f}", "volume") in sent
+    b.apply(1.0)
     sent.clear()
     b.apply(1.0)
     assert sent == []                              # unchanged: nothing sent
@@ -198,7 +205,7 @@ def test_bed_sends_ride_carve_and_sweep_through_af_command(monkeypatch):
     assert sent == [("af-command", "sweep", "f", "20000.0000", "lowpass")]
     sent.clear()
     b.duck(8)
-    assert ("af-command", "ride", "volume", f"{10 ** (-8 / 20):.4f}", "volume") in sent
+    assert ("af-command", "ride", "volume", f"{10 ** (-2 / 20):.4f}", "volume") in sent
 
 
 # ---- the end, the hold, the intro --------------------------------------------------------
@@ -317,3 +324,17 @@ def test_end_fade_plays_the_ending_and_fades_the_loop_quickly(monkeypatch, tmp_p
     started.clear()
     U.end_fade(bed, lambda v: None, 70.0, lambda: None, quick=True)
     assert started == []                            # a cut: no ending
+
+
+def test_the_chosen_level_is_the_level_under_the_words(monkeypatch):
+    """David, 31 Oct 2026: no music heard on the phone. The bed played the
+    whole reply, but a dip taken BELOW his level (already -10 dB) put it
+    under a phone speaker's hearing. Now the level is the one under the
+    words and the pauses swell above it."""
+    from agent_media_core.under_mix import Envelope
+    B.set_settings({"gain_db": -10})
+    p = M.params("generated", "calm", B.file_for("calm"))
+    under_words = p["gain_db"] - p["breathe_db"]
+    in_pauses = p["gain_db"]
+    assert under_words == M.level_offset("generated", B.file_for("calm"))
+    assert in_pauses > under_words

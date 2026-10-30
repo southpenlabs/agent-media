@@ -5,13 +5,20 @@ A music bed (music_bed.py) used to sit at one level under a reading, fade in
 as it started and fade out after it. Now, each a switch in Settings → Music
 (GET/POST /speech/music-bed `settings`, kind "bool", all on by default):
 
-- **breathe** — the music dips under the words (MEDIA_MUSIC_BED_BREATHE_DB,
-  6 dB) and comes back up in the pauses: down in MEDIA_MUSIC_BED_ATTACK_MS
+- **breathe** — the music sits at the chosen level under the words and
+  swells MEDIA_MUSIC_BED_BREATHE_DB (6 dB) above it in the pauses (and
+  before the first word, and after the last). The level is the one under
+  the words, not in the pauses: with the dip taken below the chosen level a
+  quiet bed went under a phone's hearing altogether (David, 31 Oct 2026, no
+  music heard; the player ran the whole reply). Sent as `gain_db` raised by
+  the swell, which the ride takes down again under the words: down in
+  MEDIA_MUSIC_BED_ATTACK_MS
   (80), up in MEDIA_MUSIC_BED_RELEASE_MS (400), and only once the voice has
   been quiet for MEDIA_MUSIC_BED_HOLD_MS (250), so the gaps between words
   never pump.
 - **carve** — while the voice sounds, a cut in the voice band of the music
-  (MEDIA_MUSIC_BED_CARVE_DB, 6 dB, from MEDIA_MUSIC_BED_CARVE_LO_HZ 300 to
+  (MEDIA_MUSIC_BED_CARVE_DB, 3 dB — a phone's speaker plays little but that
+  band, so a deeper cut is the music gone; from MEDIA_MUSIC_BED_CARVE_LO_HZ 300 to
   MEDIA_MUSIC_BED_CARVE_HI_HZ 3000: a peaking EQ at their geometric mean,
   log2(hi/lo) octaves wide), following the same envelope as breathe.
 - **intro** — the music starts MEDIA_MUSIC_BED_INTRO_MS (1500) before the
@@ -83,7 +90,7 @@ IDS = tuple(s[0] for s in SWITCHES)
 
 DEFAULTS = {
     "BREATHE_DB": 6.0, "ATTACK_MS": 80.0, "RELEASE_MS": 400.0, "HOLD_MS": 250.0,
-    "CARVE_DB": 6.0, "CARVE_LO_HZ": 300.0, "CARVE_HI_HZ": 3000.0,
+    "CARVE_DB": 3.0, "CARVE_LO_HZ": 300.0, "CARVE_HI_HZ": 3000.0,
     "INTRO_MS": 1500.0, "SWEEP_HZ": 400.0, "OUTRO_MS": 800.0,
     "CARRY_S": 20.0, "XFADE_MS": 3000.0, "THOUGHT_DB": 8.0,
 }
@@ -208,10 +215,13 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
             after = music_bed_vocal.after_for(path)
         except Exception as e:  # noqa: BLE001
             log.debug("music-bed mix: vocal: %s", e)
+    swell = tunable("BREATHE_DB") if breathe else 0.0
     out = {
         "v": 1,
-        "gain_db": level_offset(source, path),
-        "breathe_db": tunable("BREATHE_DB") if breathe else 0.0,
+        # The chosen level is under the words; the pauses swell above it (a
+        # player's ride takes `breathe_db` off this while the voice sounds).
+        "gain_db": round(level_offset(source, path) + swell, 2),
+        "breathe_db": swell,
         "attack_ms": tunable("ATTACK_MS"),
         "release_ms": tunable("RELEASE_MS"),
         "hold_ms": tunable("HOLD_MS"),

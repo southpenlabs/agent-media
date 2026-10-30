@@ -1321,8 +1321,12 @@ def play_under(p: Path, target=None, sink=None, mix: Optional[dict] = None) -> b
             ok = under(str(p), target, loop=True)
         if not ok:
             return False
-        log.info("music-bed: %s under the reading on %s", p.name,
-                 getattr(target, "name", target))
+        log.info("music-bed: %s under the reading on %s%s", p.name,
+                 getattr(target, "name", target),
+                 "" if not mix else " (mix: level %+.1f dB, swell %g, carve %g, intro %g ms%s)" % (
+                     float(mix.get("gain_db") or 0) - float(mix.get("breathe_db") or 0),
+                     mix.get("breathe_db") or 0, mix.get("carve_db") or 0,
+                     mix.get("intro_ms") or 0, ", sings out" if mix.get("after") else ""))
         return True
     except Exception as e:  # noqa: BLE001 — a bed must never cost a reply
         log.warning("music-bed: playing failed: %s", e)
