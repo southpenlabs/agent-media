@@ -1,4 +1,4 @@
-"""`media session list|send`: reach a headless session from another one.
+"""`media session list|start|send`: reach a headless session from another one.
 
 A headless session (sessiond.py: a phone-started chat, `claude -p` under
 media-sessiond) has no tmux pane, and sessiond strips `CLAUDE*` from its
@@ -19,6 +19,10 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   refused `pending` — atomically by a sessiond that knows `keep_pending`,
   and by a look first for one that does not — and with `--wait S` it is
   tried again until the card is answered or S seconds pass.
+* `start` opens a new chat in a folder with a first message and prints its
+  thread link (David, 30 Oct 2026: "we need a more streamlined approach to
+  start a new chat"): the server's `/ask` wants a device's credential, so a
+  session had been reaching into the driver by hand.
 
 Nothing here records the words as David's turn (send._record_turn): they
 are another session's, marked by the `[From …]` the caller puts on them.
@@ -145,12 +149,46 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
         time.sleep(min(POLL_S, max(0.05, deadline - time.monotonic())))
 
 
+def start(cwd: str, text: str, *, model: str = "", plan: bool = False) -> tuple[int, dict]:
+    """A fresh headless Claude session in `cwd` with `text` as its first
+    message; `(rc, answer)` with the session id and its thread link. Filed
+    under the workspace a new chat from the app would get (send.ask), and
+    through sessiond's own `start`, so its refusals hold (a usage limit, a
+    restart pending). The words are not recorded as the listener's turn."""
+    from agent_media_core import layout
+    from agent_media_core.intake.context import thread_link_base
+
+    from . import session_settings
+
+    cwd = _real(cwd)
+    if not os.path.isdir(cwd):
+        return RC_NONE, {"error": f"no folder {cwd}", "code": "none"}
+    model, mode = session_settings.clean_new("claude", model, "plan" if plan else "")
+    host = layout.workspace_for(layout.place_host(cwd), cwd)
+    r = _call("start", cwd=cwd, text=text, agent="claude", workspace=host, model=model,
+              mode=mode, timeout=30.0)
+    if not r.get("ok"):
+        return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
+    sid = str(r.get("session") or "")
+    return RC_SENT, {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="media session",
-        description="headless sessions (sessiond): list them, or send one a message "
-                    "from another session")
+        description="headless sessions (sessiond): list them, start one, or send one a "
+                    "message from another session")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    st = sub.add_parser("start", help="a new chat in a folder, with a first message; "
+                                      "prints its thread link")
+    st.add_argument("cwd", help="the folder it works in")
+    st.add_argument("text", nargs="*", help="the first message; '-' or nothing reads stdin")
+    st.add_argument("--from", dest="sender", default="",
+                    help="who it is from: prefixed as '[From Name]' unless the text has one")
+    st.add_argument("--model", default="", help="opus | sonnet | haiku | fable (default: "
+                                                "Claude's own)")
+    st.add_argument("--plan", action="store_true", help="start in plan mode")
+    st.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
     ls.add_argument("--cwd", default="", help="only this folder's")
@@ -193,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     if not text or text == "-":
         text = sys.stdin.read().strip()
     if not text:
-        print("media session send: nothing to say", file=sys.stderr)
+        print(f"media session {a.cmd}: nothing to say", file=sys.stderr)
         return RC_USAGE
     if a.sender and not text.startswith("[From "):
         name = a.sender.strip()
@@ -201,8 +239,17 @@ def main(argv: list[str] | None = None) -> int:
     if not up:
         msg = "the session host (media-sessiond) is not running"
         print(json.dumps({"ok": False, "code": "down", "error": msg}) if a.json
-              else f"media session send: {msg}", file=sys.stdout if a.json else sys.stderr)
+              else f"media session {a.cmd}: {msg}", file=sys.stdout if a.json else sys.stderr)
         return RC_FAILED
+    if a.cmd == "start":
+        rc, ans = start(a.cwd, text, model=a.model, plan=a.plan)
+        if a.json:
+            print(json.dumps({"ok": rc == RC_SENT, **ans}))
+        elif rc == RC_SENT:
+            print(f"started {ans['session']} in {ans['cwd']}\n{ans['link']}")
+        else:
+            print(f"media session start: {ans.get('error')}", file=sys.stderr)
+        return rc
     view, why = find(a.target, views)
     if view is None:
         print(json.dumps({"ok": False, "code": "none", "error": why}) if a.json

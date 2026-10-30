@@ -58,7 +58,9 @@ turn and never over a question or permission card (headless_mail.py).
 `agent-mail-deliver --to <folder>` does the same when the folder has no pane
 (pane first, then sessiond, a new session only when neither has one).
 `ListAgents` and `SendMessage` cannot see these sessions: sessiond strips
-their messaging socket.
+their messaging socket. To open a new chat (a "new thread" David asks
+for), `media session start <folder> --from <you> <first message>`
+(`--model`, `--plan`) prints its thread link.
 
 Talk to another agent's session only through agent mail
 (`agent-mail-deliver`, `media session send`), never by typing or pasting

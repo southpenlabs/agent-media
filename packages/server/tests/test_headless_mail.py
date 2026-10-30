@@ -174,6 +174,22 @@ def test_no_live_session_in_the_folder_and_bad_ids(host, capsys, tmp_path):
     assert rc == 5 and "8 characters" in d["error"]
 
 
+def test_start_opens_a_chat_in_the_folder_and_prints_its_link(host, capsys, monkeypatch):
+    monkeypatch.setenv("MEDIA_PUBLIC_URL", "https://example.test")
+    rc, d = run(capsys, "start", str(host.work), "--from", "agent-media-7", "reply:", "hi")
+    assert rc == 0 and d["ok"] and d["cwd"] == str(host.work)
+    sid = d["session"]
+    assert d["link"] == f"https://example.test/app/t/{sid}"
+    assert host.sup.get(sid)["cwd"] == str(host.work)
+    wait_for(lambda: "ok: [From Agent-media-7] reply: hi" in results(host, sid))
+    assert host.turns == []          # another session's words, not the listener's
+
+
+def test_start_in_no_such_folder_is_rc_5(host, capsys, tmp_path):
+    rc, d = run(capsys, "start", str(tmp_path / "nowhere"), "hello")
+    assert rc == 5 and "no folder" in d["error"]
+
+
 def test_sessiond_down_is_rc_1(host, capsys):
     sessiond.stop(host.srv)
     rc, d = run(capsys, "send", str(host.work), "hello")
