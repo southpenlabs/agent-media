@@ -246,6 +246,8 @@ def end_fade(bed: Optional[Bed], set_level: Callable[[float], None], level: floa
         bed.stop(settle=not quick)
     if quick or bed is None:
         return under_fade.Fade(set_level, level, done, quick=quick)
+    if bed.mix.get("after") and bed.argv:
+        return Handover(bed, level, done)
     if bed.mix.get("outro"):
         _outro(bed, level)
         return under_fade.Fade(set_level, level, done, tail_ms=0,
@@ -386,3 +388,159 @@ def watch(target_name: str, token: str, poll_s: float = 0.25) -> threading.Threa
     th = threading.Thread(target=run, name="under-held", daemon=False)
     th.start()
     return th
+
+
+# ---- singing it out (music_bed_vocal) ------------------------------------------------------
+
+class Handover:
+    """After a long reply over a favourite: the original song, vocals and
+    all, on a third mpv from the matching point (music_bed_vocal.start_pos),
+    crossfaded in at equal power while the bed goes, to the end of its next
+    chorus (choose_end), then faded out. Both levels move through their
+    ``@ride`` volume filters (amplitude, so the curves are true). `hurry()`
+    (a new reading's under sound, which stop_under passes on) fades
+    whatever plays in the quick time. Not a daemon thread, like a Fade."""
+
+    def __init__(self, bed: Bed, level: float, done: Callable[[], None],
+                 sleep: Callable[[float], None] = time.sleep):
+        self.bed = bed
+        self.level = float(level)
+        self.done = done
+        self.after = dict(bed.mix.get("after") or {})
+        self._hurry = threading.Event()
+        self._sleep = sleep
+        self.sock: Optional[str] = None
+        self.proc = None
+        self.thread = threading.Thread(target=self._run, name="under-handover",
+                                       daemon=False)
+
+    def run_async(self) -> "Handover":
+        self.thread.start()
+        return self
+
+    def hurry(self) -> None:
+        self._hurry.set()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        self.thread.join(timeout)
+
+    def _ride(self, sock: str, amp: float) -> None:
+        try:
+            _ipc().command(sock, "af-command", "ride", "volume", f"{max(0.0, amp):.4f}",
+                           "volume", timeout=0.3, retry_errors=False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pos(self, sock: str) -> Optional[float]:
+        try:
+            v = _ipc().get_property(sock, "time-pos", timeout=0.5)
+            return float(v) if isinstance(v, (int, float)) else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _start_song(self, at: float) -> bool:
+        import subprocess
+        from . import music_bed_vocal  # noqa: F401 — the module this serves
+        d = Path(self.bed.sock).parent
+        self.sock = str(d / f"song-{os.getpid()}-{time.monotonic_ns()}.sock")
+        argv = [a for a in self.bed.argv if not a.startswith(
+            ("--volume=", "--af=", "--input-ipc-server=", "--loop"))]
+        argv += [f"--volume={self.level:g}", f"--start={at:.2f}",
+                 "--af=@ride:lavfi-volume=volume=0", f"--input-ipc-server={self.sock}",
+                 str(self.after["uri"])]
+        try:
+            self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            log.info("under-mix: the song failed: %s", e)
+            return False
+        until = time.monotonic() + 2.0
+        while not Path(self.sock).exists() and time.monotonic() < until:
+            self._sleep(0.02)
+        return Path(self.sock).exists()
+
+    def _ramp(self, ms: float, fn) -> None:
+        """fn(t) for t 0..1 over `ms`, cut to the quick time if hurried."""
+        from . import under_fade
+        began = time.monotonic()
+        while True:
+            t = (time.monotonic() - began) * 1000.0 / max(1.0, ms)
+            if self._hurry.is_set() and ms > under_fade.quick_ms():
+                return
+            if t >= 1.0:
+                fn(1.0)
+                return
+            fn(t)
+            self._sleep(0.04)
+
+    def _run(self) -> None:
+        from . import music_bed_vocal as V
+        from . import under_fade
+        bed_amp = _db(self.bed.offset_db - self.bed.extra_db)
+        song_amp = 0.0
+        try:
+            a = self.after
+            pos = self._pos(self.bed.sock) or 0.0
+            at = V.start_pos(pos, a.get("inst_s") or 0, a.get("orig_s") or 0,
+                             bool(a.get("aligned")), a.get("bounds"), a.get("snap_s"))
+            end = V.choose_end(at, a.get("orig_s") or 0, a.get("bounds"), a.get("choruses"),
+                               a.get("ahead_s"), a.get("fallback_s"))
+            if not self._start_song(at):
+                # No song: the bed's usual fade.
+                fade = under_fade.Fade(lambda v: self._ride(self.bed.sock, bed_amp * v / max(
+                    1e-6, self.level)), self.level, lambda: None)
+                fade.run_async().join()
+                return
+            log.info("under-mix: singing it out from %.1f s to %.1f s", at, end)
+            state = {"song": 0.0, "bed": bed_amp}
+
+            def cross(t: float) -> None:
+                b, g = V.equal_power(t)
+                self._ride(self.bed.sock, bed_amp * b)
+                self._ride(self.sock, g)
+                state.update(song=g, bed=bed_amp * b)
+            self._ramp(float(a.get("xfade_ms") or 2000), cross)
+            song_amp = state["song"]
+            bed_left = state["bed"] if self._hurry.is_set() else 0.0
+            if not bed_left:
+                self._ride(self.bed.sock, 0.0)
+                try:
+                    _ipc().command(self.bed.sock, "quit", timeout=0.3, retry_errors=False)
+                except Exception:  # noqa: BLE001
+                    pass
+            fade_ms = float(a.get("fade_ms") or 3000)
+            while not self._hurry.is_set():
+                p = self._pos(self.sock)
+                if p is None or self.proc.poll() is not None or p >= end:
+                    break
+                self._hurry.wait(0.25)
+            ms = under_fade.quick_ms() if self._hurry.is_set() else fade_ms
+            top = song_amp
+            began = time.monotonic()
+            while True:
+                t = (time.monotonic() - began) * 1000.0 / max(1.0, ms)
+                if t >= 1.0:
+                    break
+                self._ride(self.sock, top * (1.0 - under_fade.curve(t)))
+                if bed_left:
+                    # Hurried mid-crossfade: the bed goes with the song.
+                    self._ride(self.bed.sock, bed_left * (1.0 - under_fade.curve(t)))
+                self._sleep(0.04)
+        except Exception as e:  # noqa: BLE001
+            log.info("under-mix: handover: %s", e)
+        finally:
+            if self.proc is not None:
+                try:
+                    self.proc.terminate()
+                except OSError:
+                    pass
+            if self.sock:
+                try:
+                    Path(self.sock).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            try:
+                self.done()
+            except Exception as e:  # noqa: BLE001
+                log.debug("under-mix: handover done: %s", e)

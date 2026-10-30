@@ -1964,6 +1964,18 @@ ahead.
     keeps its plain fade; the desk's "voice" is a clip playing, not the
     voice's level (no meter on the broker); a phone's first-sentence
     timing may be stamped up to the intro early.
+    **Landed 31 Oct 2026 (singing it out)** (David: "when the speech
+    finishes, the music keeps playing for a while, but not just as an
+    instrumental"; he chose "Just the chorus" and "Long replies only"):
+    after a long reply over one of his favourites, the instrumental
+    crossfades into the original song (from the same point for a separated
+    bed, else the nearest section), up to a music level, on to the end of
+    the next chorus, then fades. Originals kept and analysed for sections
+    in the background (`music_bed_vocal.py`, `music_bed_sections.py`,
+    numpy in the Demucs venv); a switch "Sing it out after long replies".
+    Contract §`/speech/music-bed` "Singing it out". Not yet: the section
+    finder is a plain novelty curve, so a chorus is "the most repeated
+    section" and can miss.
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...

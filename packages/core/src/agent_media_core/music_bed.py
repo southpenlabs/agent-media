@@ -1066,7 +1066,9 @@ def warm_needed() -> bool:
             return st.upkeep_due() or any(st.needs(g) for g in _net_genres(style))
         if src == "favourites":
             from . import music_bed_favourites as fav
-            return fav.upkeep_due() or fav.needs()
+            from . import music_bed_mix, music_bed_vocal
+            return (fav.upkeep_due() or fav.needs()
+                    or (music_bed_mix.on("vocal") and music_bed_vocal.due()))
     except Exception as e:  # noqa: BLE001
         log.info("music-bed: %s", e)
     return False
@@ -1146,6 +1148,13 @@ def warm() -> int:
                 done += fav.fill()
             except Exception as e:  # noqa: BLE001
                 log.warning("music-bed: preparing favourites failed: %s", e)
+            try:
+                # The originals a long reply sings out into (music_bed_vocal).
+                from . import music_bed_mix, music_bed_vocal
+                if music_bed_mix.on("vocal"):
+                    done += music_bed_vocal.upkeep()
+            except Exception as e:  # noqa: BLE001
+                log.warning("music-bed: keeping originals failed: %s", e)
         elif parsed and parsed[0] in ("library", "streaming"):
             src, style = parsed
             genres = _net_genres(style)
@@ -1295,7 +1304,12 @@ def play_under(p: Path, target=None, sink=None, mix: Optional[dict] = None) -> b
             pass
         pre = getattr(sink, "prefetch", None)
         if pre is not None:
-            pre([p] + ([Path(mix["outro"])] if mix and mix.get("outro") else []), target)
+            extra = []
+            if mix and mix.get("outro"):
+                extra.append(Path(mix["outro"]))
+            if mix and (mix.get("after") or {}).get("uri"):
+                extra.append(Path(mix["after"]["uri"]))
+            pre([p] + extra, target)
         if mix:
             # The DJ mix (music_bed_mix): told to a phone beside the clip,
             # ridden on this host's under player.
@@ -1339,7 +1353,8 @@ def _note_now(plan: Optional[Plan], playing: bool) -> None:
         pass
 
 
-def start(plan: Plan, target=None, sink=None) -> tuple[bool, Optional[Callable[[], None]]]:
+def start(plan: Plan, target=None, sink=None,
+          long: bool = False) -> tuple[bool, Optional[Callable[[], None]]]:
     """Start `plan` under the reading about to begin on `target`.
 
     Returns (looping under-player started, stop): the first says the speech
@@ -1372,8 +1387,10 @@ def start(plan: Plan, target=None, sink=None) -> tuple[bool, Optional[Callable[[
                     _note_now(None, False)
             return False, done
         from . import music_bed_mix
+        # `long`: a long reply (music_bed_vocal.is_long), which a favourite
+        # sings out after.
         if plan.path is None or not play_under(plan.path, target, sink,
-                                               music_bed_mix.for_plan(plan)):
+                                               music_bed_mix.for_plan(plan, long)):
             return False, None
         _note_now(plan, True)
         return True, lambda quick=False: _note_now(None, False)

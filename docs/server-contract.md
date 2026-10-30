@@ -2449,6 +2449,35 @@ of its last 120 ms counts as voice); a held bed is
 atomic rename. The streaming source (Mopidy) keeps its plain fade. Pinned by
 `packages/core/tests/test_music_bed_mix.py`.
 
+**Singing it out after a long reply (31 Oct 2026)** (`music_bed_vocal.py`,
+`music_bed_sections.py`, `under_mix.Handover`; David: "when the speech
+finishes, the music keeps playing for a while, but not just as an
+instrumental" — "Just the chorus", "Long replies only"). A seventh switch,
+`vocal` ("Sing it out after long replies", on). For a reply long by the
+default thresholds (45 s estimated or 12 sentences, whatever
+`MEDIA_MUSIC_BED_MIN_S` says) over a favourites bed whose original is kept,
+the mix carries `"after": {"uri", "aligned", "inst_s", "orig_s", "bounds",
+"choruses", "xfade_ms", "fade_ms", "ahead_s", "fallback_s", "snap_s"}` (a
+phone's `uri` is the original's clip URI, prefetched) and `outro` "",
+`carry_ms` 0: at the natural end the player crossfades (equal power) into
+the original song — from the bed's own position for a separated bed (the
+same recording, cut and trimmed alike), else from the same fraction of the
+song snapped to a section start within `snap_s` — over
+`MEDIA_MUSIC_BED_VOCAL_XFADE_MS` (2000) aligned or `_LOOSE_XFADE_MS` (3000),
+plays it at a music level (the original is loudnormed to
+`MEDIA_MUSIC_BED_VOCAL_LUFS`, -16) to the end of the next chorus at least
+`_AHEAD_S` (15) on, else the next boundary that far on, else `_FALLBACK_S`
+(30) on, and fades it over `_FADE_MS` (3000). A new reading's under sound,
+a stop or a cut fades it quickly. The originals: fetched for each kept
+favourite by the background process (`_PER_PASS`, 2 a pass), kept private
+in the clip dir as `music-bed-vocal-<key>.mp3` (cap `_MAX_MB`, 300; dropped
+with their favourite), indexed in `music-bed-vocal.json` with their sections
+from `music_bed_sections.py` — a numpy-only novelty analysis (chroma and
+band energies, a Foote kernel on the self-similarity matrix; the most
+repeated section is the chorus), run out of process with the Demucs venv's
+Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
+fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

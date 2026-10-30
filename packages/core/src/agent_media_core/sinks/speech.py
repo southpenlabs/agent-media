@@ -1005,6 +1005,9 @@ class SinkSpeech:
                     if m.get("outro"):
                         m["outro"] = _clip_uri_for(str(m["outro"]), target,
                                                    self._prefer_url(target))
+                    if (m.get("after") or {}).get("uri"):
+                        m["after"] = dict(m["after"], uri=_clip_uri_for(
+                            str(m["after"]["uri"]), target, self._prefer_url(target)))
                     mixed = json.dumps(m)
                 ipc.set_property(sock, TONE_KIND_PROPERTY, kind or "")
                 ipc.set_property(sock, UNDER_MIX_PROPERTY, mixed)
@@ -1146,7 +1149,8 @@ class SinkSpeech:
             name = target.name
             rec = _UNDER_PROCS.get(name)
             bed = getattr(rec, "bed", None)
-            if rec is not None and bed is not None and rec.sock is not None:
+            if (rec is not None and bed is not None and rec.sock is not None
+                    and float(bed.mix.get("carry_ms") or 0) > 0):
                 _UNDER_PROCS.pop(name, None)
                 rec.fading_in.clear()
                 bed.stop(settle=True)

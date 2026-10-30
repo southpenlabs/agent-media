@@ -75,6 +75,9 @@ SWITCHES = (
     ("carry", "Keep the music going between replies",
      "When another reply is about to start, the music carries on into it "
      "(a different piece crossfades)."),
+    ("vocal", "Sing it out after long replies",
+     "After a long reply over one of your favourites, the song itself comes in, "
+     "vocals and all, and plays to the end of its next chorus."),
 )
 IDS = tuple(s[0] for s in SWITCHES)
 
@@ -181,11 +184,13 @@ def level_offset(source: str, path) -> float:
 
 # ---- what a player is told --------------------------------------------------------------
 
-def params(source: str, style: str, path) -> dict:
+def params(source: str, style: str, path, long: bool = False) -> dict:
     """The mix for one bed, as a phone is told it (JSON) and this host's
     under player uses it: every effect's amount, 0 for one switched off.
     `outro` is the ending's file (a path; the sink makes it a clip URI for
-    a phone), "" for none."""
+    a phone), "" for none. `long` (a long reply, music_bed_vocal.is_long)
+    over a favourite whose original is kept: `after`, the vocal handover,
+    which replaces the ending and the carry."""
     breathe = on("breathe")
     carve = on("carve")
     outro = ""
@@ -196,7 +201,14 @@ def params(source: str, style: str, path) -> dict:
             outro = str(p) if p is not None else ""
         except Exception as e:  # noqa: BLE001
             log.debug("music-bed mix: outro: %s", e)
-    return {
+    after = None
+    if long and source == "favourites" and on("vocal"):
+        try:
+            from . import music_bed_vocal
+            after = music_bed_vocal.after_for(path)
+        except Exception as e:  # noqa: BLE001
+            log.debug("music-bed mix: vocal: %s", e)
+    out = {
         "v": 1,
         "gain_db": level_offset(source, path),
         "breathe_db": tunable("BREATHE_DB") if breathe else 0.0,
@@ -214,15 +226,18 @@ def params(source: str, style: str, path) -> dict:
         "xfade_ms": tunable("XFADE_MS"),
         "thought_db": tunable("THOUGHT_DB"),
     }
+    if after:
+        out.update(after=after, outro="", carry_ms=0.0)
+    return out
 
 
-def for_plan(plan) -> Optional[dict]:
+def for_plan(plan, long: bool = False) -> Optional[dict]:
     """`params` for a music_bed.Plan played as an under clip; None for a
     streaming one (Mopidy's fade only) or on any failure."""
     try:
         if plan is None or plan.kind != "under" or plan.path is None:
             return None
-        return params(plan.source, plan.style, plan.path)
+        return params(plan.source, plan.style, plan.path, long)
     except Exception as e:  # noqa: BLE001 — a mix must never cost a bed
         log.warning("music-bed mix: %s", e)
         return None

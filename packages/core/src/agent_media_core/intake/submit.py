@@ -5212,7 +5212,10 @@ def _submit_event(event: Event,
                     bed_plan = music_bed.choose(_bed_pick, _other, target)
             if bed_plan is not None:
                 from .. import music_bed
-                bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
+                from .. import music_bed_vocal
+                bed_tone, bed_stop = music_bed.start(
+                    bed_plan, target, sink,
+                    long=music_bed_vocal.is_long(_dj.estimate_seconds(text), len(sentences)))
                 if bed_tone:
                     # The intro (music_bed_mix): this host's bed leads the
                     # first word in; a phone holds its first sentence itself.
