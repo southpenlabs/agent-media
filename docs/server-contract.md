@@ -291,6 +291,9 @@ Everything a message can be pointed at.
   set with `POST /session/archive` (§6.4). **Archived rows stay in the list**;
   the app files them under an "Archived" section itself. Talking to a thread
   (a reply, or an `/ask` routed into it) clears the flag.
+- `archived_at` (every row, 30 Oct 2026): when it was archived (epoch s,
+  the time kept in `archived.json`), else `null`. The app's Archived view
+  sorts by it ("Recently archived").
 - `mail_from` (every row, 28 Oct 2026): the sender's name (`"Cece"`) when
   another agent's mail started the thread — its first words are
   `[From Name] …` (agent-mail-deliver, `media session send`; not

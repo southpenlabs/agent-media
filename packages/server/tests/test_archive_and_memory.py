@@ -40,6 +40,20 @@ def test_archive_toggles_and_the_row_stays_listed(server, shelf, signed_in, type
     assert _row(targets, SID)["archived"] is False
 
 
+def test_rows_carry_when_they_were_archived(server, shelf, signed_in, typed):
+    # `archived_at` (epoch) on archived rows, None on the rest: the app's
+    # "Recently archived" sort (David, 30 Oct 2026).
+    _, targets = call(server, "GET", "/targets", headers=AUTH)
+    assert _row(targets, SID)["archived_at"] is None
+    call(server, "POST", "/session/archive", {"session": SID, "archived": True}, AUTH)
+    _, targets = call(server, "GET", "/targets", headers=AUTH)
+    assert _row(targets, SID)["archived_at"] == archive.archived()[SID]
+    assert _row(targets, SID2)["archived_at"] is None
+    call(server, "POST", "/session/archive", {"session": SID, "archived": False}, AUTH)
+    _, targets = call(server, "GET", "/targets", headers=AUTH)
+    assert _row(targets, SID)["archived_at"] is None
+
+
 def test_archiving_ends_nothing(server, shelf, signed_in, typed):
     res, obj = call(server, "POST", "/session/archive", {"session": SID2}, AUTH)
     assert res.status == 200 and obj["archived"] is True    # absent means archive

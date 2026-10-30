@@ -1532,6 +1532,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
         row["speech_fallback"] = {"level": fb[0] if fb else dflt,
                                   "from": fb[1] if fb else "default"}
         row["priority"] = row["speech"] in SPEAKS
+        # When it was archived (epoch), else None: the Archived view's
+        # "Recently archived" sort (David, 30 Oct 2026).
+        row["archived_at"] = flags.get(sid) if row.get("archived") else None
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted
