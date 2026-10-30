@@ -261,6 +261,16 @@ def test_below_warning():
     high_week = {**low, "unifiedWindows": {"five_hour": {"utilization": 0.35},
                                            "seven_day": {"utilization": 0.91}}}
     assert not quota.below_warning(high_week)
-    assert not quota.below_warning({"status": "allowed_warning", "utilization": 0.35})
+    # allowed_warning is pace, not level: a 35% reading is still below.
+    assert quota.below_warning({"status": "allowed_warning", "utilization": 0.35})
+    assert not quota.below_warning({"status": "allowed_warning", "utilization": 0.85})
     assert not quota.below_warning({"status": "allowed"})          # no reading
     assert not quota.below_warning({"status": "rejected", "utilization": 0.1})
+
+
+def test_allowed_warning_below_threshold_is_quiet():
+    # 30 Oct 2026: "Claude quota at 25%" from an allowed_warning seven_day.
+    assert quota.check_rate_limit_info({"status": "allowed_warning", "utilization": 0.25,
+                                        "rateLimitType": "seven_day"}) is None
+    assert quota.check_rate_limit_info({"status": "allowed_warning",
+                                        "rateLimitType": "seven_day"}) is not None

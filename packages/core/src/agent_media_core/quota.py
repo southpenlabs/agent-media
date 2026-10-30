@@ -702,7 +702,9 @@ def check_rate_limit_info(
     resets_at = reset_from_info(info)
     kind = str(info.get("rateLimitType") or info.get("limit_name") or info.get("window") or "")
     thresh = warn_pct_threshold()
-    if status == "allowed_warning" or (pct is not None and pct >= thresh):
+    # Upstream flags allowed_warning on pace, not level (a 25% seven_day,
+    # 30 Oct 2026): with a reading, only the threshold decides.
+    if (pct is not None and pct >= thresh) or (pct is None and status == "allowed_warning"):
         msg = str(info.get("message") or info.get("warning") or "")
         if not msg:
             pct_str = f"{pct:.0f}%" if pct is not None else f"{thresh:.0f}%+"
@@ -801,7 +803,7 @@ def expire_warnings(now: Optional[float] = None) -> list[dict]:
 def below_warning(info: Optional[dict]) -> bool:
     """A request went through with every window it reports below the warning
     threshold: any warning standing for the agent is out of date."""
-    if not isinstance(info, dict) or str(info.get("status") or "").lower() != "allowed":
+    if not isinstance(info, dict) or str(info.get("status") or "").lower() not in ("allowed", "allowed_warning"):
         return False
     pcts = [_normalize_pct(info.get(k)) for k in ("utilization", "used_percent", "used_percentage")
             if info.get(k) is not None]

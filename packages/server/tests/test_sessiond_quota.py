@@ -435,3 +435,24 @@ def test_a_stale_warning_alert_clears(host, monkeypatch):
                                                    for k, v in d["warnings"].items()}})
     host.sup.deliver_due()
     assert open_quota() == []
+
+
+def test_an_orphaned_quota_alert_is_swept(host, monkeypatch):
+    """30 Oct 2026: a Codex 100% alert (resets 4:05 pm) still open at 6 pm,
+    with no warning or limit left on record behind it."""
+    from agent_media_server import alerts
+
+    def open_ids():
+        return {a["id"] for a in alerts.listing(open_only=True)["alerts"]}
+
+    alerts.report({"id": "quota.codex", "level": "warn", "step": 100, "title": "Codex quota at 100%"})
+    monkeypatch.setattr(sessiond, "_quota_swept", 0.0)
+    sessiond._sweep_quota_alerts()
+    assert "quota.codex" not in open_ids()
+
+    # A warning still on record keeps its alert.
+    quota.note_warning(agent="claude", utilization=0.9, resets_at=time.time() + 1800, text="x")
+    alerts.report({"id": "quota.claude", "level": "warn", "step": 90, "title": "Claude quota at 90%"})
+    monkeypatch.setattr(sessiond, "_quota_swept", 0.0)
+    sessiond._sweep_quota_alerts()
+    assert "quota.claude" in open_ids()

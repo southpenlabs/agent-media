@@ -766,6 +766,36 @@ def _settle_quota_warning(agent: str) -> None:
     _clear_quota_alert(agent, "usage back under the warning level")
 
 
+_quota_swept = 0.0
+
+
+def _sweep_quota_alerts(now: float | None = None) -> None:
+    """Clear a `quota.<agent>` alert with neither a warning nor a limit on
+    record behind it, at most every 5 min: one whose row went before the
+    expiry path could see it stayed up past its reset (a Codex 100% at 4:05
+    pm still open at 6 pm, 30 Oct 2026)."""
+    global _quota_swept
+    now = time.time() if now is None else now
+    if now - _quota_swept < 300:
+        return
+    _quota_swept = now
+    try:
+        from . import alerts
+        q = _quota()
+        warned = {str(w.get("agent") or "claude") for w in q.warnings(now)} if q.warnings_path().exists() else set()
+        rec = q.read() if q.path().exists() else None
+        for a in alerts.listing(open_only=True)["alerts"]:
+            aid = str(a.get("id") or "")
+            if not aid.startswith("quota."):
+                continue
+            agent = aid.split(".", 1)[1]
+            if agent in warned or (rec and q.limited(rec=rec, agent=agent) is not None):
+                continue
+            _clear_quota_alert(agent, "quota alert out of date")
+    except Exception:  # noqa: BLE001 — a sweep never stops delivery
+        log.debug("sessiond: quota alert sweep failed", exc_info=True)
+
+
 def _emit_quota_warning(w: dict) -> None:
     try:
         from . import alerts, notes
@@ -773,7 +803,7 @@ def _emit_quota_warning(w: dict) -> None:
         pct = w.get("utilization")
         step = int(w.get("step") or 80)
         r_at = w.get("resets_at")
-        reset_str = f" (resets at {_clock(float(r_at))})" if r_at else ""
+        reset_str = f" (resets {_reset_clock(float(r_at))})" if r_at else ""
         pct_str = f"{float(pct):.0f}%" if isinstance(pct, (int, float)) else f"{step}%"
         title = f"{agent.capitalize()} quota at {pct_str}{reset_str}"
         detail = str(w.get("text") or title)
@@ -799,7 +829,7 @@ def _emit_quota_limit(agent: str, reset: float | None, text: str, *, session: st
     try:
         from . import alerts, notes
         agent = str(agent or "claude")
-        reset_str = _clock(reset) if reset else "unknown"
+        reset_str = _reset_clock(reset) if reset else "unknown"
         title = f"{agent.capitalize()} usage limit reached (resets {reset_str})"
         detail = (str(text or "").strip()[:240] or title) + " Sessions will resume automatically at the reset."
         alerts.report({
@@ -836,6 +866,14 @@ def _clock(at: float) -> str:
     """`2:41 am`: the host's local time, as David reads it."""
     t = time.localtime(at)
     return f"{(t.tm_hour % 12) or 12}:{t.tm_min:02d} {'am' if t.tm_hour < 12 else 'pm'}"
+
+
+def _reset_clock(at: float) -> str:
+    """`at 5:00 pm` today, `Thu 5:00 pm` later: a seven-day reset read as
+    today's time looked already past (30 Oct 2026)."""
+    if time.localtime(at)[:3] == time.localtime()[:3]:
+        return f"at {_clock(at)}"
+    return f"{time.strftime('%a', time.localtime(at))} {_clock(at)}"
 
 
 def quota_note(cut: dict, subagents: str = "") -> str:
@@ -1167,6 +1205,7 @@ class Supervisor:
                 _settle_quota_warning(str(w.get("agent") or "claude"))
             for w in q.pop_unnotified_warnings():
                 _emit_quota_warning(w)
+        _sweep_quota_alerts()
         rec = q.read() if q.path().exists() else None
         with self.lock:
             todo = []
