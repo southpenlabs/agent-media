@@ -133,6 +133,10 @@ def _no_inherited_app(monkeypatch):
 # A test that wants to assert on the mirror should monkeypatch it back on.
 os.environ["MEDIA_FLOOR_MIRROR"] = "0"
 
+# The Claude Code hook forks its Stop path off at once (`_detach_early`); a
+# test driving `main()` must stay in this process to see what it did.
+os.environ["MEDIA_HOOK_NO_EARLY_DETACH"] = "1"
+
 
 @pytest.fixture(autouse=True)
 def _no_live_speech_token(monkeypatch, tmp_path):

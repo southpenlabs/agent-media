@@ -451,6 +451,10 @@ class Session:
         self.first_text = ""
         self.turns = 0
         self.last_result: dict | None = None
+        # The last turn's final words and when they came, for
+        # `_recover_reply` (not saved: only an exit soon after reads them).
+        self.result_text = ""
+        self.result_at = 0.0
         self.stderr_tail: collections.deque = collections.deque(maxlen=40)
         self.write_lock = threading.Lock()
         self.file_lines = 0
@@ -600,6 +604,12 @@ def _work_of_record(rec: dict) -> dict | None:
         return None
     return {"state": state, "turn": turn, "question": question, "tasks": tasks,
             "queued": queued, "last_text": str(rec.get("last_text") or "")}
+
+
+#: An exit this soon after a turn's result may have taken its Stop hook with
+#: it (`Supervisor._recover_reply`), which is checked this long after the result.
+RECOVER_WITHIN_S = 60.0
+RECOVER_AFTER_S = 45.0
 
 
 #: How long before the host's stop a session that ended by itself still
@@ -1851,6 +1861,8 @@ class Supervisor:
                 if _quota().is_limit_result(obj):
                     self._quota_cut(s, obj, now)
                 s.last_result = _result_summary(obj)
+                s.result_text = "" if obj.get("is_error") else str(obj.get("result") or "")
+                s.result_at = now
                 s.set_state("approval" if s.pending else "waiting")
                 self._drain_cut(s, now)
                 if s.turns == 1 and not s.auto_titled and not obj.get("is_error"):
@@ -1979,6 +1991,47 @@ class Supervisor:
             self._save(s)
             self.cond.notify_all()
         log.info("sessiond: %s exited %s (%s)", s.id[:8], rc, s.state)
+        if (s.agent == "claude" and s.state in ("parked", "ended") and s.result_text
+                and os.environ.get("MEDIA_SESSIOND_RECOVER_REPLY", "1") != "0"
+                and time.time() - s.result_at < RECOVER_WITHIN_S):
+            threading.Thread(target=self._recover_reply,
+                             args=(s.id, s.result_text, s.result_at, s.cwd,
+                                   self._env(s, sys.executable)),
+                             daemon=True, name="recover-reply").start()
+
+    def _recover_reply(self, sid: str, text: str, at: float, cwd: str, env: dict) -> None:
+        """A chat that exits just after its turn can take its Stop hook down
+        before the reply is spoken or recorded, and the bubble then has no
+        play key (David, 30 Oct 2026: "why is there no play button for this
+        thread?" — parked 5 s after its Stop while red5 thrashed). Give the
+        hook its time, then, if the history has no reply from this session
+        since the turn ended, run it again with MEDIA_HOOK_HOLD: the reply is
+        kept with its play key and a toast, not read out late. The hook's
+        own text dedup covers a first run that lands at the same moment."""
+        time.sleep(max(0.0, at + RECOVER_AFTER_S - time.time()))
+        try:
+            from agent_media_core.state import StateStore
+
+            for row in StateStore().recent_history(sink="speech", limit=60):
+                if (row.get("started_at") or 0) < at - 5:
+                    break
+                ex = row.get("extras") or {}
+                if isinstance(ex, str):
+                    ex = json.loads(ex or "{}")
+                if ex.get("session") == sid and not ex.get("listener"):
+                    return
+        except Exception:  # noqa: BLE001 — unsure: let the hook's dedup decide
+            log.debug("sessiond: recover %s: history unread", sid[:8], exc_info=True)
+        payload = {"hook_event_name": "Stop", "session_id": sid, "cwd": cwd,
+                   "last_assistant_message": text}
+        try:
+            subprocess.run([sys.executable, "-m", "agent_media_core.intake.hook_claude_code"],
+                           input=json.dumps(payload), text=True, cwd=cwd or None,
+                           env={**env, "MEDIA_HOOK_HOLD": "1"}, timeout=120,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log.info("sessiond: %s reply recovered (its Stop hook left no trace)", sid[:8])
+        except Exception:  # noqa: BLE001 — best effort, as the hook itself is
+            log.warning("sessiond: recover %s failed", sid[:8], exc_info=True)
 
     # -- capacity --
 

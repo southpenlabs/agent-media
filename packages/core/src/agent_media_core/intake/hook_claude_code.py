@@ -24,9 +24,11 @@ Settings.json wires it as (note `"async": true` — see below):
 
 `async: true` runs the hook in the background so Claude Code never blocks on
 TTS. Claude Code still terminates async hooks at their timeout and when the
-session exits, so the Stop path detaches playback into a `setsid` child that
-reparents to init and outlives both (see `_play_detached`). A single fork is
-enough now that async handles non-blocking — no double-fork.
+session exits, so the Stop path forks into a `setsid` child as soon as it
+has read the payload, and that child builds and plays the reply, reparented
+to init and outliving both (see `_detach_early`; a phone chat exits seconds
+after its turn). A single fork is enough now that async handles
+non-blocking — no double-fork.
 
 PreToolUse(AskUserQuestion) is what actually reads a multiple-choice prompt
 aloud — Claude Code never fires a Notification for the question modal, so the
@@ -1198,6 +1200,69 @@ def _play_reveal(event: Event, reveal: dict, spawn_epoch: float,
     submit_event(part(reveal["post"]), state=state)
 
 
+#: True in the child `_detach_early` made: the Stop path already runs in its
+#: own session, so `_play_detached` plays here instead of forking again.
+_DETACHED = False
+
+
+def _detach_stdio() -> None:
+    """Point stdin at /dev/null and stdout/stderr at hook-play.log, so Claude
+    Code's hook pipe sees EOF and a detached child's warnings and tracebacks
+    still land somewhere (a child that dies mid-playback leaves a stale
+    now_playing mirror and an unrestored duck with zero trace otherwise)."""
+    try:
+        logp = Path.home() / ".cache" / "agent-media" / "hook-play.log"
+        try:
+            logp.parent.mkdir(parents=True, exist_ok=True)
+            if logp.exists() and logp.stat().st_size > 2_000_000:
+                logp.unlink()   # crude rotation — it's a diagnostic tail, not an archive
+            logfd = os.open(str(logp), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        except OSError:
+            logfd = None
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        for fd in (1, 2):
+            try:
+                os.dup2(logfd if logfd is not None else devnull, fd)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _detach_early() -> bool:
+    """Leave Claude Code's process group before the Stop path does anything.
+
+    A phone chat (sessiond) exits seconds after its turn ends, and Claude Code
+    takes its async hooks down with it. The Stop path used to fork only once
+    the event was built — tmux, the speech level, the toast check — which on
+    a thrashing host took longer than those seconds, so the reply was never
+    spoken nor recorded and its bubble had no play key (David, 30 Oct 2026:
+    "why is there no play button for this thread?"; red5 at load ~270, the
+    session parked 5 s after its Stop). Now the payload is read, then the
+    hook forks at once and the child does the rest under `setsid`.
+
+    True in the parent (return now), False in the child or when it cannot
+    fork (the work then runs here, as before). MEDIA_HOOK_NO_DETACH and
+    MEDIA_HOOK_NO_EARLY_DETACH (the tests) keep it in-process."""
+    global _DETACHED
+    if os.environ.get("MEDIA_HOOK_NO_DETACH") or os.environ.get("MEDIA_HOOK_NO_EARLY_DETACH"):
+        return False
+    try:
+        pid = os.fork()
+    except OSError:
+        return False
+    if pid > 0:
+        return True
+    try:
+        os.setsid()
+    except OSError:
+        pass
+    _detach_stdio()
+    _DETACHED = True
+    return False
+
+
 def _play_detached(event: Event) -> None:
     """Render + play `event` in a session-detached child that outlives the hook.
 
@@ -1215,6 +1280,16 @@ def _play_detached(event: Event) -> None:
     if os.environ.get("MEDIA_HOOK_NO_DETACH"):
         _play_now(event)
         return
+    if _DETACHED:
+        # Already in the session-detached child (_detach_early): play here.
+        print(f"--- hook-play pid={os.getpid()} {time.strftime('%F %T')} "
+              f"text={event.text[:60]!r}", file=sys.stderr, flush=True)
+        try:
+            _play_now(event)
+        except Exception:  # noqa: BLE001 — detached; log it, there is no caller
+            import traceback
+            traceback.print_exc()
+        return
     try:
         pid = os.fork()
     except OSError:
@@ -1229,26 +1304,10 @@ def _play_detached(event: Event) -> None:
     except OSError:
         pass
     # Detach stdio so Claude Code's hook pipe sees EOF — but keep stdout/stderr
-    # observable: a detached child that dies mid-playback (kill, crash) leaves a
-    # stale now_playing mirror and an unrestored duck with zero trace when its
-    # output goes to /dev/null. Warnings (logging's lastResort handler writes
-    # WARNING+ to stderr) and tracebacks land in the log instead.
+    # observable (_detach_stdio). Warnings (logging's lastResort handler
+    # writes WARNING+ to stderr) and tracebacks land in the log.
+    _detach_stdio()
     try:
-        logp = Path.home() / ".cache" / "agent-media" / "hook-play.log"
-        try:
-            logp.parent.mkdir(parents=True, exist_ok=True)
-            if logp.exists() and logp.stat().st_size > 2_000_000:
-                logp.unlink()   # crude rotation — it's a diagnostic tail, not an archive
-            logfd = os.open(str(logp), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        except OSError:
-            logfd = None
-        devnull = os.open(os.devnull, os.O_RDWR)
-        os.dup2(devnull, 0)
-        for fd in (1, 2):
-            try:
-                os.dup2(logfd if logfd is not None else devnull, fd)
-            except OSError:
-                pass
         print(f"--- hook-play pid={os.getpid()} {time.strftime('%F %T')} "
               f"text={event.text[:60]!r}", file=sys.stderr, flush=True)
     except OSError:
@@ -1422,6 +1481,12 @@ def _handle_stop(payload: dict) -> int:
                   priority=Priority.HIGH if level == "interrupt" else Priority.NORMAL,
                   voice=voice_for_session(_session_name()),
                   metadata=metadata)
+    if os.environ.get("MEDIA_HOOK_HOLD"):
+        # sessiond's second try at a reply whose first hook died with its
+        # chat (sessiond `_recover_reply`): kept with its play key, never
+        # read out late.
+        toast.hold(event)
+        return 0
     # Nobody looking at this conversation: toast it, play on request.
     if level in HOLDS and toast.should_hold(metadata["session"]):
         toast.hold(event)
@@ -1694,6 +1759,8 @@ def main() -> int:
         if event_name == "Notification":
             return _handle_notification(payload)
         if event_name == "Stop":
+            if _detach_early():
+                return 0
             return _handle_stop(payload)
         if event_name == "UserPromptSubmit":
             return _handle_user_prompt(payload, record=False)

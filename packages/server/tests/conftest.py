@@ -15,6 +15,12 @@ import os
 
 import pytest
 
+# A fake chat that exits just after its turn would have sessiond run the real
+# speech hook to keep a "lost" reply (`Supervisor._recover_reply`), into the
+# real history: it did, 30 Oct 2026. Off for the whole process, since an exit
+# can land after a test's teardown; set again below after the MEDIA_* scrub.
+os.environ["MEDIA_SESSIOND_RECOVER_REPLY"] = "0"
+
 
 @pytest.fixture(autouse=True)
 def _clean_media_env(monkeypatch, tmp_path, request):
@@ -37,6 +43,7 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # (~/.amux, ~/.claude/settings.json), so unpinned they would pass on red5
     # and fail anywhere else. test_layout.py unpins it where it needs to.
     monkeypatch.setenv("MEDIA_LAYOUT", "projects-per-tmux-session")
+    monkeypatch.setenv("MEDIA_SESSIOND_RECOVER_REPLY", "0")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     # The phone's contacts are read, and a Join written back to Google
     # (contacts_writeback.py), through `agent-phone-adb shell`: never the
