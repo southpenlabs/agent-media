@@ -72,6 +72,12 @@ def _wire(monkeypatch):
     monkeypatch.setattr(music_sasonica.ipc, "set_property",
                         lambda ep, n, v: sent.append((ep, "set", n, v)))
     monkeypatch.setattr(music_sasonica, "_note_title", lambda uri, title: None)
+    monkeypatch.setattr("agent_media_core.media_meta.known", lambda key: None)
+
+    def get(ep, n, **k):
+        sent.append((ep, "get", n))
+        raise music_sasonica.ipc.MpvIpcError("property not found")
+    monkeypatch.setattr(music_sasonica.ipc, "get_property", get)
     return sent
 
 
@@ -87,6 +93,9 @@ def test_play_hands_the_app_a_served_url(monkeypatch):
         ("tcp://p8a:6615", "set", "volume", 100),       # the balance's music level
         ("tcp://p8a:6615", "set", "user-data/agent-media/art",
          "https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg"),
+        # A replace starts the names afresh: no read of the old ones.
+        ("tcp://p8a:6615", "set", music_sasonica.NAMES,
+         {"http://red5:8780/audio/music/x.mka": ["A Song", ""]}),
         ("tcp://p8a:6615", "set", "pause", False),
     ]
 
@@ -96,6 +105,72 @@ def test_add_appends_and_leaves_pause_alone(monkeypatch):
     monkeypatch.setattr(music_sasonica, "resolve", lambda uri: ("http://x/a.mka", ""))
     assert SinkMusicSasonica("tcp://p8a:6615").play("http://x/a.mka", replace=False)
     assert sent == [("tcp://p8a:6615", "cmd", "loadfile", "http://x/a.mka", "append-play")]
+
+
+def test_an_added_track_is_named_beside_the_queue(monkeypatch):
+    # The banner showed no name, or the last track's, for a track added
+    # behind the playing one: force-media-title is only written on a replace.
+    sent = _wire(monkeypatch)
+    have = {"http://localhost:6616/a.mka": ["Fade Into You", "Mazzy Star"]}
+    monkeypatch.setattr(music_sasonica.ipc, "get_property", lambda ep, n, **k: dict(have))
+    monkeypatch.setattr(music_sasonica, "resolve",
+                        lambda uri: ("http://localhost:6616/b.mka", "Radiohead - No Surprises (Official Video)"))
+    assert SinkMusicSasonica("tcp://p8a:6615").play("yt:b", replace=False)
+    assert ("tcp://p8a:6615", "set", "force-media-title", "Radiohead - No Surprises (Official Video)") not in sent
+    assert sent[-1] == ("tcp://p8a:6615", "set", music_sasonica.NAMES, {
+        "http://localhost:6616/a.mka": ["Fade Into You", "Mazzy Star"],
+        "http://localhost:6616/b.mka": ["No Surprises", "Radiohead"],
+    })
+    assert ("tcp://p8a:6615", "set", "pause", False) not in sent
+
+
+def test_the_names_drop_the_oldest_past_the_cap(monkeypatch):
+    sent = _wire(monkeypatch)
+    have = {f"u{i}": [f"t{i}", ""] for i in range(music_sasonica.NAMES_CAP)}
+    monkeypatch.setattr(music_sasonica.ipc, "get_property", lambda ep, n, **k: dict(have))
+    monkeypatch.setattr(music_sasonica, "resolve", lambda uri: ("new", "New"))
+    assert SinkMusicSasonica("tcp://p8a:6615").play("http://x/new", replace=False)
+    names = sent[-1][3]
+    assert len(names) == music_sasonica.NAMES_CAP
+    assert "u0" not in names and list(names)[-1] == "new"
+
+
+def test_a_failed_name_write_still_plays(monkeypatch):
+    # The track is loaded; a declined play here would start it again in mpv.
+    sent = _wire(monkeypatch)
+    monkeypatch.setattr(music_sasonica, "resolve", lambda uri: ("http://x/a.mka", "A"))
+
+    def refuse(ep, n, v):
+        if n == music_sasonica.NAMES:
+            raise OSError("gone")
+    monkeypatch.setattr(music_sasonica.ipc, "set_property", refuse)
+    assert SinkMusicSasonica("tcp://p8a:6615").play("http://x/a.mka", replace=False)
+
+
+def test_names_prefer_the_looked_up_song_and_artist(monkeypatch):
+    monkeypatch.setattr("agent_media_core.media_meta.known",
+                        lambda key: {"artist": "Mazzy Star", "song": "Fade Into You"}
+                        if key == "yt:avv2IIdDnnk" else None)
+    assert music_sasonica.track_names("yt:https://www.youtube.com/watch?v=avv2IIdDnnk",
+                                      "Mazzy Star - Fade Into You (Official Video)") \
+        == ("Fade Into You", "Mazzy Star")
+
+
+def test_names_from_the_callers_title_then_the_videos(monkeypatch):
+    monkeypatch.setattr("agent_media_core.media_meta.known", lambda key: None)
+    assert music_sasonica.track_names("http://x/a", "", "Like A Stone — Audioslave") \
+        == ("Like A Stone", "Audioslave")
+    assert music_sasonica.track_names("http://x/a", "Les Nuits") == ("Les Nuits", "")
+    assert music_sasonica.track_names("http://x/a", "") == ("", "")
+
+
+def test_the_callers_title_reaches_the_app(monkeypatch):
+    sent = _wire(monkeypatch)
+    monkeypatch.setattr(music_sasonica, "resolve", lambda uri: ("http://x/a.mka", ""))
+    assert SinkMusicSasonica("tcp://p8a:6615").play("http://x/a.mka", replace=False,
+                                                    title="Sunshower — Chris Cornell")
+    assert sent[-1] == ("tcp://p8a:6615", "set", music_sasonica.NAMES,
+                        {"http://x/a.mka": ["Sunshower", "Chris Cornell"]})
 
 
 def test_nothing_playable_declines(monkeypatch):

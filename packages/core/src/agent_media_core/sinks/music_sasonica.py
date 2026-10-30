@@ -161,6 +161,42 @@ def resolve(uri: str) -> tuple[Optional[str], str]:
     return (url, title) if url else music_app.resolve(uri)
 
 
+#: The app's names for its queue, ``{url: [title, artist]}``, keyed by the URL
+#: handed to ``loadfile`` (sasonica-app Media3Music). ``force-media-title`` is
+#: one name for whatever loaded last, so a track added behind the playing one
+#: had none of its own: the banner showed the file's name or the last track's.
+NAMES = "user-data/agent-media/names"
+#: Entries kept: a queue rarely runs past a few dozen, and the oldest go first.
+NAMES_CAP = 50
+
+
+def track_names(uri: str, title: str, given: str = "") -> tuple[str, str]:
+    """``(title, artist)`` for a track, "" where not known.
+
+    In order: what media_meta looked up for its YouTube id (the Media tab's
+    artist and song), the name the caller gave as ``"<title> — <artist>"``
+    (music_bed_song's form), then the video's own title split as
+    ``"Artist - Song"`` when it reads that way."""
+    vid = music_fetch.watch_id(uri[3:] if uri.startswith("yt:") else uri)
+    if vid:
+        from .. import media_meta
+        got = media_meta.known(f"yt:{vid}") or {}
+        if got.get("song"):
+            return str(got["song"]).strip(), str(got.get("artist") or "").strip()
+    if given and " — " in given:
+        t, a = given.split(" — ", 1)
+        if t.strip():
+            return t.strip(), a.strip()
+    name = (given or title or "").strip()
+    if not name:
+        return "", ""
+    from ..media_meta import split_title
+    artist, song, sure = split_title(name, "")
+    if sure and artist and song:
+        return song, artist
+    return name, ""
+
+
 class SinkMusicSasonica(SinkMusicLocal):
     """The music channel's Sasonica backend (the app's media player)."""
 
@@ -177,11 +213,16 @@ class SinkMusicSasonica(SinkMusicLocal):
         return ep
 
     def play(self, uri: str, target: Target = SASONICA_TARGET,
-             replace: bool = True, **_: object) -> bool:
-        """Load `uri` in the app. False = it could not be; the caller falls back."""
+             replace: bool = True, **opts: object) -> bool:
+        """Load `uri` in the app. False = it could not be; the caller falls back.
+
+        ``title`` in `opts` is the caller's name for it (``media music play
+        --title``), used when the phone has none."""
         if not (self._ep_override or configured()):
             return False
         url, title = resolve(uri)
+        given = str(opts.get("title") or "").strip()
+        title = title or given
         if not url:
             log.info("sink-music-sasonica: nothing the app can play for %s", uri)
             return False
@@ -208,10 +249,38 @@ class SinkMusicSasonica(SinkMusicLocal):
         except (ipc.MpvIpcError, OSError) as e:
             log.info("sink-music-sasonica: the app did not take %s: %s", uri, e)
             return False
+        # After the load, so the app's queue already holds `url`; best-effort,
+        # as the track is playing whether or not it gets its name.
+        self._name(url, *track_names(uri, title, given), replace=replace)
         self._unpause_if(replace)
         if title:
             _note_title(uri, title)
         return True
+
+    def _name(self, url: str, title: str, artist: str, replace: bool) -> None:
+        """Add `url`'s title and artist to the app's names (:data:`NAMES`).
+
+        A replace starts the map afresh (the queue it named is gone); an add
+        keeps what is there, this track last, the oldest dropped past
+        :data:`NAMES_CAP`. The app never clears it, so nothing races this."""
+        if not title and not artist:
+            return
+        try:
+            names: dict = {}
+            if not replace:
+                try:
+                    cur = ipc.get_property(self._endpoint(), NAMES, retry_errors=False)
+                    if isinstance(cur, dict):
+                        names = dict(cur)
+                except (ipc.MpvIpcError, OSError):
+                    pass
+            names.pop(url, None)
+            names[url] = [title, artist]
+            while len(names) > NAMES_CAP:
+                names.pop(next(iter(names)))
+            self._set(NAMES, names)
+        except (ipc.MpvIpcError, OSError) as e:
+            log.info("sink-music-sasonica: could not name %s: %s", url, e)
 
     def seek_cur(self, target: Target = SASONICA_TARGET, position_ms: int = 0) -> None:
         # The app's socket takes `seek`, not a write to `time-pos` (the

@@ -6569,7 +6569,8 @@ def cmd_music(a) -> int:
         ct = coerce_content_type(getattr(a, "as_type", None)) or detect_content_type(a.uri)
         if where in ("abs", "sasonica"):
             try:
-                m.play(a.uri, Target(name=where), replace=not a.add)
+                m.play(a.uri, Target(name=where), replace=not a.add,
+                       title=getattr(a, "title", "") or "")
             except Exception as e:  # noqa: BLE001
                 print(f"media music play ({where}) failed: {e}", file=sys.stderr)
                 return 1
