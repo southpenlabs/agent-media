@@ -113,6 +113,10 @@ class Turn:
     #: the rest since: `{sentence, at_s, dur_s}` — the first sentence not
     #: heard, the seconds into the reply it starts at, and the reply's length.
     resume: dict = field(default_factory=dict)
+    #: The song the music bed played under it, when there is one to play
+    #: again: `{source, title, artist}` (music_bed_song.shown; the reply's
+    #: ⋯ "Play the song").
+    song: dict = field(default_factory=dict)
 
     @property
     def title(self) -> str:
@@ -204,9 +208,16 @@ def turns(session: str, *, store=None) -> list[Turn]:
                         workspace=(ex.get("source_tmux_session") or "").strip(),
                         id=int(row.get("id") or 0),
                         unheard=bool(ex.get("held") and not ex.get("heard")),
-                        resume=_resume_of(ex)))
+                        resume=_resume_of(ex),
+                        song=_song_of(ex)))
     out.sort(key=lambda t: t.at)
     return out
+
+
+def _song_of(ex: dict) -> dict:
+    """`extras.bed_song` as the app is shown it (Turn.song), or {}."""
+    from .music_bed_song import shown
+    return shown(ex.get("bed_song")) or {}
 
 
 def _resume_of(ex: dict) -> dict:

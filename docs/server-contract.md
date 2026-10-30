@@ -1018,7 +1018,7 @@ written, with its steps and narration. Messages are read from the same file.
 | `role` | `"user"` or `"assistant"` |
 | `at` | epoch seconds, 3 dp, of the first record |
 | `parts` | in order, as the terminal draws them (below) |
-| `spoken` | the speech of this message, or `null` if it was not spoken (or cannot be recognised). `id` is the history row for `/speech/ctl replay-id` (`null` while it is still playing for the first time); `key` the reply's dedup key; `images`/`figure` as on lines, only when drawn; `live` only while it plays — the §6.2 live-line fields, moved here; `timeline` instead of `live` on the newest spoken turn when it is not playing (`{sentences, offsets, measured}`, §6.2); `unheard: true` on a reply held and never played (as on lines) — the app makes its play key the big one; `resume: {sentence, at_s, dur_s}` on a reply the listener interrupted (a Stop, or a reply that ended the reading) and has not heard again — `sentence` is the first not heard (clip index, what `replay-id` `sentence` takes), `at_s` the seconds into the reply it starts at, `dur_s` the reply's length; history `extras.stopped_at`, cleared when the reply is replayed; also written when a paused reply outlasts the speech lock's hold (`stopped_at.paused`, the sentence it was paused on, §`/speech/now` `left_paused`, 14 Oct 2026); the bar's Replay resumes it too (25 Sep 2026) |
+| `spoken` | the speech of this message, or `null` if it was not spoken (or cannot be recognised). `id` is the history row for `/speech/ctl replay-id` (`null` while it is still playing for the first time); `key` the reply's dedup key; `images`/`figure` as on lines, only when drawn; `live` only while it plays — the §6.2 live-line fields, moved here; `timeline` instead of `live` on the newest spoken turn when it is not playing (`{sentences, offsets, measured}`, §6.2); `unheard: true` on a reply held and never played (as on lines) — the app makes its play key the big one; `resume: {sentence, at_s, dur_s}` on a reply the listener interrupted (a Stop, or a reply that ended the reading) and has not heard again — `sentence` is the first not heard (clip index, what `replay-id` `sentence` takes), `at_s` the seconds into the reply it starts at, `dur_s` the reply's length; history `extras.stopped_at`, cleared when the reply is replayed; also written when a paused reply outlasts the speech lock's hold (`stopped_at.paused`, the sentence it was paused on, §`/speech/now` `left_paused`, 14 Oct 2026); the bar's Replay resumes it too (25 Sep 2026); `song: {source, title, artist}` (30 Oct 2026) on a reply the music under long readings played a song under (history `extras.bed_song`, `agent_media_core.music_bed_song`; `source` `favourites`, `streaming` or `library`, never `generated`) — the app's reply ⋯ offers "Play the song", `POST /music {"action": "song", "id"}` (§6.9a); also on lines |
 | `turn.running` | the turn is still going: the last record asked for a tool, or a tool has no result yet. Always `false` when the session is not live |
 | `command` | user messages that are a slash command only: `{name, args, text}`, the line's chip (`slash.py`); settings commands are never messages |
 | `peer` | user messages another session delivered into this one (a `<cross-session-message>`): `{name}`; the text is only the message body. Not the listener's words — the app shows a small "From <name>" and never counts it as a send of its own |
@@ -3085,6 +3085,24 @@ the state) when the verb failed.
 `"play"` and `"add"` take a `uri` (`yt:`, `http://` or `https://`) and put
 it on now or after what is playing (`media music play [--add]`, to the
 default place): Recently played's tap.
+
+`{"action": "song", "id", "session"?}` (30 Oct 2026) plays the song the
+music under long readings (roadmap 39) played under reply `id` — its speech
+history row's `extras.bed_song`, shown to the app as the reply's
+`spoken.song` (§6.2.2) — in the music player, as `"play"` does (`media music
+play <uri> --title "<title> — <artist>"`), so it shows in the Media tab with
+its controls: for "your favourites, instrumental" the ORIGINAL song, with
+its vocals (`yt:<video id>`); for a streaming bed its first song
+(`yt:<video id>`); for a library track (archive.org, ccMixter) the track's
+own download address. Only a row's recorded song, never any address. A
+generated bed records nothing. The answer adds `"song": {"source", "title",
+"artist", "when"}`: `when` is `"now"`, or `"after"` when a reply was being
+read at the tap — the song then starts once the reading ends (at most
+10 minutes later), so it neither cuts the reply off nor plays over it, and
+a streaming bed's tidy-up (Mopidy stopped, its tracks taken back) cannot
+stop it. 400 for an id that is not a positive integer; 404 when the row is
+not a reply with a song (or `session` names another thread); 502 when the
+play failed. The app's reply ⋯ "Play the song" (David, 30 Oct 2026).
 
 `{"action": "room", "id", "on"?, "volume"?}` (20 Oct 2026) switches one
 house speaker on or off (Snapcast mute) and/or sets its volume (0-100);

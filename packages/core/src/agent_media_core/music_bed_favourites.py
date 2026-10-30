@@ -394,6 +394,9 @@ def credit(entry: dict) -> dict:
             "url": f"https://music.youtube.com/watch?v={vid}" if vid else "",
             "source": "Your favourites", "method": method,
             "original_title": entry.get("title") or "",
+            # The original's video, with vocals: what "Play the song" plays
+            # (music_bed_song).
+            "original_id": vid,
             "made": entry.get("made") or ""}
 
 

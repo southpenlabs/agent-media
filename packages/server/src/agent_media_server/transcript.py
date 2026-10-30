@@ -1701,6 +1701,10 @@ def _spoken(line: dict) -> dict:
         # Interrupted part-way (§6.2.2): the ▶ resumes at `sentence`, and the
         # app says where — `at_s` into `dur_s` — and marks what was not heard.
         out["resume"] = line["resume"]
+    if line.get("song"):
+        # The song the music bed played under it (§6.2.2): the reply's ⋯
+        # offers "Play the song" (POST /music {"action": "song", "id"}).
+        out["song"] = line["song"]
     if line.get("live"):
         out["live"] = {k: line.get(k) for k in LIVE_FIELDS}
     elif line.get("sentences"):

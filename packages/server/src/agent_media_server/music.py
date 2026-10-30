@@ -15,6 +15,11 @@ server-contract.md §6.9a. Step 1 of docs/proposals/2026-09-28-music-tab.md
 plays a song from its list now, and `{"action": "dislike"}` is 👎:
 that song off the station, and the next one on.
 
+`{"action": "song", "id"}` plays the song the music bed played under reply
+`id` (its history row's `bed_song`, agent_media_core.music_bed_song): the
+reply's ⋯ "Play the song". The answer's `song` says what and `when` ("now",
+or "after" the reply being read ends).
+
 `where.rooms` is the house speakers one by one (agent_media_core.music_rooms):
 `{"action": "room", "id", "on"?, "volume"?}` switches one on or off and sets
 how loud it is. `{"action": "move"}` takes what is playing to where the next
@@ -57,6 +62,8 @@ ACTIONS = {
     "radio": "radio", "dislike": "dislike",
     # The house speakers one by one, and what is playing to another place.
     "room": "room", "move": "move",
+    # The song the music bed played under a reply, by its speech history id.
+    "song": "play",
 }
 
 _CACHE_TTL_S = 2.5
@@ -386,6 +393,78 @@ def _spawn(fn, *args) -> None:
     threading.Thread(target=fn, args=args, name="music-move", daemon=True).start()
 
 
+#: A reply still being read when its song is asked for: the song waits for
+#: it to end, this long at most, then this long more for the bed's own
+#: tidy-up (a streaming bed stops Mopidy and takes its tracks back).
+_SONG_WAIT_S = 600.0
+_SONG_SETTLE_S = 2.0
+_SONG_POLL_S = 1.0
+
+
+def _speaking() -> bool:
+    """Whether a reply is being read on this host now (cli._speech_in_flight)."""
+    try:
+        from agent_media_core.cli import _speech_in_flight
+
+        return bool(_speech_in_flight())
+    except Exception:  # noqa: BLE001 — not known: as if quiet
+        return False
+
+
+def _song_after_speech(argv: list[str]) -> None:
+    """Play the song once the reading ends (bounded), never over it."""
+    deadline = time.monotonic() + _SONG_WAIT_S
+    while _speaking() and time.monotonic() < deadline:
+        time.sleep(_SONG_POLL_S)
+    time.sleep(_SONG_SETTLE_S)
+    done, said = _run(argv)
+    _reset_cache()
+    if not done:
+        print(f"music: song after the reply failed: {said}", file=sys.stderr)
+
+
+def _song_control(body: dict) -> tuple[bool, dict]:
+    """`{"action": "song", "id", "session"?}`: the song the music bed played
+    under reply `id` (its speech history row's `extras.bed_song`,
+    agent_media_core.music_bed_song), played in the music player as
+    `media music play` does — the original of a favourite, a streaming
+    track, a library track's own address. Only a row's recorded song, so it
+    is not a way to play any address. While a reply is being read it waits
+    for the reading to end (`song.when` "after"), so it neither cuts the
+    reply off nor plays over it, and a streaming bed's tidy-up cannot stop
+    it; else it starts now ("now")."""
+    from agent_media_core.music_bed_song import label, shown
+    from agent_media_core.state.store import StateStore
+
+    rid = body.get("id")
+    if isinstance(rid, bool) or not isinstance(rid, int) or rid <= 0:
+        return False, {"error": "id must be a reply's speech history id", "status": 400}
+    row = StateStore().history_row(rid)
+    ex = (row or {}).get("extras") if (row or {}).get("sink") == "speech" else None
+    ex = ex if isinstance(ex, dict) else {}
+    song = ex.get("bed_song")
+    session = body.get("session")
+    if not shown(song) or (isinstance(session, str) and session
+                           and ex.get("source_session") not in (None, "", session)):
+        return False, {"error": "no song was played under that reply", "status": 404}
+    uri = str(song.get("uri") or "").strip()
+    if uri.startswith("-") or not uri.startswith(("yt:", "http://", "https://")):
+        return False, {"error": "no song was played under that reply", "status": 404}
+    argv = ["play", uri]
+    if label(song):
+        argv.append(f"--title={label(song)}")
+    if _speaking():
+        threading.Thread(target=_song_after_speech, args=(argv,), name="music-song",
+                         daemon=True).start()
+        return True, {**_answer(), "song": {**shown(song), "when": "after"}}
+    done, said = _run(argv)
+    _reset_cache()
+    if not done:
+        print(f"music: song {uri} failed: {said}", file=sys.stderr)
+        return False, {"error": said or "play failed", "status": 502, **_answer()}
+    return True, {**_answer(), "song": {**shown(song), "when": "now"}}
+
+
 def _radio_control(body: dict) -> tuple[bool, dict]:
     """`radio` (start, or `off`) and `dislike`."""
     from agent_media_core import radio
@@ -513,6 +592,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         return _room_control(body)
     if action == "move":
         return _move_control()
+    if action == "song":
+        return _song_control(body)
     argv = [ACTIONS[action]]
     if action in ("seek", "seek-by"):
         key = "to" if action == "seek" else "by"

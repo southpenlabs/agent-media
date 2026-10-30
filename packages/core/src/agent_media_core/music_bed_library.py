@@ -248,7 +248,10 @@ def credit(entry: dict) -> dict:
     """What the app shows: title, creator, the licence and the page."""
     return {"title": entry.get("title") or "", "creator": entry.get("creator") or "",
             "license": entry.get("license") or "", "license_url": entry.get("license_url") or "",
-            "url": entry.get("url") or "", "source": entry.get("source") or ""}
+            "url": entry.get("url") or "", "source": entry.get("source") or "",
+            # The address of the audio itself: what "Play the song" plays
+            # (music_bed_song).
+            "download": entry.get("download") or ""}
 
 
 def track_for(genre: str) -> Optional[tuple[Path, dict]]:

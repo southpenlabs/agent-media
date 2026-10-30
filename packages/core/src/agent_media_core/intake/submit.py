@@ -4142,6 +4142,7 @@ def _submit_event(event: Event,
     people_tone = False  # likewise
     bed_tone = False     # likewise: the music bed (music_bed.py) is under it
     bed_stop = None      # likewise: what ends the bed (Mopidy's tracks, its credit)
+    bed_song = None      # the song the bed played, for the row (music_bed_song)
     def _allowed() -> bool:
         try:
             return playback_allowed is None or playback_allowed()
@@ -4850,6 +4851,8 @@ def _submit_event(event: Event,
                                       in sorted(mark_clock["audio"].items())}
         if fallback_info:
             extras["fallback"] = fallback_info
+        if bed_song:
+            extras["bed_song"] = bed_song
         if muted:
             extras["muted"] = True   # rendered but never played (popup can replay)
         if flushed:
@@ -5177,6 +5180,10 @@ def _submit_event(event: Event,
             if bed_plan is not None:
                 from .. import music_bed
                 bed_tone, bed_stop = music_bed.start(bed_plan, target, sink)
+                # Which song it was, kept on the reply's row: the reply's ⋯
+                # "Play the song" (music_bed_song; David, 30 Oct 2026).
+                from .. import music_bed_song
+                bed_song = music_bed_song.started(bed_plan, bed_tone, bed_stop)
                 if not bed_tone and bed_stop is None and (reply_tone or people_tone):
                     from .. import earcons
                     earcons.play_under(
