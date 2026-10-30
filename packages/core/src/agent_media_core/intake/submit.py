@@ -6097,6 +6097,14 @@ def _submit_event(event: Event,
                           pane=source_pane, source=event.source.value,
                           target=target.name, played=bool(played_any))
             state.clear_now_playing("speech")
+            # Back to 1× for the next reply, when the listener chose that
+            # (speech_speed.py); otherwise the rate stays on the player.
+            try:
+                from .. import speech_speed
+                from ..sinks.speech import _socket_for
+                speech_speed.at_reply_end(_socket_for(target))
+            except Exception:  # noqa: BLE001 — never cost the cleanup
+                log.debug("speed reset failed", exc_info=True)
             # Another reading about to start: the bed is held for it rather
             # than ended (music_bed_mix carry); else one held across this
             # reading plays its ending.

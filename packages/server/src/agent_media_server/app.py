@@ -173,6 +173,8 @@ device gets its token):
                   the server's (music_bed.py)
   GET|POST /speech/balance {"balance"} → how loud speech is next to music
                   in the app, -100..100; the server's (speech_balance.py)
+  GET|POST /speech/speed-reset {"reset"} → whether the speech rate goes
+                  back to 1× as each reply ends; the server's (speech_speed.py)
   GET|POST /speech/voice {"mode", "voice"?} → the speech target's replies
                   rendered on the phone (Android TTS) or by the server, and
                   in which voice, by language and accent (render/device.py,
@@ -396,7 +398,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/music-bed", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -432,6 +434,7 @@ CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
 GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/balance",
+                         "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
                          "/book/state"}) | AUDIO_PATHS | MUSIC_PATHS
 
@@ -1991,6 +1994,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Speech next to music in the app (speech_balance.py).
         ok, detail = pins.speech_balance(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/speed-reset":
+        # Whether the speech rate goes back to 1× after a reply (speech_speed.py).
+        ok, detail = pins.speech_speed_reset(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/music-bed":
         # Music under a long reading (music_bed.py): off, auto or a mood.
         ok, detail = pins.speech_music_bed(_bearer(h))
@@ -3344,6 +3351,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # A missing or null balance is a bad one, not a read.
         balance = body.get("balance")
         ok, detail = pins.speech_balance(_bearer(h), balance="" if balance is None else balance)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/speed-reset":
+        # Settings' and the full player's "Back to 1× after each reply".
+        body = _read_json(h) or {}
+        # A missing or null reset is a bad one, not a read.
+        reset = body.get("reset")
+        ok, detail = pins.speech_speed_reset(_bearer(h), reset="" if reset is None else reset)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/music-bed":
         # Settings' Music under long readings.

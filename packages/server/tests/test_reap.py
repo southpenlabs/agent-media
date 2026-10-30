@@ -748,6 +748,20 @@ def test_speech_balance_is_the_servers(server, shelf, signed_in, typed):
     assert speech_balance.balance() == 35
 
 
+def test_speed_reset_is_the_servers(server, shelf, signed_in, typed):
+    from agent_media_core import speech_speed
+
+    res, obj = call(server, "GET", "/speech/speed-reset", headers=AUTH)
+    assert res.status == 200 and obj == {"ok": True, "reset": False}
+    res, obj = call(server, "POST", "/speech/speed-reset", {"reset": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "reset": True}
+    assert speech_speed.reset_after_reply() is True
+    for bad in ({}, {"reset": "yes"}, {"reset": 1}, {"reset": None}):
+        res, obj = call(server, "POST", "/speech/speed-reset", bad, AUTH)
+        assert res.status == 400, bad
+    assert speech_speed.reset_after_reply() is True
+
+
 def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
     from agent_media_core import music_bed
 

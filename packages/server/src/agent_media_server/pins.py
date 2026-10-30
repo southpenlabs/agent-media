@@ -201,6 +201,26 @@ def speech_balance(bearer: str, balance=None) -> tuple[bool, dict]:
     return True, {"balance": b, "speech": sb.speech_level(b), "music": sb.music_level(b)}
 
 
+def speech_speed_reset(bearer: str, reset=None) -> tuple[bool, dict]:
+    """`GET /speech/speed-reset` and `POST /speech/speed-reset {"reset"}`:
+    whether the speech rate goes back to 1× as each reply ends
+    (speech_speed.py). Off until set. The server's, so every device's. With
+    `reset` None, only read."""
+    from agent_media_core import speech_speed
+
+    if reset is not None and not isinstance(reset, bool):
+        return False, {"error": "reset must be true or false", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    if reset is not None:
+        try:
+            speech_speed.set_reset_after_reply(reset)
+        except OSError as e:
+            return False, {"error": f"could not save the setting ({e})", "status": 500}
+    return True, {"reset": speech_speed.reset_after_reply()}
+
+
 _UNSET = object()
 
 

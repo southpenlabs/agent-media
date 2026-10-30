@@ -4952,6 +4952,12 @@ def _follow_replay(a) -> int:
                 state.clear_now_playing("speech")
         except Exception:  # noqa: BLE001
             pass
+        # A replay ends like a reply: back to 1× if chosen (speech_speed.py).
+        try:
+            from . import speech_speed
+            speech_speed.at_reply_end(_sock())
+        except Exception:  # noqa: BLE001
+            pass
         return 0
 
     then_id = getattr(a, "then_id", None)

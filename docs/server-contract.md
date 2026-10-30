@@ -2170,6 +2170,22 @@ The server's, so every device's. Kept in `<state_dir>/speech-balance.json`.
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_speech_balance.py`.
 
+#### `GET` / `POST /speech/speed-reset` — gated (31 Oct 2026)
+
+`GET` → `{"ok": true, "reset"}`; `POST {"reset"}` → the same, after setting
+it. Whether the speech rate goes back to 1× as each reply (or replay) ends:
+`false` until set, when a speed set on one reply stays for the next. On, the
+end of a reply writes 1.0 down as the rate (so the bars say 1×) and sets it
+on the player, best effort, only when it was not 1.0 already. The server's,
+so every device's. Kept in `<state_dir>/speech-speed-reset.json`
+(`agent_media_core/speech_speed.py`). 400 for anything but `true` or
+`false`; in `CORS_PATHS` and open to guests, like `/speech/balance`. The app
+shows it under the full player's speed keys and in Settings › Speech (David,
+31 Oct 2026: "a setting for whether or not speed resets after each turn").
+
+Pinned by `packages/server/tests/test_reap.py` and
+`packages/core/tests/test_speech_speed.py`.
+
 #### `GET` / `POST /speech/music-bed` — gated (26 Oct 2026)
 
 `GET` → `{"ok": true, "choice", "set", "choices": [{"id", "label"}],
