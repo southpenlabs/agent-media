@@ -231,3 +231,21 @@ def test_rooms_only_or_none(rooms, home_claude):
     # Thread hits follow it too: the room's name is gone without rooms.
     assert [t["session"] for t in ask("sam", rooms="only")["threads"]] == [r.thread]
     assert ask("sam", rooms="none")["threads"] == []
+
+
+def test_a_restart_skips_a_room_that_holds_what_was_indexed(rooms):
+    r, _ = rooms(_story(5, {3: "quiet heron"}))
+    search.refresh()
+    conn = search._connect()
+    before = conn.total_changes
+    search._MATRIX_REV.clear()                         # a new process
+    got = search._index_room(conn, r, blocking=True)
+    assert got is False and conn.total_changes == before
+    assert search._MATRIX_REV[r.thread] == r.rev
+    assert [h["message"] for h in ask("heron")["messages"]] == ["$3"]
+    # What it holds changed while the canvas was down: read again.
+    matrix._ROOMS.clear()
+    r2, _ = rooms(_story(6, {3: "quiet heron", 6: "loud heron"}))
+    search._MATRIX_REV.clear()
+    assert search._index_room(conn, r2, blocking=True) is True
+    assert [h["message"] for h in ask("heron")["messages"]] == ["$6", "$3"]

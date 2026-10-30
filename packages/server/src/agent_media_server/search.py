@@ -64,6 +64,7 @@ Read-only toward every transcript; the only file written is the index.
 
 from __future__ import annotations
 
+import hashlib
 import glob
 import json
 import os
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS threads (
 CREATE TABLE IF NOT EXISTS docs (
   id INTEGER PRIMARY KEY, session TEXT, msg TEXT, role TEXT, at REAL,
   pos INTEGER, kind INTEGER, body TEXT);
+CREATE TABLE IF NOT EXISTS rooms (session TEXT PRIMARY KEY, sig TEXT);
 CREATE INDEX IF NOT EXISTS docs_session_pos ON docs(session, pos);
 CREATE VIRTUAL TABLE IF NOT EXISTS text_fts USING fts5(
   body, content='docs', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
@@ -154,7 +156,7 @@ def _connect() -> sqlite3.Connection:
 
 def _wipe(conn: sqlite3.Connection) -> None:
     conn.execute("BEGIN IMMEDIATE")
-    for t in ("files", "threads", "docs"):
+    for t in ("files", "threads", "docs", "rooms"):
         conn.execute(f"DELETE FROM {t}")
     conn.execute("INSERT INTO text_fts(text_fts) VALUES('delete-all')")
     conn.execute("INSERT INTO tool_fts(tool_fts) VALUES('delete-all')")
@@ -176,6 +178,7 @@ def forget(session: str) -> int:
             _delete_docs(conn, "session=?", (session,))
             conn.execute("DELETE FROM threads WHERE session=?", (session,))
             conn.execute("DELETE FROM files WHERE session=?", (session,))
+            conn.execute("DELETE FROM rooms WHERE session=?", (session,))
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -731,6 +734,15 @@ def _index_room(conn: sqlite3.Connection, r, blocking: bool) -> bool | None:
         title, back = r.title(), r.back
     finally:
         r.lock.release()
+    sig = hashlib.sha1(json.dumps([title, held]).encode()).hexdigest()
+    if first and not amends:
+        # A restart reads every room again: one holding what was last
+        # indexed is done. Without this each one was read against its rows,
+        # 40 s to 3 min of the canvas after every restart (30 Oct 2026).
+        got = conn.execute("SELECT sig FROM rooms WHERE session=?", (r.thread,)).fetchone()
+        if got and got[0] == sig:
+            _MATRIX_REV[r.thread] = rev
+            return False
     conn.execute("BEGIN IMMEDIATE")
     try:
         have = _indexed(conn, r.thread)
@@ -753,6 +765,8 @@ def _index_room(conn: sqlite3.Connection, r, blocking: bool) -> bool | None:
         _upsert_thread(conn, r.thread, "matrix",
                        {"title": _one_line(title), "first_at": min(ats) if ats else None,
                         "last_at": max(ats) if ats else None})
+        conn.execute("INSERT OR REPLACE INTO rooms VALUES (?, ?)",
+                     (r.thread, None if amends else sig))
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
