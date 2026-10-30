@@ -60,6 +60,12 @@ turn and never over a question or permission card (headless_mail.py).
 `ListAgents` and `SendMessage` cannot see these sessions: sessiond strips
 their messaging socket.
 
+Talk to another agent's session only through agent mail
+(`agent-mail-deliver`, `media session send`), never by typing or pasting
+into its pane (`tmux send-keys`, a paste). Those tools sign the words
+(`[From <you>]`); words typed into a pane read as David's own, in his
+thread, in Sent and Waiting for reply, and to the agent there.
+
 ## Testing without touching a real device
 
 A shell on a working install carries the real config, so tests can reach
