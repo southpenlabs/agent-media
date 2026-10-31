@@ -2160,6 +2160,14 @@ ahead.
     on its own timer while open and on the next open. Not run on a device,
     and the Android unit tests (NotifyRulesTest) need the SDK that CI has,
     not this host.
+    **It unarchives** (David, 31 Oct 2026: "does bring back also
+    unarchive?" — he chose unarchive when due) — **DONE 31 Oct 2026**: a
+    reminder on an archived thread leaves it archived until due; then the
+    server takes the archive flag off, once per reminder, wherever due
+    reminders are worked out (rows, `/dashboard`, the phone's stream), so
+    the phone's "Back · <title>" opens a thread that is in the list.
+    Show → Reminders lists reminders on archived threads too, marked
+    Archived (agent-media `59475c9c`, sasonica-app `073adc6`).
 
 45. **Hands-free from the player** (David, 30 Oct 2026: "a button to turn
     on hands-free for that thread... the input field would have to pop up
