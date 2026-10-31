@@ -7472,6 +7472,35 @@ it for now — the per-user step
 (`docs/proposals/2026-09-23-accounts-and-the-identity-seam.md`) is a file
 per account key and the readers passing the listener's.
 
+### 6.43 What's new as a thread — gated (built 31 Oct 2026)
+
+Code: `agent_media_server/news_thread.py`. Pinned by
+`packages/server/tests/test_news_thread.py`. David, 31 Oct 2026: "let's make
+it like a thread and have the reply row beneath it with all the buttons so
+that people can reply with feedback ... a light introduction to how things
+work"; replies go to an agent chat in the app's folder, and a notice takes
+the pop-up's place.
+
+- `GET /news` → `{"ok": true, "enabled", "session": <id> | null, "title"?}`.
+  `enabled` is whether this server has the thread: `MEDIA_NEWS_FOLDER` names
+  an existing folder (the app's source, on a host that builds it). Off, the
+  app keeps its What's new sheet.
+- `POST /news {"entries": [{"id", "items": [...]}], "intro"?: bool}` →
+  `{"ok": true, "session", "sent", "fresh"?, "pending"?, "title"?}`. The
+  app's entries since this device last looked, newest first, as written in
+  the app. The first post starts a headless chat in that folder (as
+  `media session start`, named "What's new"); later ones are sent into it
+  (as `media session send`: never over a question card — then `sent: false,
+  pending: true`, and the next launch tries again). The message is from the
+  app, not the listener: the entries, and to read them out in plain words,
+  with, the first time (or `intro`), a short word on how a thread works;
+  what the listener answers is feedback the agent can act on. Entries no
+  newer than the last posted are not sent again (`sent: false`): a second
+  device, a relaunch. A thread that is gone is started afresh.
+- 404 when off, 400 `expected entries [{id, items}]`, 503 when the session
+  host is down or refuses the start. CORS as the other app routes.
+- Kept in `<state_dir>/news-thread.json` (`{"session", "posted"}`).
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

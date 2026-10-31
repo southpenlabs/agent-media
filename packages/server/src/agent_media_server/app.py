@@ -398,7 +398,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -1601,6 +1601,16 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # fall through to the caller's 404 on a socket it already wrote to.
         _thread_events(h, events.group(1), query)
         return True
+    if path == "/news":
+        # What's new as a thread (§6.43, news_thread.py): is there one here?
+        from . import news_thread
+
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+        else:
+            _json(h, 200, {"ok": True, **news_thread.state()})
+        return True
     if path == "/sessions/events":
         # Every session's state as a stream (§6.13): the phone's background
         # notifier. Answers the request however it ends.
@@ -2716,6 +2726,19 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_say(h)
     elif path == "/speech/say":
         _speech_say(h)
+    elif path == "/news":
+        # An update's entries, handed to the What's new thread (§6.43).
+        from . import news_thread
+
+        bearer = _bearer(h)
+        user, err = auth.gate(bearer)
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        body = _read_json(h) or {}
+        body = body if isinstance(body, dict) else {}
+        ok, detail = news_thread.post(body.get("entries"), body.get("intro") is True, bearer)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/contacts/google/login", "/contacts/google/finish",
                   "/contacts/google/signout"):
         _contacts_google(h, path.rsplit("/", 1)[1])
