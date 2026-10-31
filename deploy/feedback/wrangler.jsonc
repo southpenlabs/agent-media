@@ -17,7 +17,7 @@
   "compatibility_date": "2026-07-01",
   // Feedback is people's own words: no invocation logs.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } },
-  "d1_databases": [{ "binding": "DB", "database_name": "sasonica-feedback", "database_id": "00000000-0000-0000-0000-000000000000" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "sasonica-feedback", "database_id": "040d984f-1f0f-49f4-a2f5-c092d1b01af8" }],
   // Requests per source address (on top of the per-install limits in the code).
   "ratelimits": [{ "name": "WRITES", "namespace_id": "4816", "simple": { "limit": 30, "period": 60 } }]
 }
