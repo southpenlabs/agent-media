@@ -819,9 +819,15 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
             add(song, LIKE_POINTS, "youtube-liked")
         if s["plays"]:
             add(song, s["plays"], "youtube")
-    lb = _from_listenbrainz(listenbrainz_user())
+    lb = [{**r, "via": "listenbrainz"} for r in _from_listenbrainz(listenbrainz_user())]
+    # His Spotify (music_accounts.spotify_songs): named the same way.
+    try:
+        from . import music_accounts
+        lb += [{**r, "via": "spotify"} for r in music_accounts.spotify_songs(now)]
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed favourites: Spotify: %s", e)
     lb.sort(key=lambda r: -(r["plays"] + (LIKE_POINTS if r["loved"] else 0)))
-    for r in lb[: max_favourites() * 2]:
+    for r in lb[: max_favourites() * 3]:
         k = key_for(r["artist"], r["title"])
         song = None
         if k in merged:
@@ -843,7 +849,7 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
                 data["lookups"][f"lb:{k}"] = song or {}
         if song:
             add(song, r["plays"] + (LIKE_POINTS if r["loved"] else 0),
-                "listenbrainz-loved" if r["loved"] else "listenbrainz")
+                f"{r['via']}-loved" if r["loved"] else r["via"])
     for k, s in suggested().items():
         if s.get("id"):
             add({**s, "dur": s.get("dur") or MIN_TRACK_S}, SUGGEST_POINTS, "suggested")

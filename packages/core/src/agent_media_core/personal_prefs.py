@@ -124,6 +124,10 @@ FIELDS: dict[str, tuple[str, str, str]] = {
                           "Your most played and loved songs, for Your favourites, "
                           "instrumental. Filled in for you when you sign in with "
                           "your token; a public profile works with the name alone."),
+    "spotify.client_id": ("text", "Spotify app client ID",
+                          "From your own app at developer.spotify.com (needs Premium): its "
+                          "Settings → Client ID. Then sign in with Spotify; your top, saved "
+                          "and recent songs count toward Your favourites, instrumental."),
     "youtube.profiles": ("text", "YouTube accounts",
                          "yt-profile names on this server, comma separated (e.g. "
                          "davidj4,davidj4music): their YouTube likes, history and music "
@@ -139,7 +143,7 @@ GROUPS = (
     ("astro", "Astro Tunes", ("astro.enabled", "astro.birth_date", "astro.birth_time",
                               "astro.birth_place", "astro.to_model")),
     ("accounts", "Music accounts", ("listenbrainz.user", "listenbrainz.token",
-                                    "youtube.profiles")),
+                                    "youtube.profiles", "spotify.client_id")),
 )
 
 #: The environment a field falls back to, first set wins.
@@ -149,6 +153,7 @@ ENV = {
     "listenbrainz.user": ("MEDIA_LISTENBRAINZ_USER", "MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER"),
     "listenbrainz.token": ("MEDIA_LISTENBRAINZ_TOKEN",),
     "youtube.profiles": ("MEDIA_YOUTUBE_PROFILES",),
+    "spotify.client_id": ("MEDIA_SPOTIFY_CLIENT_ID",),
 }
 
 
@@ -331,6 +336,10 @@ def _validate(field: str, value: Any) -> Any:
     if field == "listenbrainz.user":
         if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", value):
             raise Invalid(field, "a ListenBrainz username is letters, digits, _ . -")
+        return value
+    if field == "spotify.client_id":
+        if not re.fullmatch(r"[0-9a-f]{32}", value):
+            raise Invalid(field, "a Spotify client ID is 32 letters a-f and digits")
         return value
     if field == "youtube.profiles":
         if not re.fullmatch(r"[A-Za-z0-9_.\-]+(\s*,\s*[A-Za-z0-9_.\-]+)*", value):
@@ -654,6 +663,12 @@ def status(user: Optional[str] = None) -> dict:
             # both fields null).
             group["signin"] = {"service": "listenbrainz", "label": "ListenBrainz",
                                **listenbrainz_signin(user)}
+            try:
+                from . import music_accounts
+                group["spotify"] = {**music_accounts.spotify_signed_in(),
+                                    "start": "/accounts/spotify/start"}
+            except Exception:  # noqa: BLE001
+                pass
         groups.append(group)
     return {"scope": SCOPE, "groups": groups, "sources": sources(user),
             "privacy": ("Kept on this server only, readable by its admins. Your birth details "

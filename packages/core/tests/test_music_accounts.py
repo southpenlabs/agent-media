@@ -77,3 +77,63 @@ def test_the_setting(isolated):
     assert A.youtube_profiles() == ["davidj4", "davidj4music"]
     with pytest.raises(P.Invalid):
         P.update({"youtube.profiles": "a;rm -rf"})
+
+
+# ---- Spotify ------------------------------------------------------------------------------
+
+CID = "63432639554e45a38849c335681e9b4e"
+
+
+def test_spotify_sign_in_and_read(monkeypatch):
+    import urllib.parse
+    P.update({"spotify.client_id": CID})
+    calls = []
+
+    def http(url, data=None, token="", timeout=20.0):
+        calls.append((url.split("?")[0], dict(data or {}), token))
+        if url.endswith("/api/token") and data["grant_type"] == "authorization_code":
+            return {"access_token": "a1", "refresh_token": "r1"}
+        if url.endswith("/api/token"):
+            return {"access_token": "a2", "refresh_token": "r2"}
+        if url.endswith("/me"):
+            return {"display_name": "David"}
+        if "/me/top/tracks" in url:
+            return {"items": [{"name": "Teardrop", "artists": [{"name": "Massive Attack"}]}]}
+        if "/me/tracks" in url:
+            return {"items": [{"track": {"name": "Paranoid", "artists": [{"name": "Black Sabbath"}]}}],
+                    "next": None}
+        if "recently-played" in url:
+            return {"items": [{"track": {"name": "Teardrop", "artists": [{"name": "Massive Attack"}]}}]}
+        raise AssertionError(url)
+    monkeypatch.setattr(A, "_http", http)
+    url = A.spotify_begin(now=100.0)
+    q = urllib.parse.parse_qs(url.partition("?")[2])
+    assert q["client_id"] == [CID] and q["code_challenge_method"] == ["S256"]
+    assert q["redirect_uri"] == ["https://red5.sasonica.com/accounts/spotify/callback"]
+    with pytest.raises(ValueError):
+        A.spotify_finish("c", "wrong", now=110.0)
+    assert A.spotify_finish("c", q["state"][0], now=110.0) == {"user": "David"}
+    assert calls[0][1]["code_verifier"] and A.spotify_signed_in() == {"signed_in": True, "user": "David"}
+    assert oct(A._sp_path().stat().st_mode & 0o777) == "0o600"
+    songs = {s["title"]: s for s in A.spotify_songs(now=200.0)}
+    assert songs["Paranoid"]["loved"] and songs["Teardrop"]["plays"] == 2 * 5 + 5 + 1
+    assert A._sp_load()["refresh_token"] == "r2"  # the rotated one is kept
+    n = len(calls)
+    A.spotify_songs(now=300.0)
+    assert len(calls) == n  # kept a day
+
+
+def test_spotify_pending_expires(monkeypatch):
+    import urllib.parse
+    P.update({"spotify.client_id": CID})
+    state = urllib.parse.parse_qs(A.spotify_begin(now=0.0).partition("?")[2])["state"][0]
+    with pytest.raises(ValueError):
+        A.spotify_finish("c", state, now=A.PENDING_S + 1)
+
+
+def test_spotify_needs_a_client_id():
+    with pytest.raises(ValueError):
+        A.spotify_begin()
+    assert A.spotify_songs() == []
+    with pytest.raises(P.Invalid):
+        P.update({"spotify.client_id": "not-an-id"})
