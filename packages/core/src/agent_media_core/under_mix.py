@@ -48,6 +48,8 @@ from typing import Callable, Optional
 log = logging.getLogger(__name__)
 
 RIDE_STEP_S = 0.03
+#: How often a rider reads Settings' level (a change is heard within it).
+LEVEL_CHECK_S = 1.0
 #: The end of a clip counted as its trailing silence, not voice.
 TAIL_TRIM_S = 0.12
 OPEN_HZ = 20000.0
@@ -143,6 +145,11 @@ class Bed:
         self.argv = list(argv or [])
         self.adopted = adopted
         self.offset_db = float(mix.get("gain_db") or 0.0)
+        # The level the mix was made at, and the offset it gave: Settings
+        # moving the level moves a bed already playing by the difference.
+        self._base_db = self.offset_db
+        self._made_at = mix.get("level_db")
+        self._level_checked = 0.0
         self.extra_db = 0.0
         self.env = Envelope(mix.get("attack_ms", 80), mix.get("release_ms", 400),
                             mix.get("hold_ms", 250))
@@ -200,8 +207,24 @@ class Bed:
                 props = {}
             a = self.env.step(voiced(props), now, now - last)
             last = now
+            if now - self._level_checked >= LEVEL_CHECK_S:
+                self._level_checked = now
+                self.follow_level()
             self.apply(a)
             self._stop.wait(RIDE_STEP_S)
+
+    def follow_level(self, level: Optional[float] = None) -> None:
+        """Settings' level now (music_bed.gain_db unless given): the bed moves
+        by its difference from the level its mix was made at."""
+        if self._made_at is None:
+            return
+        if level is None:
+            try:
+                from . import music_bed
+                level = music_bed.gain_db()
+            except Exception:  # noqa: BLE001
+                return
+        self.offset_db = self._base_db + float(level) - float(self._made_at)
 
     def stop(self, settle: bool = True) -> None:
         """Stop riding; `settle` puts the music back to its level between

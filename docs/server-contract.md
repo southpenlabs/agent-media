@@ -2417,7 +2417,11 @@ far under a reply's voice the music sits, roughly (`VOICE_REF_DB`, 10: a kept
 track at -30 LUFS under a voice measured near -20); stored, and used by the
 renders and the duck, `VOICE_REF_DB` higher, against the first beds
 (-24..6), so a stored -12 reads -22; the level `POST {"settings": {"gain_db":
-n|null}}`, n on the shown scale, has set since 83dcd049), `slow` (bool), and six bools, all on by default (each
+n|null}}`, n on the shown scale, has set since 83dcd049; heard at once since
+31 Oct 2026: a mix carries `level_db`, the stored level it was made at, and
+a change writes the stored level now to every phone target as
+`user-data/agent-media/under-level`, so a bed playing moves by the
+difference; this host's rider reads it every `LEVEL_CHECK_S`, 1 s), `slow` (bool), and six bools, all on by default (each
 `MEDIA_MUSIC_BED_<ID>=0|off` turns its default off; Settings wins): `breathe`,
 `carve`, `intro`, `outro`, `sweep`, `carry`. `POST {"settings": {"<id>":
 true|false|null}}`; 400 for a non-bool. An app renders any `bool` and `range`

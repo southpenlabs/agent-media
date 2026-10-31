@@ -191,6 +191,14 @@ def level_offset(source: str, path) -> float:
 
 # ---- what a player is told --------------------------------------------------------------
 
+def _stored_level() -> float:
+    from . import music_bed
+    try:
+        return round(float(music_bed.gain_db()), 2)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def params(source: str, style: str, path, long: bool = False) -> dict:
     """The mix for one bed, as a phone is told it (JSON) and this host's
     under player uses it: every effect's amount, 0 for one switched off.
@@ -222,6 +230,9 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
         # player's ride takes `breathe_db` off this while the voice sounds).
         "gain_db": round(level_offset(source, path) + swell, 2),
         "breathe_db": swell,
+        # The stored level this mix was made at: a later change moves a bed
+        # already playing by the difference (UNDER_LEVEL_PROPERTY, Rider).
+        "level_db": _stored_level(),
         "attack_ms": tunable("ATTACK_MS"),
         "release_ms": tunable("RELEASE_MS"),
         "hold_ms": tunable("HOLD_MS"),

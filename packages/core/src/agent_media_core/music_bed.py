@@ -158,6 +158,7 @@ import os
 import random
 import subprocess
 import sys
+import threading
 import time
 import wave
 from datetime import datetime
@@ -1540,6 +1541,14 @@ def settings() -> list[dict]:
             + music_bed_mix.settings())
 
 
+def _push_level() -> None:
+    try:
+        from .sinks import speech
+        speech.push_under_level(gain_db())
+    except Exception as e:  # noqa: BLE001
+        log.debug("music-bed: level push: %s", e)
+
+
 def set_settings(values: dict) -> None:
     """Save `{id: value}` from POST /speech/music-bed's `settings` (null
     forgets one). ValueError for an unknown id or a bad value, before any
@@ -1571,6 +1580,10 @@ def set_settings(values: dict) -> None:
     if "gain_db" in values:
         v = values["gain_db"]
         set_gain(None if v is None else stored_from_shown(v))
+        # A bed playing now hears it at once (a phone through its property;
+        # this host's rider reads gain_db itself). In the background: a
+        # phone can take seconds to answer.
+        threading.Thread(target=_push_level, name="music-bed-level", daemon=True).start()
         # The files at the new level, rendered and re-levelled in the
         # background; until then each plays at the new level by its offset.
         spawn_warm()

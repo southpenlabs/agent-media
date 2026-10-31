@@ -217,6 +217,12 @@ TONE_KIND_PROPERTY = "user-data/agent-media/tone-kind"
 #: play_under before UNDER_LOOP_PROPERTY; "" for a tone. The app rides the
 #: bed by it and takes it with the clip.
 UNDER_MIX_PROPERTY = "user-data/agent-media/under-mix"
+#: The backing music level as stored now (music_bed.gain_db, dB), written to
+#: every phone target when Settings changes it (push_under_level): a bed
+#: already playing moves by its difference from the mix's `level_db`, so
+#: the slider is heard at once (David, 31 Oct 2026: "The backing music
+#: slider doesn't seem to affect the backing music").
+UNDER_LEVEL_PROPERTY = "user-data/agent-media/under-level"
 #: Written at a reading's natural end when another is about to start
 #: (hold_under): the window, ms, the app keeps the bed playing for it.
 UNDER_HOLD_PROPERTY = "user-data/agent-media/under-hold"
@@ -1444,3 +1450,28 @@ class SinkSpeech:
             return bool(ipc.get_property(_socket_for(target), "mute"))
         except ipc.MpvIpcError:
             return False
+
+
+def push_under_level(db: float) -> int:
+    """Tell every phone speech target the backing music level now
+    (UNDER_LEVEL_PROPERTY). Best effort, one try each; the number told."""
+    try:
+        from ..audio_targets import speech_options
+        names = [o["name"] for o in speech_options()]
+    except Exception:  # noqa: BLE001
+        names = [DEFAULT_TARGET]
+    told, seen = 0, set()
+    for name in names:
+        try:
+            sock = str(_socket_for(name))
+        except Exception:  # noqa: BLE001
+            continue
+        if not sock.startswith("tcp://") or sock in seen:
+            continue
+        seen.add(sock)
+        try:
+            ipc.set_property(sock, UNDER_LEVEL_PROPERTY, f"{float(db):.2f}")
+            told += 1
+        except (ipc.MpvIpcError, OSError) as e:
+            log.debug("sink-speech: under level to %s failed: %s", name, e)
+    return told
