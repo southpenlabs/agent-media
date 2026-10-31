@@ -7,7 +7,7 @@ book channel, as a document is (docs.py): a ten-minute session is a short
 audiobook, so Pause, Stop, seek and the mini player already understand it,
 and a reply that arrives during it pauses it rather than talking over it.
 It is eased out, not cut (David, 31 Oct 2026: "ease out of it instead of
-pausing for speech"): faded down over MEDIA_MEDITATE_EASE_OUT_S (1.0) before
+pausing for speech"): faded down over MEDIA_MEDITATE_EASE_OUT_S (5.0) before
 the pause and back up over MEDIA_MEDITATE_EASE_IN_S (2.0) after
 (route/coordinator.py `_ease_book_out`, SinkBook.fade_volume).
 
@@ -101,7 +101,7 @@ def mood() -> str:
 
 def ease_out_s() -> float:
     """How long a meditation fades before a reply pauses it."""
-    return min(5.0, max(0.0, _num_env("MEDIA_MEDITATE_EASE_OUT_S", 1.0)))
+    return min(10.0, max(0.0, _num_env("MEDIA_MEDITATE_EASE_OUT_S", 5.0)))
 
 
 def ease_in_s() -> float:
