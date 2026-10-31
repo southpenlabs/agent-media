@@ -2494,6 +2494,30 @@ repeated section is the chorus), run out of process with the Demucs venv's
 Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
 fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
 
+**Ducking follows the backing music level (31 Oct 2026)** (`route/dj.py`,
+`route/coordinator.py`; David: "ducking follows the backing music slider").
+A reply's duck of David's own music (Mopidy, the rooms stream, the phone's
+music player) is scaled by `music_bed.duck_scale()` = 10 ** ((`gain_db` −
+(−4)) / 20): at the default −4 dB every level is as before (talk 10, a
+short notice 25 (`MEDIA_DJ_DIP_LEVEL`), ambient 4); at −12 dB about 0.4 of
+them (4, 10, 2); rounded, held to 1..100. Approximate: a duck level is a
+volume and tracks differ in loudness. A stop (books, podcasts, a question,
+a long reply) is unchanged, and `MEDIA_DUCK_VOLUME` still fixes the level.
+With `breathe` on, ducked music swells in the voice's pauses as the bed
+does. The DJ cue a phone reads (`user-data/agent-media/duck-cue`,
+`level=0.10;down=400;up=1500;beat=300;stop=0;swell=0.20`) gains **`swell`**:
+the level in the pauses as a share of the music's own volume, min(1,
+level × 10 ** (`MEDIA_MUSIC_BED_BREATHE_DB` / 20)) with breathing on, the
+level itself with it off, 0 for a stop; the other keys are as they were. The
+app rides its music player between `level` (voice) and `swell` (pauses)
+with the bed's envelope (the mix's `attack_ms`, `release_ms`, `hold_ms`).
+On this host, with `MEDIA_DJ_DUCK` on and the speech broker a local socket,
+the coordinator rides Mopidy and the rooms clients itself (dj.Rider,
+watching the broker as the bed's rider does): a move only when the voice
+starts or has been quiet `hold_ms`, none before the first word, and the
+fade up at the end starts from where the ride left the music. Pinned by
+`packages/core/tests/test_duck_follows_level.py`.
+
 #### `GET` / `POST /speech/voice` — gated (27 Sep 2026)
 
 `GET` → `{"ok": true, "target", "mode": "phone"|"server", "voice": str|null,

@@ -155,6 +155,10 @@ class Coordinator:
         # it is expected to take. Kept for duck_music_now, which applies the
         # cue later on the lane that defers it.
         self._speech_hint: dict = {}
+        # Ducked music breathing with the voice (route/dj.py Rider): one per
+        # reply, started by the first duck it rides, stopped by after_speech.
+        self._rider: Optional[dj.Rider] = None
+        self._rider_lock = threading.Lock()
 
     # ---- "this loss is ours" -------------------------------------------
 
@@ -385,10 +389,12 @@ class Coordinator:
 
         dj.fade(_at, 0, 1000, fade_ms, step_ms=60)
 
-    def _rooms_unduck(self, clear: bool = True, fade_ms: int = 0) -> None:
+    def _rooms_unduck(self, clear: bool = True, fade_ms: int = 0,
+                      from_level: Optional[int] = None) -> None:
         """Restore client volumes ducked by :meth:`_rooms_duck`. With
         ``clear=False`` the marker is kept so a later restore still runs (used
-        by the mid-response mute release)."""
+        by the mid-response mute release). ``from_level``: where the duck
+        ride left them (a swell), the fade's start instead of the level."""
         if not _rooms_duck_stream():
             return
         try:
@@ -408,12 +414,13 @@ class Coordinator:
         owed: dict[str, int] = {}
         failed: list[str] = []
         level = int(marker.get("level") or 0)
+        start = level if from_level is None else int(from_level)
         if fade_ms > 0:
             # Faded up together first; the per-client restore below still runs
             # and is what lands (or owes) the final volume.
             try:
                 self._rooms_fade(
-                    {str(c): (min(level, int(p)), int(p))
+                    {str(c): (min(start, int(p)), int(p))
                      for c, p in (marker.get("vols") or {}).items()
                      if int(p) > level},
                     fade_ms)
@@ -620,8 +627,10 @@ class Coordinator:
             if rooms_level is None and cue.strategy == InterruptionStrategy.DUCK:
                 rooms_level = cue.level
         if rooms_level is None:
-            rooms_level = policy_for(ContentType.MUSIC).duck_level
+            rooms_level = dj.scaled(policy_for(ContentType.MUSIC).duck_level)
         self._rooms_duck(rooms_level, fade_ms=rooms_fade_ms)
+        if dj.enabled() and cue.strategy == InterruptionStrategy.DUCK:
+            self._ride_rooms()
         # Local players: pause browser/external players on this host (MPRIS
         # on Linux, the system media controls on Windows — audio_backend).
         if audio_backend.pause_enabled():
@@ -738,7 +747,8 @@ class Coordinator:
                 return
         else:
             env_override = _env_duck_level()
-            level = env_override if env_override is not None else policy.duck_level
+            level = (env_override if env_override is not None
+                     else dj.scaled(policy.duck_level))
             extras["strategy"] = "duck"
             extras["duck_level"] = level
             # If a book is in front (bed=duck), music belongs at the bed
@@ -886,9 +896,82 @@ class Coordinator:
         else:
             extras["strategy"] = "duck"
             extras["duck_level"] = level
+            if fades:
+                self._ride("music", lambda v: owner.duck(self.music_target, v),
+                           level, dj.swell_level(level, dj.breathe_db(),
+                                                 max(level, baseline)))
         return True
 
-    def _dj_restore(self, interruption: dict, ducked: Optional[dict]) -> None:
+    # ---- breathing: the duck ridden with the voice (dj.Rider) ----------
+
+    def _ride_broker(self):
+        """The speech broker to watch, when it is this host's own (a Unix
+        socket that is there): a remote one (the phone, over a bridge) is
+        too far to poll every 30 ms, and a phone breathes its own music
+        from the cue's ``swell``."""
+        try:
+            sock = _speech._socket_for(Target(name=audio_targets.speech_default()))
+        except Exception:  # noqa: BLE001
+            return None
+        if isinstance(sock, str) or not sock.exists():
+            return None
+        return sock
+
+    def _ride(self, name: str, set_level, duck: int, swell: int) -> None:
+        """Ride one ducked volume between ``duck`` and ``swell`` while the
+        reply plays. Only with the DJ duck and breathing on, a local broker,
+        and a swell above the duck. Never raises."""
+        try:
+            if swell <= duck or not dj.enabled():
+                return
+            with self._rider_lock:
+                rider = self._rider
+                if rider is None:
+                    broker = self._ride_broker()
+                    if broker is None:
+                        return
+                    a, r, hold = dj.ride_times()
+                    rider = self._rider = dj.Rider(
+                        broker, attack_ms=a, release_ms=r, hold_ms=hold)
+                rider.add(name, set_level, duck, swell)
+                rider.start()
+        except Exception as e:  # noqa: BLE001
+            self._log_err("music: duck ride failed", str(e))
+
+    def _ride_rooms(self) -> None:
+        """The rooms' clients as one ridden lane, each held at or under
+        the volume it had before the duck."""
+        if not _rooms_duck_stream():
+            return
+        try:
+            marker = self.state.get_rooms_duck() or {}
+        except Exception:  # noqa: BLE001
+            return
+        level = int(marker.get("level") or 0)
+        vols = {str(c): int(p) for c, p in (marker.get("vols") or {}).items()
+                if int(p) > level}
+        if not level or not vols:
+            return
+
+        def set_level(v: int) -> None:
+            for cid, prior in vols.items():
+                snapcast.set_client_volume(cid, min(prior, int(v)))
+        self._ride("rooms", set_level, level,
+                   dj.swell_level(level, dj.breathe_db(), max(vols.values())))
+
+    def _stop_ride(self) -> dict:
+        """End the ride where it is: each lane's level now ({} none)."""
+        with self._rider_lock:
+            rider, self._rider = self._rider, None
+        if rider is None:
+            return {}
+        try:
+            return rider.stop()
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _dj_restore(self, interruption: dict, ducked: Optional[dict],
+                    from_level: Optional[int] = None) -> None:
         """Undo a DJ cue: resume what was stopped, then bring the music back
         up over the cue's fade. The debt is cleared only once the volume is
         back, so a restore cut short is finished by the next clip."""
@@ -903,6 +986,9 @@ class Coordinator:
             else:
                 start = int(interruption.get("duck_level")
                             or (ducked or {}).get("level") or 0)
+                if from_level is not None:
+                    # Where the ride left it: a swell fades up from there.
+                    start = int(from_level)
             owner, fades = self._volume_owner()
             if fades and fade_ms > 0:
                 # Up to one step short, then the router's own unduck for the
@@ -931,6 +1017,8 @@ class Coordinator:
         with self._defer_lock:
             self._deferred_music = None
         self._last_line = ""
+        # The breathing stops where it is; the fades up start from there.
+        ridden = self._stop_ride()
         # A DJ lets the last word land before the music comes back: a beat of
         # quiet, then the rooms and the player fade up together.
         if dj.enabled():
@@ -945,7 +1033,8 @@ class Coordinator:
                 time.sleep(beat_ms / 1000.0)
             rooms_thread = threading.Thread(
                 target=self._rooms_unduck,
-                kwargs={"fade_ms": dj.plan_cue(ContentType.MUSIC).fade_up_ms},
+                kwargs={"fade_ms": dj.plan_cue(ContentType.MUSIC).fade_up_ms,
+                        "from_level": ridden.get("rooms")},
                 name="rooms-fade-up", daemon=True)
             rooms_thread.start()
         else:
@@ -993,7 +1082,7 @@ class Coordinator:
         # the row.
         ducked = self._music_duck_marker()
         if interruption_now.get("cue"):
-            self._dj_restore(interruption_now, ducked)
+            self._dj_restore(interruption_now, ducked, ridden.get("music"))
             if rooms_thread is not None:
                 rooms_thread.join(timeout=10)
             return
@@ -1098,6 +1187,8 @@ class Coordinator:
         never the book/MPRIS/phone pauses, which would churn on every toggle.
         Pause-strategy music (audiobook/podcast) is left alone.
         """
+        # Muted speech has no pauses to breathe in: the ride ends here.
+        self._stop_ride()
         # Lift the rooms (Snapcast) duck too while speech is muted; keep the
         # marker so after_speech still owns the authoritative restore.
         self._rooms_unduck(clear=False)

@@ -883,6 +883,20 @@ def set_gain(value: Optional[float]) -> Optional[float]:
     return value
 
 
+def duck_scale() -> float:
+    """How far the backing music level moves a reply's duck of David's own
+    music (route/dj.py; David, 31 Oct 2026: "ducking follows the backing
+    music slider"): the level's difference from the default as an amplitude
+    ratio, 10 ** ((gain_db - DEFAULT_GAIN_DB) / 20). 1.0 at the default
+    (-4), so every duck level is as it was; about 0.4 at -12. Approximate:
+    tracks differ in loudness, so the same slider is not the same dB over
+    every song. Never raises (1.0 on any failure)."""
+    try:
+        return 10 ** ((gain_db() - DEFAULT_GAIN_DB) / 20.0)
+    except Exception:  # noqa: BLE001 — a duck must never cost a reply
+        return 1.0
+
+
 def peak_dbfs(mood: str = "") -> float:
     """A generated bed's peak: -24 dBFS and the gain (-28), the question's
     3 dB under the rest."""

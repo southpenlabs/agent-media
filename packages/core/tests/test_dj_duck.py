@@ -238,9 +238,11 @@ def test_the_rooms_fade_together(state, monkeypatch):
 # ---- a player that fades itself (Sasonica's DjCue) -----------------------
 
 def test_the_cue_on_the_wire():
+    # Breathing on (the default): the pauses swell 6 dB, a share of the
+    # music's own volume like the level.
     assert dj.plan_cue(CT.MUSIC, est_s=2).wire() == (
-        "level=0.25;down=80;up=120;beat=0;stop=0")
-    assert dj.plan_cue(CT.MUSIC, ask=True).wire().endswith("stop=1")
+        "level=0.25;down=80;up=120;beat=0;stop=0;swell=0.50")
+    assert "stop=1" in dj.plan_cue(CT.MUSIC, ask=True).wire().split(";")
     assert dj.plan_cue(CT.MUSIC, ask=True).wire().startswith("level=0.00;")
 
 
@@ -252,7 +254,7 @@ def test_the_cue_is_sent_before_the_reply_and_cleared_after(state, monkeypatch):
     c = _coord(state, music)
     c.before_speech(est_s=2)
     c._flag_writer.submit(lambda: None).result()
-    assert sent == ["level=0.25;down=80;up=120;beat=0;stop=0"]
+    assert sent == ["level=0.25;down=80;up=120;beat=0;stop=0;swell=0.50"]
     c.after_speech()
     c._flag_writer.submit(lambda: None).result()
     assert sent[-1] == ""

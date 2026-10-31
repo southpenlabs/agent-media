@@ -58,6 +58,17 @@ def _no_inherited_dj_duck(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_inherited_music_level(monkeypatch):
+    """The env file may set the backing music level (MEDIA_MUSIC_BED_GAIN_DB),
+    and every duck level follows it (route/dj.py `scaled`):
+    inherited, the duck tests' exact levels move. A test of the level sets
+    its own."""
+    monkeypatch.delenv("MEDIA_MUSIC_BED_GAIN_DB", raising=False)
+    for key in ("BREATHE", "BREATHE_DB", "ATTACK_MS", "RELEASE_MS", "HOLD_MS"):
+        monkeypatch.delenv(f"MEDIA_MUSIC_BED_{key}", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_remote_say(monkeypatch):
     """Keep the suite on the local render path.
 
