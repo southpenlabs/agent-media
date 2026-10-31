@@ -2411,7 +2411,7 @@ Pinned by `packages/core/tests/test_music_bed_replay.py`.
 `under_mix.py`, `music_bed_outro.py`; David: "DJ mixing" and a volume
 slider). `settings` gains a second kind, **`"range"`** — a slider, `{"id",
 "kind": "range", "label", "hint", "min", "max", "step", "unit", "value"
-(number), "set"}` — and lists, in order: `gain_db` (range, "Music level",
+(number), "set"}` — and lists, in order: `gain_db` (range, "Backing music level",
 -24..6 step 1 "dB"; the level `POST {"settings": {"gain_db": n|null}}` has
 set since 83dcd049), `slow` (bool), and six bools, all on by default (each
 `MEDIA_MUSIC_BED_<ID>=0|off` turns its default off; Settings wins): `breathe`,

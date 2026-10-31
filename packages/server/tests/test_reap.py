@@ -806,17 +806,17 @@ def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):
     res, obj = call(server, "POST", "/speech/music-bed", {"source": "off"}, AUTH)
     assert res.status == 200 and obj["choice"] == "off" and obj["source"] == "off"
     # Slow only (30 Oct 2026): a switch in `settings`, kept beside the choice.
-    assert obj["slow"] is True and obj["settings"][0]["id"] == "slow"
-    assert obj["settings"][0]["kind"] == "bool" and obj["settings"][0]["set"] is False
+    slow = lambda o: next(x for x in o["settings"] if x["id"] == "slow")  # noqa: E731
+    assert obj["slow"] is True and slow(obj)["kind"] == "bool" and slow(obj)["set"] is False
     res, obj = call(server, "POST", "/speech/music-bed", {"settings": {"slow": False}}, AUTH)
-    assert res.status == 200 and obj["slow"] is False and obj["settings"][0]["set"] is True
+    assert res.status == 200 and obj["slow"] is False and slow(obj)["set"] is True
     assert obj["choice"] == "off"                          # the choice kept
     for bad in ({"settings": {"slow": "no"}}, {"settings": {"fast": True}},
                 {"settings": {}}, {"settings": 1}):
         res, obj = call(server, "POST", "/speech/music-bed", bad, AUTH)
         assert res.status == 400, bad
     res, obj = call(server, "POST", "/speech/music-bed", {"settings": {"slow": None}}, AUTH)
-    assert res.status == 200 and obj["slow"] is True and obj["settings"][0]["set"] is False
+    assert res.status == 200 and obj["slow"] is True and slow(obj)["set"] is False
     assert "bossa" in [s["id"] for s in obj["sources"][2]["styles"]]
 
 

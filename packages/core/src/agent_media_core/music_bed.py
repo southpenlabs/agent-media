@@ -842,7 +842,7 @@ _PEAK_OFFSETS = {"question": -3.0}
 
 #: The range a stored level may take (dB against the first beds' levels).
 GAIN_RANGE = (-24.0, 6.0)
-GAIN_LABEL = "Music level"
+GAIN_LABEL = "Backing music level"
 GAIN_HINT = ("How loud the music is under the voice, against where it started. "
              "A change plays at once; the files catch up in the background.")
 

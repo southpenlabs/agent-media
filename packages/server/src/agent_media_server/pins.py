@@ -251,11 +251,13 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
         return False, {"error": "choice must be off, auto or one of the choices listed",
                        "status": 400}
     if settings is not _UNSET:
+        # Each kind's value is checked by set_settings (a range's is a
+        # number): checking for a boolean here turned every gain_db away
+        # with a 400, and the app's slider jumped back.
         ids = {s["id"] for s in music_bed.settings()}
         if (not isinstance(settings, dict) or not settings
-                or any(k not in ids or not (v is None or isinstance(v, bool))
-                       for k, v in settings.items())):
-            return False, {"error": "settings must be {id: true|false|null} for the "
+                or any(k not in ids for k in settings)):
+            return False, {"error": "settings must be {id: value} for the "
                                     "settings listed", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
@@ -263,6 +265,8 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
     if settings is not _UNSET:
         try:
             music_bed.set_settings(settings)
+        except ValueError as e:
+            return False, {"error": str(e), "status": 400}
         except OSError as e:
             return False, {"error": f"could not save the music settings ({e})", "status": 500}
     if choice is not _UNSET:
