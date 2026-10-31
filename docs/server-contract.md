@@ -2494,6 +2494,24 @@ repeated section is the chorus), run out of process with the Demucs venv's
 Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
 fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
 
+**Singing it out: the song and its controls (31 Oct 2026)** (David: "The
+new singing it out feature is awesome!" — he picked like and dislike, and
+radio from the song). `after` also carries the song, for the phone to show
+while it plays: `"title"`, `"artist"`, `"key"` (the favourite's key, for the
+verdict below) and `"video_id"` (the original's YouTube id, the favourites
+entry's `original_id`; `""` when there is none, and then no radio button).
+
+- **`POST /speech/music-bed/song {"key": str, "verdict": "like" |
+  "dislike"}`** — gated (`auth.gate`, like `POST /speech/music-bed`) →
+  `{"ok": true, "key", "verdict"}`; 400 for an unknown key or verdict.
+  `like` records a like in the state store as `media music like` does
+  (channel music, keyed by the video id), so the song counts its five
+  points and ranks higher at the next gather of favourites. `dislike` takes
+  it off the favourites for good: its bed file and kept original are
+  deleted, and it goes on an exclusion list
+  (`<state_dir>/music-bed-favourites-excluded.json`, by key and by video id)
+  that no later gather matches.
+
 **Ducking follows the backing music level (31 Oct 2026)** (`route/dj.py`,
 `route/coordinator.py`; David: "ducking follows the backing music slider").
 A reply's duck of David's own music (Mopidy, the rooms stream, the phone's

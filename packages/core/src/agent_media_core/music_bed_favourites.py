@@ -351,11 +351,14 @@ def _file(entry: dict) -> Path:
 
 def tracks(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
     """The ready tracks (of `style`: official, separated; None or auto for
-    both) whose files are there."""
+    both) whose files are there, never a disliked one."""
     data = load() if data is None else data
+    gone = excluded()
     out = []
     for e in data["tracks"]:
         if style in STYLES and e.get("method") != style:
+            continue
+        if e.get("key") in gone:
             continue
         try:
             if _file(e).is_file():
@@ -747,12 +750,16 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
     now = time.time() if now is None else now
     merged: dict[str, dict] = {}
 
+    gone = excluded()
+
     def add(song: dict, score: float, where: str) -> None:
         if not song or not song.get("title") or not song.get("artist"):
             return
         if not (MIN_TRACK_S <= int(song.get("dur") or 0) <= MAX_TRACK_S):
             return
         k = key_for(song["artist"], song["title"])
+        if k in gone or (song.get("id") and f"id:{song['id']}" in gone):
+            return
         cur = merged.get(k)
         if cur is None:
             merged[k] = cur = {"key": k, "artist": song["artist"], "title": song["title"],
@@ -802,6 +809,101 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
     if len(data["lookups"]) > 2000:
         data["lookups"] = dict(list(data["lookups"].items())[-1000:])
     return favs
+
+
+# ---- his verdict on a song sung out (POST /speech/music-bed/song) ----------------------------
+
+VERDICTS = ("like", "dislike")
+
+
+def _excluded_path() -> Path:
+    from ._paths import state_dir
+    return state_dir() / "music-bed-favourites-excluded.json"
+
+
+def excluded() -> dict:
+    """The songs he disliked, never gathered again: `{key: {...}}`, and
+    `id:<video id>` for each one's video, so the same song named another
+    way is not matched either. Its own file beside the index, so the
+    background pass (which saves the index it loaded) cannot write a
+    dislike away. {} on any failure."""
+    try:
+        d = json.loads(_excluded_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _song(data: dict, key: str) -> Optional[dict]:
+    """A favourite by key: its ready track, else its entry in the list."""
+    for e in list(data["tracks"]) + list(data["favourites"]):
+        if e.get("key") == key:
+            return e
+    return None
+
+
+def verdict(key: str, which: str, now: Optional[float] = None) -> dict:
+    """His word on a favourite sung out after a reply (David, 31 Oct 2026:
+    "The new singing it out feature is awesome!" — like, dislike, and radio
+    from it).
+
+    like: a like in the state store as `media music like` records one
+    (channel music, keyed by the original's video id), so `gather` counts
+    its five points and the song ranks higher at the next gather.
+    dislike: off the favourites for good — kept in `excluded`, so no later
+    gather takes it again — and its files dropped as a pruned one's are:
+    the bed, and the kept original (music_bed_vocal).
+
+    ValueError for an unknown key or verdict."""
+    if which not in VERDICTS:
+        raise ValueError("verdict must be like or dislike")
+    data = load()
+    song = _song(data, key) if isinstance(key, str) and key else None
+    if song is None:
+        raise ValueError(f"no favourite {key!r}")
+    vid = song.get("original_id") or song.get("id") or ""
+    title, artist = song.get("title") or "", song.get("artist") or ""
+    now = time.time() if now is None else now
+    if which == "like":
+        from .state import StateStore
+        StateStore().add_like(
+            "music", vid or key,
+            uri=f"yt:https://www.youtube.com/watch?v={vid}" if vid else "",
+            title=f"{title} — {artist}" if artist else title, backend="sasonica",
+            note="sung out after a reply", extras={"favourite": key})
+        return {"key": key, "verdict": which}
+    gone = excluded()
+    rec = {"title": title, "artist": artist, "video_id": vid, "at": now}
+    gone[key] = rec
+    if vid:
+        gone[f"id:{vid}"] = {**rec, "key": key}
+    p = _excluded_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(gone, indent=1))
+    os.replace(tmp, p)
+    for e in [e for e in data["tracks"] if e.get("key") == key]:
+        try:
+            _file(e).unlink(missing_ok=True)
+        except (OSError, KeyError):
+            pass
+    data["tracks"] = [e for e in data["tracks"] if e.get("key") != key]
+    data["favourites"] = [f for f in data["favourites"] if f.get("key") != key]
+    save(data)
+    try:
+        from . import music_bed_vocal as V
+        kept = V.load()
+        if key in kept:
+            try:
+                V._file(kept[key]).unlink(missing_ok=True)
+            except (OSError, KeyError):
+                pass
+            kept.pop(key, None)
+            V.save(kept)
+    except Exception as e:  # noqa: BLE001 — the upkeep drops it anyway
+        log.info("music-bed favourites: the original of %s: %s", key, e)
+    log.info("music-bed favourites: %s — %s disliked, off the favourites", title, artist)
+    return {"key": key, "verdict": which}
 
 
 def _has_track(data: dict, key: str) -> bool:

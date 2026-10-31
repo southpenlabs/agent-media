@@ -181,7 +181,18 @@ def after_for(bed_path) -> Optional[dict]:
     if rec is None:
         return None
     aligned = bool(rec.get("aligned"))
+    # The song as the phone shows it, with its controls (David, 31 Oct
+    # 2026): like or dislike by `key` (POST /speech/music-bed/song), and
+    # radio from `video_id`, the original's YouTube id ("" without one).
+    song: dict = {}
+    try:
+        from . import music_bed_favourites as fav
+        song = next((e for e in fav.load()["tracks"] if e.get("key") == rec.get("key")), {})
+    except Exception as e:  # noqa: BLE001
+        log.debug("music-bed vocal: the song: %s", e)
     return {"uri": str(_file(rec)), "aligned": aligned,
+            "title": str(song.get("title") or ""), "artist": str(song.get("artist") or ""),
+            "key": str(rec.get("key") or ""), "video_id": str(song.get("original_id") or ""),
             "inst_s": float(rec.get("inst_s") or 0), "orig_s": float(rec.get("orig_s") or 0),
             "bounds": list(rec.get("bounds") or []), "choruses": list(rec.get("choruses") or []),
             "xfade_ms": tunable("XFADE_MS" if aligned else "LOOSE_XFADE_MS"),

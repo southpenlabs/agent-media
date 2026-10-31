@@ -558,3 +558,54 @@ def test_karaoke_can_be_refused(monkeypatch):
     assert not F.is_instrumental_of(ORIG, k)
     assert F.is_instrumental_of(ORIG, {**k, "title": "When I'm Small (Instrumental)",
                                        "artist": "Phantogram"})
+
+
+# ---- his verdict on a song sung out (POST /speech/music-bed/song) ---------------------------
+
+def test_a_like_is_counted_at_the_next_gather(tmp_path):
+    from agent_media_core.state import StateStore
+    _ready(tmp_path, key="massiveattackangel", title="Angel")
+    assert F.verdict("massiveattackangel", "like") == {"key": "massiveattackangel",
+                                                       "verdict": "like"}
+    (row,) = StateStore().list_likes(channel="music")
+    assert row["media_id"] == "66A_3uwuZ_I"
+    # The gather reads it as five points for that video.
+    assert F._from_store()["66A_3uwuZ_I"]["likes"] == 1
+
+
+def test_a_dislike_is_gone_for_good(monkeypatch, tmp_path):
+    from agent_media_core import music_bed_vocal as V
+    bed = _ready(tmp_path, key="massiveattackangel", title="Angel")
+    V._dir().mkdir(parents=True, exist_ok=True)
+    (V._dir() / "music-bed-vocal-massiveattackangel.mp3").write_bytes(b"x" * 2000)
+    V.save({"massiveattackangel": {"key": "massiveattackangel",
+                                   "file": "music-bed-vocal-massiveattackangel.mp3"}})
+    data = F.load()
+    data["favourites"] = [_fav("massiveattackangel", "Angel", "Massive Attack", "66A_3uwuZ_I")]
+    F.save(data)
+
+    F.verdict("massiveattackangel", "dislike")
+    assert not bed.exists() and F.tracks() == [] and F.load()["favourites"] == []
+    assert V.load() == {}
+    assert not (V._dir() / "music-bed-vocal-massiveattackangel.mp3").exists()
+
+    # Liked and played as much as ever: a later gather never takes it again.
+    monkeypatch.setattr(F, "_from_store", lambda: {"66A_3uwuZ_I": {"likes": 3, "plays": 9}})
+    monkeypatch.setattr(F, "lookup", lambda vid, data=None: {
+        "id": vid, "artist": "Massive Attack", "title": "Angel", "dur": 382})
+    assert F.gather(F.load()) == []
+    # Nor under another name for the same video.
+    monkeypatch.setattr(F, "lookup", lambda vid, data=None: {
+        "id": vid, "artist": "Massive Attack", "title": "Angel (Remastered)", "dur": 382})
+    assert F.gather(F.load()) == []
+    # Even a track entry written back by a pass that loaded the index before.
+    _ready(tmp_path, key="massiveattackangel", title="Angel")
+    assert F.tracks() == []
+
+
+def test_an_unknown_key_or_verdict_is_refused(tmp_path):
+    _ready(tmp_path, key="k1")
+    with pytest.raises(ValueError):
+        F.verdict("nope", "like")
+    with pytest.raises(ValueError):
+        F.verdict("k1", "love")

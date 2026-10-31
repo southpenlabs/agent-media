@@ -97,6 +97,21 @@ def test_a_long_reply_over_a_kept_favourite_sings_it_out(tmp_path):
     json.dumps(p)
 
 
+def test_the_handover_names_the_song_for_its_controls(tmp_path):
+    # The phone shows the song with like, dislike and radio (31 Oct 2026).
+    from agent_media_core import music_bed_favourites as fav
+    bed = _keep_original(tmp_path)
+    a = M.params("favourites", "auto", bed, long=True)["after"]
+    assert (a["title"], a["artist"], a["key"], a["video_id"]) == ("", "", "k1", "")
+    data = fav.load()
+    data["tracks"].append({"key": "k1", "file": "music-bed-fav-k1.mp3", "title": "Angel",
+                           "artist": "Massive Attack", "original_id": "66A_3uwuZ_I"})
+    fav.save(data)
+    a = M.params("favourites", "auto", bed, long=True)["after"]
+    assert (a["title"], a["artist"], a["key"], a["video_id"]) == (
+        "Angel", "Massive Attack", "k1", "66A_3uwuZ_I")
+
+
 def test_not_for_a_short_reply_another_source_or_with_the_switch_off(tmp_path):
     bed = _keep_original(tmp_path)
     assert "after" not in M.params("favourites", "auto", bed, long=False)

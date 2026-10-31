@@ -277,6 +277,30 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
     return True, music_bed.status()
 
 
+def speech_music_bed_song(bearer: str, key=None, verdict=None) -> tuple[bool, dict]:
+    """`POST /speech/music-bed/song {"key", "verdict"}`: his word on a
+    favourite sung out after a long reply (David, 31 Oct 2026: "The new
+    singing it out feature is awesome!"). `like` records a like, so it ranks
+    higher at the next gather; `dislike` drops it from the favourites for
+    good, its files with it (music_bed_favourites.verdict). 400 for an
+    unknown key or verdict."""
+    from agent_media_core import music_bed_favourites as fav
+
+    if verdict not in fav.VERDICTS:
+        return False, {"error": "verdict must be like or dislike", "status": 400}
+    if not isinstance(key, str) or not key:
+        return False, {"error": "key must be a favourite's key", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    try:
+        return True, fav.verdict(key, verdict)
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+
+
 def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
     """`GET /speech/voice` and `POST /speech/voice {"mode", "voice"?}`: whether
     the current speech target's replies are rendered on the phone, by
