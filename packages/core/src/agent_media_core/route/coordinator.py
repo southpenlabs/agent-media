@@ -134,6 +134,8 @@ class Coordinator:
         self._android_paused: list[str] = []
         # Whether we paused the book channel for the current clip.
         self._book_paused = False
+        # The volume a meditation was eased out from (_ease_book_out).
+        self._book_eased: Optional[float] = None
         self.other_audio: Optional[bool] = None
         self._music_found = False
         # A duck this coordinator decided on but has not applied yet — see
@@ -487,6 +489,25 @@ class Coordinator:
         except Exception:  # noqa: BLE001 — unsure means ask, as before
             return False
 
+    def _ease_book_out(self) -> Optional[float]:
+        """A guided meditation is faded down before speech pauses it, not
+        cut (David, 31 Oct 2026: "ease out of it instead of pausing for
+        speech"), and faded back up after (`after_speech`). Returns the
+        volume it was at, or None when the book is not a meditation or its
+        volume cannot be read (then it is paused as any book is)."""
+        try:
+            from ..meditate import ease_out_s, is_meditation
+            if not is_meditation(self.book.now_playing_uri(self.book_target)):
+                return None
+            level = self.book.volume(self.book_target)
+            if level is None or level <= 0:
+                return None
+            self.book.fade_volume(level, 0.0, ease_out_s(), self.book_target)
+            return level
+        except Exception as e:  # noqa: BLE001 — never cost a reply its start
+            self._log_err("book: ease out failed", str(e))
+            return None
+
     def _probe_book_active(self) -> bool:
         """Is the book channel playing? Asked concurrently (see before_speech)."""
         if self._book_is_the_speech_player():
@@ -670,6 +691,7 @@ class Coordinator:
         # when no broker is up, so this is a no-op when the book is unused.
         try:
             if book_active.result(timeout=20):
+                self._book_eased = self._ease_book_out()
                 self.book.pause(self.book_target)
                 self._book_paused = True
         except Exception as e:  # noqa: BLE001
@@ -1067,11 +1089,18 @@ class Coordinator:
                 lead_in_ms = policy_for(ContentType.AUDIOBOOK).lead_in_ms
                 if lead_in_ms > 0:
                     self.book.skip(-lead_in_ms / 1000.0, self.book_target)
+                eased = self._book_eased
+                if eased is not None:
+                    self.book.set_volume(0, self.book_target)
                 self.book.resume(self.book_target)
+                if eased is not None:
+                    from ..meditate import ease_in_s
+                    self.book.fade_volume(0.0, eased, ease_in_s(), self.book_target)
             except Exception as e:  # noqa: BLE001
                 self._log_err("book: resume failed", str(e))
             finally:
                 self._book_paused = False
+                self._book_eased = None
 
         # An in-force duck of ours is restored from its own marker, before and
         # independently of the now-playing row below. That row is shared, and

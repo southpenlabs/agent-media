@@ -716,6 +716,30 @@ class SinkBook:
         except (ipc.MpvIpcError, OSError):
             pass
 
+    def volume(self, target: Target = DEFAULT_TARGET) -> Optional[float]:
+        """The book stream's volume (0-100), None when it cannot be read."""
+        try:
+            return float(ipc.get_property(_socket_for(target), "volume"))
+        except (ipc.MpvIpcError, OSError, TypeError, ValueError):
+            return None
+
+    def fade_volume(self, start: float, end: float, seconds: float,
+                    target: Target = DEFAULT_TARGET, steps_per_s: int = 12) -> None:
+        """Ramp the volume from `start` to `end` over `seconds` (equal
+        steps on the 0-100 scale, which mpv already maps as a cube, so the
+        ramp sounds even). Blocks for `seconds`; best effort."""
+        endpoint = _socket_for(target)
+        n = max(1, int(seconds * steps_per_s))
+        for k in range(1, n + 1):
+            level = start + (end - start) * k / n
+            try:
+                ipc.set_property(endpoint, "volume", max(0.0, min(100.0, level)),
+                                 critical=True)
+            except (ipc.MpvIpcError, OSError):
+                return
+            if k < n:
+                time.sleep(seconds / n)
+
     # ---- observation (spawn-free) ----------------------------------------
 
     def position(self, target: Target = DEFAULT_TARGET) -> Optional[int]:

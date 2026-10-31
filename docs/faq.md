@@ -173,8 +173,8 @@ Yes. Ask in any chat, for example "guide me through a ten-minute body scan".
 The agent writes the script, and you hear it said more slowly than a reply,
 over quiet generated music, with real silences and a singing bowl at the
 start and end. It plays like an audiobook, so pause, stop and seek work as
-usual, and a reply that arrives during it pauses it instead of talking over
-it.
+usual. A reply that arrives during it doesn't talk over it: the meditation
+fades out over a second, pauses, and fades back in after the reply.
 
 From a shell, a script with `[[pause: 20]]` (or `1m`, `1m30s`) and
 `[[bell]]` markers:
@@ -187,7 +187,8 @@ Settings, in `~/.config/agent-media.env`: `MEDIA_MEDITATE_RATE` (-12%,
 how much slower than a reply), `MEDIA_MEDITATE_BED_PEAK_DBFS` (-20, the
 music's level), `MEDIA_MEDITATE_MOOD` (night), `MEDIA_MEDITATE_GAP_S` (2,
 the quiet after each paragraph), `MEDIA_MEDITATE_TAIL_S` (30, the music's
-fade after the last words).
+fade after the last words), `MEDIA_MEDITATE_EASE_OUT_S` (1) and
+`MEDIA_MEDITATE_EASE_IN_S` (2), the fades around a reply.
 
 See also: `packages/core/src/agent_media_core/meditate.py`, the `meditate`
 MCP tool, `docs/proposals/2026-10-31-relax-and-meditate.md`.

@@ -113,3 +113,69 @@ def test_render_mixes_voice_and_bed_into_one_file(monkeypatch):
                     engine="edge", voice="v", bed="calm", renderer=fake) == clip
     assert said == []
     assert not list(M.out_dir().glob(".*.parts"))
+
+
+# ---- easing out for a reply ----------------------------------------------------
+
+class _Book:
+    def __init__(self, path, level=80.0):
+        self.path, self.level, self.fades = path, level, []
+
+    def now_playing_uri(self, target):
+        return self.path
+
+    def volume(self, target):
+        return self.level
+
+    def fade_volume(self, start, end, seconds, target):
+        self.fades.append((start, end, seconds))
+
+
+def _coord(book, tmp_path):
+    from agent_media_core.route.coordinator import Coordinator
+    from agent_media_core.state import StateStore
+    from agent_media_core.types import Target
+
+    class _Music:
+        pass
+
+    return Coordinator(music=_Music(), state=StateStore(), book=book,
+                       book_target=Target(name="local"))
+
+
+def test_is_meditation_by_name():
+    assert M.is_meditation("/x/meditations/meditation-0123abcd.mp3")
+    assert M.is_meditation("/sdcard/Audiobooks/meditation-0123abcd.mp3")
+    assert not M.is_meditation("/books/dune.mp3")
+    assert not M.is_meditation(None)
+
+
+def test_a_meditation_fades_out_before_a_reply(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIA_MEDITATE_EASE_OUT_S", "1.5")
+    book = _Book("/c/meditations/meditation-0123abcd.mp3", level=70.0)
+    assert _coord(book, tmp_path)._ease_book_out() == 70.0
+    assert book.fades == [(70.0, 0.0, 1.5)]
+
+
+def test_an_audiobook_is_paused_as_before(tmp_path):
+    book = _Book("/books/dune.mp3")
+    assert _coord(book, tmp_path)._ease_book_out() is None
+    assert book.fades == []
+
+
+def test_an_unreadable_volume_falls_back_to_a_plain_pause(tmp_path):
+    book = _Book("/c/meditation-0123abcd.mp3", level=None)
+    assert _coord(book, tmp_path)._ease_book_out() is None
+    assert book.fades == []
+
+
+def test_fade_volume_ramps_in_even_steps(monkeypatch):
+    from agent_media_core.sinks import book as B
+    sent = []
+    monkeypatch.setattr(B.ipc, "set_property",
+                        lambda ep, name, value, **k: sent.append((name, value)))
+    monkeypatch.setattr(B.time, "sleep", lambda s: None)
+    sink = B.SinkBook.__new__(B.SinkBook)
+    sink.fade_volume(0.0, 60.0, 0.5, steps_per_s=8)
+    assert [v for _, v in sent] == [15.0, 30.0, 45.0, 60.0]
+    assert {n for n, _ in sent} == {"volume"}
