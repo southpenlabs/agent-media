@@ -433,6 +433,9 @@ CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 # Saved meditations, recorded and written (meditations.py, §6.45).
 MEDITATION_PATHS = frozenset({"/meditations"})
 CORS_PATHS = CORS_PATHS | MEDITATION_PATHS
+# A link shared or pasted into a Media tab (media_links.py, §6.46).
+MEDIA_LINK_PATHS = frozenset({"/media/links"})
+CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
 
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
@@ -758,6 +761,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _music(h, method, path)
     if path in MEDITATION_PATHS and method in ("GET", "POST"):
         return _meditations(h, method)
+    if path in MEDIA_LINK_PATHS and method in ("GET", "POST"):
+        return _media_links(h, method)
     if path in ORG_PATHS and method in ("GET", "POST"):
         return _org(h, method, path)
     if path in ALERT_PATHS and method in ("GET", "POST"):
@@ -3835,6 +3840,19 @@ def _meditations(h: BaseHTTPRequestHandler, method: str) -> bool:
     else:
         body = _read_json(h)
         ok, detail = meditations.control(body if isinstance(body, dict) else {}, _bearer(h))
+    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    return True
+
+
+def _media_links(h: BaseHTTPRequestHandler, method: str) -> bool:
+    """`GET`/`POST /media/links` (§6.46): a link into a Media tab."""
+    from . import media_links
+
+    if method == "GET":
+        ok, detail = media_links.listing(_bearer(h))
+    else:
+        body = _read_json(h)
+        ok, detail = media_links.control(body if isinstance(body, dict) else {}, _bearer(h))
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 

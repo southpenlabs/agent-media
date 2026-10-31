@@ -3512,7 +3512,7 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 |---|---|
 | `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest) |
 | `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most` |
-| `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most` |
+| `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most`, `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
 A library book adds `progress` (0–1) and `finished`; its `id` is the
 Audiobookshelf item's (a string), a liked song's a negative number. A
@@ -7710,6 +7710,37 @@ Code: `agent_media_server/meditations.py`, the list in
   nothing was saved under it.
 - Kept in `<state_dir>/meditations.json`; feeds cached for 6 h in
   `<cache>/meditation-feeds/`. Not a guest POST.
+
+### 6.46 A link into a Media tab — gated (built 1 Nov 2026)
+
+Code: `agent_media_server/media_links.py`, the podcast links in
+`agent_media_core/podcast_links.py`. Pinned by
+`packages/server/tests/test_media_links_route.py`. David, 1 Nov 2026: "a
+share option would be even better... so that we can share from YouTube and
+select which media tab it goes to" … "keep the link in cases the
+downloaded version has been removed to save space".
+
+- `GET /media/links` → `{"ok": true, "to": [{"id", "label", "takes"}]}`:
+  the tabs that take a link, in order (`podcast`, `meditation`, `book`),
+  `takes` saying what kind of link in words. The app shows a chip for
+  each (on the share screen, and a paste box on a tab whose id it is),
+  so a tab added here needs no app change.
+- `POST /media/links {"url", "to", "title"?}` → `{"ok", "added", "title",
+  …}`. `podcast`: a YouTube video, saved (`id` `podcast-link:<video id>`)
+  and downloaded in the background (`fetching`) through the phone, shrunk
+  to mono Opus (32 kb/s, about 15 MB an hour); listed in
+  `GET /music/recent?kind=podcast&list=saved` (§6.9a). `meditation`: as
+  §6.45's add (`added` `youtube` or `podcast`). `book`: a YouTube video or
+  playlist imported into Audiobookshelf (`items`); 503 when the download
+  helper is not installed. 400 for a link the tab does not take or an
+  unknown `to`.
+- `POST /media/links {"action": "remove", "id", "keep_link"?}` → `{"ok",
+  "removed"}`: a saved podcast link and its download, or with `keep_link`
+  only the download (it plays from the link after). 404 when nothing was
+  saved under it.
+- Kept in `<state_dir>/podcast-links.json`, the downloads in
+  `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`).
+  `MEDIA_PODCAST_LINK_FETCH=0` saves without downloading. Not a guest POST.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 

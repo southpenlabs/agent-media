@@ -300,6 +300,9 @@ def _no_live_jobs_server(monkeypatch):
     route sets it itself."""
     monkeypatch.setenv("MEDIA_PHONE_JOBS_URL", "http://127.0.0.1:9")
     monkeypatch.delenv("MEDIA_PHONE_JOBS", raising=False)
+    # A podcast link saved from the Media tab downloads through the phone
+    # (podcast_links.start_fetch): never from a test.
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
 
 
 @pytest.fixture(autouse=True)

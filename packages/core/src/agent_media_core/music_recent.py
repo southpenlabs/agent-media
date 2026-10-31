@@ -20,7 +20,8 @@ Each kind has other lists beside what was played (`listed`; David, 31 Oct
 the songs liked and the most played; books the ones in progress, finished,
 or all of them (Audiobookshelf's, with this listener's progress) and the
 most played; podcasts the newest episodes of Audiobookshelf's podcast
-libraries and the most played.
+libraries, the most played and the YouTube links saved for the tab
+(podcast_links).
 """
 
 from __future__ import annotations
@@ -148,7 +149,7 @@ KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
 LISTS = {"music": ("recent", "liked", "most"),
          "book": ("recent", "progress", "finished", "all", "most"),
-         "podcast": ("recent", "new", "most")}
+         "podcast": ("recent", "new", "most", "saved")}
 
 
 def recent(limit: int = 40, store: Optional[StateStore] = None,
@@ -384,7 +385,8 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
     is what was played; `most` the same by how often (`plays`, then the
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
     book library's (`progress` 0–1, `finished`); `new` podcast episodes,
-    newest first (`published`, epoch seconds)."""
+    newest first (`published`, epoch seconds); `saved` the YouTube links
+    saved for the Podcasts tab (podcast_links)."""
     if which == "recent":
         return recent(limit=limit, store=store, kind=kind)
     if which == "most":
@@ -397,6 +399,10 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
         return _library_books(which)[:limit if which != "all" else 500]
     if which == "new":
         return _new_episodes(limit)
+    if which == "saved":
+        from . import podcast_links
+
+        return podcast_links.items()[:limit]
     return []
 
 
@@ -543,5 +549,9 @@ def playable_book(uri: str, store: Optional[StateStore] = None) -> bool:
         if any(i.get("uri") == uri for i in recent(limit=200, store=store, kind=kind)):
             return True
     if any(i["uri"] == uri for i in _library_books("all")):
+        return True
+    from . import podcast_links
+
+    if any(i["uri"] == uri for i in podcast_links.items()):
         return True
     return any(i["uri"] == uri for i in _new_episodes(100))

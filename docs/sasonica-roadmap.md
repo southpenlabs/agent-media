@@ -2243,6 +2243,20 @@ ahead.
     Add field for a link, remove on long-press. Later: presets for the
     agent-written ones (proposal 2026-10-31-relax-and-meditate.md §1).
 
+49. **A link into a Media tab, shared or pasted** — **BUILT 1 Nov 2026**
+    (David, 1 Nov 2026: "share from YouTube and select which media tab it
+    goes to" … "keep the link in cases the downloaded version has been
+    removed to save space"). Contract §6.46 `/media/links`: the server names
+    the tabs that take a link (Podcasts, Meditations, Books) and the share
+    screen shows an Add to <tab> row for each when the share is a link. A
+    podcast link is saved (`podcast_links.py`), downloaded through the
+    phone and shrunk to mono Opus at 32 kb/s (about 15 MB an hour), and
+    listed under Podcasts → Show → Saved links. The tab also has a paste
+    box. A link whose file is gone plays by fetching it again. Next: follow
+    a YouTube channel or playlist as a show (its feed), remove and "free
+    the space" on a long press in Saved, a size cap that clears the oldest
+    played downloads.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
