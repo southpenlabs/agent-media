@@ -14,6 +14,10 @@ Device names, hosts and paths in commands are examples; use your own.
 - Why does the voice sometimes change to a different one?
 - Why is text bigger in the app than in the browser?
 - How do I link to a thread?
+- What is the music under replies, and how do I change it?
+- What is the Backing music level relative to?
+- What can I do with the song after a long reply?
+- Why does my music go quiet, then swell, while a reply plays?
 
 **On the server**
 
@@ -105,6 +109,74 @@ told their own thread's link at the start of a session; they use
 Set `MEDIA_THREAD_LINK=0` to turn that off.
 
 See also: `server-contract.md` §19, "Thread links".
+
+### What is the music under replies, and how do I change it?
+
+Replies can play over quiet backing music, the way a radio host talks over
+a bed. **Settings → Music under long readings** picks the source: generated
+moods and styles (bossa nova, piano, lo-fi…), your streaming service
+(house speakers only), a free online library (archive.org and ccMixter), or
+**your favourites, instrumental**: official instrumental or karaoke
+versions of the songs you play most, or ones with the vocals removed
+overnight. **Auto** follows the time of day (and your Astro Tunes reading,
+where set up); **Slow music only** keeps it calm. The switches below it shape
+the mix like a DJ would: the music breathes up in the pauses, steps out of
+the voice's way, has an intro and an ending, and carries on between replies
+that follow each other.
+
+See also: `server-contract.md` §`/speech/music-bed` ("DJ mixing").
+
+### What is the Backing music level relative to?
+
+To where the music started, not to the voice. 0 dB is the level the backing
+music first shipped at (a generated bed peaking at -24 dBFS, a track
+normalised to -30 LUFS, Mopidy at volume 12); -12 dB is 12 dB quieter than
+that, about half as loud to the ear. The voice is normalised loud, so even at
+0 dB the music sits well under it. The level is the one **under the words**:
+in the pauses the music swells up to 6 dB above it. Every device shares it:
+change it on the full player (**Levels**, tap to fold) or in Settings →
+Music, and the next sound plays at the new level.
+
+The same slider sets how far your own music (the radio, a playlist) is
+turned down while a reply plays: at -4 dB it ducks as it always did (to
+about a tenth of its volume), and each 6 dB lower halves that again. Tracks
+differ in loudness, so this is approximate.
+
+See also: `packages/core/src/agent_media_core/music_bed.py` (`gain_db`,
+`duck_scale`).
+
+### What can I do with the song after a long reply?
+
+After a long reply over one of your favourites, the original song, vocals
+and all, takes over from the instrumental and plays to the end of a chorus
+(**Sing it out after long replies** in Settings → Music). While it plays it
+shows in the mini player and at the top of the Media tab, with:
+
+- **Keep playing**: the whole song, no fade at the chorus.
+- **Stop**: a quick fade.
+- **Like** / **Dislike**: a like ranks it higher among your favourites; a
+  dislike takes it out of them for good, and stops it.
+- **Start radio**: your music player carries the song on from the same place
+  and a radio station seeded with it follows. From then on it is ordinary
+  music, turned down under later replies.
+
+With a headset: **next** keeps it playing, a **double press** starts the
+radio, a single press stops it. By voice (hands-free or the mic key): "keep
+playing", "start the radio", "stop the music". Only on the phone; the song
+after a reply on house speakers has no controls yet.
+
+See also: `server-contract.md` §`/speech/music-bed` ("Singing it out"),
+`POST /speech/music-bed/song`, `POST /music/radio`.
+
+### Why does my music go quiet, then swell, while a reply plays?
+
+Your own music is ducked under a reply the way a DJ talks over a record: it
+slides down as the voice starts, rises a little in the pauses, and comes back
+up after the last word. How far down follows the **Backing music level**
+(above). A short notice only dips it; a question or a very long reply pauses
+it; books and podcasts always pause, since you can't half-hear narration.
+
+See also: `packages/core/src/agent_media_core/route/dj.py`.
 
 ## On the server
 
