@@ -51,6 +51,10 @@ Config (env; hours and percentages may be fractional):
   MEDIA_REAP_RECAP_TIMEOUT seconds (default 20) — a failure never blocks a close
   MEDIA_DONE_RECAP         0 to skip the recap written when a thread is marked
                            Done or archived (`recap_soon`; default on)
+  MEDIA_QUIET_RECAP        0 to skip recaps for threads gone quiet (`recap_quiet`;
+                           default on, whatever MEDIA_REAP_MODE says)
+  MEDIA_QUIET_RECAP_MIN    minutes without a message before a recap (default 30)
+  MEDIA_QUIET_RECAP_MAX    recaps written per run at most (default 8)
 """
 
 from __future__ import annotations
@@ -642,6 +646,74 @@ def recap_soon(session: str) -> bool:
     return True
 
 
+#: A quiet thread older than this is not recapped by `recap_quiet`: the list's
+#: old threads keep their last reply rather than a first run writing hundreds.
+QUIET_RECAP_WINDOW_H = 48
+#: `{session: transcript mtime}` of the quiet recaps tried, so one that cannot
+#: be written (a private thread, a gateway that said nothing) is tried once
+#: per quiet spell, not every run.
+_QUIET_TRIED = None
+
+
+def _quiet_tried():
+    global _QUIET_TRIED
+    if _QUIET_TRIED is None:
+        from ._jsonmap import JsonMap
+
+        _QUIET_TRIED = JsonMap("quiet-recaps-tried.json")
+    return _QUIET_TRIED
+
+
+def recap_quiet(now: float | None = None) -> list[str]:
+    """Write a recap for each thread in the list (not archived; an agent's)
+    that has had no message for MEDIA_QUIET_RECAP_MIN minutes and whose recap
+    is older than its last one — newest first, MEDIA_QUIET_RECAP_MAX a run,
+    none quiet longer than `QUIET_RECAP_WINDOW_H`. As Claude Code wrote its
+    own when you came back to a terminal (David, 31 Oct 2026: "archived means
+    it's not in the thread list, which is where we want the recaps").
+    A log line per recap tried."""
+    if (os.environ.get("MEDIA_QUIET_RECAP", "1") or "1").strip() == "0":
+        return []
+    from agent_media_core import harnesses
+
+    now = time.time() if now is None else now
+    quiet_s = _env_float("MEDIA_QUIET_RECAP_MIN", 30.0) * 60
+    most = int(_env_float("MEDIA_QUIET_RECAP_MAX", 8.0))
+    due, waiting = [], set()
+    tried = _quiet_tried().all()
+    for row in sessions.sessions_index(days=QUIET_RECAP_WINDOW_H / 24):
+        sid = str(row.get("session") or "")
+        if row.get("archived") or row.get("harness") in ("matrix", "quick") or not sid:
+            continue
+        found = harnesses.transcript(sid)
+        try:
+            at = os.stat(found[1]).st_mtime if found else None
+        except OSError:
+            at = None
+        if at is None or not (quiet_s <= now - at <= QUIET_RECAP_WINDOW_H * 3600):
+            continue
+        have = recaps.recap_for(sid)
+        if have and have["at"] >= at - 1:
+            continue
+        waiting.add(sid)
+        if tried.get(sid) != at:
+            due.append((at, sid))
+    stamp = datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds")
+    out = []
+    picked = sorted(due, reverse=True)[:most]
+
+    def keep(rows: dict) -> bool:
+        for k in [k for k in rows if k not in waiting]:
+            del rows[k]
+        rows.update({sid: at for at, sid in picked})
+        return True
+    _quiet_tried().update(keep)
+    for _at, sid in picked:
+        got = generate_recap(sid)
+        out.append(f"{stamp} recap-quiet {sid[:8]} {'written' if got else 'failed'}")
+    return out
+
+
 def _recap_state(d: Decision) -> str:
     have = recaps.recap_for(d.session)
     return "have" if have and d.last_at is not None and have["at"] >= d.last_at else "missing"
@@ -798,6 +870,10 @@ def run(mode: str | None = None, *, as_json: bool = False, write_log: bool = Tru
     # Sealing a private thread does not wait on MEDIA_REAP_MODE: privacy is
     # not something a host opts into by letting the reaper close panes.
     lines += seal_private(now, apply=(os.environ.get("MEDIA_PRIVATE_SEAL", "1").strip() != "0"))
+    try:
+        lines += recap_quiet(now)
+    except Exception as e:  # noqa: BLE001 — the reaper's own work is done
+        print(f"reap: quiet recaps failed ({e})", file=sys.stderr)
     # A voice-mode model switch whose loop went stale goes back here too
     # (voice_model.py): nothing else may come along to undo it.
     try:

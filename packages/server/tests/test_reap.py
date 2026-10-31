@@ -1126,3 +1126,39 @@ def test_your_messages_leave_out_mail(monkeypatch):
         msg("user", "the ask"), msg("assistant", "ok"),
         msg("user", "[From Cece] agent-mail #3"), msg("user", "and  this\ntoo")], False))
     assert reap.your_messages("s") == ["the ask", "and this too"]
+
+
+def test_a_quiet_thread_in_the_list_gets_a_recap_once(monkeypatch, tmp_path):
+    """Threads gone quiet get a recap, not archived ones (David, 31 Oct 2026:
+    "archived means it's not in the thread list, which is where we want the recaps")."""
+    import os
+
+    from agent_media_core import harnesses
+
+    monkeypatch.setenv("MEDIA_QUIET_RECAP", "1")
+    now = 1_800_000_000.0
+    files = {}
+    for name, age_min in (("quiet", 40), ("busy", 5), ("old", 60 * 72), ("arch", 40), ("fails", 41)):
+        f = tmp_path / f"{name}.jsonl"
+        f.write_text("{}\n")
+        os.utime(f, (now - age_min * 60, now - age_min * 60))
+        files[name] = str(f)
+    rows = [{"session": n, "harness": "claude", "archived": n == "arch"} for n in files]
+    monkeypatch.setattr(reap.sessions, "sessions_index", lambda days=None: rows)
+    monkeypatch.setattr(harnesses, "transcript", lambda s: ("claude", files[s]))
+    monkeypatch.setattr(reap.recaps, "recap_for", lambda s: None)
+    wrote = []
+    monkeypatch.setattr(reap, "generate_recap", lambda s: wrote.append(s) or ({"at": now} if s != "fails" else None))
+    lines = reap.recap_quiet(now)
+    assert wrote == ["quiet", "fails"]
+    assert any("quiet written" in ln for ln in lines) and any("fails failed" in ln for ln in lines)
+    # The next run: one that failed is not tried again in the same quiet spell.
+    wrote.clear()
+    reap.recap_quiet(now + 900)
+    assert wrote == []
+    # A new message, and later quiet again: tried again.
+    os.utime(files["fails"], (now + 60, now + 60))
+    reap.recap_quiet(now + 60 + 31 * 60)
+    assert wrote == ["fails", "busy"]    # and "busy" has gone quiet since
+    monkeypatch.setenv("MEDIA_QUIET_RECAP", "0")
+    assert reap.recap_quiet(now) == []

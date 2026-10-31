@@ -292,7 +292,12 @@ Everything a message can be pointed at.
   none for a private thread. A thread marked Done (§6.44) or archived
   (§6.4) gets an `"agent-media"` recap written in the background, one at a
   time, unless its recap is already as new as its transcript
-  (`reap.recap_soon`; `MEDIA_DONE_RECAP=0` turns it off).
+  (`reap.recap_soon`; `MEDIA_DONE_RECAP=0` turns it off). So does a thread
+  in the list (not archived) gone quiet: each reaper run (every 15 min)
+  writes one for up to 8 threads with no message for 30 minutes whose recap
+  is older than their last, none quiet past 48 h, each tried once per quiet
+  spell (`reap.recap_quiet`; `MEDIA_QUIET_RECAP=0` off,
+  `MEDIA_QUIET_RECAP_MIN`, `_MAX`).
 - `archived` (every row, 22 Sep 2026): whether the thread is archived — a
   flag this server keeps per session (`archive.py`, `<state_dir>/archived.json`),
   set with `POST /session/archive` (§6.4). **Archived rows stay in the list**;
@@ -7636,6 +7641,35 @@ probably use this as my own little issue tracker/ticketing system too".
 - The rows (`/targets`, `/conversations`, `/dashboard` `recent`) carry
   `issue` (the object above, or null).
 - Kept in `<state_dir>/issues.json`.
+
+### 6.45 Meditations: recorded and written — gated (built 31 Oct 2026)
+
+Code: `agent_media_server/meditations.py`, the list in
+`agent_media_core/meditation_library.py`. Pinned by
+`packages/server/tests/test_meditations_route.py`. David, 31 Oct 2026:
+"I'd like to use recorded meditations too" … "A list in the app".
+
+- `GET /meditations` → `{"ok": true, "items": [{"id", "title", "source",
+  …}], "feeds": [{"url", "title"}], "folder"}`. `source` is `made` (one
+  the agent wrote, newest first; `added`), `youtube` (a saved link;
+  `added`), `file` (an audio file in the host's Meditations folder,
+  `folder`; `added` is its mtime) or `podcast` (one of a saved feed's
+  newest 20 episodes; `show`, `published`, `duration` as the feed gives
+  them). In that order. No paths or URLs are given out.
+- `POST /meditations {"action": "play", "id", "target"?, "resume"?}` →
+  `{"ok", "playing", "title"}`: plays it on the book channel, from the
+  start unless `resume`. A recorded one is then eased out for a reply as
+  a written one is (5 s down, paused, 2 s back up). 404 for an id not in
+  the list; 502 when the player could not start it.
+- `POST /meditations {"action": "add", "url", "title"?}` → the list, plus
+  `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
+  podcast feed with audio episodes. 400 for anything else.
+- `POST /meditations {"action": "remove", "id"}` → the list: a link
+  (`yt:<id>`), a written one (`made:<hash>`, its audio deleted) or a feed
+  (its `url`). A folder's files are only removed from the folder. 404 when
+  nothing was saved under it.
+- Kept in `<state_dir>/meditations.json`; feeds cached for 6 h in
+  `<cache>/meditation-feeds/`. Not a guest POST.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 

@@ -84,6 +84,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A thread marked Done or archived gets a recap through the gateway
     # (reap.recap_soon): never from a test. test_issues.py turns it on.
     monkeypatch.setenv("MEDIA_DONE_RECAP", "0")
+    # … and so does a thread gone quiet, on each reaper run (reap.recap_quiet).
+    monkeypatch.setenv("MEDIA_QUIET_RECAP", "0")
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would
