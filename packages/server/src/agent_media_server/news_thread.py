@@ -264,6 +264,12 @@ def post(entries, intro: bool, bearer: str = "") -> tuple[bool, dict]:
                 return False, {"status": 503, "error": answer.get("error") or "could not start it"}
             session = str(answer.get("session") or "")
         _save({"session": session, "posted": newest})
+    # The threads these entries were asked for in are done (issues.py) —
+    # here, where they are; a relay's are on another server.
+    if not relayed:
+        from . import issues
+
+        issues.done_by_news(clean)
     if fresh:
         name_thread(session, TITLE)
     print(f"news: {len(clean)} entr{'y' if len(clean) == 1 else 'ies'} to {session[:8]}"

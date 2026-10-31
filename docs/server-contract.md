@@ -7608,6 +7608,24 @@ the pop-up's place.
   `env_off` when `MEDIA_FEEDBACK=0` overrides it. 400 `on must be true or
   false`.
 
+### 6.44 Issues: a thread as a ticket — gated (built 31 Oct 2026)
+
+Code: `agent_media_server/issues.py`. Pinned by
+`packages/server/tests/test_issues.py`. David, 31 Oct 2026: "I could
+probably use this as my own little issue tracker/ticketing system too".
+
+- `POST /session/issue {"session", "state": "open" | "done" | null}` →
+  `{"ok": true, "session", "issue": {"state", "opened", "done"?, "news"?} |
+  null}`: track the thread as an open issue, mark it done, or stop tracking
+  it. `opened` stays the first time it was tracked; `done` is when it was
+  marked done. 400 for a bad id or state, 404 for a session nothing knows.
+- **Closed by What's new:** `POST /news` (§6.43) marks each entry's `from`
+  thread done, with `news` the entry's id — the change that shipped closes
+  the thread that asked for it. Not on a relay.
+- The rows (`/targets`, `/conversations`, `/dashboard` `recent`) carry
+  `issue` (the object above, or null).
+- Kept in `<state_dir>/issues.json`.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

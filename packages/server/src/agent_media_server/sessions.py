@@ -1563,12 +1563,13 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # And `quiet`: `{until, at}` while Quiet for… holds it, else None (quiet.py).
     # And `spaces`: the projects and groups it is in, else people or inbox (spaces.py).
     # And `mail_from`: who, when another agent's mail started it (mail_threads.py).
-    from . import chat_marks, mail_threads, quiet, remind, spaces, tags
+    from . import chat_marks, issues, mail_threads, quiet, remind, spaces, tags
 
-    # And `top` and `marked_unread`: pinned to the top, marked unread (chat_marks.py).
-    return chat_marks.add_marks(mail_threads.add_mail(remind.add_remind(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
+    # And `top` and `marked_unread`: pinned to the top, marked unread (chat_marks.py);
+    # `issue`: tracked as Open or Done (issues.py).
+    return issues.add_issues(chat_marks.add_marks(mail_threads.add_mail(remind.add_remind(quiet.add_quiet(spaces.add_spaces(tags.add_tags(
         add_projects(out) + [seal_row(sid, rec, sid in flags, sid in pinned)
-                             for sid, rec in locked.items() if sid not in gone]))))))
+                             for sid, rec in locked.items() if sid not in gone])))))))
 
 
 def _you_wrote(row: dict, paths: dict) -> tuple[float | None, bool]:

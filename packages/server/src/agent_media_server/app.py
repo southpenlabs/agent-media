@@ -400,7 +400,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
-    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
+    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -3357,6 +3357,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = remind.session_remind(str(body.get("session") or ""), body, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/issue":
+        # Issues: track the thread as Open or Done, or stop (issues.py).
+        from . import issues
+
+        body = _read_json(h) or {}
+        ok, detail = issues.session_issue(str(body.get("session") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/handoff":
         # A quick chat to a full agent, with what was said (quick.py).
