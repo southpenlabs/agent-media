@@ -1146,6 +1146,34 @@ def _ensure_autoadvance_watcher() -> None:
 
 
 @mcp.tool()
+def meditate(script: str, title: str = "Meditation", target: str = "",
+             bed: str = "") -> dict:
+    """Play a guided meditation you have written, on the book channel.
+
+    For "guide me through a body scan", "a ten-minute wind-down", "help me
+    relax". Write the script yourself, in short calm paragraphs; it is said
+    slower than a reply over quiet generated music. Markers:
+    `[[pause: 20]]` (seconds, or `1m`, `1m30s`) is silence with the music
+    still playing — use generous ones, a meditation is mostly quiet — and
+    `[[bell]]` rings a singing bowl (start and end with one). Rendering
+    takes a few seconds per minute of words.
+
+    Args:
+        script: The words with their markers.
+        title: What the player shows.
+        target: rooms | local | phone; empty follows the default.
+        bed: A generated mood (night by default: calm, dusk, rainy, ambient,
+            piano, …), or "none" for the voice alone.
+    """
+    from . import meditate as med
+    clip = med.render(script, bed=bed or None)
+    if clip is None:
+        return {"ok": False, "error": "nothing could be rendered from that script"}
+    r = book_play(str(clip), resume=False, start_ms=-1, target=target, title=title)
+    return {**r, "file": str(clip)} if isinstance(r, dict) else {"ok": True, "file": str(clip)}
+
+
+@mcp.tool()
 def book_playlist_new(name: str) -> dict:
     """Create an empty book playlist. Add parts with `book_playlist_add`."""
     created = _state().create_playlist(name, channel="book")

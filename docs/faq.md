@@ -167,6 +167,31 @@ after a reply on house speakers has no controls yet.
 See also: `server-contract.md` §`/speech/music-bed` ("Singing it out"),
 `POST /speech/music-bed/song`, `POST /music/radio`.
 
+### Can it guide me through a meditation?
+
+Yes. Ask in any chat, for example "guide me through a ten-minute body scan".
+The agent writes the script, and you hear it said more slowly than a reply,
+over quiet generated music, with real silences and a singing bowl at the
+start and end. It plays like an audiobook, so pause, stop and seek work as
+usual, and a reply that arrives during it pauses it instead of talking over
+it.
+
+From a shell, a script with `[[pause: 20]]` (or `1m`, `1m30s`) and
+`[[bell]]` markers:
+
+```
+media meditate --file body-scan.txt --bed night
+```
+
+Settings, in `~/.config/agent-media.env`: `MEDIA_MEDITATE_RATE` (-12%,
+how much slower than a reply), `MEDIA_MEDITATE_BED_PEAK_DBFS` (-20, the
+music's level), `MEDIA_MEDITATE_MOOD` (night), `MEDIA_MEDITATE_GAP_S` (2,
+the quiet after each paragraph), `MEDIA_MEDITATE_TAIL_S` (30, the music's
+fade after the last words).
+
+See also: `packages/core/src/agent_media_core/meditate.py`, the `meditate`
+MCP tool, `docs/proposals/2026-10-31-relax-and-meditate.md`.
+
 ### Why does my music go quiet, then swell, while a reply plays?
 
 Your own music is ducked under a reply the way a DJ talks over a record: it

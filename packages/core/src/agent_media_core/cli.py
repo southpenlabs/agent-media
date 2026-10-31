@@ -5486,6 +5486,38 @@ def cmd_history(a) -> int:
     return 0
 
 
+def cmd_meditate(a) -> int:
+    """A guided meditation: the script (an argument, a file or stdin) spoken
+    slowly over a bed with real pauses and bells, played on the book channel
+    (meditate.py)."""
+    from pathlib import Path
+
+    from . import meditate
+    if getattr(a, "file", ""):
+        script = Path(a.file).expanduser().read_text(errors="replace")
+    else:
+        script = a.script if a.script else sys.stdin.read()
+    if not meditate.parse(script):
+        print("media meditate: nothing to say", file=sys.stderr)
+        return 1
+    clip = meditate.render(script, bed=getattr(a, "bed", "") or None,
+                           force=getattr(a, "force", False))
+    if clip is None:
+        print("media meditate: could not render that script", file=sys.stderr)
+        return 1
+    if getattr(a, "no_play", False):
+        print(clip)
+        return 0
+    title = getattr(a, "title", "") or "Meditation"
+    r = _srv().book_play(str(clip), resume=False, start_ms=-1,
+                         target=getattr(a, "target", "") or "", title=title)
+    if r.get("error"):
+        print(f"media meditate: {r['error']}", file=sys.stderr)
+        return 1
+    print(title)
+    return 0
+
+
 def cmd_say(a) -> int:
     from .intake._text import strip_markdown
     from .intake._visual import (extract_visual_markers, spawn_visual,
@@ -9770,6 +9802,21 @@ def _build_parser() -> argparse.ArgumentParser:
                         "host asks its origin for")
     s.set_defaults(func=cmd_history)
 
+    s = sub.add_parser("meditate",
+                       help="a guided meditation: a script with [[pause: 20]] and "
+                            "[[bell]] markers, said slowly over a bed, on the "
+                            "book channel")
+    s.add_argument("script", nargs="?", help="the script (stdin if neither this "
+                                             "nor --file)")
+    s.add_argument("--file", default="", help="read the script from a file")
+    s.add_argument("--title", default="", help="what the player shows")
+    s.add_argument("--bed", default="", help="a generated mood (night by "
+                                             "default), or none")
+    s.add_argument("--target", default="", help="rooms|local|phone")
+    s.add_argument("--no-play", action="store_true",
+                   help="render only and print the file")
+    s.add_argument("--force", action="store_true", help="render afresh")
+    s.set_defaults(func=cmd_meditate)
     s = sub.add_parser("say", help="speak text (stdin if no arg)")
     s.add_argument("text", nargs="?")
     s.add_argument("--urgent", action="store_true",
