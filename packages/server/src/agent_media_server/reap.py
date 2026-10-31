@@ -73,12 +73,15 @@ MODES = ("dry-run", "apply")
 #: paragraph, which stopped after 22 Sep 2026): the goal, where it stands, the
 #: next step, in two sentences (David, 31 Oct 2026: "I'm wondering if the
 #: summary should also include the first message from me" … "Match Claude's
-#: style"). The goal comes from the person's first message, given first.
+#: style"). The goal comes from the person's own messages, every one, given
+#: first (David, 31 Oct 2026: "what about if we use all my messages from the
+#: thread which there wouldn't be that many of them anyway?").
 RECAP_PROMPT = (
-    "You read a conversation between a person and a coding assistant: the "
-    "person's first message, then the end of the conversation. Write the "
-    "recap the person reads when they come back to it, in at most two short "
-    "sentences: the goal (what they asked for, from the first message), "
+    "You read a conversation between a person and a coding assistant: every "
+    "message the person wrote, in order, then the end of the conversation. "
+    "Write the recap the person reads when they come back to it, in at most "
+    "two short sentences, under 50 words in all: the goal (what they asked for, as their messages "
+    "shaped it), "
     "where it stands (what got done), and the next step or what it is "
     "waiting on, if anything. Speak to the person as \"you\" and of the work "
     "as \"we\". Plain prose, no markdown, no preamble, no quotes. For example: "
@@ -502,16 +505,66 @@ def first_ask(session: str) -> str:
         return ""
 
 
+#: A recap's input keeps each of the person's messages to about this many
+#: characters, and all of them to about `YOURS_TOTAL`: the first few and the
+#: newest when there are more (a median thread has 5, ~430 characters).
+YOURS_EACH = 500
+YOURS_TOTAL = 4000
+YOURS_FIRST = 2
+
+
+def your_messages(session: str) -> list[str]:
+    """The person's own messages in the thread, oldest first, as the Sent
+    view counts them (`you_wrote.yours`: no agent mail, host notes or timed
+    prompts). Their first message alone where no transcript can be read
+    (Hermes); [] when there is nothing."""
+    from . import transcript, you_wrote
+
+    try:
+        got = transcript.messages(session)
+    except Exception:  # noqa: BLE001 — the recap is written from the end alone
+        got = None
+    if got is None:
+        first = first_ask(session)
+        return [first] if first else []
+    out = []
+    for m in got[0]:
+        if you_wrote.yours(m):
+            text = " ".join(str((m.get("parts") or [{}])[0].get("text") or "").split())
+            if text:
+                out.append(text)
+    return out
+
+
+def _yours_block(texts: list[str]) -> list[str]:
+    cut = [t if len(t) <= YOURS_EACH else t[:YOURS_EACH].rsplit(None, 1)[0] + " …"
+           for t in texts]
+    lines = [f"Person: {t}" for t in cut]
+    if sum(len(x) + 1 for x in lines) <= YOURS_TOTAL:
+        return lines
+    head = lines[:YOURS_FIRST]
+    size = sum(len(x) + 1 for x in head)
+    tail: list[str] = []
+    for x in reversed(lines[YOURS_FIRST:]):
+        if size + len(x) + 1 > YOURS_TOTAL:
+            break
+        tail.insert(0, x)
+        size += len(x) + 1
+    left = len(lines) - len(head) - len(tail)
+    return head + [f"(… {left} more of their messages left out …)"] + tail
+
+
 def recap_input(session: str) -> str:
-    """What a recap is written from: the first message, then `tail_text`.
-    The first message alone is left out when the end already holds it."""
+    """What a recap is written from: every message the person wrote
+    (`your_messages`, kept short), then `tail_text`."""
     tail = tail_text(session)
     if not tail:
         return ""
-    first = first_ask(session)[:1500]
-    if not first or first[:200] in tail:
+    yours = your_messages(session)
+    if not yours:
         return tail
-    return f"First message:\nPerson: {first}\n\nThe end of the conversation:\n{tail}"
+    return ("The person's messages, in order:\n" + "\n".join(_yours_block(yours))
+            + "\n\nThe end of the conversation:\n" + tail)
 
 
 def generate_recap(session: str) -> dict | None:

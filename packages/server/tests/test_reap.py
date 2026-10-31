@@ -1092,15 +1092,37 @@ def test_gateway_sessions_are_machinery_not_threads(monkeypatch, tmp_path):
     assert sessions._excluded_dirs() == []
 
 
-def test_a_recap_is_written_from_the_first_message_and_the_end(monkeypatch):
-    """The goal comes from the first message (David, 31 Oct 2026: "Match Claude's style")."""
+def test_a_recap_is_written_from_every_message_of_theirs_and_the_end(monkeypatch):
+    """The goal comes from the person's own messages (David, 31 Oct 2026:
+    "what about if we use all my messages from the thread")."""
     monkeypatch.setattr(reap, "tail_text", lambda s: "Person: ship it\nAssistant: Shipped.")
-    monkeypatch.setattr(reap, "first_ask", lambda s: "Make autoplay wait for What's new")
-    got = reap.recap_input("s")
-    assert got.startswith("First message:\nPerson: Make autoplay wait for What's new")
-    assert got.endswith("Assistant: Shipped.")
-    # A short thread whose end already holds it: the end alone.
-    monkeypatch.setattr(reap, "first_ask", lambda s: "ship it")
+    monkeypatch.setattr(reap, "your_messages", lambda s: ["Make autoplay wait", "ship it"])
+    assert reap.recap_input("s") == ("The person's messages, in order:\nPerson: Make autoplay wait\n"
+                                     "Person: ship it\n\nThe end of the conversation:\n"
+                                     "Person: ship it\nAssistant: Shipped.")
+    monkeypatch.setattr(reap, "your_messages", lambda s: [])
     assert reap.recap_input("s") == "Person: ship it\nAssistant: Shipped."
     monkeypatch.setattr(reap, "tail_text", lambda s: "")
     assert reap.recap_input("s") == ""
+
+
+def test_many_long_messages_are_kept_short(monkeypatch):
+    texts = [f"m{i} " + "word " * 200 for i in range(40)]
+    got = reap._yours_block(texts)
+    assert got[0].startswith("Person: m0 ") and got[0].endswith(" …")
+    assert len(got[0]) <= len("Person: ") + reap.YOURS_EACH + 2
+    assert got[1].startswith("Person: m1 ") and got[2].startswith("(… ")
+    assert got[-1].startswith("Person: m39 ")
+    assert sum(len(x) + 1 for x in got) <= reap.YOURS_TOTAL + 100
+    assert reap._yours_block(["a", "b"]) == ["Person: a", "Person: b"]
+
+
+def test_your_messages_leave_out_mail(monkeypatch):
+    from agent_media_server import transcript
+
+    def msg(role, text):
+        return {"role": role, "parts": [{"type": "text", "text": text}]}
+    monkeypatch.setattr(transcript, "messages", lambda s, **kw: ([
+        msg("user", "the ask"), msg("assistant", "ok"),
+        msg("user", "[From Cece] agent-mail #3"), msg("user", "and  this\ntoo")], False))
+    assert reap.your_messages("s") == ["the ask", "and this too"]

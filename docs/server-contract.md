@@ -530,8 +530,10 @@ reads it (`agent_media_server/recaps.py`, read-only) and hands it on as
   `intake/_followup.py` call style; `MEDIA_REAP_RECAP_MODEL` /
   `_TIMEOUT` override, 20 s) for a recap in Claude Code's own shape (31 Oct
   2026): at most two sentences, the goal, where it stands and the next step,
-  written from the person's first message and the end of the conversation
-  (`reap.recap_input`). It keeps it in `<state_dir>/generated-recaps.json`. A failed
+  under 50 words, written from every message the person wrote (agent mail
+  and host notes left out, each kept to ~500 characters and all to ~4000:
+  the first two and the newest when there are more) and the end of the
+  conversation (`reap.recap_input`). It keeps it in `<state_dir>/generated-recaps.json`. A failed
   call never blocks the close. `recaps.recap_for` answers the newer of the
   two; that is what `/targets`, `/conversations` and `/conversation/log`
   carry.
