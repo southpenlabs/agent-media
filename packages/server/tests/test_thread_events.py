@@ -367,6 +367,41 @@ def test_an_open_left_at_once_plays_nothing(server, convo, signed_in, monkeypatc
     st.close()
 
 
+def test_a_held_device_counts_no_stream_until_released(server, convo, signed_in, monkeypatch):
+    """`POST /threads/hold` (the phone's What's new is up): a stream the
+    device already had — a stale one from before an update — stops counting
+    as on screen, and a new open plays nothing; `held: false` lets them go
+    and plays what waited."""
+    from agent_media_core import watching
+
+    monkeypatch.setattr(thread_events, "OPEN_DWELL_S", 0)
+    played: list = []
+    monkeypatch.setattr(thread_events, "_play_waiting", lambda s, d="": played.append(s))
+    tables: list = []
+    monkeypatch.setattr(watching, "publish_pinned", lambda t: tables.append(dict(t)))
+    st = Stream(server, f"/threads/{SID}/events", AUTH)
+    assert st.status == 200 and st.event()[0] == "snapshot"
+    assert _wait(lambda: played == [SID]) and tables[-1] == {SID: 1}
+    res, body = call(server, "POST", "/threads/hold", {"held": True}, AUTH)
+    assert res.status == 200 and body["held"] is True
+    assert tables[-1] == {}
+    st2 = Stream(server, f"/threads/{SID}/events", AUTH)
+    assert st2.status == 200 and st2.event()[0] == "snapshot"
+    time.sleep(0.1)
+    assert played == [SID] and tables[-1] == {}
+    res, body = call(server, "POST", "/threads/hold", {"held": False}, AUTH)
+    assert res.status == 200 and body["held"] is False
+    assert _wait(lambda: played == [SID, SID]) and tables[-1] == {SID: 2}
+    # Not held: nothing more plays.
+    call(server, "POST", "/threads/hold", {"held": False}, AUTH)
+    time.sleep(0.1)
+    assert played == [SID, SID]
+    res, body = call(server, "POST", "/threads/hold", {"held": "yes"}, AUTH)
+    assert res.status == 400
+    st.close()
+    st2.close()
+
+
 def test_preflight_and_the_token_is_never_logged(server, convo, monkeypatch, capsys):
     res, _ = call(server, "OPTIONS", f"/threads/{SID}/events")
     assert res.status == 204 and res.getheader("Access-Control-Allow-Origin") == "*"

@@ -394,7 +394,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -3043,7 +3043,27 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not sessions._SESSION.fullmatch(session):
             _json(h, 400, {"ok": False, "error": "not a session id"})
             return True
-        _json(h, 200, {"ok": True, "released": thread_events.release(session, _opener(user))})
+        _json(h, 200, {"ok": True, "released": thread_events.release(_opener(user))})
+    elif path == "/threads/hold":
+        # The phone's What's new is up, or closed (§11): none of its
+        # streams counts as on screen meanwhile, a stale one included.
+        from . import thread_events
+
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        body = _read_json(h) or {}
+        held = body.get("held") if isinstance(body, dict) else None
+        if not isinstance(held, bool):
+            _json(h, 400, {"ok": False, "error": "held must be true or false"})
+            return True
+        who = _opener(user)
+        if held:
+            thread_events.hold_device(who)
+            _json(h, 200, {"ok": True, "held": True})
+        else:
+            _json(h, 200, {"ok": True, "held": False, "released": thread_events.release(who)})
     elif AGENT_ACT.fullmatch(path):
         # Stop one background agent, or send it a message, from the agents
         # strip (§6.12a, agent_actions.py).

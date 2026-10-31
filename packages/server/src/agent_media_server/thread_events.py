@@ -91,6 +91,10 @@ QUEUE_MAX = 256
 # 2026: a question from another thread was read out "while I'm on a different
 # thread"; its log fetch was cut off in the same second).
 OPEN_DWELL_S = 1.5
+# A device's What's new is up (`hold_device`): none of its streams counts as on
+# screen, a stale one from before an update included, until it is closed or
+# this long has passed (an app killed with the sheet up).
+HOLD_S = 600.0
 #: Messages in the snapshot unless the client asks (`?limit=`). A busy
 #: thread's 60 were ~390 KB of JSON; the phone draws the end first and pages
 #: back with `/conversation/log?before=`.
@@ -403,6 +407,18 @@ class Watcher:
 
 _WATCHERS: dict[str, Watcher] = {}
 _LOCK = threading.Lock()
+#: {device: until (monotonic)} — devices whose What's new is up.
+_HELD_DEVICES: dict[str, float] = {}
+
+
+def _device_held(device: str) -> bool:
+    until = _HELD_DEVICES.get(device) if device else None
+    return until is not None and until > time.monotonic()
+
+
+def _counts(sub: Subscriber) -> bool:
+    """Is `sub` a screen someone is looking at: not held, nor its device."""
+    return not sub.held and not _device_held(sub.device)
 
 
 def renamed(session: str, title: str) -> None:
@@ -425,6 +441,8 @@ def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watch
         if total >= MAX_TOTAL or (w and len(w.subs) >= MAX_PER_SESSION):
             return None
         sub = Subscriber(device, held)
+        if held and device:
+            _hold(device)
         # A watcher in the table always has subscribers: the last one out
         # takes it out (`unsubscribe`).
         start = w is None
@@ -444,32 +462,66 @@ def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watch
     if start:
         w.prime()
         w.start()
-    if not held:
+    if _counts(sub):
         threading.Thread(target=_play_if_stayed, args=(session, device, sub), daemon=True,
                          name=f"opened:{session[:8]}").start()
     return w, sub
 
 
-def release(session: str, device: str = "") -> int:
-    """The sheet `device`'s streams of `session` were opened under is closed
-    (`POST /threads/{session}/release`): they count as on screen from now,
-    and the thread's waiting replies play as on an open. How many were
-    released; nothing plays when none was (the stream is shut, say: its
-    next open plays them)."""
+def _hold(device: str) -> None:
+    """Under `_LOCK`: hold `device` for HOLD_S, and look again when that ends."""
+    _HELD_DEVICES[device] = time.monotonic() + HOLD_S
+    t = threading.Timer(HOLD_S + 0.5, _expire_holds)
+    t.daemon = True
+    t.start()
+
+
+def _expire_holds() -> None:
     with _LOCK:
-        w = _WATCHERS.get(session)
-        mine = [s for s in (w.subs if w else []) if s.held and s.device == device]
-        for s in mine:
-            s.held = False
-        if mine:
+        now = time.monotonic()
+        gone = [d for d, until in _HELD_DEVICES.items() if until <= now]
+        for d in gone:
+            del _HELD_DEVICES[d]
+        if gone:
             _publish()
-            log.info("thread %s released (%d)", session[:8], len(mine))
-            print(f"thread {session[:8]} released by {device or '?'} ({len(mine)})",
+
+
+def hold_device(device: str) -> None:
+    """`device`'s What's new is up (`POST /threads/hold`): every stream of it
+    stops counting as on screen — its waiting replies are not played on an
+    open, and a new one waits — until `release`."""
+    if not device:
+        return
+    with _LOCK:
+        _hold(device)
+        _publish()
+    print(f"threads held for {device}", file=sys.stderr, flush=True)
+
+
+def release(device: str = "") -> int:
+    """`device`'s What's new is closed (`POST /threads/hold` false, or
+    `POST /threads/{session}/release`): its streams count as on screen from
+    now, and the threads they show play their waiting replies as on an open.
+    How many held streams were let go; nothing plays when the device was not
+    held (the next open plays them)."""
+    with _LOCK:
+        was = _HELD_DEVICES.pop(device, None) is not None
+        mine = [(sess, x) for sess, w in _WATCHERS.items() for x in w.subs if x.device == device]
+        freed = [x for _, x in mine if x.held]
+        for x in freed:
+            x.held = False
+        if was or freed:
+            _publish()
+            print(f"threads released by {device or '?'} ({len(freed)} held)",
                   file=sys.stderr, flush=True)
-    if mine:
-        threading.Thread(target=_play_if_stayed, args=(session, device, mine[0]), daemon=True,
-                         name=f"opened:{session[:8]}").start()
-    return len(mine)
+    if was or freed:
+        first: dict[str, Subscriber] = {}
+        for sess, x in mine:
+            first.setdefault(sess, x)
+        for sess, x in first.items():
+            threading.Thread(target=_play_if_stayed, args=(sess, device, x), daemon=True,
+                             name=f"opened:{sess[:8]}").start()
+    return len(freed)
 
 
 def _play_if_stayed(session: str, device: str, sub: Subscriber) -> None:
@@ -480,7 +532,7 @@ def _play_if_stayed(session: str, device: str, sub: Subscriber) -> None:
         time.sleep(OPEN_DWELL_S)
     with _LOCK:
         w = _WATCHERS.get(session)
-        stayed = w is not None and sub in w.subs and not sub.held
+        stayed = w is not None and sub in w.subs and _counts(sub)
     if stayed and sub.gone():
         stayed = False
     if not stayed:
@@ -575,7 +627,7 @@ def _publish() -> None:
 
     # A held stream is not on screen: a reply that comes in under the sheet
     # waits, and plays on `release` with the rest.
-    on = {s: n for s, w in _WATCHERS.items() if (n := sum(not x.held for x in w.subs))}
+    on = {s: n for s, w in _WATCHERS.items() if (n := sum(_counts(x) for x in w.subs))}
     _watching.publish_pinned(on)
 
 
@@ -590,6 +642,7 @@ def _reset_for_tests() -> None:
         for w in _WATCHERS.values():
             w.stop()
         _WATCHERS.clear()
+        _HELD_DEVICES.clear()
         _publish()
 
 

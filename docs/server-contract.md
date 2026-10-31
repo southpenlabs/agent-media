@@ -7972,6 +7972,16 @@ many of the caller's streams were released; at 0 nothing plays (the next
 open does). A server without it ignores `hold` and plays on the open, as
 before.
 
+The whole device too (31 Oct 2026; a stream the server still held from
+before an update let a reply through the sheet): `POST /threads/hold`
+`{"held": true}` (gated, CORS) while the sheet is up — none of the caller's
+streams counts as on screen, those it already had included, for at most 10
+minutes (`HOLD_S`, an app killed with the sheet up) — and `{"held": false}`
+→ `{"ok": true, "held": false, "released": N}` when it closes: the device's
+streams count again and the threads they show play their waiting replies as
+on an open (nothing plays if the device was not held). `release` above does
+the same for the whole device. 400 `"held must be true or false"`.
+
 **Only a thread that stays open plays (30 Oct 2026).** Its held Normal
 replies play once the stream has stayed open `OPEN_DWELL_S` (1.5 s), not on
 the open itself; a stream closed before then plays nothing (checked on the
