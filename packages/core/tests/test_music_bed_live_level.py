@@ -44,7 +44,9 @@ def test_only_phone_targets_are_told_once_each(monkeypatch):
     monkeypatch.setattr(at, "speech_options", lambda: [
         {"name": "phone"}, {"name": "phone2"}, {"name": "local"}])
     socks = {"phone": "tcp://p:1", "phone2": "tcp://p:1", "local": "/run/x.sock"}
-    monkeypatch.setattr(speech, "_socket_for", lambda t: socks[t])
+    # A Target, as the real _socket_for takes (a bare name was the bug: 31 Oct
+    # 2026, every push failed quietly and the slider still did nothing).
+    monkeypatch.setattr(speech, "_socket_for", lambda t: socks[t.name])
     sent = []
     monkeypatch.setattr(speech.ipc, "set_property", lambda s, n, v: sent.append((s, n, v)))
     assert speech.push_under_level(-16) == 1
@@ -60,3 +62,13 @@ def test_the_rider_moves_by_the_difference():
     old = under_mix.Bed("/nowhere.sock", {"gain_db": -3.0})   # an older mix
     old.follow_level(-20.0)
     assert old.offset_db == -3.0
+
+
+def test_the_real_socket_lookup_takes_a_name(monkeypatch):
+    """No fake _socket_for: a phone target's tcp override is found by name."""
+    import agent_media_core.audio_targets as at
+    monkeypatch.setattr(at, "speech_options", lambda: [{"name": "sasonica"}])
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_SASONICA", "tcp://127.0.0.1:1")
+    sent = []
+    monkeypatch.setattr(speech.ipc, "set_property", lambda s, n, v: sent.append(s))
+    assert speech.push_under_level(-20) == 1 and sent == ["tcp://127.0.0.1:1"]

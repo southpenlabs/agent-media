@@ -1459,12 +1459,13 @@ def push_under_level(db: float) -> int:
         from ..audio_targets import speech_options
         names = [o["name"] for o in speech_options()]
     except Exception:  # noqa: BLE001
-        names = [DEFAULT_TARGET]
+        names = [DEFAULT_TARGET.name]
     told, seen = 0, set()
     for name in names:
         try:
-            sock = str(_socket_for(name))
-        except Exception:  # noqa: BLE001
+            sock = str(_socket_for(Target(name=name)))
+        except Exception as e:  # noqa: BLE001
+            log.debug("sink-speech: no socket for %s: %s", name, e)
             continue
         if not sock.startswith("tcp://") or sock in seen:
             continue
