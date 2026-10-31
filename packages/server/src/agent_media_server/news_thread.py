@@ -43,6 +43,45 @@ def folder() -> str:
     return f if f and os.path.isdir(f) else ""
 
 
+def relay() -> bool:
+    """No app source here, but the owner sends feedback on (feedback.py,
+    `MEDIA_FEEDBACK=1`): the thread is a relay to the Sasonica team."""
+    from . import feedback
+
+    return not folder() and feedback.sending()
+
+
+def workdir() -> str:
+    """Where the What's new chat runs: the app's source, or for a relay a
+    folder of its own with nothing in it."""
+    if folder():
+        return folder()
+    if relay():
+        from agent_media_core._paths import state_dir
+
+        d = state_dir() / "news-thread"
+        d.mkdir(parents=True, exist_ok=True)
+        return str(d)
+    return ""
+
+
+def relay_session() -> str:
+    """The relay thread's session, "" when this server has none."""
+    return str(_load().get("session") or "") if relay() else ""
+
+
+def team_message(text: str) -> str:
+    """An answer from the Sasonica team, for the relay thread to pass on."""
+    return "\n".join([
+        "[From the Sasonica team]",
+        "",
+        text.strip(),
+        "",
+        "(An answer from the Sasonica team to this person's feedback. Pass it on to them word "
+        "for word, saying it is from the Sasonica team, and add nothing else.)",
+    ])
+
+
 def _path() -> Path:
     from agent_media_core._paths import state_dir
 
@@ -70,9 +109,10 @@ def _save(data: dict) -> None:
 
 def state() -> dict:
     """`GET /news`: whether this server has the thread, and which it is."""
-    if not folder():
+    if not workdir():
         return {"enabled": False, "session": None}
-    return {"enabled": True, "session": _load().get("session") or None, "title": TITLE}
+    return {"enabled": True, "session": _load().get("session") or None, "title": TITLE,
+            "relay": relay()}
 
 
 def _clean(entries) -> list[dict]:
@@ -87,9 +127,11 @@ def _clean(entries) -> list[dict]:
     return out[:MAX_ENTRIES]
 
 
-def message(entries: list[dict], intro: bool, cwd: str) -> str:
+def message(entries: list[dict], intro: bool, cwd: str, relayed: bool = False) -> str:
     """What the agent is handed: the entries as written, and what to do."""
     lines = ["[From Sasonica What's new]"]
+    if relayed:
+        return _relay_message(entries, intro)
     if intro:
         lines += [
             "This thread is Sasonica's What's new. The listener has just installed the app or "
@@ -122,15 +164,48 @@ def message(entries: list[dict], intro: bool, cwd: str) -> str:
     return "\n".join(lines)
 
 
+def _relay_message(entries: list[dict], intro: bool) -> str:
+    """For a relay thread: the agent reads the news and is the go-between."""
+    lines = ["[From Sasonica What's new]"]
+    if intro:
+        lines += [
+            "This thread is Sasonica's What's new. Start with a light introduction to how a "
+            "thread works, in three or four short spoken sentences: replies are read aloud, and "
+            "Play under a reply hears it again; the reply row below takes an answer, typed or "
+            "by the mic (a tap dictates once, a hold talks hands-free); and anything said in "
+            "this thread goes to the Sasonica team, the people who make the app, who may answer "
+            "here. Then the news.",
+            "",
+        ]
+    lines += ["New in this update, newest first:", ""]
+    for e in entries:
+        for item in e["items"]:
+            lines.append(f"- {item}")
+    lines += [
+        "",
+        "Tell them what is new in plain, spoken words: keep it short, keep every change in, add "
+        "nothing that is not there. End by asking if they have any thoughts or wishes for the "
+        "Sasonica team.",
+        "",
+        "From now on in this thread you are only the go-between. Each thing they say is sent "
+        "to the Sasonica team for you (you do not send it): answer it with one short sentence "
+        "saying it has gone to the team, and nothing more. A message that starts [From the "
+        "Sasonica team] is the team's answer: pass it on word for word. Never run commands, "
+        "read or change files, or take any other action in this thread.",
+    ]
+    return "\n".join(lines)
+
+
 def post(entries, intro: bool, bearer: str = "") -> tuple[bool, dict]:
     """`POST /news`: hand `entries` to the What's new thread, starting it the
     first time. `(ok, detail)`; detail carries `session` and `sent` (False
     when these entries were posted already)."""
     from . import headless_mail
 
-    cwd = folder()
+    cwd = workdir()
     if not cwd:
         return False, {"status": 404, "error": "this server has no What's new thread"}
+    relayed = relay()
     clean = _clean(entries)
     if not clean:
         return False, {"status": 400, "error": "expected entries [{id, items}]"}
@@ -140,7 +215,7 @@ def post(entries, intro: bool, bearer: str = "") -> tuple[bool, dict]:
         session = str(data.get("session") or "")
         if session and str(data.get("posted") or "") >= newest:
             return True, {"session": session, "sent": False}
-        text = message(clean, intro or not session, cwd)
+        text = message(clean, intro or not session, cwd, relayed)
         rc, answer = (0, {})
         if session:
             rc, answer = headless_mail.send(session, text)
@@ -155,26 +230,33 @@ def post(entries, intro: bool, bearer: str = "") -> tuple[bool, dict]:
                       f"({answer.get('code') or answer.get('error')}); starting another",
                       file=sys.stderr, flush=True)
                 session = ""
-                text = message(clean, True, cwd)
+                text = message(clean, True, cwd, relayed)
         fresh = not session
         if fresh:
-            rc, answer = headless_mail.start(cwd, text)
+            # A relay only reads out and passes on: the smallest model will do.
+            rc, answer = headless_mail.start(cwd, text, model="haiku" if relayed else "")
             if rc != headless_mail.RC_SENT:
                 return False, {"status": 503, "error": answer.get("error") or "could not start it"}
             session = str(answer.get("session") or "")
         _save({"session": session, "posted": newest})
     if fresh:
-        _name(session, bearer)
+        name_thread(session, TITLE)
     print(f"news: {len(clean)} entr{'y' if len(clean) == 1 else 'ies'} to {session[:8]}"
           f"{' (new)' if fresh else ''}", file=sys.stderr, flush=True)
     return True, {"session": session, "sent": True, "fresh": fresh, "title": TITLE}
 
 
-def _name(session: str, bearer: str) -> None:
-    """Name the new thread, so lists and notices say What's new."""
-    from . import threads
+def name_thread(session: str, title: str) -> None:
+    """Name a thread this server started (no caller to check): the name file,
+    the running agent told, and its open screens — as `/rename` does."""
+    from agent_media_core import book_tracks
+
+    from . import send, thread_events
 
     try:
-        threads.rename_conversation("", session, TITLE, bearer)
+        named = book_tracks.rename(session, title)
+        if named:
+            send.send_rename(session, named)
+            thread_events.renamed(session, named)
     except Exception as e:  # noqa: BLE001 — a name is never worth the news
         print(f"news: could not name {session[:8]}: {e}", file=sys.stderr, flush=True)

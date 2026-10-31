@@ -8899,6 +8899,14 @@ def cmd_session(a) -> int:
     return mail.main(a.args or ["--help"])
 
 
+def cmd_feedback(a) -> int:
+    """`media feedback answer|poll|status` (agent_media_server.feedback)."""
+    fb = _server_module("feedback")
+    if fb is None:
+        return 1
+    return fb.main(a.args or ["--help"])
+
+
 def cmd_session_reap(a) -> int:
     """Close agent sessions idle past the threshold (agent_media_server.reap)."""
     reap = _server_module("reap")
@@ -9919,6 +9927,12 @@ def _build_parser() -> argparse.ArgumentParser:
              "[--wait S] <text> (queued behind a turn, never over a question card)")
     session.add_argument("args", nargs=argparse.REMAINDER)
     session.set_defaults(func=cmd_session)
+
+    feedback = sub.add_parser(
+        "feedback", add_help=False,
+        help="feedback from Sasonica installs: answer <install> [--post N] <text> | poll | status")
+    feedback.add_argument("args", nargs=argparse.REMAINDER)
+    feedback.set_defaults(func=cmd_feedback)
 
     search = sub.add_parser("search", help="unified search (music/book library)")
     search.add_argument("--lines", action="store_true",

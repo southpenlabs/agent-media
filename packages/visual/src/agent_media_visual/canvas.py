@@ -2323,6 +2323,11 @@ def main() -> None:
     # MEDIA_CONTACTS=0 leaves it off.
     from agent_media_server import contacts as _contacts
     _contacts.start()
+    # Feedback from Sasonica installs (roadmap 47): an install that sends it
+    # picks up the team's answers, a server that reads it the new posts. Off
+    # unless MEDIA_FEEDBACK=1 or MEDIA_FEEDBACK_ADMIN_TOKEN is set.
+    from agent_media_server import feedback as _feedback
+    _feedback.start()
     # Each bridge's sign-ins as alerts, every 10 min: bridge.<id> at warn while
     # one needs signing in again (agent_media_server.bridges, §6.26).
     from agent_media_server import bridges as _bridges

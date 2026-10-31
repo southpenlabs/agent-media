@@ -2894,6 +2894,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                      else f"item {str(body.get('item') or '')!r}")
             print(f"reply: refused {status} ({detail.get('error')}) "
                   f"for {named} from {h.client_address[0]}", file=sys.stderr)
+        else:
+            # A reply in the relay What's new thread goes on to the Sasonica
+            # team (feedback.py, roadmap 47; off unless the owner chose it).
+            from . import feedback
+
+            feedback.forward_reply(str(body.get("session") or detail.get("session") or ""),
+                                   str(body.get("text") or ""))
         _json(h, 200 if ok else status, {"ok": ok, **detail})
     elif path == "/ask":
         # A fresh session from the phone: the assistant button, or "new

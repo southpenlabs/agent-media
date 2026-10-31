@@ -7566,6 +7566,17 @@ the pop-up's place.
 - 404 when off, 400 `expected entries [{id, items}]`, 503 when the session
   host is down or refuses the start. CORS as the other app routes.
 - Kept in `<state_dir>/news-thread.json` (`{"session", "posted"}`).
+- **A relay** (31 Oct 2026, roadmap 47): with no `MEDIA_NEWS_FOLDER` but
+  `MEDIA_FEEDBACK=1` (the owner's choice), `enabled` is true and `GET /news`
+  adds `"relay": true`. The thread is a chat in a folder of its own
+  (`<state_dir>/news-thread`, the smallest model) that reads the news out and
+  says replies go to the Sasonica team; each `/reply` into it is posted to
+  the feedback service (`feedback.py`, signed with the install key the `/r/`
+  lookup knows), and the team's answers come back into it as messages to
+  pass on word for word. A server with `MEDIA_FEEDBACK_ADMIN_TOKEN` reads
+  every post into a thread per install in `MEDIA_NEWS_FOLDER`, and
+  `media feedback answer <install> [--post N] <text>` answers. The service
+  is `deploy/feedback` (`sasonica.com/feedback/v1`, `MEDIA_FEEDBACK_URL`).
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 

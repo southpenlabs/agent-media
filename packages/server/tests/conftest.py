@@ -78,6 +78,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A quick tunnel's URL is published to sasonica.com/r (tunnel.py): never
     # from a test. test_tunnel.py points it at a local stand-in.
     monkeypatch.setenv("MEDIA_LOOKUP_URL", "-")
+    # Feedback goes to sasonica.com/feedback (feedback.py): never from a test.
+    # test_feedback.py points it at a stand-in.
+    monkeypatch.setenv("MEDIA_FEEDBACK_URL", "-")
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would

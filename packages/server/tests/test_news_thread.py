@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_media_server import headless_mail, news_thread, threads
+from agent_media_server import headless_mail, news_thread
 
 from test_contract import AUTH, call, server, signed_in, typed  # noqa: F401
 
@@ -30,8 +30,7 @@ def host(tmp_path, monkeypatch):
 
     monkeypatch.setattr(headless_mail, "start", start)
     monkeypatch.setattr(headless_mail, "send", send)
-    monkeypatch.setattr(threads, "rename_conversation",
-                        lambda item, s, title, bearer, auto=False: got["named"].append((s, title)) or (True, {}))
+    monkeypatch.setattr(news_thread, "name_thread", lambda s, title: got["named"].append((s, title)))
     got["cwd"] = str(tmp_path)
     return got
 

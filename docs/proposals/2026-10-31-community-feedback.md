@@ -47,14 +47,24 @@ have no app source, so today they get the sheet.
 - The service keeps feedback until it is answered and then for a set time;
   an install can ask for its feedback to be deleted.
 
+## Built so far (31 Oct 2026)
+
+- The service: `deploy/feedback` (Worker + D1), checked locally; **not
+  deployed** yet.
+- Enrolment is settled: an install signs with the Ed25519 key it already
+  made for the `/r/` lookup (its install id is the key's hash), so there is
+  no enrolment step and nothing to hand out.
+- The relay thread and the reading side: `feedback.py`, news_thread.py's
+  relay (contract §6.43). The owner's switch is `MEDIA_FEEDBACK=1` for now;
+  a switch in Settings and a question in setup are still to do.
+
 ## Open questions
 
 - **Where the service runs.** A Cloudflare Worker with D1 (no load on a
   home machine, nothing to keep up), or a route on David's own server's
   public HTTPS. The Worker is the better fit for strangers' traffic.
-- **Enrolment.** Keys minted when the server is installed (the installer
-  already talks to sasonica.com) or on first use. Either way a key can be
-  revoked, and posts are rate-limited per key.
+- **Enrolment.** Settled: the install key (above). An install can be
+  blocked, and posts are limited to 30 an hour per install.
 - **Answers back.** Their server polls the service (outbound only, so no
   open port), say every 15 minutes and at launch, or keeps a stream open.
 - **Abuse.** Rate limits, a size cap, and David's Feedback group can block
