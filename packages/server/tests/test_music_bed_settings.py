@@ -26,14 +26,14 @@ def _setting(detail, sid):
 
 
 def test_a_number_sets_the_level(bed):
-    ok, detail = pins.speech_music_bed("t", settings={"gain_db": -9})
+    ok, detail = pins.speech_music_bed("t", settings={"gain_db": -19})
     assert ok, detail
-    assert bed.gain_db() == -9.0
-    assert _setting(detail, "gain_db")["value"] == -9.0
+    assert bed.gain_db() == -9.0                      # stored against the first beds
+    assert _setting(detail, "gain_db")["value"] == -19.0  # shown against the voice
 
 
 def test_null_forgets_it_and_a_switch_still_works(bed):
-    pins.speech_music_bed("t", settings={"gain_db": -9})
+    pins.speech_music_bed("t", settings={"gain_db": -19})
     ok, _ = pins.speech_music_bed("t", settings={"gain_db": None, "slow": False})
     assert ok
     assert bed.stored_gain() is None

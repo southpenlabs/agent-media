@@ -842,9 +842,28 @@ _PEAK_OFFSETS = {"question": -3.0}
 
 #: The range a stored level may take (dB against the first beds' levels).
 GAIN_RANGE = (-24.0, 6.0)
+#: How far under the voice the music sits at a stored level of 0: a kept
+#: track is loudnormed to -30 LUFS there, and a reply's voice (Microsoft's
+#: neural voices, raw or through the speaker's dynaudnorm) measures about
+#: -20 LUFS (31 Oct 2026). Settings shows the level against the voice
+#: (David, 31 Oct 2026: "what are the backing music levels relative to?";
+#: he chose "Show it against the voice"): the stored -12 reads -22.
+#: Approximate: songs and generated beds differ in loudness.
+VOICE_REF_DB = 10.0
 GAIN_LABEL = "Backing music level"
-GAIN_HINT = ("How loud the music is under the voice, against where it started. "
-             "A change plays at once; the files catch up in the background.")
+GAIN_HINT = ("How far under the voice the music sits, in dB: -22 is 22 dB quieter "
+             "than the voice. Approximate, as songs differ. It also sets how far "
+             "your own music drops while a reply plays.")
+
+
+def shown_gain(stored: float) -> float:
+    """A stored level as Settings shows it: against the voice."""
+    return float(stored) - VOICE_REF_DB
+
+
+def stored_from_shown(shown: float) -> float:
+    """A level Settings sent (against the voice) as it is stored."""
+    return float(shown) + VOICE_REF_DB
 
 
 def stored_gain() -> Optional[float]:
@@ -1512,9 +1531,10 @@ def settings() -> list[dict]:
     the DJ mix's switches (music_bed_mix)."""
     from . import music_bed_mix
     lo, hi = GAIN_RANGE
+    # Against the voice (VOICE_REF_DB); stored, and used, against the first beds.
     return ([{"id": "gain_db", "kind": "range", "label": GAIN_LABEL, "hint": GAIN_HINT,
-              "min": lo, "max": hi, "step": 1, "unit": "dB",
-              "value": gain_db(), "set": stored_gain() is not None},
+              "min": shown_gain(lo), "max": shown_gain(hi), "step": 1, "unit": "dB",
+              "value": shown_gain(gain_db()), "set": stored_gain() is not None},
              {"id": "slow", "kind": "bool", "label": SLOW_LABEL, "hint": SLOW_HINT,
               "value": slow_on(), "set": stored_slow() is not None}]
             + music_bed_mix.settings())
@@ -1532,10 +1552,12 @@ def set_settings(values: dict) -> None:
             if v is not None and not isinstance(v, bool):
                 raise ValueError("slow must be true, false or null")
         elif k == "gain_db":
+            # Sent against the voice, as settings() shows it.
+            lo, hi = shown_gain(GAIN_RANGE[0]), shown_gain(GAIN_RANGE[1])
             if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
-                                  or not GAIN_RANGE[0] <= float(v) <= GAIN_RANGE[1]):
-                raise ValueError(f"gain_db must be a number from {GAIN_RANGE[0]:g} "
-                                 f"to {GAIN_RANGE[1]:g}, or null")
+                                  or not lo <= float(v) <= hi):
+                raise ValueError(f"gain_db must be a number from {lo:g} "
+                                 f"to {hi:g}, or null")
         elif k in music_bed_mix.IDS:
             if v is not None and not isinstance(v, bool):
                 raise ValueError(f"{k} must be true, false or null")
@@ -1547,7 +1569,8 @@ def set_settings(values: dict) -> None:
     if "slow" in values:
         set_slow(values["slow"])
     if "gain_db" in values:
-        set_gain(values["gain_db"])
+        v = values["gain_db"]
+        set_gain(None if v is None else stored_from_shown(v))
         # The files at the new level, rendered and re-levelled in the
         # background; until then each plays at the new level by its offset.
         spawn_warm()

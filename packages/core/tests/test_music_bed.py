@@ -496,7 +496,7 @@ def test_a_stored_level_wins_over_the_env_and_is_checked(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "_settings_path", lambda: tmp_path / "music-bed.json")
     monkeypatch.setenv("MEDIA_MUSIC_BED_GAIN_DB", "-12")
     assert M.gain_db() == -12
-    M.set_settings({"gain_db": -10})
+    M.set_settings({"gain_db": -20})   # shown against the voice: -10 stored
     assert M.gain_db() == -10
     with pytest.raises(ValueError):
         M.set_settings({"gain_db": -99})
@@ -531,3 +531,18 @@ def test_a_late_duck_asks_this_host_instead_of_skipping_the_bed(monkeypatch, tmp
     assert len(unders) == 1 and unders[0].startswith("music-bed-")
     unders = speak(LONG, coord=SlowCoord(playing=True)).unders()
     assert len(unders) == 1 and unders[0].startswith("earcon-reply-")
+
+
+def test_the_level_is_shown_against_the_voice(monkeypatch, tmp_path):
+    """David, 31 Oct 2026: "what are the backing music levels relative to?"
+    — he chose "Show it against the voice". Stored as before (the duck and
+    the renders read the stored level); Settings shows and takes it
+    VOICE_REF_DB lower."""
+    from agent_media_core import music_bed as M
+    monkeypatch.setattr(M, "_settings_path", lambda: tmp_path / "music-bed.json")
+    monkeypatch.setattr(M, "spawn_warm", lambda *a, **k: None)
+    M.set_gain(-12.0)
+    g = next(s for s in M.settings() if s["id"] == "gain_db")
+    assert (g["value"], g["min"], g["max"]) == (-22.0, -34.0, -4.0)
+    M.set_settings({"gain_db": -30})
+    assert M.gain_db() == -20.0

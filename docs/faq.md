@@ -128,22 +128,21 @@ See also: `server-contract.md` §`/speech/music-bed` ("DJ mixing").
 
 ### What is the Backing music level relative to?
 
-To where the music started, not to the voice. 0 dB is the level the backing
-music first shipped at (a generated bed peaking at -24 dBFS, a track
-normalised to -30 LUFS, Mopidy at volume 12); -12 dB is 12 dB quieter than
-that, about half as loud to the ear. The voice is normalised loud, so even at
-0 dB the music sits well under it. The level is the one **under the words**:
-in the pauses the music swells up to 6 dB above it. Every device shares it:
-change it on the full player (**Levels**, tap to fold) or in Settings →
-Music, and the next sound plays at the new level.
+To the voice. The number is roughly how far under a reply's voice the music
+sits: -22 dB means the music is about 22 dB quieter than the voice (each 10
+dB is about half as loud to the ear). It is approximate: songs differ in
+loudness, and a voice rendered on your phone may differ from one rendered on
+the server. The level is the one **under the words**: in the pauses the music
+swells up to 6 dB above it. Every device shares it: change it on the full
+player (**Levels**, tap to fold) or in Settings → Music, and the next sound
+plays at the new level.
 
 The same slider sets how far your own music (the radio, a playlist) is
-turned down while a reply plays: at -4 dB it ducks as it always did (to
-about a tenth of its volume), and each 6 dB lower halves that again. Tracks
-differ in loudness, so this is approximate.
+turned down while a reply plays: at -14 dB it ducks as it always did (to
+about a tenth of its volume), and each 6 dB lower halves that again.
 
 See also: `packages/core/src/agent_media_core/music_bed.py` (`gain_db`,
-`duck_scale`).
+`VOICE_REF_DB`, `duck_scale`).
 
 ### What can I do with the song after a long reply?
 

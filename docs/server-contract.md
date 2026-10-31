@@ -2412,8 +2412,12 @@ Pinned by `packages/core/tests/test_music_bed_replay.py`.
 slider). `settings` gains a second kind, **`"range"`** — a slider, `{"id",
 "kind": "range", "label", "hint", "min", "max", "step", "unit", "value"
 (number), "set"}` — and lists, in order: `gain_db` (range, "Backing music level",
--24..6 step 1 "dB"; the level `POST {"settings": {"gain_db": n|null}}` has
-set since 83dcd049), `slow` (bool), and six bools, all on by default (each
+-34..-4 step 1 "dB" — against the voice since 31 Oct 2026: the value is how
+far under a reply's voice the music sits, roughly (`VOICE_REF_DB`, 10: a kept
+track at -30 LUFS under a voice measured near -20); stored, and used by the
+renders and the duck, `VOICE_REF_DB` higher, against the first beds
+(-24..6), so a stored -12 reads -22; the level `POST {"settings": {"gain_db":
+n|null}}`, n on the shown scale, has set since 83dcd049), `slow` (bool), and six bools, all on by default (each
 `MEDIA_MUSIC_BED_<ID>=0|off` turns its default off; Settings wins): `breathe`,
 `carve`, `intro`, `outro`, `sweep`, `carry`. `POST {"settings": {"<id>":
 true|false|null}}`; 400 for a non-bool. An app renders any `bool` and `range`

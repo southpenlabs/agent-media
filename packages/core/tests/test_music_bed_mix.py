@@ -32,19 +32,19 @@ def isolated(monkeypatch, tmp_path):
 def test_the_level_is_a_range_and_every_effect_a_switch_on_by_default():
     got = {s["id"]: s for s in B.settings()}
     g = got["gain_db"]
-    assert g["kind"] == "range" and (g["min"], g["max"], g["step"], g["unit"]) == (-24.0, 6.0, 1, "dB")
-    assert g["value"] == B.DEFAULT_GAIN_DB and g["set"] is False and g["label"]
+    assert g["kind"] == "range" and (g["min"], g["max"], g["step"], g["unit"]) == (-34.0, -4.0, 1, "dB")  # against the voice
+    assert g["value"] == B.DEFAULT_GAIN_DB - B.VOICE_REF_DB and g["set"] is False and g["label"]
     for i in ("breathe", "carve", "intro", "outro", "sweep", "carry"):
         assert got[i]["kind"] == "bool" and got[i]["value"] is True and got[i]["set"] is False
         assert got[i]["label"] and got[i]["hint"]
 
 
 def test_switches_are_saved_forgotten_and_checked(monkeypatch):
-    B.set_settings({"carve": False, "gain_db": -9})
+    B.set_settings({"carve": False, "gain_db": -19})   # -9 stored, shown against the voice
     assert M.on("carve") is False and B.gain_db() == -9.0
     got = {s["id"]: s for s in B.settings()}
     assert got["carve"]["value"] is False and got["carve"]["set"] is True
-    assert got["gain_db"]["value"] == -9.0 and got["gain_db"]["set"] is True
+    assert got["gain_db"]["value"] == -19.0 and got["gain_db"]["set"] is True
     with pytest.raises(ValueError):
         B.set_settings({"carve": 1})
     with pytest.raises(ValueError):
@@ -118,7 +118,7 @@ def test_a_file_at_another_level_plays_at_once_by_its_offset():
     B._dir().mkdir(parents=True, exist_ok=True)
     old = B._dir() / f"music-bed-calm-v{B.VERSION}.wav"     # rendered at -4
     old.write_bytes(b"x" * 100)
-    B.set_settings({"gain_db": -10})
+    B.set_settings({"gain_db": -20})   # -10 stored
     assert B.rendered("calm") is None
     assert B.ready("calm") == old            # not silence until the re-render
     assert M.level_offset("generated", old) == -6.0
@@ -132,7 +132,7 @@ def test_a_kept_track_normalised_to_another_level_gets_the_difference(monkeypatc
     from agent_media_core import music_bed_library as lib
     monkeypatch.setattr(lib, "load", lambda: {})
     monkeypatch.setattr(lib, "tracks", lambda g, d: [{"file": "a.mp3", "lufs_target": -34.0}])
-    B.set_settings({"gain_db": -1})
+    B.set_settings({"gain_db": -11})   # -1 stored
     assert M.level_offset("library", "/clips/a.mp3") == 3.0
     assert M.level_offset("library", "/clips/b.mp3") == 0.0
 
@@ -332,7 +332,7 @@ def test_the_chosen_level_is_the_level_under_the_words(monkeypatch):
     under a phone speaker's hearing. Now the level is the one under the
     words and the pauses swell above it."""
     from agent_media_core.under_mix import Envelope
-    B.set_settings({"gain_db": -10})
+    B.set_settings({"gain_db": -20})   # -10 stored
     p = M.params("generated", "calm", B.file_for("calm"))
     under_words = p["gain_db"] - p["breathe_db"]
     in_pauses = p["gain_db"]
