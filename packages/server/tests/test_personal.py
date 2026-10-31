@@ -17,7 +17,7 @@ def test_read_and_set(server, signed_in, monkeypatch):
                         {"valid": True, "user_name": "someone", "message": "Token valid."})
     res, obj = call(server, "GET", "/settings/personal", headers=AUTH)
     assert res.status == 200 and obj["ok"] and obj["scope"] == "server"
-    assert {g["id"] for g in obj["groups"]} == {"weather", "astro", "accounts"}
+    assert {g["id"] for g in obj["groups"]} == {"weather", "astro", "accounts", "streaming"}
     fields = {f["id"]: f for g in obj["groups"] for f in g["fields"]}
     assert fields["location"]["kind"] == "place" and fields["location"]["value"] is None
     assert fields["astro.enabled"]["value"] is False

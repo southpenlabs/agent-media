@@ -142,8 +142,10 @@ GROUPS = (
     ("weather", "Weather", ("location",)),
     ("astro", "Astro Tunes", ("astro.enabled", "astro.birth_date", "astro.birth_time",
                               "astro.birth_place", "astro.to_model")),
-    ("accounts", "Music accounts", ("listenbrainz.user", "listenbrainz.token",
-                                    "youtube.profiles", "spotify.client_id")),
+    ("accounts", "Music accounts", ("listenbrainz.user", "listenbrainz.token")),
+    # Their own group: the app's ListenBrainz sign-out clears every field of
+    # its group, and these are not ListenBrainz's (1 Nov 2026).
+    ("streaming", "YouTube and Spotify", ("youtube.profiles", "spotify.client_id")),
 )
 
 #: The environment a field falls back to, first set wins.
@@ -643,7 +645,19 @@ def status(user: Optional[str] = None) -> dict:
     labels, values (a secret only as `set`), where each comes from, and
     what is available."""
     groups = []
-    why = {"weather": weather_why(user), "astro": astro_why(user), "accounts": listenbrainz_why(user)}
+    try:
+        from . import music_accounts
+        if music_accounts.youtube_profiles():
+            streaming_why = music_accounts.youtube_why()
+        elif music_accounts.spotify_signed_in()["signed_in"]:
+            streaming_why = None
+        else:
+            streaming_why = ("Not set: name your yt-profile YouTube accounts, or enter your "
+                             "Spotify app's client ID and sign in with Spotify.")
+    except Exception:  # noqa: BLE001
+        streaming_why = None
+    why = {"weather": weather_why(user), "astro": astro_why(user), "accounts": listenbrainz_why(user),
+           "streaming": streaming_why}
     for gid, label, fields in GROUPS:
         rows = []
         for f in fields:
@@ -663,10 +677,16 @@ def status(user: Optional[str] = None) -> dict:
             # both fields null).
             group["signin"] = {"service": "listenbrainz", "label": "ListenBrainz",
                                **listenbrainz_signin(user)}
+
+        if gid == "streaming":
+            # Sign in with Spotify (POST /accounts/spotify/start opens it; the
+            # app's Sign out posts /accounts/spotify/signout).
             try:
                 from . import music_accounts
                 group["spotify"] = {**music_accounts.spotify_signed_in(),
-                                    "start": "/accounts/spotify/start"}
+                                    "ready": bool(music_accounts.spotify_client_id()),
+                                    "start": "/accounts/spotify/start",
+                                    "signout": "/accounts/spotify/signout"}
             except Exception:  # noqa: BLE001
                 pass
         groups.append(group)

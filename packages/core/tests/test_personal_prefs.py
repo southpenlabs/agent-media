@@ -46,7 +46,7 @@ def test_a_fresh_install_assumes_nobody():
     assert pp.astro_context() is None
     st = pp.status()
     assert st["scope"] == "server"
-    assert [g["id"] for g in st["groups"]] == ["weather", "astro", "accounts"]
+    assert [g["id"] for g in st["groups"]] == ["weather", "astro", "accounts", "streaming"]
     assert all(not g["available"] and g["reason"] for g in st["groups"])
     rows = {r["id"]: r for r in st["sources"]}
     assert rows["youtube"]["reason"].startswith("Not available:")
