@@ -80,3 +80,18 @@ def test_a_gone_thread_is_started_again_and_a_question_waits(server, signed_in, 
 def test_bad_entries(server, signed_in, host):
     res, _ = call(server, "POST", "/news", {"entries": [{"id": "x", "items": []}]}, headers=AUTH)
     assert res.status == 400
+
+
+def test_an_entry_links_back_to_its_thread(server, signed_in, host):
+    """An entry's `from` (the thread it was asked for in) reaches the agent
+    as a link, to end what it says about it; a relay never gets one."""
+    sid = "6ec31fd1-b48e-4fc4-8701-1e177d1cacee"
+    entries = [{"id": "2026-11-02-x", "items": ["A thing."], "from": sid},
+               {"id": "2026-11-01-y", "items": ["Another."], "from": "not a session"}]
+    call(server, "POST", "/news", {"entries": entries}, headers=AUTH)
+    text = host["start"][-1][1]
+    assert f"(asked for in this thread: " in text and text.count("asked for in this thread") == 1
+    assert sid in text and "where you asked for it" in text
+    assert "not a session" not in text
+    assert news_thread.message(news_thread._clean(entries), False, "/x", relayed=True).count(sid) == 0
+

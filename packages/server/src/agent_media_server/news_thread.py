@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -123,7 +124,12 @@ def _clean(entries) -> list[dict]:
         eid = str(e.get("id") or "").strip()[:120]
         items = [str(i).strip()[:MAX_ITEM] for i in (e.get("items") or []) if str(i).strip()]
         if eid and items:
-            out.append({"id": eid, "items": items})
+            entry = {"id": eid, "items": items}
+            # The thread it was asked for in (the app's `from`), when it is a session id.
+            src = str(e.get("from") or "").strip()
+            if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", src):
+                entry["from"] = src
+            out.append(entry)
     return out[:MAX_ENTRIES]
 
 
@@ -150,9 +156,13 @@ def message(entries: list[dict], intro: bool, cwd: str, relayed: bool = False) -
         "listener):",
         "",
     ]
+    linked = False
     for e in entries:
         for item in e["items"]:
             lines.append(f"- {item}")
+        if e.get("from"):
+            lines.append(f"  (asked for in this thread: {_link(e['from'])})")
+            linked = True
     lines += [
         "",
         "Tell them what is new in plain, spoken words: keep it short, group what belongs "
@@ -161,7 +171,22 @@ def message(entries: list[dict], intro: bool, cwd: str, relayed: bool = False) -
         "answer, treat it as feedback on the Sasonica app: discuss it, and change the app "
         "only once they ask you to.",
     ]
+    if linked:
+        lines.append(
+            "Where an entry names the thread it was asked for in, end what you say about it "
+            "with a markdown link to that thread labelled \"where you asked for it\" (the link "
+            "is shown, not read aloud).")
     return "\n".join(lines)
+
+
+def _link(session: str) -> str:
+    """A thread's link in the app, as replies give them."""
+    try:
+        from agent_media_core.intake.context import thread_link_base
+
+        return thread_link_base() + session
+    except Exception:  # noqa: BLE001 — the id alone still finds it
+        return session
 
 
 def _relay_message(entries: list[dict], intro: bool) -> str:

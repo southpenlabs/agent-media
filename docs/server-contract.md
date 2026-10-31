@@ -7569,7 +7569,7 @@ the pop-up's place.
   `enabled` is whether this server has the thread: `MEDIA_NEWS_FOLDER` names
   an existing folder (the app's source, on a host that builds it). Off, the
   app keeps its What's new sheet.
-- `POST /news {"entries": [{"id", "items": [...]}], "intro"?: bool}` →
+- `POST /news {"entries": [{"id", "items": [...], "from"?}], "intro"?: bool}` →
   `{"ok": true, "session", "sent", "fresh"?, "pending"?, "title"?}`. The
   app's entries since this device last looked, newest first, as written in
   the app. The first post starts a headless chat in that folder (as
@@ -7581,6 +7581,9 @@ the pop-up's place.
   what the listener answers is feedback the agent can act on. Entries no
   newer than the last posted are not sent again (`sent: false`): a second
   device, a relaunch. A thread that is gone is started afresh.
+- `from` (31 Oct 2026): the thread the entry was asked for in, a session
+  id; the agent is given its link and ends what it says about that entry
+  with it ("where you asked for it"). A relay never passes it on.
 - 404 when off, 400 `expected entries [{id, items}]`, 503 when the session
   host is down or refuses the start. CORS as the other app routes.
 - Kept in `<state_dir>/news-thread.json` (`{"session", "posted"}`).
