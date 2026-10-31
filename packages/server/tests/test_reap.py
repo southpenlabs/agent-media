@@ -1090,3 +1090,17 @@ def test_gateway_sessions_are_machinery_not_threads(monkeypatch, tmp_path):
     assert not sessions._is_machinery(os.getpid(), sessions._excluded_dirs())
     monkeypatch.setenv("MEDIA_SESSIONS_EXCLUDE_CWD", "")
     assert sessions._excluded_dirs() == []
+
+
+def test_a_recap_is_written_from_the_first_message_and_the_end(monkeypatch):
+    """The goal comes from the first message (David, 31 Oct 2026: "Match Claude's style")."""
+    monkeypatch.setattr(reap, "tail_text", lambda s: "Person: ship it\nAssistant: Shipped.")
+    monkeypatch.setattr(reap, "first_ask", lambda s: "Make autoplay wait for What's new")
+    got = reap.recap_input("s")
+    assert got.startswith("First message:\nPerson: Make autoplay wait for What's new")
+    assert got.endswith("Assistant: Shipped.")
+    # A short thread whose end already holds it: the end alone.
+    monkeypatch.setattr(reap, "first_ask", lambda s: "ship it")
+    assert reap.recap_input("s") == "Person: ship it\nAssistant: Shipped."
+    monkeypatch.setattr(reap, "tail_text", lambda s: "")
+    assert reap.recap_input("s") == ""

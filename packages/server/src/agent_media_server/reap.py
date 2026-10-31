@@ -69,11 +69,21 @@ from . import drafts, panes, pins, procmem, recaps, rest, send, sessions
 
 MODES = ("dry-run", "apply")
 
+#: In the shape Claude Code's own recaps had (its "while you were away"
+#: paragraph, which stopped after 22 Sep 2026): the goal, where it stands, the
+#: next step, in two sentences (David, 31 Oct 2026: "I'm wondering if the
+#: summary should also include the first message from me" … "Match Claude's
+#: style"). The goal comes from the person's first message, given first.
 RECAP_PROMPT = (
-    "You read the end of a conversation between a person and a coding "
-    "assistant. In one to three short sentences, say where this thread was "
-    "left: what was being worked on, what was done last, and what was still "
-    "open or next. Plain prose, no markdown, no preamble, no quotes."
+    "You read a conversation between a person and a coding assistant: the "
+    "person's first message, then the end of the conversation. Write the "
+    "recap the person reads when they come back to it, in at most two short "
+    "sentences: the goal (what they asked for, from the first message), "
+    "where it stands (what got done), and the next step or what it is "
+    "waiting on, if anything. Speak to the person as \"you\" and of the work "
+    "as \"we\". Plain prose, no markdown, no preamble, no quotes. For example: "
+    "Goal was letting Cece answer Sam's questions; that's built, tested and "
+    "deployed. Next: wait for Cece's reply on the design."
 )
 
 #: The decision log is kept to about this size: a line per live session every
@@ -482,6 +492,28 @@ def _clean(text: str) -> str:
     return text[:600]
 
 
+def first_ask(session: str) -> str:
+    """The person's first message in the thread, "" when none is found."""
+    from agent_media_core import harnesses
+
+    try:
+        return sessions._claude_first_prompt(session) or harnesses.first_prompt(session)
+    except Exception:  # noqa: BLE001 — the recap is written from the end alone
+        return ""
+
+
+def recap_input(session: str) -> str:
+    """What a recap is written from: the first message, then `tail_text`.
+    The first message alone is left out when the end already holds it."""
+    tail = tail_text(session)
+    if not tail:
+        return ""
+    first = first_ask(session)[:1500]
+    if not first or first[:200] in tail:
+        return tail
+    return f"First message:\nPerson: {first}\n\nThe end of the conversation:\n{tail}"
+
+
 def generate_recap(session: str) -> dict | None:
     """Write a "where this thread was" recap through the gateway and keep it
     (`rest.save_recap`). None on any failure — never raises."""
@@ -491,7 +523,7 @@ def generate_recap(session: str) -> dict | None:
 
         if hidden(session):     # a private thread is never read out to a model
             return None
-        text = tail_text(session)
+        text = recap_input(session)
         if not text:
             return None
         model = (os.environ.get("MEDIA_REAP_RECAP_MODEL")

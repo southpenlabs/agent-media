@@ -528,8 +528,10 @@ reads it (`agent_media_server/recaps.py`, read-only) and hands it on as
   when a session it is about to close has no recap newer than its last
   message, it asks the follow-up gateway (Haiku, `MEDIA_FOLLOWUP_MODEL`, the
   `intake/_followup.py` call style; `MEDIA_REAP_RECAP_MODEL` /
-  `_TIMEOUT` override, 20 s) for one to three sentences from the end of the
-  conversation, and keeps it in `<state_dir>/generated-recaps.json`. A failed
+  `_TIMEOUT` override, 20 s) for a recap in Claude Code's own shape (31 Oct
+  2026): at most two sentences, the goal, where it stands and the next step,
+  written from the person's first message and the end of the conversation
+  (`reap.recap_input`). It keeps it in `<state_dir>/generated-recaps.json`. A failed
   call never blocks the close. `recaps.recap_for` answers the newer of the
   two; that is what `/targets`, `/conversations` and `/conversation/log`
   carry.
