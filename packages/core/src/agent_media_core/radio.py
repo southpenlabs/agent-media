@@ -34,6 +34,17 @@ docs/proposals/2026-09-29-licensed-music.md) is one more class there.
 ``--add``, and ``stop``, end the station (cli), which is how the Media tab,
 a chat and the share sheet all play. A song the station has no record of
 coming up is played on: it is not a guess at what the listener meant.
+
+**Back to a station** (David, 1 Nov 2026: "a way of returning to radio that
+was playing before deviating from it by playing something else" ... "or
+maybe even keep a list of previous radio stations"). A station turned off,
+or replaced by a new one, is kept whole in ``radio-stations.json`` (the last
+MAX_STATIONS, newest first): its seed, the song it was on and where in it,
+its list to come, its 👎s. :func:`resume` puts one back on: the song again
+at the same spot (``_resume``, as after an app restart), then the same list,
+topped up from its Mix (or the DJ) as it runs. The newest is the Media tab's
+"Back to radio" (`snapshot`'s ``last`` while off, for a day); all of them
+are Music's Show → Stations (`stations`).
 """
 
 from __future__ import annotations
@@ -67,6 +78,12 @@ _TRIES = 3
 _RESUME_BEFORE_END_S = 8.0
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+#: Stations kept to go back to, and how long the newest is offered as
+#: "Back to radio".
+MAX_STATIONS = 10
+_BACK_S = 24 * 3600.0
+#: What a kept station leaves out: the live player's bookkeeping.
+_UNKEPT = ("on", "fetching", "tries", "moving", "fresh")
 
 
 def _path() -> Path:
@@ -109,6 +126,106 @@ def _station() -> Iterator[dict]:
                 os.replace(tmp, p)
         finally:
             fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+
+
+def _stations_path() -> Path:
+    return state_dir() / "radio-stations.json"
+
+
+def _sid(st: dict) -> str:
+    return str(int(float(st.get("started") or 0) * 1000))
+
+
+def _kept() -> list[dict]:
+    try:
+        d = json.loads(_stations_path().read_text())
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _archive(st: dict) -> None:
+    """Keep this station to go back to (newest first, MAX_STATIONS). One
+    that never played a song is not kept. Called under the station lock."""
+    if not st.get("seed") or not st.get("started") or not st.get("played"):
+        return
+    entry = {k: v for k, v in st.items() if k not in _UNKEPT}
+    entry.update(sid=_sid(st), stopped=time.time())
+    rows = [entry] + [e for e in _kept() if e.get("sid") != entry["sid"]]
+    p = _stations_path()
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows[:MAX_STATIONS]))
+    os.replace(tmp, p)
+
+
+def _title_of(st: dict, vid: Optional[str]) -> str:
+    for s in list(st.get("sent") or []) + list(st.get("queue") or []) + [st.get("seed") or {}]:
+        if vid and s.get("id") == vid:
+            return s.get("title") or ""
+    return ""
+
+
+def _shown_station(e: dict) -> dict:
+    seed = e.get("seed") or {}
+    return {"sid": e.get("sid") or _sid(e), "kind": e.get("kind") or "mix",
+            "title": seed.get("title") or ("Claude DJ" if e.get("kind") == "dj" else ""),
+            "seed_id": seed.get("id"), "where": e.get("where") or "",
+            "stopped": e.get("stopped") or 0, "current": _title_of(e, e.get("current")),
+            "left": len(e.get("queue") or [])}
+
+
+def stations() -> list[dict]:
+    """The stations to go back to, newest first, not the one on now:
+    `[{sid, kind, title, seed_id, where, stopped, current, left}]`."""
+    on = read()
+    live = _sid(on) if on.get("on") else None
+    return [_shown_station(e) for e in _kept() if e.get("sid") != live]
+
+
+def resume(sid: Optional[str] = None, where: Optional[str] = None) -> dict:
+    """Put a kept station back on (the newest with no `sid`): the song it
+    was on again where it was, then its list. On `where` when that is a
+    player, else where it played. The station on now, if any, is kept
+    first. ValueError for none, or one that cannot play here."""
+    rows = _kept()
+    saved = next((e for e in rows if e.get("sid") == sid), None) if sid else (rows[0] if rows else None)
+    if saved is None:
+        raise ValueError("no such station to go back to")
+    kind = saved.get("kind") or "mix"
+    where = where if where in radio_io.PLAYERS else saved.get("where")
+    if where not in radio_io.PLAYERS:
+        raise ValueError(f"the radio does not play on {where}")
+    if getattr(radio_io.PLAYERS[where], "personal", False) and not radio_io.youtube_on():
+        raise ValueError(OFF_HERE)
+    with _station() as st:
+        _archive(st)
+        st.clear()
+        st.update(_blank())
+        st.update({k: v for k, v in saved.items() if k in st and k not in _UNKEPT})
+        st.update(on=True, where=where, kind=kind, fresh=False)
+    if not _resume(where):
+        with _station() as st:
+            # The player's queue went when something else was played: what
+            # was queued and not heard comes back to the front of the list.
+            lost = [x for x in st["sent"] if x["id"] not in st["played"]]
+            st["sent"] = [x for x in st["sent"] if x["id"] in st["played"]]
+            st["queue"][:0] = lost
+            song = st["queue"].pop(0) if st["queue"] else None
+            if song is None and kind == "dj":
+                st["fresh"] = True  # the loop picks and puts one on (_begin)
+        if song is not None:
+            if _send(where, song, replace=True):
+                with _station() as st:
+                    st["current"] = song["id"]
+                    st["sent"].append(song)
+                    st["played"].append(song["id"])
+                _label(where, song)
+                _note(song)
+            else:
+                with _station() as st:
+                    st["queue"].insert(0, song)
+                raise RuntimeError("the player would not take the station's next song")
+    return snapshot()
 
 
 def read() -> dict:
@@ -256,6 +373,7 @@ def start(uri: str, where: str, playing: bool) -> dict:
         raise RuntimeError("YouTube's Mix for this track could not be listed")
     seed = next((s for s in songs if s["id"] == vid), {"id": vid, "title": "", "channel": ""})
     with _station() as st:
+        _archive(st)
         st.clear()
         st.update(_blank())
         st.update(on=True, where=where, seed=seed, started=time.time(), current=vid,
@@ -282,6 +400,7 @@ def start_dj(where: str) -> dict:
         if why:
             raise ValueError(why)
     with _station() as st:
+        _archive(st)
         st.clear()
         st.update(_blank())
         st.update(on=True, where=where, kind="dj", fresh=True, started=time.time(),
@@ -324,6 +443,7 @@ def stop() -> None:
     with _station() as st:
         if st["on"]:
             st["on"] = False
+            _archive(st)
 
 
 def dislike() -> Optional[dict]:
@@ -677,7 +797,12 @@ def snapshot() -> dict:
     `state` "ready" (queued or downloaded), "fetching", or null."""
     st = read()
     if not st["on"]:
-        return {"on": False, "seed": None, "next": [], "available": available()}
+        off = {"on": False, "seed": None, "next": [], "available": available()}
+        # Back to radio: the station just turned off, for a day.
+        kept = _kept()
+        if kept and time.time() - float(kept[0].get("stopped") or 0) < _BACK_S:
+            off["last"] = _shown_station(kept[0])
+        return off
     cur = st.get("current")
     ids = [s["id"] for s in st["sent"]]
     after = st["sent"][ids.index(cur) + 1:] if cur in ids else \

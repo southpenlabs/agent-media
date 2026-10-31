@@ -18,6 +18,12 @@ that song off the station, and the next one on.
 /music/radio`) starts one from the favourite a long reply sang out, on the
 app's player, where the phone has put it (31 Oct 2026).
 
+`{"action": "radio", "resume": true | sid}` puts a kept station back on
+where it was turned off (radio.resume): `radio.last` while off names the
+newest for a day ("Back to radio"); `GET /music/recent?list=stations` lists
+them, each row's `uri` `radio:<sid>`, which `{"action": "play"}` resumes
+(1 Nov 2026).
+
 `{"action": "bed", "uri"?, "off"?}` suggests what is playing (or `uri`)
 for the backing music under replies, or takes it back; `bed.suggested` in
 every answer says whether what is playing is suggested (1 Nov 2026).
@@ -537,6 +543,21 @@ def _radio_control(body: dict) -> tuple[bool, dict]:
     if body.get("off"):
         radio.stop()
         return True, _answer()
+    if "resume" in body:
+        # Back to a station kept when it was turned off: `true` the newest,
+        # else its `sid` (radio.resume).
+        sid = body.get("resume")
+        if not (sid is True or (isinstance(sid, str) and sid.isdigit())):
+            return False, {"error": "resume must be true or a station's sid", "status": 400}
+        try:
+            radio.resume(None if sid is True else sid)
+        except ValueError as e:
+            return False, {"error": str(e), "status": 409, **_answer()}
+        except RuntimeError as e:
+            return False, {"error": str(e), "status": 502, **_answer()}
+        _reset_cache()
+        loop.wake()
+        return True, _answer()
     if "play" in body:
         # A song from Up next, now.
         vid = body.get("play")
@@ -726,6 +747,9 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             print(f"music: book play failed: {said}", file=sys.stderr)
             return False, {"error": said or "book failed", "status": 502, **_answer()}
         return True, _answer()
+    elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("radio:"):
+        # A row of Show → Stations: that station back on.
+        return _radio_control({"action": "radio", "resume": body["uri"][6:]})
     elif action in ("play", "add"):
         uri = body.get("uri")
         # A name the CLI would read as an option is not a track.

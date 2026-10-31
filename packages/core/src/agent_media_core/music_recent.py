@@ -147,7 +147,7 @@ def _inferred(speakers: list[tuple[float, str]], at: float) -> Optional[str]:
 
 KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
-LISTS = {"music": ("recent", "liked", "most"),
+LISTS = {"music": ("recent", "liked", "most", "stations"),
          "book": ("recent", "progress", "finished", "all", "most"),
          "podcast": ("recent", "new", "most", "saved")}
 
@@ -403,7 +403,27 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
         from . import podcast_links
 
         return podcast_links.items()[:limit]
+    if which == "stations":
+        return _stations(limit)
     return []
+
+
+def _stations(limit: int) -> list[dict]:
+    """The radio stations to go back to (radio.stations; David, 1 Nov 2026:
+    "keep a list of previous radio stations"), as rows whose `uri` is
+    `radio:<sid>`: a tap puts the station back on where it was."""
+    from . import radio
+
+    out = []
+    for s in radio.stations()[:limit]:
+        title = s["title"] or "Radio"
+        out.append({"id": -int(s["sid"]) if s["sid"].isdigit() else 0,
+                    "uri": f"radio:{s['sid']}", "title": f"Radio: {title}",
+                    "art": art(s["seed_id"]) if s.get("seed_id") else None,
+                    "at": s["stopped"], "session": None, "inferred": False, "kind": "music",
+                    "artist": (f"Was on {s['current']}" if s["current"] else None),
+                    "song": f"Radio: {title}", "station": s})
+    return out
 
 
 def _liked(store: StateStore, limit: int) -> list[dict]:

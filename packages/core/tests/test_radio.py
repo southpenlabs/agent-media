@@ -646,3 +646,65 @@ def test_a_station_moves_only_to_a_radio_player(station, old):
     for to in ("abs", "handoff"):
         with pytest.raises(ValueError):
             radio.move(to)
+
+
+# ---- back to a station (David, 1 Nov 2026: "a way of returning to radio that
+# was playing before deviating from it" ... "keep a list of previous radio
+# stations") ---------------------------------------------------------------------
+
+def test_back_to_radio_picks_up_the_song_where_it_was(station):
+    player, sent, _, _ = station
+    radio.start(SEED["id"], "sasonica", playing=True)
+    radio.tick()                  # the next song queued behind the seed
+    player.pos, player.t = 1, 95.0
+    radio.tick()                  # the station follows it: on MIX[1] at 95 s
+    radio.stop()                  # something else was played
+    snap = radio.snapshot()
+    assert snap["on"] is False and snap["last"]["title"] == "The Gambler"
+    assert snap["last"]["current"] == "Song 1"
+    player.items, player.pos = ["somethingel"], 0
+    radio.resume()
+    st = radio.read()
+    assert st["on"] and st["current"] == MIX[1]["id"]
+    assert player.items == [MIX[1]["id"]] and player.seeks[-1] == 95000
+    # The list to come is the same, the song queued behind it back in front.
+    assert [r["id"] for r in radio.snapshot()["next"]][:2] == [MIX[2]["id"], MIX[3]["id"]]
+    assert "last" not in radio.snapshot()
+
+
+def test_a_new_station_keeps_the_old_one(station, monkeypatch):
+    player, _, _, _ = station
+    radio.start(SEED["id"], "sasonica", playing=True)
+    old = radio.read()
+    monkeypatch.setattr(radio, "time", type("T", (), {"time": staticmethod(lambda: old["started"] + 60)}))
+    radio.start("otherseed01", "sasonica", playing=False)
+    rows = radio.stations()
+    assert [r["title"] for r in rows] == ["The Gambler"]  # not the one on
+    radio.stop()
+    assert len(radio.stations()) == 2
+    radio.resume(rows[0]["sid"])
+    assert radio.read()["seed"]["id"] == SEED["id"]
+    # The one it replaced is kept in turn.
+    assert [r["seed_id"] for r in radio.stations()] == ["otherseed01"]
+
+
+def test_a_played_out_song_goes_on_with_the_next(station):
+    player, sent, _, _ = station
+    radio.start(SEED["id"], "sasonica", playing=True)
+    player.t = 199.0
+    radio.tick()
+    radio.stop()
+    radio.resume()
+    assert radio.read()["current"] == MIX[1]["id"] and sent[-1] == (MIX[1]["id"], True)
+
+
+def test_kept_stations_are_capped_and_unknown_is_refused(station, monkeypatch):
+    with pytest.raises(ValueError):
+        radio.resume("123")
+    t = [1000.0]
+    monkeypatch.setattr(radio, "time", type("T", (), {"time": staticmethod(lambda: t[0])}))
+    for i in range(radio.MAX_STATIONS + 3):
+        t[0] += 10
+        radio.start(SEED["id"], "sasonica", playing=True)
+        radio.stop()
+    assert len(radio._kept()) == radio.MAX_STATIONS

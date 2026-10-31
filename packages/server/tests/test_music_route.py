@@ -162,7 +162,7 @@ def test_recent_is_the_played_list(server, signed_in, audio_host, monkeypatch):
     monkeypatch.setattr(music_recent, "_liked", lambda store, limit: items[:1])
     res, obj = call(server, "GET", "/music/recent", headers=AUTH)
     assert res.status == 200 and obj == {"ok": True, "kind": "music", "list": "recent",
-                                         "lists": ["recent", "liked", "most"], "items": items}
+                                         "lists": ["recent", "liked", "most", "stations"], "items": items}
     res, obj = call(server, "GET", "/music/recent?kind=book", headers=AUTH)
     assert res.status == 200 and obj["kind"] == "book" and obj["items"] == []
     assert obj["lists"] == ["recent", "progress", "finished", "all", "most"]
@@ -515,3 +515,24 @@ def test_bed_refuses_what_is_not_youtube(server, signed_in, audio_host, player):
     assert res.status == 400, obj
     res, obj = call(server, "POST", "/music", {"action": "bed", "uri": 5}, AUTH)
     assert res.status == 400, obj
+
+
+def test_back_to_a_station(server, signed_in, audio_host, player, monkeypatch):
+    """Back to radio, and a row of Show → Stations (radio.resume; 1 Nov 2026)."""
+    from agent_media_core import radio
+    from agent_media_server import radio as loop
+    asked = []
+    monkeypatch.setattr(radio, "resume", lambda sid=None, where=None: asked.append(sid) or {})
+    monkeypatch.setattr(loop, "wake", lambda: None)
+    res, _ = call(server, "POST", "/music", {"action": "radio", "resume": True}, AUTH)
+    assert res.status == 200
+    res, _ = call(server, "POST", "/music", {"action": "play", "uri": "radio:1730419200000"}, AUTH)
+    assert res.status == 200 and asked == [None, "1730419200000"]
+    res, _ = call(server, "POST", "/music", {"action": "radio", "resume": "../x"}, AUTH)
+    assert res.status == 400
+
+    def none(sid=None, where=None):
+        raise ValueError("no such station to go back to")
+    monkeypatch.setattr(radio, "resume", none)
+    res, obj = call(server, "POST", "/music", {"action": "radio", "resume": True}, AUTH)
+    assert res.status == 409 and "no such station" in obj["error"]
