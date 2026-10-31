@@ -204,7 +204,6 @@ def max_live() -> int:
 #: working (31 Oct 2026); three is what it holds.
 HOST_RESERVE_MB = 2048.0
 PER_SESSION_MB = 1536.0
-AUTO_CEILING = 8
 
 
 def mem_total_mb() -> float | None:
@@ -221,7 +220,8 @@ def mem_total_mb() -> float | None:
 
 def auto_max_live(total_mb: float | None = None, cpus: int | None = None) -> int:
     """How many sessions this host holds: what memory fits after the
-    reserve, no more than its cores, at least 1 and at most AUTO_CEILING.
+    reserve, no more than its cores, at least 1. No ceiling past those: the
+    cap is what parks idle sessions, and a big host can keep them.
     Without /proc/meminfo, cores alone."""
     if total_mb is None:
         total_mb = mem_total_mb()
@@ -230,7 +230,7 @@ def auto_max_live(total_mb: float | None = None, cpus: int | None = None) -> int
     n = cpus
     if total_mb is not None:
         n = min(n, int((total_mb - HOST_RESERVE_MB) // PER_SESSION_MB))
-    return max(1, min(n, AUTO_CEILING))
+    return max(1, n)
 
 
 def min_free_mb() -> float:

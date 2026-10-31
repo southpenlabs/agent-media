@@ -8597,7 +8597,7 @@ writes nothing to tmux.
   from the last event or task activity, whichever is later. The session
   record carries `tasks`, how many count now. At most `MEDIA_SESSIOND_MAX`
   live (unset or `auto`: sized to the host — what its memory holds after
-  2 GB for itself at 1.5 GB a session, no more than its cores, 1 to 8; 3 on
+  2 GB for itself at 1.5 GB a session, no more than its cores, at least 1; 3 on
   a 7.6 GB, 4-core host), and none more while the host has under `MEDIA_SESSIOND_MIN_FREE_MB` (1024) available and one is
   already running; one more parks the least recently used idle one (no
   tasks in flight either), else 503 `busy` (its sentence says when memory
