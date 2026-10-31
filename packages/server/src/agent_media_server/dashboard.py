@@ -156,16 +156,20 @@ def _transcript_mtime(session: str) -> float | None:
 
 
 def _recent(index: list[dict]) -> list[dict]:
-    from . import quiet, remind
+    from . import archive, quiet, remind
 
     hushed = quiet.quieted(rows={str(r.get("session") or ""): r for r in index})  # now, not the cache's
-    held = remind.reminders()
     now = time.time()
+    remind.fire_due(now)
+    held = remind.reminders()
+    # A reminder come due unarchived its thread (remind.py); the cached index may not know yet.
+    filed = archive.archived()
     rows = []
     for r in index:
-        if r.get("archived"):
-            continue
         sid = str(r.get("session") or "")
+        back = sid in held and held[sid]["at"] <= now
+        if (sid in filed) if back else r.get("archived"):
+            continue
         at = r.get("at") if not r.get("live") else None
         if at is None:
             at = _transcript_mtime(sid)
@@ -257,14 +261,21 @@ def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     # Quiet for… (quiet.py): asked now, not off the cached index, so a quiet
     # set or ended a moment ago already counts. Bring back… (remind.py): held
     # until due, and a due one is in whatever its quiet says.
-    held = remind.reminders()
     now = time.time()
+    remind.fire_due(now)
+    held = remind.reminders()
     hushed = {k for k in quiet.quieted()} | {k for k, v in held.items() if v["at"] > now}
     hushed -= {k for k, v in held.items() if v["at"] <= now}
+    back = {k for k, v in held.items() if v["at"] <= now}
+    from . import archive
+
+    filed = archive.archived()
     cut = now - REPLIES_WINDOW_S
     for r in index:
         sid = str(r.get("session") or "")
-        if not sid or r.get("archived") or sid in busy or hidden(sid) or sid in hushed:
+        # One brought back was unarchived as it came due: the archive's word for it.
+        archived = (sid in filed) if sid in back else r.get("archived")
+        if not sid or archived or sid in busy or hidden(sid) or sid in hushed:
             continue
         if harnesses.is_hermes(sid):
             if hermes is None:
@@ -311,10 +322,11 @@ def _replies(index: list[dict], busy: set[str]) -> list[dict]:
     # when it came back if that is later than the reply's, and a thread with no
     # reply to show comes with its recap.
     shown = {r["session"]: r for r in rows}
+    # Unarchived when it came due (remind.py): the archive's word, not the cached index's.
     for r in index:
         sid = str(r.get("session") or "")
         mine = held.get(sid)
-        if not mine or mine["at"] > now or r.get("archived") or hidden(sid) or sid in busy:
+        if not mine or mine["at"] > now or sid in filed or hidden(sid) or sid in busy:
             continue
         if sid in shown:
             shown[sid]["at"] = max(shown[sid]["at"], mine["at"])

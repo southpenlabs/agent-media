@@ -21,8 +21,16 @@ unless the thread is really quiet too (that quiet shows as it is); once due,
 regardless. Opening the thread, which cancels the reminder, lets the quiet
 take hold again.
 
+It also **unarchives** (David, 31 Oct 2026: "does bring back also
+unarchive?" — yes, when due): setting a reminder on an archived thread
+leaves it archived; when it comes due the server takes the archive flag off
+(`archive.py`, the store `/session/archive` uses), once per reminder
+(`fired`), so it is back in the list as well as unread — with the app shut
+too, as the phone's stream asks every few seconds. Archiving it again after
+that is left alone.
+
 Kept on the server so every device agrees and it fires when the app is shut,
-in `<state_dir>/remind.json` as `{"<session>": {"at", "held", "set"}}`
+in `<state_dir>/remind.json` as `{"<session>": {"at", "held", "set", "fired"?}}`
 (`_jsonmap.JsonMap`). A reminder is at most a year off.
 """
 
@@ -56,9 +64,36 @@ def pending(now: float | None = None) -> dict[str, dict]:
 
 
 def due(now: float | None = None) -> dict[str, dict]:
-    """Reminders whose time has come and that nobody has opened yet."""
+    """Reminders whose time has come and that nobody has opened yet (each
+    newly due one unarchived first, `fire_due`)."""
     now = time.time() if now is None else now
+    fire_due(now)
     return {k: v for k, v in reminders().items() if v["at"] <= now}
+
+
+def fire_due(now: float | None = None) -> list[str]:
+    """Each reminder that has come due and not yet fired: its thread
+    unarchived, and the reminder marked `fired` so it happens once (an
+    archive made after it came back is left alone). The sessions it fired."""
+    now = time.time() if now is None else now
+    todo = [k for k, v in STORE.all().items() if _ok(v) and v["at"] <= now and not v.get("fired")]
+    if not todo:
+        return []
+    from . import archive
+
+    for k in todo:
+        archive.unarchive_quietly(k)
+
+    def fn(rows: dict) -> bool:
+        changed = False
+        for k in todo:
+            r = rows.get(k)
+            if _ok(r) and r["at"] <= now and not r.get("fired"):
+                rows[k] = {**r, "fired": round(now, 3)}
+                changed = True
+        return changed
+    STORE.update(fn)
+    return todo
 
 
 def due_key(now: float | None = None) -> tuple:
@@ -90,8 +125,12 @@ def set_remind(session: str, at, held: float | None = None) -> bool:
 def add_remind(rows: list[dict]) -> list[dict]:
     """`remind` and `reminded` on every row, and `quiet` as they say (above)."""
     now = time.time()
+    # Come due since the last look: unarchived now, so the row says so too.
+    fired = set(fire_due(now))
     held = reminders()
     for row in rows:
+        if str(row.get("session") or "") in fired:
+            row["archived"] = False
         r = held.get(str(row.get("session") or ""))
         if r is None:
             row["remind"], row["reminded"] = None, False

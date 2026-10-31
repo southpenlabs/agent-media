@@ -177,3 +177,58 @@ def test_cancelling_drops_the_row_and_is_idempotent():
     remind.set_remind(SID, time.time() + 60)
     assert SID in remind.reminders()
     assert remind.set_remind(SID, None) is True and remind.reminders() == {}
+
+
+def test_a_due_reminder_unarchives_its_thread_once(server, shelf, signed_in, machine):
+    """David, 31 Oct 2026: "does bring back also unarchive?" — yes, when due."""
+    from agent_media_server import archive
+
+    _transcript(SID, [_asked("hi", 1), _said("All done.", 2)])
+    archive.set_archived(SID, True)
+    call(server, "POST", "/session/remind", {"session": SID, "at": time.time() + 600}, AUTH)
+    # Pending: still archived, and not news.
+    assert archive.is_archived(SID) and _rows(server)[SID]["archived"] is True
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)
+    assert not any(r["session"] == SID for r in obj["replies"])
+    # Due: unarchived by the server, in the list and in Home's replies.
+    _put(SID, time.time() - 2)
+    row = _rows(server)[SID]
+    assert row["archived"] is False and row["reminded"] is True and not archive.is_archived(SID)
+    dashboard._reset_for_tests()                 # a fresh index; the next test uses a cached one
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)
+    assert [r["reminded"] for r in obj["replies"] if r["session"] == SID] == [True]
+    assert remind.STORE.get(SID).get("fired")
+    # Archived again after it came back: left archived (fired once).
+    archive.set_archived(SID, True)
+    assert _rows(server)[SID]["archived"] is True and remind.fire_due() == []
+
+
+def test_the_dashboard_unarchives_with_a_cached_index(server, shelf, signed_in, machine):
+    """The index is cached for a few seconds; a thread just brought back is
+    in the replies whatever the cache still says."""
+    from agent_media_server import archive
+
+    _transcript(SID, [_asked("hi", 1), _said("All done.", 2)])
+    archive.set_archived(SID, True)
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)   # caches the index: archived
+    assert not any(r["session"] == SID for r in obj["replies"])
+    _put(SID, time.time() - 2)
+    _, obj = call(server, "GET", "/dashboard", headers=AUTH)
+    got = [r for r in obj["replies"] if r["session"] == SID]
+    assert len(got) == 1 and got[0]["reminded"] is True and got[0]["text"] == "All done."
+    assert SID in {r["session"] for r in obj["recent"]}
+
+
+def test_the_reminders_frame_unarchives_with_nobody_reading_the_list(server, screen, monkeypatch):
+    from agent_media_server import archive
+    from test_mic import _device
+
+    archive.set_archived(SID2, True)
+    _put(SID2, time.time() - 5)
+    pixel, _ = _device("Pixel 8a")
+    st = Stream(server, "/sessions/events?ping=0.3&remind=1", pixel)
+    try:
+        assert [d["session"] for d in st.next("reminders", 2.0)["due"]] == [SID2]
+    finally:
+        st.close()
+    assert not archive.is_archived(SID2)

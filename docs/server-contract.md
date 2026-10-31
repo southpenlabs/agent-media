@@ -1795,11 +1795,19 @@ Pinned by `packages/server/tests/test_quiet.py`.
   "Back · <title>"), even with the app shut. `null` or `false` cancels; the
   app cancels a due one when the thread is opened, which is also its seen
   mark. Moving a pending one keeps its first `held`.
+- **It unarchives** (David, 31 Oct 2026: "does bring back also
+  unarchive?"): a reminder set on an archived thread leaves it archived
+  until it is due; then the server takes the archive flag off (the store
+  `/session/archive` uses), once per reminder (`fired` in its row), so the
+  thread is back in the list, at the top and unread, like any other. It is
+  done wherever due reminders are worked out — the rows, `/dashboard`, the
+  stream's watcher — so it happens with the app shut while a phone holds
+  its stream. A thread archived again after it came back stays archived.
 - It combines with a quiet: the answer's `quiet` (and the rows') is what
   the lists show — the thread's own quiet while pending, `null` once due
   (the due time lifts it regardless; cancelling lets it take hold again).
 - Kept here, per session, in `<state_dir>/remind.json` (`{"<session>":
-  {"at", "held", "set"}}`, the same atomic write-and-lock as the pin), so
+  {"at", "held", "set", "fired"?}}`, the same atomic write-and-lock as the pin), so
   every device agrees. Forgetting a thread drops it.
 - 400 `"at must be a time to come, null or false"`, `"at must be within a
   year"` (a cap of 366 days), `"held must be a time that has passed"`; the
@@ -4461,6 +4469,8 @@ data: {}
   being opened and cancelled (`due` then shrinks). The client keeps the
   `session`+`at` pairs it has already told, so a reconnect does not post one
   twice. The notifier posts "Back · <title>", tapping it opens the thread.
+  A thread that was archived is unarchived as it comes due (§6.4
+  `/session/remind`), so the one it opens is in the list.
 - `ping`: `{}` after `?ping=` seconds of silence — 15 to 300, default 15,
   clamped. A phone asks for a long one so an idle connection wakes the radio
   only for real changes.
