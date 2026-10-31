@@ -7570,9 +7570,12 @@ the pop-up's place.
 - 404 when off, 400 `expected entries [{id, items}]`, 503 when the session
   host is down or refuses the start. CORS as the other app routes.
 - Kept in `<state_dir>/news-thread.json` (`{"session", "posted"}`).
-- **A relay** (31 Oct 2026, roadmap 47): with no `MEDIA_NEWS_FOLDER` but
-  `MEDIA_FEEDBACK=1` (the owner's choice), `enabled` is true and `GET /news`
-  adds `"relay": true`. The thread is a chat in a folder of its own
+- **A relay** (31 Oct 2026, roadmap 47): with no `MEDIA_NEWS_FOLDER` and
+  feedback on — the default (David, 31 Oct 2026: "I'd like it on by default
+  since reactions or feedback are optional"); off with Settings' switch or
+  `MEDIA_FEEDBACK=0` — `enabled` is true and `GET /news` adds
+  `"relay": true`, and the app's reply box there reads "Reply to the
+  Sasonica team…". The thread is a chat in a folder of its own
   (`<state_dir>/news-thread`, the smallest model) that reads the news out and
   says replies go to the Sasonica team; each `/reply` into it is posted to
   the feedback service (`feedback.py`, signed with the install key the `/r/`
@@ -7581,6 +7584,12 @@ the pop-up's place.
   every post into a thread per install in `MEDIA_NEWS_FOLDER`, and
   `media feedback answer <install> [--post N] <text>` answers. The service
   is `deploy/feedback` (`sasonica.com/feedback/v1`, `MEDIA_FEEDBACK_URL`).
+- `GET /feedback/settings` (gated) → `{"ok", "on", "sending", "env_off",
+  "applies"}`; `POST {"on": bool}` (admins) sets the owner's switch, kept in
+  `<state_dir>/feedback-settings.json`. `applies` is false where What's new
+  is the app's source or the service is off (the app hides the switch);
+  `env_off` when `MEDIA_FEEDBACK=0` overrides it. 400 `on must be true or
+  false`.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 

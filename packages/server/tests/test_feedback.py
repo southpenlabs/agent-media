@@ -46,15 +46,40 @@ def sending(monkeypatch):
     return posted
 
 
-def test_off_by_default(monkeypatch):
+def test_on_by_default_and_off_three_ways(monkeypatch):
+    """Sending is on by default (David, 31 Oct 2026): nothing goes until
+    someone answers in the What's new thread. Off: the service off,
+    MEDIA_FEEDBACK=0, or the owner's switch."""
     monkeypatch.delenv("MEDIA_FEEDBACK", raising=False)
     monkeypatch.delenv("MEDIA_FEEDBACK_ADMIN_TOKEN", raising=False)
     monkeypatch.delenv("MEDIA_NEWS_FOLDER", raising=False)
-    assert not feedback.sending() and not feedback.admin_token()
-    assert not news_thread.relay() and news_thread.state()["enabled"] is False
-    monkeypatch.setenv("MEDIA_FEEDBACK", "1")
-    monkeypatch.setenv("MEDIA_FEEDBACK_URL", "-")
+    monkeypatch.setenv("MEDIA_FEEDBACK_URL", "https://feedback.invalid/v1")
+    assert feedback.sending() and news_thread.relay() and not feedback.admin_token()
+    assert news_thread.state()["enabled"] is True and news_thread.state()["relay"] is True
+    monkeypatch.setenv("MEDIA_FEEDBACK", "0")
+    assert not feedback.sending() and news_thread.state()["enabled"] is False
+    monkeypatch.delenv("MEDIA_FEEDBACK")
+    feedback._save("feedback-settings.json", {"on": False})
     assert not feedback.sending()
+    feedback._save("feedback-settings.json", {"on": True})
+    monkeypatch.setenv("MEDIA_FEEDBACK_URL", "-")
+    assert not feedback.sending() and not feedback.base()
+
+
+def test_the_settings_switch(server, signed_in, monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_FEEDBACK_URL", "https://feedback.invalid/v1")
+    res, obj = call(server, "GET", "/feedback/settings", headers=AUTH)
+    assert res.status == 200 and obj["on"] is True and obj["sending"] and obj["applies"]
+    res, obj = call(server, "POST", "/feedback/settings", {"on": False}, headers=AUTH)
+    assert res.status == 200 and obj["on"] is False and not obj["sending"]
+    assert not feedback.sending()
+    res, _ = call(server, "POST", "/feedback/settings", {"on": "no"}, headers=AUTH)
+    assert res.status == 400
+    res, _ = call(server, "POST", "/feedback/settings", {}, headers=AUTH)
+    assert res.status == 400
+    # Where What's new is the app's own source, there is nothing to switch.
+    monkeypatch.setenv("MEDIA_NEWS_FOLDER", str(tmp_path))
+    assert call(server, "GET", "/feedback/settings", headers=AUTH)[1]["applies"] is False
 
 
 def test_the_relay_thread_reads_the_news_and_forwards_replies(server, signed_in, chats, sending,

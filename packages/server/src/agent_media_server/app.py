@@ -398,7 +398,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -1601,6 +1601,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # fall through to the caller's 404 on a socket it already wrote to.
         _thread_events(h, events.group(1), query)
         return True
+    if path == "/feedback/settings":
+        # Settings' "Send What's new replies to the Sasonica team" (feedback.py).
+        from . import feedback
+
+        ok, detail = feedback.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        return True
     if path == "/news":
         # What's new as a thread (§6.43, news_thread.py): is there one here?
         from . import news_thread
@@ -2726,6 +2733,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_say(h)
     elif path == "/speech/say":
         _speech_say(h)
+    elif path == "/feedback/settings":
+        # Settings' switch: send What's new replies on, or not (feedback.py).
+        from . import feedback
+
+        body = _read_json(h) or {}
+        on = body.get("on") if isinstance(body, dict) else None
+        ok, detail = feedback.settings(_bearer(h), on="" if on is None else on)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/news":
         # An update's entries, handed to the What's new thread (§6.43).
         from . import news_thread

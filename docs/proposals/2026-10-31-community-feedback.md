@@ -39,8 +39,10 @@ have no app source, so today they get the sheet.
 
 ## Consent and privacy
 
-- Off until the owner turns it on: one question in setup, and a switch in
-  Settings. The relay thread's first message and the reply row's hint say
+- On by default (David, 31 Oct 2026: "I'd like it on by default since
+  reactions or feedback are optional": nothing is sent unless someone
+  answers in the thread), with a switch in Settings → Display → Feedback and
+  `MEDIA_FEEDBACK=0`. The relay thread's first message and the reply row's hint say
   where replies go.
 - Only replies in the What's new thread are sent, and only after they are
   sent in the app (an edit or take-back before then sends nothing).
@@ -55,8 +57,9 @@ have no app source, so today they get the sheet.
   made for the `/r/` lookup (its install id is the key's hash), so there is
   no enrolment step and nothing to hand out.
 - The relay thread and the reading side: `feedback.py`, news_thread.py's
-  relay (contract §6.43). The owner's switch is `MEDIA_FEEDBACK=1` for now;
-  a switch in Settings and a question in setup are still to do.
+  relay (contract §6.43). On by default; Settings' switch and the reply
+  box's "Reply to the Sasonica team…" (sasonica-app 69369dc). Deployed
+  31 Oct 2026.
 
 ## Open questions
 

@@ -1,14 +1,19 @@
 """Feedback from every install, to South Pen Labs (roadmap 47; docs/proposals/
 2026-10-31-community-feedback.md; the service is deploy/feedback).
 
-Two sides, each off unless set:
+Two sides:
 
-- **An install that sends feedback** (`MEDIA_FEEDBACK=1`, the owner's
-  choice): its What's new thread is a relay (news_thread.py), what the owner
+- **An install that sends feedback** (on by default — David, 31 Oct 2026: "I'd
+  like it on by default since reactions or feedback are optional": nothing
+  is sent unless someone answers in the What's new thread, which says where
+  answers go; Settings' switch, `POST /feedback/settings`, or
+  `MEDIA_FEEDBACK=0` turns it off): its What's new thread is a relay
+  (news_thread.py), what the owner
   answers there is posted to the service signed with this install's key (the
   one the `/r/` lookup knows it by, tunnel.identity), and the answers to it
   come back into that thread, every MEDIA_FEEDBACK_POLL_S.
-- **The server that reads it** (`MEDIA_FEEDBACK_ADMIN_TOKEN`, David's): every
+- **The server that reads it** (`MEDIA_FEEDBACK_ADMIN_TOKEN`, David's; off
+  unless set): every
   post becomes a message in a thread of its own per install, an agent chat
   in `MEDIA_NEWS_FOLDER`, and `media feedback answer <install> <text>` (the
   agent's, once David says so) sends an answer back.
@@ -44,9 +49,39 @@ def base() -> str:
     return (os.environ.get("MEDIA_FEEDBACK_URL") or DEFAULT_URL).rstrip("/")
 
 
+def switched_on() -> bool:
+    """The owner's switch (Settings), on unless turned off."""
+    return _load("feedback-settings.json").get("on", True) is not False
+
+
 def sending() -> bool:
-    """Does this install send its What's new replies on? The owner's choice."""
-    return os.environ.get("MEDIA_FEEDBACK", "0") == "1" and bool(base())
+    """Does this install send its What's new replies on? On unless the owner
+    turned it off (Settings, or MEDIA_FEEDBACK=0)."""
+    return os.environ.get("MEDIA_FEEDBACK", "1") != "0" and switched_on() and bool(base())
+
+
+def settings(bearer: str, on: object = None) -> tuple[bool, dict]:
+    """`GET` / `POST /feedback/settings`: Settings' "Send What's new replies
+    to the Sasonica team". Any signed-in device reads it; changing it is an
+    admin's (it is the whole server's). `applies` is false where What's new
+    is the app's own source (MEDIA_NEWS_FOLDER) or the service is off: then
+    there is nothing to switch, and the app hides it."""
+    from . import auth, news_thread
+
+    if on is None:
+        user, err = auth.gate(bearer)
+    else:
+        user, err = auth.may_admin(bearer)
+    if not user:
+        return False, err
+    if on is not None:
+        if not isinstance(on, bool):
+            return False, {"status": 400, "error": "on must be true or false"}
+        _save("feedback-settings.json", {"on": on})
+        print(f"feedback: sending {'on' if on else 'off'}", file=sys.stderr, flush=True)
+    env_off = os.environ.get("MEDIA_FEEDBACK", "1") == "0"
+    return True, {"on": switched_on(), "sending": sending(), "env_off": env_off,
+                  "applies": bool(base()) and not news_thread.folder()}
 
 
 def admin_token() -> str:
