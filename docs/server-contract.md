@@ -2884,6 +2884,15 @@ server's own list, 0-based, never a client's re-split of the text:
   fields of the replay count from the start of the reply, as if the earlier
   sentences had played, so `sentence`/`offsets`/`elapsed` read as usual.
 
+#### `POST /speech/say` — `auth.may_control_speech`, like `/speech/ctl` (31 Oct 2026)
+
+`{"text"}` → `{"ok": true, "chars"}`. The app's own words read aloud
+through `media say`, the same way as a reply, on a tap only: What's new's
+Play (David, 31 Oct 2026: "maybe what's new should have a play button
+too"). `--private`: never kept in speech history. Capped at 6,000
+characters (`SAY_MAX`); 400 `expected {"text"}` when empty. Pinned by
+`packages/server/tests/test_speech_say.py`.
+
 #### `GET /speech/sentences?id=<history id>` — gated
 
 `{"ok": true, "id": 48213, "sentences": ["First.", "Second.", …]}` — the

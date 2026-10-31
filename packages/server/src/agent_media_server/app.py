@@ -398,7 +398,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -1160,6 +1160,39 @@ def _mail_say(h: BaseHTTPRequestHandler) -> None:
         return
     try:
         # --private: played, never kept in speech history (David, 20 Oct 2026).
+        p = subprocess.Popen([sys.executable, "-m", "agent_media_core.cli", "say", "--private"],
+                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        p.stdin.write(text.encode())
+        p.stdin.close()
+    except OSError as e:
+        _json(h, 503, {"ok": False, "error": f"could not start speech ({e})"})
+        return
+    _json(h, 200, {"ok": True, "chars": len(text)})
+
+
+#: The most `/speech/say` reads at once, as `/org/say` caps a note.
+SAY_MAX = 6000
+
+
+def _speech_say(h: BaseHTTPRequestHandler) -> None:
+    """`POST /speech/say {"text"}`: read the app's own words aloud through
+    `media say` — What's new's Play (David, 31 Oct 2026: "maybe what's new
+    should have a play button too"). On a tap only; gated as the speech bar
+    is (it makes the phone talk); private, so never kept in speech history."""
+    import subprocess
+
+    ok, detail = auth.may_control_speech(_bearer(h))
+    if not ok:
+        _json(h, detail.pop("status", 403), {"ok": False, **detail})
+        return
+    body = _read_json(h)
+    text = str((body if isinstance(body, dict) else {}).get("text") or "").strip()
+    if not text:
+        _json(h, 400, {"ok": False, "error": 'expected {"text"}'})
+        return
+    text = text[:SAY_MAX]
+    try:
         p = subprocess.Popen([sys.executable, "-m", "agent_media_core.cli", "say", "--private"],
                              stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
@@ -2681,6 +2714,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_level(h, m.group(1), m.group(2) == "notify")
     elif path == "/mail/say":
         _mail_say(h)
+    elif path == "/speech/say":
+        _speech_say(h)
     elif path in ("/contacts/google/login", "/contacts/google/finish",
                   "/contacts/google/signout"):
         _contacts_google(h, path.rsplit("/", 1)[1])
