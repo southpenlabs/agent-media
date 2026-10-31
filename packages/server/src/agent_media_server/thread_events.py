@@ -59,6 +59,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import sys
 import threading
 import time
 import zlib
@@ -435,6 +436,11 @@ def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watch
         # reply plays or waits behind a Play, so the log can answer "why did
         # that play?" afterwards.
         log.info("thread %s open (%d)%s", session[:8], len(w.subs), " held" if held else "")
+        # In the journal too (the logger is quiet there): which device's
+        # screen made a reply play, after the fact (David, 31 Oct 2026: a
+        # reply played behind What's new and nothing said who was watching).
+        print(f"thread {session[:8]} open by {device or '?'}{' (held)' if held else ''}, "
+              f"{len(w.subs)} open", file=sys.stderr, flush=True)
     if start:
         w.prime()
         w.start()
@@ -458,6 +464,8 @@ def release(session: str, device: str = "") -> int:
         if mine:
             _publish()
             log.info("thread %s released (%d)", session[:8], len(mine))
+            print(f"thread {session[:8]} released by {device or '?'} ({len(mine)})",
+                  file=sys.stderr, flush=True)
     if mine:
         threading.Thread(target=_play_if_stayed, args=(session, device, mine[0]), daemon=True,
                          name=f"opened:{session[:8]}").start()
@@ -549,6 +557,8 @@ def unsubscribe(w: Watcher, sub: Subscriber) -> None:
         except ValueError:
             pass
         log.info("thread %s closed (%d)", w.session[:8], len(w.subs))
+        print(f"thread {w.session[:8]} closed by {sub.device or '?'}, {len(w.subs)} open",
+              file=sys.stderr, flush=True)
         if not w.subs:
             w.stop()
             if _WATCHERS.get(w.session) is w:
