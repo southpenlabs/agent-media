@@ -49,13 +49,17 @@ Config (env; hours and percentages may be fractional):
   MEDIA_REAP_RECAP_MODEL   chat model (default MEDIA_FOLLOWUP_MODEL, then the
                            summary's); endpoint and key are MEDIA_SUMMARY_*
   MEDIA_REAP_RECAP_TIMEOUT seconds (default 20) — a failure never blocks a close
+  MEDIA_DONE_RECAP         0 to skip the recap written when a thread is marked
+                           Done or archived (`recap_soon`; default on)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import queue
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -499,6 +503,58 @@ def generate_recap(session: str) -> dict | None:
         return rest.save_recap(session, out)
     except Exception:  # noqa: BLE001 — a recap must never stand in front of a close
         return None
+
+
+_SOON: "queue.Queue[str] | None" = None
+_SOON_HELD: set[str] = set()
+_SOON_LOCK = threading.Lock()
+
+
+def _recap_current(session: str) -> bool:
+    """Whether its recap is at least as new as its transcript's last write."""
+    from agent_media_core import harnesses
+
+    have = recaps.recap_for(session)
+    if not have:
+        return False
+    found = harnesses.transcript(session)
+    try:
+        return bool(found) and have["at"] >= os.stat(found[1]).st_mtime - 1
+    except OSError:
+        return True
+
+
+def _soon_worker() -> None:
+    while True:
+        sid = _SOON.get()
+        try:
+            if not _recap_current(sid):
+                generate_recap(sid)
+        except Exception:  # noqa: BLE001 — a recap is a nicety, never a failure
+            pass
+        finally:
+            with _SOON_LOCK:
+                _SOON_HELD.discard(sid)
+
+
+def recap_soon(session: str) -> bool:
+    """Write a recap for a thread just marked Done or archived, in the
+    background, one at a time (a bulk archive queues, it never fans out),
+    unless its recap is already current. So a finished thread's row has a
+    summary under its ⌄, not only its last reply (David, 31 Oct 2026: "Also
+    write recaps on Done"). True when queued. MEDIA_DONE_RECAP=0 turns it off."""
+    global _SOON
+    if (os.environ.get("MEDIA_DONE_RECAP", "1") or "1").strip() == "0":
+        return False
+    with _SOON_LOCK:
+        if session in _SOON_HELD:
+            return False
+        _SOON_HELD.add(session)
+        if _SOON is None:
+            _SOON = queue.Queue()
+            threading.Thread(target=_soon_worker, name="recap-soon", daemon=True).start()
+    _SOON.put(session)
+    return True
 
 
 def _recap_state(d: Decision) -> str:

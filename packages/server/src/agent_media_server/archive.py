@@ -157,7 +157,11 @@ def session_archive(session: str, flag, bearer: str) -> tuple[bool, dict]:
             or matrix.room(session) is not None or _quick(session)):
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
-        set_archived(session, flag)
+        changed = set_archived(session, flag)
     except OSError as e:
         return False, {"error": f"could not save the flag ({e})", "status": 500}
+    if flag and changed:
+        from . import reap
+
+        reap.recap_soon(session)
     return True, {"session": session, "archived": flag}

@@ -42,3 +42,26 @@ def test_a_news_entry_closes_the_thread_it_came_from(server, signed_in, tmp_path
     assert res.status == 200
     got = issues.issues()[SID]
     assert got["state"] == "done" and got["news"] == "2026-11-02-x"
+
+
+def test_done_queues_a_recap_once(monkeypatch):
+    """Done writes a recap in the background (reap.recap_soon), once per change."""
+    import threading
+
+    from agent_media_server import reap
+
+    monkeypatch.setenv("MEDIA_DONE_RECAP", "1")
+    wrote = threading.Event()
+    calls = []
+    monkeypatch.setattr(reap, "_recap_current", lambda s: False)
+    monkeypatch.setattr(reap, "generate_recap", lambda s: (calls.append(s), wrote.set()))
+    issues.set_issue(SID, "done")
+    assert wrote.wait(5) and calls == [SID]
+    issues.set_issue(SID, "done")          # no change: nothing queued
+    issues.set_issue(SID, "open")          # not done: nothing queued
+    monkeypatch.setenv("MEDIA_DONE_RECAP", "0")
+    issues.set_issue(SID, "done")          # off
+    import time
+
+    time.sleep(0.2)
+    assert calls == [SID]

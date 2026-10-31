@@ -57,7 +57,12 @@ def set_issue(session: str, state: str | None, news: str = "") -> bool:
             return False
         rows[session] = value
         return True
-    return STORE.update(fn)
+    changed = STORE.update(fn)
+    if changed and state == "done":
+        from . import reap
+
+        reap.recap_soon(session)
+    return changed
 
 
 def done_by_news(entries: list[dict]) -> list[str]:

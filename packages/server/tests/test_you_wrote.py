@@ -139,3 +139,27 @@ def test_not_the_listeners_words():
         assert not you_wrote.yours(msg(t)), t
     for t in ("play me some tunes", "[draft] my own words", "<b>bold</b> idea", "Scheduled the dentist?"):
         assert you_wrote.yours(msg(t)), t
+
+
+def test_the_newest_reply_rides_the_same_read(path):
+    """A row with no recap shows its newest reply (sessions._reply_recap)."""
+    write(path, user("hello there", 100), reply("First answer.", 101))
+    assert you_wrote.with_reply(SID, "claude", str(path)) == (100.0, False, {"text": "First answer.", "at": 101.0})
+    # Asked again and not answered yet: the last reply stays the one shown.
+    write(path, user("and another", 102), tool(103))
+    assert you_wrote.with_reply(SID, "claude", str(path))[2] == {"text": "First answer.", "at": 101.0}
+    write(path, {"type": "user", "uuid": str(uuid.uuid4()), "timestamp": _ts(103.5),
+                 "message": {"role": "user", "content": [
+                     {"type": "tool_result", "tool_use_id": "t1", "content": "a b"}]}},
+          reply("Second.", 104))
+    got = you_wrote.with_reply(SID, "claude", str(path))
+    assert got[:2] == (102.0, False) and got[2]["text"] == "Second."
+
+
+def test_a_long_reply_is_cut_as_a_recap(monkeypatch):
+    from agent_media_server import sessions
+
+    got = sessions._reply_recap(SID, {"text": "word " * 300, "at": 5.0})
+    assert got["source"] == "last" and got["text"].endswith("…")
+    assert len(got["text"]) <= sessions.REPLY_RECAP_CHARS + 1
+    assert sessions._reply_recap(SID, {"text": "short", "at": 5.0})["text"] == "short"

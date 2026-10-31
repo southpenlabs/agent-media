@@ -78,6 +78,19 @@ def of_messages(msgs: list[dict]) -> tuple[float | None, bool]:
     return None, False
 
 
+def reply_of(msgs: list[dict]) -> dict | None:
+    """The newest answering message's words and time, `{"text", "at"}`, or
+    None: what a row with no recap shows under its ⌄ (David, 31 Oct 2026:
+    "how come they all don't have that?")."""
+    for m in reversed(msgs):
+        if answered(m):
+            # The turn's last words, not the notes between its tool calls.
+            texts = [str(p.get("text") or "").strip() for p in m.get("parts") or []
+                     if p.get("type") == "text" and str(p.get("text") or "").strip()]
+            return {"text": texts[-1], "at": round(float(m.get("at") or 0), 3) or None}
+    return None
+
+
 def of_chat(msgs: list[dict]) -> tuple[float | None, bool]:
     """`(you_at, last_from_you)` for a chat whose `role: "user"` messages
     are the listener's and every other one someone answering (a Matrix
@@ -89,7 +102,7 @@ def of_chat(msgs: list[dict]) -> tuple[float | None, bool]:
 
 
 class _File:
-    __slots__ = ("sig", "offset", "seam", "builder", "you_at", "from_you", "lock")
+    __slots__ = ("sig", "offset", "seam", "builder", "you_at", "from_you", "reply", "lock")
 
     def __init__(self) -> None:
         self.sig: tuple = ()
@@ -98,14 +111,16 @@ class _File:
         self.builder = None
         self.you_at: float | None = None
         self.from_you = False
+        self.reply: dict | None = None
         self.lock = threading.Lock()
 
 
 #: `{path: _File}`, one per transcript a row has asked about. Small: the
-#: answer, a seam and the few messages after the listener's last one.
+#: answer, a seam, the newest reply and the few messages after the
+#: listener's last one.
 _FILES: dict[str, _File] = {}
-#: `{key: (sig, answer)}` for the conversations folded whole.
-_WHOLE: dict[str, tuple[tuple, tuple[float | None, bool]]] = {}
+#: `{key: (sig, (you_at, last_from_you, reply))}` for the conversations folded whole.
+_WHOLE: dict[str, tuple[tuple, tuple]] = {}
 _LOCK = threading.Lock()
 
 
@@ -157,6 +172,7 @@ def _fold(f: _File) -> None:
     """Bring `f`'s answer up to date from its builder's messages, and trim
     them to what the next read needs."""
     msgs = f.builder.messages
+    f.reply = reply_of(msgs) or f.reply
     i = next((k for k in range(len(msgs) - 1, -1, -1) if yours(msgs[k])), -1)
     if i >= 0:
         f.you_at = round(float(msgs[i].get("at") or 0), 3) or f.you_at
@@ -169,13 +185,13 @@ def _fold(f: _File) -> None:
     del msgs[:-1]                  # the open message is all a later read needs
 
 
-def _of_file(path: str, harness: str) -> tuple[float | None, bool]:
+def _of_file(path: str, harness: str) -> tuple:
     from . import transcript as tr
 
     try:
         st = os.stat(path)
     except OSError:
-        return None, False
+        return None, False, None
     sig = (st.st_ino, st.st_size, st.st_mtime)
     with _LOCK:
         f = _FILES.get(path)
@@ -183,7 +199,7 @@ def _of_file(path: str, harness: str) -> tuple[float | None, bool]:
             f = _FILES[path] = _File()
     with f.lock:
         if f.sig == sig:
-            return f.you_at, f.from_you
+            return f.you_at, f.from_you, f.reply
         reader = tr.READERS.get(harness) or tr.READERS["claude"]
         try:
             with open(path, "rb") as fh:
@@ -193,24 +209,25 @@ def _of_file(path: str, harness: str) -> tuple[float | None, bool]:
                 if not appended:
                     # First sight, or shrunk, replaced, rewritten: from the
                     # listener's newest prompt on.
-                    f.builder, f.you_at, f.from_you = reader.build(False), None, False
+                    f.builder, f.you_at, f.from_you, f.reply = reader.build(False), None, False, None
                     f.offset = _start(fh, end, reader)
                 tr._feed_range(f.builder, fh, f.offset, end, reader.wants)
                 f.builder.settle()
                 f.offset, f.seam = end, tr._seam(fh, end)
         except OSError:
-            return None, False
+            return None, False, None
         _fold(f)
         f.sig = sig
-        return f.you_at, f.from_you
+        return f.you_at, f.from_you, f.reply
 
 
-def _of_whole(key: str, sig, read) -> tuple[float | None, bool]:
+def _of_whole(key: str, sig, read) -> tuple:
     with _LOCK:
         got = _WHOLE.get(key)
     if got and got[0] == sig:
         return got[1]
-    ans = of_messages(read() or [])
+    msgs = read() or []
+    ans = (*of_messages(msgs), reply_of(msgs))
     with _LOCK:
         _WHOLE[key] = (sig, ans)
     return ans
@@ -219,24 +236,32 @@ def _of_whole(key: str, sig, read) -> tuple[float | None, bool]:
 def of_session(session: str, harness: str = "", path: str = "") -> tuple[float | None, bool]:
     """`(you_at, last_from_you)` for an agent's thread, from its transcript
     at `path` (the store's, when the caller has it) or the one found for it."""
+    return with_reply(session, harness, path)[:2]
+
+
+def with_reply(session: str, harness: str = "", path: str = "") -> tuple:
+    """`(you_at, last_from_you, reply)`: `of_session`'s answer and `reply_of`
+    the same read. The reply is the newest one the reads have passed: a
+    file first read from the listener's newest prompt, still unanswered,
+    has none yet."""
     from . import transcript as tr
 
     if not path:
         if harness == "opencode":
             st = tr.file_state(session)
             if st is None:
-                return None, False
+                return None, False, None
             return _of_whole(session, st, lambda: tr._opencode_messages(session))
         harness, path = tr.transcript_of(session)
         if not path:
-            return None, False
+            return None, False, None
     if harness in tr._WHOLE:
         try:
             st = os.stat(path)
         except OSError:
-            return None, False
+            return None, False, None
         return _of_whole(path, (st.st_ino, st.st_size, st.st_mtime),
                          lambda: tr._WHOLE[harness](path))
     if harness not in tr.READERS:
-        return None, False
+        return None, False, None
     return _of_file(path, harness)

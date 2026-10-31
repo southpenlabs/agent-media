@@ -1549,7 +1549,13 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
         # A Matrix room or quick chat says so itself; an agent's thread is
         # read from its transcript's end, cached per file (you_wrote.py).
         if "you_at" not in row:
-            row["you_at"], row["last_from_you"] = _you_wrote(row, paths)
+            row["you_at"], row["last_from_you"], reply = _you_wrote(row, paths)
+            # No recap (Claude Code writes one only in a terminal you came
+            # back to, the reaper only before resting a pane): the newest
+            # reply, so every agent's row has its ⌄ (David, 31 Oct 2026:
+            # "how come they all don't have that?"). `source: "last"`.
+            if not row.get("recap") and reply and reply["text"]:
+                row["recap"] = _reply_recap(sid, reply)
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted
@@ -1574,21 +1580,39 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
                              for sid, rec in locked.items() if sid not in gone])))))))
 
 
-def _you_wrote(row: dict, paths: dict) -> tuple[float | None, bool]:
-    """`(you_at, last_from_you)` for an agent's thread (`you_wrote`), its
-    transcript found through the store sweep `sessions_index` already made."""
+def _you_wrote(row: dict, paths: dict) -> tuple:
+    """`(you_at, last_from_you, reply)` for an agent's thread
+    (`you_wrote.with_reply`), its transcript found through the store sweep
+    `sessions_index` already made."""
     from . import you_wrote
 
     harness, path = paths.get(row["session"]) or (str(row.get("harness") or ""), "")
     if harness in ("hermes", "matrix", "quick"):
-        return None, False
+        return None, False, None
     try:
-        return you_wrote.of_session(row["session"], harness, path)
+        return you_wrote.with_reply(row["session"], harness, path)
     except Exception as e:  # noqa: BLE001 — a row without the fields, not no list
         import logging
 
         logging.getLogger(__name__).warning("you_wrote %s: %s", row["session"][:8], e)
-        return None, False
+        return None, False, None
+
+
+#: How much of a reply a row carries in place of a recap. Longer is cut at a
+#: word with "…", which the app reads as cut and fetches whole on Show more.
+REPLY_RECAP_CHARS = 600
+
+
+def _reply_recap(session: str, reply: dict) -> dict | None:
+    """A row's `recap` made from its newest reply, or None for a private thread."""
+    from agent_media_core.private import hidden
+
+    if hidden(session):
+        return None
+    text = reply["text"]
+    if len(text) > REPLY_RECAP_CHARS:
+        text = text[:REPLY_RECAP_CHARS].rsplit(None, 1)[0].rstrip(" ,;:") + "…"
+    return {"text": text, "at": reply["at"], "source": "last"}
 
 
 def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = False) -> dict:

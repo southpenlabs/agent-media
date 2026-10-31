@@ -285,7 +285,14 @@ Everything a message can be pointed at.
   Code's own "while you were away" paragraph (`"source": "claude"`), or the
   one agent-media wrote before the idle reaper rested the session
   (`"source": "agent-media"`), whichever is newer. See [Recaps](#recaps)
-  below. The app uses it as the row's preview line.
+  below. The app uses it as the row's preview line. On a list row only
+  (31 Oct 2026), an agent's thread with neither has its newest reply
+  instead, `"source": "last"`: the turn's last words, cut at a word with
+  "…" past 600 characters (the app fetches the whole message on Show more);
+  none for a private thread. A thread marked Done (§6.44) or archived
+  (§6.4) gets an `"agent-media"` recap written in the background, one at a
+  time, unless its recap is already as new as its transcript
+  (`reap.recap_soon`; `MEDIA_DONE_RECAP=0` turns it off).
 - `archived` (every row, 22 Sep 2026): whether the thread is archived — a
   flag this server keeps per session (`archive.py`, `<state_dir>/archived.json`),
   set with `POST /session/archive` (§6.4). **Archived rows stay in the list**;
