@@ -153,3 +153,57 @@ def test_the_distinctive_come_up_most(monkeypatch):
     random.seed(1)
     picks = [F.track_for()[1]["original_title"] for _ in range(400)]
     assert picks.count("Iconic") > 5 * picks.count("Bland")
+
+
+def test_a_well_known_tune_may_be_slowish(monkeypatch):
+    """David, 1 Nov 2026: "maybe slowish is allowed ... relative to
+    popularity". The limits widen 12 % a point above 5; loudness stays."""
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SLOW", "1")
+    slowish = {"bpm": 120, "onsets": 3.0, "energy": 0.5}
+    loud = {"bpm": 120, "onsets": 3.0, "energy": 0.95}
+    _ready("famous", "Famous", slowish)
+    _ready("plain", "Plain", slowish)
+    _ready("rocker", "Rocker", loud)
+    data = F.load()
+    data["renown"] = {"famous": 9, "plain": 5, "rocker": 10}
+    F.save(data)
+    assert [e["key"] for e in F.playable()] == ["famous"]
+    assert F.slow_scale(None) == 1.0 and F.slow_scale(3) == 1.0
+    assert F.slow_scale(10) == pytest.approx(1.6)
+
+
+def test_the_topic_picks_its_track_most(monkeypatch):
+    """David, 1 Nov 2026: backing music "related to the topic being spoken"."""
+    from agent_media_core.intake import fast
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SLOW", "0")
+    _ready("sea", "The Sea")
+    _ready("gambler", "The Gambler")
+    asked = []
+
+    def chat(system, user, timeout, purpose_env=None, private=False):
+        asked.append(user)
+        return "2" if "poker" in user else "0"
+    monkeypatch.setattr(fast, "chat", chat)
+    random.seed(3)
+    picks = [F.track_for(topic="Let's talk about poker odds")[1]["original_title"]
+             for _ in range(200)]
+    assert picks.count("The Gambler") > 4 * picks.count("The Sea")
+    assert "1. The Sea" in asked[0] and "poker odds" in asked[0]
+    # None fits, no answer, or no topic: as without it, and no ask.
+    assert F.topic_choice(F.tracks(), "the weather") is None
+    n = len(asked)
+    F.track_for()
+    assert len(asked) == n
+
+
+def test_the_topic_switch_is_listed_and_kept(monkeypatch):
+    from agent_media_core import music_bed as B
+    assert B.topic_on() is False
+    ids = [s["id"] for s in B.settings()]
+    assert "topic" in ids
+    B.set_settings({"topic": True})
+    assert B.topic_on() is True
+    with pytest.raises(ValueError):
+        B.set_settings({"topic": "yes"})
+    B.set_settings({"topic": None})
+    assert B.topic_on() is False

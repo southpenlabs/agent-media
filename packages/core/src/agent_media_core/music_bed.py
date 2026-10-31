@@ -354,6 +354,34 @@ def slow_on() -> bool:
     return env_slow() if s is None else s
 
 
+def stored_topic() -> Optional[bool]:
+    v = _stored().get("topic")
+    return v if isinstance(v, bool) else None
+
+
+def topic_on() -> bool:
+    """Match the music to the topic (David, 1 Nov 2026: "a nice but not
+    essential option for backing music to be selected that is related to
+    the topic being spoken"; music_bed_favourites.topic_choice): Settings'
+    switch, else MEDIA_MUSIC_BED_TOPIC (off)."""
+    s = stored_topic()
+    if s is not None:
+        return s
+    return (os.environ.get("MEDIA_MUSIC_BED_TOPIC") or "").strip().lower() in (
+        "1", "on", "true", "yes")
+
+
+def set_topic(value: Optional[bool]) -> None:
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(f"topic must be true, false or null, not {value!r}")
+    d = _stored()
+    if value is None:
+        d.pop("topic", None)
+    else:
+        d["topic"] = value
+    _store(d)
+
+
 def set_slow(value: Optional[bool]) -> Optional[bool]:
     """Save the slow switch (None forgets it, back to MEDIA_MUSIC_BED_SLOW)."""
     if value is not None and not isinstance(value, bool):
@@ -376,6 +404,9 @@ def played(style: str, slow: Optional[bool] = None) -> str:
 
 
 #: What GET /speech/music-bed lists as `settings`: switches beside the choice.
+TOPIC_LABEL = "Match the music to the topic"
+TOPIC_HINT = ("Your favourites, instrumental: a quick model picks the ready track that best "
+              "suits what the reply is about. It may start the reply a moment later.")
 SLOW_LABEL = "Slow music only"
 SLOW_HINT = "Only slow, quiet pieces: no beat-driven or quick ones."
 
@@ -1277,7 +1308,8 @@ class Plan(NamedTuple):
     fallback: str = ""
 
 
-def choose(pick, other_audio: Optional[bool], target=None) -> Optional[Plan]:
+def choose(pick, other_audio: Optional[bool], target=None,
+           topic: Optional[str] = None) -> Optional[Plan]:
     """What to play under a reading, or None.
 
     In order: the chosen source, if it can play on `target` and has
@@ -1285,7 +1317,8 @@ def choose(pick, other_audio: Optional[bool], target=None) -> Optional[Plan]:
     rendered. `other_audio`: whether the reading's duck found something
     playing (None: not known, which counts as playing — a bed over someone's
     music is the failure to avoid). Never fetches, never renders, never
-    raises."""
+    raises. `topic`: the reply's words, for Match the music to the topic
+    (topic_on; never given for a private thread)."""
     pick = as_pick(pick)
     if pick is None or other_audio is not False:
         return None
@@ -1297,7 +1330,8 @@ def choose(pick, other_audio: Optional[bool], target=None) -> Optional[Plan]:
                 return Plan("under", "library", pick.style, path=got[0], credit=got[1])
         elif pick.source == "favourites":
             from . import music_bed_favourites as fav
-            got = fav.track_for(pick.style, astro_reading()) if fav.enabled() else None
+            mine = {"topic": topic} if topic and topic_on() else {}
+            got = fav.track_for(pick.style, astro_reading(), **mine) if fav.enabled() else None
             if got is not None:
                 return Plan("under", "favourites", pick.style, path=got[0], credit=got[1])
         elif pick.source == "streaming":
@@ -1542,7 +1576,9 @@ def settings() -> list[dict]:
               "min": shown_gain(lo), "max": shown_gain(hi), "step": 1, "unit": "dB",
               "value": shown_gain(gain_db()), "set": stored_gain() is not None},
              {"id": "slow", "kind": "bool", "label": SLOW_LABEL, "hint": SLOW_HINT,
-              "value": slow_on(), "set": stored_slow() is not None}]
+              "value": slow_on(), "set": stored_slow() is not None},
+             {"id": "topic", "kind": "bool", "label": TOPIC_LABEL, "hint": TOPIC_HINT,
+              "value": topic_on(), "set": stored_topic() is not None}]
             + music_bed_mix.settings())
 
 
@@ -1562,9 +1598,9 @@ def set_settings(values: dict) -> None:
     if not isinstance(values, dict) or not values:
         raise ValueError("settings must be an object of {id: value}")
     for k, v in values.items():
-        if k == "slow":
+        if k in ("slow", "topic"):
             if v is not None and not isinstance(v, bool):
-                raise ValueError("slow must be true, false or null")
+                raise ValueError(f"{k} must be true, false or null")
         elif k == "gain_db":
             # Sent against the voice, as settings() shows it.
             lo, hi = shown_gain(GAIN_RANGE[0]), shown_gain(GAIN_RANGE[1])
@@ -1582,6 +1618,8 @@ def set_settings(values: dict) -> None:
             music_bed_mix.set_switch(k, values[k])
     if "slow" in values:
         set_slow(values["slow"])
+    if "topic" in values:
+        set_topic(values["topic"])
     if "gain_db" in values:
         v = values["gain_db"]
         set_gain(None if v is None else stored_from_shown(v))

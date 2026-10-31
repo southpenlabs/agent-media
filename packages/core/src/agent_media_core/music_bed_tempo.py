@@ -177,19 +177,22 @@ def measure(src: Path, loudness: bool = True) -> dict:
     return out
 
 
-def is_slow(features: Optional[dict]) -> bool:
+def is_slow(features: Optional[dict], scale: float = 1.0) -> bool:
     """Whether a measured track counts as slow (the rule in the module's
-    docstring): the BPM and the busyness both say so."""
+    docstring): the BPM and the busyness both say so. `scale` widens the
+    tempo and busyness limits (not the loudness one) for a track allowed to
+    be slowish: a favourite with a well-known tune (music_bed_favourites.
+    slow_scale)."""
     f = features or {}
     bpm, onsets = f.get("bpm"), f.get("onsets")
     if not isinstance(bpm, (int, float)) or not isinstance(onsets, (int, float)):
         return False
-    lim_on = max_onsets()
+    lim_on = max_onsets() * scale
     energy = f.get("energy")
     calm = onsets <= lim_on and not (isinstance(energy, (int, float)) and energy > MAX_ENERGY)
     if not calm:
         return False
-    lim = max_bpm()
+    lim = max_bpm() * scale
     if bpm <= lim:
         return True
     return bpm / 2 <= lim and onsets <= DOUBLED_ONSETS * lim_on

@@ -380,13 +380,18 @@ def counts(data: Optional[dict] = None) -> dict:
 
 def playable(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
     """The ready tracks (of `style`) the bed may play: the slow ones while
-    slow is on (music_bed_tempo.keep), and every one he suggested — he
-    chose it for this, so the slow rule's guess does not overrule him."""
-    from .music_bed_tempo import keep
+    slow is on (music_bed_tempo.is_slow), a well-known tune allowed to be
+    slowish (slow_scale), and every one he suggested — he chose it for
+    this, so the slow rule's guess does not overrule him."""
+    from . import music_bed
+    from .music_bed_tempo import is_slow
     have = tracks(style, data)
+    if not music_bed.slow_on():
+        return have
     mine = suggested()
-    kept = {id(e) for e in keep(have)}
-    return [e for e in have if id(e) in kept or e.get("key") in mine]
+    rated = data_renown(data)
+    return [e for e in have if e.get("key") in mine
+            or is_slow(e.get("features"), slow_scale(rated.get(e.get("key"))))]
 
 
 def upkeep_due(data: Optional[dict] = None) -> bool:
@@ -462,12 +467,15 @@ def features_fit(entry: dict, axes: Optional[dict], late: bool = False) -> float
 
 
 def track_for(style: str = "auto", axes: Optional[dict] = None,
-              when: Optional[datetime] = None) -> Optional[tuple[Path, dict]]:
+              when: Optional[datetime] = None,
+              topic: Optional[str] = None) -> Optional[tuple[Path, dict]]:
     """A ready track (of `style`) and its credit; None with none. At random,
     weighted by fit to astrotunes' tempo and energy when `axes` are given
     (features_fit), so the nearest come up most but not always, and by how
-    distinctive its tune is (pick_weight: his suggestions most). Marks it
-    played. Never fetches."""
+    distinctive its tune is (pick_weight: his suggestions most), and with
+    `topic` (the reply's words) the one a quick model finds suits it
+    TOPIC_BOOST times as often (topic_choice). Marks it played. Never
+    fetches."""
     try:
         have = playable(style)
         if not have:
@@ -477,6 +485,10 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
         rated, mine = data_renown(), suggested()
         weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
                    for e in have]
+        if topic and len(have) > 1:
+            i = topic_choice(have, topic)
+            if i is not None:
+                weights[i] *= TOPIC_BOOST
         e = random.choices(have, weights=weights, k=1)[0]
         p = _file(e)
         try:
@@ -981,6 +993,60 @@ def renown_factor(score) -> float:
     if not isinstance(score, (int, float)):
         return 1.0
     return 0.5 + max(0.0, min(10.0, float(score))) / 10.0
+
+
+# ---- the topic of the reply ------------------------------------------------------------------
+#
+# David, 1 Nov 2026: "it would be a nice but not essential option for
+# backing music to be selected that is related to the topic being spoken".
+# Settings' "Match the music to the topic" (music_bed.topic_on, off by
+# default): the ready tracks' names and the start of the reply go to the
+# fast models with a short deadline (MEDIA_MUSIC_BED_TOPIC_S, 2.5 s;
+# MEDIA_MUSIC_BED_TOPIC_MODEL goes first); the one named is picked
+# TOPIC_BOOST times as often, so it usually plays but not always. No answer
+# in time: the pick as without it. Never for a private thread (submit).
+
+TOPIC_BOOST = 8.0
+TOPIC_TEXT_CHARS = 900
+TOPIC_SYSTEM = (
+    "You pick quiet instrumental background music for a spoken reply. Given numbered "
+    "songs and the reply's text, answer with the number of the one song whose title, "
+    "theme or feeling best suits what the reply is about. Answer 0 if none fits better "
+    "than the others. Reply with the number only.")
+
+
+def topic_timeout() -> float:
+    return max(0.5, _num_env("MEDIA_MUSIC_BED_TOPIC_S", 2.5))
+
+
+def topic_choice(have: list[dict], text: str) -> Optional[int]:
+    """The index in `have` of the track a fast model says suits `text`,
+    or None (no answer in time, none fits, or anything failed)."""
+    try:
+        from .intake import fast
+        names = "\n".join(f"{i}. {e.get('title') or '?'} — {e.get('artist') or ''}"
+                           for i, e in enumerate(have, 1))
+        words = " ".join((text or "").split())[:TOPIC_TEXT_CHARS]
+        if not words:
+            return None
+        out = fast.chat(TOPIC_SYSTEM, f"Songs:\n{names}\n\nReply:\n{words}", topic_timeout(),
+                        purpose_env="MEDIA_MUSIC_BED_TOPIC_MODEL")
+        m = re.search(r"\d+", out or "")
+        n = int(m.group(0)) if m else 0
+        return n - 1 if 1 <= n <= len(have) else None
+    except Exception as e:  # noqa: BLE001 — the pick goes on without it
+        log.info("music-bed favourites: topic: %s", e)
+        return None
+
+
+def slow_scale(score) -> float:
+    """How far slow only's tempo and busyness limits widen for a tune this
+    well known (David, 1 Nov 2026: "maybe slowish is allowed ... relative
+    to popularity"): none up to 5, then 12 % a point, x1.6 at 10. The
+    loudness limit stays, so a loud rocker is still left out."""
+    if not isinstance(score, (int, float)):
+        return 1.0
+    return 1.0 + 0.12 * max(0.0, min(10.0, float(score)) - 5.0)
 
 
 def pick_weight(key: Optional[str], rated: dict, mine: dict) -> float:

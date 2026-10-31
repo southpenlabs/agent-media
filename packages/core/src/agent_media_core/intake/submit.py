@@ -5209,7 +5209,9 @@ def _submit_event(event: Event,
                                 _other = bool(_probe())
                             except Exception:  # noqa: BLE001
                                 _other = None
-                    bed_plan = music_bed.choose(_bed_pick, _other, target)
+                    bed_plan = music_bed.choose(
+                        _bed_pick, _other, target,
+                        topic=None if _private(event) else text)
             if bed_plan is not None:
                 from .. import music_bed
                 from .. import music_bed_vocal

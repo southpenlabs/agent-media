@@ -3450,6 +3450,7 @@ adverts, much sampled; `MEDIA_MUSIC_BED_RENOWN_MODEL` goes first), kept in
 the index's `renown`; a gathered favourite's count is multiplied by 0.5-1.5
 and a ready track picked 0.25-2.25× by it. Unrated is 1×.
 `MEDIA_MUSIC_BED_FAVOURITES_RENOWN=0` turns it off.
+**Slowish for a known tune** (same day: "maybe slowish is allowed ... relative to popularity"): slow only's tempo and busyness limits widen 12 % a rating point above 5 (×1.6 at 10; the loudness limit stays), `slow_scale`. **Match the music to the topic** (same day; `/speech/music-bed` setting `topic`, off by default, env `MEDIA_MUSIC_BED_TOPIC`): the ready favourites' names and the reply's first 900 characters go to the fast models (`MEDIA_MUSIC_BED_TOPIC_S`, 2.5 s; `MEDIA_MUSIC_BED_TOPIC_MODEL` first); the one named is picked 8× as often. Never for a private thread; no answer in time is the pick without it.
 
 `{"action": "room", "id", "on"?, "volume"?}` (20 Oct 2026) switches one
 house speaker on or off (Snapcast mute) and/or sets its volume (0-100);
