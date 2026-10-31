@@ -7642,6 +7642,35 @@ probably use this as my own little issue tracker/ticketing system too".
   `issue` (the object above, or null).
 - Kept in `<state_dir>/issues.json`.
 
+### 6.45 Meditations: recorded and written — gated (built 31 Oct 2026)
+
+Code: `agent_media_server/meditations.py`, the list in
+`agent_media_core/meditation_library.py`. Pinned by
+`packages/server/tests/test_meditations_route.py`. David, 31 Oct 2026:
+"I'd like to use recorded meditations too" … "A list in the app".
+
+- `GET /meditations` → `{"ok": true, "items": [{"id", "title", "source",
+  …}], "feeds": [{"url", "title"}], "folder"}`. `source` is `made` (one
+  the agent wrote, newest first; `added`), `youtube` (a saved link;
+  `added`), `file` (an audio file in the host's Meditations folder,
+  `folder`; `added` is its mtime) or `podcast` (one of a saved feed's
+  newest 20 episodes; `show`, `published`, `duration` as the feed gives
+  them). In that order. No paths or URLs are given out.
+- `POST /meditations {"action": "play", "id", "target"?, "resume"?}` →
+  `{"ok", "playing", "title"}`: plays it on the book channel, from the
+  start unless `resume`. A recorded one is then eased out for a reply as
+  a written one is (5 s down, paused, 2 s back up). 404 for an id not in
+  the list; 502 when the player could not start it.
+- `POST /meditations {"action": "add", "url", "title"?}` → the list, plus
+  `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
+  podcast feed with audio episodes. 400 for anything else.
+- `POST /meditations {"action": "remove", "id"}` → the list: a link
+  (`yt:<id>`), a written one (`made:<hash>`, its audio deleted) or a feed
+  (its `url`). A folder's files are only removed from the folder. 404 when
+  nothing was saved under it.
+- Kept in `<state_dir>/meditations.json`; feeds cached for 6 h in
+  `<cache>/meditation-feeds/`. Not a guest POST.
+
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
 
 One SSE stream for every screen. The canvas page, the wake watcher and the

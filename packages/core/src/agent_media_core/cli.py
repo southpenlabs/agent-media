@@ -5486,6 +5486,43 @@ def cmd_history(a) -> int:
     return 0
 
 
+def cmd_meditations(a) -> int:
+    """Saved meditations: recorded (YouTube, the folder, podcasts) and the
+    agent's own (meditation_library.py)."""
+    import json as _json
+
+    from . import meditation_library as lib
+    cmd = a.med_cmd
+    if cmd == "list":
+        items = lib.items()
+        if getattr(a, "json", False):
+            print(_json.dumps({"items": items, "feeds": lib.feeds(),
+                               "folder": str(lib.folder())}))
+            return 0
+        for it in items:
+            print(f"{it['id']}\t{it['source']}\t{it['title']}")
+        return 0
+    if cmd == "add":
+        try:
+            got = lib.add(a.url, title=a.title or "")
+        except ValueError as e:
+            print(f"media meditations: {e}", file=sys.stderr)
+            return 1
+        print(f"added {got['added']}: {got['title']}")
+        return 0
+    if cmd == "remove":
+        if not lib.remove(a.key):
+            print(f"media meditations: nothing saved as {a.key!r}", file=sys.stderr)
+            return 1
+        return 0
+    r = lib.play(a.name, target=a.target or "", resume=a.resume)
+    if not r.get("ok"):
+        print(f"media meditations: {r.get('error')}", file=sys.stderr)
+        return 1
+    print(r.get("title") or "")
+    return 0
+
+
 def cmd_meditate(a) -> int:
     """A guided meditation: the script (an argument, a file or stdin) spoken
     slowly over a bed with real pauses and bells, played on the book channel
@@ -5505,10 +5542,12 @@ def cmd_meditate(a) -> int:
     if clip is None:
         print("media meditate: could not render that script", file=sys.stderr)
         return 1
+    title = getattr(a, "title", "") or "Meditation"
+    from .meditation_library import remember
+    remember(clip, title)
     if getattr(a, "no_play", False):
         print(clip)
         return 0
-    title = getattr(a, "title", "") or "Meditation"
     r = _srv().book_play(str(clip), resume=False, start_ms=-1,
                          target=getattr(a, "target", "") or "", title=title)
     if r.get("error"):
@@ -9802,6 +9841,24 @@ def _build_parser() -> argparse.ArgumentParser:
                         "host asks its origin for")
     s.set_defaults(func=cmd_history)
 
+    s = sub.add_parser("meditations",
+                       help="saved meditations: YouTube links, the Meditations "
+                            "folder, podcast feeds and the agent's own")
+    msub = s.add_subparsers(dest="med_cmd", required=True)
+    ml = msub.add_parser("list", help="every saved meditation")
+    ml.add_argument("--json", action="store_true")
+    ma = msub.add_parser("add", help="save a YouTube link or a podcast feed")
+    ma.add_argument("url")
+    ma.add_argument("--title", default="")
+    mr = msub.add_parser("remove", help="forget a link (yt:<id>), a feed (its "
+                                        "URL) or a written one (made:<hash>)")
+    mr.add_argument("key")
+    mp = msub.add_parser("play", help="play one by id or by words of its title")
+    mp.add_argument("name")
+    mp.add_argument("--target", default="", help="rooms|local|phone")
+    mp.add_argument("--resume", action="store_true",
+                    help="carry on where it was left (a long talk)")
+    s.set_defaults(func=cmd_meditations)
     s = sub.add_parser("meditate",
                        help="a guided meditation: a script with [[pause: 20]] and "
                             "[[bell]] markers, said slowly over a bed, on the "

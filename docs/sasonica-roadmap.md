@@ -2231,6 +2231,18 @@ ahead.
     answers. Waiting on David's go for the service: it is public and
     outward-facing.
 
+48. **Meditations list in the Media tab** (David, 31 Oct 2026: "I'd like to
+    use recorded meditations too" … "A list in the app"). The server half is
+    built (agent-media, contract §6.45): `GET /meditations` gives
+    `items` ({id, title, source: made | youtube | file | podcast, show?,
+    published?, duration?}) and `feeds`; `POST /meditations` with
+    `{"action": "play", "id"}`, `{"action": "add", "url", "title"?}` (a
+    YouTube link or a podcast feed) and `{"action": "remove", "id"}`. The
+    app: a Meditations section in the Media tab, grouped by source, tap to
+    play (it goes to the book channel, so the existing player shows it), an
+    Add field for a link, remove on long-press. Later: presets for the
+    agent-written ones (proposal 2026-10-31-relax-and-meditate.md §1).
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)

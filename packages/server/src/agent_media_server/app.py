@@ -430,6 +430,10 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
+# Saved meditations, recorded and written (meditations.py, §6.45).
+MEDITATION_PATHS = frozenset({"/meditations"})
+CORS_PATHS = CORS_PATHS | MEDITATION_PATHS
+
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
@@ -752,6 +756,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _audio(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
         return _music(h, method, path)
+    if path in MEDITATION_PATHS and method in ("GET", "POST"):
+        return _meditations(h, method)
     if path in ORG_PATHS and method in ("GET", "POST"):
         return _org(h, method, path)
     if path in ALERT_PATHS and method in ("GET", "POST"):
@@ -3815,6 +3821,19 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         ok, detail = music.now(_bearer(h))
     else:
         ok, detail = music.control(_read_json(h) or {}, _bearer(h))
+    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    return True
+
+
+def _meditations(h: BaseHTTPRequestHandler, method: str) -> bool:
+    """`GET`/`POST /meditations` (§6.45): the saved meditations list."""
+    from . import meditations
+
+    if method == "GET":
+        ok, detail = meditations.listing(_bearer(h))
+    else:
+        body = _read_json(h)
+        ok, detail = meditations.control(body if isinstance(body, dict) else {}, _bearer(h))
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 
