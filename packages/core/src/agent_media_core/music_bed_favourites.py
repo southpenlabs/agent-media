@@ -801,6 +801,24 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
             add(song, n["likes"] * LIKE_POINTS, "liked")
         if n["plays"]:
             add(song, n["plays"], "played")
+    # His YouTube accounts (music_accounts: yt-profile's sign-ins, read
+    # only): liked songs five points, a play or a music playlist's song one.
+    try:
+        from . import music_accounts
+        yt = music_accounts.youtube_songs(now)
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed favourites: YouTube accounts: %s", e)
+        yt = {}
+    ranked_yt = sorted(yt.values(), key=lambda s: -(s["liked"] * LIKE_POINTS + s["plays"]))
+    for s in ranked_yt[: max_favourites() * 3]:
+        song = lookup(s["id"], data)
+        if not song:
+            artist, title = clean_original(s.get("artist") or "", s.get("title") or "")
+            song = {"id": s["id"], "artist": artist, "title": title, "dur": s.get("dur") or 0}
+        if s["liked"]:
+            add(song, LIKE_POINTS, "youtube-liked")
+        if s["plays"]:
+            add(song, s["plays"], "youtube")
     lb = _from_listenbrainz(listenbrainz_user())
     lb.sort(key=lambda r: -(r["plays"] + (LIKE_POINTS if r["loved"] else 0)))
     for r in lb[: max_favourites() * 2]:

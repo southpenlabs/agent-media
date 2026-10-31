@@ -124,6 +124,10 @@ FIELDS: dict[str, tuple[str, str, str]] = {
                           "Your most played and loved songs, for Your favourites, "
                           "instrumental. Filled in for you when you sign in with "
                           "your token; a public profile works with the name alone."),
+    "youtube.profiles": ("text", "YouTube accounts",
+                         "yt-profile names on this server, comma separated (e.g. "
+                         "davidj4,davidj4music): their YouTube likes, history and music "
+                         "playlists count toward Your favourites, instrumental. Read only."),
     "listenbrainz.token": ("secret", "ListenBrainz user token",
                            "Signs you in: copy it from your ListenBrainz settings page. "
                            "Checked with ListenBrainz, kept on this server and never "
@@ -134,7 +138,8 @@ GROUPS = (
     ("weather", "Weather", ("location",)),
     ("astro", "Astro Tunes", ("astro.enabled", "astro.birth_date", "astro.birth_time",
                               "astro.birth_place", "astro.to_model")),
-    ("accounts", "Music accounts", ("listenbrainz.user", "listenbrainz.token")),
+    ("accounts", "Music accounts", ("listenbrainz.user", "listenbrainz.token",
+                                    "youtube.profiles")),
 )
 
 #: The environment a field falls back to, first set wins.
@@ -143,6 +148,7 @@ ENV = {
     "astro.to_model": ("MEDIA_ASTRO_TO_MODEL",),
     "listenbrainz.user": ("MEDIA_LISTENBRAINZ_USER", "MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER"),
     "listenbrainz.token": ("MEDIA_LISTENBRAINZ_TOKEN",),
+    "youtube.profiles": ("MEDIA_YOUTUBE_PROFILES",),
 }
 
 
@@ -325,6 +331,10 @@ def _validate(field: str, value: Any) -> Any:
     if field == "listenbrainz.user":
         if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", value):
             raise Invalid(field, "a ListenBrainz username is letters, digits, _ . -")
+        return value
+    if field == "youtube.profiles":
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]+(\s*,\s*[A-Za-z0-9_.\-]+)*", value):
+            raise Invalid(field, "yt-profile names: letters, digits, _ . -, comma separated")
         return value
     if kind == "secret":
         if not re.fullmatch(r"[A-Za-z0-9_\-]{8,128}", value):

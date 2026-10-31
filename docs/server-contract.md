@@ -7596,6 +7596,7 @@ Labels and hints are the server's; the app adds only its button words.
 | `astro.to_model` | bool | the radio DJ's model is told the reading (six axes, posture, novelty, themes), never the birth details. Off by default. Env: `MEDIA_ASTRO_TO_MODEL=1` |
 | `listenbrainz.user` | text | a public profile's name; set from ListenBrainz on sign-in. Env: `MEDIA_LISTENBRAINZ_USER`, then `MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER` |
 | `listenbrainz.token` | secret | sign-in: checked with `GET https://api.listenbrainz.org/1/validate-token` as it is set (400 "ListenBrainz did not accept that token", or "could not reach ListenBrainz"), its `user_name` becoming `listenbrainz.user`. Sign out is both null. Env: `MEDIA_LISTENBRAINZ_TOKEN` |
+| `youtube.profiles` | text | yt-profile names on this server, comma separated (1 Nov 2026; `agent_media_core.music_accounts`): each account's YouTube Music history and likes (its headers) and liked music videos and mostly-music playlists (YouTube Data API with its OAuth token) count toward the favourites gather — a like 5 points, a play or a playlist song 1. Read by `ytmusic_reader.py` in its own process under a Python with ytmusicapi (`MEDIA_YTMUSIC_PYTHON`, else Mopidy's venv); read only; the last read kept a day. Env: `MEDIA_YOUTUBE_PROFILES` |
 
 A `<source>` is `{"id", "label", "available", "reason"}` for `weather`,
 `astro`, `listenbrainz`, `youtube` (downloads on, `MEDIA_RADIO_YOUTUBE=1`,
