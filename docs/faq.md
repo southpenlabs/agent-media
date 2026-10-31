@@ -132,7 +132,7 @@ To the voice. The number is roughly how far under a reply's voice the music
 sits: -22 dB means the music is about 22 dB quieter than the voice (each 10
 dB is about half as loud to the ear). It is approximate: songs differ in
 loudness, and a voice rendered on your phone may differ from one rendered on
-the server. The level is the one **under the words**: in the pauses the music
+the server. A new install starts at -30 dB. The level is the one **under the words**: in the pauses the music
 swells up to 6 dB above it. Every device shares it: change it on the full
 player (**Levels**, tap to fold) or in Settings → Music, and the next sound
 plays at the new level.

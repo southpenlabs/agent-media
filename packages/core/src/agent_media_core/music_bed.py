@@ -174,6 +174,11 @@ BASE_PEAK_DBFS = -24.0
 #: had first (David, 30 Oct 2026: "a little bit quieter").
 DEFAULT_GAIN_DB = -4.0
 PEAK_DBFS = BASE_PEAK_DBFS + DEFAULT_GAIN_DB
+#: The level a new install starts at and Reset goes back to, unless
+#: MEDIA_MUSIC_BED_GAIN_DB says otherwise: -20, shown as -30 against the
+#: voice (David, 31 Oct 2026: "let's make the default -30"). DEFAULT_GAIN_DB
+#: stays the reference the files are named by and the duck is scaled from.
+DEFAULT_LEVEL_DB = -20.0
 #: Bumped whenever a recipe changes, so an old file is never reused. 2: the
 #: slow versions, bossa nova, and 4 dB quieter (30 Oct 2026).
 VERSION = 2
@@ -852,7 +857,7 @@ GAIN_RANGE = (-24.0, 6.0)
 #: Approximate: songs and generated beds differ in loudness.
 VOICE_REF_DB = 10.0
 GAIN_LABEL = "Backing music level"
-GAIN_HINT = ("How far under the voice the music sits, in dB: -22 is 22 dB quieter "
+GAIN_HINT = ("How far under the voice the music sits, in dB: -30 is 30 dB quieter "
              "than the voice. Approximate, as songs differ. It also sets how far "
              "your own music drops while a reply plays.")
 
@@ -882,9 +887,9 @@ def stored_gain() -> Optional[float]:
 def gain_db() -> float:
     """Every bed's level against the first ones' (-24 dBFS peak generated,
     -30 LUFS kept tracks, Mopidy at 12): Settings' `gain_db`, else
-    MEDIA_MUSIC_BED_GAIN_DB, else -4."""
+    MEDIA_MUSIC_BED_GAIN_DB, else DEFAULT_LEVEL_DB (-20, shown -30)."""
     g = stored_gain()
-    return g if g is not None else _num_env("MEDIA_MUSIC_BED_GAIN_DB", DEFAULT_GAIN_DB)
+    return g if g is not None else _num_env("MEDIA_MUSIC_BED_GAIN_DB", DEFAULT_LEVEL_DB)
 
 
 def set_gain(value: Optional[float]) -> Optional[float]:

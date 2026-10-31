@@ -64,6 +64,11 @@ def _no_inherited_music_level(monkeypatch):
     inherited, the duck tests' exact levels move. A test of the level sets
     its own."""
     monkeypatch.delenv("MEDIA_MUSIC_BED_GAIN_DB", raising=False)
+    # The tests were written at the reference level (-4, DEFAULT_GAIN_DB):
+    # the files unnamed by a gain, the duck unscaled. The shipped default
+    # (DEFAULT_LEVEL_DB, -20 since 31 Oct 2026) is checked on its own.
+    from agent_media_core import music_bed
+    monkeypatch.setattr(music_bed, "DEFAULT_LEVEL_DB", music_bed.DEFAULT_GAIN_DB)
     for key in ("BREATHE", "BREATHE_DB", "ATTACK_MS", "RELEASE_MS", "HOLD_MS"):
         monkeypatch.delenv(f"MEDIA_MUSIC_BED_{key}", raising=False)
 

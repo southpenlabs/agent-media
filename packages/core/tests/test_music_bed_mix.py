@@ -33,7 +33,7 @@ def test_the_level_is_a_range_and_every_effect_a_switch_on_by_default():
     got = {s["id"]: s for s in B.settings()}
     g = got["gain_db"]
     assert g["kind"] == "range" and (g["min"], g["max"], g["step"], g["unit"]) == (-34.0, -4.0, 1, "dB")  # against the voice
-    assert g["value"] == B.DEFAULT_GAIN_DB - B.VOICE_REF_DB and g["set"] is False and g["label"]
+    assert g["value"] == B.DEFAULT_LEVEL_DB - B.VOICE_REF_DB and g["set"] is False and g["label"]
     for i in ("breathe", "carve", "intro", "outro", "sweep", "carry"):
         assert got[i]["kind"] == "bool" and got[i]["value"] is True and got[i]["set"] is False
         assert got[i]["label"] and got[i]["hint"]

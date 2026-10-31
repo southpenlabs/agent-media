@@ -72,3 +72,15 @@ def test_the_real_socket_lookup_takes_a_name(monkeypatch):
     sent = []
     monkeypatch.setattr(speech.ipc, "set_property", lambda s, n, v: sent.append(s))
     assert speech.push_under_level(-20) == 1 and sent == ["tcp://127.0.0.1:1"]
+
+
+def test_a_new_install_starts_at_minus_30_against_the_voice(monkeypatch):
+    """David, 31 Oct 2026: "let's make the default -30" (conftest pins the
+    reference level for the older tests, so the shipped value is read from
+    the source and put back here)."""
+    from pathlib import Path
+    assert "\nDEFAULT_LEVEL_DB = -20.0\n" in Path(B.__file__).read_text()
+    monkeypatch.setattr(B, "DEFAULT_LEVEL_DB", -20.0)
+    assert B.DEFAULT_GAIN_DB == -4.0          # the files' and the duck's reference
+    assert B.gain_db() == -20.0
+    assert next(s for s in B.settings() if s["id"] == "gain_db")["value"] == -30.0
