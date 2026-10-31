@@ -2188,6 +2188,19 @@ ahead.
     side); whether Google Voice or a SIP line matters. Stays generic: the
     server says which call services it has (`/features`), the app renders
     them.
+47. **Feedback from every install** (David, 31 Oct 2026: "how might we set
+    it up so that other people's installs send that feedback to me?"; he
+    chose private first, then a public roadmap). Builds on What's new as a
+    thread (§6.43, done 31 Oct 2026 on hosts with `MEDIA_NEWS_FOLDER`).
+    Proposal: [2026-10-31-community-feedback.md](proposals/2026-10-31-community-feedback.md).
+    Steps: (1) a relay What's new thread on installs without the app's
+    source, its replies sent on, opt-in; (2) a South Pen Labs feedback
+    service (public HTTPS, a key per install); (3) a Feedback group on
+    David's server, admin only, an agent triaging, answers back into their
+    thread; (4) a public roadmap page of what he takes on. Open: where the
+    service runs (a Cloudflare Worker is the lead), enrolment, polling for
+    answers. Waiting on David's go for the service: it is public and
+    outward-facing.
 
 ## Loose ends
 
