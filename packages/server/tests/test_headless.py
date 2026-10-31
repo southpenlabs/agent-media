@@ -1205,3 +1205,17 @@ def test_relocate_with_sessiond_down_rewrites_the_record(host, tmp_path):
     sessiond.stop(host.srv)
     assert driver.headless_driver().relocate(sid, str(tmp_path)) == ""
     assert sessiond.read_record(sid)["cwd"] == str(tmp_path)
+
+
+def test_the_session_cap_is_sized_to_the_host_unless_set(monkeypatch):
+    assert sessiond.auto_max_live(7757, 4) == 3       # red5, 31 Oct 2026
+    assert sessiond.auto_max_live(3800, 8) == 1       # small box: never 0
+    assert sessiond.auto_max_live(65536, 4) == 4      # cores bound it
+    assert sessiond.auto_max_live(131072, 32) == 8    # and the ceiling
+    assert sessiond.auto_max_live(None, 2) == 2       # no /proc/meminfo
+    monkeypatch.setattr(sessiond, "auto_max_live", lambda: 3)
+    for v in ("", "auto", "0", "x"):
+        monkeypatch.setenv("MEDIA_SESSIOND_MAX", v)
+        assert sessiond.max_live() == 3
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "6")
+    assert sessiond.max_live() == 6

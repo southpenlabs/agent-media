@@ -52,7 +52,8 @@ What it does per session:
   `MEDIA_SESSIOND_TASK_STALE_S` (default 3600) no longer counts, so a lost
   notification cannot pin a session. Idle counts from the last event, which
   a task's progress is too. The record shows `tasks`, how many count. At most `MEDIA_SESSIOND_MAX`
-  (default 6) run at once, and fewer when the host is short of memory: below
+  run at once (unset or `auto`: sized to the host, `auto_max_live()`; 3 on a
+  7.6 GB, 4-core host), and fewer when the host is short of memory: below
   `MEDIA_SESSIOND_MIN_FREE_MB` available (default 1024) there is no room for
   another. Either way one more parks the least recently used idle one (by
   the same test), or is refused with a sentence when none is idle.
@@ -189,7 +190,47 @@ def task_stale_s() -> float:
 
 
 def max_live() -> int:
-    return int(_env_f("MEDIA_SESSIOND_MAX", 6))
+    """`MEDIA_SESSIOND_MAX`, or sized to the host when unset (or `auto`)."""
+    try:
+        n = int(float(os.environ.get("MEDIA_SESSIOND_MAX") or "auto"))
+    except ValueError:
+        return auto_max_live()
+    return n if n > 0 else auto_max_live()
+
+
+#: Memory the host keeps for itself, and what one more busy session costs:
+#: 0.2–0.6 GB for the agent and its MCP servers plus the builds and tests it
+#: runs. Six on red5 (7.6 GB, 4 cores) had it 8 GB into swap with four
+#: working (31 Oct 2026); three is what it holds.
+HOST_RESERVE_MB = 2048.0
+PER_SESSION_MB = 1536.0
+AUTO_CEILING = 8
+
+
+def mem_total_mb() -> float | None:
+    """The kernel's MemTotal, or None where there is no /proc/meminfo."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def auto_max_live(total_mb: float | None = None, cpus: int | None = None) -> int:
+    """How many sessions this host holds: what memory fits after the
+    reserve, no more than its cores, at least 1 and at most AUTO_CEILING.
+    Without /proc/meminfo, cores alone."""
+    if total_mb is None:
+        total_mb = mem_total_mb()
+    if cpus is None:
+        cpus = os.cpu_count() or 1
+    n = cpus
+    if total_mb is not None:
+        n = min(n, int((total_mb - HOST_RESERVE_MB) // PER_SESSION_MB))
+    return max(1, min(n, AUTO_CEILING))
 
 
 def min_free_mb() -> float:
