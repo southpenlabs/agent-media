@@ -272,6 +272,70 @@ def test_radio_is_409_on_a_server_that_has_not_turned_it_on(server, signed_in, a
     assert res.status == 200
 
 
+# ---- radio from a song sung out (31 Oct 2026) ------------------------------
+
+@pytest.fixture()
+def youtube(monkeypatch, tmp_path):
+    """The real radio.start with its YouTube and the app's player faked at
+    radio_io: the Mix listed here, the player a stub that already has the
+    song (as the phone labels it, `&v=<id>` on the clip's URL)."""
+    from agent_media_core import radio, radio_io
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_server import radio as loop
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")
+    asked: list = []
+    monkeypatch.setattr(radio_io, "youtube_mix", lambda vid: (asked.append(vid), [
+        {"id": vid, "title": "Angel", "channel": "Massive Attack"},
+        {"id": "Gkl8blLusFc", "title": "Teardrop", "channel": "Massive Attack"}])[1])
+
+    class App:
+        def __init__(self, where):
+            self.where = where
+
+        def props(self):
+            return {"path": "https://red5/speech/clips/music-bed-vocal-k1.mp3?sig=ab&v=66A_3uwuZ_I",
+                    "idle-active": False, "playlist-pos": 0, "playlist-count": 1}
+
+        def clear(self):
+            asked.append(("clear", self.where))
+
+    monkeypatch.setattr(radio_io, "player", lambda where: App(where))
+    monkeypatch.setattr(loop, "wake", lambda: None)
+    data = fav.load()
+    data["tracks"] = [{"key": "k1", "file": "f.mp3", "title": "Angel", "artist": "Massive Attack",
+                       "original_id": "66A_3uwuZ_I"},
+                      {"key": "k2", "file": "g.mp3", "title": "Home", "artist": "Nobody",
+                       "original_id": ""}]
+    fav.save(data)
+    return asked
+
+
+def test_radio_from_a_sung_out_song(server, signed_in, audio_host, player, youtube):
+    res, obj = call(server, "POST", "/music/radio", {"from_song": "k1"}, AUTH)
+    assert res.status == 200, obj
+    # Seeded with the original's video, on the app's player, behind the song.
+    assert youtube == ["66A_3uwuZ_I", ("clear", "sasonica")]
+    assert obj["radio"]["on"] is True and obj["radio"]["seed"]["id"] == "66A_3uwuZ_I"
+    assert [s["id"] for s in obj["radio"]["next"]] == ["Gkl8blLusFc"]
+    assert player == []                       # nothing played from here: it is on already
+    # The same through POST /music.
+    res, obj = call(server, "POST", "/music", {"action": "radio", "from_song": "k1"}, AUTH)
+    assert res.status == 200, obj
+
+
+def test_radio_from_a_song_without_an_original(server, signed_in, audio_host, player, youtube):
+    res, obj = call(server, "POST", "/music/radio", {"from_song": "k2"}, AUTH)
+    assert res.status == 400 and obj["error"] == "this song has no YouTube original"
+    res, obj = call(server, "POST", "/music/radio", {"from_song": "nope"}, AUTH)
+    assert res.status == 400
+    # A key the server no longer has, with the id the phone was told.
+    res, obj = call(server, "POST", "/music/radio",
+                    {"from_song": "gone", "video_id": "Gkl8blLusFc"}, AUTH)
+    assert res.status == 200 and youtube[-2] == "Gkl8blLusFc"
+
+
 # ---- the house speakers one by one, and moving what plays (20 Oct 2026) ----
 
 ROOMS = [{"id": "hpo-music", "label": "hpo", "connected": True, "on": True, "volume": 40}]

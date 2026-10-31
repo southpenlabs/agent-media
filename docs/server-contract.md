@@ -2511,6 +2511,26 @@ entry's `original_id`; `""` when there is none, and then no radio button).
   deleted, and it goes on an exclusion list
   (`<state_dir>/music-bed-favourites-excluded.json`, by key and by video id)
   that no later gather matches.
+- **Radio from the song**: `POST /music/radio {"from_song": "<key>",
+  "video_id"?}` (the same as `POST /music {"action": "radio", "from_song",
+  "video_id"?}`, §6.9a Radio) starts a YouTube Mix station seeded with the
+  original. Before it posts, the app has already put the song on its own
+  music player (`sasonica`). It must load the song with a **path the server
+  can read the video id from**: the original's clip URL with
+  **`&v=<video_id>`** added (`…/speech/clips/music-bed-vocal-<key>.mp3?sig=…&v=<video_id>`;
+  the clip link's signature covers only the name, so an extra query key
+  does no harm), or any URL that has `v=<id>`, `youtu.be/<id>`, or a
+  file named `<id>.<ext>` (radio_io.vid_of reads the player's mpv `path`).
+  A local file path (a phone told `MEDIA_SPEECH_CLIP_LOCALDIR`) cannot carry
+  the key, so the app plays the http clip URL for this. Without the label
+  the station still starts on `sasonica`, but does not know the song
+  playing is its seed (no position for it in the station). The station is built behind it
+  on `sasonica` (what was queued after it makes way), and the answer is the
+  Media tab's, as for any `radio` action. 400 `"this song has no YouTube
+  original"` when the favourite has no video id (a `video_id` sent with a
+  key the server no longer knows is used); 409 where radio is off
+  (`MEDIA_RADIO_YOUTUBE`); 502 when the Mix cannot be listed. The station
+  then plays and ducks like any music.
 
 **Ducking follows the backing music level (31 Oct 2026)** (`route/dj.py`,
 `route/coordinator.py`; David: "ducking follows the backing music slider").
@@ -3479,6 +3499,10 @@ past those. Off is `{"on": false, "seed": null, "next": [], "available"}`.
   tap on Up next); the songs before it stay to come. 400 when the id is
   not on the list, 409 with no station, 502 when the player would not take
   it.
+- `{"action": "radio", "from_song": "<favourite key>", "video_id"?}` (31 Oct
+  2026), also `POST /music/radio {"from_song", "video_id"?}`: a station from
+  the song a long reply sang out, on `sasonica` (see "Singing it out: the
+  song and its controls" for the label the app gives the song).
 - `{"action": "dislike"}` is 👎: the song is kept off the station (a second
   👎 on the same channel keeps the channel off) and the next song plays.
   With no station it is `next`.

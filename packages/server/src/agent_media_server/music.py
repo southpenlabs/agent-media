@@ -14,6 +14,9 @@ server-contract.md §6.9a. Step 1 of docs/proposals/2026-09-28-music-tab.md
 `{"action": "radio", "dj": true}` starts the DJ's station (radio_dj), `{"action": "radio", "off": true}` ends it, `{"action": "radio", "play": id}`
 plays a song from its list now, and `{"action": "dislike"}` is 👎:
 that song off the station, and the next one on.
+`{"action": "radio", "from_song": key, "video_id"?}` (also `POST
+/music/radio`) starts one from the favourite a long reply sang out, on the
+app's player, where the phone has put it (31 Oct 2026).
 
 `{"action": "song", "id"}` plays the song the music bed played under reply
 `id` (its history row's `bed_song`, agent_media_core.music_bed_song): the
@@ -497,6 +500,8 @@ def _radio_control(body: dict) -> tuple[bool, dict]:
         _reset_cache()
         loop.wake()
         return True, _answer()
+    if "from_song" in body:
+        return _radio_from_song(body)
     if not radio.available():
         return False, {"error": radio.OFF_HERE, "status": 409, **_answer()}
     if body.get("dj"):
@@ -528,6 +533,52 @@ def _radio_control(body: dict) -> tuple[bool, dict]:
             return False, {"error": said or "play failed", "status": 502, **_answer()}
     try:
         radio.start(uri.strip(), where, playing=True)
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400, **_answer()}
+    except RuntimeError as e:
+        return False, {"error": str(e), "status": 502, **_answer()}
+    _reset_cache()
+    loop.wake()
+    return True, _answer()
+
+
+#: The player a station from a sung-out song runs on: the app's own, where
+#: the phone put the song as the reply ended.
+FROM_SONG_PLAYER = "sasonica"
+
+
+def _radio_from_song(body: dict) -> tuple[bool, dict]:
+    """`{"action": "radio", "from_song": <favourite key>, "video_id"?}`: a
+    YouTube Mix station seeded with the song a long reply sang out (David,
+    31 Oct 2026: "The new singing it out feature is awesome!" — radio from
+    the song). The phone has already put the song on its own player
+    (labelled with `&v=<video_id>`, so the station finds it there), so it is
+    built behind it on `sasonica`. The video is the favourite's original
+    (`original_id`), else the `video_id` given; neither: 400."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import radio
+
+    from . import radio as loop
+
+    key = body.get("from_song")
+    if not isinstance(key, str) or not key:
+        return False, {"error": "from_song must be a favourite's key", "status": 400}
+    given = body.get("video_id")
+    given = given if isinstance(given, str) and radio._ID.match(given) else ""
+    try:
+        song = fav._song(fav.load(), key)
+    except Exception as e:  # noqa: BLE001 — the id given may still do
+        print(f"music: favourites unreadable: {e}", file=sys.stderr)
+        song = None
+    if song is None and not given:
+        return False, {"error": f"no favourite {key!r}", "status": 400}
+    vid = ((song or {}).get("original_id") or (song or {}).get("id") or given)
+    if not vid:
+        return False, {"error": "this song has no YouTube original", "status": 400}
+    if not radio.available():
+        return False, {"error": radio.OFF_HERE, "status": 409, **_answer()}
+    try:
+        radio.start(radio.radio_io.yt_uri(vid), FROM_SONG_PLAYER, playing=True)
     except ValueError as e:
         return False, {"error": str(e), "status": 400, **_answer()}
     except RuntimeError as e:

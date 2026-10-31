@@ -427,7 +427,7 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 
 # What is playing, and its controls: the Media tab (music.py). The same
 # arrangement.
-MUSIC_PATHS = frozenset({"/music", "/music/recent"})
+MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
@@ -3774,6 +3774,14 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
             return False
         kind = (parse_qs(h.path.partition("?")[2]).get("kind") or ["music"])[0]
         ok, detail = music.recent(_bearer(h), kind)
+    elif path == "/music/radio":
+        # `POST /music {"action": "radio", …}` by its own name, for radio
+        # from a song sung out (`from_song`).
+        if method != "POST":
+            return False
+        body = _read_json(h)
+        body = body if isinstance(body, dict) else {}
+        ok, detail = music.control({**body, "action": "radio"}, _bearer(h))
     elif method == "GET":
         ok, detail = music.now(_bearer(h))
     else:
