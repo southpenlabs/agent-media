@@ -3807,8 +3807,9 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     if path == "/music/recent":
         if method != "GET":
             return False
-        kind = (parse_qs(h.path.partition("?")[2]).get("kind") or ["music"])[0]
-        ok, detail = music.recent(_bearer(h), kind)
+        q = parse_qs(h.path.partition("?")[2])
+        ok, detail = music.recent(_bearer(h), (q.get("kind") or ["music"])[0],
+                                  (q.get("list") or ["recent"])[0])
     elif path == "/music/radio":
         # `POST /music {"action": "radio", …}` by its own name, for radio
         # from a song sung out (`from_song`).

@@ -14,6 +14,13 @@ A row from before `source_session` was recorded has its conversation
 inferred: the newest speech row with a session in the few minutes before
 the play — an agent says what it is putting on, or is asked to, just before
 it does.
+
+Each kind has other lists beside what was played (`listed`; David, 31 Oct
+2026: "let's get some relevant show filters going for each tab"): music
+the songs liked and the most played; books the ones in progress, finished,
+or all of them (Audiobookshelf's, with this listener's progress) and the
+most played; podcasts the newest episodes of Audiobookshelf's podcast
+libraries and the most played.
 """
 
 from __future__ import annotations
@@ -138,6 +145,10 @@ def _inferred(speakers: list[tuple[float, str]], at: float) -> Optional[str]:
 
 
 KINDS = ("music", "book", "podcast")
+#: What each kind's list can be (`GET /music/recent?list=`), what was played first.
+LISTS = {"music": ("recent", "liked", "most"),
+         "book": ("recent", "progress", "finished", "all", "most"),
+         "podcast": ("recent", "new", "most")}
 
 
 def recent(limit: int = 40, store: Optional[StateStore] = None,
@@ -147,10 +158,15 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
     `artist`, `album`, `song`, `genre`; books and podcasts `author`, `series`,
     `narrator`, `genre` (media_meta: null until looked up)."""
     store = store or StateStore()
+    # How far back plays are counted (`plays`): further for a long list.
+    window = min(4000, max(400, limit * 10))
     if kind in ("book", "podcast"):
-        return _spoken_books(store, kind, limit)
-    rows = [r for r in store.recent_history(sink="music", limit=400, requested=True)
+        return _spoken_books(store, kind, limit, window)
+    rows = [r for r in store.recent_history(sink="music", limit=window, requested=True)
             if _asked(r)]
+    plays: dict[str, int] = {}
+    for r in rows:
+        plays[_key(r["uri"])] = plays.get(_key(r["uri"]), 0) + 1
     # A name any row learned for a video names all its rows.
     named: dict[str, str] = {}
     for r in rows:
@@ -197,6 +213,7 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
         out.append({"id": r["id"], "uri": r["uri"],
                     "title": named.get(_key(r["uri"])) or None, "art": art(r["uri"]),
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
+                    "plays": plays.get(_key(r["uri"]), 1),
                     "kind": "music", **_music_meta(r["uri"], named.get(_key(r["uri"])) or "")})
     wanted = [(f"yt:{_vid(r['uri'])}", "music", {"vid": _vid(r["uri"]), "title": named.get(_key(r["uri"])) or ""})
               for r in picked if _vid(r["uri"])]
@@ -284,10 +301,11 @@ def kind_of(uri: str, title: str, genres: list) -> str:
     return "book" if not g or "audiobook" in g else "podcast"
 
 
-def _spoken_books(store: StateStore, kind: str, limit: int) -> list[dict]:
-    rows = store.recent_history(sink="book", limit=400)
+def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -> list[dict]:
+    rows = store.recent_history(sink="book", limit=window)
     items = _abs_by_file()
     seen: set[str] = set()
+    plays: dict[str, int] = {}
     picked = []
     for r in rows:
         uri = r.get("uri") or ""
@@ -306,6 +324,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int) -> list[dict]:
             continue
         else:
             it = items.get(os.path.basename(urllib.parse.urlparse(uri).path if "://" in uri else uri))
+        plays[uri] = plays.get(uri, 0) + 1
         if uri in seen:
             continue
         seen.add(uri)
@@ -351,9 +370,178 @@ def _spoken_books(store: StateStore, kind: str, limit: int) -> list[dict]:
         out.append({"id": r["id"], "uri": r["uri"], "title": title,
                     "art": art(vid.group(1)) if vid else None,
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
-                    "kind": kind, "author": author,
+                    "plays": plays.get(r["uri"], 1), "kind": kind, "author": author,
                     "series": media_meta.series_of(title, meta.get("seriesName") or ""),
                     "narrator": (meta.get("narratorName") or "").strip() or None,
                     "genre": genre})
     media_meta.fill(wanted)
     return out
+
+
+def listed(kind: str = "music", which: str = "recent", store: Optional[StateStore] = None,
+           limit: int = 40) -> list[dict]:
+    """One of a kind's lists (LISTS), in Recently played's shape. `recent`
+    is what was played; `most` the same by how often (`plays`, then the
+    newest); `liked` the songs liked; `progress`, `finished` and `all` a
+    book library's (`progress` 0–1, `finished`); `new` podcast episodes,
+    newest first (`published`, epoch seconds)."""
+    if which == "recent":
+        return recent(limit=limit, store=store, kind=kind)
+    if which == "most":
+        rows = recent(limit=1000, store=store, kind=kind)
+        rows.sort(key=lambda r: (-(r.get("plays") or 1), -float(r.get("at") or 0)))
+        return rows[:limit]
+    if which == "liked":
+        return _liked(store or StateStore(), limit)
+    if which in ("progress", "finished", "all"):
+        return _library_books(which)[:limit if which != "all" else 500]
+    if which == "new":
+        return _new_episodes(limit)
+    return []
+
+
+def _liked(store: StateStore, limit: int) -> list[dict]:
+    """The songs liked (`media music like`), newest first, one per track."""
+    seen: set[str] = set()
+    out = []
+    names = _titles()
+    for like in store.list_likes(500, channel="music"):
+        uri = like.get("uri") or ""
+        if not uri.startswith(("yt:", "http://", "https://")):
+            continue
+        k = _key(uri)
+        if k in seen:
+            continue
+        seen.add(k)
+        title = (like.get("title") or "").strip() or names.get(k) or None
+        extras = like.get("extras") if isinstance(like.get("extras"), dict) else {}
+        out.append({"id": -int(like["id"]), "uri": uri, "title": title, "art": art(uri),
+                    "at": like.get("at") or 0, "session": extras.get("source_session") or None,
+                    "inferred": False, "kind": "music", **_music_meta(uri, title or "")})
+        if len(out) >= limit:
+            break
+    return out
+
+
+_PROGRESS: list = [0.0, {}]
+_PROGRESS_TTL_S = 60.0
+
+
+def _abs_get(path: str):
+    """Audiobookshelf's answer to a GET, or None without one configured."""
+    from . import book_tracks
+
+    ready = book_tracks._abs_ready()
+    if not ready:
+        return None
+    url, token, _libs = ready
+    req = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+
+def _abs_progress() -> dict:
+    """This listener's progress by Audiobookshelf item: `{id: {progress,
+    finished, at}}`, books only (no episode), kept a minute."""
+    if time.time() - _PROGRESS[0] < _PROGRESS_TTL_S:
+        return _PROGRESS[1]
+    out: dict = {}
+    try:
+        me = _abs_get("/api/me") or {}
+        for m in me.get("mediaProgress") or []:
+            if m.get("episodeId") or not m.get("libraryItemId"):
+                continue
+            out[m["libraryItemId"]] = {"progress": float(m.get("progress") or 0.0),
+                                       "finished": bool(m.get("isFinished")),
+                                       "at": float(m.get("lastUpdate") or 0) / 1000.0}
+    except Exception:  # noqa: BLE001 — no progress, not a failure
+        pass
+    _PROGRESS[0], _PROGRESS[1] = time.time(), out
+    return out
+
+
+def _library_books(which: str) -> list[dict]:
+    """The book library's items whose file is on this host: those in
+    progress or finished (latest listened first), or all (by title)."""
+    progress = _abs_progress()
+    out = []
+    for key, it in _abs_by_file().items():
+        if not key.startswith("id:"):
+            continue
+        path = _book_file(it)
+        if not path:
+            continue
+        p = progress.get(it["id"])
+        if which == "progress" and not (p and not p["finished"] and p["progress"] > 0):
+            continue
+        if which == "finished" and not (p and p["finished"]):
+            continue
+        meta = (it.get("media") or {}).get("metadata") or {}
+        title = meta.get("title") or os.path.splitext(os.path.basename(path))[0]
+        genre = next((g for g in meta.get("genres") or [] if g.lower() != "audiobook"), None)
+        if not genre:
+            genre = (media_meta.known(f"abs:{it['id']}") or {}).get("genre")
+        out.append({"id": it["id"], "uri": path, "title": title, "art": None,
+                    "at": (p or {}).get("at") or float(it.get("addedAt") or 0) / 1000.0,
+                    "session": None, "inferred": False, "kind": "book",
+                    "author": (meta.get("authorName") or "").strip() or None,
+                    "series": media_meta.series_of(title, meta.get("seriesName") or ""),
+                    "narrator": (meta.get("narratorName") or "").strip() or None,
+                    "genre": genre,
+                    "progress": round((p or {}).get("progress", 0.0), 3),
+                    "finished": bool((p or {}).get("finished"))})
+    if which == "all":
+        out.sort(key=lambda r: (r["title"] or "").lower())
+    else:
+        out.sort(key=lambda r: -r["at"])
+    return out
+
+
+def _episode_file(path: str) -> Optional[str]:
+    """An episode's file as this host has it: its own path, else by name in
+    the audiobook folder (Audiobookshelf reports its container's view)."""
+    if path and os.path.isfile(path):
+        return path
+    root = os.path.expanduser(os.environ.get("AUDIOBOOK_LIB") or os.environ.get("MEDIA_AUDIOBOOK_ABS_DIR")
+                              or "~/audiobooks")
+    p = os.path.join(root, os.path.basename(path or ""))
+    return p if path and os.path.isfile(p) else None
+
+
+def _new_episodes(limit: int) -> list[dict]:
+    """The newest episodes of Audiobookshelf's podcast libraries whose file
+    is on this host, newest first."""
+    out = []
+    try:
+        libs = (_abs_get("/api/libraries") or {}).get("libraries") or []
+        for lib in libs:
+            if lib.get("mediaType") != "podcast":
+                continue
+            got = _abs_get(f"/api/libraries/{lib['id']}/recent-episodes?limit={int(limit)}") or {}
+            for ep in got.get("episodes") or []:
+                path = _episode_file(((ep.get("audioFile") or {}).get("metadata") or {}).get("path") or "")
+                if not path:
+                    continue
+                show = ((ep.get("podcast") or {}).get("metadata") or {})
+                published = float(ep.get("publishedAt") or ep.get("addedAt") or 0) / 1000.0
+                out.append({"id": ep.get("id") or path, "uri": path, "title": ep.get("title") or None,
+                            "art": None, "at": published, "published": published,
+                            "session": None, "inferred": False, "kind": "podcast",
+                            "author": show.get("title") or show.get("author") or None,
+                            "series": None, "narrator": None,
+                            "genre": next(iter(show.get("genres") or []), None)})
+    except Exception:  # noqa: BLE001 — no episodes, not a failure
+        pass
+    out.sort(key=lambda r: -r["at"])
+    return out[:limit]
+
+
+def playable_book(uri: str, store: Optional[StateStore] = None) -> bool:
+    """Whether `uri` is a book or episode one of the lists holds: the only
+    files `POST /music {"action": "book"}` will start."""
+    for kind in ("book", "podcast"):
+        if any(i.get("uri") == uri for i in recent(limit=200, store=store, kind=kind)):
+            return True
+    if any(i["uri"] == uri for i in _library_books("all")):
+        return True
+    return any(i["uri"] == uri for i in _new_episodes(100))

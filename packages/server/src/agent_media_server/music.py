@@ -4,8 +4,8 @@ server-contract.md §6.9a. Step 1 of docs/proposals/2026-09-28-music-tab.md
 (David, 28 Sep 2026: "Let's build the Media tab UI").
 
   GET  /music                → {"ok", "now": {...}, "chapters": [...], "where": {...}}
-  GET  /music/recent[?kind=music|book|podcast]
-                             → {"ok", "kind", "items": [{"uri", "title", "at", "session", …}]}
+  GET  /music/recent[?kind=music|book|podcast][&list=recent|liked|most|…]
+                             → {"ok", "kind", "list", "items": [{"uri", "title", "at", "session", …}]}
   POST /music {"action", …}  → the same, after doing it
 
 `radio` is the station (agent_media_core.radio; docs/proposals/
@@ -596,10 +596,13 @@ def now(bearer: str) -> tuple[bool, dict]:
     return True, _answer()
 
 
-def recent(bearer: str, kind: str = "music") -> tuple[bool, dict]:
+def recent(bearer: str, kind: str = "music", which: str = "recent") -> tuple[bool, dict]:
     """`GET /music/recent` — gated like /speech/now: what was played, newest
     first, one per track, with the conversation that put it on
-    (agent_media_core.music_recent). `kind` is music, book or podcast."""
+    (agent_media_core.music_recent). `kind` is music, book or podcast;
+    `which` (`?list=`) one of its lists (music_recent.LISTS): what was
+    played, the most played, the songs liked, a book library's, the newest
+    podcast episodes."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -607,21 +610,23 @@ def recent(bearer: str, kind: str = "music") -> tuple[bool, dict]:
 
     if kind not in music_recent.KINDS:
         return False, {"error": "kind must be music, book or podcast", "status": 400}
+    if which not in music_recent.LISTS[kind]:
+        return False, {"error": f"list must be one of {', '.join(music_recent.LISTS[kind])}", "status": 400}
     try:
-        items = music_recent.recent(kind=kind)
+        items = music_recent.listed(kind=kind, which=which)
     except Exception as e:  # noqa: BLE001 — an empty list, not a 500
         print(f"music: recent failed: {e}", file=sys.stderr)
         items = []
-    return True, {"kind": kind, "items": items}
+    return True, {"kind": kind, "list": which, "lists": list(music_recent.LISTS[kind]), "items": items}
 
 
 def _played_book(uri: str) -> bool:
-    """Whether `uri` is one Recently played lists — the only books this
-    route will start, so it is not a way to play any file on the host."""
+    """Whether `uri` is one the book and podcast lists hold (what was
+    played, the library, new episodes) — the only books this route will
+    start, so it is not a way to play any file on the host."""
     from agent_media_core import music_recent
 
-    return any(i.get("uri") == uri for k in ("book", "podcast")
-               for i in music_recent.recent(kind=k, limit=200))
+    return music_recent.playable_book(uri)
 
 
 def _clock(seconds: float) -> str:
@@ -660,7 +665,7 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     elif action == "book":
         uri = body.get("uri")
         if not isinstance(uri, str) or not uri.strip() or not _played_book(uri.strip()):
-            return False, {"error": "uri must be a book or podcast from Recently played", "status": 400}
+            return False, {"error": "uri must be a book or podcast from the Media tab's lists", "status": 400}
         done, said = _run_book(uri.strip())
         _reset_cache()
         if not done:

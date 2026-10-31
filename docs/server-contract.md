@@ -3479,10 +3479,29 @@ podcasts are the book player's history less what Threads already holds (a
 conversation read back, the agenda, a note sent to the phone); a link to an
 Audiobookshelf item is never handed on — its file on the host stands in.
 
+Every item also has `plays` (31 Oct 2026): how often it was played, in
+the stretch of history read.
+
+`?list=` (31 Oct 2026; default `recent`, one the kind does not have is
+400) picks one of the kind's lists; the answer says which (`"list"`) and
+which the kind has (`"lists"`), so a client offers only those (David, 31
+Oct 2026: "let's get some relevant show filters going for each tab"):
+
+| kind | lists |
+|---|---|
+| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest) |
+| `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most` |
+| `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most` |
+
+A library book adds `progress` (0–1) and `finished`; its `id` is the
+Audiobookshelf item's (a string), a liked song's a negative number. A
+server before this ignores `list` and answers without `"list"`: the
+client then has only what was played.
+
 `POST /music {"action": "book", "uri"}` (29 Sep 2026) plays a book or
 podcast again (`media book play`, resumed where it was left). Only a `uri`
-the book or podcast list holds is accepted (400 otherwise), so this is not
-a way to play any file on the host.
+one of the book or podcast lists holds is accepted (400 otherwise), so
+this is not a way to play any file on the host.
 
 #### Radio (29 Sep 2026)
 

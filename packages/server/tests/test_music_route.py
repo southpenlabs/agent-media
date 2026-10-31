@@ -158,11 +158,18 @@ def test_recent_is_the_played_list(server, signed_in, audio_host, monkeypatch):
     items = [{"id": 3, "uri": "yt:https://www.youtube.com/watch?v=Gkl8blLusFc", "title": "As Hope",
               "at": 1790596000.0, "session": "ed0469b8", "inferred": True}]
     monkeypatch.setattr(music_recent, "recent", lambda kind="music", **_: items if kind == "music" else [])
+    monkeypatch.setattr(music_recent, "_liked", lambda store, limit: items[:1])
     res, obj = call(server, "GET", "/music/recent", headers=AUTH)
-    assert res.status == 200 and obj == {"ok": True, "kind": "music", "items": items}
+    assert res.status == 200 and obj == {"ok": True, "kind": "music", "list": "recent",
+                                         "lists": ["recent", "liked", "most"], "items": items}
     res, obj = call(server, "GET", "/music/recent?kind=book", headers=AUTH)
-    assert res.status == 200 and obj == {"ok": True, "kind": "book", "items": []}
+    assert res.status == 200 and obj["kind"] == "book" and obj["items"] == []
+    assert obj["lists"] == ["recent", "progress", "finished", "all", "most"]
+    res, obj = call(server, "GET", "/music/recent?list=liked", headers=AUTH)
+    assert res.status == 200 and obj["list"] == "liked" and obj["items"] == items[:1]
     res, obj = call(server, "GET", "/music/recent?kind=video", headers=AUTH)
+    assert res.status == 400 and obj["ok"] is False
+    res, obj = call(server, "GET", "/music/recent?kind=music&list=progress", headers=AUTH)
     assert res.status == 400 and obj["ok"] is False
 
 
@@ -170,6 +177,8 @@ def test_a_book_is_played_only_from_the_list(server, signed_in, audio_host, monk
     from agent_media_core import music_recent
     books = [{"uri": "/home/u/audiobooks/Hounded.m4b", "kind": "book"}]
     monkeypatch.setattr(music_recent, "recent", lambda kind="music", **_: books if kind == "book" else [])
+    monkeypatch.setattr(music_recent, "_library_books", lambda which: [])
+    monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
     ran = []
     monkeypatch.setattr(music, "_run_book", lambda uri: (ran.append(uri), (True, ""))[1])
     monkeypatch.setattr(music, "_answer", lambda: {"now": None})

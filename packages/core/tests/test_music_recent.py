@@ -130,3 +130,63 @@ def test_books_and_podcasts_are_their_own_lists(st, monkeypatch):
     pods = music_recent.recent(store=st, kind="podcast")
     assert [(p["title"], p["author"]) for p in pods] == [("Episode 205", "traffic.libsyn.com")]
     assert not any("token" in r["uri"] for r in books + pods)
+
+
+def test_most_played_counts_each_track(st):
+    for at, vid in ((1, "AAAAAAAAAAA"), (2, "BBBBBBBBBBB"), (3, "AAAAAAAAAAA"), (4, "CCCCCCCCCCC"), (5, "AAAAAAAAAAA"), (6, "CCCCCCCCCCC")):
+        st.add_history(sink="music", uri=f"yt:https://www.youtube.com/watch?v={vid}", started_at=at, text=vid)
+    got = music_recent.listed(kind="music", which="most", store=st)
+    assert [(r["title"], r["plays"]) for r in got] == [("AAAAAAAAAAA", 3), ("CCCCCCCCCCC", 2), ("BBBBBBBBBBB", 1)]
+    # What was played stays newest first, and says how often too.
+    assert [r["title"] for r in music_recent.listed(kind="music", store=st)] == ["CCCCCCCCCCC", "AAAAAAAAAAA", "BBBBBBBBBBB"]
+
+
+def test_liked_is_the_songs_liked_newest_first(st):
+    st.add_like(channel="music", uri="yt:https://www.youtube.com/watch?v=AAAAAAAAAAA", title="First", media_id="AAAAAAAAAAA")
+    st.add_like(channel="music", uri="yt:https://www.youtube.com/watch?v=BBBBBBBBBBB", title="Second", media_id="BBBBBBBBBBB")
+    st.add_like(channel="music", uri="yt:https://www.youtube.com/watch?v=AAAAAAAAAAA", title="First", media_id="AAAAAAAAAAA")
+    st.add_like(channel="book", media_id="", uri="/home/u/audiobooks/Hounded.m4b", title="A book")
+    got = music_recent.listed(kind="music", which="liked", store=st)
+    assert [r["title"] for r in got] == ["First", "Second"]
+    assert got[0]["art"] == "https://i.ytimg.com/vi/AAAAAAAAAAA/hqdefault.jpg" and got[0]["kind"] == "music"
+
+
+def test_a_book_library_by_progress(st, monkeypatch, tmp_path):
+    lib = tmp_path / "audiobooks"
+    lib.mkdir()
+    items = {}
+    for n, (iid, title) in enumerate((("a", "Alpha"), ("b", "Bravo"), ("c", "Charlie"), ("d", "Gone"))):
+        if iid != "d":
+            (lib / f"{title}.m4b").write_bytes(b"x")
+        items["id:" + iid] = {"id": iid, "relPath": f"{title}.m4b", "addedAt": n * 1000,
+                              "media": {"metadata": {"title": title, "authorName": "Someone"}}}
+    monkeypatch.setattr(music_recent, "_abs_by_file", lambda: items)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(music_recent, "_abs_progress", lambda: {
+        "a": {"progress": 0.4, "finished": False, "at": 50.0},
+        "b": {"progress": 1.0, "finished": True, "at": 60.0},
+        "d": {"progress": 0.2, "finished": False, "at": 70.0}})
+    assert [(r["title"], r["progress"]) for r in music_recent.listed(kind="book", which="progress", store=st)] == [("Alpha", 0.4)]
+    assert [r["title"] for r in music_recent.listed(kind="book", which="finished", store=st)] == ["Bravo"]
+    every = music_recent.listed(kind="book", which="all", store=st)
+    assert [r["title"] for r in every] == ["Alpha", "Bravo", "Charlie"], "not one whose file is not here"
+    assert every[1]["finished"] is True and every[2]["progress"] == 0
+    monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
+    assert music_recent.playable_book(str(lib / "Charlie.m4b"), store=st)
+    assert not music_recent.playable_book("/etc/passwd", store=st)
+
+
+def test_new_episodes_newest_first(st, monkeypatch, tmp_path):
+    ep = tmp_path / "ep1.mp3"
+    ep.write_bytes(b"x")
+    answers = {
+        "/api/libraries": {"libraries": [{"id": "L1", "mediaType": "podcast"}, {"id": "B", "mediaType": "book"}]},
+        "/api/libraries/L1/recent-episodes?limit=40": {"episodes": [
+            {"id": "e1", "title": "Older", "publishedAt": 1000_000, "audioFile": {"metadata": {"path": str(ep)}},
+             "podcast": {"metadata": {"title": "Calm Minutes"}}},
+            {"id": "e2", "title": "Newer", "publishedAt": 2000_000, "audioFile": {"metadata": {"path": str(ep)}},
+             "podcast": {"metadata": {"title": "Calm Minutes"}}},
+            {"id": "e3", "title": "Not here", "publishedAt": 3000_000, "audioFile": {"metadata": {"path": "/nowhere/x.mp3"}}}]}}
+    monkeypatch.setattr(music_recent, "_abs_get", lambda path: answers.get(path))
+    got = music_recent.listed(kind="podcast", which="new", store=st)
+    assert [(r["title"], r["author"], r["published"]) for r in got] == [("Newer", "Calm Minutes", 2000.0), ("Older", "Calm Minutes", 1000.0)]
