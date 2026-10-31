@@ -3430,6 +3430,27 @@ stop it. 400 for an id that is not a positive integer; 404 when the row is
 not a reply with a song (or `session` names another thread); 502 when the
 play failed. The app's reply ⋯ "Play the song" (David, 30 Oct 2026).
 
+`{"action": "bed", "uri"?, "off"?}` (1 Nov 2026) suggests what is playing
+(or `uri`) for the music under long readings (§6.4's "your favourites,
+instrumental"; `agent_media_core.music_bed_favourites.suggest`; David: "an
+easy way to be able to suggest tracks for backing music"). Only a YouTube
+track (400 otherwise, or when Mopidy cannot name it). The song goes above
+every gathered favourite, so its official instrumental is looked for at
+once (a background pass is started) and its vocals removed first in the
+night window; once ready it is picked 2.5× as often as an unrated track and
+plays even when slow only would leave it out. `"off": true` takes it back.
+The answer adds `"suggested": {"key", "title", "artist", "id", "ready"}`;
+every `/music` answer has `"bed": {"suggested"}` for what is playing (the
+player's 🎼). `media music bed [what]`, `bed-off`, `bed-list` do the same
+from a shell. **Distinctive tunes first** (same day: "distinctive tunes and
+riffs should be preferred … use in popular movie soundtracks … a good
+indicator"): each favourite is rated once by the fast models (0-10, how
+recognisable its music is without the words — soundtracks, theme tunes,
+adverts, much sampled; `MEDIA_MUSIC_BED_RENOWN_MODEL` goes first), kept in
+the index's `renown`; a gathered favourite's count is multiplied by 0.5-1.5
+and a ready track picked 0.25-2.25× by it. Unrated is 1×.
+`MEDIA_MUSIC_BED_FAVOURITES_RENOWN=0` turns it off.
+
 `{"action": "room", "id", "on"?, "volume"?}` (20 Oct 2026) switches one
 house speaker on or off (Snapcast mute) and/or sets its volume (0-100);
 at least one of the two. 400 for an id that is not a room in `rooms`, a

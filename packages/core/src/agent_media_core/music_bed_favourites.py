@@ -146,6 +146,11 @@ OFFICIAL_SEARCHES = 8
 MIN_TRACK_S = 60
 MAX_TRACK_S = 1200
 LIKE_POINTS = 5
+#: A song he suggested for the bed: above anything a gather can count.
+SUGGEST_POINTS = 1000.0
+#: How many unrated favourites are put to the model in one ask.
+RENOWN_BATCH = 40
+RENOWN_TIMEOUT_S = 45.0
 
 LISTENBRAINZ = "https://api.listenbrainz.org/1"
 USER_AGENT = ("agent-media-music-bed/1.0 (+https://github.com/southpenlabs/agent-media; "
@@ -375,9 +380,13 @@ def counts(data: Optional[dict] = None) -> dict:
 
 def playable(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
     """The ready tracks (of `style`) the bed may play: the slow ones while
-    slow is on (music_bed_tempo.keep)."""
+    slow is on (music_bed_tempo.keep), and every one he suggested — he
+    chose it for this, so the slow rule's guess does not overrule him."""
     from .music_bed_tempo import keep
-    return keep(tracks(style, data))
+    have = tracks(style, data)
+    mine = suggested()
+    kept = {id(e) for e in keep(have)}
+    return [e for e in have if id(e) in kept or e.get("key") in mine]
 
 
 def upkeep_due(data: Optional[dict] = None) -> bool:
@@ -456,7 +465,8 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
               when: Optional[datetime] = None) -> Optional[tuple[Path, dict]]:
     """A ready track (of `style`) and its credit; None with none. At random,
     weighted by fit to astrotunes' tempo and energy when `axes` are given
-    (features_fit), so the nearest come up most but not always. Marks it
+    (features_fit), so the nearest come up most but not always, and by how
+    distinctive its tune is (pick_weight: his suggestions most). Marks it
     played. Never fetches."""
     try:
         have = playable(style)
@@ -464,7 +474,9 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
             return None
         hour = (when or datetime.now()).hour
         late = hour >= 21 or hour < 6
-        weights = [features_fit(e, axes, late) for e in have]
+        rated, mine = data_renown(), suggested()
+        weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
+                   for e in have]
         e = random.choices(have, weights=weights, k=1)[0]
         p = _file(e)
         try:
@@ -802,13 +814,231 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
         if song:
             add(song, r["plays"] + (LIKE_POINTS if r["loved"] else 0),
                 "listenbrainz-loved" if r["loved"] else "listenbrainz")
-    favs = sorted(merged.values(), key=lambda f: -f["score"])[: max_favourites()]
+    for k, s in suggested().items():
+        if s.get("id"):
+            add({**s, "dur": s.get("dur") or MIN_TRACK_S}, SUGGEST_POINTS, "suggested")
+    # Distinctive tunes first (David, 1 Nov 2026): a song's count is moved
+    # by how recognisable its music is without the words (`rate_renown`).
+    ranked = sorted(merged.values(), key=lambda f: -f["score"])
+    rate_renown(data, ranked[: max_favourites() * 2])
+    rated = data.get("renown") or {}
+    for f in ranked:
+        if "suggested" not in f["from"]:
+            f["score"] = round(f["score"] * renown_factor(rated.get(f["key"])), 2)
+    favs = sorted(ranked, key=lambda f: -f["score"])[: max_favourites()]
     data["favourites"] = favs
     data["favourites_at"] = now
     # The lookups are a cache; keep it from growing without end.
     if len(data["lookups"]) > 2000:
         data["lookups"] = dict(list(data["lookups"].items())[-1000:])
     return favs
+
+
+# ---- songs he suggests for the bed (POST /music {"action": "bed"}) ---------------------------
+#
+# David, 1 Nov 2026, from the Media tab playing Teardrop: "It would be great
+# to have an easy way to be able to suggest tracks for backing music."
+# A suggestion goes above every gathered favourite (SUGGEST_POINTS), so it
+# is the first looked for as an official instrumental and the first to have
+# its vocals removed; once ready it is picked most often (pick_weight) and
+# plays even when the slow rule would leave it out (playable). Its own file
+# beside the index, as the dislikes are, so the background pass cannot
+# write one away.
+
+def _suggested_path() -> Path:
+    from ._paths import state_dir
+    return state_dir() / "music-bed-favourites-suggested.json"
+
+
+def _write_json(p: Path, obj: dict) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(obj, indent=1, ensure_ascii=False))
+    os.replace(tmp, p)
+
+
+def suggested() -> dict:
+    """The songs he suggested: `{key: {id, artist, title, dur, at}}`. {} on
+    any failure."""
+    try:
+        d = json.loads(_suggested_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def suggested_key(vid: str) -> Optional[str]:
+    """The suggestion with this video, by key; None when there is none."""
+    if not vid:
+        return None
+    return next((k for k, s in suggested().items() if s.get("id") == vid), None)
+
+
+def _resolve(what: str, data: dict) -> Optional[dict]:
+    """A song `{id, artist, title, dur}` for a yt: address, a YouTube link
+    or video id, else "artist title" searched for (the first YouTube
+    result, cleaned)."""
+    what = (what or "").strip()
+    vid = _vid(what) if ("youtu" in what or what.startswith("yt:")) else None
+    if not vid and re.fullmatch(r"[A-Za-z0-9_-]{11}", what):
+        vid = what
+    if vid:
+        return lookup(vid, data)
+    if not what or what.startswith(("http://", "https://", "file:", "/")):
+        return None
+    for s in search(what):
+        artist, title = clean_original(s["artist"], s["title"])
+        if artist and title:
+            return {"id": s["id"], "artist": artist, "title": title, "dur": s["dur"]}
+    return None
+
+
+def suggest(what: str, now: Optional[float] = None) -> dict:
+    """Suggest a song for the bed: `what` is a yt: address, a YouTube link
+    or video id, or "artist title". It goes to the top of the favourites at
+    once (and off the dislikes, if it was there), and the next background
+    pass looks for its official instrumental. `{key, title, artist, id,
+    ready}`. ValueError when nothing is found."""
+    now = time.time() if now is None else now
+    data = load()
+    song = _resolve(what, data)
+    if not song or not song.get("title") or not song.get("artist"):
+        raise ValueError(f"couldn't find a song for {what!r}")
+    key = key_for(song["artist"], song["title"])
+    mine = suggested()
+    mine[key] = {"id": song["id"], "artist": song["artist"], "title": song["title"],
+                 "dur": int(song.get("dur") or 0), "at": now}
+    _write_json(_suggested_path(), mine)
+    gone = excluded()
+    if key in gone or f"id:{song['id']}" in gone:
+        gone.pop(key, None)
+        gone.pop(f"id:{song['id']}", None)
+        _write_json(_excluded_path(), gone)
+    fav = {"key": key, "artist": song["artist"], "title": song["title"], "id": song["id"],
+           "dur": int(song.get("dur") or 0), "score": SUGGEST_POINTS, "from": ["suggested"]}
+    data["favourites"] = [fav] + [f for f in data["favourites"] if f.get("key") != key]
+    # Looked for at the next pass, not in six hours; and tried again even
+    # when an earlier search found nothing.
+    data.pop("pass_at", None)
+    _state(data, key).pop("official_at", None)
+    save(data)
+    log.info("music-bed favourites: %s — %s suggested", song["title"], song["artist"])
+    return {"key": key, "title": song["title"], "artist": song["artist"], "id": song["id"],
+            "ready": _has_track(data, key)}
+
+
+def unsuggest(what: str) -> dict:
+    """Take a suggestion back, by its key, video or address: it ranks as
+    any favourite again (its bed, if made, stays). ValueError for none."""
+    mine = suggested()
+    what = (what or "").strip()
+    vid = _vid(what) if ("youtu" in what or what.startswith("yt:")) else what
+    key = what if what in mine else suggested_key(vid or "")
+    if not key:
+        raise ValueError(f"no suggestion {what!r}")
+    s = mine.pop(key)
+    _write_json(_suggested_path(), mine)
+    data = load()
+    data["favourites_at"] = 0  # ranked afresh at the next pass
+    save(data)
+    return {"key": key, "title": s.get("title") or "", "artist": s.get("artist") or ""}
+
+
+# ---- distinctive tunes first -----------------------------------------------------------------
+#
+# David, 1 Nov 2026: "for backing music, distinctive tunes and riffs should
+# be preferred", and "the use in popular movie soundtracks and things like
+# that are often a good indicator". That is knowledge about a song, not
+# something heard in its file, so a model is asked once a song (the fast
+# models, intake/fast.chat): 0 for a forgettable backing, 10 for a riff or
+# melody known without the words — film and TV soundtracks, theme tunes,
+# adverts, much sampled. Kept in the index's `renown` for good; a song the
+# model could not rate stays unrated (weight 1) and is asked again at the
+# next gather. MEDIA_MUSIC_BED_FAVOURITES_RENOWN=0 turns it off.
+
+RENOWN_SYSTEM = (
+    "You rate songs for use as quiet instrumental background music under spoken replies. "
+    "For each song, score 0-10 how distinctive and recognisable its MUSIC is with the vocals "
+    "taken away: a memorable riff, hook, bassline or melody that people know on its own. "
+    "Strong signs: used in well-known film or TV soundtracks, theme tunes, trailers or "
+    "adverts; widely sampled; an instantly recognisable intro. 0-2 generic or forgettable "
+    "backing, 5 pleasant but unremarkable, 8-10 an iconic riff or tune. "
+    "Reply with only a JSON object mapping each song's number to its score, e.g. "
+    '{"1": 7, "2": 3}.')
+
+
+def renown_on() -> bool:
+    return not _off("MEDIA_MUSIC_BED_FAVOURITES_RENOWN")
+
+
+def data_renown(data: Optional[dict] = None) -> dict:
+    return dict((load() if data is None else data).get("renown") or {})
+
+
+def renown_factor(score) -> float:
+    """A gathered favourite's count is multiplied by this: 0.5 for a
+    forgettable tune, 1.5 for an iconic one, 1 unrated."""
+    if not isinstance(score, (int, float)):
+        return 1.0
+    return 0.5 + max(0.0, min(10.0, float(score))) / 10.0
+
+
+def pick_weight(key: Optional[str], rated: dict, mine: dict) -> float:
+    """How much more often a ready track is picked: his suggestions 2.5,
+    a rated one 0.25 (forgettable) to 2.25 (iconic), steeper at the top so
+    the distinctive ones come up most; 1 unrated."""
+    if key and key in mine:
+        return 2.5
+    r = rated.get(key) if key else None
+    if not isinstance(r, (int, float)):
+        return 1.0
+    return 0.25 + 2.0 * (max(0.0, min(10.0, float(r))) / 10.0) ** 2
+
+
+def _rate(songs: list[dict]) -> dict:
+    """`{index: score}` from a fast model for `songs` (1-based), {} when
+    none answered or the answer could not be read."""
+    from .intake import fast
+    lines = "\n".join(f"{i}. {s['artist']} — {s['title']}" for i, s in enumerate(songs, 1))
+    text = fast.chat(RENOWN_SYSTEM, lines, RENOWN_TIMEOUT_S,
+                     purpose_env="MEDIA_MUSIC_BED_RENOWN_MODEL")
+    if not text:
+        return {}
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        raw = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        return {}
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        try:
+            i, score = int(k), float(v)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= i <= len(songs):
+            out[i] = max(0.0, min(10.0, score))
+    return out
+
+
+def rate_renown(data: dict, favs: list[dict]) -> int:
+    """Rate the unrated among `favs` (one ask, at most RENOWN_BATCH), kept
+    in `data["renown"]` by key. How many were rated. Never raises."""
+    if not renown_on():
+        return 0
+    rated = data.setdefault("renown", {})
+    todo = [f for f in favs if f.get("key") and f["key"] not in rated][:RENOWN_BATCH]
+    if not todo:
+        return 0
+    try:
+        got = _rate(todo)
+    except Exception as e:  # noqa: BLE001 — unrated is weight 1, asked again later
+        log.info("music-bed favourites: rating tunes: %s", e)
+        return 0
+    for i, score in got.items():
+        rated[todo[i - 1]["key"]] = score
+    if got:
+        log.info("music-bed favourites: %d tunes rated for distinctiveness", len(got))
+    return len(got)
 
 
 # ---- his verdict on a song sung out (POST /speech/music-bed/song) ----------------------------

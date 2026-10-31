@@ -339,6 +339,8 @@ def _no_music_bed_network(monkeypatch):
     monkeypatch.setattr(music_bed_favourites, "_mpd", refuse)
     monkeypatch.setattr(music_bed_favourites, "_fetch_local", lambda vid: None)
     monkeypatch.setattr(music_bed_favourites, "_run", refuse)
+    # A tune's distinctiveness is asked of a model (rate_renown): unrated.
+    monkeypatch.setattr(music_bed_favourites, "_rate", lambda songs: {})
     for key in [k for k in os.environ if k.startswith("MEDIA_MUSIC_BED_FAVOURITES")]:
         monkeypatch.delenv(key, raising=False)
     # A track's tempo is measured with ffmpeg (music_bed_tempo.measure): a

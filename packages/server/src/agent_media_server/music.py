@@ -18,6 +18,10 @@ that song off the station, and the next one on.
 /music/radio`) starts one from the favourite a long reply sang out, on the
 app's player, where the phone has put it (31 Oct 2026).
 
+`{"action": "bed", "uri"?, "off"?}` suggests what is playing (or `uri`)
+for the backing music under replies, or takes it back; `bed.suggested` in
+every answer says whether what is playing is suggested (1 Nov 2026).
+
 `{"action": "song", "id"}` plays the song the music bed played under reply
 `id` (its history row's `bed_song`, agent_media_core.music_bed_song): the
 reply's ⋯ "Play the song". The answer's `song` says what and `when` ("now",
@@ -67,6 +71,9 @@ ACTIONS = {
     "room": "room", "move": "move",
     # The song the music bed played under a reply, by its speech history id.
     "song": "play",
+    # Suggest what is playing (or `uri`) for the backing music; `off` takes
+    # it back (agent_media_core.music_bed_favourites.suggest).
+    "bed": "bed",
 }
 
 _CACHE_TTL_S = 2.5
@@ -236,7 +243,52 @@ def _answer() -> dict:
     move = _move_state()
     if move:
         out["move"] = move
+    out["bed"] = _bed_state(now)
     return out
+
+
+def _bed_state(now: dict) -> dict:
+    """Whether what is playing is suggested for the backing music:
+    `{"suggested": bool}`, for the player's 🎼 button."""
+    try:
+        from agent_media_core import music_bed_favourites as fav
+
+        vid = fav._vid(now.get("uri") or "") or ""
+        return {"suggested": bool(fav.suggested_key(vid))}
+    except Exception:  # noqa: BLE001 — a button state, never a failed read
+        return {"suggested": False}
+
+
+def _bed_control(body: dict) -> tuple[bool, dict]:
+    """`bed`: suggest what is playing (or `uri`) for the music under
+    replies, or with `off` take it back (David, 1 Nov 2026: "an easy way to
+    be able to suggest tracks for backing music"). The next background pass
+    looks for its instrumental at once, in its own thread."""
+    import threading as _t
+
+    from agent_media_core import music_bed_favourites as fav
+
+    uri = body.get("uri")
+    if uri is not None and (not isinstance(uri, str) or not uri.strip()):
+        return False, {"error": "uri must be a yt: or web address", "status": 400}
+    if uri is None:
+        now, _ = _now()
+        uri = now.get("uri") or ""
+    if not fav._vid(uri.strip()):
+        return False, {"error": "only a YouTube track can be suggested for the backing music",
+                       "status": 400, **_answer()}
+    try:
+        if body.get("off") is True:
+            done = fav.unsuggest(uri.strip())
+        else:
+            done = fav.suggest(uri.strip())
+            if fav.chosen() and not done.get("ready"):
+                _t.Thread(target=fav.fill, daemon=True, name="bed-suggest").start()
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400, **_answer()}
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    return True, {**_answer(), "suggested": done}
 
 
 def _room_control(body: dict) -> tuple[bool, dict]:
@@ -650,6 +702,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         return _move_control()
     if action == "song":
         return _song_control(body)
+    if action == "bed":
+        return _bed_control(body)
     argv = [ACTIONS[action]]
     if action in ("seek", "seek-by"):
         key = "to" if action == "seek" else "by"

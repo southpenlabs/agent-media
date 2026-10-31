@@ -6535,6 +6535,36 @@ def _music_like(m: "SinkMusic", note: str = "", where: str = "") -> int:
     return 0
 
 
+def _music_bed_suggest(m: "SinkMusic", action: str, what: str = "", where: str = "") -> int:
+    """Suggest a song for the backing music under replies, or take one back
+    (music_bed_favourites.suggest; David, 1 Nov 2026: "an easy way to be
+    able to suggest tracks for backing music"). With nothing named, what is
+    playing."""
+    from . import music_bed_favourites as fav
+    if action == "bed-list":
+        for k, s in sorted(fav.suggested().items(), key=lambda kv: -kv[1].get("at", 0)):
+            print(f"{s.get('title')} — {s.get('artist')}  ({k})")
+        return 0
+    if not what:
+        snap = _music_snapshot(m, where=where)
+        what = (snap or {}).get("uri") or ""
+        if not what:
+            print(f"media music {action}: nothing playing; name a song", file=sys.stderr)
+            return 1
+    try:
+        if action == "bed-off":
+            r = fav.unsuggest(what)
+            print(f"no longer suggested: {r['title']} — {r['artist']}")
+        else:
+            r = fav.suggest(what)
+            print(f"🎼 suggested for backing music: {r['title']} — {r['artist']}"
+                  + (" (ready)" if r["ready"] else " (an instrumental is looked for next)"))
+    except ValueError as e:
+        print(f"media music {action}: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_likes(limit_s: str = "", channel: Optional[str] = None,
                json_out: bool = False) -> int:
     try:
@@ -6732,6 +6762,8 @@ def cmd_music(a) -> int:
                           json_out=bool(getattr(a, "json", False)))
     if a.action in ("radio", "dislike"):
         return _cmd_music_radio(m, a)
+    if a.action in ("bed", "bed-off", "bed-list"):
+        return _music_bed_suggest(m, a.action, a.uri or "", where=getattr(a, "where", "") or "")
     if a.action == "play":
         if not a.uri:
             print("media music play: a URI is required", file=sys.stderr)
@@ -9925,7 +9957,8 @@ def _build_parser() -> argparse.ArgumentParser:
                             "next", "prev", "status", "now", "now-status",
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
-                            "chapters", "chapter", "radio", "dislike"))
+                            "chapters", "chapter", "radio", "dislike",
+                            "bed", "bed-off", "bed-list"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "
@@ -9935,7 +9968,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "rate; for 'bookmark': optional note; for "
                         "'bookmarks': optional limit; for 'like': optional "
                         "note; for 'likes': optional limit; for 'chapter': "
-                        "1-based chapter number (see 'chapters')")
+                        "1-based chapter number (see 'chapters'); for 'bed' / "
+                        "'bed-off': a yt: address, link or \"artist title\" "
+                        "(default: what is playing)")
     s.add_argument("--lines", action="store_true",
                    help="for 'chapters': print display<TAB>number rows "
                         "for an external picker")

@@ -44,7 +44,8 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed"}
+    assert obj["bed"] == {"suggested": False}
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
     assert obj["art"] == "https://i.ytimg.com/vi/nMDHjVVj3bA/hqdefault.jpg"
     assert obj["now"] == SAID and obj["chapters"] == []
@@ -483,3 +484,34 @@ def test_a_failed_move_goes_back(server, signed_in, audio_host, player, mover, m
     assert res.status == 200
     assert ran == [["pause"], ["play", NOW["uri"], "--where", "rooms"], ["resume"]]
     assert music._move_state()["state"] == "failed"
+
+
+def test_bed_suggests_what_is_playing(server, signed_in, audio_host, player, monkeypatch):
+    """🎼 on the player (David, 1 Nov 2026: "an easy way to be able to
+    suggest tracks for backing music")."""
+    from agent_media_core import music_bed_favourites as fav
+    mine: dict = {}
+
+    def suggest(uri):
+        mine["k"] = {"id": fav._vid(uri)}
+        return {"key": "k", "title": "Teardrop", "artist": "Massive Attack", "id": "x", "ready": True}
+
+    def unsuggest(uri):
+        mine.clear()
+        return {"key": "k", "title": "Teardrop", "artist": "Massive Attack"}
+    monkeypatch.setattr(fav, "suggest", suggest)
+    monkeypatch.setattr(fav, "unsuggest", unsuggest)
+    monkeypatch.setattr(fav, "suggested", lambda: dict(mine))
+    res, obj = call(server, "POST", "/music", {"action": "bed"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["suggested"]["title"] == "Teardrop" and obj["bed"] == {"suggested": True}
+    assert mine == {"k": {"id": "nMDHjVVj3bA"}} and player == []
+    res, obj = call(server, "POST", "/music", {"action": "bed", "off": True}, AUTH)
+    assert res.status == 200 and obj["bed"] == {"suggested": False}
+
+
+def test_bed_refuses_what_is_not_youtube(server, signed_in, audio_host, player):
+    res, obj = call(server, "POST", "/music", {"action": "bed", "uri": "file:///etc/passwd"}, AUTH)
+    assert res.status == 400, obj
+    res, obj = call(server, "POST", "/music", {"action": "bed", "uri": 5}, AUTH)
+    assert res.status == 400, obj
