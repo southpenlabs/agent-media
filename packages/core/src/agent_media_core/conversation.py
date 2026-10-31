@@ -205,20 +205,30 @@ def pane_of(session: str) -> str:
     return ""
 
 
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def transcript(session: str) -> Optional[Path]:
     """The session's transcript file, or None.
 
     Transcripts are named for the session, so this is a lookup and not a
-    search. Which project directory holds it does not matter and is not
-    guessed at: a session id is unique across all of them.
+    search. A session resumed from another folder leaves its old file
+    behind under the old folder's directory, no longer written (David, 31
+    Oct 2026: a thread moved from ~/scratch showed nothing after 15:04),
+    so the newest of them is the one being written.
     """
     session = (session or "").strip()
     if not session or "/" in session or session.startswith("."):
         return None
     root = _claude_dir() / "projects"
     try:
-        for path in root.glob(f"*/{session}.jsonl"):
-            return path
+        hits = list(root.glob(f"*/{session}.jsonl"))
+        if hits:
+            return max(hits, key=_mtime)
     except OSError as e:  # noqa: BLE001 — a surface renders what it got
         log.debug("transcript lookup failed: %s", e)
     # A harness profile's directory (harness_profiles): a second Claude login.

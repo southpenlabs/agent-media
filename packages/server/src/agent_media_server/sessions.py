@@ -1156,8 +1156,10 @@ def _live_title(session: str) -> str:
 _GENERIC_TITLES = {"claude code"}
 def _claude_files(session: str) -> list[str]:
     """A Claude session's transcript: under ~/.claude, else in a harness
-    profile's directory (a second Claude login)."""
+    profile's directory (a second Claude login). Newest first: a session
+    resumed from another folder leaves its old, unwritten file behind."""
     hits = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{session}.jsonl"))
+    hits.sort(key=lambda f: os.path.getmtime(f) if os.path.exists(f) else 0.0, reverse=True)
     if not hits:
         from agent_media_core import harnesses
 

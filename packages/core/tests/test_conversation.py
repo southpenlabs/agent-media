@@ -161,6 +161,22 @@ def test_a_transcript_is_found_by_session_alone(claude_home):
     assert C.transcript("abc").name == "abc.jsonl"
 
 
+def test_a_session_resumed_elsewhere_is_read_from_its_newest_file(claude_home):
+    """Resumed from another folder, a session writes a new file under that
+    folder's directory and leaves the old one behind: the thread must follow
+    the one being written (David, 31 Oct 2026: the replies after the move
+    were missing from the app)."""
+    import os
+
+    old = claude_home / "abc.jsonl"
+    old.write_text("{}")
+    os.utime(old, (1000, 1000))
+    moved = claude_home.parent / "-home-someone-other"
+    moved.mkdir()
+    (moved / "abc.jsonl").write_text("{}")
+    assert C.transcript("abc").parent == moved
+
+
 def test_no_transcript_for_a_session_that_never_ran(claude_home):
     assert C.transcript("abc") is None
 
