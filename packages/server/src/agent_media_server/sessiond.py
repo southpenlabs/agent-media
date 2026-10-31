@@ -272,7 +272,9 @@ TYPED_INSTEAD = ("The user answered by typing a message instead of choosing; "
                  "their message follows. Take it as the answer.")
 #: Why a new chat is refused while a restart is pending (Supervisor.start).
 RESTART_REFUSED = ("the session host is about to restart and is waiting for the "
-                   "busy sessions to finish; start the chat again once it has")
+                   "busy sessions to finish; start the chat again once it has. "
+                   "A reply in an open thread is not lost: it is held and sent "
+                   "after the restart")
 #: Why a new chat is refused while the usage limit holds (Supervisor.start).
 QUOTA_REFUSED = ("the usage limit has been reached; it resets at {at}. Start the chat "
                  "then (a message to an open thread is held and sent at the reset)")
