@@ -1,0 +1,23 @@
+// sasonica.com/feedback — feedback from every install (src/index.ts; agent-media
+// docs/proposals/2026-10-31-community-feedback.md). South Pen Labs account, on
+// the sasonica.com zone, like the lookup. The route is /feedback/* only.
+//
+// First time:
+//     npx wrangler d1 create sasonica-feedback        # put its id below
+//     npx wrangler d1 execute sasonica-feedback --remote --file schema.sql
+//     npx wrangler secret put ADMIN_TOKEN             # what David's server reads with
+// Then:
+//     CLOUDFLARE_API_TOKEN=$SPL_CLOUDFLARE_TOKEN npx wrangler deploy
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sasonica-feedback",
+  "main": "src/index.ts",
+  "account_id": "d255073199b24b2895921acfb9dd761f",
+  "routes": [{ "pattern": "sasonica.com/feedback/*", "zone_name": "sasonica.com" }],
+  "compatibility_date": "2026-07-01",
+  // Feedback is people's own words: no invocation logs.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  "d1_databases": [{ "binding": "DB", "database_name": "sasonica-feedback", "database_id": "00000000-0000-0000-0000-000000000000" }],
+  // Requests per source address (on top of the per-install limits in the code).
+  "ratelimits": [{ "name": "WRITES", "namespace_id": "4816", "simple": { "limit": 30, "period": 60 } }]
+}
