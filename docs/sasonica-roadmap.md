@@ -1983,7 +1983,28 @@ ahead.
     folding Levels group, open until folded and remembered per device:
     Speech and music while music plays, and the Music level from the
     server's `gain_db` range, sent on release; an older server shows only
-    the balance. The mini player has none. sasonica-app `1747195`.
+    the balance. The mini player has none. sasonica-app `1747195`. The
+    slider is "Backing music level" since `4fa851e7`, which also let the
+    server take its number (it allowed only booleans: every move was a 400).
+    **Landed 31 Oct 2026 (ducking follows the level; sing it out's
+    controls; radio from the song)** (David: "The new singing it out
+    feature is awesome!", and he picked all three): every duck of his own
+    music is scaled by `music_bed.duck_scale()` (10^((gain_db + 4)/20), the
+    old levels at -4) and breathes up to `swell` in the pauses (red5 rides
+    Mopidy and the rooms; the phone's Media3Music via DjCue `swell`,
+    DuckBreath); the stops for books, podcasts, questions and long replies
+    are as before (`dc93a185`, sasonica-app `49367d2`). The handover song
+    shows in the mini player and the Media tab (SongBar, SongNow) with Keep
+    playing, Stop, Like and Dislike (`POST /speech/music-bed/song`; a
+    dislike leaves the favourites for good), Start radio, the headset (next
+    keeps it, a double press starts the radio, a press stops it) and voice
+    ("keep playing", "start the radio", "stop the music") (`dae73169`,
+    sasonica-app `3d52cfc`, `8bcb52b`). Start radio crossfades the song
+    onto the music player at the same place, labelled `&v=<id>`, then
+    `POST /music/radio {from_song}` builds a Mix behind it (`050128fa`).
+    Phone only: the desk's handover has no controls. Not yet tried on the
+    phone: the headset reaching the speech player's session, and a reply
+    starting during the 1 s radio crossfade (its duck can be missed).
 
 40. **Read it on the share sheet** — **DONE 26 Oct 2026** (David, 26 Oct
     2026: "can we have a Read it option for sharing things to Sasonica ...
