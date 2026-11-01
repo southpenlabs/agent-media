@@ -252,7 +252,12 @@ def _all() -> list[dict]:
     eps = [{"id": e["id"], "title": e.get("title") or e["audio"], "source": "podcast",
             "show": e.get("show", ""), "added": e.get("added", 0), "_uri": e["audio"]}
            for e in d["episodes"]]
-    return _made() + yt + _files() + eps + _podcasts(d)
+    try:
+        from .practice_embed import items as _embeds
+        embeds = _embeds()
+    except Exception:  # noqa: BLE001 — a bad index costs only its own items
+        embeds = []
+    return _made() + yt + _files() + eps + embeds + _podcasts(d)
 
 
 def items() -> list[dict]:
@@ -913,6 +918,12 @@ def play(item_id: str, target: str = "", resume: bool = False) -> dict:
     it = match(item_id)
     if not it:
         return {"ok": False, "error": f"nothing saved as {item_id!r}"}
+    if it.get("source") == "embed":
+        # Played in the maker's own player, by the app: counted here, nothing
+        # started on the book channel (practice_embed).
+        note_play(it["id"])
+        return {"ok": True, "id": it["id"], "title": it.get("title"),
+                "embed": it["embed"], "page": it.get("page")}
     from . import mcp_server
     mark_playing(it["_uri"])
     note_play(it["id"])

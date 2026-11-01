@@ -101,6 +101,11 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         item_id = str(body.get("id") or "")
         if not item_id or lib.find(item_id) is None:
             return False, {"error": "id must be one from GET /practice", "status": 404}
+        if (lib.find(item_id) or {}).get("source") == "embed":
+            # The app plays it in the maker's player: counted, and the embed given.
+            r = lib.play(item_id)
+            return True, {"playing": item_id, "title": r.get("title"),
+                          "embed": r.get("embed"), "page": r.get("page")}
         argv = [sys.executable, "-m", "agent_media_core.cli", "practice", "play"]
         if body.get("target"):
             argv += ["--target", str(body["target"])]

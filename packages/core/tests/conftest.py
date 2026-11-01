@@ -404,3 +404,5 @@ def _no_practice_lookups(monkeypatch):
     monkeypatch.setenv("MEDIA_FACTS_URL", "-")
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
+    # The person's own embed index (practice_embed) never joins a test's list.
+    monkeypatch.delenv("MEDIA_PRACTICE_EMBED_INDEX", raising=False)

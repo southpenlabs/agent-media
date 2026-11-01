@@ -7764,6 +7764,14 @@ names the first time they are read.
   start unless `resume`. A recorded one is then eased out for a reply as
   a written one is (5 s down, paused, 2 s back up). 404 for an id not in
   the list; 502 when the player could not start it.
+- **Embeds** (source `embed`, id `it:<hash>`; `practice_embed.py`): a
+  practice that plays only in its maker's own player, such as a saved
+  Insight Timer track. Listed from MEDIA_PRACTICE_EMBED_INDEX (the person's
+  own export, never this package's), with `embed` (the player's public
+  page, e.g. `https://widgets.insighttimer.com/track/<slug>`), `page` and
+  `folders`. `play` starts nothing here: it counts the play and answers
+  `{"ok", "playing", "title", "embed", "page"}` for the app to open the
+  embed itself.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
