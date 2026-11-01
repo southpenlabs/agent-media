@@ -208,6 +208,21 @@ See also: `packages/core/src/agent_media_core/meditate.py`,
 `practice_library.py`, the `meditate` and `practice_*` MCP tools,
 `server-contract.md` §6.45, `docs/proposals/2026-10-31-relax-and-meditate.md`.
 
+### Is there a breathing exercise?
+
+Yes: a breathing pacer. Ask ("box breathing for five minutes", "help me
+breathe"), or `media breathe box --minutes 5`. The quiet music swells as
+you breathe in and ebbs as you breathe out; for the first three rounds a
+soft voice says "breathe in", "hold", "breathe out", then the music alone
+carries it, with a bell at each end. Patterns: `box` (4-4-4-4), `478`
+(4-7-8), `slow` (5 in, 5 out), `calm` (4 in, 6 out). It plays like a
+meditation, eased out for a reply, and joins your practice list.
+`MEDIA_BREATHE_CUE_ROUNDS` (3) and `MEDIA_BREATHE_LOW_DB` (-14, how far the
+music ebbs) tune it.
+
+See also: `packages/core/src/agent_media_core/breathe.py`, the `breathe`
+MCP tool.
+
 ### Can music stop by itself when I fall asleep?
 
 Yes: a sleep timer. Ask in a chat ("stop the music in half an hour", "play

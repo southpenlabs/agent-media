@@ -1212,6 +1212,27 @@ def practice_add(url: str, title: str = "") -> dict:
 
 
 @mcp.tool()
+def breathe(pattern: str = "box", minutes: float = 5.0, target: str = "") -> dict:
+    """A breathing pacer on the book channel: quiet music that swells as
+    David breathes in and ebbs as he breathes out, with a soft spoken count
+    for the first three rounds and a bell at each end. For "help me breathe",
+    "box breathing for five minutes", "4-7-8 breathing". Patterns: box
+    (4-4-4-4), 478 (4-7-8), slow (5 in, 5 out), calm (4 in, 6 out)."""
+    from . import breathe as br
+    from .practice_library import remember
+    try:
+        clip = br.render(pattern, minutes)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    if clip is None:
+        return {"ok": False, "error": "could not render it"}
+    title = f"Breathing: {pattern}, {minutes:g} min"
+    remember(clip, title)
+    r = book_play(str(clip), resume=False, start_ms=-1, target=target, title=title)
+    return {**r, "file": str(clip)} if isinstance(r, dict) else {"ok": True, "file": str(clip)}
+
+
+@mcp.tool()
 def sleep_timer(minutes: float, fade_minutes: float = 3.0, target: str = "") -> dict:
     """A sleep timer: in `minutes`, music and the book channel (audiobooks,
     meditations, sleep stories) fade out over the last `fade_minutes` and

@@ -5486,6 +5486,33 @@ def cmd_history(a) -> int:
     return 0
 
 
+def cmd_breathe(a) -> int:
+    """`media breathe box --minutes 5` — a breathing pacer: the music follows
+    the breath, a spoken count for the first rounds, on the book channel
+    (breathe.py)."""
+    from . import breathe
+    try:
+        clip = breathe.render(a.pattern, a.minutes, bed=a.bed or None)
+    except ValueError as e:
+        print(f"media breathe: {e}", file=sys.stderr)
+        return 1
+    if clip is None:
+        print("media breathe: could not render it", file=sys.stderr)
+        return 1
+    title = f"Breathing: {a.pattern}, {a.minutes:g} min"
+    from .practice_library import remember
+    remember(clip, title)
+    if a.no_play:
+        print(clip)
+        return 0
+    r = _srv().book_play(str(clip), resume=False, start_ms=-1, target=a.target or "", title=title)
+    if r.get("error"):
+        print(f"media breathe: {r['error']}", file=sys.stderr)
+        return 1
+    print(title)
+    return 0
+
+
 def cmd_sleep(a) -> int:
     """`media sleep 30` — music and the book channel fade out and stop in 30
     minutes; `media sleep off` ends it; `media sleep` says what is set
@@ -9917,6 +9944,15 @@ def _build_parser() -> argparse.ArgumentParser:
     mp.add_argument("--resume", action="store_true",
                     help="carry on where it was left (a long talk)")
     s.set_defaults(func=cmd_practice)
+    s = sub.add_parser("breathe", help="a breathing pacer: the music swells on the "
+                                        "in-breath and ebbs on the out-breath")
+    s.add_argument("pattern", nargs="?", default="box", help="box (4-4-4-4), 478, slow "
+                                                             "(5-5) or calm (4-6)")
+    s.add_argument("--minutes", type=float, default=5.0)
+    s.add_argument("--bed", default="", help="a generated mood (night), or none")
+    s.add_argument("--target", default="", help="rooms|local|phone")
+    s.add_argument("--no-play", action="store_true", help="render only and print the file")
+    s.set_defaults(func=cmd_breathe)
     s = sub.add_parser("sleep", help="a sleep timer: music and books fade out "
                                       "and stop (media sleep 30; media sleep off)")
     s.add_argument("minutes", nargs="?", default="", help="minutes, or off; "

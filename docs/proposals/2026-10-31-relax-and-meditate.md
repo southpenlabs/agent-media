@@ -12,6 +12,8 @@ He picked all four ideas below.
 
 **§4 sleep timer built (1 Nov 2026): sleep_timer.py, `media sleep`, MCP `sleep_timer`. Sleep stories: the meditate renderer with a story script.**
 
+**§3 breathing pacer built (1 Nov 2026): breathe.py, `media breathe`, MCP `breathe`. Not yet: the canvas showing the phase.**
+
 ## What exists to build on
 
 - **The music bed** (`music_bed.py`): generated electric-piano-and-pad beds
