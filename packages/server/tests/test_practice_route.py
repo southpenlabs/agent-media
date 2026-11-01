@@ -114,3 +114,15 @@ def test_the_sleep_timer_is_set_and_cancelled(server, shelf, signed_in, monkeypa
     assert len(started) == 1 and 1790 <= obj["sleep"]["timer"]["left_s"] <= 1800
     res, obj = call(server, "POST", "/practice", {"action": "sleep", "minutes": 0}, AUTH)
     assert res.status == 200 and obj["sleep"]["timer"] is None
+
+
+def test_embed_play_is_the_widget_unless_the_owner_says_page(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import practice_library as lib
+    embed = {"id": "it:x", "title": "Yoga Nidra", "source": "embed", "embed": "https://widgets.insighttimer.com/track/x"}
+    monkeypatch.setattr(lib, "items", lambda: [embed])
+    monkeypatch.delenv("MEDIA_PRACTICE_EMBED_PLAY", raising=False)
+    assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "widget"
+    monkeypatch.setenv("MEDIA_PRACTICE_EMBED_PLAY", "page")
+    assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "page"
+    monkeypatch.setattr(lib, "items", lambda: [{**embed, "source": "youtube"}])
+    assert "embed_play" not in call(server, "GET", "/practice", None, AUTH)[1], "only with embeds in the list"

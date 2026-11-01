@@ -24,6 +24,7 @@ process starts it.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -89,8 +90,22 @@ def listing(bearer: str) -> tuple[bool, dict]:
         places = {}
     _report_lengths()
     from agent_media_core import breathe, sleep_timer
-    return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places,
-                  "breathe": breathe.offer(), "sleep": sleep_timer.offer()}
+    out = {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places,
+           "breathe": breathe.offer(), "sleep": sleep_timer.offer()}
+    if any(i.get("source") == "embed" for i in items):
+        out["embed_play"] = embed_play()
+    return True, out
+
+
+def embed_play() -> str:
+    """How the app plays an embed (§6.45): "widget", the maker's own
+    embeddable player and a button to their app — what their terms allow
+    anyone; "page", the app's own player of the track's page, only where
+    the install's owner sets MEDIA_PRACTICE_EMBED_PLAY=page for their own
+    personal use (David, 2 Nov 2026: "I'd like to keep the current
+    functionality for myself but yeah, we should probably change the
+    public version to that")."""
+    return "page" if os.environ.get("MEDIA_PRACTICE_EMBED_PLAY", "").strip().lower() == "page" else "widget"
 
 
 def control(body: dict, bearer: str) -> tuple[bool, dict]:

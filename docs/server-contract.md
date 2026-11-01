@@ -7804,6 +7804,17 @@ names the first time they are read.
   `folders`. `play` starts nothing here: it counts the play and answers
   `{"ok", "playing", "title", "embed", "page"}` for the app to open the
   embed itself.
+  With embeds in the list, the answer also has `"embed_play": "page" |
+  "widget"` (2 Nov 2026, after reading Insight Timer's terms: their track
+  page driven in a hidden WebView with the app's own controls is outside
+  them, §3 personal non-commercial use, §5(7)–(8), §6). `"widget"`, the
+  default and what an absent field means: the app shows the maker's own
+  embeddable player (`embed`) on Now playing, with a button that opens
+  `page` in their app, and no Insight Timer sign-in. `"page"`: the app
+  plays the track's page in its own player — only where the install's
+  owner sets `MEDIA_PRACTICE_EMBED_PLAY=page` for their own personal use
+  (David: "I'd like to keep the current functionality for myself but
+  yeah, we should probably change the public version to that").
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
