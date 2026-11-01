@@ -97,6 +97,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A shared podcast link is looked up on its page and in the iTunes
     # directory (podcast_resolve): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
+    # … and who an artist, author or show is (media_people).
+    monkeypatch.setenv("MEDIA_PEOPLE", "0")
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would

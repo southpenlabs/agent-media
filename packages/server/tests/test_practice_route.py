@@ -74,3 +74,11 @@ def test_a_teachers_profile_only_for_a_teacher_in_the_list(server, shelf, signed
 
 def test_a_teachers_profile_needs_a_credential(server):
     assert call(server, "GET", "/practice/teacher?name=Pura%20Rasa")[0].status != 200
+
+
+def test_a_person_is_asked_by_kind_and_name(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import media_people
+    monkeypatch.setattr(media_people, "profile", lambda kind, name: {"name": name, "kind": kind, "profile": {"facts": ["born 1964"]}})
+    res, obj = call(server, "GET", "/media/person?kind=artist&name=Chris%20Cornell", None, AUTH)
+    assert res.status == 200 and obj["profile"] == {"facts": ["born 1964"]} and obj["kind"] == "artist"
+    assert call(server, "GET", "/media/person?kind=painter&name=X", None, AUTH)[0].status == 400

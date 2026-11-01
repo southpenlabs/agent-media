@@ -402,3 +402,4 @@ def _no_practice_lookups(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "0")
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
+    monkeypatch.setenv("MEDIA_PEOPLE", "0")

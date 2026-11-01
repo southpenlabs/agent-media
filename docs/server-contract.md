@@ -7847,6 +7847,35 @@ Code: `packages/server/src/agent_media_server/devices.py` (the store, the
 codes, the CLI's listing), `auth.py` (the gate), `app.py` (`POST /pair`).
 Pinned by `packages/server/tests/test_devices.py`.
 
+
+### 6.47 Who made it: artists, authors, shows — gated (built 1 Nov 2026)
+
+Code: `agent_media_core/media_people.py`, the route in `app.py`. Pinned by
+`packages/core/tests/test_media_people.py` and
+`packages/server/tests/test_practice_route.py`. David, 1 Nov 2026: "Maybe
+we could do the same with the other tabs? as in artist, author,
+podcaster" … "yeah let's do the other profiles too".
+
+- `GET /media/person?kind=artist|author|show&name=` → `{"ok", "name",
+  "kind", "profile": {"source", "name", "photo", "description", "region",
+  "facts": [..], "links": [{"label", "url"}]} | null}`. 400 for another
+  kind, or no name.
+- **artist**: MusicBrainz (the music facts layer,
+  `proposals/2026-11-01-three-data-layers.md`), the artist whose name
+  matches exactly; `region` its begin area and area, `facts` born/formed
+  and died/ended, its type for a group; the photo and words from the
+  English Wikipedia page MusicBrainz links through Wikidata, never a page
+  found by name. Links: Website, Bandcamp, Wikipedia, MusicBrainz.
+- **author**: the English Wikipedia page of that name only when its short
+  description says a writer (author, novelist, poet, teacher, …), else the
+  description Audiobookshelf keeps for the author; `facts` the short
+  description.
+- **show**: the iTunes directory's podcast of that exact name: artwork,
+  `facts` by whom, genre, episode count; the words from its feed; an
+  Apple Podcasts link.
+- Kept in `<state_dir>/media-people.json` a month, one not found asked
+  again after a week; fetched by each install for its own user.
+  MEDIA_PEOPLE=0 turns the lookups off.
 ### Pairing
 
 1. At the desk: `media-visual-canvas pair --device "Pixel 8a"` (the existing
