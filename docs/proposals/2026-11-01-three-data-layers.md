@@ -120,11 +120,11 @@ share. A group's "what we practised" is opt-in per person, per group.
 5. **Peer-to-peer shares over Matrix**, starting with one practice item or
    playlist to one person, on the hosted homeserver (sasonica.com) and
    bring-your-own (ryer.org).
-6. **An install's own homeserver, turnkey** (David, 1 Nov 2026: "Yes,
+6. **A person's own homeserver, turnkey** (David, 1 Nov 2026: "Yes,
    after hosted"; below).
 7. **Groups**, if wanted.
 
-## An install's own homeserver
+## A person's own homeserver
 
 So that peer to peer needs no domain of the user's own (David, 1 Nov
 2026: "that's what it would take for peer-to-peer without the user having
@@ -132,16 +132,25 @@ their own domain ... ideally, the peer-to-peer setup would be fairly turn
 key"). A fourth way beside the Matrix transport proposal's three
 (bring-your-own, hosted sasonica.com, no Matrix), built after step 5.
 
-- **The install's name is the server name.** An install with a named
-  sasonica.com subdomain (as red5's) runs tuwunel with that name as its
-  `server_name`: `@david:red5-david.sasonica.com`. Its `/_matrix/` and
-  `/.well-known/matrix/` paths go through the install's existing tunnel
-  beside the app, on 443, so nothing new is opened. Not
-  `matrix.<install>.sasonica.com`: a second-level name falls outside the
-  zone's certificate.
-- **The name must never change**, so a quick tunnel's address will not do:
-  South Pen Labs hands out a named subdomain at install for anyone who
-  turns this on.
+- **A person's homeserver, named by a word.** One per person, not per
+  install: their other installs and phones are its devices. Its
+  `server_name` is a word under sasonica.com, `@david:willow.sasonica.com`
+  (David, 1 Nov 2026: "Maybe we should assign our own random names rather
+  than relying on the host server's name" … "Or a random word"), offered
+  when the homeserver is turned on: take it, ask for another, or type any
+  free word; two words (`quiet-river`) once single ones run out. The word
+  never changes and is not the host's or the account's name, so an account
+  rename or a new machine leaves the identity alone.
+- **It moves with the person, by delegation.** The word belongs to their
+  Sasonica account; the install that runs it signs in with that account,
+  and sasonica.com serves `<word>.sasonica.com/.well-known/matrix/server`
+  (and `/client`) pointing at wherever it runs now (the install's tunnel,
+  on 443, so nothing new is opened). Moving: restore the backup on the new
+  host and sign in; sasonica.com repoints the word. A second-level name
+  (`matrix.<word>.sasonica.com`) is avoided: it falls outside the zone's
+  certificate. A Sasonica account as a federated identity whose data lives
+  elsewhere is not possible in Matrix today (account portability is still a
+  proposal); delegation is the nearest thing that works.
 - **Federation stays closed to the wider internet.** sasonica.com (and
   each install) allowlists `\.sasonica\.com$` plus the bring-your-own
   servers its people use (ryer.org), so installs federate with each other
