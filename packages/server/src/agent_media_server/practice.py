@@ -39,8 +39,8 @@ _reported_at: list = [None]
 
 
 def _report_lengths() -> None:
-    """Send the lengths this install measured, and where the teachers it
-    looked up are from, that the shared store has not had yet, in the background, at most every _REPORT_EVERY_S. Signed with
+    """Send the lengths this install measured that the shared store has not
+    had yet, in the background, at most every _REPORT_EVERY_S. Signed with
     the install key (tunnel.identity), as feedback is."""
     from agent_media_core import central_facts
 
@@ -56,15 +56,12 @@ def _report_lengths() -> None:
 
         try:
             todo = lib.to_report()
-            places = lib.places_to_report()
-            if not todo and not places:
+            if not todo:
                 return
             seed, pub, _iid = tunnel.identity()
-            ok, got = central_facts.report({k: n for k, n in todo.values()}, seed, pub,
-                                           places={k: p for k, p in places.values()})
+            ok, got = central_facts.report({k: n for k, n in todo.values()}, seed, pub)
             if ok:
                 lib.mark_reported(list(todo))
-                lib.mark_places_reported(list(places))
             else:
                 print(f"practice: sharing lengths failed: {got.get('error')}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001 — tried again at a later listing

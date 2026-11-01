@@ -7748,12 +7748,8 @@ names the first time they are read.
   there, signed with the install key, at most every ten minutes from a
   listing (`practice-durations-shared.json` says which were had or sent).
   A file's and the agent's own are never sent. `MEDIA_FACTS_URL=-` turns
-  both off. Where a teacher is from is shared the same way (1 Nov 2026):
-  a teacher never looked up is first asked of the store
-  (`teacher:<name in letters and digits>` → country, state, city, region,
-  photo), and only one it does not know is looked up on Insight Timer; a
-  place found there is sent to it (`practice-places-shared.json`). The
-  profile page's own fields (description, followers…) are never shared.
+  both off. Where a teacher is from is not shared (it was for a day, 1–2
+  Nov 2026, and taken out): it stays a per-install Insight Timer lookup.
 - The answer also has `"teachers": {name: {"region", "country", "state", "city", "photo"}}`
   (state and city from Insight Timer's region, a state's name never its
   code; for a profile kept before they were, from the region's words)

@@ -4,9 +4,8 @@ David, 1 Nov 2026: "central metadata vs pier to pier vs private ... I'm
 thinking about a combination of all three for sasonica ... What do you
 think?" — then "y" to writing it up. Status: **central lengths built** (steps 2 and 3 below, 1 Nov 2026:
 `deploy/facts` live at https://sasonica.com/facts/v1, seeded with red5's 80
-measured lengths; `agent_media_core/central_facts.py`), and teachers' places
-(step 4, the same day: 441 seeded, keys `teacher:` and also `artist:`, `author:`,
-`show:` for media people); the rest proposed.
+measured lengths; `agent_media_core/central_facts.py`); teachers' places were
+shared for a day (step 4) and taken out again, below; the rest proposed.
 
 ## Decided (David, 1 Nov 2026)
 
@@ -88,6 +87,24 @@ each install fetching it for its own user. Central keeps facts (a length,
 a name, a country, a public image URL), not content: no descriptions
 copied in bulk, no audio, no thumbnails rehosted. Insight Timer profile
 text stays a per-install fetch.
+
+### Only facts that are not drawn from someone else's site
+
+David, 2 Nov 2026: "a big part of why I'd be leaning towards Matrix for
+fully peer-to-peer rather than central hosting would be to avoid the bounds
+of hosting scraped content" — then "y" to taking places out. Moving the
+same data onto Matrix would not by itself change who hosts it (a
+homeserver South Pen Labs runs, or its bot, is still the host and curator).
+What lowers the exposure is what is kept and who fetches it: facts, not
+content (no descriptions, no copied images); each install fetching for its
+own user, as a browser does; and no South Pen Labs node holding the whole
+collected set. So central keeps **lengths** (measured by installs, pure
+facts) and drops **teachers' places and photo links** (drawn from Insight
+Timer's profiles): those stay a per-install lookup, or go friend to friend.
+The 441 places sent on 1 Nov were deleted from the service (its tables
+dropped, 2 Nov). Australia's safe harbour for hosts is narrower than the
+US's; a short consult with an Australian IP lawyer comes before anyone else
+relies on central at scale.
 
 ### Open: central over HTTPS, Matrix, or both
 

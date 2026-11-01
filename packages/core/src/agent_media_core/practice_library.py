@@ -795,15 +795,11 @@ def teacher_places(names: list[str]) -> dict:
         kept = json.loads(_profiles_path().read_text())
     except (OSError, ValueError):
         kept = {}
-    got = _places_shared().get("got") or {}
     out, missing = {}, []
     for name in names:
         hit = kept.get(_norm(name))
         if not isinstance(hit, dict):
-            if isinstance(got.get(_norm(name)), dict):
-                out[name] = got[_norm(name)]
-            else:
-                missing.append(name)
+            missing.append(name)
             continue
         pr = hit.get("profile")
         if pr:
@@ -818,78 +814,6 @@ def _place_of(pr: dict) -> dict:
             "photo": pr.get("photo")}
 
 
-# ---- where teachers are from, shared (central_facts; the three-layers proposal) --
-
-def _places_shared_path() -> Path:
-    return state_dir() / "practice-places-shared.json"
-
-
-def _places_shared() -> dict:
-    """`{"got": {name: place}, "sent": {name: at}}`: places had from the
-    shared store, and those this install found itself and sent to it."""
-    try:
-        d = json.loads(_places_shared_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-def _save_places_shared(d: dict) -> None:
-    p = _places_shared_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(d))
-    tmp.replace(p)
-
-
-def _places_from_central(names: list[str]) -> list[str]:
-    """Ask the shared store where `names` are from; keep those it knows and
-    return the rest, to be looked up on Insight Timer."""
-    from . import central_facts
-
-    keys = {central_facts.place_key("teacher", n): n for n in names}
-    keys.pop(None, None)
-    found = central_facts.lookup_places(list(keys)) if keys else {}
-    if not found:
-        return names
-    d = _places_shared()
-    got = d.setdefault("got", {})
-    for k, place in found.items():
-        if k in keys:
-            got[_norm(keys[k])] = place
-    _save_places_shared(d)
-    return [n for k, n in keys.items() if k not in found]
-
-
-def places_to_report() -> dict:
-    """`{name: (key, place)}`: where a teacher is from, as this install found
-    it on Insight Timer, not yet sent to the shared store."""
-    from . import central_facts
-
-    try:
-        kept = json.loads(_profiles_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    sent = _places_shared().get("sent") or {}
-    out = {}
-    for norm, hit in kept.items():
-        pr = hit.get("profile") if isinstance(hit, dict) else None
-        key = central_facts.place_key("teacher", norm)
-        if pr and key and norm not in sent:
-            place = _place_of(pr)
-            if place.get("country") or place.get("region"):
-                out[norm] = (key, place)
-    return out
-
-
-def mark_places_reported(names: list[str]) -> None:
-    if not names:
-        return
-    d = _places_shared()
-    d.setdefault("sent", {}).update({n: time.time() for n in names})
-    _save_places_shared(d)
-
-
 _PROFILING: list = [False]
 
 
@@ -901,7 +825,7 @@ def _fill_profiles(names: list[str]) -> None:
 
     def run():
         try:
-            for n in _places_from_central(names):
+            for n in names:
                 teacher_profile(n)
                 time.sleep(1.0)
         finally:

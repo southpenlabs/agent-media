@@ -283,40 +283,7 @@ def test_state_and_city_from_a_profile():
     assert sc(region="Lithuania") == (None, None)
 
 
-def test_a_teachers_place_from_the_shared_store_skips_insight_timer(monkeypatch):
-    from agent_media_core import central_facts as C
-
-    place = {"country": "Canada", "state": "British Columbia", "city": "Victoria",
-             "region": "Victoria, BC, Canada", "photo": "https://example/p.jpg"}
-    monkeypatch.setattr(C, "lookup_places", lambda keys: {"teacher:sarahblondin": place} if "teacher:sarahblondin" in keys else {})
-    looked = []
-    monkeypatch.setattr(L, "teacher_profile", lambda n, fresh=False: looked.append(n))
-    monkeypatch.delenv("MEDIA_PRACTICE_PROFILES")
-    monkeypatch.setattr("threading.Thread", lambda target, **kw: type("T", (), {"start": lambda self: target()})())
-    monkeypatch.setattr(L.time, "sleep", lambda s: None)
-    assert L.teacher_places(["Sarah Blondin", "Someone Else"]) == {}
-    assert looked == ["Someone Else"]
-    assert L.teacher_places(["Sarah Blondin"]) == {"Sarah Blondin": place}
-    # Had from the store, so never sent back to it.
-    assert L.places_to_report() == {}
-
-
-def test_a_place_found_on_insight_timer_is_sent_once():
-    L._profiles_path().parent.mkdir(parents=True, exist_ok=True)
-    L._profiles_path().write_text(json.dumps({
-        "sarahblondin": {"profile": {"region": "Victoria, BC, Canada", "country": "Canada", "state": "BC",
-                                     "city": "Victoria", "photo": None}, "at": 1},
-        "nobody": {"profile": None, "at": 1}}))
-    got = L.places_to_report()
-    assert list(got) == ["sarahblondin"]
-    key, place = got["sarahblondin"]
-    assert key == "teacher:sarahblondin"
-    assert place["state"] == "British Columbia" and place["country"] == "Canada"
-    L.mark_places_reported(["sarahblondin"])
-    assert L.places_to_report() == {}
-
-
-def test_a_report_sends_lengths_and_places_signed(monkeypatch):
+def test_a_report_sends_lengths_signed(monkeypatch):
     from agent_media_core import central_facts as C
 
     monkeypatch.setenv("MEDIA_FACTS_URL", "https://facts.example/v1")
@@ -325,9 +292,7 @@ def test_a_report_sends_lengths_and_places_signed(monkeypatch):
                         sent.append((path, json.loads(data), headers)) or (True, {"accepted": 1}))
     seed = bytes(range(32))
     from agent_media_core._ed25519 import public_key
-    ok, got = C.report({"yt:AAAAAAAAAAA": 60}, seed, public_key(seed),
-                       places={"teacher:x": {"country": "Canada", "state": None, "photo": ""}})
-    assert ok and got == {"accepted": 2}
-    assert [(p, b.get("durations"), b.get("places")) for p, b, _h in sent] == [
-        ("/report", {"yt:AAAAAAAAAAA": 60}, None), ("/report", None, {"teacher:x": {"country": "Canada"}})]
+    ok, got = C.report({"yt:AAAAAAAAAAA": 60}, seed, public_key(seed))
+    assert ok and got == {"accepted": 1}
+    assert [(p, b["durations"]) for p, b, _h in sent] == [("/report", {"yt:AAAAAAAAAAA": 60})]
     assert all("X-Sasonica-Signature" in h for _p, _b, h in sent)
