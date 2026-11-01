@@ -1,17 +1,21 @@
-"""Saved meditations for the app's list (server-contract.md §6.45).
+"""Saved practice for the app's Practice tab (server-contract.md §6.45):
+meditations, yoga, breathwork, any practice kept.
 
 David, 31 Oct 2026: "I'd like to use recorded meditations too" … "A list in
-the app". The list is agent_media_core.meditation_library: YouTube links,
-the Meditations folder, podcast feeds and the ones the agent wrote.
+the app"; 1 Nov 2026: "Maybe we should rename meditation to practise...
+which also means it could be used for any kind of practise" — renamed from
+/meditations, no alias. The list is agent_media_core.practice_library:
+YouTube links, the Practice folder, podcast feeds and the meditations the
+agent wrote.
 
-  GET  /meditations → {"ok", "items": [{id, title, source, …}], "feeds": [{url, title}],
+  GET  /practice → {"ok", "items": [{id, title, source, …}], "feeds": [{url, title}],
                        "folder"}
-  POST /meditations {"action": "play", "id", "target"?, "resume"?}
-                    {"action": "add", "url", "title"?}
-                    {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
+  POST /practice {"action": "play", "id", "target"?, "resume"?}
+                 {"action": "add", "url", "title"?}
+                 {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
 
-Play takes an id from the list only (meditation_library.play), and runs
-`media meditations play` as the desk would, so the book channel's own
+Play takes an id from the list only (practice_library.play), and runs
+`media practice play` as the desk would, so the book channel's own
 process starts it.
 """
 
@@ -29,12 +33,12 @@ def listing(bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    from agent_media_core import meditation_library as lib
+    from agent_media_core import practice_library as lib
 
     try:
         items = lib.items()
     except Exception as e:  # noqa: BLE001 — an empty list, not a 500
-        print(f"meditations: list failed: {e}", file=sys.stderr)
+        print(f"practice: list failed: {e}", file=sys.stderr)
         items = []
     return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder())}
 
@@ -43,14 +47,14 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    from agent_media_core import meditation_library as lib
+    from agent_media_core import practice_library as lib
 
     action = body.get("action")
     if action == "play":
         item_id = str(body.get("id") or "")
         if not item_id or lib.find(item_id) is None:
-            return False, {"error": "id must be one from GET /meditations", "status": 404}
-        argv = [sys.executable, "-m", "agent_media_core.cli", "meditations", "play"]
+            return False, {"error": "id must be one from GET /practice", "status": 404}
+        argv = [sys.executable, "-m", "agent_media_core.cli", "practice", "play"]
         if body.get("target"):
             argv += ["--target", str(body["target"])]
         if body.get("resume"):

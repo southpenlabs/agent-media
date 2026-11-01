@@ -7693,17 +7693,21 @@ probably use this as my own little issue tracker/ticketing system too".
   `issue` (the object above, or null).
 - Kept in `<state_dir>/issues.json`.
 
-### 6.45 Meditations: recorded and written — gated (built 31 Oct 2026)
+### 6.45 Practice: meditations, yoga, any practice, recorded and written — gated (built 31 Oct 2026)
 
-Code: `agent_media_server/meditations.py`, the list in
-`agent_media_core/meditation_library.py`. Pinned by
-`packages/server/tests/test_meditations_route.py`. David, 31 Oct 2026:
-"I'd like to use recorded meditations too" … "A list in the app".
+Code: `agent_media_server/practice.py`, the list in
+`agent_media_core/practice_library.py`. Pinned by
+`packages/server/tests/test_practice_route.py`. David, 31 Oct 2026:
+"I'd like to use recorded meditations too" … "A list in the app". Renamed
+from Meditations (`/meditations`) on 1 Nov 2026, no alias: "Maybe we
+should rename meditation to practise... which also means it could be used
+for any kind of practise". The old state files are moved to their new
+names the first time they are read.
 
-- `GET /meditations` → `{"ok": true, "items": [{"id", "title", "source",
+- `GET /practice` → `{"ok": true, "items": [{"id", "title", "source",
   …}], "feeds": [{"url", "title"}], "folder"}`. `source` is `made` (one
   the agent wrote, newest first; `added`), `youtube` (a saved link;
-  `added`), `file` (an audio file in the host's Meditations folder,
+  `added`), `file` (an audio file in the host's Practice folder (`~/Music/Practice`, MEDIA_PRACTICE_DIR),
   `folder`; `added` is its mtime) or `podcast` (one of a saved feed's
   newest 20 episodes; `show`, `published`, `duration` as the feed gives
   them). In that order. No paths or URLs are given out.
@@ -7717,25 +7721,25 @@ Code: `agent_media_server/meditations.py`, the list in
   strength, Intuition & spirit, Calm & grounding, or null), `duration_s`
   (a feed's duration, else looked up in the background — a YouTube link's
   by yt-dlp on the phone, as YouTube refuses the host, a file's or
-  episode's by ffprobe — and kept in `meditation-durations.json`, one
+  episode's by ffprobe — and kept in `practice-durations.json`, one
   that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
-  `meditation-plays.json`). The app groups and orders by these itself.
-- `POST /meditations {"action": "play", "id", "target"?, "resume"?}` →
+  `practice-plays.json`). The app groups and orders by these itself.
+- `POST /practice {"action": "play", "id", "target"?, "resume"?}` →
   `{"ok", "playing", "title"}`: plays it on the book channel, from the
   start unless `resume`. A recorded one is then eased out for a reply as
   a written one is (5 s down, paused, 2 s back up). 404 for an id not in
   the list; 502 when the player could not start it.
-- `POST /meditations {"action": "add", "url", "title"?}` → the list, plus
+- `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
-- `POST /meditations {"action": "remove", "id"}` → the list: a link
+- `POST /practice {"action": "remove", "id"}` → the list: a link
   (`yt:<id>`), a single saved episode (`ep:<hash>`, source `podcast` with
-  its `show`; saved by `meditation_library.add_episode`), a written one (`made:<hash>`, its audio deleted) or a feed
+  its `show`; saved by `practice_library.add_episode`), a written one (`made:<hash>`, its audio deleted) or a feed
   (its `url`). A folder's files are only removed from the folder. 404 when
   nothing was saved under it.
-- Kept in `<state_dir>/meditations.json`; feeds cached for 6 h in
-  `<cache>/meditation-feeds/`. Not a guest POST.
+- Kept in `<state_dir>/practice.json`; feeds cached for 6 h in
+  `<cache>/practice-feeds/`. Not a guest POST.
 
 ### 6.46 A link into a Media tab — gated (built 1 Nov 2026)
 
@@ -7747,7 +7751,7 @@ select which media tab it goes to" … "keep the link in cases the
 downloaded version has been removed to save space".
 
 - `GET /media/links` → `{"ok": true, "to": [{"id", "label", "takes"}]}`:
-  the tabs that take a link, in order (`podcast`, `meditation`, `book`),
+  the tabs that take a link, in order (`podcast`, `practice`, `book`),
   `takes` saying what kind of link in words. The app shows a chip for
   each (on the share screen, and a paste box on a tab whose id it is),
   so a tab added here needs no app change.
@@ -7755,7 +7759,7 @@ downloaded version has been removed to save space".
   …}`. `podcast`: a YouTube video, saved (`id` `podcast-link:<video id>`)
   and downloaded in the background (`fetching`) through the phone, shrunk
   to mono Opus (32 kb/s, about 15 MB an hour); listed in
-  `GET /music/recent?kind=podcast&list=saved` (§6.9a). `meditation`: as
+  `GET /music/recent?kind=podcast&list=saved` (§6.9a). `practice`: as
   §6.45's add (`added` `youtube` or `podcast`). `book`: a YouTube video or
   playlist imported into Audiobookshelf (`items`); 503 when the download
   helper is not installed. 400 for a link the tab does not take or an

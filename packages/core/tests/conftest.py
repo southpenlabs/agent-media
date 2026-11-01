@@ -396,7 +396,7 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(autouse=True)
-def _no_meditation_lookups(monkeypatch):
-    """A meditation's length is looked up with yt-dlp or ffprobe in the
-    background (meditation_library._fill_durations): never from a test."""
-    monkeypatch.setenv("MEDIA_MEDITATION_DURATIONS", "0")
+def _no_practice_lookups(monkeypatch):
+    """A practice's length is looked up with yt-dlp or ffprobe in the
+    background (practice_library._fill_durations): never from a test."""
+    monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")

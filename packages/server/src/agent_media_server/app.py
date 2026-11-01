@@ -430,9 +430,9 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
-# Saved meditations, recorded and written (meditations.py, §6.45).
-MEDITATION_PATHS = frozenset({"/meditations"})
-CORS_PATHS = CORS_PATHS | MEDITATION_PATHS
+# Saved practice: meditations, yoga, any practice (practice.py, §6.45).
+PRACTICE_PATHS = frozenset({"/practice"})
+CORS_PATHS = CORS_PATHS | PRACTICE_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
 MEDIA_LINK_PATHS = frozenset({"/media/links"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
@@ -764,8 +764,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _audio(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
         return _music(h, method, path)
-    if path in MEDITATION_PATHS and method in ("GET", "POST"):
-        return _meditations(h, method)
+    if path in PRACTICE_PATHS and method in ("GET", "POST"):
+        return _practice(h, method)
     if path in MEDIA_LINK_PATHS and method in ("GET", "POST"):
         return _media_links(h, method)
     if path in ORG_PATHS and method in ("GET", "POST"):
@@ -3836,15 +3836,15 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     return True
 
 
-def _meditations(h: BaseHTTPRequestHandler, method: str) -> bool:
-    """`GET`/`POST /meditations` (§6.45): the saved meditations list."""
-    from . import meditations
+def _practice(h: BaseHTTPRequestHandler, method: str) -> bool:
+    """`GET`/`POST /practice` (§6.45): the saved practice list."""
+    from . import practice
 
     if method == "GET":
-        ok, detail = meditations.listing(_bearer(h))
+        ok, detail = practice.listing(_bearer(h))
     else:
         body = _read_json(h)
-        ok, detail = meditations.control(body if isinstance(body, dict) else {}, _bearer(h))
+        ok, detail = practice.control(body if isinstance(body, dict) else {}, _bearer(h))
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 

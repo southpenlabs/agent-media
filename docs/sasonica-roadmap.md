@@ -2231,7 +2231,7 @@ ahead.
     answers. Waiting on David's go for the service: it is public and
     outward-facing.
 
-48. **Meditations list in the Media tab** (David, 31 Oct 2026: "I'd like to
+48. **Meditations list in the Media tab** — now the **Practice** tab, `/practice` (renamed 1 Nov 2026) (David, 31 Oct 2026: "I'd like to
     use recorded meditations too" … "A list in the app"). The server half is
     built (agent-media, contract §6.45): `GET /meditations` gives
     `items` ({id, title, source: made | youtube | file | podcast, show?,

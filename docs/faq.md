@@ -190,20 +190,22 @@ the quiet after each paragraph), `MEDIA_MEDITATE_TAIL_S` (30, the music's
 fade after the last words), `MEDIA_MEDITATE_EASE_OUT_S` (5) and
 `MEDIA_MEDITATE_EASE_IN_S` (2), the fades around a reply.
 
-Recorded meditations sit beside the written ones: YouTube links and
-podcast feeds you save, and audio files in `~/Music/Meditations` (or
-`MEDIA_MEDITATION_DIR`). Ask in a chat ("play the yoga nidra one"), or:
+Recorded practice sits beside the written meditations: YouTube links and
+podcast feeds you save (a meditation, a yoga class, breathwork, any
+practice), and audio files in `~/Music/Practice` (or
+`MEDIA_PRACTICE_DIR`). They are the app's Practice tab. Ask in a chat
+("play the yoga nidra one"), or:
 
 ```
-media meditations add https://youtu.be/...
-media meditations list
-media meditations play "yoga nidra"
+media practice add https://youtu.be/...
+media practice list
+media practice play "yoga nidra"
 ```
 
 They are eased out for a reply too.
 
 See also: `packages/core/src/agent_media_core/meditate.py`,
-`meditation_library.py`, the `meditate` and `meditation_*` MCP tools,
+`practice_library.py`, the `meditate` and `practice_*` MCP tools,
 `server-contract.md` §6.45, `docs/proposals/2026-10-31-relax-and-meditate.md`.
 
 ### Why does my music go quiet, then swell, while a reply plays?

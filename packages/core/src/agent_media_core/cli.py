@@ -5486,13 +5486,14 @@ def cmd_history(a) -> int:
     return 0
 
 
-def cmd_meditations(a) -> int:
-    """Saved meditations: recorded (YouTube, the folder, podcasts) and the
-    agent's own (meditation_library.py)."""
+def cmd_practice(a) -> int:
+    """Saved practice — meditations, yoga, breathwork: recorded (YouTube,
+    the folder, podcasts) and the agent's own meditations
+    (practice_library.py)."""
     import json as _json
 
-    from . import meditation_library as lib
-    cmd = a.med_cmd
+    from . import practice_library as lib
+    cmd = a.practice_cmd
     if cmd == "list":
         items = lib.items()
         if getattr(a, "json", False):
@@ -5506,18 +5507,18 @@ def cmd_meditations(a) -> int:
         try:
             got = lib.add(a.url, title=a.title or "")
         except ValueError as e:
-            print(f"media meditations: {e}", file=sys.stderr)
+            print(f"media practice: {e}", file=sys.stderr)
             return 1
         print(f"added {got['added']}: {got['title']}")
         return 0
     if cmd == "remove":
         if not lib.remove(a.key):
-            print(f"media meditations: nothing saved as {a.key!r}", file=sys.stderr)
+            print(f"media practice: nothing saved as {a.key!r}", file=sys.stderr)
             return 1
         return 0
     r = lib.play(a.name, target=a.target or "", resume=a.resume)
     if not r.get("ok"):
-        print(f"media meditations: {r.get('error')}", file=sys.stderr)
+        print(f"media practice: {r.get('error')}", file=sys.stderr)
         return 1
     print(r.get("title") or "")
     return 0
@@ -5543,7 +5544,7 @@ def cmd_meditate(a) -> int:
         print("media meditate: could not render that script", file=sys.stderr)
         return 1
     title = getattr(a, "title", "") or "Meditation"
-    from .meditation_library import remember
+    from .practice_library import remember
     remember(clip, title)
     if getattr(a, "no_play", False):
         print(clip)
@@ -9873,11 +9874,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         "host asks its origin for")
     s.set_defaults(func=cmd_history)
 
-    s = sub.add_parser("meditations",
-                       help="saved meditations: YouTube links, the Meditations "
-                            "folder, podcast feeds and the agent's own")
-    msub = s.add_subparsers(dest="med_cmd", required=True)
-    ml = msub.add_parser("list", help="every saved meditation")
+    s = sub.add_parser("practice",
+                       help="saved practice (meditations, yoga, breathwork): "
+                            "YouTube links, the Practice folder, podcast feeds "
+                            "and the agent's own meditations")
+    msub = s.add_subparsers(dest="practice_cmd", required=True)
+    ml = msub.add_parser("list", help="everything saved")
     ml.add_argument("--json", action="store_true")
     ma = msub.add_parser("add", help="save a YouTube link or a podcast feed")
     ma.add_argument("url")
@@ -9890,7 +9892,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mp.add_argument("--target", default="", help="rooms|local|phone")
     mp.add_argument("--resume", action="store_true",
                     help="carry on where it was left (a long talk)")
-    s.set_defaults(func=cmd_meditations)
+    s.set_defaults(func=cmd_practice)
     s = sub.add_parser("meditate",
                        help="a guided meditation: a script with [[pause: 20]] and "
                             "[[bell]] markers, said slowly over a bed, on the "

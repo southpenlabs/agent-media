@@ -1,10 +1,10 @@
-"""Saved meditations (meditation_library.py): sources, feeds, the mark."""
+"""Saved practice (practice_library.py): sources, feeds, the mark."""
 
 import json
 
 import pytest
 
-from agent_media_core import meditation_library as L
+from agent_media_core import practice_library as L
 
 FEED = b"""<?xml version="1.0"?>
 <rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
@@ -21,7 +21,7 @@ FEED = b"""<?xml version="1.0"?>
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("MEDIA_MEDITATION_DIR", str(tmp_path / "Meditations"))
+    monkeypatch.setenv("MEDIA_PRACTICE_DIR", str(tmp_path / "Practice"))
     monkeypatch.setattr(L, "_fetch", lambda url, timeout=15.0: FEED)
     monkeypatch.setattr(L, "_yt_title", lambda url: "")
 
@@ -59,7 +59,7 @@ def test_a_link_that_is_neither_is_refused(monkeypatch):
 
 def test_files_and_made_ones_are_listed(tmp_path):
     from agent_media_core import meditate
-    d = tmp_path / "Meditations"
+    d = tmp_path / "Practice"
     (d / "sleep").mkdir(parents=True)
     (d / "sleep" / "Deep_Sleep.m4a").write_bytes(b"x")
     meditate.out_dir().mkdir(parents=True)
@@ -134,7 +134,7 @@ def test_items_carry_length_and_plays(monkeypatch):
 
 
 def test_lengths_are_looked_up_in_the_background(monkeypatch):
-    monkeypatch.setenv("MEDIA_MEDITATION_DURATIONS", "1")
+    monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "1")
     L.add("https://www.youtube.com/watch?v=AAAAAAAAAAA", "A")
     L.add("https://www.youtube.com/watch?v=BBBBBBBBBBB", "B")
     asked = []
@@ -160,3 +160,14 @@ def test_youtube_lengths_read_the_phones_answer(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: (seen.append(argv), type("R", (), {"stdout": "AAAAAAAAAAA 1820\nBBBBBBBBBBB NA\n", "returncode": 0})())[1])
     assert L._youtube_lengths(["AAAAAAAAAAA", "BBBBBBBBBBB"]) == {"AAAAAAAAAAA": 1820}
     assert seen[0][0] == "ssh" and "--skip-download" in seen[0][-1] and "watch?v=AAAAAAAAAAA" in seen[0][-1]
+
+
+def test_the_old_meditation_files_are_moved_across_once():
+    old = L.state_dir() / "meditations.json"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text(json.dumps({"youtube": [{"vid": "AAAAAAAAAAA", "url": "https://www.youtube.com/watch?v=AAAAAAAAAAA", "title": "Kept"}]}))
+    (L.state_dir() / "meditation-plays.json").write_text(json.dumps({"yt:AAAAAAAAAAA": {"n": 4, "last": 1.0}}))
+    got = L.items()
+    assert [(i["title"], i["plays"]) for i in got] == [("Kept", 4)]
+    assert not old.exists() and (L.state_dir() / "practice.json").exists()
+    assert (L.state_dir() / "practice-plays.json").exists()

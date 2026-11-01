@@ -11,7 +11,7 @@ server knows what each tab does with it).
 
 - podcast — a YouTube video, saved and downloaded small
   (agent_media_core.podcast_links); the Podcasts tab's `saved` list.
-- meditation — a YouTube video or a podcast feed (meditation_library.add).
+- practice — a YouTube video or a podcast feed (practice_library.add).
 - book — a YouTube video or playlist, imported into Audiobookshelf as
   `media book import-youtube` does.
 """
@@ -22,7 +22,7 @@ from . import auth
 
 TABS = [
     {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video"},
-    {"id": "meditation", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
+    {"id": "practice", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
     {"id": "book", "label": "Books", "takes": "a YouTube video or playlist"},
 ]
 
@@ -49,7 +49,7 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    from agent_media_core import meditation_library, podcast_links
+    from agent_media_core import podcast_links, practice_library
 
     if body.get("action") == "remove":
         if not podcast_links.remove(str(body.get("id") or ""), keep_link=bool(body.get("keep_link"))):
@@ -63,8 +63,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     try:
         if to == "podcast":
             return True, podcast_links.add(url, title=title)
-        if to == "meditation":
-            return True, meditation_library.add(url, title=title)
+        if to == "practice":
+            return True, practice_library.add(url, title=title)
         if to == "book":
             return True, _book(url)
     except ValueError as e:

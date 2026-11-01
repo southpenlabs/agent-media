@@ -1,38 +1,41 @@
-"""Saved meditations: recorded ones beside the ones the agent writes.
+"""Saved practice: meditations, yoga, breathwork, any practice kept —
+recorded ones beside the meditations the agent writes.
 
 David, 31 Oct 2026: "I'd like to use recorded meditations too" — from
 YouTube links, audio files in a folder, and podcast feeds, picked from a
-list in the app (server-contract.md §6.45, `GET`/`POST /meditations`).
+list in the app (server-contract.md §6.45, `GET`/`POST /practice`). 1 Nov
+2026: "Maybe we should rename meditation to practise... which also means
+it could be used for any kind of practise" — renamed from meditations
+everywhere, no aliases; `_moved` brings the old state files across once.
 
 Four sources, one list (`items`), each item ``{id, title, source, …}``:
 
 - **youtube** — a link added by hand (`add`), kept in
-  ``<state_dir>/meditations.json``. Played as `media book play` plays a
+  ``<state_dir>/practice.json``. Played as `media book play` plays a
   YouTube link: downloaded once into the library and kept.
-- **file** — every audio file under MEDIA_MEDITATION_DIR
-  (``~/Music/Meditations``), read each time, never stored.
+- **file** — every audio file under MEDIA_PRACTICE_DIR
+  (``~/Music/Practice``), read each time, never stored.
 - **podcast** — the newest FEED_EPISODES episodes of each feed added
   (`add` with a feed's URL), read over HTTP and kept for FEED_TTL_S in
-  ``<cache>/meditation-feeds/``.
-- **made** — the ones the agent wrote (meditate.py), newest
+  ``<cache>/practice-feeds/``; or one episode saved alone (`add_episode`).
+- **made** — the meditations the agent wrote (meditate.py), newest
   MADE_KEPT, titled by the sidecar `remember` writes beside each render.
 
 Each item also says who it is by (`teacher`: the name after the title's
 " — ", or a podcast's show), what kind of practice it is and what it is
-for (`practice`, `benefit`: from the title's words), how long it is
+for (`style`, `benefit`: from the title's words), how long it is
 (`duration_s`: a feed's, else looked up in the background — a YouTube
 link's by yt-dlp on the phone, a file's or episode's by ffprobe — and
-kept in ``meditation-durations.json``) and how often it was played (`plays`,
-`last_played`, kept in ``meditation-plays.json`` by `play`), for the
+kept in ``practice-durations.json``) and how often it was played (`plays`,
+`last_played`, kept in ``practice-plays.json`` by `play`), for the
 app's Show ▾ (David, 1 Nov 2026: "Can we have show filters for the
-meditation tab too please?"; groupings after Insight Timer's; the app calls
-the tab Practice since 1 Nov 2026).
+meditation tab too please?"; groupings after Insight Timer's).
 
 Playing (`play`) takes an id from this list only, never a path or URL, so
 the route is not a way to play anything on the host. It goes to the book
-channel, and marks what it started (``meditation-now.json``) so a reply
+channel, and marks what it started (``practice-now.json``) so a reply
 eases it out rather than cutting it (meditate.is_meditation), as it does a
-written one.
+written meditation.
 """
 
 from __future__ import annotations
@@ -56,12 +59,24 @@ MADE_KEPT = 20
 _YT = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})")
 
 
+def _moved(new: Path, old: str) -> Path:
+    """`new`, the state file under its practice name: one still under its
+    old meditation name (before 1 Nov 2026) is moved across the first time."""
+    was = new.with_name(old)
+    if not new.exists() and was.exists():
+        try:
+            was.replace(new)
+        except OSError:
+            return was
+    return new
+
+
 def _store_path() -> Path:
-    return state_dir() / "meditations.json"
+    return _moved(state_dir() / "practice.json", "meditations.json")
 
 
 def _now_path() -> Path:
-    return state_dir() / "meditation-now.json"
+    return _moved(state_dir() / "practice-now.json", "meditation-now.json")
 
 
 def _load() -> dict:
@@ -90,8 +105,8 @@ def _hid(prefix: str, raw: str) -> str:
 
 
 def folder() -> Path:
-    raw = os.environ.get("MEDIA_MEDITATION_DIR", "").strip()
-    return Path(raw).expanduser() if raw else Path.home() / "Music" / "Meditations"
+    raw = os.environ.get("MEDIA_PRACTICE_DIR", "").strip()
+    return Path(raw).expanduser() if raw else Path.home() / "Music" / "Practice"
 
 
 def youtube_id(url: str) -> Optional[str]:
@@ -151,7 +166,7 @@ def _files() -> list[dict]:
 # ---- podcasts ------------------------------------------------------------------
 
 def _feed_cache(url: str) -> Path:
-    return cache_dir() / "meditation-feeds" / (_hid("feed", url).split(":")[1] + ".json")
+    return cache_dir() / "practice-feeds" / (_hid("feed", url).split(":")[1] + ".json")
 
 
 def _local(tag: str) -> str:
@@ -241,7 +256,7 @@ def _all() -> list[dict]:
 
 
 def items() -> list[dict]:
-    """Every saved meditation, for the app's list (no paths or URLs), with
+    """Everything saved, for the app's list (no paths or URLs), with
     `teacher`, `style`, `benefit`, `duration_s`, `plays` and `last_played`."""
     every = _all()
     plays = _plays()
@@ -276,7 +291,7 @@ STYLES = (
     ("Talk", r"explained|wisdom|karma|lecture|\btalk\b|\[part \d"),
     ("Music", r"music|piano|prayer|devi\b|lokah|instrumental"),
 )
-#: A meditation no rule names is a guided one.
+#: A practice no rule names is a guided one.
 STYLE_DEFAULT = "Guided"
 #: What a title says it is for, first match wins (Insight Timer's "Benefit").
 BENEFITS = (
@@ -291,7 +306,7 @@ BENEFITS = (
 
 
 def teacher_of(it: dict) -> Optional[str]:
-    """Who a meditation is by: the name after " — " in its title, else a
+    """Who a practice is by: the name after " — " in its title, else a
     podcast's show; None for the agent's own and an unsigned file."""
     m = _BY.search(it.get("title") or "")
     if m:
@@ -328,7 +343,7 @@ def _seconds(raw) -> Optional[int]:
 
 
 def _plays_path() -> Path:
-    return state_dir() / "meditation-plays.json"
+    return _moved(state_dir() / "practice-plays.json", "meditation-plays.json")
 
 
 def _plays() -> dict:
@@ -352,7 +367,7 @@ def note_play(item_id: str) -> None:
 
 
 def _durations_path() -> Path:
-    return state_dir() / "meditation-durations.json"
+    return _moved(state_dir() / "practice-durations.json", "meditation-durations.json")
 
 
 def _durations() -> dict:
@@ -438,7 +453,7 @@ _FILLING: list = [False]
 def _fill_durations(missing: list[dict]) -> None:
     """Look up the lengths not known yet in the background; a next listing
     has them. One that could not be had is asked again after RETRY_S."""
-    if not missing or _FILLING[0] or os.environ.get("MEDIA_MEDITATION_DURATIONS") == "0":
+    if not missing or _FILLING[0] or os.environ.get("MEDIA_PRACTICE_DURATIONS") == "0":
         return
     import threading
     tried = _tried()
@@ -463,7 +478,7 @@ def _fill_durations(missing: list[dict]) -> None:
         finally:
             _FILLING[0] = False
 
-    threading.Thread(target=run, name="meditation-durations", daemon=True).start()
+    threading.Thread(target=run, name="practice-durations", daemon=True).start()
 
 
 def feeds() -> list[dict]:
@@ -564,7 +579,7 @@ def mark_playing(uri: str) -> None:
 
 
 def is_marked(path: Optional[str]) -> bool:
-    """Whether the book's `path` is the recorded meditation last played."""
+    """Whether the book's `path` is the recorded practice last played."""
     if not path:
         return False
     try:
@@ -582,7 +597,7 @@ def is_marked(path: Optional[str]) -> bool:
 
 
 def match(query: str) -> Optional[dict]:
-    """The saved meditation `query` names: an id, else the title holding
+    """The saved practice `query` names: an id, else the title holding
     every word of it (the newest such), else None."""
     q = (query or "").strip()
     if not q:
@@ -599,15 +614,15 @@ def match(query: str) -> Optional[dict]:
 
 
 def play(item_id: str, target: str = "", resume: bool = False) -> dict:
-    """Play a saved meditation on the book channel (by id, or a `match`)."""
+    """Play a saved practice on the book channel (by id, or a `match`)."""
     it = match(item_id)
     if not it:
-        return {"ok": False, "error": f"no saved meditation {item_id!r}"}
+        return {"ok": False, "error": f"nothing saved as {item_id!r}"}
     from . import mcp_server
     mark_playing(it["_uri"])
     note_play(it["id"])
     r = mcp_server.book_play(it["_uri"], resume=resume, start_ms=-1,
-                             target=target, title=it.get("title") or "Meditation")
+                             target=target, title=it.get("title") or "Practice")
     r = r if isinstance(r, dict) else {}
     return {**r, "ok": not r.get("error"), "id": it["id"], "title": it.get("title")}
 

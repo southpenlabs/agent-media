@@ -1166,7 +1166,7 @@ def meditate(script: str, title: str = "Meditation", target: str = "",
             piano, …), or "none" for the voice alone.
     """
     from . import meditate as med
-    from .meditation_library import remember
+    from .practice_library import remember
     clip = med.render(script, bed=bed or None)
     if clip is None:
         return {"ok": False, "error": "nothing could be rendered from that script"}
@@ -1176,33 +1176,35 @@ def meditate(script: str, title: str = "Meditation", target: str = "",
 
 
 @mcp.tool()
-def meditation_list() -> dict:
-    """David's saved meditations: recorded ones (YouTube links, his
-    Meditations folder, podcast feeds) and ones written before. Each item
-    is `{id, title, source}`; play one with `meditation_play`."""
-    from . import meditation_library as lib
+def practice_list() -> dict:
+    """David's saved practice — meditations, yoga, breathwork, any practice:
+    recorded ones (YouTube links, his Practice folder, podcast feeds) and
+    meditations written before. Each item is `{id, title, source, teacher,
+    style, benefit, duration_s, plays, …}`; play one with `practice_play`."""
+    from . import practice_library as lib
     return {"ok": True, "items": lib.items(), "feeds": lib.feeds()}
 
 
 @mcp.tool()
-def meditation_play(name: str, target: str = "", resume: bool = False) -> dict:
-    """Play a saved meditation ("the yoga nidra one", "Tara Brach's latest")
+def practice_play(name: str, target: str = "", resume: bool = False) -> dict:
+    """Play a saved practice ("the yoga nidra one", "Tara Brach's latest")
     on the book channel, by its id or by words of its title.
 
     Args:
-        name: An id from `meditation_list`, or words of the title.
+        name: An id from `practice_list`, or words of the title.
         target: rooms | local | phone; empty follows the default.
         resume: Carry on where it was left rather than from the start.
     """
-    from . import meditation_library as lib
+    from . import practice_library as lib
     return lib.play(name, target=target, resume=resume)
 
 
 @mcp.tool()
-def meditation_add(url: str, title: str = "") -> dict:
-    """Save a recorded meditation: a YouTube link, or a podcast feed's URL
-    (its newest episodes join the list)."""
-    from . import meditation_library as lib
+def practice_add(url: str, title: str = "") -> dict:
+    """Save a recorded practice (a meditation, a yoga class, breathwork): a
+    YouTube link, or a podcast feed's URL (its newest episodes join the
+    list)."""
+    from . import practice_library as lib
     try:
         return {"ok": True, **lib.add(url, title=title)}
     except ValueError as e:

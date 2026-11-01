@@ -112,11 +112,11 @@ def ease_in_s() -> float:
 def is_meditation(path: Optional[str]) -> bool:
     """Whether the book channel's file is one of these renders (by name, so
     a copy on the phone counts too), or the recorded meditation last played
-    from the list (meditation_library.is_marked)."""
+    from the Practice list (practice_library.is_marked)."""
     name = Path(str(path or "")).name
     if name.startswith("meditation-") and name.endswith(".mp3"):
         return True
-    from .meditation_library import is_marked
+    from .practice_library import is_marked
     return is_marked(path)
 
 
