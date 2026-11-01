@@ -186,7 +186,6 @@ def auto_title(session: str) -> str:
     when it cannot be had. A private thread is read only to
     MEDIA_PRIVATE_MODELS, and with none gets no name."""
     from agent_media_core.intake import fast
-    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _int_env
     from agent_media_core.private import hidden
 
     private = hidden(session)
@@ -195,8 +194,39 @@ def auto_title(session: str) -> str:
     text = _conversation_text(session)
     if not text:
         return ""
+    return _ask_title(AUTO_TITLE_PROMPT, text, private)
+
+
+#: What a saved new-chat draft is named with (Save draft, David, 2 Nov 2026).
+#: The auto-rename's models and clean-up, asked about words not yet sent.
+DRAFT_TITLE_PROMPT = (
+    "You name a draft message a person has written to their coding assistant "
+    "and saved to send later, the way it would be listed among their drafts. "
+    "Read it and reply with a short title for what it asks or is about: two "
+    "to six words, sentence case, specific (\"Spotify album links in Music\", "
+    "not \"A request\"). No quotes, no preamble, no trailing full stop. Reply "
+    "with the title only."
+)
+
+
+def draft_title(text: str, private: bool = False) -> str:
+    """A name for a saved draft from the same fast models as `auto_title`, or
+    "" when it cannot be had (the caller falls back to its first words). A
+    draft for a private chat is read only to MEDIA_PRIVATE_MODELS."""
+    from agent_media_core.intake import fast
+
+    text = (text or "").strip()
+    if not text or (private and not fast.models(private=True)):
+        return ""
+    return _ask_title(DRAFT_TITLE_PROMPT, text[:8000], private)
+
+
+def _ask_title(prompt: str, text: str, private: bool) -> str:
+    from agent_media_core.intake import fast
+    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _int_env
+
     timeout = _int_env("MEDIA_TITLE_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    out = (fast.chat(AUTO_TITLE_PROMPT, text, timeout, purpose_env="MEDIA_TITLE_MODEL",
+    out = (fast.chat(prompt, text, timeout, purpose_env="MEDIA_TITLE_MODEL",
                      private=private) or "").strip()
     line = out.splitlines()[0] if out else ""
     if line.lower().startswith("title:"):

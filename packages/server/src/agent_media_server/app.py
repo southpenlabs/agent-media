@@ -222,6 +222,10 @@ device gets its token):
   GET  /draft?session=<uuid>   → what was left half-typed in that
                   conversation's reply box
   POST /draft     {"session", "text", "at"?} → hold it (empty text drops it)
+  GET  /drafts/saved → the new-chat drafts put aside, named, newest first
+  POST /drafts/saved {"text", "at"?, "private"?} → put one aside; answers
+                  the name the fast models gave it (else its first words)
+  POST /drafts/saved/delete {"id"} → drop one
   POST /rename    {"item"|"session", "title"|"auto"} → rename a conversation
   POST /share     {"text", "channel"?} → play a shared link
   POST /upload?name=<file name>  (the file as the raw body) → keep a file
@@ -393,7 +397,7 @@ from . import app_links, web_app
 # needed it — a native HTTP client is not subject to the same-origin policy.
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
-    "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft",
+    "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
@@ -2048,6 +2052,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # What the app's reply box was left holding for this session.
         ok, detail = drafts.draft_read((parse_qs(query).get("session") or [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/drafts/saved":
+        # The new-chat drafts put aside to send later (Save draft).
+        ok, detail = drafts.saved_list(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/sentences":
         # "Read from here" on a reply that is not playing: its sentences as
         # the replay counts them, so the index the app sends back with
@@ -3684,6 +3692,17 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = drafts.draft_write(
             str(body.get("session") or ""), str(body.get("text") or ""),
             body.get("at"), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/drafts/saved":
+        # Put the new-chat box aside under a name (the fast models' title,
+        # else its first words): it waits a model's answer, so seconds.
+        body = _read_json(h) or {}
+        ok, detail = drafts.saved_write(str(body.get("text") or ""), body.get("at"),
+                                        _bearer(h), private=body.get("private") is True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/drafts/saved/delete":
+        body = _read_json(h) or {}
+        ok, detail = drafts.saved_delete(str(body.get("id") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/focus":
         # The "opened in %23" link: pull the attached tmux client to a pane.

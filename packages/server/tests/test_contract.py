@@ -417,6 +417,34 @@ def test_draft_round_trip(server, shelf, signed_in):
 
 
 
+def test_saved_drafts_are_named_listed_and_dropped(server, shelf, signed_in, monkeypatch):
+    # Save draft on the new-chat screen (David, 2 Nov 2026): named by the
+    # auto-rename's models, else by its first words.
+    from agent_media_server import threads
+
+    monkeypatch.setattr(threads, "draft_title", lambda text, private=False: "Spotify album links")
+    res, obj = call(server, "POST", "/drafts/saved", {"text": "share a spotify album", "at": 5}, AUTH)
+    assert res.status == 200, obj
+    assert keys(obj) == {"ok", "id", "title", "text", "at", "named"}
+    assert obj["title"] == "Spotify album links" and obj["named"] == "model"
+    first = obj["id"]
+    monkeypatch.setattr(threads, "draft_title", lambda text, private=False: "")
+    _, obj = call(server, "POST", "/drafts/saved",
+                  {"text": "make the full screen key a toggle please, both ways", "at": 9}, AUTH)
+    assert obj["title"] == "make the full screen key a…" and obj["named"] == "words"
+    _, obj = call(server, "GET", "/drafts/saved", headers=AUTH)
+    assert [d["at"] for d in obj["drafts"]] == [9.0, 5.0]
+    assert keys(obj["drafts"][0]) == {"id", "title", "text", "at"}
+    res, obj = call(server, "POST", "/drafts/saved/delete", {"id": first}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "id": first}
+    _, obj = call(server, "GET", "/drafts/saved", headers=AUTH)
+    assert [d["at"] for d in obj["drafts"]] == [9.0]
+    res, _ = call(server, "POST", "/drafts/saved", {"text": "  "}, AUTH)
+    assert res.status == 400
+    res, _ = call(server, "POST", "/drafts/saved/delete", {"id": "../x"}, AUTH)
+    assert res.status == 400
+
+
 def test_a_row_says_when_its_draft_was_written(server, shelf, signed_in):
     # `draft_at` on /targets rows: Show → Drafts (David, 30 Oct 2026).
     row = lambda o: {r["session"]: r for r in o["sessions"]}[SID]  # noqa: E731

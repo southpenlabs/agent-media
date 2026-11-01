@@ -133,7 +133,7 @@ does, because it is served from the ABS port.
 
 The app routes: `/conversation`, `/conversation/log`, `/conversations`,
 `/targets`, `/item`, `/reply`, `/ask`, `/focus`, `/session/resume`,
-`/session/close`, `/session/answer`, `/session/stop`, `/draft`, `/speech/now`, `/speech/ctl`,
+`/session/close`, `/session/answer`, `/session/stop`, `/draft`, `/drafts/saved` (2 Nov 2026), `/speech/now`, `/speech/ctl`,
 `/sessions/state`, `/commands`, `/rename`, `/harnesses`, `/harnesses/run`,
 `/harnesses/screen`, `/harnesses/keys`, `/harnesses/apikey` (28 Sep 2026), `/harnesses/close`,
 `/harnesses/logout`, `/harnesses/updates` (23 Sep 2026), `/share`, `/upload` (25 Sep 2026; its GET 29 Sep 2026),
@@ -1237,6 +1237,25 @@ reinstalls. Keyed by session, not by user.
 - 400 for a bad session id; 500 when it cannot be written.
 
 Clients: S (`ReplyBox.vue`), POST debounced 800 ms.
+
+#### `GET /drafts/saved` · `POST /drafts/saved` · `POST /drafts/saved/delete` — gated (2 Nov 2026)
+
+The new-chat screen's words put aside to send later ("Save draft"), each
+under a name of its own. Not keyed by session: a new chat has none yet.
+
+- POST `/drafts/saved` `{"text", "at"?, "private"?}` names it with the
+  auto-rename's fast models (`MEDIA_TITLE_MODEL`, then the fast models; a
+  `private` draft only to `MEDIA_PRIVATE_MODELS`), else its first six words,
+  and answers `{"ok": true, "id", "title", "text", "at", "named"}`, `named`
+  `"model"` or `"words"`. It waits for the model, so it can take seconds.
+  400 for empty text, 409 at 200 saved.
+- GET answers `{"ok": true, "drafts": [{"id", "title", "text", "at"}]}`,
+  newest first.
+- POST `/drafts/saved/delete` `{"id"}` answers `{"ok": true, "id"}`; 400 for
+  a malformed id. The app drops one when it is deleted or taken back into
+  the box.
+
+Clients: A (`routes/new.tsx`, Show → Drafts).
 
 ### 6.3 Sending
 
