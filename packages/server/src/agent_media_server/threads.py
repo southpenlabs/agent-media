@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from . import auth, auth_abs, context, driver, recaps, send, sessions, transcript
+from . import auth, auth_abs, context, driver, git_state, recaps, send, sessions, transcript
 
 log = logging.getLogger("agent-media.server.threads")
 
@@ -572,7 +572,10 @@ def _envelope(session: str, lines: list, *, limit: int = MESSAGES_LIMIT,
            "pending": pending, "working": working, "approval": approval,
            "suggestion": suggestion, "recap": recap,
            # How full its context is, for the line under the title.
-           "context": context.context_for(session)}
+           "context": context.context_for(session),
+           # Its folder's branch and changed files, for the status line
+           # under the input box (git_state.py, 1 Nov 2026).
+           "git": git_state.git_for(sessions.session_cwd(session))}
     if around:
         out["around"] = {"id": around, **jump}
         out["newer"] = jump["newer"]

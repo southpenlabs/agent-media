@@ -744,7 +744,8 @@ newest page, as without it. Other harnesses' threads find their line ids
  "approval": null,
  "suggestion": "",
  "recap": null,
- "context": {"used": 66597, "window": 200000}}
+ "context": {"used": 66597, "window": 200000},
+ "git": {"branch": "main", "changed": 3, "ahead": 0, "behind": 0}}
 ```
 
 **Envelope**
@@ -782,6 +783,13 @@ newest page, as without it. Other harnesses' threads find their line ids
   saved as `<state>/agent-media/context/<session>.window`), else by the
   reply's model (Opus 5.5: 1 000 000), else 200 000, or 1 000 000 once
   `used` is past 200 000.
+- `git` (1 Nov 2026): the session folder's checkout, for the status line
+  under the input box: `{"branch", "changed", "ahead", "behind"}`, or `null`
+  when the folder is not in a git checkout (or git is slow or missing).
+  `branch` is `null` on a detached HEAD; `changed` counts the entries
+  `git status --porcelain` lists (changed, staged and untracked files);
+  `ahead` / `behind` are against the branch's upstream, 0 without one.
+  Kept 15 s per folder (`git_state.py`).
 
 **A line**
 
