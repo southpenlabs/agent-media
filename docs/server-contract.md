@@ -7716,7 +7716,8 @@ Code: `agent_media_server/meditations.py`, the list in
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
 - `POST /meditations {"action": "remove", "id"}` → the list: a link
-  (`yt:<id>`), a written one (`made:<hash>`, its audio deleted) or a feed
+  (`yt:<id>`), a single saved episode (`ep:<hash>`, source `podcast` with
+  its `show`; saved by `meditation_library.add_episode`), a written one (`made:<hash>`, its audio deleted) or a feed
   (its `url`). A folder's files are only removed from the folder. 404 when
   nothing was saved under it.
 - Kept in `<state_dir>/meditations.json`; feeds cached for 6 h in

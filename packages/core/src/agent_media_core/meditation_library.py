@@ -62,6 +62,7 @@ def _load() -> dict:
         d = {}
     d.setdefault("youtube", [])
     d.setdefault("feeds", [])
+    d.setdefault("episodes", [])
     return d
 
 
@@ -222,7 +223,10 @@ def _all() -> list[dict]:
     yt = [{"id": f"yt:{v['vid']}", "title": v.get("title") or v["url"],
            "source": "youtube", "added": v.get("added", 0), "_uri": f"yt:{v['url']}"}
           for v in d["youtube"]]
-    return _made() + yt + _files() + _podcasts(d)
+    eps = [{"id": e["id"], "title": e.get("title") or e["audio"], "source": "podcast",
+            "show": e.get("show", ""), "added": e.get("added", 0), "_uri": e["audio"]}
+           for e in d["episodes"]]
+    return _made() + yt + _files() + eps + _podcasts(d)
 
 
 def items() -> list[dict]:
@@ -269,15 +273,35 @@ def add(url: str, title: str = "") -> dict:
     return {"added": "podcast", "title": title, "episodes": len(got["episodes"])}
 
 
+def add_episode(audio: str, title: str, show: str = "") -> dict:
+    """Save one podcast episode by its audio URL (not its whole feed): the
+    free copy of a meditation found in a teacher's podcast. ``ep:<hash>``."""
+    audio = (audio or "").strip()
+    if not audio.startswith(("http://", "https://")):
+        raise ValueError("an episode's audio must be an http(s) URL")
+    d = _load()
+    eid = _hid("ep", audio)
+    d["episodes"] = [e for e in d["episodes"] if e["id"] != eid]
+    d["episodes"].append({"id": eid, "audio": audio, "title": title.strip() or audio,
+                          "show": show.strip(), "added": time.time()})
+    _save(d)
+    return {"added": "episode", "id": eid, "title": title}
+
+
 def remove(key: str) -> bool:
-    """Forget a YouTube link (``yt:<id>``), a feed (by its URL) or one of the
-    agent's renders (``made:<hash>``). Files in the folder are the folder's."""
+    """Forget a YouTube link (``yt:<id>``), an episode (``ep:<hash>``), a feed
+    (by its URL) or one of the agent's renders (``made:<hash>``). Files in the folder are the folder's."""
     d = _load()
     if key.startswith("yt:"):
         before = len(d["youtube"])
         d["youtube"] = [v for v in d["youtube"] if f"yt:{v['vid']}" != key]
         _save(d)
         return len(d["youtube"]) < before
+    if key.startswith("ep:"):
+        before = len(d["episodes"])
+        d["episodes"] = [e for e in d["episodes"] if e["id"] != key]
+        _save(d)
+        return len(d["episodes"]) < before
     if key.startswith("made:"):
         from . import meditate
         clip = meditate.out_dir() / f"meditation-{key[5:]}.mp3"

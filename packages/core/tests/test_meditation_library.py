@@ -90,3 +90,15 @@ def test_the_mark_finds_what_the_book_plays():
 
 def test_play_refuses_what_is_not_saved():
     assert L.play("/etc/passwd")["ok"] is False
+
+
+def test_a_single_episode_is_saved_and_removed():
+    got = L.add_episode("https://cdn.example/breath.mp3", "Breath", show="Calm Talks")
+    assert got["added"] == "episode" and got["id"].startswith("ep:")
+    eps = [i for i in L.items() if i["id"] == got["id"]]
+    assert eps == [{"id": got["id"], "title": "Breath", "source": "podcast",
+                    "show": "Calm Talks", "added": eps[0]["added"]}]
+    assert L.uri_for(got["id"]) == "https://cdn.example/breath.mp3"
+    with pytest.raises(ValueError):
+        L.add_episode("file:///etc/passwd", "x")
+    assert L.remove(got["id"]) and not [i for i in L.items() if i["id"] == got["id"]]
