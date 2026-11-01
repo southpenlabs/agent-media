@@ -22,7 +22,7 @@ from . import auth
 
 TABS = [
     {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video"},
-    {"id": "meditation", "label": "Meditations", "takes": "a YouTube video or a podcast feed"},
+    {"id": "meditation", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
     {"id": "book", "label": "Books", "takes": "a YouTube video or playlist"},
 ]
 

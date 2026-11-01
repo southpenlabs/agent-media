@@ -17,6 +17,16 @@ Four sources, one list (`items`), each item ``{id, title, source, …}``:
 - **made** — the ones the agent wrote (meditate.py), newest
   MADE_KEPT, titled by the sidecar `remember` writes beside each render.
 
+Each item also says who it is by (`teacher`: the name after the title's
+" — ", or a podcast's show), what kind of practice it is and what it is
+for (`practice`, `benefit`: from the title's words), how long it is
+(`duration_s`: a feed's, else looked up once in the background and kept
+in ``meditation-durations.json``) and how often it was played (`plays`,
+`last_played`, kept in ``meditation-plays.json`` by `play`), for the
+app's Show ▾ (David, 1 Nov 2026: "Can we have show filters for the
+meditation tab too please?"; groupings after Insight Timer's; the app calls
+the tab Practice since 1 Nov 2026).
+
 Playing (`play`) takes an id from this list only, never a path or URL, so
 the route is not a way to play anything on the host. It goes to the book
 channel, and marks what it started (``meditation-now.json``) so a reply
@@ -230,8 +240,180 @@ def _all() -> list[dict]:
 
 
 def items() -> list[dict]:
-    """Every saved meditation, for the app's list (no paths or URLs)."""
-    return [{k: v for k, v in i.items() if not k.startswith("_")} for i in _all()]
+    """Every saved meditation, for the app's list (no paths or URLs), with
+    `teacher`, `style`, `benefit`, `duration_s`, `plays` and `last_played`."""
+    every = _all()
+    plays = _plays()
+    lengths = _durations()
+    out = []
+    for i in every:
+        d = {k: v for k, v in i.items() if not k.startswith("_")}
+        p = plays.get(i["id"]) or {}
+        d.update(teacher=teacher_of(i), style=style_of(i["title"]), benefit=benefit_of(i["title"]),
+                 duration_s=_seconds(i.get("duration")) or lengths.get(i["id"]),
+                 plays=int(p.get("n") or 0), last_played=p.get("last") or None)
+        out.append(d)
+    _fill_durations([i for i in every if not _seconds(i.get("duration")) and i["id"] not in lengths])
+    return out
+
+
+# ---- who, what, how long, how often ----------------------------------------------
+
+_BY = re.compile(r"\s+[—–]\s+([^—–]{2,60})$")
+
+#: What kind of practice a title says it is, first match wins (Insight Timer's
+#: "Practice"; "Style" here, the app's tab being Practice).
+STYLES = (
+    ("Yoga Nidra", r"yoga\s*nidra|\bnidra\b"),
+    ("Body scan", r"body\s*scan"),
+    ("Breathwork", r"breath|pranayama"),
+    ("Journey", r"journey|astral|shaman|lucid|out of body|travel|visuali[sz]"),
+    ("Sound & mantra", r"\bsound\b|\bhz\b|\bbowls?\b|chant|mantra|asatoma|\bom\b"),
+    ("Affirmations", r"affirmation|manifest|abundance|dream life|confiden"),
+    ("Movement", r"\byoga\b(?!\s*nidra)|stretch|qigong|tai chi|vinyasa|flow\b"),
+    ("Energy & chakra", r"chakra|reiki|cleans|cutting cords|energy wash|wash meditation"),
+    ("Talk", r"explained|wisdom|karma|lecture|\btalk\b|\[part \d"),
+    ("Music", r"music|piano|prayer|devi\b|lokah|instrumental"),
+)
+#: A meditation no rule names is a guided one.
+STYLE_DEFAULT = "Guided"
+#: What a title says it is for, first match wins (Insight Timer's "Benefit").
+BENEFITS = (
+    ("Sleep", r"sleep|insomnia|bed\s*time|middle of the night|night sky|stargaz"),
+    ("Morning & energy", r"morning|wake|energy|energi"),
+    ("Healing", r"heal|headache|tension|jaw|spin|nervous|pain|reboot|release|trapped|chakra|cleans|cords|karma|embodiment"),
+    ("Heart & love", r"heart|love|compassion|kindness|bliss|gratitude|relationship"),
+    ("Confidence & strength", r"confiden|strength|power|abundance|manifest|dream life|success|goal|intention|empower|authentic self"),
+    ("Intuition & spirit", r"intuition|third eye|spirit|astral|out of body|lucid|soul|upper world|past life|guides|medicine wheel|shaman|prayer|devi\b"),
+    ("Calm & grounding", r"calm|stress|anxi|relax|ground|stabili|peace|clarity|focus|fear|wonderment|easy|lokah|rest\b"),
+)
+
+
+def teacher_of(it: dict) -> Optional[str]:
+    """Who a meditation is by: the name after " — " in its title, else a
+    podcast's show; None for the agent's own and an unsigned file."""
+    m = _BY.search(it.get("title") or "")
+    if m:
+        return m.group(1).strip()
+    return (it.get("show") or "").strip() or None
+
+
+def _first(rules: tuple, title: str) -> Optional[str]:
+    t = (title or "").lower()
+    return next((name for name, rx in rules if re.search(rx, t)), None)
+
+
+def style_of(title: str) -> str:
+    return _first(STYLES, title) or STYLE_DEFAULT
+
+
+def benefit_of(title: str) -> Optional[str]:
+    return _first(BENEFITS, title)
+
+
+def _seconds(raw) -> Optional[int]:
+    """A feed's duration ("754", "12:34", "1:02:03") in seconds."""
+    if isinstance(raw, (int, float)):
+        return int(raw) or None
+    raw = (raw or "").strip()
+    if re.fullmatch(r"\d+", raw):
+        return int(raw) or None
+    if re.fullmatch(r"\d+(?::\d{1,2}){1,2}", raw):
+        n = 0
+        for part in raw.split(":"):
+            n = n * 60 + int(part)
+        return n or None
+    return None
+
+
+def _plays_path() -> Path:
+    return state_dir() / "meditation-plays.json"
+
+
+def _plays() -> dict:
+    try:
+        d = json.loads(_plays_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def note_play(item_id: str) -> None:
+    """Count a play of `item_id` and when it was."""
+    d = _plays()
+    p = d.get(item_id) if isinstance(d.get(item_id), dict) else {}
+    d[item_id] = {"n": int(p.get("n") or 0) + 1, "last": time.time()}
+    path = _plays_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(d))
+    tmp.replace(path)
+
+
+def _durations_path() -> Path:
+    return state_dir() / "meditation-durations.json"
+
+
+def _durations() -> dict:
+    try:
+        d = json.loads(_durations_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(v, (int, float)) and v > 0} if isinstance(d, dict) else {}
+
+
+def _measure(it: dict) -> Optional[int]:
+    """How long a meditation is: a file's by ffprobe, a YouTube video's by
+    yt-dlp (its page, no download)."""
+    import subprocess
+    uri = it.get("_uri") or ""
+    try:
+        if uri.startswith("yt:"):
+            r = subprocess.run(["yt-dlp", "--no-warnings", "--skip-download", "--print", "duration", uri[3:]],
+                               capture_output=True, text=True, timeout=60)
+        elif uri.startswith("/"):
+            r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                "-of", "default=nw=1:nk=1", uri], capture_output=True, text=True, timeout=30)
+        else:
+            return None
+        return int(float(r.stdout.strip().splitlines()[0])) if r.returncode == 0 and r.stdout.strip() else None
+    except (OSError, ValueError, IndexError, Exception):  # noqa: BLE001
+        return None
+
+
+_FILLING: list = [False]
+
+
+def _fill_durations(missing: list[dict]) -> None:
+    """Look up the lengths not known yet, one at a time, in the background;
+    a next listing has them. One that cannot be measured is kept as -1."""
+    if not missing or _FILLING[0] or os.environ.get("MEDIA_MEDITATION_DURATIONS") == "0":
+        return
+    import threading
+    tried = json.loads(_durations_path().read_text()) if _durations_path().exists() else {}
+    todo = [i for i in missing if i["id"] not in tried]
+    if not todo:
+        return
+    _FILLING[0] = True
+
+    def run():
+        try:
+            for it in todo:
+                n = _measure(it)
+                try:
+                    d = json.loads(_durations_path().read_text())
+                except (OSError, ValueError):
+                    d = {}
+                d[it["id"]] = n or -1
+                p = _durations_path()
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp = p.with_suffix(f".tmp.{os.getpid()}")
+                tmp.write_text(json.dumps(d))
+                tmp.replace(p)
+        finally:
+            _FILLING[0] = False
+
+    threading.Thread(target=run, name="meditation-durations", daemon=True).start()
 
 
 def feeds() -> list[dict]:
@@ -373,6 +555,7 @@ def play(item_id: str, target: str = "", resume: bool = False) -> dict:
         return {"ok": False, "error": f"no saved meditation {item_id!r}"}
     from . import mcp_server
     mark_playing(it["_uri"])
+    note_play(it["id"])
     r = mcp_server.book_play(it["_uri"], resume=resume, start_ms=-1,
                              target=target, title=it.get("title") or "Meditation")
     r = r if isinstance(r, dict) else {}

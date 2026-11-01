@@ -96,9 +96,53 @@ def test_a_single_episode_is_saved_and_removed():
     got = L.add_episode("https://cdn.example/breath.mp3", "Breath", show="Calm Talks")
     assert got["added"] == "episode" and got["id"].startswith("ep:")
     eps = [i for i in L.items() if i["id"] == got["id"]]
-    assert eps == [{"id": got["id"], "title": "Breath", "source": "podcast",
-                    "show": "Calm Talks", "added": eps[0]["added"]}]
+    keys = ("id", "title", "source", "show", "added")
+    assert [{k: e[k] for k in keys} for e in eps] == [{"id": got["id"], "title": "Breath", "source": "podcast",
+                                                       "show": "Calm Talks", "added": eps[0]["added"]}]
     assert L.uri_for(got["id"]) == "https://cdn.example/breath.mp3"
     with pytest.raises(ValueError):
         L.add_episode("file:///etc/passwd", "x")
     assert L.remove(got["id"]) and not [i for i in L.items() if i["id"] == got["id"]]
+
+
+def test_who_what_and_for_what():
+    yt = {"title": "Yoga Nidra For Sleep — Melanie Cooper", "source": "youtube"}
+    assert L.teacher_of(yt) == "Melanie Cooper"
+    assert L.style_of(yt["title"]) == "Yoga Nidra" and L.benefit_of(yt["title"]) == "Sleep"
+    assert L.teacher_of({"title": "Letting go", "show": "Calm Talks"}) == "Calm Talks"
+    assert L.teacher_of({"title": "Meditation", "source": "made"}) is None
+    assert L.style_of("Dialectic") == "Guided" and L.benefit_of("Dialectic") is None
+    assert L.style_of("Heart Opening Yoga Nidra 528 Hz") == "Yoga Nidra", "the first rule wins"
+
+
+def test_a_feeds_duration_in_seconds():
+    assert [L._seconds(x) for x in ("754", "12:34", "1:02:03", "", "soon", None)] == [754, 754, 3723, None, None, None]
+
+
+def test_items_carry_length_and_plays(monkeypatch):
+    L.add("https://feeds.example/calm.xml")
+    L.add("https://www.youtube.com/watch?v=AAAAAAAAAAA", "Morning Yoga Nidra — Jaime Tan")
+    got = {i["title"]: i for i in L.items()}
+    assert got["Letting go"]["duration_s"] == 1330 and got["Letting go"]["teacher"] == "Calm Talks"
+    nidra = got["Morning Yoga Nidra — Jaime Tan"]
+    assert nidra["duration_s"] is None and nidra["plays"] == 0 and nidra["last_played"] is None
+    assert (nidra["teacher"], nidra["style"], nidra["benefit"]) == ("Jaime Tan", "Yoga Nidra", "Morning & energy")
+    L.note_play("yt:AAAAAAAAAAA")
+    L.note_play("yt:AAAAAAAAAAA")
+    again = next(i for i in L.items() if i["id"] == "yt:AAAAAAAAAAA")
+    assert again["plays"] == 2 and again["last_played"] > 0
+
+
+def test_lengths_are_looked_up_once_in_the_background(monkeypatch):
+    monkeypatch.setenv("MEDIA_MEDITATION_DURATIONS", "1")
+    L.add("https://www.youtube.com/watch?v=AAAAAAAAAAA", "A")
+    L.add("https://www.youtube.com/watch?v=BBBBBBBBBBB", "B")
+    asked = []
+    monkeypatch.setattr(L, "_measure", lambda it: (asked.append(it["id"]), 600 if it["id"].endswith("A") else None)[1])
+    started = []
+    import threading
+    monkeypatch.setattr(threading, "Thread", lambda target, **_: type("T", (), {"start": lambda self: (started.append(1), target())})())
+    L.items()
+    got = {i["id"]: i["duration_s"] for i in L.items()}
+    assert got == {"yt:AAAAAAAAAAA": 600, "yt:BBBBBBBBBBB": None}
+    assert sorted(asked) == ["yt:AAAAAAAAAAA", "yt:BBBBBBBBBBB"] and started == [1], "one that cannot be measured is not asked again"

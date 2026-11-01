@@ -7707,6 +7707,18 @@ Code: `agent_media_server/meditations.py`, the list in
   `folder`; `added` is its mtime) or `podcast` (one of a saved feed's
   newest 20 episodes; `show`, `published`, `duration` as the feed gives
   them). In that order. No paths or URLs are given out.
+  Every item also has (1 Nov 2026, for the app's Show ▾; David: "Can we
+  have show filters for the meditation tab too please?"): `teacher` (the
+  name after the title's " — ", else a podcast's `show`; null for the
+  agent's own), `style` (what kind of practice the title says: Yoga
+  Nidra, Body scan, Breathwork, Journey, Sound & mantra, Affirmations,
+  Movement, Energy & chakra, Talk, Music, else Guided), `benefit` (what it
+  is for: Sleep, Morning & energy, Healing, Heart & love, Confidence &
+  strength, Intuition & spirit, Calm & grounding, or null), `duration_s`
+  (a feed's duration, else looked up once in the background with yt-dlp
+  or ffprobe and kept in `meditation-durations.json`; null until known),
+  `plays` and `last_played` (counted by `play`, in
+  `meditation-plays.json`). The app groups and orders by these itself.
 - `POST /meditations {"action": "play", "id", "target"?, "resume"?}` →
   `{"ok", "playing", "title"}`: plays it on the book channel, from the
   start unless `resume`. A recorded one is then eased out for a reply as

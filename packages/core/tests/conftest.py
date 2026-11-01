@@ -393,3 +393,10 @@ def pytest_runtest_makereport(item, call):
         yield
     finally:
         os.name = left
+
+
+@pytest.fixture(autouse=True)
+def _no_meditation_lookups(monkeypatch):
+    """A meditation's length is looked up with yt-dlp or ffprobe in the
+    background (meditation_library._fill_durations): never from a test."""
+    monkeypatch.setenv("MEDIA_MEDITATION_DURATIONS", "0")
