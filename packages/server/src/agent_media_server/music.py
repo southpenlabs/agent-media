@@ -250,7 +250,30 @@ def _answer() -> dict:
     if move:
         out["move"] = move
     out["bed"] = _bed_state(now)
+    out["verdict"] = _verdict(now)
     return out
+
+
+def _verdict(now: dict) -> str | None:
+    """`"like"` or `"dislike"` for what is playing, else null: the player's
+    ♥ and 👎 stay lit when the song is come back to (David, 1 Nov 2026:
+    "the like or dislike is no longer highlighted. can we fix that so it
+    remembers?"). A like is the likes list's (on a mix, this chapter's); a
+    dislike is a station's 👎, this one's or a kept one's."""
+    vid = now.get("media_id") or ""
+    if not vid:
+        return None
+    try:
+        from agent_media_core import radio
+        from agent_media_core.state import StateStore
+
+        if radio.disliked(vid):
+            return "dislike"
+        if StateStore().is_liked("music", vid, chapter=now.get("chapter") or ""):
+            return "like"
+    except Exception:  # noqa: BLE001 — a button state, never a failed read
+        pass
+    return None
 
 
 def _bed_state(now: dict) -> dict:

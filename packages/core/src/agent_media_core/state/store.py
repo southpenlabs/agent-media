@@ -613,6 +613,20 @@ class StateStore:
             out.append(d)
         return out
 
+    def is_liked(self, channel: str, media_id: str, chapter: str = "") -> bool:
+        """Whether `media_id` was liked; with `chapter` (a mix's track), that
+        chapter of it."""
+        if not channel or not media_id:
+            return False
+        sql = "SELECT 1 FROM likes WHERE channel = ? AND media_id = ?"
+        args: tuple = (channel, media_id)
+        if chapter:
+            sql += " AND chapter = ?"
+            args += (chapter,)
+        with self._cursor() as cur:
+            cur.execute(sql + " LIMIT 1", args)
+            return cur.fetchone() is not None
+
     _BOOKMARK_PENDING_PREFIX = "bookmark_pending:"
 
     def set_bookmark_pending(self, channel: str, data: Optional[dict],

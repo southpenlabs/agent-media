@@ -782,6 +782,14 @@ def _refill() -> None:
             log.info("radio: +%d from the Mix of %s", n, base)
 
 
+def disliked(vid: str) -> bool:
+    """Whether a station was given 👎 on `vid`: this one or a kept one."""
+    with _station() as st:
+        if vid in st["banned"]:
+            return True
+    return any(vid in (e.get("banned") or []) for e in _kept())
+
+
 def _liked_ids() -> set:
     try:
         from .state import StateStore

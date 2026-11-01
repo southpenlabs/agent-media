@@ -44,11 +44,36 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed"}
-    assert obj["bed"] == {"suggested": False}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict"}
+    assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
     assert obj["art"] == "https://i.ytimg.com/vi/nMDHjVVj3bA/hqdefault.jpg"
     assert obj["now"] == SAID and obj["chapters"] == []
+
+
+def test_the_verdict_is_remembered(server, signed_in, audio_host, player, monkeypatch):
+    """♥ and 👎 stay lit when the song is come back to (David, 1 Nov 2026)."""
+    from agent_media_core import radio
+    from agent_media_core.state import StateStore
+    StateStore().add_like("music", "nMDHjVVj3bA", title="A Mix")
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] == "like"
+    music._reset_cache()
+    monkeypatch.setattr(radio, "disliked", lambda vid: vid == "nMDHjVVj3bA")
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] == "dislike"
+
+
+def test_a_like_on_a_mix_is_its_chapter(server, signed_in, audio_host, player, monkeypatch):
+    from agent_media_core.state import StateStore
+    StateStore().add_like("music", "nMDHjVVj3bA", title="A Mix", chapter="Track two")
+    monkeypatch.setattr(music, "_status", lambda: {**NOW, "chapter": "Track one"})
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] is None
+    music._reset_cache()
+    monkeypatch.setattr(music, "_status", lambda: {**NOW, "chapter": "Track two"})
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] == "like"
 
 
 def test_now_names_the_artist(server, signed_in, audio_host, player, monkeypatch):
