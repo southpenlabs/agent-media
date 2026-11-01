@@ -106,6 +106,14 @@ dropped, 2 Nov). Australia's safe harbour for hosts is narrower than the
 US's; a short consult with an Australian IP lawyer comes before anyone else
 relies on central at scale.
 
+**Later, maybe: friends swap what they have looked up.** Places work on
+every install by itself (each looks teachers up on Insight Timer). Friends'
+installs could also send each other the places they already know, over the
+same Matrix rooms as shares, each merging them under its own (its own
+lookup wins): a new install's Where filter would fill at once, Insight Timer
+would be asked less, and nobody would see what anyone looks up. An
+optimisation only, not built (David, 2 Nov 2026: "Not now").
+
 ### Open: central over HTTPS, Matrix, or both
 
 David, 2 Nov 2026: "I'm still not sure about that https only option for
