@@ -2215,6 +2215,18 @@ so every device's. Kept in `<state_dir>/speech-speed-reset.json`
 shows it under the full player's speed keys and in Settings › Speech (David,
 31 Oct 2026: "a setting for whether or not speed resets after each turn").
 
+Since 2 Nov 2026 it also carries where a reply starts (David: "a start
+speed", "per-thread speed", "reset after a break"): `GET` → `{"ok", "reset",
+"start", "per_thread", "break_min", "starts", "breaks"}`, and `POST` takes
+any of `reset`, `start` (one of `starts`: 1, 1.25, 1.5, 1.75, 2),
+`per_thread` (bool) and `break_min` (one of `breaks`: 0, 5, 15, 30, 60; 0 is
+never), 400 for anything else. `reset` goes back to `start`, not 1×.
+`per_thread`: each thread starts at the rate it was last heard at, a new one
+at `start`. `break_min`: with the rate carrying on, a reply after that long
+with nothing spoken starts at `start`. Applied as a live reply starts and
+ends (`at_reply_start` / `at_reply_end`); what was heard is kept in
+`<state_dir>/speech-speed-heard.json`.
+
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_speech_speed.py`.
 

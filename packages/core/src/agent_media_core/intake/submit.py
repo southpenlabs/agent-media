@@ -5278,6 +5278,14 @@ def _submit_event(event: Event,
                           private=_private(event),
                           pane=source_pane, source=event.source.value,
                           target=target.name)
+            # Its speed: its thread's, the start speed after a break, or as
+            # the player has it (speech_speed.py, 2 Nov 2026).
+            try:
+                from .. import speech_speed
+                from ..sinks.speech import _socket_for
+                speech_speed.at_reply_start(_socket_for(target), source_session or "")
+            except Exception:  # noqa: BLE001 — never cost the reply
+                log.debug("speech speed at start failed", exc_info=True)
             mute_watcher = _MuteDuckWatcher(sink, target, coordinator)
 
             def _stamp_start(idx: int, live: Optional[dict], prior: dict,
@@ -6111,7 +6119,7 @@ def _submit_event(event: Event,
             try:
                 from .. import speech_speed
                 from ..sinks.speech import _socket_for
-                speech_speed.at_reply_end(_socket_for(target))
+                speech_speed.at_reply_end(_socket_for(target), source_session or "")
             except Exception:  # noqa: BLE001 — never cost the cleanup
                 log.debug("speed reset failed", exc_info=True)
             # Another reading about to start: the bed is held for it rather

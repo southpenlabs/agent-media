@@ -201,24 +201,31 @@ def speech_balance(bearer: str, balance=None) -> tuple[bool, dict]:
     return True, {"balance": b, "speech": sb.speech_level(b), "music": sb.music_level(b)}
 
 
-def speech_speed_reset(bearer: str, reset=None) -> tuple[bool, dict]:
-    """`GET /speech/speed-reset` and `POST /speech/speed-reset {"reset"}`:
-    whether the speech rate goes back to 1× as each reply ends
-    (speech_speed.py). Off until set. The server's, so every device's. With
-    `reset` None, only read."""
+def speech_speed_reset(bearer: str, reset=None, start=None, per_thread=None, break_min=None) -> tuple[bool, dict]:
+    """`GET /speech/speed-reset` and `POST /speech/speed-reset {"reset"?,
+    "start"?, "per_thread"?, "break_min"?}`: where the speech rate starts each
+    reply (speech_speed.py): back to the start speed as each reply ends, the
+    start speed, each thread's own, back after a break. The server's, so
+    every device's. All None, only read."""
     from agent_media_core import speech_speed
 
-    if reset is not None and not isinstance(reset, bool):
-        return False, {"error": "reset must be true or false", "status": 400}
+    for name, v in (("reset", reset), ("per_thread", per_thread)):
+        if v is not None and not isinstance(v, bool):
+            return False, {"error": f"{name} must be true or false", "status": 400}
+    if start is not None and (isinstance(start, bool) or not isinstance(start, (int, float)) or float(start) not in speech_speed.STARTS):
+        return False, {"error": "start must be one of " + ", ".join(map(str, speech_speed.STARTS)), "status": 400}
+    if break_min is not None and (isinstance(break_min, bool) or not isinstance(break_min, (int, float)) or int(break_min) != break_min or int(break_min) not in speech_speed.BREAKS):
+        return False, {"error": "break_min must be one of " + ", ".join(map(str, speech_speed.BREAKS)), "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    if reset is not None:
+    if any(v is not None for v in (reset, start, per_thread, break_min)):
         try:
-            speech_speed.set_reset_after_reply(reset)
+            speech_speed.save_settings(reset=reset, start=start, per_thread=per_thread, break_min=break_min)
         except OSError as e:
             return False, {"error": f"could not save the setting ({e})", "status": 500}
-    return True, {"reset": speech_speed.reset_after_reply()}
+    s = speech_speed.settings()
+    return True, {**s, "starts": list(speech_speed.STARTS), "breaks": list(speech_speed.BREAKS)}
 
 
 _UNSET = object()

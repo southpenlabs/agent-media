@@ -751,15 +751,21 @@ def test_speech_balance_is_the_servers(server, shelf, signed_in, typed):
 def test_speed_reset_is_the_servers(server, shelf, signed_in, typed):
     from agent_media_core import speech_speed
 
+    choices = {"starts": [1.0, 1.25, 1.5, 1.75, 2.0], "breaks": [0, 5, 15, 30, 60]}
     res, obj = call(server, "GET", "/speech/speed-reset", headers=AUTH)
-    assert res.status == 200 and obj == {"ok": True, "reset": False}
+    assert res.status == 200 and obj == {"ok": True, "reset": False, "start": 1.0, "per_thread": False, "break_min": 0, **choices}
     res, obj = call(server, "POST", "/speech/speed-reset", {"reset": True}, AUTH)
-    assert res.status == 200 and obj == {"ok": True, "reset": True}
+    assert res.status == 200 and obj["reset"] is True
     assert speech_speed.reset_after_reply() is True
-    for bad in ({}, {"reset": "yes"}, {"reset": 1}, {"reset": None}):
+    for bad in ({}, {"reset": "yes"}, {"reset": 1}, {"reset": None}, {"start": 1.1}, {"start": True},
+                {"per_thread": "on"}, {"break_min": 7}, {"break_min": 1.5}):
         res, obj = call(server, "POST", "/speech/speed-reset", bad, AUTH)
         assert res.status == 400, bad
     assert speech_speed.reset_after_reply() is True
+    # Where a reply starts (2 Nov 2026): any of them, the others kept.
+    res, obj = call(server, "POST", "/speech/speed-reset", {"start": 1.25, "per_thread": True, "break_min": 15}, AUTH)
+    assert res.status == 200 and (obj["reset"], obj["start"], obj["per_thread"], obj["break_min"]) == (True, 1.25, True, 15)
+    assert speech_speed.settings()["start"] == 1.25
 
 
 def test_music_bed_is_the_servers(server, shelf, signed_in, typed, monkeypatch):

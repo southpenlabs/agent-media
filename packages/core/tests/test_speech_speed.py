@@ -56,3 +56,56 @@ def test_an_unreachable_player_still_writes_1x_down(monkeypatch):
     StateStore().set_speech_speed(1.25)
     assert speech_speed.at_reply_end("sock") is True
     assert StateStore().get_speech_speed() == 1.0
+
+
+# ── Start speed, per-thread speed, back after a break (David, 2 Nov 2026) ──
+
+def test_settings_default_and_refuse_odd_values():
+    assert speech_speed.settings() == {"reset": False, "start": 1.0, "per_thread": False, "break_min": 0}
+    with pytest.raises(ValueError):
+        speech_speed.save_settings(start=1.1)
+    with pytest.raises(ValueError):
+        speech_speed.save_settings(break_min=7)
+    assert speech_speed.save_settings(start=1.25, break_min=15)["start"] == 1.25
+    # The old switch keeps the others.
+    speech_speed.set_reset_after_reply(True)
+    assert speech_speed.settings() == {"reset": True, "start": 1.25, "per_thread": False, "break_min": 15}
+
+
+def test_reset_goes_back_to_the_start_speed(sent):
+    speech_speed.save_settings(reset=True, start=1.5)
+    StateStore().set_speech_speed(2.0)
+    assert speech_speed.at_reply_end("sock") is True
+    assert StateStore().get_speech_speed() == 1.5
+    assert sent == [("sock", ("set_property", "speed", 1.5))]
+
+
+def test_carrying_speed_leaves_the_start_alone(sent):
+    speech_speed.save_settings(start=1.25)
+    StateStore().set_speech_speed(2.0)
+    assert speech_speed.at_reply_start("sock", "s1") is False
+    assert speech_speed.at_reply_end("sock", "s1") is False
+    assert StateStore().get_speech_speed() == 2.0 and sent == []
+
+
+def test_back_to_the_start_speed_after_a_break(sent):
+    speech_speed.save_settings(start=1.25, break_min=15)
+    StateStore().set_speech_speed(2.0)
+    speech_speed.at_reply_end("sock", "s1", now=1000.0)
+    assert speech_speed.at_reply_start("sock", "s1", now=1000.0 + 14 * 60) is False
+    assert StateStore().get_speech_speed() == 2.0
+    assert speech_speed.at_reply_start("sock", "s1", now=1000.0 + 15 * 60) is True
+    assert StateStore().get_speech_speed() == 1.25
+
+
+def test_each_thread_keeps_its_own_speed(sent):
+    speech_speed.save_settings(per_thread=True, start=1.0)
+    StateStore().set_speech_speed(1.75)
+    speech_speed.at_reply_end("sock", "fast")
+    # Another thread, never heard: the start speed.
+    assert speech_speed.at_reply_start("sock", "careful") is True
+    assert StateStore().get_speech_speed() == 1.0
+    speech_speed.at_reply_end("sock", "careful")
+    # Back in the first: its own speed again.
+    assert speech_speed.at_reply_start("sock", "fast") is True
+    assert StateStore().get_speech_speed() == 1.75
