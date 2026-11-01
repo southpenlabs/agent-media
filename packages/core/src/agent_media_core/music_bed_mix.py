@@ -249,6 +249,19 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
     }
     if after:
         out.update(after=after, outro="", carry_ms=0.0)
+    try:
+        from . import calm
+        if calm.active():
+            # Drift it out: no song after the words, the loop fading slowly
+            # under its ending (calm.py).
+            out.pop("after", None)
+            out["outro_ms"] = calm.drift_ms()
+            if not out["outro"] and source == "generated":
+                from . import music_bed_outro
+                p = music_bed_outro.ready(style)
+                out["outro"] = str(p) if p is not None else ""
+    except Exception as e:  # noqa: BLE001
+        log.debug("music-bed mix: calm: %s", e)
     return out
 
 

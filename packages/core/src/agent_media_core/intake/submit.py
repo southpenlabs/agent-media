@@ -4260,6 +4260,13 @@ def _submit_event(event: Event,
     # Oct 2026), wherever it is said: edge-tts / ffmpeg here, a sidecar the
     # device reads for the clips it renders itself.
     prosody = device_voice.thinking_prosody() if thinking else None
+    if prosody is None:
+        # Calm mode: a reply said slower and softer too (calm.py).
+        try:
+            from .. import calm
+            prosody = calm.prosody() if calm.active() else None
+        except Exception:  # noqa: BLE001
+            prosody = None
     renderer = partial(render_text, prosody=prosody) if prosody and any(prosody) else render_text
     if device_voice.renders_on_device(target.name):
         # The device says it in its own voice: each clip is its sentence.

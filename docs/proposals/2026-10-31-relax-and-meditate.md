@@ -8,6 +8,8 @@ He picked all four ideas below.
 **Status: §1 built (31 Oct 2026): `meditate.py`, `media meditate`, the
 `meditate` MCP tool. Not yet: the Relax card in the Media tab, §2–§4.**
 
+**§2 built (1 Nov 2026): calm.py — Calm mode and Calm in the evenings in Settings → Music.**
+
 ## What exists to build on
 
 - **The music bed** (`music_bed.py`): generated electric-piano-and-pad beds

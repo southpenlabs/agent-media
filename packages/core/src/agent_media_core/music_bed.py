@@ -733,6 +733,14 @@ def pick_for(pick: Optional[str] = None, when: Optional[datetime] = None,
     if parsed is None:
         return None
     src, style = parsed
+    try:
+        from . import calm
+        if calm.active(when):
+            # Calm mode: a beatless generated bed, whatever the choice (calm.py).
+            m = calm.mood()
+            return Pick("generated", m, played(m))
+    except Exception as e:  # noqa: BLE001
+        log.debug("music-bed: calm: %s", e)
     auto = auto_now(when, weather)
     mood = auto.mood
     if src == "generated":
@@ -1579,7 +1587,12 @@ def settings() -> list[dict]:
               "value": slow_on(), "set": stored_slow() is not None},
              {"id": "topic", "kind": "bool", "label": TOPIC_LABEL, "hint": TOPIC_HINT,
               "value": topic_on(), "set": stored_topic() is not None}]
-            + music_bed_mix.settings())
+            + music_bed_mix.settings() + _calm_settings())
+
+
+def _calm_settings() -> list[dict]:
+    from . import calm
+    return calm.settings()
 
 
 def _push_level() -> None:
@@ -1598,7 +1611,7 @@ def set_settings(values: dict) -> None:
     if not isinstance(values, dict) or not values:
         raise ValueError("settings must be an object of {id: value}")
     for k, v in values.items():
-        if k in ("slow", "topic"):
+        if k in ("slow", "topic", "calm", "calm_evening"):
             if v is not None and not isinstance(v, bool):
                 raise ValueError(f"{k} must be true, false or null")
         elif k == "gain_db":
@@ -1620,6 +1633,10 @@ def set_settings(values: dict) -> None:
         set_slow(values["slow"])
     if "topic" in values:
         set_topic(values["topic"])
+    for k in ("calm", "calm_evening"):
+        if k in values:
+            from . import calm
+            calm.set_stored(k, values[k])
     if "gain_db" in values:
         v = values["gain_db"]
         set_gain(None if v is None else stored_from_shown(v))

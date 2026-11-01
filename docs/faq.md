@@ -208,6 +208,21 @@ See also: `packages/core/src/agent_media_core/meditate.py`,
 `practice_library.py`, the `meditate` and `practice_*` MCP tools,
 `server-contract.md` §6.45, `docs/proposals/2026-10-31-relax-and-meditate.md`.
 
+### What is calm mode?
+
+Two switches in Settings → Music. **Calm mode** turns it on now; **Calm in
+the evenings** turns it on by itself from 9 pm to 6 am. While it is on,
+replies are read in a slower, softer voice, the music under them is the
+quiet night bed (no beat, never your favourites), no song sings out after a
+long reply, and the music drifts out over about a minute after the words.
+
+Settings, in `~/.config/agent-media.env`: `MEDIA_CALM_RATE` (-10%),
+`MEDIA_CALM_VOLUME` (-15%), `MEDIA_CALM_MOOD` (night), `MEDIA_CALM_DRIFT_S`
+(60), `MEDIA_CALM_FROM` / `MEDIA_CALM_UNTIL` (21:00 / 06:00), `MEDIA_CALM`
+(the first switch's default).
+
+See also: `packages/core/src/agent_media_core/calm.py`.
+
 ### Why does my music go quiet, then swell, while a reply plays?
 
 Your own music is ducked under a reply the way a DJ talks over a record: it
