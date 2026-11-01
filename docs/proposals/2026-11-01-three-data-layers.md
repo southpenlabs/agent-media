@@ -171,7 +171,17 @@ share. A group's "what we practised" is opt-in per person, per group.
 4. **Teacher profiles through central** (facts only, see above).
 5. **Peer-to-peer shares over Matrix**, starting with one practice item or
    playlist to one person, on the hosted homeserver (sasonica.com) and
-   bring-your-own (ryer.org).
+   bring-your-own (ryer.org). **Server side built, then paused** (2 Nov
+   2026, contract §6.48, `shares.py`; one test share sent ryer.org →
+   sasonica.com): no app screens. David: "this whole share feature feels a
+   bit unnecessary at the moment ... I don't have a good use case for it
+   right now" — kept dormant. Use cases weighed for when it comes back:
+   bulk (a whole list or collection in one share, Save all or pick),
+   setting a family member up, a teacher sending a sequence to a class,
+   and the strongest, a shared collection in a room both add to (a
+   bedtime playlist), each Sasonica keeping its copy in step. Receiving
+   needs an install signed in to Matrix as its owner, which only red5 is
+   (by hand); the transport proposal's sign-in step comes first.
 6. **A person's own homeserver, turnkey** (David, 1 Nov 2026: "Yes,
    after hosted"; below).
 7. **Groups**, if wanted.
