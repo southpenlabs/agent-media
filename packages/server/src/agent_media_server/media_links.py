@@ -14,6 +14,8 @@ server knows what each tab does with it).
 - practice — a YouTube video or a podcast feed (practice_library.add).
 - book — a YouTube video or playlist, imported into Audiobookshelf as
   `media book import-youtube` does.
+- music — a Spotify album, playlist or song (agent_media_core.music_links),
+  the Music tab's `albums` list, played from YouTube.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ TABS = [
     {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video or a podcast episode"},
     {"id": "practice", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
     {"id": "book", "label": "Books", "takes": "a YouTube video or playlist"},
+    {"id": "music", "label": "Music", "takes": "a Spotify album, playlist or song"},
 ]
 
 
@@ -49,8 +52,12 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    from agent_media_core import podcast_links, practice_library
+    from agent_media_core import music_links, podcast_links, practice_library
 
+    if body.get("action") == "remove" and str(body.get("id") or "").startswith("album:"):
+        if not music_links.remove(str(body["id"])):
+            return False, {"error": "no saved album under that id", "status": 404}
+        return True, {"removed": str(body["id"])}
     if body.get("action") == "remove":
         if not podcast_links.remove(str(body.get("id") or ""), keep_link=bool(body.get("keep_link"))):
             return False, {"error": "no saved podcast link under that id", "status": 404}
@@ -67,6 +74,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return True, practice_library.add(url, title=title)
         if to == "book":
             return True, _book(url)
+        if to == "music":
+            return True, music_links.add(url, title=title)
     except ValueError as e:
         return False, {"error": str(e)}
     except RuntimeError as e:

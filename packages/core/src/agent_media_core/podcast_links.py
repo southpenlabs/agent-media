@@ -12,7 +12,8 @@ because YouTube refuses a datacenter address, into a phone folder of its own
 (``.cache/agent-media/podcast-links``) so the books' sync never carries it;
 rsync'd here into `folder()`, deleted from the phone, then shrunk to mono
 Opus at MEDIA_PODCAST_LINK_KBPS (32): about 15 MB an hour of talk, where the
-phone's best audio is about 50.
+phone's best audio is about 50. Past MEDIA_PODCAST_LINK_MAX_MB (1000) in
+all, the oldest downloads are deleted (`prune`); their links stay.
 
 The list (`items`, music_recent's `saved` list for podcasts) gives each link
 the file as its uri while the file is there, and ``yt:<url>`` when it is
@@ -266,7 +267,41 @@ def fetch(vid: str) -> Optional[Path]:
                    capture_output=True, timeout=60)
     out = shrink(got)
     print(f"podcast-links: kept {out.name} ({out.stat().st_size // 1_000_000} MB)", file=sys.stderr)
+    for gone in prune(keep=out):
+        print(f"podcast-links: cleared {gone.name} for space (its link stays)", file=sys.stderr)
     return out
+
+
+def max_bytes() -> int:
+    """The most the downloads may hold (MEDIA_PODCAST_LINK_MAX_MB, 1000:
+    about 65 hours of talk at 32 kb/s); 0 for no cap."""
+    try:
+        return max(0, int(os.environ.get("MEDIA_PODCAST_LINK_MAX_MB", "1000"))) * 1_000_000
+    except ValueError:
+        return 1000 * 1_000_000
+
+
+def prune(keep: Optional[Path] = None) -> list[Path]:
+    """Delete the oldest downloads (by when each was fetched) until they fit
+    under `max_bytes`, never `keep`. Their links stay, so each still plays
+    (fetched again). The files deleted."""
+    cap = max_bytes()
+    d = folder()
+    if not cap or not d.is_dir():
+        return []
+    files = sorted((p for p in d.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXTS),
+                   key=lambda p: p.stat().st_mtime)
+    total = sum(p.stat().st_size for p in files)
+    gone = []
+    for p in files:
+        if total <= cap:
+            break
+        if keep is not None and p == keep:
+            continue
+        total -= p.stat().st_size
+        p.unlink(missing_ok=True)
+        gone.append(p)
+    return gone
 
 
 if __name__ == "__main__":

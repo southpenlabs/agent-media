@@ -28,6 +28,22 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
     if not (text or "").strip():
         return False, {"error": "nothing shared"}
     channel = channel if channel in ("music", "book") else ""
+    # A Spotify album, playlist or song: saved to the Music tab's Albums and
+    # played from YouTube (music_links; David, 2 Nov 2026: "Is there a way
+    # to share a link to an album from Spotify?").
+    from agent_media_core import music_links
+
+    url = sharemod.extract_url(text) or ""
+    if music_links.is_music_link(url):
+        try:
+            got = music_links.add(url)
+        except ValueError as e:
+            return False, {"error": str(e), "status": 422}
+        r = music_links.play(got["id"])
+        if not r.get("ok"):
+            return False, {"error": r.get("error") or "couldn't play it", "status": 502}
+        return True, {"url": url, "channel": "music", "title": got["title"],
+                      "line": f"Playing {got['title']} ({got['tracks']} tracks, from YouTube)"}
     # A podcast app's episode link: its audio, on the book channel, not a
     # page handed to the music player (David, 1 Nov 2026: "I tried to share
     # a podcast with sasonica but it came through as music").

@@ -2252,10 +2252,14 @@ ahead.
     podcast link is saved (`podcast_links.py`), downloaded through the
     phone and shrunk to mono Opus at 32 kb/s (about 15 MB an hour), and
     listed under Podcasts → Show → Saved links. The tab also has a paste
-    box. A link whose file is gone plays by fetching it again. Next: follow
-    a YouTube channel or playlist as a show (its feed), remove and "free
-    the space" on a long press in Saved, a size cap that clears the oldest
-    played downloads.
+    box. A link whose file is gone plays by fetching it again. 2 Nov 2026:
+    hold a row in Saved links to Remove it or Clear download (the link
+    stays); downloads past 1 GB clear the oldest; a Spotify album, playlist
+    or song shared goes to Add to Music → Music → Show → Albums
+    (`music_links.py`, read from Spotify's public page, played from YouTube
+    track by track) and Play it plays one at once. Next: follow a YouTube
+    channel as a show (its feed; the channel's id needs the phone, since
+    red5 cannot read YouTube's pages).
 
 ## Loose ends
 

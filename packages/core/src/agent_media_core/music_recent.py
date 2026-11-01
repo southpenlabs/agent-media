@@ -147,7 +147,7 @@ def _inferred(speakers: list[tuple[float, str]], at: float) -> Optional[str]:
 
 KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
-LISTS = {"music": ("recent", "liked", "most", "stations"),
+LISTS = {"music": ("recent", "liked", "most", "stations", "albums"),
          "book": ("recent", "progress", "finished", "all", "most"),
          "podcast": ("recent", "new", "most", "saved")}
 
@@ -386,7 +386,8 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
     book library's (`progress` 0–1, `finished`); `new` podcast episodes,
     newest first (`published`, epoch seconds); `saved` the YouTube links
-    saved for the Podcasts tab (podcast_links)."""
+    saved for the Podcasts tab (podcast_links); `albums` the Spotify albums,
+    playlists and songs saved for the Music tab (music_links)."""
     if which == "recent":
         return recent(limit=limit, store=store, kind=kind)
     if which == "most":
@@ -399,6 +400,10 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
         return _library_books(which)[:limit if which != "all" else 500]
     if which == "new":
         return _new_episodes(limit)
+    if which == "albums":
+        from . import music_links
+
+        return music_links.items()[:limit]
     if which == "saved":
         from . import podcast_links
 

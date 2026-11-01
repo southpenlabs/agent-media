@@ -798,6 +798,17 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             print(f"music: book play failed: {said}", file=sys.stderr)
             return False, {"error": said or "book failed", "status": 502, **_answer()}
         return True, _answer()
+    elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("album:"):
+        # A row of Show → Albums: a saved Spotify album, played from YouTube.
+        from agent_media_core import music_links
+
+        if not music_links.find(body["uri"]):
+            return False, {"error": "no saved album under that id", "status": 404}
+        r = music_links.play(body["uri"])
+        _reset_cache()
+        if not r.get("ok"):
+            return False, {"error": r.get("error") or "album failed", "status": 502, **_answer()}
+        return True, _answer()
     elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("radio:"):
         # A row of Show → Stations: that station back on.
         return _radio_control({"action": "radio", "resume": body["uri"][6:]})

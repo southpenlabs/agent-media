@@ -25,7 +25,7 @@ def test_without_a_credential_is_refused(server):
 def test_the_tabs_that_take_a_link(server, shelf, signed_in):
     res, obj = call(server, "GET", "/media/links", None, AUTH)
     assert res.status == 200, obj
-    assert [t["id"] for t in obj["to"]] == ["podcast", "practice", "book"]
+    assert [t["id"] for t in obj["to"]] == ["podcast", "practice", "book", "music"]
 
 
 def test_a_podcast_link_lands_in_the_saved_list(server, shelf, signed_in):
@@ -63,3 +63,19 @@ def test_an_unknown_tab_is_400(server, shelf, signed_in):
     res, obj = call(server, "POST", "/media/links",
                     {"url": "https://youtu.be/AAAAAAAAAAA", "to": "fridge"}, AUTH)
     assert res.status == 400
+
+
+def test_a_spotify_album_goes_to_music(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import music_links
+    monkeypatch.setattr(music_links, "read", lambda kind, sid: {
+        "title": "The Heart Chronicles", "artist": "Eli Poz", "art": None,
+        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})
+    res, obj = call(server, "POST", "/media/links",
+                    {"url": "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y?si=x", "to": "music"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["added"] == "music" and obj["tracks"] == 1
+    _, obj = call(server, "GET", "/music/recent?list=albums", None, AUTH)
+    assert [i["title"] for i in obj["items"]] == ["The Heart Chronicles"]
+    res, obj = call(server, "POST", "/media/links",
+                    {"action": "remove", "id": "album:spotify-album-1qiw9zXdtK5Xidv4j8W28Y"}, AUTH)
+    assert res.status == 200

@@ -3538,7 +3538,7 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 
 | kind | lists |
 |---|---|
-| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest) |
+| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved) |
 | `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most` |
 | `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most`, `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
@@ -7825,7 +7825,7 @@ select which media tab it goes to" … "keep the link in cases the
 downloaded version has been removed to save space".
 
 - `GET /media/links` → `{"ok": true, "to": [{"id", "label", "takes"}]}`:
-  the tabs that take a link, in order (`podcast`, `practice`, `book`),
+  the tabs that take a link, in order (`podcast`, `practice`, `book`, `music`),
   `takes` saying what kind of link in words. The app shows a chip for
   each (on the share screen, and a paste box on a tab whose id it is),
   so a tab added here needs no app change.
@@ -7842,14 +7842,23 @@ downloaded version has been removed to save space".
   `GET /music/recent?kind=podcast&list=saved` (§6.9a). `practice`: as
   §6.45's add (`added` `youtube` or `podcast`). `book`: a YouTube video or
   playlist imported into Audiobookshelf (`items`); 503 when the download
-  helper is not installed. 400 for a link the tab does not take or an
-  unknown `to`.
+  helper is not installed. `music` (2 Nov 2026; David: "Is there a way to
+  share a link to an album from Spotify?"): a Spotify album, playlist or
+  song (`music_links`), read from Spotify's public embed page (no account:
+  name, artist, each track's title and artist; the cover from oEmbed) and
+  saved as `album:spotify-<kind>-<id>` (`tracks`); listed in
+  `GET /music/recent?list=albums`. Playing it finds each track on YouTube
+  (the original, not live, a cover or karaoke, kept once found), starts the
+  first and queues the rest behind it. 400 for a link the tab does not take
+  or an unknown `to`.
 - `POST /media/links {"action": "remove", "id", "keep_link"?}` → `{"ok",
   "removed"}`: a saved podcast link and its download, or with `keep_link`
-  only the download (it plays from the link after). 404 when nothing was
-  saved under it.
-- Kept in `<state_dir>/podcast-links.json`, the downloads in
-  `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`).
+  only the download (it plays from the link after), or a saved album
+  (`album:…`). 404 when nothing was saved under it.
+- Kept in `<state_dir>/podcast-links.json` and `music-links.json`, the
+  downloads in `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`);
+  past `MEDIA_PODCAST_LINK_MAX_MB` (1000) the oldest downloads are deleted
+  after each new one, their links kept.
   `MEDIA_PODCAST_LINK_FETCH=0` saves without downloading. Not a guest POST.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream

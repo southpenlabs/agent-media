@@ -80,3 +80,20 @@ def test_shrink_makes_mono_opus_and_keeps_the_id(tmp_path):
     ch = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "stream=channels",
                          "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout.strip()
     assert ch == "1"
+
+
+def test_prune_clears_the_oldest_downloads_and_keeps_their_links(_dirs, monkeypatch):
+    import os
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_MAX_MB", "1")
+    _dirs.mkdir()
+    files = []
+    for i, vid in enumerate(("AAAAAAAAAAA", "BBBBBBBBBBB", "CCCCCCCCCCC")):
+        podcast_links.add(f"https://youtu.be/{vid}", title=vid)
+        f = _dirs / f"{vid} [{vid}].opus"
+        f.write_bytes(b"x" * 400_000)
+        os.utime(f, (1000 + i, 1000 + i))
+        files.append(f)
+    gone = podcast_links.prune(keep=files[0])
+    assert gone == [files[1]]          # the oldest but the one just fetched
+    assert files[0].exists() and files[2].exists()
+    assert len(podcast_links.items()) == 3
