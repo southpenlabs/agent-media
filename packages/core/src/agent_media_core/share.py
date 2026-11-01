@@ -102,6 +102,11 @@ PODCAST_HOSTS = (
     "megaphone.fm",
     "audioboom.com",
     "rss.com",
+    "podcastoneaustralia.com.au",
+    "podcastone.com",
+    "omny.fm",
+    "listnr.com",
+    "podcasts.google.com",
 )
 
 AUDIOBOOK_HOSTS = (

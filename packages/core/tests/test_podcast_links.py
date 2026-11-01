@@ -46,10 +46,24 @@ def test_the_file_is_the_uri_while_it_is_there(_dirs):
     assert podcast_links.items() == []
 
 
-def test_only_youtube_videos():
+def test_a_link_that_is_no_episode_is_refused():
+    # The resolver off (conftest): nothing found, so refused.
     for bad in ("https://example.com/a.mp3", "file:///etc/passwd", "https://www.youtube.com/@someone"):
         with pytest.raises(ValueError):
             podcast_links.add(bad)
+
+
+def test_a_podcast_apps_episode_is_saved_by_its_audio(monkeypatch):
+    from agent_media_core import podcast_resolve
+    monkeypatch.setattr(podcast_resolve, "episode", lambda url, text="", search=True: {
+        "audio": "https://traffic.example/ep355.mp3", "title": "355 - Can We Still Pass a Driving Test?",
+        "show": "Hamish & Andy", "art": "https://art.example/a.jpg", "published": 1.0, "duration_s": 2399, "via": "search"})
+    got = podcast_links.add("https://www.podcastoneaustralia.com.au/episode/x", title="355 Driving Test Hamish & Andy")
+    assert got["id"].startswith("podcast-link:ep-") and got["show"] == "Hamish & Andy" and got["fetching"] is False
+    [it] = podcast_links.items()
+    assert (it["uri"], it["author"], it["duration_s"]) == ("https://traffic.example/ep355.mp3", "Hamish & Andy", 2399)
+    assert music_recent.playable_book(it["uri"])
+    assert podcast_links.remove(got["id"]) and podcast_links.items() == []
 
 
 def test_an_unsaved_id_is_never_fetched():

@@ -21,7 +21,7 @@ from __future__ import annotations
 from . import auth
 
 TABS = [
-    {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video"},
+    {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video or a podcast episode"},
     {"id": "practice", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
     {"id": "book", "label": "Books", "takes": "a YouTube video or playlist"},
 ]

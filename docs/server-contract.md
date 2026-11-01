@@ -3226,6 +3226,13 @@ before.
 "channel", "title", "line"}`. It is media-share's pipeline, called with the
 ABS bearer. The verdict comes back for the toast while the fetch runs
 behind it. 400 `"nothing shared"`; 422 when the share pipeline refuses.
+A podcast episode's link (1 Nov 2026; David: "I tried to share a podcast
+with sasonica but it came through as music") is played as a podcast on
+the book channel: unless `channel` is `music`, a link that is not YouTube's
+or a music site's goes first to `podcast_resolve`, which finds its audio
+(the iTunes directory is searched by the shared words only for a link that
+looks like a podcast: a known podcast site, or podcast or episode in its
+address); `url` is then that audio and `channel` `book`.
 
 Clients: S (`SasonicaShareActivity.kt`, the share sheet).
 
@@ -7767,7 +7774,13 @@ downloaded version has been removed to save space".
   each (on the share screen, and a paste box on a tab whose id it is),
   so a tab added here needs no app change.
 - `POST /media/links {"url", "to", "title"?}` → `{"ok", "added", "title",
-  …}`. `podcast`: a YouTube video, saved (`id` `podcast-link:<video id>`)
+  …}`. `podcast`: a podcast app's episode link (1 Nov 2026: PodcastOne, Pocket
+  Casts, Apple Podcasts…; `title` the words shared with it), its audio
+  found by `podcast_resolve` (the link itself, Apple's episode id, the
+  page's audio, else the iTunes directory searched with the shared words,
+  a match only when half the episode's title is among them) and saved as
+  `podcast-link:ep-<hash>`, played from that audio, never downloaded; 400
+  when no audio is found. Or a YouTube video, saved (`id` `podcast-link:<video id>`)
   and downloaded in the background (`fetching`) through the phone, shrunk
   to mono Opus (32 kb/s, about 15 MB an hour); listed in
   `GET /music/recent?kind=podcast&list=saved` (§6.9a). `practice`: as

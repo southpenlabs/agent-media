@@ -129,6 +129,25 @@ def test_a_share_from_the_app_is_gated_and_dispatched(monkeypatch):
     assert played == [("https://example.com/x", "music")]
 
 
+def test_a_shared_podcast_episode_plays_as_a_podcast(monkeypatch):
+    from agent_media_core import podcast_resolve
+    from agent_media_core.entrypoints import share_listener
+
+    _as(monkeypatch)
+    monkeypatch.setattr(podcast_resolve, "episode", lambda url, text="", search=True: {
+        "audio": "https://traffic.example/355.mp3", "title": "355 - Driving Test", "show": "Hamish & Andy"} if search else None)
+    played = []
+    monkeypatch.setattr(share_listener, "_play", lambda url, v, where: played.append((url, v.channel, v.content_type)))
+    ok, out = share.share_from_app("355 - Driving Test https://www.podcastoneaustralia.com.au/episode/x", "", "tok")
+    assert ok and out["channel"] == "book" and out["title"] == "355 - Driving Test"
+    import time
+    for _ in range(50):
+        if played:
+            break
+        time.sleep(0.01)
+    assert played == [("https://traffic.example/355.mp3", "book", "podcast")]
+
+
 def test_nothing_shared_is_said_so(monkeypatch):
     _as(monkeypatch)
     ok, out = share.share_from_app("   ", "", "tok")

@@ -21,6 +21,12 @@ not — deleted to save space, or not downloaded yet — so a tap still plays it
 
 MEDIA_PODCAST_LINK_FETCH=0 saves links without downloading (pinned off in
 the tests' conftest).
+
+A podcast app's episode link (PodcastOne, Pocket Casts, Apple Podcasts, …)
+is saved too (David, 1 Nov 2026: "I tried to share a podcast with sasonica
+but it came through as music"): podcast_resolve finds the episode's audio,
+kept as ``{ep, url, audio, title, show, art, published, duration_s,
+added}`` and played from its audio URL, never downloaded.
 """
 
 from __future__ import annotations
@@ -57,7 +63,7 @@ def _load() -> list[dict]:
     except (OSError, ValueError):
         return []
     links = d.get("links") if isinstance(d, dict) else None
-    return [x for x in links if isinstance(x, dict) and x.get("vid")] if isinstance(links, list) else []
+    return [x for x in links if isinstance(x, dict) and (x.get("vid") or x.get("ep"))] if isinstance(links, list) else []
 
 
 def _save(links: list[dict]) -> None:
@@ -97,15 +103,23 @@ def _title(vid: str) -> str:
     return music_recent._cached_title(vid) or music_recent._oembed(vid)
 
 
+def _key(x: dict) -> str:
+    return x.get("vid") or f"ep-{x['ep']}"
+
+
 def add(url: str, title: str = "", fetch: bool = True) -> dict:
-    """Save a YouTube video link. Returns ``{"added": "podcast", "id",
-    "title", "fetching"}``; raises ValueError for anything else."""
+    """Save a YouTube video link, or a podcast episode's link (its audio
+    found by podcast_resolve, `title` the words shared with it). Returns
+    ``{"added": "podcast", "id", "title", "fetching"}``; raises ValueError
+    for a link that is neither."""
     url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("a podcast link must be an http(s) link")
     vid = youtube_id(url)
-    if not url.startswith(("http://", "https://")) or not vid:
-        raise ValueError("a podcast link must be a YouTube video")
+    if not vid:
+        return _add_episode(url, title)
     title = title.strip() or _title(vid) or url
-    links = [x for x in _load() if x["vid"] != vid]
+    links = [x for x in _load() if x.get("vid") != vid]
     links.append({"vid": vid, "url": f"https://www.youtube.com/watch?v={vid}",
                   "title": title, "added": time.time()})
     _save(links)
@@ -114,19 +128,41 @@ def add(url: str, title: str = "", fetch: bool = True) -> dict:
             "fetching": bool(fetching)}
 
 
+def _add_episode(url: str, text: str) -> dict:
+    import hashlib
+
+    from . import podcast_resolve
+    got = podcast_resolve.episode(url, text)
+    if not got:
+        raise ValueError("couldn't find that episode's audio: try sharing it with its title, or paste the show's RSS feed into Practice")
+    ep = hashlib.sha256(got["audio"].encode()).hexdigest()[:12]
+    links = [x for x in _load() if x.get("ep") != ep]
+    links.append({"ep": ep, "url": url, "audio": got["audio"], "title": got.get("title") or url,
+                  "show": got.get("show"), "art": got.get("art"), "published": got.get("published"),
+                  "duration_s": got.get("duration_s"), "added": time.time()})
+    _save(links)
+    return {"added": "podcast", "id": f"podcast-link:ep-{ep}", "title": got.get("title") or url,
+            "show": got.get("show"), "fetching": False}
+
+
 def remove(key: str, keep_link: bool = False) -> bool:
     """Forget a link (``podcast-link:<vid>`` or the bare id) and delete its
     download; with `keep_link`, delete only the download."""
     vid = key.split(":", 1)[1] if key.startswith("podcast-link:") else key
     links = _load()
-    if not any(x["vid"] == vid for x in links):
+    if not any(_key(x) == vid for x in links):
         return False
+    if vid.startswith("ep-"):
+        # An episode is its link alone: nothing downloaded to delete.
+        if not keep_link:
+            _save([x for x in links if _key(x) != vid])
+        return True
     d = folder()
     if d.is_dir():
         for p in d.glob(f"*[[]{vid}[]]*"):
             p.unlink(missing_ok=True)
     if not keep_link:
-        _save([x for x in links if x["vid"] != vid])
+        _save([x for x in links if _key(x) != vid])
     return True
 
 
@@ -136,6 +172,13 @@ def items() -> list[dict]:
 
     out = []
     for x in sorted(_load(), key=lambda x: -float(x.get("added") or 0)):
+        if x.get("ep"):
+            out.append({"id": f"podcast-link:ep-{x['ep']}", "uri": x["audio"], "title": x.get("title") or None,
+                        "art": x.get("art"), "at": float(x.get("added") or 0), "session": None,
+                        "inferred": False, "kind": "podcast", "author": x.get("show") or None,
+                        "series": None, "narrator": None, "genre": None, "downloaded": False,
+                        "size": None, "published": x.get("published"), "duration_s": x.get("duration_s")})
+            continue
         f = file_for(x["vid"])
         out.append({"id": f"podcast-link:{x['vid']}", "uri": str(f) if f else f"yt:{x['url']}",
                     "title": x.get("title") or None, "art": music_recent.art(x["vid"]),
@@ -192,7 +235,7 @@ def shrink(path: Path, kbps: Optional[int] = None) -> Path:
 def fetch(vid: str) -> Optional[Path]:
     """Download `vid` on the phone, bring it here, delete the phone's copy,
     shrink it. The file, or None when any step failed."""
-    if not any(x["vid"] == vid for x in _load()) or not vid.replace("-", "").replace("_", "").isalnum():
+    if not any(x.get("vid") == vid for x in _load()) or not vid.replace("-", "").replace("_", "").isalnum():
         return None
     have = file_for(vid)
     if have and have.parent == folder():

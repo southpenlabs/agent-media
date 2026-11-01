@@ -28,6 +28,18 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
     if not (text or "").strip():
         return False, {"error": "nothing shared"}
     channel = channel if channel in ("music", "book") else ""
+    # A podcast app's episode link: its audio, on the book channel, not a
+    # page handed to the music player (David, 1 Nov 2026: "I tried to share
+    # a podcast with sasonica but it came through as music").
+    ep = _podcast_episode(text) if channel != "music" else None
+    if ep:
+        verdict = sharemod.Verdict(channel="book", content_type="podcast",
+                                   reason=f"a podcast episode{' of ' + ep['show'] if ep.get('show') else ''}",
+                                   title=ep.get("title") or "")
+        threading.Thread(target=share_listener._play, args=(ep["audio"], verdict, ""),
+                         daemon=True, name="share-dispatch").start()
+        return True, {"url": ep["audio"], "channel": "book", "title": verdict.title,
+                      "line": verdict.line()}
     try:
         url, verdict = sharemod.share(text, channel=channel,
                                       probe_timeout=share_listener.PROBE_TIMEOUT_S)
@@ -37,3 +49,23 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
                      daemon=True, name="share-dispatch").start()
     return True, {"url": url, "channel": verdict.channel, "title": verdict.title,
                   "line": verdict.line()}
+
+
+def _podcast_episode(text: str) -> dict | None:
+    """The podcast episode a shared link is (agent_media_core.podcast_resolve),
+    for any link but YouTube's and the music sites': those keep the share
+    pipeline's own probe."""
+    from agent_media_core import podcast_resolve
+    from agent_media_core import share as sharemod
+
+    url = sharemod.extract_url(text)
+    if not url:
+        return None
+    host = (url.split("/")[2] if "//" in url else "").lower()
+    if sharemod._host_matches(host, ("youtube.com", "youtu.be", *sharemod.MUSIC_HOSTS)) \
+            or (host.endswith("spotify.com") and "/episode/" not in url):
+        return None
+    try:
+        return podcast_resolve.episode(url, text, search=podcast_resolve.looks_like_podcast(url))
+    except Exception:  # noqa: BLE001 — the share pipeline decides as before
+        return None
