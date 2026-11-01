@@ -22,3 +22,19 @@ CREATE TABLE IF NOT EXISTS durations (
   seconds INTEGER NOT NULL,
   at INTEGER NOT NULL
 );
+-- Where a person is from (a teacher, an artist, an author, a show), as
+-- {country, state, city, region, photo}: a place reported by installs, a
+-- fact once two agree on country, state and city, or a trusted one reports it.
+CREATE TABLE IF NOT EXISTS place_reports (
+  key TEXT NOT NULL,              -- teacher|artist|author|show:<name, letters and digits>
+  install TEXT NOT NULL,
+  value TEXT NOT NULL,            -- the place, JSON
+  at INTEGER NOT NULL,
+  PRIMARY KEY (key, install)
+);
+CREATE INDEX IF NOT EXISTS place_reports_install ON place_reports (install, at);
+CREATE TABLE IF NOT EXISTS places (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  at INTEGER NOT NULL
+);

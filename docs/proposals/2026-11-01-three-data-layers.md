@@ -4,7 +4,9 @@ David, 1 Nov 2026: "central metadata vs pier to pier vs private ... I'm
 thinking about a combination of all three for sasonica ... What do you
 think?" — then "y" to writing it up. Status: **central lengths built** (steps 2 and 3 below, 1 Nov 2026:
 `deploy/facts` live at https://sasonica.com/facts/v1, seeded with red5's 80
-measured lengths; `agent_media_core/central_facts.py`); the rest proposed.
+measured lengths; `agent_media_core/central_facts.py`), and teachers' places
+(step 4, the same day: 441 seeded, keys `teacher:` and also `artist:`, `author:`,
+`show:` for media people); the rest proposed.
 
 ## Decided (David, 1 Nov 2026)
 
