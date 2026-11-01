@@ -616,12 +616,17 @@ def _insight_timer(name: str) -> Optional[dict]:
     uid = found["id"]
     u = _get_json(IT_USER.format(id=uid))
     region = u.get("region") if isinstance(u.get("region"), dict) else {}
-    where = ", ".join(x for x in (region.get("name"), region.get("country_name")) if x) if region else (u.get("region") or "")
-    country = (region.get("country_name") if region else "") or (where.rsplit(",", 1)[-1].strip() if where else "")
+    where = (region.get("name") or ", ".join(x for x in (region.get("city"), region.get("country") or region.get("country_name")) if x)) \
+        if region else (u.get("region") or "")
+    country = (region.get("country") or region.get("country_name") if region else "") or (where.rsplit(",", 1)[-1].strip() if where else "")
+    loc = (region.get("location") or {}) if region else {}
     return {"source": "insight-timer", "name": u.get("name") or name,
             "photo": IT_PICTURE.format(id=uid) if u.get("has_avatar") else None,
             "description": (u.get("publisher_description") or "").strip() or None,
-            "region": where or None, "country": country or None, "website": u.get("website") or None,
+            "region": where or None, "country": country or None,
+            "state": (region.get("state_long_name") or region.get("state") or None) if region else None,
+            "city": (region.get("city") or None) if region else None,
+            "lat": loc.get("lat"), "lon": loc.get("lon"), "website": u.get("website") or None,
             "url": u.get("public_url") or None,
             "followers": u.get("publisher_follower_count") or u.get("follower_count") or None,
             "free_tracks": u.get("total_free_tracks") or None,
@@ -671,8 +676,50 @@ def _country(profile: Optional[dict]) -> Optional[str]:
     return raw
 
 
+def _state_city(profile: dict) -> tuple[Optional[str], Optional[str]]:
+    """A profile's state and city: Insight Timer's own, else from its
+    region's words ("Manly NSW 2095, Australia" is Manly, New South
+    Wales; "Asheville, NC" Asheville, North Carolina)."""
+    state, city = profile.get("state"), profile.get("city")
+    if state or city:
+        return _state_name(state), city
+    parts = [p.strip() for p in (profile.get("region") or "").split(",") if p.strip()]
+    if len(parts) >= 2:
+        first = re.sub(r"\s+\w*\d\w*$", "", parts[0])
+        words = first.split()
+        if len(parts) == 2 and len(words) > 1 and words[-1].upper() in _AU_STATES:
+            return _state_name(words[-1]), " ".join(words[:-1])
+        if len(parts) >= 3:
+            return _state_name(re.sub(r"\s+\w*\d\w*$", "", parts[1])), first
+        if parts[1].upper() in _US_STATES | _AU_STATES | _CA_PROVINCES:
+            return _state_name(parts[1]), first
+        return None, first
+    return None, None
+
+
+_STATE_NAMES = {
+    "NSW": "New South Wales", "VIC": "Victoria", "QLD": "Queensland", "TAS": "Tasmania", "ACT": "Australian Capital Territory",
+    "NT": "Northern Territory", "BC": "British Columbia", "AB": "Alberta", "ON": "Ontario", "QC": "Quebec",
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
+    "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+    "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota",
+    "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"}
+
+
+def _state_name(state: Optional[str]) -> Optional[str]:
+    """A state's name, not its code ("CA" is California)."""
+    if not state:
+        return None
+    return _STATE_NAMES.get(state.strip().upper(), state.strip())
+
+
 def teacher_places(names: list[str]) -> dict:
-    """`{name: {"region", "country", "photo"}}` for the teachers whose
+    """`{name: {"region", "country", "state", "city", "photo"}}` for the teachers whose
     profile is kept (none for one not found), for the Teachers list's
     Where filter; those never looked up are looked up in the background, a
     few seconds apart, and a next listing has them."""
@@ -688,7 +735,9 @@ def teacher_places(names: list[str]) -> dict:
             continue
         pr = hit.get("profile")
         if pr:
-            out[name] = {"region": pr.get("region"), "country": _country(pr), "photo": pr.get("photo")}
+            state, city = _state_city(pr)
+            out[name] = {"region": pr.get("region"), "country": _country(pr), "state": state, "city": city,
+                         "photo": pr.get("photo")}
     _fill_profiles(missing)
     return out
 

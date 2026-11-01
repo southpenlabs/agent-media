@@ -183,7 +183,8 @@ def test_a_teachers_profile_is_an_exact_match_kept_a_month(monkeypatch):
             return [{"items": [{"id": "x1", "name": "Pura Rasa Fans", "is_publisher": True},
                                {"id": "u1", "name": "Pura  Rasa", "is_publisher": True}]}]
         return {"name": "Pura Rasa", "has_avatar": True, "publisher_description": "Rasa is the voice…",
-                "region": {"name": "Vilnius", "country_name": "Lithuania"}, "website": "https://purarasa.com",
+                "region": {"name": "Vilnius, Lithuania", "city": "Vilnius", "state": "Vilnius", "country": "Lithuania",
+                           "location": {"lat": 54.7, "lon": 25.3}}, "website": "https://purarasa.com",
                 "public_url": "https://insighttimer.com/pura.rasa", "publisher_follower_count": 92037,
                 "total_free_tracks": 150}
     monkeypatch.setattr(L, "_get_json", fake)
@@ -208,7 +209,8 @@ def test_teacher_places_from_the_kept_profiles(monkeypatch):
     asked = []
     monkeypatch.setattr(L, "_fill_profiles", lambda names: asked.extend(names))
     got = L.teacher_places(["Pura Rasa", "Calm Minutes", "Nid Ra"])
-    assert got == {"Pura Rasa": {"region": "Vilnius, Lithuania", "country": "Lithuania", "photo": "p.jpg"}}
+    assert got == {"Pura Rasa": {"region": "Vilnius, Lithuania", "country": "Lithuania", "state": None,
+                                 "city": "Vilnius", "photo": "p.jpg"}}
     assert asked == ["Nid Ra"], "only one never looked up is asked for"
 
 
@@ -217,3 +219,12 @@ def test_countries_are_written_one_way():
     assert [c(country="USA"), c(region="Asheville, NC"), c(country="UK"), c(region="Manly NSW 2095, Australia"),
             c(region="Toronto, ON"), c(country="Lithuania"), c(country="Nevada"), c(country="Manchester UK"), L._country(None)] == \
         ["United States", "United States", "United Kingdom", "Australia", "Canada", "Lithuania", "United States", "United Kingdom", None]
+
+
+def test_state_and_city_from_a_profile():
+    sc = lambda **p: L._state_city(p)  # noqa: E731
+    assert sc(state="CA", city="Los Angeles") == ("California", "Los Angeles")
+    assert sc(region="Manly NSW 2095, Australia") == ("New South Wales", "Manly")
+    assert sc(region="Asheville, NC") == ("North Carolina", "Asheville")
+    assert sc(region="Stonehouse GL10, UK") == (None, "Stonehouse")
+    assert sc(region="Lithuania") == (None, None)

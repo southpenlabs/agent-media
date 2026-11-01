@@ -7732,7 +7732,9 @@ names the first time they are read.
   that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
   `practice-plays.json`). The app groups and orders by these itself.
-- The answer also has `"teachers": {name: {"region", "country", "photo"}}`
+- The answer also has `"teachers": {name: {"region", "country", "state", "city", "photo"}}`
+  (state and city from Insight Timer's region, a state's name never its
+  code; for a profile kept before they were, from the region's words)
   (1 Nov 2026; David: "Can we add a location based filter for teachers")
   for each teacher whose profile is kept (below), for the Teachers list's
   Where filter; teachers never looked up are looked up in the background,
