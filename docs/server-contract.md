@@ -7732,6 +7732,15 @@ names the first time they are read.
   that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
   `practice-plays.json`). The app groups and orders by these itself.
+  A YouTube link's or an episode's length is first asked of the shared
+  store (1 Nov 2026; `agent_media_core.central_facts`, the service
+  `deploy/facts` at https://sasonica.com/facts/v1; the three-layers
+  proposal), unsigned and by key only (`yt:<id>`,
+  `audio:<sha256(url)[:32]>`); one this install measured itself is sent
+  there, signed with the install key, at most every ten minutes from a
+  listing (`practice-durations-shared.json` says which were had or sent).
+  A file's and the agent's own are never sent. `MEDIA_FACTS_URL=-` turns
+  both off.
 - The answer also has `"teachers": {name: {"region", "country", "state", "city", "photo"}}`
   (state and city from Insight Timer's region, a state's name never its
   code; for a profile kept before they were, from the region's words)

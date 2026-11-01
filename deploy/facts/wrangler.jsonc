@@ -1,0 +1,27 @@
+// sasonica.com/facts — public facts installs share (src/index.ts; agent-media
+// docs/proposals/2026-11-01-three-data-layers.md). South Pen Labs account, on
+// the sasonica.com zone, beside /feedback. The route is /facts/* only.
+//
+// First time:
+//     npx wrangler d1 create sasonica-facts           # put its id below
+//     npx wrangler d1 execute sasonica-facts --remote --file schema.sql
+// Then:
+//     CLOUDFLARE_API_TOKEN=$SPL_CLOUDFLARE_TOKEN npx wrangler deploy
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sasonica-facts",
+  "main": "src/index.ts",
+  "account_id": "d255073199b24b2895921acfb9dd761f",
+  "routes": [{ "pattern": "sasonica.com/facts/*", "zone_name": "sasonica.com" }],
+  "compatibility_date": "2026-07-01",
+  // What an install looks up is its own business: no invocation logs.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  "d1_databases": [{ "binding": "DB", "database_name": "sasonica-facts", "database_id": "809dee51-5451-4cec-9362-f65655c307e2" }],
+  // Install ids whose report is a fact at once: red5 (David's).
+  "vars": { "TRUSTED": "wgg5vlgrugd5ktj3kytuzyrfve" },
+  // Requests per source address (on top of the per-install limit in the code).
+  "ratelimits": [
+    { "name": "READS", "namespace_id": "4817", "simple": { "limit": 120, "period": 60 } },
+    { "name": "WRITES", "namespace_id": "4818", "simple": { "limit": 30, "period": 60 } }
+  ]
+}

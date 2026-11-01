@@ -466,7 +466,8 @@ def _fill_durations(missing: list[dict]) -> None:
 
     def run():
         try:
-            got = _measure_all(todo)
+            shared = _from_central(todo)
+            got = {**_measure_all([i for i in todo if i["id"] not in shared]), **shared}
             d = _tried()
             for it in todo:
                 d[it["id"]] = got.get(it["id"]) or {"failed": time.time()}
@@ -479,6 +480,68 @@ def _fill_durations(missing: list[dict]) -> None:
             _FILLING[0] = False
 
     threading.Thread(target=run, name="practice-durations", daemon=True).start()
+
+
+# ---- the lengths every install shares (central_facts; the three-layers proposal) --
+
+def _shared_path() -> Path:
+    return state_dir() / "practice-durations-shared.json"
+
+
+def _shared() -> dict:
+    """`{id: "from" | "sent"}`: a length had from the shared store, or one
+    this install measured and sent to it. Neither is sent (again)."""
+    try:
+        d = json.loads(_shared_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _mark_shared(ids: list[str], how: str) -> None:
+    if not ids:
+        return
+    d = _shared()
+    d.update({i: how for i in ids})
+    p = _shared_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(d))
+    tmp.replace(p)
+
+
+def _from_central(todo: list[dict]) -> dict:
+    """`{id: seconds}` the shared store already knows, for those of `todo`
+    that have a shared key (never a file or the agent's own)."""
+    from . import central_facts
+
+    keys = {central_facts.key_for(i): i["id"] for i in todo}
+    keys.pop(None, None)
+    if not keys:
+        return {}
+    got = {keys[k]: n for k, n in central_facts.lookup(list(keys)).items() if k in keys}
+    _mark_shared(list(got), "from")
+    return got
+
+
+def to_report() -> dict:
+    """`{id: (key, seconds)}`: lengths this install measured itself that the
+    shared store has not been sent yet."""
+    from . import central_facts
+
+    lengths = _durations()
+    shared = _shared()
+    out = {}
+    for it in _all():
+        if it["id"] in lengths and it["id"] not in shared:
+            key = central_facts.key_for(it)
+            if key:
+                out[it["id"]] = (key, int(lengths[it["id"]]))
+    return out
+
+
+def mark_reported(ids: list[str]) -> None:
+    _mark_shared(ids, "sent")
 
 
 def feeds() -> list[dict]:

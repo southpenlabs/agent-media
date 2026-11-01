@@ -25,10 +25,48 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
+import time
 
 from . import auth
 
 _CMD_TIMEOUT_S = 60
+#: How often a listing may send the lengths this install measured to the
+#: shared store (agent_media_core.central_facts).
+_REPORT_EVERY_S = 600.0
+_reported_at: list = [None]
+
+
+def _report_lengths() -> None:
+    """Send the lengths this install measured and the shared store has not
+    had yet, in the background, at most every _REPORT_EVERY_S. Signed with
+    the install key (tunnel.identity), as feedback is."""
+    from agent_media_core import central_facts
+
+    now = time.monotonic()
+    if not central_facts.base() or (_reported_at[0] is not None and now - _reported_at[0] < _REPORT_EVERY_S):
+        return
+    _reported_at[0] = now
+
+    def run():
+        from agent_media_core import practice_library as lib
+
+        from . import tunnel
+
+        try:
+            todo = lib.to_report()
+            if not todo:
+                return
+            seed, pub, _iid = tunnel.identity()
+            ok, got = central_facts.report({k: n for k, n in todo.values()}, seed, pub)
+            if ok:
+                lib.mark_reported(list(todo))
+            else:
+                print(f"practice: sharing lengths failed: {got.get('error')}", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001 — tried again at a later listing
+            print(f"practice: sharing lengths failed: {e}", file=sys.stderr)
+
+    threading.Thread(target=run, name="practice-share-lengths", daemon=True).start()
 
 
 def listing(bearer: str) -> tuple[bool, dict]:
@@ -48,6 +86,7 @@ def listing(bearer: str) -> tuple[bool, dict]:
     except Exception as e:  # noqa: BLE001 — the list without its places
         print(f"practice: teacher places failed: {e}", file=sys.stderr)
         places = {}
+    _report_lengths()
     return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places}
 
 

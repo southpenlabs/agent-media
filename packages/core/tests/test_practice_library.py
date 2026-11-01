@@ -221,6 +221,59 @@ def test_countries_are_written_one_way():
         ["United States", "United States", "United Kingdom", "Australia", "Canada", "Lithuania", "United States", "United Kingdom", None]
 
 
+# ---- the lengths every install shares (central_facts) -----------------------------
+
+def test_only_public_items_have_a_shared_key(tmp_path):
+    from agent_media_core import central_facts as C
+
+    assert C.key_for({"id": "yt:AAAAAAAAAAA", "source": "youtube", "_uri": "yt:https://…"}) == "yt:AAAAAAAAAAA"
+    k = C.key_for({"id": "pod:x", "source": "podcast", "_uri": "https://cdn.example/a.mp3"})
+    assert k.startswith("audio:") and len(k) == 38
+    assert C.key_for({"id": "file:x", "source": "file", "_uri": str(tmp_path / "mine.mp3")}) is None
+    assert C.key_for({"id": "made:x", "source": "made", "_uri": "/home/me/clip.mp3"}) is None
+
+
+def test_a_length_the_shared_store_knows_is_not_measured_or_sent(monkeypatch):
+    from agent_media_core import central_facts as C
+
+    L.add("https://www.youtube.com/watch?v=AAAAAAAAAAA", "One — Teacher")
+    L.add("https://www.youtube.com/watch?v=BBBBBBBBBBB", "Two — Teacher")
+    asked = []
+    monkeypatch.setattr(C, "lookup", lambda keys: asked.extend(keys) or {"yt:AAAAAAAAAAA": 600})
+    measured = []
+    monkeypatch.setattr(L, "_measure_all", lambda todo: measured.extend(i["id"] for i in todo) or {"yt:BBBBBBBBBBB": 300})
+    monkeypatch.delenv("MEDIA_PRACTICE_DURATIONS")
+    # The lengths are filled in the background: here, at once.
+    monkeypatch.setattr("threading.Thread", lambda target, **kw: type("T", (), {"start": lambda self: target()})())
+    L.items()
+    assert sorted(asked) == ["yt:AAAAAAAAAAA", "yt:BBBBBBBBBBB"]
+    assert measured == ["yt:BBBBBBBBBBB"]
+    lengths = {i["id"]: i["duration_s"] for i in L.items()}
+    assert lengths["yt:AAAAAAAAAAA"] == 600 and lengths["yt:BBBBBBBBBBB"] == 300
+    # Only what this install measured goes to the store, and only once.
+    assert L.to_report() == {"yt:BBBBBBBBBBB": ("yt:BBBBBBBBBBB", 300)}
+    L.mark_reported(["yt:BBBBBBBBBBB"])
+    assert L.to_report() == {}
+
+
+def test_a_file_in_the_practice_folder_is_never_sent(tmp_path):
+    folder = tmp_path / "Practice"
+    folder.mkdir()
+    (folder / "Mine.mp3").write_bytes(b"")
+    fid = next(i["id"] for i in L.items() if i["source"] == "file")
+    L._durations_path().parent.mkdir(parents=True, exist_ok=True)
+    L._durations_path().write_text(json.dumps({fid: 120}))
+    assert L.to_report() == {}
+
+
+def test_the_shared_store_off_asks_nothing(monkeypatch):
+    from agent_media_core import central_facts as C
+
+    monkeypatch.setattr(C, "_post", lambda *a, **k: pytest.fail("asked the store while off"))
+    assert C.lookup(["yt:AAAAAAAAAAA"]) == {}
+    assert C.report({"yt:AAAAAAAAAAA": 5}, b"\0" * 32, b"\0" * 32) == (False, {"error": "off"})
+
+
 def test_state_and_city_from_a_profile():
     sc = lambda **p: L._state_city(p)  # noqa: E731
     assert sc(state="CA", city="Los Angeles") == ("California", "Los Angeles")

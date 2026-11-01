@@ -94,6 +94,7 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")
     # … and a teacher's profile from Insight Timer (practice_library.teacher_profile).
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "0")
+    monkeypatch.setenv("MEDIA_FACTS_URL", "-")
     # A shared podcast link is looked up on its page and in the iTunes
     # directory (podcast_resolve): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")

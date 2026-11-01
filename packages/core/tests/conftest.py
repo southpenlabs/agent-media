@@ -401,5 +401,6 @@ def _no_practice_lookups(monkeypatch):
     background (practice_library._fill_durations): never from a test."""
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "0")
+    monkeypatch.setenv("MEDIA_FACTS_URL", "-")
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
