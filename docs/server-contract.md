@@ -7725,6 +7725,17 @@ names the first time they are read.
   that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
   `practice-plays.json`). The app groups and orders by these itself.
+- `GET /practice/teacher?name=` (1 Nov 2026; David: "Can we add a profile
+  page for teachers?") → `{"ok", "name", "profile": {"source":
+  "insight-timer", "name", "photo", "description", "region", "website",
+  "url", "followers", "free_tracks", "courses", "yoga"} | null}`: who a
+  teacher is, from Insight Timer's public search and profile data, looked
+  up once and kept in `practice-teachers.json` (a month; a teacher not
+  found is asked again after a week). Only a teacher whose name matches
+  exactly (letters and digits) counts, so no one is given someone else's
+  page; `profile` is null for one not on Insight Timer (a podcast's show).
+  404 for a name no item's `teacher` holds. `photo` is Insight Timer's
+  public image URL. MEDIA_PRACTICE_PROFILES=0 turns the lookups off.
 - `POST /practice {"action": "play", "id", "target"?, "resume"?}` →
   `{"ok", "playing", "title"}`: plays it on the book channel, from the
   start unless `resume`. A recorded one is then eased out for a reply as

@@ -92,6 +92,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A practice's length is looked up with yt-dlp or ffprobe in the
     # background (practice_library._fill_durations): never from a test.
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")
+    # … and a teacher's profile from Insight Timer (practice_library.teacher_profile).
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "0")
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would

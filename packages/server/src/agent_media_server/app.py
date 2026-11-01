@@ -431,7 +431,7 @@ MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # Saved practice: meditations, yoga, any practice (practice.py, §6.45).
-PRACTICE_PATHS = frozenset({"/practice"})
+PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
 MEDIA_LINK_PATHS = frozenset({"/media/links"})
@@ -764,6 +764,11 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _audio(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
         return _music(h, method, path)
+    if path == "/practice/teacher" and method == "GET":
+        from . import practice
+        ok, detail = practice.teacher((parse_qs(h.path.partition("?")[2]).get("name") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        return True
     if path in PRACTICE_PATHS and method in ("GET", "POST"):
         return _practice(h, method)
     if path in MEDIA_LINK_PATHS and method in ("GET", "POST"):

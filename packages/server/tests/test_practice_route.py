@@ -60,3 +60,17 @@ def test_play_takes_only_an_id_from_the_list(server, shelf, signed_in):
     assert res.status == 404
     res, obj = call(server, "POST", "/practice", {"action": "dance"}, AUTH)
     assert res.status == 400
+
+
+def test_a_teachers_profile_only_for_a_teacher_in_the_list(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import practice_library as lib
+    monkeypatch.setattr(lib, "items", lambda: [{"id": "yt:A", "title": "Sleep — Pura Rasa", "teacher": "Pura Rasa"}])
+    monkeypatch.setattr(lib, "teacher_profile", lambda name: {"name": name, "profile": {"region": "Lithuania"}})
+    res, obj = call(server, "GET", "/practice/teacher?name=Pura%20Rasa", None, AUTH)
+    assert res.status == 200 and obj["profile"] == {"region": "Lithuania"}
+    res, obj = call(server, "GET", "/practice/teacher?name=Someone%20Else", None, AUTH)
+    assert res.status == 404
+
+
+def test_a_teachers_profile_needs_a_credential(server):
+    assert call(server, "GET", "/practice/teacher?name=Pura%20Rasa")[0].status != 200

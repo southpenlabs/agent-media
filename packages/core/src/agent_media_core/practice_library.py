@@ -563,6 +563,104 @@ def remove(key: str) -> bool:
     return len(d["feeds"]) < before
 
 
+# ---- a teacher's profile -----------------------------------------------------------
+
+#: Insight Timer's public search and profile data (what its web app reads).
+IT_SEARCH = "https://search.insighttimer-api.net/api/v1/top"
+IT_USER = "https://users.insighttimer.com/{id}/data/user.json"
+IT_PICTURE = "https://users.insighttimer.com/{id}/pictures/square_medium.jpeg"
+#: A profile found is kept a month; a teacher not found is asked again after a week.
+PROFILE_TTL_S = 30 * 86400
+PROFILE_MISS_TTL_S = 7 * 86400
+
+
+def _profiles_path() -> Path:
+    return state_dir() / "practice-teachers.json"
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def _get_json(url: str, timeout: float = 15.0):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (agent-media practice)"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _insight_timer(name: str) -> Optional[dict]:
+    """The Insight Timer teacher named exactly `name` (letters and digits
+    compared), as a profile; None when there is no such teacher."""
+    import urllib.parse
+    q = urllib.parse.urlencode({"content_langs": "en", "device_lang": "en", "limit": 15, "offset": 0,
+                                "publishers_only_users": "true", "query": name, "search_friends": "false"})
+    found = None
+
+    def walk(o):
+        nonlocal found
+        if found is not None:
+            return
+        if isinstance(o, dict):
+            if o.get("is_publisher") and _norm(o.get("name", "")) == _norm(name) and o.get("id"):
+                found = o
+                return
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(_get_json(f"{IT_SEARCH}?{q}"))
+    if not found:
+        return None
+    uid = found["id"]
+    u = _get_json(IT_USER.format(id=uid))
+    region = u.get("region") if isinstance(u.get("region"), dict) else {}
+    where = ", ".join(x for x in (region.get("name"), region.get("country_name")) if x) if region else (u.get("region") or "")
+    return {"source": "insight-timer", "name": u.get("name") or name,
+            "photo": IT_PICTURE.format(id=uid) if u.get("has_avatar") else None,
+            "description": (u.get("publisher_description") or "").strip() or None,
+            "region": where or None, "website": u.get("website") or None,
+            "url": u.get("public_url") or None,
+            "followers": u.get("publisher_follower_count") or u.get("follower_count") or None,
+            "free_tracks": u.get("total_free_tracks") or None,
+            "courses": u.get("total_courses") or None,
+            "yoga": bool(u.get("is_yoga_teacher"))}
+
+
+def teacher_profile(name: str, fresh: bool = False) -> dict:
+    """`{"name", "profile": {...} | None}`: who a teacher is, from Insight
+    Timer's public profile (photo, description, region, website, followers,
+    free tracks), looked up once and kept in ``practice-teachers.json``.
+    Only an exact name match counts, so a teacher is never given someone
+    else's page; one not found is asked again after a week."""
+    name = (name or "").strip()
+    if not name:
+        return {"name": name, "profile": None}
+    try:
+        kept = json.loads(_profiles_path().read_text())
+    except (OSError, ValueError):
+        kept = {}
+    key = _norm(name)
+    hit = kept.get(key) if isinstance(kept.get(key), dict) else None
+    ttl = PROFILE_TTL_S if hit and hit.get("profile") else PROFILE_MISS_TTL_S
+    if hit and not fresh and time.time() - float(hit.get("at") or 0) < ttl:
+        return {"name": name, "profile": hit.get("profile")}
+    if os.environ.get("MEDIA_PRACTICE_PROFILES") == "0":
+        return {"name": name, "profile": (hit or {}).get("profile")}
+    try:
+        profile = _insight_timer(name)
+    except Exception:  # noqa: BLE001 — the last one known, or none
+        return {"name": name, "profile": (hit or {}).get("profile")}
+    kept[key] = {"profile": profile, "at": time.time()}
+    p = _profiles_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(kept))
+    tmp.replace(p)
+    return {"name": name, "profile": profile}
+
+
 def find(item_id: str) -> Optional[dict]:
     return next((i for i in _all() if i["id"] == item_id), None)
 

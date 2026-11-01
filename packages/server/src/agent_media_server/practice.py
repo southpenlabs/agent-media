@@ -8,6 +8,8 @@ which also means it could be used for any kind of practise" — renamed from
 YouTube links, the Practice folder, podcast feeds and the meditations the
 agent wrote.
 
+  GET  /practice/teacher?name= → {"ok", "name", "profile": {photo, description, region,
+                       website, url, followers, free_tracks, courses, source} | null}
   GET  /practice → {"ok", "items": [{id, title, source, …}], "feeds": [{url, title}],
                        "folder"}
   POST /practice {"action": "play", "id", "target"?, "resume"?}
@@ -79,3 +81,17 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
     return False, {"error": "action must be play, add or remove"}
+
+
+def teacher(name: str, bearer: str) -> tuple[bool, dict]:
+    """`GET /practice/teacher?name=` — a teacher's profile page: who they
+    are (practice_library.teacher_profile), for a name the list holds."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from agent_media_core import practice_library as lib
+
+    name = (name or "").strip()
+    if not name or not any((i.get("teacher") or "") == name for i in lib.items()):
+        return False, {"error": "name must be a teacher from GET /practice", "status": 404}
+    return True, lib.teacher_profile(name)

@@ -171,3 +171,30 @@ def test_the_old_meditation_files_are_moved_across_once():
     assert [(i["title"], i["plays"]) for i in got] == [("Kept", 4)]
     assert not old.exists() and (L.state_dir() / "practice.json").exists()
     assert (L.state_dir() / "practice-plays.json").exists()
+
+
+def test_a_teachers_profile_is_an_exact_match_kept_a_month(monkeypatch):
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
+    calls = []
+
+    def fake(url, timeout=15.0):
+        calls.append(url)
+        if url.startswith(L.IT_SEARCH):
+            return [{"items": [{"id": "x1", "name": "Pura Rasa Fans", "is_publisher": True},
+                               {"id": "u1", "name": "Pura  Rasa", "is_publisher": True}]}]
+        return {"name": "Pura Rasa", "has_avatar": True, "publisher_description": "Rasa is the voice…",
+                "region": {"name": "Vilnius", "country_name": "Lithuania"}, "website": "https://purarasa.com",
+                "public_url": "https://insighttimer.com/pura.rasa", "publisher_follower_count": 92037,
+                "total_free_tracks": 150}
+    monkeypatch.setattr(L, "_get_json", fake)
+    got = L.teacher_profile("Pura Rasa")["profile"]
+    assert got["photo"].endswith("/u1/pictures/square_medium.jpeg"), "the exact name, not the first result"
+    assert (got["region"], got["followers"], got["free_tracks"]) == ("Vilnius, Lithuania", 92037, 150)
+    n = len(calls)
+    assert L.teacher_profile("Pura Rasa")["profile"] == got and len(calls) == n, "kept, not asked again"
+
+
+def test_a_teacher_not_on_insight_timer_has_no_profile(monkeypatch):
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
+    monkeypatch.setattr(L, "_get_json", lambda url, timeout=15.0: [{"items": [{"id": "x1", "name": "Calm Minutes Daily", "is_publisher": True}]}])
+    assert L.teacher_profile("Calm Minutes") == {"name": "Calm Minutes", "profile": None}

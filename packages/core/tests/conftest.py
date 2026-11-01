@@ -400,3 +400,4 @@ def _no_practice_lookups(monkeypatch):
     """A practice's length is looked up with yt-dlp or ffprobe in the
     background (practice_library._fill_durations): never from a test."""
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "0")
