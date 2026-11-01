@@ -4,6 +4,20 @@ David, 1 Nov 2026: "central metadata vs pier to pier vs private ... I'm
 thinking about a combination of all three for sasonica ... What do you
 think?" — then "y" to writing it up. Status: **proposal, nothing built.**
 
+## Decided (David, 1 Nov 2026)
+
+- Central is built **now**, not when a second install appears.
+- It lives on **sasonica.com**, beside the feedback service: a Worker like
+  `deploy/feedback`, at `https://sasonica.com/facts/v1`, signed with the
+  install key the feedback service already uses (tunnel.identity).
+- Music stays out of central: **MusicBrainz is the central layer** for
+  track details.
+- Peer to peer is **Matrix only**: one encrypted transport that delivers
+  while the other server is offline. A direct server-to-server link was
+  weighed (no middleman, but both servers must be up and it is a second
+  protocol to secure) and left out; it can be added if a homeserver ever
+  gets in the way.
+
 ## The rule
 
 Each layer holds only one kind of data. Which layer a piece of data
@@ -92,14 +106,3 @@ share. A group's "what we practised" is opt-in per person, per group.
 5. **Peer-to-peer shares over Matrix**, starting with one practice item or
    playlist to one person.
 6. **Groups**, if wanted.
-
-## Open questions
-
-- Does central start before there is a second outside install? Step 2 is
-  small, but with only red5 it caches for no one else.
-- Is `sasonica.com` the host, beside the feedback service and relay?
-- Peer to peer without Matrix: is a direct server-to-server link (the
-  public address and a pairing token) worth having for two people who
-  both run servers, or is Matrix the only transport?
-- Music: does the same split apply to track metadata, or does
-  MusicBrainz already serve as the central layer there?
