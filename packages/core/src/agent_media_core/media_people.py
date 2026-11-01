@@ -117,7 +117,11 @@ def _place(qid: str) -> dict:
     if not countries or countries[0] == ent.get("id") or "Q6256" in _claims(ent, "P31"):
         return {"city": None, "state": None, "country": _label(ent)}
     cid = countries[0]
-    country = _label(_wd(cid))
+    cent = _wd(cid)
+    if (cent.get("claims") or {}).get("P576"):
+        # A country that is gone (Roman Empire): a historical place, not where they are.
+        return {}
+    country = _label(cent)
     up = [q for q in _claims(ent, "P131") if q != ent.get("id")]
     if not up or up[0] == cid:
         # Straight under its country: a state (Arizona), not a city.

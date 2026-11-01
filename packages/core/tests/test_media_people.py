@@ -110,3 +110,11 @@ def test_only_current_claims_count():
         {"rank": "preferred", "mainsnak": {"datavalue": {"value": {"id": "Q145"}}}},
         {"rank": "deprecated", "mainsnak": {"datavalue": {"value": {"id": "Q1"}}}}]}}
     assert P._claims(ent, "P17") == ["Q145", "Q105313"]
+
+
+def test_a_place_in_a_country_that_is_gone_is_no_place(monkeypatch):
+    gone = _ent("Q2277", "Roman Empire")
+    gone["entities"]["Q2277"]["claims"]["P576"] = [{"mainsnak": {"datavalue": {"value": {"time": "+0476"}}}}]
+    ents = {"Q2": _ent("Q2", "Londinium", "Q2277"), "Q2277": gone}
+    monkeypatch.setattr(P, "_json", lambda url: next(v for k, v in ents.items() if url.endswith(f"/{k}.json")))
+    assert P._place("Q2") == {}
