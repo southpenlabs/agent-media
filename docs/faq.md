@@ -208,6 +208,19 @@ See also: `packages/core/src/agent_media_core/meditate.py`,
 `practice_library.py`, the `meditate` and `practice_*` MCP tools,
 `server-contract.md` §6.45, `docs/proposals/2026-10-31-relax-and-meditate.md`.
 
+### Can music stop by itself when I fall asleep?
+
+Yes: a sleep timer. Ask in a chat ("stop the music in half an hour", "play
+something calm for 30 minutes"), or `media sleep 30`. Over the last three
+minutes the music and the book channel (audiobooks, meditations, sleep
+stories) fade down, then both stop, and the volume is put back for next
+time. `media sleep` says how long is left; `media sleep off` cancels it.
+`--fade` sets the fade in minutes (`MEDIA_SLEEP_FADE_S`, 180 s, by default).
+A book playing in the Sasonica app is stopped without the fade.
+
+See also: `packages/core/src/agent_media_core/sleep_timer.py`, the
+`sleep_timer` MCP tool.
+
 ### What is calm mode?
 
 Two switches in Settings → Music. **Calm mode** turns it on now; **Calm in

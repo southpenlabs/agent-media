@@ -1212,6 +1212,23 @@ def practice_add(url: str, title: str = "") -> dict:
 
 
 @mcp.tool()
+def sleep_timer(minutes: float, fade_minutes: float = 3.0, target: str = "") -> dict:
+    """A sleep timer: in `minutes`, music and the book channel (audiobooks,
+    meditations, sleep stories) fade out over the last `fade_minutes` and
+    stop. For "stop the music in half an hour", "play something calm for 30
+    minutes" (play it, then this). `minutes` 0 cancels the timer. A new
+    timer replaces the old one."""
+    from . import sleep_timer as st
+    if not minutes:
+        return {"ok": True, "cancelled": st.cancel()}
+    try:
+        s = st.start(minutes, fade_minutes * 60, target=target)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "stops_in_s": s.get("left_s"), "fade_s": s.get("fade_s")}
+
+
+@mcp.tool()
 def book_playlist_new(name: str) -> dict:
     """Create an empty book playlist. Add parts with `book_playlist_add`."""
     created = _state().create_playlist(name, channel="book")

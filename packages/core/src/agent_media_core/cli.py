@@ -5486,6 +5486,30 @@ def cmd_history(a) -> int:
     return 0
 
 
+def cmd_sleep(a) -> int:
+    """`media sleep 30` — music and the book channel fade out and stop in 30
+    minutes; `media sleep off` ends it; `media sleep` says what is set
+    (sleep_timer.py)."""
+    from . import sleep_timer
+    arg = (a.minutes or "").strip().lower()
+    if arg in ("off", "cancel", "stop", "0"):
+        print("sleep timer off" if sleep_timer.cancel() else "no sleep timer was set")
+        return 0
+    if not arg:
+        s = sleep_timer.status()
+        print(f"stops in {int(s['left_s'] // 60)} min {int(s['left_s'] % 60)} s" if s else "no sleep timer")
+        return 0
+    try:
+        minutes = float(arg)
+        fade = None if a.fade is None else float(a.fade) * 60
+        sleep_timer.start(minutes, fade, target=a.target or "")
+    except ValueError as e:
+        print(f"media sleep: {e}", file=sys.stderr)
+        return 1
+    print(f"music and books fade out and stop in {minutes:g} min")
+    return 0
+
+
 def cmd_practice(a) -> int:
     """Saved practice — meditations, yoga, breathwork: recorded (YouTube,
     the folder, podcasts) and the agent's own meditations
@@ -9893,6 +9917,14 @@ def _build_parser() -> argparse.ArgumentParser:
     mp.add_argument("--resume", action="store_true",
                     help="carry on where it was left (a long talk)")
     s.set_defaults(func=cmd_practice)
+    s = sub.add_parser("sleep", help="a sleep timer: music and books fade out "
+                                      "and stop (media sleep 30; media sleep off)")
+    s.add_argument("minutes", nargs="?", default="", help="minutes, or off; "
+                                                          "none says what is set")
+    s.add_argument("--fade", type=float, default=None,
+                   help="minutes of fade before the stop (default 3)")
+    s.add_argument("--target", default="", help="rooms|local|phone")
+    s.set_defaults(func=cmd_sleep)
     s = sub.add_parser("meditate",
                        help="a guided meditation: a script with [[pause: 20]] and "
                             "[[bell]] markers, said slowly over a bed, on the "

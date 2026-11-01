@@ -10,6 +10,8 @@ He picked all four ideas below.
 
 **§2 built (1 Nov 2026): calm.py — Calm mode and Calm in the evenings in Settings → Music.**
 
+**§4 sleep timer built (1 Nov 2026): sleep_timer.py, `media sleep`, MCP `sleep_timer`. Sleep stories: the meditate renderer with a story script.**
+
 ## What exists to build on
 
 - **The music bed** (`music_bed.py`): generated electric-piano-and-pad beds
