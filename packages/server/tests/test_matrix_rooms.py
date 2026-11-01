@@ -389,3 +389,112 @@ def test_the_sync_hands_receipts_on(tmp_path):
     s.subscribe(lambda room, ev: got.append((room, ev["type"])))
     s.poll_once()
     assert got == [(ROOM, "m.receipt")]
+
+
+# --- a portal the bridge closed (2 Nov 2026) ---------------------------------
+
+OLD, NEW = "!old:ryer.org", "!new:ryer.org"
+FB, STEPH = "@facebookbot:ryer.org", "@facebook_615:ryer.org"
+CHANNEL = (FB, "111", "615")
+
+
+class Portals:
+    """Two portals of one Facebook conversation: `OLD`, closed by the bridge,
+    holding David's first message; `NEW`, opened for her reply."""
+
+    def __init__(self):
+        self.rooms = {OLD: [_ev(1, ME, "first, from the friend request")],
+                      NEW: [_ev(5, STEPH, "her reply"), _ev(6, ME, "my answer")]}
+
+    def __call__(self, config, path, params=None, timeout=10.0):
+        room = next(r for r in self.rooms if path.startswith(f"/rooms/{r}") or
+                    path.startswith(f"/rooms/{matrix._q(r)}"))
+        if path.endswith("/joined_members"):
+            return {"joined": {ME: {"display_name": "David"},
+                               STEPH: {"display_name": "Stephanie"}}}
+        if path.endswith("/state"):
+            return [{"type": "m.bridge", "content": {
+                "bridgebot": FB, "channel": {"id": "615", "fi.mau.receiver": "111"},
+                "protocol": {"id": "facebook", "displayname": "Facebook Messenger"}}}]
+        if path.endswith("/state/m.room.name"):
+            return {"name": "Stephanie"}
+        return {"chunk": list(reversed(self.rooms[room]))}
+
+
+@pytest.fixture
+def portals(monkeypatch):
+    monkeypatch.setattr(matrix, "_ROOMS", {})
+    monkeypatch.setattr(matrix, "_CLOSED", {})
+    monkeypatch.setattr(matrix, "_ALIAS", {})
+    monkeypatch.setattr(matrix, "_OWNER", [None])
+    hs = Portals()
+    cfg = core_matrix.Config(homeserver="https://hs.test", token="t", rooms=set())
+
+    def room(rid):
+        r = matrix.Room(rid, cfg, ME, get=hs)
+        matrix._ROOMS[r.thread] = r
+        return r
+    return room
+
+
+def _texts(r):
+    return [m["parts"][0]["text"] for m in r.page(30)[0]]
+
+
+def test_a_new_portal_shows_the_closed_ones_messages_first(portals):
+    matrix.closed(OLD, CHANNEL, 1_790_000_002_000)
+    new = portals(NEW)
+    new.load()
+    assert _texts(new) == ["first, from the friend request", "her reply", "my answer"]
+    assert new.page(30)[1] is False
+    # The old thread opens the new room.
+    assert matrix.room(matrix.thread_of(OLD)) is new
+
+
+def test_a_portal_closed_while_both_are_held_becomes_one_chat(portals):
+    old, new = portals(OLD), portals(NEW)
+    old.load()
+    new.load()
+    assert len(matrix.rows()) == 2              # the two chats of 9:56
+    matrix.closed(OLD, None, 1_790_000_002_000)
+    (row,) = matrix.rows()
+    assert row["room"] == NEW
+    assert _texts(new)[0] == "first, from the friend request"
+
+
+def test_a_closed_portals_message_cannot_be_changed_or_answered(portals, monkeypatch):
+    monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
+    monkeypatch.setattr(matrix, "_put", lambda *a, **k: pytest.fail("sent"))
+    matrix.closed(OLD, CHANNEL)
+    new = portals(NEW)
+    new.load()
+    for ok, err in (new.edit("$1", "x"), new.unsend("$1"), new.react("$1", "👍"),
+                    new.send("x", reply_to="$1")):
+        assert not ok and err["status"] == 409
+
+
+def test_only_a_bridge_taking_the_owner_out_closes_a_portal(portals, monkeypatch):
+    monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
+    base = core_matrix.Config(homeserver="https://hs.test", token="sam-tok", rooms=set())
+    loop = matrix._Owner(base, ME, {FB}, None)
+    monkeypatch.setattr(matrix, "_get", Portals())
+
+    def leave(sender):
+        return {"timeline": {"events": [{"type": "m.room.member", "state_key": ME,
+                                         "sender": sender, "origin_server_ts": 7,
+                                         "content": {"membership": "leave",
+                                                     "reason": "Deleting portal"}}]}}
+    loop._left(OLD, leave(ME))                  # David left it himself
+    assert matrix._CLOSED == {}
+    loop._left(OLD, leave(FB))
+    assert matrix._CLOSED == {CHANNEL: [OLD]}
+
+
+def test_the_sync_tells_of_rooms_left(tmp_path):
+    got = []
+    data = {"next_batch": "n1", "rooms": {"leave": {OLD: {"timeline": {"events": []}}}}}
+    cfg = core_matrix.Config(homeserver="https://hs.test", token="t", rooms=set())
+    s = core_matrix.Sync(cfg, state_path=tmp_path / "s.json", fetch=lambda req, t: data,
+                         on_leave=lambda room, sec: got.append(room))
+    s.poll_once()
+    assert got == [OLD]

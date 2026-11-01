@@ -129,16 +129,20 @@ class Sync:
     def __init__(self, config: Config, *, state_path: Path | None = None,
                  fetch: Callable[[urllib.request.Request, float], dict] = _fetch_json,
                  on_invite: Callable[[str, list], None] | None = None,
-                 on_join: Callable[[str, dict], None] | None = None):
+                 on_join: Callable[[str, dict], None] | None = None,
+                 on_leave: Callable[[str, dict], None] | None = None):
         """`config.rooms` is read on every pass, so a caller may add rooms to
         it as it learns of them. `on_invite(room_id, invite_state_events)`
         is told of each invitation (none are accepted here). `on_join(room_id,
         room)` is told of a joined room not in `config.rooms` (its sync
         section, state and timeline); one it adds there has this pass's
-        events read too (28 Oct 2026: a room joined without an invitation)."""
+        events read too (28 Oct 2026: a room joined without an invitation).
+        `on_leave(room_id, room)` is told of each room left (its sync
+        section): a bridge closing a portal (2 Nov 2026)."""
         self.config = config
         self._on_invite = on_invite
         self._on_join = on_join
+        self._on_leave = on_leave
         self.state_path = state_path or (state_dir() / "sync.json")
         self._fetch = fetch
         self._subs: list[Subscriber] = []
@@ -193,6 +197,12 @@ class Sync:
                     self._on_invite(room_id, (room.get("invite_state") or {}).get("events") or [])
                 except Exception as e:  # noqa: BLE001
                     log.warning("matrix: invite handler failed: %s", e)
+        if self._on_leave is not None:
+            for room_id, room in ((data.get("rooms") or {}).get("leave") or {}).items():
+                try:
+                    self._on_leave(room_id, room)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("matrix: leave handler failed: %s", e)
         joined = (data.get("rooms") or {}).get("join") or {}
         for room_id, room in joined.items():
             if room_id not in c.rooms and self._on_join is not None:

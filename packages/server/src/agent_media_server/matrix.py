@@ -125,6 +125,10 @@ class Room:
         self.name = ""
         # The service a bridge carries this room for (`m.bridge`), or None.
         self.network: dict | None = None
+        # The bridge's conversation this room is the portal of (`_channel`),
+        # or None: a portal the bridge closed for the same one is read on
+        # before this room's start (`_pending`, `closed`).
+        self.channel: tuple | None = None
         self.members: dict[str, str] = {}
         # Pictures (20 Oct 2026): the room's own `m.room.avatar` and each
         # member's, as mxc URLs ("" for none); served by /rooms/<thread>/avatar.
@@ -150,6 +154,16 @@ class Room:
         # The /messages token for what is older than `messages[0]`; None once
         # the start of the room is reached.
         self.back: str | None = None
+        # Portals the bridge closed for this conversation, not yet read back
+        # into, the last closed first (2 Nov 2026: Facebook moved a chat out
+        # of message requests when she answered, and mautrix-meta deleted
+        # the room holding David's first message and opened a new one for
+        # her reply — two chats, then the first gone). `_from` is the room
+        # `back` pages; `_closed_ids` the messages held from a closed one,
+        # which can be read but not answered, edited or reacted to.
+        self._pending: list[str] = []
+        self._from = room_id
+        self._closed_ids: set[str] = set()
         # The message the owner's last read receipt was on (`read`, §6.32):
         # the same one is not told twice.
         self.read_sent = ""
@@ -192,6 +206,7 @@ class Room:
                 state = self._get(self.config, f"/rooms/{q}/state")
                 self.network = _network(state)
                 self.avatar = _room_avatar(state)
+                self.channel = _channel(state)
             except (urllib.error.URLError, OSError, ValueError):
                 pass                 # no service named: listed with the plain rooms
             got = self._page(None)
@@ -204,32 +219,68 @@ class Room:
             for content in _SEEDED.pop(self.id, []):
                 self._receipts(content)
             self.loaded = True
+            for old in _CLOSED.get(self.channel, []) if self.channel else []:
+                self.attach(old)
 
-    def _page(self, token: str | None) -> tuple[list, str | None] | None:
+    def attach(self, room_id: str) -> None:
+        """A portal the bridge closed for this room's conversation: read on
+        into after this room's start, and read now when all of this room is
+        held, so a short new room shows what came before it."""
+        with self.lock:
+            if room_id == self.id or room_id in self._pending or room_id == self._from:
+                return
+            self._pending.append(room_id)
+            _ALIAS[thread_of(room_id)] = self.thread
+            if self.loaded and not self.back:
+                while len(self.messages) < PAGE and self.more() and self.older():
+                    pass
+
+    def more(self) -> bool:
+        """Whether there is older history than what is held."""
+        return bool(self.back or self._pending)
+
+    def _page(self, token: str | None,
+              room_id: str = "") -> tuple[list, str | None] | None:
+        room_id = room_id or self.id
         params = {"dir": "b", "limit": str(PAGE)}
         if token:
             params["from"] = token
         try:
-            data = self._get(self.config, f"/rooms/{_q(self.id)}/messages", params)
+            data = self._get(self.config, f"/rooms/{_q(room_id)}/messages", params)
         except (urllib.error.URLError, OSError, ValueError) as e:
-            log.warning("matrix %s: messages unreadable: %s", self.id, e)
+            log.warning("matrix %s: messages unreadable: %s", room_id, e)
             return None
         chunk = data.get("chunk") or []
         # No `end`, or an empty page: the start of the room.
         return chunk, (data.get("end") if chunk else None)
 
     def older(self) -> bool:
-        """One more page from before the oldest held; False at the start."""
+        """One more page from before the oldest held, going on into a closed
+        portal (`attach`) at this room's start; False when there is none."""
         with self.lock:
-            if not self.back:
+            if self.back:
+                room_id, token = self._from, self.back
+            elif self._pending:
+                room_id, token = self._pending[0], None
+            else:
                 return False
-            got = self._page(self.back)
+            got = self._page(token, room_id)
             if got is None:
                 return False
+            if token is None:
+                self._from = self._pending.pop(0)
             evs, self.back = got
             for ev in evs:
                 self._take(ev, front=True)
-            return bool(evs)
+                if room_id != self.id and ev.get("event_id") in self._by_id:
+                    self._closed_ids.add(ev["event_id"])
+            return bool(evs) or self.more()
+
+    def _closed_refusal(self, ev_id: str) -> dict | None:
+        if ev_id in self._closed_ids:
+            return {"error": "that message is in an earlier chat the bridge closed: "
+                             "it can be read, not changed or answered", "status": 409}
+        return None
 
     # -- events into messages --
 
@@ -252,6 +303,8 @@ class Room:
             with self.lock:
                 if reply_to not in self._by_id:
                     return False, {"error": "no such message in this room", "status": 404}
+                if (err := self._closed_refusal(reply_to)):
+                    return False, err
             content["m.relates_to"] = {"m.in_reply_to": {"event_id": reply_to}}
         try:
             got = _put(self.config, f"/rooms/{_q(self.id)}/send/m.room.message/"
@@ -305,6 +358,8 @@ class Room:
         with self.lock:
             if ev_id and ev_id not in self._by_id:
                 return False, {"error": "no such message in this room", "status": 404}
+            if ev_id in self._closed_ids:
+                ev_id = ""           # read in the room it is in: the newest here
             if not ev_id:
                 ev_id = self.messages[-1]["id"] if self.messages else ""
             if not ev_id or ev_id == self.read_sent:
@@ -336,6 +391,8 @@ class Room:
                 return "", {"error": "no such message in this room", "status": 404}
             if m["sender"]["id"] != self.owner:
                 return "", {"error": "only your own messages can be changed", "status": 403}
+            if (err := self._closed_refusal(ev_id)):
+                return "", err
         return token, None
 
     def edit(self, ev_id: str, text: str) -> tuple[bool, dict]:
@@ -389,6 +446,8 @@ class Room:
         with self.lock:
             if ev_id not in self._by_id:
                 return False, {"error": "no such message in this room", "status": 404}
+            if (err := self._closed_refusal(ev_id)):
+                return False, err
             mine = [(k, rid) for k, by in self.reactions.get(ev_id, {}).items()
                     for s, rid in by.items() if s == self.owner]
         try:
@@ -641,10 +700,10 @@ class Room:
                                 if m["id"] == before), -1)
                     if end < 0:
                         return [], False
-                if end >= limit or not self.back or not self.older():
+                if end >= limit or not self.more() or not self.older():
                     break
             start = max(0, end - limit)
-            return self._view(self.messages[start:end]), start > 0 or bool(self.back)
+            return self._view(self.messages[start:end]), start > 0 or self.more()
 
     def around(self, ev_id: str, limit: int, most: int) -> tuple[list[dict], bool, bool] | None:
         """A jump from search (§6.14, 17 Oct 2026): `(window, older, newer)`
@@ -655,13 +714,13 @@ class Room:
 
         with self.lock:
             for _ in range(AROUND_PAGES):
-                if ev_id in self._by_id or not self.back or not self.older():
+                if ev_id in self._by_id or not self.more() or not self.older():
                     break
             win = transcript.window_around(self.messages, ev_id, limit, most)
             if win is None:
                 return None
             msgs, older, newer = win
-            return self._view(msgs), older or bool(self.back), newer
+            return self._view(msgs), older or self.more(), newer
 
     def _receipts(self, content: dict) -> None:
         """An `m.receipt`'s content: `{event id: {"m.read" | "m.read.private":
@@ -913,7 +972,55 @@ def _network(state: list) -> dict | None:
     return None
 
 
+def _channel(state: list) -> tuple | None:
+    """`(bridge bot, receiver, conversation id)` from a room's `m.bridge`
+    state: the bridge's conversation the room is the portal of, the same in
+    a portal it opens again for it."""
+    if not isinstance(state, list):
+        return None
+    for ev in state:
+        if isinstance(ev, dict) and ev.get("type") in ("m.bridge", "uk.half-shot.bridge"):
+            c = ev.get("content") or {}
+            ch = c.get("channel") or {}
+            if ch.get("id"):
+                return (str(c.get("bridgebot") or ""), str(ch.get("fi.mau.receiver") or ""),
+                        str(ch["id"]))
+    return None
+
+
 _ROOMS: dict[str, Room] = {}       # by thread id
+#: Portals a bridge closed (its "Deleting portal" leave of the owner), by
+#: `_channel`: room ids, the last closed first. A room for the same
+#: conversation reads on into them (`Room.attach`).
+_CLOSED: dict[tuple, list[str]] = {}
+#: A closed portal's thread id → the thread of the room it is read in.
+_ALIAS: dict[str, str] = {}
+
+
+def closed(room_id: str, channel: tuple | None, at: int = 0) -> None:
+    """The bridge closed portal `room_id` (`at`, ms): its thread is no longer
+    a chat of its own, and the room for the same conversation, now or when
+    one opens, shows its messages before its own."""
+    r = _ROOMS.pop(thread_of(room_id), None)
+    owner = _OWNER[0]
+    if owner is not None:
+        owner.config.rooms.discard(room_id)
+    if channel is None and r is not None:
+        channel = r.channel
+    if channel is None:
+        return
+    held = _CLOSED.setdefault(channel, [])
+    if room_id in held:
+        return
+    _AT[room_id] = at
+    held.append(room_id)
+    held.sort(key=lambda rid: -_AT.get(rid, 0))
+    for other in list(_ROOMS.values()):
+        if other.channel == channel and other.loaded:
+            other.attach(room_id)
+
+
+_AT: dict[str, int] = {}
 
 
 _owner = matrix.owner_of
@@ -921,7 +1028,7 @@ _owner = matrix.owner_of
 
 def room(thread: str) -> Room | None:
     """The room behind a thread id, loaded; None when it is not a room."""
-    r = _ROOMS.get(thread)
+    r = _ROOMS.get(thread) or _ROOMS.get(_ALIAS.get(thread, ""))
     if r is not None and not r.loaded:
         r.load()
     return r
@@ -1111,7 +1218,8 @@ class _Owner:
         self.bridges = bridges
         self.lock = threading.Lock()
         self.sync = matrix.Sync(self.config, state_path=matrix.state_dir() / "sync-owner.json",
-                                on_invite=self._invited, on_join=self._seen)
+                                on_invite=self._invited, on_join=self._seen,
+                                on_leave=self._left)
         self._not_bridge: set[str] = set()
         if intake is not None:
             on_event, _stop = intake.consumer(self.config, name_of=_name_of, commands=False)
@@ -1174,6 +1282,52 @@ class _Owner:
         if r is not None:
             threading.Thread(target=r.load, name="matrix-joined", daemon=True).start()
 
+    def _closed_by_bridge(self, events: list) -> int | None:
+        """When (ms) a bridge took the owner out of a room — how it closes a
+        portal (mautrix's "Deleting portal") — among `events`; None when it
+        did not, or the owner left themselves (§6.41: that chat is gone)."""
+        for e in reversed(events):
+            if e.get("type") == "m.room.member" and e.get("state_key") == self.owner \
+                    and (e.get("content") or {}).get("membership") == "leave":
+                if _bridge_sender(e.get("sender") or "", self.bridges):
+                    return int(e.get("origin_server_ts") or 0)
+                return None
+        return None
+
+    def _left(self, room_id: str, room: dict) -> None:
+        at = self._closed_by_bridge((room.get("timeline") or {}).get("events") or [])
+        if at is None:
+            return
+        r = _ROOMS.get(thread_of(room_id))
+        channel = r.channel if r is not None else None
+        if channel is None:
+            try:
+                channel = _channel(_get(self.config, f"/rooms/{_q(room_id)}/state"))
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("matrix: closed portal %s unreadable: %s", room_id, e)
+        closed(room_id, channel, at)
+
+    def discover_closed(self) -> None:
+        """The portals bridges have closed on the owner: one /sync of the
+        rooms left, their `m.bridge` and last event only."""
+        filt = {"room": {"include_leave": True, "timeline": {"limit": 1},
+                         "state": {"types": ["m.bridge", "uk.half-shot.bridge"]},
+                         "ephemeral": {"not_types": ["*"]},
+                         "account_data": {"not_types": ["*"]}},
+                "presence": {"not_types": ["*"]}, "account_data": {"not_types": ["*"]}}
+        try:
+            data = _get(self.config, "/sync", {"filter": json.dumps(filt), "timeout": "0"},
+                        timeout=120.0)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            log.warning("matrix: closed portals unread: %s", e)
+            return
+        for room_id, room in ((data.get("rooms") or {}).get("leave") or {}).items():
+            tl = (room.get("timeline") or {}).get("events") or []
+            at = self._closed_by_bridge(tl)
+            if at is not None:
+                closed(room_id, _channel([*((room.get("state") or {}).get("events") or []),
+                                          *tl]), at)
+
     def discover(self) -> None:
         """The bridge rooms David is already in."""
         try:
@@ -1191,6 +1345,7 @@ class _Owner:
 
     def start(self) -> None:
         def run() -> None:
+            self.discover_closed()
             self.discover()
             self.sync.start()
             for r in list(_ROOMS.values()):
