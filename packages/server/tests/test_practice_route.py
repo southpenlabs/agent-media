@@ -82,3 +82,11 @@ def test_a_person_is_asked_by_kind_and_name(server, shelf, signed_in, monkeypatc
     res, obj = call(server, "GET", "/media/person?kind=artist&name=Chris%20Cornell", None, AUTH)
     assert res.status == 200 and obj["profile"] == {"facts": ["born 1964"]} and obj["kind"] == "artist"
     assert call(server, "GET", "/media/person?kind=painter&name=X", None, AUTH)[0].status == 400
+
+
+def test_people_places_by_kind(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import media_people
+    monkeypatch.setattr(media_people, "places", lambda kind, names: {n: {"country": "Australia"} for n in names})
+    res, obj = call(server, "GET", "/media/people?kind=show&name=Hamish%20%26%20Andy&name=Other", None, AUTH)
+    assert res.status == 200 and obj["places"] == {"Hamish & Andy": {"country": "Australia"}, "Other": {"country": "Australia"}}
+    assert call(server, "GET", "/media/people?kind=painter&name=X", None, AUTH)[0].status == 400

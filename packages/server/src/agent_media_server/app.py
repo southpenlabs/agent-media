@@ -434,7 +434,7 @@ CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
-MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person"})
+MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
 
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
@@ -764,6 +764,20 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _audio(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
         return _music(h, method, path)
+    if path == "/media/people" and method == "GET":
+        # Where each of a list's people is from, for the Where drill-down (§6.47).
+        from agent_media_core import media_people
+        q = parse_qs(h.path.partition("?")[2])
+        user, err = auth.gate(_bearer(h))
+        kind = (q.get("kind") or [""])[0]
+        names = [n.strip() for n in q.get("name") or [] if n.strip() and len(n) <= 160][:200]
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+        elif kind not in media_people.KINDS:
+            _json(h, 400, {"ok": False, "error": "kind must be artist, author or show"})
+        else:
+            _json(h, 200, {"ok": True, "kind": kind, "places": media_people.places(kind, names)})
+        return True
     if path == "/media/person" and method == "GET":
         # Who made it: an artist, an author, a podcast's show (media_people.py, §6.47).
         from agent_media_core import media_people

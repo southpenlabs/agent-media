@@ -22,6 +22,15 @@ after a week):
   who makes it, genre, episode count, its Apple page; the words from the
   show's own feed.
 
+Each profile also says where they are from — ``country``, ``state``,
+``city`` — from Wikidata (David, 1 Nov 2026: "And can we have the same for
+podcasters" — the Teachers' Where drill-down): an artist's birthplace or a
+group's place of formation, an author's or a host's residence else
+birthplace, a show's place of formation or headquarters else its country
+of origin else its presenter's place; the city's regions walked up to the
+one just under the country for the state. `places(kind, names)` gives
+them for a whole list, looking up the rest in the background.
+
 Each install fetches for its own user (the proposal: profile text is not
 copied into central). MEDIA_PEOPLE=0 turns the lookups off (pinned off in
 the tests' conftests).
@@ -72,6 +81,92 @@ def _json(url: str):
     return json.loads(_get(url))
 
 
+WD_API = "https://www.wikidata.org/w/api.php"
+
+
+def _wd(qid: str) -> dict:
+    ents = _json(WIKIDATA.format(id=qid)).get("entities") or {}
+    return ents.get(qid) or next(iter(ents.values()), {})
+
+
+def _claims(ent: dict, prop: str) -> list[str]:
+    out = []
+    for c in (ent.get("claims") or {}).get(prop) or []:
+        v = ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        if isinstance(v, dict) and v.get("id"):
+            out.append(v["id"])
+    return out
+
+
+def _label(ent: dict) -> Optional[str]:
+    return ((ent.get("labels") or {}).get("en") or {}).get("value")
+
+
+def _place(qid: str) -> dict:
+    """`{"city", "state", "country"}` of a Wikidata place: a country is
+    itself; a city's regions are walked up to the one just under its
+    country, which is its state."""
+    ent = _wd(qid)
+    countries = _claims(ent, "P17")
+    if not countries or countries[0] == ent.get("id") or "Q6256" in _claims(ent, "P31"):
+        return {"city": None, "state": None, "country": _label(ent)}
+    cid = countries[0]
+    country = _label(_wd(cid))
+    up = [q for q in _claims(ent, "P131") if q != ent.get("id")]
+    if not up or up[0] == cid:
+        # Straight under its country: a state (Arizona), not a city.
+        return {"city": None, "state": _label(ent), "country": country}
+    state, cur = None, ent
+    for _ in range(6):
+        up = [q for q in _claims(cur, "P131") if q != cur.get("id")]
+        if not up or up[0] == cid:
+            break
+        nxt = _wd(up[0])
+        # A region named for its country (metropolitan France) is the country.
+        if country and country.lower() in (_label(nxt) or "").lower():
+            break
+        cur = nxt
+        state = _label(cur)
+    if state is None:
+        # Nothing between it and its country: it is the state (Île-de-France).
+        return {"city": None, "state": _label(ent), "country": country}
+    return {"city": _label(ent), "state": state, "country": country}
+
+
+def _where(qid: Optional[str], props: tuple) -> dict:
+    """The place of the first of `props` an entity has (P19 birthplace,
+    P551 residence, P740 formed at, P159 headquarters, P495 country of
+    origin, P27 citizenship); P371/P50 (presenter, author) follow a show to
+    its host."""
+    if not qid:
+        return {}
+    try:
+        ent = _wd(qid)
+        for prop in props:
+            got = _claims(ent, prop)
+            if not got:
+                continue
+            if prop in ("P371", "P50"):
+                host = _where(got[0], ("P551", "P19"))
+                if host:
+                    return host
+                continue
+            return _place(got[0])
+    except Exception:  # noqa: BLE001 — no place
+        return {}
+    return {}
+
+
+def _wd_search(name: str, want: re.Pattern) -> Optional[str]:
+    """The Wikidata item of exactly `name` whose description fits `want`."""
+    q = urllib.parse.urlencode({"action": "wbsearchentities", "search": name, "language": "en",
+                                "format": "json", "limit": 10, "type": "item"})
+    for r in _json(f"{WD_API}?{q}").get("search") or []:
+        if _norm(r.get("label", "")) == _norm(name) and want.search(r.get("description") or ""):
+            return r["id"]
+    return None
+
+
 def _wiki(title: str) -> Optional[dict]:
     """English Wikipedia's summary of `title`: words, picture, page."""
     try:
@@ -80,7 +175,7 @@ def _wiki(title: str) -> Optional[dict]:
         return None
     if d.get("type") == "disambiguation" or not d.get("extract"):
         return None
-    return {"description": d.get("extract"), "short": d.get("description") or "",
+    return {"description": d.get("extract"), "short": d.get("description") or "", "qid": d.get("wikibase_item"),
             "photo": (d.get("thumbnail") or {}).get("source"),
             "url": ((d.get("content_urls") or {}).get("desktop") or {}).get("page")}
 
@@ -95,7 +190,7 @@ def _artist(name: str) -> Optional[dict]:
         return None
     time.sleep(1.0)  # MusicBrainz asks for one request a second
     a = _json(f"{MB}/artist/{hit['id']}?inc=url-rels&fmt=json")
-    links, wiki = [], None
+    links, wiki, qid = [], None, None
     for rel in a.get("relations") or []:
         url = ((rel.get("url") or {}).get("resource")) or ""
         kind = rel.get("type") or ""
@@ -104,7 +199,7 @@ def _artist(name: str) -> Optional[dict]:
         elif kind == "wikidata" and not wiki:
             qid = url.rstrip("/").rsplit("/", 1)[-1]
             try:
-                ent = _json(WIKIDATA.format(id=qid))["entities"][qid]
+                ent = _wd(qid)
                 title = ((ent.get("sitelinks") or {}).get("enwiki") or {}).get("title")
                 wiki = _wiki(title) if title else None
             except Exception:  # noqa: BLE001 — without its words
@@ -129,7 +224,8 @@ def _artist(name: str) -> Optional[dict]:
     seen: set = set()
     links = [x for x in links if not (x["label"] in seen or seen.add(x["label"]))]
     return {"source": "musicbrainz", "name": a.get("name") or name, "photo": (wiki or {}).get("photo"),
-            "description": (wiki or {}).get("description"), "region": region, "facts": facts, "links": links}
+            "description": (wiki or {}).get("description"), "region": region, "facts": facts, "links": links,
+            **_where(qid, ("P740", "P19") if group else ("P19", "P551"))}
 
 
 # ---- authors ------------------------------------------------------------------------
@@ -162,9 +258,10 @@ def _author(name: str) -> Optional[dict]:
     if not (wiki or words):
         return None
     links = [{"label": "Wikipedia", "url": wiki["url"]}] if wiki and wiki.get("url") else []
+    place = _where((wiki or {}).get("qid"), ("P551", "P19"))
     return {"source": "wikipedia" if wiki else "audiobookshelf", "name": name, "photo": (wiki or {}).get("photo"),
-            "description": words, "region": None,
-            "facts": [wiki["short"]] if wiki and wiki.get("short") else [], "links": links}
+            "description": words, "region": ", ".join(x for x in (place.get("city"), place.get("country")) if x) or None,
+            "facts": [wiki["short"]] if wiki and wiki.get("short") else [], "links": links, **place}
 
 
 # ---- shows --------------------------------------------------------------------------
@@ -195,10 +292,67 @@ def _show(name: str) -> Optional[dict]:
                          hit.get("primaryGenreName") or "",
                          f"{hit['trackCount']} episodes" if hit.get("trackCount") else "") if x]
     links = [{"label": "Apple Podcasts", "url": hit["collectionViewUrl"]}] if hit.get("collectionViewUrl") else []
-    return {"source": "itunes", "name": hit.get("collectionName") or name,
+    try:
+        qid = _wd_search(hit.get("collectionName") or name, re.compile(r"podcast", re.I))
+    except Exception:  # noqa: BLE001 — no place
+        qid = None
+    place = _where(qid, ("P740", "P159", "P371", "P50", "P495"))
+    if not place:
+        # The people or the radio show of the same name (Hamish & Andy, the duo).
+        try:
+            same = _wd_search(hit.get("collectionName") or name, re.compile(r"comed|duo|radio|show|presenter|host|journalist|author|writer", re.I))
+        except Exception:  # noqa: BLE001
+            same = None
+        place = _where(same, ("P740", "P159", "P551", "P19", "P495", "P27"))
+    if not place and hit.get("artistName"):
+        try:
+            host = _wd_search(hit["artistName"], re.compile(r"podcast|comed|radio|presenter|host|journalist|author|writer|scientist", re.I))
+        except Exception:  # noqa: BLE001
+            host = None
+        place = _where(host, ("P551", "P19"))
+    return {"source": "itunes", "name": hit.get("collectionName") or name, **place,
+            "region": ", ".join(x for x in (place.get("city"), place.get("state"), place.get("country")) if x) or None,
             "photo": hit.get("artworkUrl600") or hit.get("artworkUrl100"),
             "description": _feed_words(hit["feedUrl"]) if hit.get("feedUrl") else None,
             "region": None, "facts": facts, "links": links}
+
+
+# ---- places for a whole list ----------------------------------------------------------
+
+_FILLING: list = [False]
+
+
+def places(kind: str, names: list[str]) -> dict:
+    """`{name: {"country", "state", "city", "photo"}}` for the names whose
+    profile is kept with a place; the rest (never looked up, or kept
+    before places were) looked up in the background, a second apart."""
+    try:
+        kept = json.loads(_path().read_text())
+    except (OSError, ValueError):
+        kept = {}
+    out, missing = {}, []
+    for name in names:
+        hit = kept.get(f"{kind}:{_norm(name)}")
+        pr = hit.get("profile") if isinstance(hit, dict) else None
+        if not isinstance(hit, dict) or (pr and "country" not in pr):
+            missing.append(name)
+        elif pr and pr.get("country"):
+            out[name] = {"country": pr.get("country"), "state": pr.get("state"), "city": pr.get("city"),
+                         "photo": pr.get("photo")}
+    if missing and not _FILLING[0] and os.environ.get("MEDIA_PEOPLE") != "0" and kind in KINDS:
+        import threading
+        _FILLING[0] = True
+
+        def run():
+            try:
+                for n in missing[:60]:
+                    profile(kind, n, fresh=True)
+                    time.sleep(1.0)
+            finally:
+                _FILLING[0] = False
+
+        threading.Thread(target=run, name="media-people", daemon=True).start()
+    return out
 
 
 # ---- the profile --------------------------------------------------------------------
@@ -215,7 +369,8 @@ def profile(kind: str, name: str, fresh: bool = False) -> dict:
     key = f"{kind}:{_norm(name)}"
     hit = kept.get(key) if isinstance(kept.get(key), dict) else None
     ttl = TTL_S if hit and hit.get("profile") else MISS_TTL_S
-    if hit and not fresh and time.time() - float(hit.get("at") or 0) < ttl:
+    stale = bool(hit and hit.get("profile") and "country" not in hit["profile"])
+    if hit and not fresh and not stale and time.time() - float(hit.get("at") or 0) < ttl:
         return {"name": name, "kind": kind, "profile": hit.get("profile")}
     if os.environ.get("MEDIA_PEOPLE") == "0":
         return {"name": name, "kind": kind, "profile": (hit or {}).get("profile")}
@@ -223,6 +378,10 @@ def profile(kind: str, name: str, fresh: bool = False) -> dict:
         got = {"artist": _artist, "author": _author, "show": _show}[kind](name)
     except Exception:  # noqa: BLE001 — the last one known, or none
         return {"name": name, "kind": kind, "profile": (hit or {}).get("profile")}
+    if got:
+        # A place not found is still a place looked for: not looked for again.
+        for k in ("country", "state", "city"):
+            got.setdefault(k, None)
     kept[key] = {"profile": got, "at": time.time()}
     p = _path()
     p.parent.mkdir(parents=True, exist_ok=True)

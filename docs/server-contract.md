@@ -7884,9 +7884,24 @@ podcaster" … "yeah let's do the other profiles too".
 - **show**: the iTunes directory's podcast of that exact name: artwork,
   `facts` by whom, genre, episode count; the words from its feed; an
   Apple Podcasts link.
+- Every profile also has `country`, `state`, `city` (1 Nov 2026; David:
+  "And can we have the same for podcasters") from Wikidata: an artist's
+  birthplace or a group's place of formation (through the item MusicBrainz
+  links), an author's residence else birthplace (through their Wikipedia
+  page's item), a show's place of formation or headquarters, else its
+  presenter's place, else its country of origin, else the duo or radio
+  show of that name. A city's regions are walked up to the one just under
+  its country for the state; a place straight under its country is a
+  state; a region named for its country is the country.
+- `GET /media/people?kind=&name=&name=…` (at most 200 names) → `{"ok",
+  "kind", "places": {name: {"country", "state", "city", "photo"}}}` for
+  the names whose profile is kept with a place; the rest are looked up in
+  the background, a second apart, for a later call. For the app's Where
+  drill-down on Artists, Authors and Shows.
 - Kept in `<state_dir>/media-people.json` a month, one not found asked
-  again after a week; fetched by each install for its own user.
-  MEDIA_PEOPLE=0 turns the lookups off.
+  again after a week; a profile kept before places were is looked up
+  again. Fetched by each install for its own user. MEDIA_PEOPLE=0 turns
+  the lookups off.
 ### Pairing
 
 1. At the desk: `media-visual-canvas pair --device "Pixel 8a"` (the existing

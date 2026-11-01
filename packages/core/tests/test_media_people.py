@@ -72,3 +72,32 @@ def test_off_or_unknown_kind_asks_nothing(monkeypatch):
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
     assert P.profile("artist", "Anyone")["profile"] is None
     assert P.profile("painter", "Anyone")["profile"] is None and calls == []
+
+
+def _ent(qid, label, p17=None, p131=None, p31=None):
+    claims = {}
+    for prop, v in (("P17", p17), ("P131", p131), ("P31", p31)):
+        if v:
+            claims[prop] = [{"mainsnak": {"datavalue": {"value": {"id": v}}}}]
+    return {"entities": {qid: {"id": qid, "labels": {"en": {"value": label}}, "claims": claims}}}
+
+
+def test_a_place_walks_up_to_its_state(monkeypatch):
+    ents = {"Q60": _ent("Q60", "Seattle", "Q30", "Q108"), "Q108": _ent("Q108", "King County", "Q30", "Q1223"),
+            "Q1223": _ent("Q1223", "Washington", "Q30", "Q30"), "Q30": _ent("Q30", "United States", "Q30", None, "Q6256"),
+            "Q816": _ent("Q816", "Arizona", "Q30", "Q30")}
+    monkeypatch.setattr(P, "_json", lambda url: next(v for k, v in ents.items() if url.endswith(f"/{k}.json")))
+    assert P._place("Q60") == {"city": "Seattle", "state": "Washington", "country": "United States"}
+    assert P._place("Q816") == {"city": None, "state": "Arizona", "country": "United States"}
+    assert P._place("Q30") == {"city": None, "state": None, "country": "United States"}
+
+
+def test_places_for_a_list_and_the_rest_looked_up(monkeypatch):
+    P._path().parent.mkdir(parents=True, exist_ok=True)
+    P._path().write_text(json.dumps({
+        "artist:chriscornell": {"profile": {"country": "United States", "state": "Washington", "city": "Seattle", "photo": "c.jpg"}, "at": 9e9},
+        "artist:air": {"profile": {"name": "AIR"}, "at": 9e9},
+        "artist:nobody": {"profile": None, "at": 9e9}}))
+    monkeypatch.setenv("MEDIA_PEOPLE", "0")
+    got = P.places("artist", ["Chris Cornell", "AIR", "Nobody", "New One"])
+    assert got == {"Chris Cornell": {"country": "United States", "state": "Washington", "city": "Seattle", "photo": "c.jpg"}}
