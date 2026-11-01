@@ -73,6 +73,8 @@ ACTIONS = {
     "book": "book",
     # The station, run here rather than by the CLI (radio.py).
     "radio": "radio", "dislike": "dislike",
+    # ♥ or 👎 on what is playing taken back (its `verdict` goes to null).
+    "unlike": "unlike", "undislike": "undislike",
     # The house speakers one by one, and what is playing to another place.
     "room": "room", "move": "move",
     # The song the music bed played under a reply, by its speech history id.
@@ -274,6 +276,30 @@ def _verdict(now: dict) -> str | None:
     except Exception:  # noqa: BLE001 — a button state, never a failed read
         pass
     return None
+
+
+def _unvote(action: str) -> tuple[bool, dict]:
+    """`unlike` / `undislike`: the ♥ or 👎 on what is playing taken back
+    (David, 1 Nov 2026: "let's add being able to remove an up or down
+    vote"). A like goes from the likes list (on a mix, this chapter's); a
+    👎 from every station that has it."""
+    from agent_media_core import radio
+    from agent_media_core.state import StateStore
+
+    _reset_cache()
+    now, _ = _now()
+    vid = now.get("media_id") or ""
+    if not vid:
+        return False, {"error": "nothing playing", "status": 409, **_answer()}
+    try:
+        if action == "unlike":
+            StateStore().remove_likes("music", vid, chapter=now.get("chapter") or "")
+        else:
+            radio.undislike(vid)
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    return True, _answer()
 
 
 def _bed_state(now: dict) -> dict:
@@ -748,6 +774,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         return _song_control(body)
     if action == "bed":
         return _bed_control(body)
+    if action in ("unlike", "undislike"):
+        return _unvote(action)
     argv = [ACTIONS[action]]
     if action in ("seek", "seek-by"):
         key = "to" if action == "seek" else "by"

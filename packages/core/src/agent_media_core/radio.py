@@ -790,6 +790,38 @@ def disliked(vid: str) -> bool:
     return any(vid in (e.get("banned") or []) for e in _kept())
 
 
+def _unban(st: dict, vid: str) -> bool:
+    """`vid` off a station's 👎 list, and its channel's strike back."""
+    if vid not in (st.get("banned") or []):
+        return False
+    st["banned"] = [v for v in st["banned"] if v != vid]
+    songs = (st.get("sent") or []) + (st.get("queue") or []) + [st.get("seed") or {}]
+    ch = next((s.get("channel") for s in songs if s.get("id") == vid), "") or ""
+    strikes = st.get("strikes") or {}
+    if ch in strikes:
+        strikes[ch] -= 1
+        if strikes[ch] <= 0:
+            del strikes[ch]
+    return True
+
+
+def undislike(vid: str) -> bool:
+    """Take back a 👎 on `vid`, on this station and every kept one (David,
+    1 Nov 2026: "let's add being able to remove an up or down vote"). A
+    channel kept off by two 👎 is let back: its songs come with the next
+    refill. Whether there was one to take back."""
+    with _station() as st:
+        found = _unban(st, vid)
+        kept = _kept()
+        changed = [e for e in kept if _unban(e, vid)]
+        if changed:
+            p = _stations_path()
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(kept))
+            os.replace(tmp, p)
+    return found or bool(changed)
+
+
 def _liked_ids() -> set:
     try:
         from .state import StateStore

@@ -627,6 +627,20 @@ class StateStore:
             cur.execute(sql + " LIMIT 1", args)
             return cur.fetchone() is not None
 
+    def remove_likes(self, channel: str, media_id: str, chapter: str = "") -> int:
+        """Take back the likes of `media_id` (with `chapter`, that chapter's);
+        how many went."""
+        if not channel or not media_id:
+            return 0
+        sql = "DELETE FROM likes WHERE channel = ? AND media_id = ?"
+        args: tuple = (channel, media_id)
+        if chapter:
+            sql += " AND chapter = ?"
+            args += (chapter,)
+        with self._cursor() as cur:
+            cur.execute(sql, args)
+            return int(cur.rowcount or 0)
+
     _BOOKMARK_PENDING_PREFIX = "bookmark_pending:"
 
     def set_bookmark_pending(self, channel: str, data: Optional[dict],

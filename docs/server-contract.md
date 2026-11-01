@@ -3597,6 +3597,10 @@ past those. Off is `{"on": false, "seed": null, "next": [], "available"}`.
   the likes list (on a mix, the chapter playing), `"dislike"` when a station
   (this one or a kept one) was given 👎 on it, else null — so the player's ♥
   and 👎 stay lit when the song is come back to (1 Nov 2026).
+- `{"action": "unlike"}` and `{"action": "undislike"}` take the ♥ or 👎 on
+  what is playing back: a like leaves the likes list (on a mix, the chapter
+  playing's), a 👎 leaves every station that has it, its channel's strike
+  with it. Nothing is played or skipped; 409 when nothing is playing.
   With no station it is `next`.
 - A `play` (not `add`) of something else ends the station, from here or
   `media music play`; so does `stop`. A song the station has no record of

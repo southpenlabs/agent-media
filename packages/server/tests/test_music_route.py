@@ -64,6 +64,33 @@ def test_the_verdict_is_remembered(server, signed_in, audio_host, player, monkey
     assert obj["verdict"] == "dislike"
 
 
+def test_a_like_is_taken_back(server, signed_in, audio_host, player):
+    from agent_media_core.state import StateStore
+    StateStore().add_like("music", "nMDHjVVj3bA", title="A Mix")
+    res, obj = call(server, "POST", "/music", {"action": "unlike"}, headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["verdict"] is None and StateStore().list_likes(channel="music") == []
+    assert player == []  # nothing was played or skipped
+
+
+def test_a_dislike_is_taken_back_on_every_station(server, signed_in, audio_host, player):
+    import json
+    from agent_media_core import radio
+    with radio._station() as st:
+        st.update(banned=["nMDHjVVj3bA"], strikes={"Chan": 1},
+                  sent=[{"id": "nMDHjVVj3bA", "title": "A Mix", "channel": "Chan"}])
+    radio._stations_path().write_text(json.dumps([{"sid": "1", "banned": ["nMDHjVVj3bA", "other"], "strikes": {"Chan": 2},
+                                                   "sent": [{"id": "nMDHjVVj3bA", "channel": "Chan"}]}]))
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] == "dislike"
+    res, obj = call(server, "POST", "/music", {"action": "undislike"}, headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["verdict"] is None
+    assert radio.read()["banned"] == [] and radio.read()["strikes"] == {}
+    assert radio._kept()[0]["banned"] == ["other"] and radio._kept()[0]["strikes"] == {"Chan": 1}
+    assert player == []
+
+
 def test_a_like_on_a_mix_is_its_chapter(server, signed_in, audio_host, player, monkeypatch):
     from agent_media_core.state import StateStore
     StateStore().add_like("music", "nMDHjVVj3bA", title="A Mix", chapter="Track two")
