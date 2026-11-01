@@ -90,12 +90,18 @@ def _wd(qid: str) -> dict:
 
 
 def _claims(ent: dict, prop: str) -> list[str]:
-    out = []
+    """The items a property names, current ones only: the preferred first,
+    none deprecated or with an end time (London's country is the United
+    Kingdom, not the Roman Empire it was once in)."""
+    best, rest = [], []
     for c in (ent.get("claims") or {}).get(prop) or []:
         v = ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")
-        if isinstance(v, dict) and v.get("id"):
-            out.append(v["id"])
-    return out
+        if not (isinstance(v, dict) and v.get("id")) or c.get("rank") == "deprecated":
+            continue
+        if "P582" in (c.get("qualifiers") or {}):
+            continue
+        (best if c.get("rank") == "preferred" else rest).append(v["id"])
+    return best + rest
 
 
 def _label(ent: dict) -> Optional[str]:

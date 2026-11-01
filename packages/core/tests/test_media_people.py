@@ -101,3 +101,12 @@ def test_places_for_a_list_and_the_rest_looked_up(monkeypatch):
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
     got = P.places("artist", ["Chris Cornell", "AIR", "Nobody", "New One"])
     assert got == {"Chris Cornell": {"country": "United States", "state": "Washington", "city": "Seattle", "photo": "c.jpg"}}
+
+
+def test_only_current_claims_count():
+    ent = {"claims": {"P17": [
+        {"rank": "normal", "mainsnak": {"datavalue": {"value": {"id": "Q2277"}}}, "qualifiers": {"P582": [{}]}},
+        {"rank": "normal", "mainsnak": {"datavalue": {"value": {"id": "Q105313"}}}},
+        {"rank": "preferred", "mainsnak": {"datavalue": {"value": {"id": "Q145"}}}},
+        {"rank": "deprecated", "mainsnak": {"datavalue": {"value": {"id": "Q1"}}}}]}}
+    assert P._claims(ent, "P17") == ["Q145", "Q105313"]
