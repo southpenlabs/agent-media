@@ -7773,6 +7773,17 @@ names the first time they are read.
   start unless `resume`. A recorded one is then eased out for a reply as
   a written one is (5 s down, paused, 2 s back up). 404 for an id not in
   the list; 502 when the player could not start it.
+- **Breathing and the sleep timer** (1 Nov 2026; `breathe.py`,
+  `sleep_timer.py`). `GET /practice` also carries `breathe` (`{"patterns":
+  [{"id", "label", "seconds": [in, hold, out, hold]}], "minutes": [3, 5,
+  10], "default"}`) and `sleep` (`{"timer": {"left_s", "fade_s"} | null,
+  "minutes": [15, 30, 45, 60], "fade_s"}`). `POST /practice {"action":
+  "breathe", "pattern"?, "minutes"?, "target"?}` renders a breathing session
+  (seconds) and plays it on the book channel → `{"ok", "playing":
+  "breathe", "title"}`; 400 for an unknown pattern. `POST /practice
+  {"action": "sleep", "minutes", "fade_minutes"?, "target"?}` sets the
+  timer, `minutes` 0 or null cancels it → `{"ok", "sleep"}` (the `sleep`
+  object above). At the end music and the book channel fade out and stop.
 - **Embeds** (source `embed`, id `it:<hash>`; `practice_embed.py`): a
   practice that plays only in its maker's own player, such as a saved
   Insight Timer track. Listed from MEDIA_PRACTICE_EMBED_INDEX (the person's

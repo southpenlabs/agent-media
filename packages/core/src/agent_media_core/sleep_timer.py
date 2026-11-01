@@ -72,7 +72,7 @@ def _spawn(timer_id: str) -> None:
 
 
 def start(minutes: float, fade_s: Optional[float] = None, target: str = "",
-          spawn: Callable[[str], None] = _spawn, now: Optional[float] = None) -> dict:
+          spawn: Optional[Callable[[str], None]] = None, now: Optional[float] = None) -> dict:
     """Start (or replace) the timer: everything stops `minutes` from now."""
     if not (0 < float(minutes) <= 24 * 60):
         raise ValueError("minutes must be more than 0 and at most a day")
@@ -85,7 +85,7 @@ def start(minutes: float, fade_s: Optional[float] = None, target: str = "",
     tmp = p.with_suffix(f".tmp.{os.getpid()}")
     tmp.write_text(json.dumps(timer))
     tmp.replace(p)
-    spawn(timer["id"])
+    (spawn or _spawn)(timer["id"])
     return status(now) or timer
 
 
@@ -164,3 +164,14 @@ if __name__ == "__main__":
         from .intake._env import load_env_file
         load_env_file()
         print(run(sys.argv[2]))
+
+
+PRESETS = (15, 30, 45, 60)
+
+
+def offer() -> dict:
+    """The timer for an app: what is set, and the lengths to offer
+    (GET /practice `sleep`)."""
+    s = status()
+    return {"timer": {"left_s": s["left_s"], "fade_s": s["fade_s"]} if s else None,
+            "minutes": list(PRESETS), "fade_s": fade_default()}

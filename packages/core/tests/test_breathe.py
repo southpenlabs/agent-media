@@ -61,8 +61,24 @@ def test_render_is_a_meditation_that_eases_out():
 
     clip = B.render("slow", 1, bed="calm", renderer=fake)
     assert clip is not None and meditate.is_meditation(str(clip))
-    assert said == ["Breathe in", "Hold", "Breathe out"]
+    assert said == ["Breathe in", "Hold", "Breathe out", B.CLOSE]
     dur = float(subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
                                 "-of", "csv=p=0", str(clip)], capture_output=True, text=True).stdout)
-    # lead 6 + 6 rounds of 10 s + bell 7 + 4
-    assert dur == pytest.approx(77, abs=1)
+    # lead 6 + 6 rounds of 10 s (slow has no last hold) + the closing words
+    # (0.6 + 1.5) + bell 7 + 4
+    assert dur == pytest.approx(79.1, abs=1)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_box_ends_on_the_out_breath(monkeypatch):
+    marks = []
+
+    def fake(text, out, *, engine, voice, prosody):
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                        "sine=frequency=330:duration=0.5", str(out)], check=True)
+        return True, ""
+    clip = B.render("box", 1, bed="calm", renderer=fake)
+    dur = float(subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                                "-of", "csv=p=0", str(clip)], capture_output=True, text=True).stdout)
+    # 4 rounds of 16 s less the last 4 s hold: 6 + 60 + 2.0 + 7 + 4
+    assert dur == pytest.approx(79, abs=1)

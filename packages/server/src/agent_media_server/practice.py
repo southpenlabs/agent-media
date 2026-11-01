@@ -90,7 +90,9 @@ def listing(bearer: str) -> tuple[bool, dict]:
         print(f"practice: teacher places failed: {e}", file=sys.stderr)
         places = {}
     _report_lengths()
-    return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places}
+    from agent_media_core import breathe, sleep_timer
+    return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places,
+                  "breathe": breathe.offer(), "sleep": sleep_timer.offer()}
 
 
 def control(body: dict, bearer: str) -> tuple[bool, dict]:
@@ -100,6 +102,40 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     from agent_media_core import practice_library as lib
 
     action = body.get("action")
+    if action == "breathe":
+        # A breathing session, rendered and played on the book channel (breathe.py).
+        from agent_media_core import breathe
+        pattern = str(body.get("pattern") or "box")
+        try:
+            breathe.pattern(pattern)
+            minutes = float(body.get("minutes") or 5)
+        except (ValueError, TypeError) as e:
+            return False, {"error": str(e)}
+        argv = [sys.executable, "-m", "agent_media_core.cli", "breathe", pattern,
+                "--minutes", f"{minutes:g}"]
+        if body.get("target"):
+            argv += ["--target", str(body["target"])]
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=240)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return False, {"error": str(e), "status": 502}
+        if r.returncode != 0:
+            return False, {"error": (r.stderr or r.stdout).strip()[-300:], "status": 502}
+        return True, {"playing": "breathe", "title": r.stdout.strip()}
+    if action == "sleep":
+        # The sleep timer (sleep_timer.py): minutes, or 0 / null to cancel.
+        from agent_media_core import sleep_timer
+        minutes = body.get("minutes")
+        if not minutes:
+            sleep_timer.cancel()
+            return True, {"sleep": sleep_timer.offer()}
+        try:
+            fade = body.get("fade_minutes")
+            sleep_timer.start(float(minutes), None if fade is None else float(fade) * 60,
+                              target=str(body.get("target") or ""))
+        except (ValueError, TypeError) as e:
+            return False, {"error": str(e)}
+        return True, {"sleep": sleep_timer.offer()}
     if action == "play":
         item_id = str(body.get("id") or "")
         if not item_id or lib.find(item_id) is None:
@@ -133,7 +169,7 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not lib.remove(str(body.get("id") or "")):
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
-    return False, {"error": "action must be play, add or remove"}
+    return False, {"error": "action must be play, add, remove, breathe or sleep"}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:

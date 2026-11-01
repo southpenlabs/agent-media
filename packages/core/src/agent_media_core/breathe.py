@@ -30,9 +30,13 @@ from typing import Callable, Optional
 from . import meditate as M
 
 PATTERNS = {"box": (4, 4, 4, 4), "478": (4, 7, 8, 0), "slow": (5, 0, 5, 0), "calm": (4, 0, 6, 0)}
+LABELS = {"box": "Box (4-4-4-4)", "478": "4-7-8", "slow": "Slow (5 in, 5 out)",
+          "calm": "Calm (4 in, 6 out)"}
+MINUTES = (3, 5, 10)
 CUES = ("Breathe in", "Hold", "Breathe out", "Hold")
+CLOSE = "And let your breath return to normal."
 LEAD_S = 6.0
-VERSION = 1
+VERSION = 2
 
 
 def _num(name: str, default: float) -> float:
@@ -102,14 +106,17 @@ def render(name: str = "box", minutes: float = 5.0, bed: Optional[str] = None,
     work.mkdir(parents=True, exist_ok=True)
     try:
         cues = {}
-        for i, text in enumerate(CUES[:3]):
+        for i, text in enumerate(CUES[:3] + (CLOSE,)):
             part = work / f"cue{i}.mp3"
             ok, _ = renderer(text, part, engine=engine, voice=voice or None, prosody=(M.rate(), ""))
             cues[i] = M._decode(part) if ok and part.exists() else b""
+        close = cues.pop(3)
         cues[3] = cues[1]
         bell = M._pcm_bytes(M.bell_samples())
-        body_s = n * sum(pat)
-        total = LEAD_S + body_s + M.BELL_S + 4.0
+        # The last round stops after its out-breath: no empty hold to end on.
+        body_s = n * sum(pat) - pat[3]
+        close_s = len(close) / 2 / M.RATE + 1.5 if close else 0.0
+        total = LEAD_S + body_s + close_s + M.BELL_S + 4.0
         pcm = bytearray(M._silence(total))
 
         def lay(at: float, clip: bytes) -> None:
@@ -120,7 +127,9 @@ def render(name: str = "box", minutes: float = 5.0, bed: Optional[str] = None,
         for at, which in cue_times(pat, n, cue_rounds):
             if cues.get(which):
                 lay(LEAD_S + at, cues[which])
-        lay(LEAD_S + body_s, bell)
+        if close:
+            lay(LEAD_S + body_s + 0.5, close)
+        lay(LEAD_S + body_s + close_s, bell)
         voice_wav = work / "voice.wav"
         M._write_wav(voice_wav, bytes(pcm))
         cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(voice_wav)]
@@ -146,3 +155,9 @@ def render(name: str = "box", minutes: float = 5.0, bed: Optional[str] = None,
         except OSError:
             pass
     return final if final.is_file() and final.stat().st_size > 0 else None
+
+
+def offer() -> dict:
+    """What an app offers: the patterns and lengths (GET /practice `breathe`)."""
+    return {"patterns": [{"id": k, "label": LABELS[k], "seconds": list(v)} for k, v in PATTERNS.items()],
+            "minutes": list(MINUTES), "default": {"pattern": "box", "minutes": 5}}

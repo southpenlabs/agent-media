@@ -90,3 +90,27 @@ def test_people_places_by_kind(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "GET", "/media/people?kind=show&name=Hamish%20%26%20Andy&name=Other", None, AUTH)
     assert res.status == 200 and obj["places"] == {"Hamish & Andy": {"country": "Australia"}, "Other": {"country": "Australia"}}
     assert call(server, "GET", "/media/people?kind=painter&name=X", None, AUTH)[0].status == 400
+
+
+def test_the_list_offers_breathing_and_the_sleep_timer(server, shelf, signed_in):
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    assert res.status == 200
+    assert {p["id"] for p in obj["breathe"]["patterns"]} == {"box", "478", "slow", "calm"}
+    assert obj["sleep"]["timer"] is None and 30 in obj["sleep"]["minutes"]
+
+
+def test_a_bad_breathing_pattern_is_400(server, shelf, signed_in):
+    res, obj = call(server, "POST", "/practice", {"action": "breathe", "pattern": "fast"}, AUTH)
+    assert res.status == 400 and "pattern" in obj["error"]
+
+
+def test_the_sleep_timer_is_set_and_cancelled(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import sleep_timer
+    started = []
+    # Never a real worker: it would stop the music on a real player later.
+    monkeypatch.setattr(sleep_timer, "_spawn", started.append)
+    res, obj = call(server, "POST", "/practice", {"action": "sleep", "minutes": 30}, AUTH)
+    assert res.status == 200, obj
+    assert len(started) == 1 and 1790 <= obj["sleep"]["timer"]["left_s"] <= 1800
+    res, obj = call(server, "POST", "/practice", {"action": "sleep", "minutes": 0}, AUTH)
+    assert res.status == 200 and obj["sleep"]["timer"] is None
