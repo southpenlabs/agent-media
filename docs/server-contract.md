@@ -7934,6 +7934,42 @@ podcaster" … "yeah let's do the other profiles too".
   again after a week; a profile kept before places were is looked up
   again. Fetched by each install for its own user. MEDIA_PEOPLE=0 turns
   the lookups off.
+### 6.48 Practice shared with a person over Matrix — gated (built 2 Nov 2026)
+
+Code: `agent_media_server/shares.py`; the owner's loop in `matrix.py` hands
+it every joined room's events. Pinned by `packages/server/tests/test_shares.py`.
+The three-layers proposal's step 5 (David, 1 Nov 2026: "Start now" …
+person to person first). Needs the owner's Matrix token
+(`MATRIX_OWNER_TOKEN`): the owner's loop now runs whenever it is set, with
+or without bridges.
+
+- `POST /practice {"action": "share", "id", "to", "note"?}` → `{"ok",
+  "sent", "to", "room", "event_id", "share"}`: practice item `id` sent, as
+  the owner, to Matrix user `to` (`@name:server`) in the owner's direct
+  room with them (`m.direct`), a new one made and remembered when there is
+  none. Sent as an unencrypted `m.room.message` (`m.text`: any Matrix app
+  shows its words, the note first, then "Shared a practice with you:
+  <title> by <teacher>" and the link) carrying `org.sasonica.share`:
+  `{"v": 1, "kind": "practice", "source": "youtube" | "podcast", "title",
+  "url", "key"?, "show"?, "teacher"?, "duration_s"?, "note"?}` (`key` is
+  the central store's, §6.45). Only a YouTube link or a podcast episode:
+  400 for a file in the Practice folder or the agent's own (they have no
+  public address and never leave), and for a `to` that is not a Matrix id
+  or is the owner's own; 404 for an id not in the list; 409 when this
+  server has no owner's Matrix token; 502 when the homeserver refused.
+- Arriving: a message carrying `org.sasonica.share` (kind practice, source
+  youtube or podcast, an http(s) url, a title) in any room the owner is in,
+  from anyone but the owner, is kept in `shares-incoming.json` (the newest
+  200; done ones dropped first). An invitation from a person is left for
+  the owner to accept, as before.
+- `GET /shares` → `{"ok", "shares": [{"id" (the event id), "room", "from",
+  "at", "share", "status": "new" | "saved" | "dismissed", "saved_as"?}],
+  "can_send"}`, newest first; `can_send` says whether `share` can work here.
+- `POST /shares {"action": "save" | "dismiss", "id"}` → `{"ok", "share"}`:
+  save puts it in the practice list (a YouTube link as `add` does, an
+  episode as a single saved episode, `saved_as` its id there); 404 for an
+  unknown id.
+
 ### Pairing
 
 1. At the desk: `media-visual-canvas pair --device "Pixel 8a"` (the existing

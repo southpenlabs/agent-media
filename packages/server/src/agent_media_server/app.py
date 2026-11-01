@@ -432,7 +432,9 @@ CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # Saved practice: meditations, yoga, any practice (practice.py, §6.45).
 PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
-CORS_PATHS = CORS_PATHS | PRACTICE_PATHS
+# Peer to peer: practice shared with the owner over Matrix (shares.py, §6.48).
+SHARES_PATHS = frozenset({"/shares"})
+CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
 MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
@@ -791,6 +793,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         else:
             _json(h, 200, {"ok": True, **media_people.profile(kind, name)})
         return True
+    if path == "/shares" and method in ("GET", "POST"):
+        return _shares(h, method)
     if path == "/practice/teacher" and method == "GET":
         from . import practice
         ok, detail = practice.teacher((parse_qs(h.path.partition("?")[2]).get("name") or [""])[0], _bearer(h))
@@ -3864,6 +3868,18 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         ok, detail = music.now(_bearer(h))
     else:
         ok, detail = music.control(_read_json(h) or {}, _bearer(h))
+    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    return True
+
+
+def _shares(h: BaseHTTPRequestHandler, method: str) -> bool:
+    """`GET`/`POST /shares` (§6.48): practice sent to the owner over Matrix."""
+    from . import shares
+    if method == "GET":
+        ok, detail = shares.listing(_bearer(h))
+    else:
+        body = _read_json(h)
+        ok, detail = shares.control(body if isinstance(body, dict) else {}, _bearer(h))
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 

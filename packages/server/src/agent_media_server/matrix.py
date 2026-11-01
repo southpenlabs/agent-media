@@ -1111,7 +1111,7 @@ class _Owner:
         self.bridges = bridges
         self.lock = threading.Lock()
         self.sync = matrix.Sync(self.config, state_path=matrix.state_dir() / "sync-owner.json",
-                                on_invite=self._invited, on_join=self._joined)
+                                on_invite=self._invited, on_join=self._seen)
         self._not_bridge: set[str] = set()
         if intake is not None:
             on_event, _stop = intake.consumer(self.config, name_of=_name_of, commands=False)
@@ -1139,6 +1139,18 @@ class _Owner:
             log.warning("matrix: could not join %s: %s", room_id, e)
             return
         self.take(room_id)
+
+    def _seen(self, room_id: str, room: dict) -> None:
+        """Every joined room not read as a thread: a share sent to the owner
+        (shares.py, §6.48) in any of them is kept; then a bridge's is taken in."""
+        from . import shares
+
+        for ev in (room.get("timeline") or {}).get("events") or []:
+            try:
+                shares.consider(room_id, ev, self.owner)
+            except Exception as e:  # noqa: BLE001 — one bad event can't stop the loop
+                log.warning("matrix: share not kept: %s", e)
+        self._joined(room_id, room)
 
     def _joined(self, room_id: str, room: dict) -> None:
         if room_id in self._not_bridge:
@@ -1310,7 +1322,9 @@ def start() -> None:
     threading.Thread(target=_seed_receipts, args=(config,), name="matrix-receipts",
                      daemon=True).start()
     bridges = _bridges()
-    if bridges and owner_token():
+    # The owner's loop: a bridge's rooms, and shares sent to the owner
+    # (shares.py), so it runs whenever the owner's token is there.
+    if owner_token():
         _OWNER[0] = _Owner(config, owner, bridges, intake)
         _OWNER[0].start()
     print(f"matrix: sync on for {len(config.rooms)} room(s)"

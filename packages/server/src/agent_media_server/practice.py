@@ -15,6 +15,7 @@ agent wrote.
   POST /practice {"action": "play", "id", "target"?, "resume"?}
                  {"action": "add", "url", "title"?}
                  {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
+                 {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
 
 Play takes an id from the list only (practice_library.play), and runs
 `media practice play` as the desk would, so the book channel's own
@@ -165,11 +166,16 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return False, {"error": str(e)}
         ok, detail = listing(bearer)
         return ok, {**detail, **got}
+    if action == "share":
+        # Peer to peer (shares.py, §6.48): to a person over Matrix, as the owner.
+        from . import shares
+        return shares.send(str(body.get("id") or ""), str(body.get("to") or ""),
+                           str(body.get("note") or ""))
     if action == "remove":
         if not lib.remove(str(body.get("id") or "")):
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
-    return False, {"error": "action must be play, add, remove, breathe or sleep"}
+    return False, {"error": "action must be play, add, remove, share, breathe or sleep"}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:
