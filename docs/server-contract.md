@@ -7732,9 +7732,14 @@ names the first time they are read.
   that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
   `practice-plays.json`). The app groups and orders by these itself.
+- The answer also has `"teachers": {name: {"region", "country", "photo"}}`
+  (1 Nov 2026; David: "Can we add a location based filter for teachers")
+  for each teacher whose profile is kept (below), for the Teachers list's
+  Where filter; teachers never looked up are looked up in the background,
+  a second apart, so a later listing has them.
 - `GET /practice/teacher?name=` (1 Nov 2026; David: "Can we add a profile
   page for teachers?") → `{"ok", "name", "profile": {"source":
-  "insight-timer", "name", "photo", "description", "region", "website",
+  "insight-timer", "name", "photo", "description", "region", "country", "website",
   "url", "followers", "free_tracks", "courses", "yoga"} | null}`: who a
   teacher is, from Insight Timer's public search and profile data, looked
   up once and kept in `practice-teachers.json` (a month; a teacher not

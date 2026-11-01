@@ -42,7 +42,13 @@ def listing(bearer: str) -> tuple[bool, dict]:
     except Exception as e:  # noqa: BLE001 — an empty list, not a 500
         print(f"practice: list failed: {e}", file=sys.stderr)
         items = []
-    return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder())}
+    names = sorted({i["teacher"] for i in items if i.get("teacher")})
+    try:
+        places = lib.teacher_places(names)
+    except Exception as e:  # noqa: BLE001 — the list without its places
+        print(f"practice: teacher places failed: {e}", file=sys.stderr)
+        places = {}
+    return True, {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places}
 
 
 def control(body: dict, bearer: str) -> tuple[bool, dict]:

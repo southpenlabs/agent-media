@@ -198,3 +198,22 @@ def test_a_teacher_not_on_insight_timer_has_no_profile(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
     monkeypatch.setattr(L, "_get_json", lambda url, timeout=15.0: [{"items": [{"id": "x1", "name": "Calm Minutes Daily", "is_publisher": True}]}])
     assert L.teacher_profile("Calm Minutes") == {"name": "Calm Minutes", "profile": None}
+
+
+def test_teacher_places_from_the_kept_profiles(monkeypatch):
+    L._profiles_path().parent.mkdir(parents=True, exist_ok=True)
+    L._profiles_path().write_text(json.dumps({
+        "purarasa": {"profile": {"region": "Vilnius, Lithuania", "photo": "p.jpg"}, "at": 1},
+        "calmminutes": {"profile": None, "at": 1}}))
+    asked = []
+    monkeypatch.setattr(L, "_fill_profiles", lambda names: asked.extend(names))
+    got = L.teacher_places(["Pura Rasa", "Calm Minutes", "Nid Ra"])
+    assert got == {"Pura Rasa": {"region": "Vilnius, Lithuania", "country": "Lithuania", "photo": "p.jpg"}}
+    assert asked == ["Nid Ra"], "only one never looked up is asked for"
+
+
+def test_countries_are_written_one_way():
+    c = lambda **p: L._country(p)  # noqa: E731
+    assert [c(country="USA"), c(region="Asheville, NC"), c(country="UK"), c(region="Manly NSW 2095, Australia"),
+            c(region="Toronto, ON"), c(country="Lithuania"), c(country="Nevada"), c(country="Manchester UK"), L._country(None)] == \
+        ["United States", "United States", "United Kingdom", "Australia", "Canada", "Lithuania", "United States", "United Kingdom", None]

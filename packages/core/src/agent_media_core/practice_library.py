@@ -617,15 +617,100 @@ def _insight_timer(name: str) -> Optional[dict]:
     u = _get_json(IT_USER.format(id=uid))
     region = u.get("region") if isinstance(u.get("region"), dict) else {}
     where = ", ".join(x for x in (region.get("name"), region.get("country_name")) if x) if region else (u.get("region") or "")
+    country = (region.get("country_name") if region else "") or (where.rsplit(",", 1)[-1].strip() if where else "")
     return {"source": "insight-timer", "name": u.get("name") or name,
             "photo": IT_PICTURE.format(id=uid) if u.get("has_avatar") else None,
             "description": (u.get("publisher_description") or "").strip() or None,
-            "region": where or None, "website": u.get("website") or None,
+            "region": where or None, "country": country or None, "website": u.get("website") or None,
             "url": u.get("public_url") or None,
             "followers": u.get("publisher_follower_count") or u.get("follower_count") or None,
             "free_tracks": u.get("total_free_tracks") or None,
             "courses": u.get("total_courses") or None,
             "yoga": bool(u.get("is_yoga_teacher"))}
+
+
+_US_STATES = set("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM "
+                 "NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC".split())
+_US_STATE_NAMES = {"alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware",
+                   "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky",
+                   "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+                   "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey", "new mexico",
+                   "new york", "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania",
+                   "rhode island", "south carolina", "south dakota", "tennessee", "texas", "utah", "vermont",
+                   "virginia", "washington", "west virginia", "wisconsin", "wyoming"}
+_AU_STATES = {"NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"}
+_CA_PROVINCES = {"BC", "AB", "SK", "MB", "ON", "QC", "NB", "NS", "PE", "NL", "YT", "NU"}
+_COUNTRY_ALIASES = {"usa": "United States", "us": "United States", "united states of america": "United States",
+                    "uk": "United Kingdom", "gb": "United Kingdom", "great britain": "United Kingdom",
+                    "england": "United Kingdom", "scotland": "United Kingdom", "wales": "United Kingdom"}
+
+
+def _country(profile: Optional[dict]) -> Optional[str]:
+    """A profile's country, written one way: "USA", "US" and a US state's
+    code are the United States, "UK" and England the United Kingdom, an
+    Australian state's or Canadian province's code its country."""
+    if not profile:
+        return None
+    raw = (profile.get("country") or (profile.get("region") or "").rsplit(",", 1)[-1]).strip()
+    if not raw:
+        return None
+    code = raw.split()[0].upper() if raw.split() else raw.upper()
+    if raw.lower() in _COUNTRY_ALIASES:
+        return _COUNTRY_ALIASES[raw.lower()]
+    if raw.lower() in _US_STATE_NAMES:
+        return "United States"
+    last = raw.split()[-1]
+    if len(raw.split()) > 1 and last.lower() in _COUNTRY_ALIASES:
+        return _COUNTRY_ALIASES[last.lower()]
+    if raw.upper() in _AU_STATES or code in _AU_STATES and re.search(r"\d{4}$", raw):
+        return "Australia"
+    if raw.upper() in _CA_PROVINCES and raw.upper() not in _US_STATES:
+        return "Canada"
+    if raw.upper() in _US_STATES:
+        return "United States"
+    return raw
+
+
+def teacher_places(names: list[str]) -> dict:
+    """`{name: {"region", "country", "photo"}}` for the teachers whose
+    profile is kept (none for one not found), for the Teachers list's
+    Where filter; those never looked up are looked up in the background, a
+    few seconds apart, and a next listing has them."""
+    try:
+        kept = json.loads(_profiles_path().read_text())
+    except (OSError, ValueError):
+        kept = {}
+    out, missing = {}, []
+    for name in names:
+        hit = kept.get(_norm(name))
+        if not isinstance(hit, dict):
+            missing.append(name)
+            continue
+        pr = hit.get("profile")
+        if pr:
+            out[name] = {"region": pr.get("region"), "country": _country(pr), "photo": pr.get("photo")}
+    _fill_profiles(missing)
+    return out
+
+
+_PROFILING: list = [False]
+
+
+def _fill_profiles(names: list[str]) -> None:
+    if not names or _PROFILING[0] or os.environ.get("MEDIA_PRACTICE_PROFILES") == "0":
+        return
+    import threading
+    _PROFILING[0] = True
+
+    def run():
+        try:
+            for n in names:
+                teacher_profile(n)
+                time.sleep(1.0)
+        finally:
+            _PROFILING[0] = False
+
+    threading.Thread(target=run, name="practice-profiles", daemon=True).start()
 
 
 def teacher_profile(name: str, fresh: bool = False) -> dict:
