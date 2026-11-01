@@ -89,6 +89,33 @@ a name, a country, a public image URL), not content: no descriptions
 copied in bulk, no audio, no thumbnails rehosted. Insight Timer profile
 text stays a per-install fetch.
 
+### Open: central over HTTPS, Matrix, or both
+
+David, 2 Nov 2026: "I'm still not sure about that https only option for
+the central server as opposed to Matrix ... I think we need to weigh that
+up a bit more" — written up, to decide later. Built today: HTTPS
+(`deploy/facts`).
+
+| | HTTPS (built) | A Matrix facts room |
+|---|---|---|
+| Who it reaches | every install | only installs with Matrix; the rest get no facts |
+| What central learns | each lookup's key (interest, not who: unsigned) | nothing: every member holds the whole set and looks up locally |
+| Identity of reporters | install keys, anonymous | Matrix accounts: easier to moderate and block |
+| Scale | a lookup per key; cheap on Cloudflare | the whole set copied to every member's homeserver; fine at hundreds, heavy at millions |
+| A wrong fact | replaced | stays in the timeline; as room state it can be replaced, but large state is costly for homeservers |
+| Transports an install needs | HTTPS (it has it) | Matrix too, for an install already on Matrix nothing new |
+
+The one thing only the room seemed to give, lookups central never sees,
+HTTPS can give too: **a snapshot**, the whole table as one file an install
+downloads now and then and looks up in locally. So the options are:
+
+1. **HTTPS plus a snapshot** (recommended): the HTTPS service stays the
+   source of truth for every install; the snapshot makes lookups private.
+2. **HTTPS and Matrix both**: HTTPS for every install, plus a facts room
+   a Matrix install joins to receive new facts (and maybe report them
+   under its Matrix identity).
+3. **Matrix only**: installs without Matrix get no central facts.
+
 ## Peer to peer: between people who know each other
 
 **What it is for.** Sending a playlist or a practice item to a friend,
