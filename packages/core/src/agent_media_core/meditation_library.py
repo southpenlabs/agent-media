@@ -20,8 +20,9 @@ Four sources, one list (`items`), each item ``{id, title, source, …}``:
 Each item also says who it is by (`teacher`: the name after the title's
 " — ", or a podcast's show), what kind of practice it is and what it is
 for (`practice`, `benefit`: from the title's words), how long it is
-(`duration_s`: a feed's, else looked up once in the background and kept
-in ``meditation-durations.json``) and how often it was played (`plays`,
+(`duration_s`: a feed's, else looked up in the background — a YouTube
+link's by yt-dlp on the phone, a file's or episode's by ffprobe — and
+kept in ``meditation-durations.json``) and how often it was played (`plays`,
 `last_played`, kept in ``meditation-plays.json`` by `play`), for the
 app's Show ▾ (David, 1 Nov 2026: "Can we have show filters for the
 meditation tab too please?"; groupings after Insight Timer's; the app calls
@@ -362,54 +363,103 @@ def _durations() -> dict:
     return {k: v for k, v in d.items() if isinstance(v, (int, float)) and v > 0} if isinstance(d, dict) else {}
 
 
-def _measure(it: dict) -> Optional[int]:
-    """How long a meditation is: a file's by ffprobe, a YouTube video's by
-    yt-dlp (its page, no download)."""
+#: A length that could not be had is asked again after this long.
+RETRY_S = 86400
+
+
+def _probe(uri: str) -> Optional[int]:
+    """A file's or an audio URL's length, by ffprobe (an URL is read only as
+    far as its header)."""
     import subprocess
-    uri = it.get("_uri") or ""
     try:
-        if uri.startswith("yt:"):
-            r = subprocess.run(["yt-dlp", "--no-warnings", "--skip-download", "--print", "duration", uri[3:]],
-                               capture_output=True, text=True, timeout=60)
-        elif uri.startswith("/"):
-            r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                "-of", "default=nw=1:nk=1", uri], capture_output=True, text=True, timeout=30)
-        else:
-            return None
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", uri], capture_output=True, text=True, timeout=30)
         return int(float(r.stdout.strip().splitlines()[0])) if r.returncode == 0 and r.stdout.strip() else None
     except (OSError, ValueError, IndexError, Exception):  # noqa: BLE001
         return None
+
+
+def _youtube_lengths(vids: list[str]) -> dict:
+    """`{vid: seconds}` for YouTube videos, asked of yt-dlp on the phone in
+    one call (no download): YouTube refuses this host's address, as
+    podcast_links.fetch and audiobook-fetch know."""
+    import shlex
+    import subprocess
+    if not vids:
+        return {}
+    phone = os.environ.get("AUDIOBOOK_PHONE_HOST", "p8a")
+    urls = " ".join(shlex.quote(f"https://www.youtube.com/watch?v={v}") for v in vids)
+    remote = f"yt-dlp --no-warnings --ignore-errors --skip-download --print '%(id)s %(duration)s' {urls}"
+    try:
+        r = subprocess.run(["ssh", "-o", "ConnectTimeout=12", "-o", "BatchMode=yes", phone, remote],
+                           capture_output=True, text=True, timeout=60 + 15 * len(vids))
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    out = {}
+    for line in r.stdout.splitlines():
+        vid, _, dur = line.strip().partition(" ")
+        try:
+            out[vid] = int(float(dur))
+        except ValueError:
+            continue
+    return out
+
+
+def _measure_all(todo: list[dict]) -> dict:
+    """`{id: seconds}` for those that could be measured: YouTube links
+    through the phone, files and episode links by ffprobe."""
+    got: dict = {}
+    yt = {youtube_id(i["_uri"]): i["id"] for i in todo if i.get("_uri", "").startswith("yt:")}
+    yt.pop(None, None)
+    for vid, n in _youtube_lengths(list(yt)).items():
+        if vid in yt and n > 0:
+            got[yt[vid]] = n
+    for it in todo:
+        uri = it.get("_uri") or ""
+        if uri.startswith(("/", "http://", "https://")):
+            n = _probe(uri)
+            if n:
+                got[it["id"]] = n
+    return got
+
+
+def _tried() -> dict:
+    """Every length asked for: seconds, or `{"failed": at}`."""
+    try:
+        d = json.loads(_durations_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
 
 
 _FILLING: list = [False]
 
 
 def _fill_durations(missing: list[dict]) -> None:
-    """Look up the lengths not known yet, one at a time, in the background;
-    a next listing has them. One that cannot be measured is kept as -1."""
+    """Look up the lengths not known yet in the background; a next listing
+    has them. One that could not be had is asked again after RETRY_S."""
     if not missing or _FILLING[0] or os.environ.get("MEDIA_MEDITATION_DURATIONS") == "0":
         return
     import threading
-    tried = json.loads(_durations_path().read_text()) if _durations_path().exists() else {}
-    todo = [i for i in missing if i["id"] not in tried]
+    tried = _tried()
+    now = time.time()
+    todo = [i for i in missing if not (isinstance(tried.get(i["id"]), dict)
+                                       and now - float(tried[i["id"]].get("failed") or 0) < RETRY_S)]
     if not todo:
         return
     _FILLING[0] = True
 
     def run():
         try:
+            got = _measure_all(todo)
+            d = _tried()
             for it in todo:
-                n = _measure(it)
-                try:
-                    d = json.loads(_durations_path().read_text())
-                except (OSError, ValueError):
-                    d = {}
-                d[it["id"]] = n or -1
-                p = _durations_path()
-                p.parent.mkdir(parents=True, exist_ok=True)
-                tmp = p.with_suffix(f".tmp.{os.getpid()}")
-                tmp.write_text(json.dumps(d))
-                tmp.replace(p)
+                d[it["id"]] = got.get(it["id"]) or {"failed": time.time()}
+            p = _durations_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(f".tmp.{os.getpid()}")
+            tmp.write_text(json.dumps(d))
+            tmp.replace(p)
         finally:
             _FILLING[0] = False
 

@@ -7715,8 +7715,10 @@ Code: `agent_media_server/meditations.py`, the list in
   Movement, Energy & chakra, Talk, Music, else Guided), `benefit` (what it
   is for: Sleep, Morning & energy, Healing, Heart & love, Confidence &
   strength, Intuition & spirit, Calm & grounding, or null), `duration_s`
-  (a feed's duration, else looked up once in the background with yt-dlp
-  or ffprobe and kept in `meditation-durations.json`; null until known),
+  (a feed's duration, else looked up in the background — a YouTube link's
+  by yt-dlp on the phone, as YouTube refuses the host, a file's or
+  episode's by ffprobe — and kept in `meditation-durations.json`, one
+  that could not be had asked again a day later; null until known),
   `plays` and `last_played` (counted by `play`, in
   `meditation-plays.json`). The app groups and orders by these itself.
 - `POST /meditations {"action": "play", "id", "target"?, "resume"?}` →

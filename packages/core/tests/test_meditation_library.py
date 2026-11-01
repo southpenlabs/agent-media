@@ -133,16 +133,30 @@ def test_items_carry_length_and_plays(monkeypatch):
     assert again["plays"] == 2 and again["last_played"] > 0
 
 
-def test_lengths_are_looked_up_once_in_the_background(monkeypatch):
+def test_lengths_are_looked_up_in_the_background(monkeypatch):
     monkeypatch.setenv("MEDIA_MEDITATION_DURATIONS", "1")
     L.add("https://www.youtube.com/watch?v=AAAAAAAAAAA", "A")
     L.add("https://www.youtube.com/watch?v=BBBBBBBBBBB", "B")
     asked = []
-    monkeypatch.setattr(L, "_measure", lambda it: (asked.append(it["id"]), 600 if it["id"].endswith("A") else None)[1])
+    monkeypatch.setattr(L, "_youtube_lengths", lambda vids: (asked.append(sorted(vids)), {"AAAAAAAAAAA": 600})[1])
     started = []
     import threading
     monkeypatch.setattr(threading, "Thread", lambda target, **_: type("T", (), {"start": lambda self: (started.append(1), target())})())
     L.items()
     got = {i["id"]: i["duration_s"] for i in L.items()}
     assert got == {"yt:AAAAAAAAAAA": 600, "yt:BBBBBBBBBBB": None}
-    assert sorted(asked) == ["yt:AAAAAAAAAAA", "yt:BBBBBBBBBBB"] and started == [1], "one that cannot be measured is not asked again"
+    assert asked == [["AAAAAAAAAAA", "BBBBBBBBBBB"]], "both in one call to the phone, the failed one not again so soon"
+    # A day on, the one that failed is asked again.
+    d = json.loads(L._durations_path().read_text())
+    d["yt:BBBBBBBBBBB"]["failed"] -= L.RETRY_S + 1
+    L._durations_path().write_text(json.dumps(d))
+    L.items()
+    assert asked[-1] == ["BBBBBBBBBBB"]
+
+
+def test_youtube_lengths_read_the_phones_answer(monkeypatch):
+    import subprocess
+    seen = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: (seen.append(argv), type("R", (), {"stdout": "AAAAAAAAAAA 1820\nBBBBBBBBBBB NA\n", "returncode": 0})())[1])
+    assert L._youtube_lengths(["AAAAAAAAAAA", "BBBBBBBBBBB"]) == {"AAAAAAAAAAA": 1820}
+    assert seen[0][0] == "ssh" and "--skip-download" in seen[0][-1] and "watch?v=AAAAAAAAAAA" in seen[0][-1]
