@@ -21,6 +21,16 @@ measured lengths; `agent_media_core/central_facts.py`), and teachers' places
   weighed (no middleman, but both servers must be up and it is a second
   protocol to secure) and left out; it can be added if a homeserver ever
   gets in the way.
+- The homeserver for peer to peer is **Sasonica's own, sasonica.com**,
+  stood up first rather than starting on ryer.org: server_name
+  `sasonica.com`, at https://matrix.sasonica.com (tuwunel), live 1 Nov 2026.
+  **Federation on, allowlisted**: it talks only to homeservers on its
+  list, starting with ryer.org (a bridge with federation off was weighed:
+  it would have to read every message to pass it on, so no end-to-end
+  encryption, and it is federation with extra steps). **Accounts only
+  through a Sasonica sign-in** (cms.sasonica.com's OIDC issuer, now, not
+  later): no password sign-up, no public room directory. This replaces the
+  Matrix transport proposal's "federation off" for matrix.sasonica.com.
 
 ## The rule
 
