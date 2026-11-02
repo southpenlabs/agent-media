@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -241,30 +240,14 @@ def fetch(vid: str) -> Optional[Path]:
     have = file_for(vid)
     if have and have.parent == folder():
         return shrink(have)
-    phone = os.environ.get("AUDIOBOOK_PHONE_HOST", "p8a")
-    ssh = ["ssh", "-o", "ConnectTimeout=12", "-o", "BatchMode=yes", phone]
-    url = f"https://www.youtube.com/watch?v={vid}"
-    remote = (f"mkdir -p {PHONE_DIR} && cd {PHONE_DIR} && "
-              "yt-dlp -f bestaudio --no-overwrites --no-part --no-progress --no-warnings "
-              "--print after_move:filename -o '%(title).150B [%(id)s].%(ext)s' "
-              + shlex.quote(url))
-    print(f"podcast-links: [{phone}] downloading {url}", file=sys.stderr)
-    r = subprocess.run([*ssh, remote], capture_output=True, text=True, timeout=3600)
-    name = (r.stdout.strip().splitlines() or [""])[-1]
-    if r.returncode != 0 or f"[{vid}]" not in name or "/" in name:
-        print(f"podcast-links: download failed for {vid}: {r.stderr.strip()[-300:]}", file=sys.stderr)
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-downloads")
+    if addon is None:
+        print("podcast-links: downloading from YouTube isn't available on this server", file=sys.stderr)
         return None
-    dest = folder()
-    dest.mkdir(parents=True, exist_ok=True)
-    src = f"{phone}:{PHONE_DIR}/{name}"
-    r = subprocess.run(["rsync", "-a", "-s", "-e", "ssh -o ConnectTimeout=12", src, str(dest) + "/"],
-                       capture_output=True, text=True, timeout=3600)
-    got = dest / name
-    if r.returncode != 0 or not got.exists():
-        print(f"podcast-links: copy failed for {vid}: {r.stderr.strip()[-300:]}", file=sys.stderr)
+    got = addon.fetch_audio(vid, folder())
+    if got is None:
         return None
-    subprocess.run([*ssh, f"rm -f -- {shlex.quote(PHONE_DIR + '/' + name)}"],
-                   capture_output=True, timeout=60)
     out = shrink(got)
     print(f"podcast-links: kept {out.name} ({out.stat().st_size // 1_000_000} MB)", file=sys.stderr)
     for gone in prune(keep=out):

@@ -355,15 +355,14 @@ class SinkMusicLocal:
             return
 
         host = ssh_host()
-        mode = "" if replace else " --add"
-        # The helper accepts a bare URL or a yt: URI and handles the yt: strip.
-        remote = f"{fetch_cmd()}{mode} {shlex.quote(uri)}"
-        timeout = float(os.environ.get("MEDIA_MUSIC_LOCAL_FETCH_TIMEOUT", "120"))
+        # Downloading it on the phone is the personal-use add-on's
+        # (youtube_addon "youtube-downloads" `phone_play`).
+        from .. import youtube_addon
+        addon = youtube_addon.get("youtube-downloads")
+        if addon is None:
+            raise ipc.MpvIpcError("sink-music-local: downloading from YouTube isn't available on this server")
         try:
-            r = subprocess.run(
-                phone_argv(remote),
-                capture_output=True, text=True, timeout=timeout,
-            )
+            r = addon.phone_play(uri, replace)
         except subprocess.TimeoutExpired as e:
             raise ipc.MpvIpcError(f"sink-music-local: phone fetch timed out: {e}")
         except OSError as e:

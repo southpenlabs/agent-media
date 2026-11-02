@@ -299,15 +299,6 @@ def test_a_service_without_the_gate_is_unaffected(tmp_path, monkeypatch):
 # --- shipped shell helpers --------------------------------------------------
 
 
-def test_the_audiobook_fetch_helper_ships_with_the_package():
-    """`library.fetch_cmd` looks for this on PATH, and the console script only
-    puts it there if the file is actually in the install."""
-    script = setup.shipped_bin("audiobook-fetch")
-    assert script.is_file()
-    assert script.read_text().startswith("#!")
-    assert os.access(script, os.X_OK)
-
-
 def test_shipped_bin_follows_the_package_when_it_moves(tmp_path, monkeypatch):
     inside = tmp_path / "agent_media_core" / "bin"
     inside.mkdir(parents=True)

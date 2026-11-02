@@ -65,18 +65,17 @@ def test_expand_youtube_playlist_asks_the_add_on(monkeypatch):
     ]
 
 
-def test_start_fetch_without_helper(monkeypatch):
-    monkeypatch.setenv("MEDIA_AUDIOBOOK_FETCH", "")
-    monkeypatch.setattr(library.shutil, "which", lambda _: None)
+def test_start_fetch_without_the_add_on():
     assert library.start_fetch("https://youtu.be/x") is False
 
 
-def test_start_fetch_many_passes_all_urls(monkeypatch):
-    monkeypatch.setenv("MEDIA_AUDIOBOOK_FETCH", "/bin/audiobook-fetch")
-    launched = []
-    monkeypatch.setattr(library.subprocess, "Popen", lambda argv, **kw: launched.append(argv))
+def test_start_fetch_many_asks_the_add_on(monkeypatch):
+    from agent_media_core import personal_use
+    asked = []
+    dl = type("DL", (), {"start_fetch_many": staticmethod(lambda urls, play=False, target=None, lib=None: asked.append((urls, play, target, lib)) or True)})()
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-downloads", dl)
     assert library.start_fetch_many(["u1", "u2"], play=True)
-    assert launched == [["/bin/audiobook-fetch", "--play", "u1", "u2"]]
+    assert asked == [(["u1", "u2"], True, None, None)]
 
 
 # --- timecode parsing ------------------------------------------------------

@@ -32,42 +32,6 @@ def test_rooms_ssh_host_from_mpd_env(monkeypatch):
     assert mf.rooms_ssh_host() == "otherhost"         # remote hub → ssh
 
 
-# ---- fetcher selection -------------------------------------------------------
-
-def test_current_device_fetcher_wins_over_rooms_override(monkeypatch):
-    monkeypatch.setenv("SSH_CONNECTION", "100.94.14.59 56040 100.103.43.93 22")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_ENDPOINT", "tcp://100.94.14.59:6601")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_SSH", "p8a")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_FETCH", "bin/play-local")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_SSH", "pn")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_CMD", "bin/fetch-track")
-    assert mf.fetch_ssh_host() == "p8a"
-    assert mf.fetch_helper() == "bin/play-local"
-    assert mf._fetchers()[:2] == [("p8a", "bin/play-local"),
-                                  ("pn", "bin/fetch-track")]
-
-
-def test_rooms_override_wins_when_current_device_is_not_endpoint(monkeypatch):
-    monkeypatch.setenv("SSH_CONNECTION", "100.1.2.3 56040 100.103.43.93 22")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_ENDPOINT", "tcp://100.94.14.59:6601")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_SSH", "p8a")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_FETCH", "bin/play-local")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_SSH", "pn")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_CMD", "bin/fetch-track")
-    assert mf.fetch_ssh_host() == "pn"
-    assert mf.fetch_helper() == "bin/fetch-track"
-
-
-def test_current_device_fetcher_can_be_disabled(monkeypatch):
-    monkeypatch.setenv("MEDIA_MUSIC_CURRENT_DEVICE_FETCH", "0")
-    monkeypatch.setenv("SSH_CONNECTION", "100.94.14.59 56040 100.103.43.93 22")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_ENDPOINT", "tcp://100.94.14.59:6601")
-    monkeypatch.setenv("MEDIA_MUSIC_LOCAL_SSH", "p8a")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_SSH", "pn")
-    monkeypatch.setenv("MEDIA_MUSIC_ROOMS_FETCH_CMD", "bin/fetch-track")
-    assert mf.fetch_ssh_host() == "pn"
-
-
 # ---- ensure_local ------------------------------------------------------------
 
 def test_ensure_local_disabled(monkeypatch):
@@ -81,7 +45,9 @@ def test_ensure_local_cache_hit_skips_phone(monkeypatch):
                         lambda vid: f"/home/u/.cache/music-offline/{vid}.mka")
     def no_phone(*a, **k):
         raise AssertionError("phone fetch must not run on a cache hit")
-    monkeypatch.setattr(mf, "_phone_fetch", no_phone)
+    from agent_media_core import personal_use
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-downloads",
+                        type("DL", (), {"rooms_fetch": staticmethod(no_phone)})())
     got = mf.ensure_local("https://www.youtube.com/watch?v=a82hE1aupo8")
     assert got == "/home/u/.cache/music-offline/a82hE1aupo8.mka"
 
@@ -89,8 +55,25 @@ def test_ensure_local_cache_hit_skips_phone(monkeypatch):
 def test_ensure_local_fetch_failure_returns_none(monkeypatch):
     monkeypatch.delenv("MEDIA_MUSIC_ROOMS_FETCH", raising=False)
     monkeypatch.setattr(mf, "_cached_path", lambda vid: None)
-    monkeypatch.setattr(mf, "_phone_fetch", lambda url: None)
+    from agent_media_core import personal_use
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-downloads",
+                        type("DL", (), {"rooms_fetch": staticmethod(lambda url: None)})())
     assert mf.ensure_local("https://youtu.be/a82hE1aupo8") is None
+
+
+def test_ensure_local_without_the_add_on_fetches_nothing(monkeypatch):
+    monkeypatch.delenv("MEDIA_MUSIC_ROOMS_FETCH", raising=False)
+    monkeypatch.setattr(mf, "_cached_path", lambda vid: None)
+    assert mf.ensure_local("https://youtu.be/a82hE1aupo8") is None
+
+
+def test_ensure_local_asks_the_add_on_on_a_miss(monkeypatch):
+    monkeypatch.delenv("MEDIA_MUSIC_ROOMS_FETCH", raising=False)
+    monkeypatch.setattr(mf, "_cached_path", lambda vid: None)
+    from agent_media_core import personal_use
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-downloads",
+                        type("DL", (), {"rooms_fetch": staticmethod(lambda url: "/c/" + url[-11:] + ".mka")})())
+    assert mf.ensure_local("https://youtu.be/a82hE1aupo8") == "/c/a82hE1aupo8.mka"
 
 
 # ---- _localise_youtube wiring -------------------------------------------------

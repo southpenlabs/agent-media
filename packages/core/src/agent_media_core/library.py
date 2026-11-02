@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Optional, Sequence
 import urllib.request
@@ -247,42 +245,25 @@ def cached_path(vid: str, target=None) -> Optional[Path]:
     return hits[0] if hits else None
 
 
-def fetch_cmd() -> Optional[str]:
-    """Path to the `audiobook-fetch` acquisition helper, if installed."""
-    return os.environ.get("MEDIA_AUDIOBOOK_FETCH") or shutil.which("audiobook-fetch")
-
-
 def start_fetch_many(urls: Sequence[str], *, play: bool = False, target=None) -> bool:
-    """Kick off a detached `audiobook-fetch` for one or more URLs.
+    """Start downloading one or more YouTube URLs into the library, in the
+    background: the personal-use add-on's (youtube_addon "youtube-downloads"
+    `start_fetch_many`). False without it, or when it cannot start.
 
-    Returns False if the helper isn't installed. With `play=True` the helper
-    plays the last fetched file on the book channel when the phone download +
-    sync finishes.
-
-    When `target` is given, the helper syncs into that target's ABS library
-    dir via the AUDIOBOOK_LIB env var it already honors, and receives
-    `--target <name>` so its internal `media book play` / `media abs-scan`
-    calls hit that target's book channel + library too.
+    With `play=True` the last one plays on the book channel when it has
+    arrived. With `target`, it lands in that target's ABS library dir and
+    the add-on's `media book play` / `media abs-scan` calls name it.
     """
-    fetch = fetch_cmd()
-    if not fetch:
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-downloads")
+    if addon is None:
         return False
-    argv = [fetch]
-    if play:
-        argv.append("--play")
-    env = None
     name = getattr(target, "name", target) or ""
-    if target is not None and name:
-        env = dict(os.environ)
-        env["AUDIOBOOK_LIB"] = str(abs_import_dir(target))
-        argv += ["--target", str(name)]
-    argv.extend(str(u) for u in urls)
-    subprocess.Popen(
-        argv, stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True, env=env,
-    )
-    return True
+    lib = abs_import_dir(target) if target is not None and name else None
+    try:
+        return bool(addon.start_fetch_many(list(urls), play=play, target=target, lib=lib))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def start_fetch(url: str, *, play: bool = False, target=None) -> bool:

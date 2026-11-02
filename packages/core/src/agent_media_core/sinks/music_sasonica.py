@@ -41,7 +41,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shlex
 import subprocess
 import urllib.parse
 from typing import Optional
@@ -124,21 +123,18 @@ def chapter_at(chs: list[dict], t: Optional[float]) -> int:
 
 
 def _phone_fetch(uri: str) -> Optional[str]:
-    """Download `uri` into the phone's cache (play-local --fetch-only); its path."""
-    timeout = float(os.environ.get("MEDIA_MUSIC_LOCAL_FETCH_TIMEOUT", "600"))
-    remote = f"{music_local.fetch_cmd()} --fetch-only {shlex.quote(uri)}"
+    """`uri` downloaded into the phone's cache, its path: the personal-use
+    add-on's (youtube_addon "youtube-downloads" `phone_fetch`); None
+    without it."""
+    from .. import youtube_addon
+    addon = youtube_addon.get("youtube-downloads")
+    if addon is None:
+        return None
     try:
-        r = subprocess.run(music_local.phone_argv(remote),
-                           capture_output=True, text=True, timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError) as e:
+        return addon.phone_fetch(uri)
+    except Exception as e:  # noqa: BLE001
         log.warning("sink-music-sasonica: phone fetch failed: %s", e)
         return None
-    lines = [ln for ln in (r.stdout or "").strip().splitlines() if ln]
-    if r.returncode != 0 or not lines or not lines[-1].startswith("/"):
-        log.warning("sink-music-sasonica: phone fetch failed (%d): %s", r.returncode,
-                    (r.stderr or r.stdout or "").strip()[-300:])
-        return None
-    return lines[-1]
 
 
 def phone_resolve(uri: str) -> tuple[Optional[str], str]:
