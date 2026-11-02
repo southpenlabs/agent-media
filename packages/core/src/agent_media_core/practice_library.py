@@ -633,10 +633,8 @@ def remove(key: str) -> bool:
 
 # ---- a teacher's profile -----------------------------------------------------------
 
-#: Insight Timer's public search and profile data (what its web app reads).
-IT_SEARCH = "https://search.insighttimer-api.net/api/v1/top"
-IT_USER = "https://users.insighttimer.com/{id}/data/user.json"
-IT_PICTURE = "https://users.insighttimer.com/{id}/pictures/square_medium.jpeg"
+#: A teacher's profile comes from the insight-timer-profiles add-on (its
+#: `lookup(name)`), where it is installed and allowed (personal_use).
 #: A profile found is kept a month; a teacher not found is asked again after a week.
 PROFILE_TTL_S = 30 * 86400
 PROFILE_MISS_TTL_S = 7 * 86400
@@ -648,58 +646,6 @@ def _profiles_path() -> Path:
 
 def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
-
-
-def _get_json(url: str, timeout: float = 15.0):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (agent-media practice)"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
-
-
-def _insight_timer(name: str) -> Optional[dict]:
-    """The Insight Timer teacher named exactly `name` (letters and digits
-    compared), as a profile; None when there is no such teacher."""
-    import urllib.parse
-    q = urllib.parse.urlencode({"content_langs": "en", "device_lang": "en", "limit": 15, "offset": 0,
-                                "publishers_only_users": "true", "query": name, "search_friends": "false"})
-    found = None
-
-    def walk(o):
-        nonlocal found
-        if found is not None:
-            return
-        if isinstance(o, dict):
-            if o.get("is_publisher") and _norm(o.get("name", "")) == _norm(name) and o.get("id"):
-                found = o
-                return
-            for v in o.values():
-                walk(v)
-        elif isinstance(o, list):
-            for v in o:
-                walk(v)
-
-    walk(_get_json(f"{IT_SEARCH}?{q}"))
-    if not found:
-        return None
-    uid = found["id"]
-    u = _get_json(IT_USER.format(id=uid))
-    region = u.get("region") if isinstance(u.get("region"), dict) else {}
-    where = (region.get("name") or ", ".join(x for x in (region.get("city"), region.get("country") or region.get("country_name")) if x)) \
-        if region else (u.get("region") or "")
-    country = (region.get("country") or region.get("country_name") if region else "") or (where.rsplit(",", 1)[-1].strip() if where else "")
-    loc = (region.get("location") or {}) if region else {}
-    return {"source": "insight-timer", "name": u.get("name") or name,
-            "photo": IT_PICTURE.format(id=uid) if u.get("has_avatar") else None,
-            "description": (u.get("publisher_description") or "").strip() or None,
-            "region": where or None, "country": country or None,
-            "state": (region.get("state_long_name") or region.get("state") or None) if region else None,
-            "city": (region.get("city") or None) if region else None,
-            "lat": loc.get("lat"), "lon": loc.get("lon"), "website": u.get("website") or None,
-            "url": u.get("public_url") or None,
-            "followers": u.get("publisher_follower_count") or u.get("follower_count") or None,
-            "free_tracks": u.get("total_free_tracks") or None,
-            "courses": u.get("total_courses") or None,
-            "yoga": bool(u.get("is_yoga_teacher"))}
 
 
 _US_STATES = set("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM "
@@ -863,7 +809,7 @@ def teacher_profile(name: str, fresh: bool = False) -> dict:
         # from them not shown, where personal use does not allow it.
         return {"name": name, "profile": None}
     try:
-        profile = _insight_timer(name)
+        profile = personal_use.provider("insight-timer-profiles").lookup(name)
     except Exception:  # noqa: BLE001 — the last one known, or none
         return {"name": name, "profile": (hit or {}).get("profile")}
     kept[key] = {"profile": profile, "at": time.time()}

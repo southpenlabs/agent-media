@@ -81,7 +81,7 @@ def test_a_facebook_short_link_is_resolved_with_its_tags(web):
     got = link_preview.preview("https://fb.watch/abcDEF/")
     assert got == {"url": "https://www.facebook.com/somepage/videos/1234567890/", "title": "Our dog & the sea",
                    "image": "https://scontent.example/pic.jpg", "site": "Facebook", "embeddable": True}
-    assert web[0][1] == link_preview.FB_UA                  # asked as Facebook's own previewer
+    assert web[0][1].startswith("facebookexternalhit/")   # asked as Facebook's own previewer (the add-on's)
     # Then the embed player's own page for the video it resolved to, as a phone's browser.
     assert web[1] == (link_preview.PLUGIN + "?href=https%3A%2F%2Fwww.facebook.com%2Fsomepage%2Fvideos%2F1234567890%2F&show_text=false",
                       link_preview.MOBILE_UA)

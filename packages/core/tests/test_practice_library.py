@@ -173,36 +173,27 @@ def test_the_old_meditation_files_are_moved_across_once():
     assert (L.state_dir() / "practice-plays.json").exists()
 
 
-def test_a_teachers_profile_is_an_exact_match_kept_a_month(monkeypatch):
+def test_a_teachers_profile_comes_from_the_addon_kept_a_month(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
     calls = []
-
-    def fake(url, timeout=15.0):
-        calls.append(url)
-        if url.startswith(L.IT_SEARCH):
-            return [{"items": [{"id": "x1", "name": "Pura Rasa Fans", "is_publisher": True},
-                               {"id": "u1", "name": "Pura  Rasa", "is_publisher": True}]}]
-        return {"name": "Pura Rasa", "has_avatar": True, "publisher_description": "Rasa is the voice…",
-                "region": {"name": "Vilnius, Lithuania", "city": "Vilnius", "state": "Vilnius", "country": "Lithuania",
-                           "location": {"lat": 54.7, "lon": 25.3}}, "website": "https://purarasa.com",
-                "public_url": "https://insighttimer.com/pura.rasa", "publisher_follower_count": 92037,
-                "total_free_tracks": 150}
-    monkeypatch.setattr(L, "_get_json", fake)
-    got = L.teacher_profile("Pura Rasa")["profile"]
-    assert got["photo"].endswith("/u1/pictures/square_medium.jpeg"), "the exact name, not the first result"
-    assert (got["region"], got["followers"], got["free_tracks"]) == ("Vilnius, Lithuania", 92037, 150)
-    n = len(calls)
-    assert L.teacher_profile("Pura Rasa")["profile"] == got and len(calls) == n, "kept, not asked again"
+    profile = {"name": "Pura Rasa", "region": "Vilnius, Lithuania", "country": "Lithuania", "followers": 92037}
+    from agent_media_core import personal_use
+    personal_use.register("insight-timer-profiles", type("IT", (), {"lookup": staticmethod(lambda n: calls.append(n) or profile)})())
+    assert L.teacher_profile("Pura Rasa")["profile"] == profile
+    assert L.teacher_profile("Pura Rasa")["profile"] == profile and calls == ["Pura Rasa"], "kept, not asked again"
 
 
-def test_a_teacher_not_on_insight_timer_has_no_profile(monkeypatch):
+def test_without_the_addon_no_profile(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
-    monkeypatch.setattr(L, "_get_json", lambda url, timeout=15.0: [{"items": [{"id": "x1", "name": "Calm Minutes Daily", "is_publisher": True}]}])
+    from agent_media_core import personal_use
+    personal_use.register("insight-timer-profiles", None)
     assert L.teacher_profile("Calm Minutes") == {"name": "Calm Minutes", "profile": None}
 
 
 def test_teacher_places_from_the_kept_profiles(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
+    from agent_media_core import personal_use
+    personal_use.register("insight-timer-profiles", type("IT", (), {"lookup": staticmethod(lambda n: None)})())
     L._profiles_path().parent.mkdir(parents=True, exist_ok=True)
     L._profiles_path().write_text(json.dumps({
         "purarasa": {"profile": {"region": "Vilnius, Lithuania", "photo": "p.jpg"}, "at": 1},

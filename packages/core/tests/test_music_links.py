@@ -1,6 +1,7 @@
 """Spotify albums, playlists and songs saved for the Music tab (music_links.py).
 
-Nothing is fetched or played: Spotify's page is a fixture and `read` stands in."""
+Nothing is fetched or played: the spotify-via-youtube add-on is a stand-in
+(the add-on tests its own reading and playing)."""
 
 from __future__ import annotations
 
@@ -8,18 +9,32 @@ import json
 
 import pytest
 
-from agent_media_core import music_links, music_recent
+from agent_media_core import music_links, music_recent, personal_use
 
-PAGE = '<html><script id="__NEXT_DATA__" type="application/json">' + json.dumps({"props": {"pageProps": {"state": {"data": {"entity": {
-    "type": "album", "name": "The Heart Chronicles", "subtitle": "Eli Poz",
-    "trackList": [{"title": "Just a Little Crush", "subtitle": "Eli Poz"},
-                  {"title": "First Love", "subtitle": "Eli Poz, Someone Else"}]}}}}}}) + "</script></html>"
+GOT = {"title": "The Heart Chronicles", "artist": "Eli Poz", "art": "https://i.scdn.co/image/x",
+       "tracks": [{"artist": "Eli Poz", "title": "Just a Little Crush"}, {"artist": "Eli Poz", "title": "First Love"}]}
+
+
+class _Addon:
+    def __init__(self):
+        self.played = []
+
+    def read(self, kind, sid):
+        return dict(GOT)
+
+    def play(self, key):
+        self.played.append(key)
+        return {"ok": True, "tracks": 2}
+
+    def queue(self, key, start):
+        return 1
 
 
 @pytest.fixture
-def _read(monkeypatch):
-    got = {**music_links.parse_embed(PAGE), "art": "https://i.scdn.co/image/x"}
-    monkeypatch.setattr(music_links, "read", lambda kind, sid: got)
+def _read():
+    addon = _Addon()
+    personal_use.register("spotify-via-youtube", addon)
+    return addon
 
 
 def test_parse_links():
@@ -27,13 +42,6 @@ def test_parse_links():
     assert music_links.parse("https://open.spotify.com/intl-de/playlist/37i9dQZF1DXcBWIGoYBM5M") == ("playlist", "37i9dQZF1DXcBWIGoYBM5M")
     assert music_links.parse("https://open.spotify.com/episode/1qiw9zXdtK5Xidv4j8W28Y") is None
     assert music_links.parse("https://example.com/album/1qiw9zXdtK5Xidv4j8W28Y") is None
-
-
-def test_the_embed_page_gives_the_tracks():
-    got = music_links.parse_embed(PAGE)
-    assert got["title"] == "The Heart Chronicles" and got["artist"] == "Eli Poz"
-    assert got["tracks"] == [{"artist": "Eli Poz", "title": "Just a Little Crush"},
-                             {"artist": "Eli Poz", "title": "First Love"}]
 
 
 def test_an_album_lands_in_the_albums_list(_read):
@@ -46,14 +54,21 @@ def test_an_album_lands_in_the_albums_list(_read):
     assert music_links.remove(row["id"]) and music_links.items() == []
 
 
-def test_a_track_is_found_once_and_kept(_read, monkeypatch):
+def test_the_addon_plays_it_where_installed(_read):
     music_links.add("https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y")
-    asked = []
-    monkeypatch.setattr(music_links, "_vid", lambda t: asked.append(t["title"]) or "zi2QJ-4zOyc")
-    key = "spotify-album-1qiw9zXdtK5Xidv4j8W28Y"
-    assert music_links._resolve(key, 0) == "zi2QJ-4zOyc"
-    assert music_links._resolve(key, 0) == "zi2QJ-4zOyc"
-    assert asked == ["Just a Little Crush"]
+    key = "album:spotify-album-1qiw9zXdtK5Xidv4j8W28Y"
+    assert music_links.play(key)["ok"] and _read.played == [key]
+    assert music_links.queue(key, 1) == 1
+
+
+def test_without_the_addon_it_plays_on_spotify(monkeypatch):
+    personal_use.register("spotify-via-youtube", None)
+    monkeypatch.setattr(music_links, "_get", lambda url, timeout=15.0: json.dumps({"title": "Euphoria Morning", "thumbnail_url": None}).encode())
+    got = music_links.add("https://open.spotify.com/album/1A2B3C4D5E6F7G8H9I0J1K")
+    assert got["tracks"] == 0
+    from agent_media_core import spotify_remote
+    monkeypatch.setattr(spotify_remote, "play", lambda uri, device="": {"ok": True})
+    assert music_links.play(got["id"])["on"] == "spotify" and music_links.queue(got["id"], 1) == 0
 
 
 def test_only_spotify_links():

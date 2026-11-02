@@ -66,10 +66,11 @@ def test_an_unknown_tab_is_400(server, shelf, signed_in):
 
 
 def test_a_spotify_album_goes_to_music(server, shelf, signed_in, monkeypatch):
-    from agent_media_core import music_links
-    monkeypatch.setattr(music_links, "read", lambda kind, sid: {
+    # The spotify-via-youtube add-on as a stand-in (personal_use).
+    from agent_media_core import personal_use
+    personal_use.register("spotify-via-youtube", type("SY", (), {"read": staticmethod(lambda kind, sid: {
         "title": "The Heart Chronicles", "artist": "Eli Poz", "art": None,
-        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})
+        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})})())
     res, obj = call(server, "POST", "/media/links",
                     {"url": "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y?si=x", "to": "music"}, AUTH)
     assert res.status == 200, obj
@@ -82,10 +83,11 @@ def test_a_spotify_album_goes_to_music(server, shelf, signed_in, monkeypatch):
 
 
 def test_playing_on_spotify_signed_out_says_how(server, shelf, signed_in, monkeypatch):
-    from agent_media_core import music_links
-    monkeypatch.setattr(music_links, "read", lambda kind, sid: {
+    # The spotify-via-youtube add-on as a stand-in (personal_use).
+    from agent_media_core import personal_use
+    personal_use.register("spotify-via-youtube", type("SY", (), {"read": staticmethod(lambda kind, sid: {
         "title": "The Heart Chronicles", "artist": "Eli Poz", "art": None,
-        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})
+        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})})())
     call(server, "POST", "/media/links",
          {"url": "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y", "to": "music"}, AUTH)
     res, obj = call(server, "POST", "/music",

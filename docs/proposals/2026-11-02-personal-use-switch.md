@@ -11,7 +11,7 @@ add-on (David: "Switch now, add-ons later").
 ## The idea
 
 One install-wide setting says the server serves only its owner's personal
-use: `MEDIA_PERSONAL_USE=1`. Off in the package, on red5. Each method a
+use: `MEDIA_PERSONAL_USE=1`. Off in the package. Each method a
 public product could not use asks one place (`personal_use.allowed(name)`)
 whether it may run; each keeps its own switch to turn it off (or on) alone.
 `GET /features` lists what is on

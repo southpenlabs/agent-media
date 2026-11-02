@@ -18,9 +18,19 @@ def public(monkeypatch):
 
 
 def test_nothing_on_a_public_install_and_all_on_a_personal_one(public, monkeypatch):
-    assert personal_use.report() == {"on": False, "methods": {m: False for m in personal_use.METHODS}}
+    for m in personal_use.ADDON_METHODS:
+        personal_use.register(m, object())
+    assert personal_use.report() == {"on": False, "methods": {m: False for m in personal_use.METHODS},
+                                     "addons": sorted(personal_use.ADDON_METHODS)}
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     assert all(personal_use.report()["methods"].values())
+
+
+def test_an_addon_method_needs_its_addon(public, monkeypatch):
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    personal_use.register("spotify-via-youtube", None)
+    assert not personal_use.allowed("spotify-via-youtube")
+    assert "spotify-via-youtube" not in personal_use.report()["addons"]
     assert not personal_use.allowed("something-else")
 
 
@@ -35,6 +45,7 @@ def test_a_methods_own_setting_wins_either_way(public, monkeypatch):
 
 def test_a_spotify_link_on_a_public_install_is_its_oembed_and_plays_on_spotify(public, monkeypatch, tmp_path):
     monkeypatch.setattr(music_links, "_store_path", lambda: tmp_path / "music-links.json")
+    personal_use.register("spotify-via-youtube", type("SY", (), {"read": staticmethod(lambda k, s: (_ for _ in ()).throw(AssertionError("not on a public install")))})())
     asked = []
 
     def get(url, timeout=15.0):
@@ -55,6 +66,6 @@ def test_a_spotify_link_on_a_public_install_is_its_oembed_and_plays_on_spotify(p
 
 def test_no_insight_timer_profiles_on_a_public_install(public, monkeypatch):
     calls = []
-    monkeypatch.setattr(practice_library, "_get_json", lambda url, timeout=15.0: calls.append(url))
+    personal_use.register("insight-timer-profiles", type("IT", (), {"lookup": staticmethod(lambda n: calls.append(n))})())
     assert practice_library.teacher_profile("Pura Rasa") == {"name": "Pura Rasa", "profile": None}
     assert practice_library.teacher_places(["Pura Rasa"]) == {} and calls == []

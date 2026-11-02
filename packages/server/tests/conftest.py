@@ -103,6 +103,12 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # The tests exercise the personal-use methods (personal_use.py) as a
     # personal install has them; test_personal_use.py checks a public one.
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    # The add-on methods (personal_use.ADDON_METHODS) as stand-ins, never
+    # an installed personal-use add-on even where there is one: a test
+    # registers what it needs (facebook-previews' agent is one line).
+    from agent_media_core import personal_use as _pu
+    monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})()})
+    monkeypatch.setattr(_pu, "_LOADED", [True])
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would

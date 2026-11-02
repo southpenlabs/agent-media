@@ -33,8 +33,9 @@ allowed in a commercial system").
 - The list and each method's public alternative:
   `docs/proposals/2026-11-02-personal-use-switch.md`. YouTube's methods are
   not gated yet (David's choice for now).
-- These methods are to move into a separate open-source add-on, installed
-  by its user, so the product itself carries none of them ("Switch now,
-  add-ons later"). Open source does not make a method fit a service's
+- These methods move into a separate open-source add-on, installed by its
+  user, so the product itself carries none of them ("Switch now, add-ons
+  later"), kept outside this repository and installed by its user, through
+  the `agent_media.addons` entry points; `personal_use.ADDON_METHODS` lists
+  those already moved, which run only where an add-on provides them. Open source does not make a method fit a service's
   terms; it moves the choice, and the risk, to the person who installs it.
-- red5 sets `MEDIA_PERSONAL_USE=1` in its own environment file.

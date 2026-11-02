@@ -31,7 +31,6 @@ from . import auth
 
 CACHE_S = 24 * 3600
 KEEP = 500
-FB_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
 MOBILE_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
 PLUGIN = "https://www.facebook.com/plugins/video.php"
 # The player page's marks (26 Oct 2026): a playable one carries its sources,
@@ -102,9 +101,10 @@ def _embeddable(href: str) -> bool | None:
 def _facebook(url: str) -> dict:
     from agent_media_core import personal_use
 
-    # As Facebook's own previewer only where personal use allows it; a
-    # public install asks as a browser, and shows what that gets.
-    ua = FB_UA if personal_use.allowed("facebook-previews") else MOBILE_UA
+    # As Facebook's own previewer only through the facebook-previews add-on,
+    # where installed and allowed (personal_use); otherwise as a browser.
+    addon = personal_use.provider("facebook-previews") if personal_use.allowed("facebook-previews") else None
+    ua = addon.user_agent if addon else MOBILE_UA
     try:
         final, _ctype, page = _fetch(url, ua)
     except Exception:  # noqa: BLE001 — a page we cannot read may still embed

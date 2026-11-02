@@ -405,5 +405,11 @@ def _no_practice_lookups(monkeypatch):
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    # The add-on methods (personal_use.ADDON_METHODS) as stand-ins, never
+    # an installed personal-use add-on even where there is one: a test
+    # registers what it needs (facebook-previews' agent is one line).
+    from agent_media_core import personal_use as _pu
+    monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})()})
+    monkeypatch.setattr(_pu, "_LOADED", [True])
     # The person's own embed index (practice_embed) never joins a test's list.
     monkeypatch.delenv("MEDIA_PRACTICE_EMBED_INDEX", raising=False)
