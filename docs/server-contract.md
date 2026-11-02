@@ -1387,9 +1387,19 @@ both>, "acked": <the agent acknowledged it>, "uuid": <the id it was sent
 with>}`. A session parked for idleness is resumed by the reply (a few
 seconds slower). `branch` opens a fresh headless session in the same
 directory. 503 `code: "down"` when `media-sessiond` is not running (a
-headless thread is never revived in a pane), 503 `code: "busy"` when the
-host is at `MEDIA_SESSIOND_MAX`, or below `MEDIA_SESSIOND_MIN_FREE_MB` of
-free memory with one of its sessions running, and nothing is idle.
+headless thread is never revived in a pane).
+
+**Held for a free slot** (2 Nov 2026): when the host is at
+`MEDIA_SESSIOND_MAX`, or below `MEDIA_SESSIOND_MIN_FREE_MB` of free memory
+with one of its sessions running, and nothing is idle to park, a reply to
+an ended headless thread is held (as for a restart, below) and the answer
+carries `"busy": {"live", "max", "why"}` (`why` is the host's sentence).
+It is delivered, in order, when a session finishes and is parked; a later
+reply waits behind it. A new headless chat (`POST /ask`) is made the same
+way: its `session` exists at once, with no process yet, and the answer has
+`held: true` and `busy`; it starts with its first message when a slot
+frees. Show "waiting for a free session", not as failed. (Before this a
+reply was refused 503 `code: "busy"`; an older server still does.)
 
 **Held for a restart** (19 Oct 2026): while a restart of the session host
 is pending (`restart_pending`, §6.1, §17 "Restarts"), a reply is not given

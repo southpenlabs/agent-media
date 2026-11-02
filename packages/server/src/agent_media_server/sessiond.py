@@ -425,6 +425,11 @@ class Session:
         #: --resume-session-at`) under this id; every spawn after resumes this one.
         self.fork_from = ""
         self.fork_at = ""
+        #: Started while every slot was busy (`start`): made and its first
+        #: message held, no process yet. Its first spawn starts it afresh
+        #: (`--session-id`, or the fork), not `--resume` of a transcript
+        #: that does not exist.
+        self.unstarted = False
         self.agy_text: dict[str, str] = {}
         self.agy_reply: list[str] = []
         self.agy_replied = False
@@ -561,7 +566,9 @@ class Session:
                 "turns": self.turns, "seq": self.seq, "last_result": self.last_result,
                 "tasks": self.active_tasks(), "task_list": self.task_list(),
                 "last_text": self.last_text, "held": self.held, "cut_off": self.cut_off,
-                "quota_resumed": self.quota_resumed, "interrupt_killed": self.interrupt_killed}
+                "quota_resumed": self.quota_resumed, "interrupt_killed": self.interrupt_killed,
+                **({"unstarted": True, "fork_from": self.fork_from, "fork_at": self.fork_at}
+                   if self.unstarted else {})}
 
     def view(self) -> dict:
         return {**self.record(), "live": self.live}
@@ -589,6 +596,10 @@ class Session:
         s.lost = list(rec.get("lost") or [])
         s.last_text = str(rec.get("last_text") or "")
         s.held = [m for m in rec.get("held") or [] if isinstance(m, dict) and m.get("text")]
+        s.unstarted = bool(rec.get("unstarted"))
+        if s.unstarted:
+            s.fork_from = str(rec.get("fork_from") or "")
+            s.fork_at = str(rec.get("fork_at") or "")
         s.cut_off = rec.get("cut_off") if isinstance(rec.get("cut_off"), dict) else None
         s.interrupt_killed = [t for t in rec.get("interrupt_killed") or []
                               if isinstance(t, dict) and t.get("id")]
@@ -1716,6 +1727,7 @@ class Supervisor:
     def _spawn(self, s: Session, *, resume: bool) -> None:
         if not os.path.isdir(s.cwd):
             raise Refused(f"no such directory {s.cwd!r}", "bad_cwd")
+        resume = resume and not s.unstarted
         if s.agent == "antigravity":
             from . import antigravity_adapter
             from agent_media_core import harnesses
@@ -1753,6 +1765,7 @@ class Supervisor:
             # drain's for the restart (`deliver_due`).
             s.cut_off = None
         s.park_held = 0
+        s.unstarted = False
         s.set_state("starting")
         s.last_event_at = time.time()
         self._save(s)
@@ -2236,7 +2249,15 @@ class Supervisor:
         with self.lock:
             if session in self.sessions:
                 raise Refused(f"session {session[:8]} already exists", "exists")
-            self._ensure_room()
+            if not os.path.isdir(cwd):
+                raise Refused(f"no such directory {cwd!r}", "bad_cwd")
+            try:
+                self._ensure_room()
+                full = ""
+            except Refused as e:
+                if e.code != "busy":
+                    raise
+                full = e.error
             s = Session(session, cwd, agent=agent, workspace=workspace,
                         permissions=perms.mode(permissions), model=model,
                         mode="plan" if mode == "plan" else "")
@@ -2247,9 +2268,39 @@ class Supervisor:
                     raise Refused("only a Claude Code chat can be branched with its history",
                                   "unsupported")
                 s.fork_from, s.fork_at = fork_from, fork_at
+            if full:
+                # Every slot busy (David, 2 Nov 2026: "Can a message in this
+                # situation be queued with an alert banner of some sort rather
+                # than fail?" — "Also new chats"): the chat is made now, its
+                # first message held, and `deliver_due` starts it when a slot
+                # frees.
+                s.unstarted = True
+                self.sessions[session] = s
+                return {**self._busy_hold(s, str(uuid.uuid4()), text, False, full),
+                        "fresh": True}
             self._spawn(s, resume=False)
             self.sessions[session] = s
         return self.send(session, text, _fresh=True)
+
+    def _busy_hold(self, s: Session, uid: str, text: str, keep_pending: bool,
+                   why: str = "") -> dict:
+        """Under the lock: hold a message for a session that cannot run
+        because every slot is busy or memory is short (`_ensure_room`, its
+        words `why`), as a restart's is held; `deliver_due` sends it when
+        one frees. Answered `held: true` with `busy: {"live", "max", "why"}`."""
+        s.held.append({"uuid": uid, "text": text, "at": round(time.time(), 3),
+                       "keep_pending": keep_pending})
+        if not s.first_text:
+            s.first_text = " ".join(text.split())[:200]
+        self._save(s)
+        live = sum(1 for x in self.sessions.values()
+                   if x.running and x is not s and x.agent != "opencode")
+        log.info("sessiond: %s: message held until a slot frees (%d busy, %d held)",
+                 s.id[:8], live, len(s.held))
+        return {"session": s.id, "uuid": uid, "fresh": False, "resumed": False,
+                "queued": True, "held": True, "acked": False, "state": s.state,
+                "live": s.live, "pid": s.proc.pid if s.live else None,
+                "busy": {"live": live, "max": max_live(), "why": why}}
 
     def _await_exit(self, s: Session) -> None:
         """A process being parked or closed is on its way out: wait for it to
@@ -2303,7 +2354,15 @@ class Supervisor:
             self._await_exit(s)
             resumed = False
             if not s.live:
-                self._ensure_room(exclude=s)
+                if s.held and not _internal and not _fresh:
+                    # Behind what is already held for it, not ahead.
+                    return self._busy_hold(s, uid, text, keep_pending)
+                try:
+                    self._ensure_room(exclude=s)
+                except Refused as e:
+                    if e.code != "busy" or _internal:
+                        raise
+                    return self._busy_hold(s, uid, text, keep_pending, e.error)
                 self._spawn(s, resume=True)
                 resumed = True
             # A message typed while a question or permission is up answers

@@ -429,16 +429,30 @@ def test_never_parks_a_session_waiting_on_an_approval(host, monkeypatch):
     assert host.sup.get(sid)["live"]
 
 
-def test_a_full_host_parks_the_least_recent_idle_session_or_refuses(host, monkeypatch):
+def test_a_full_host_parks_the_least_recent_idle_session_or_holds(host, monkeypatch):
     monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
     a = start(host, "reply: a")
     wait_for(lambda: state(host, a) == "waiting")
-    b = start(host, "slow: 5")
+    b = start(host, "slow: 1")
     wait_for(lambda: state(host, a) == "parked")
     wait_for(lambda: state(host, b) == "working")
+    # No slot: the new chat is made with its first message held, not refused.
     ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: c")
-    assert not ok and d["status"] == 503 and d["code"] == "busy"
-    assert "busy" in d["error"]
+    assert ok and d["held"] is True and d["busy"]["live"] == 1 and d["busy"]["max"] == 1
+    assert "busy" in d["busy"]["why"]
+    c = d["session"]
+    assert not host.sup.get(c)["live"] and host.sup.get(c)["unstarted"] is True
+    # And a message to the parked one waits too, rather than failing.
+    ok, d = driver.headless_driver().send(a, "", "reply: a again")
+    assert ok and d["held"] is True and d["busy"]["live"] == 1
+    # As b finishes, the held messages go (deliver_due), each in its turn; c
+    # starts afresh, not as a resume of a transcript it never had.
+    wait_for(lambda: last_text(host, c) == "c", timeout=15)
+    first = next(r for r in starts(host) if c in r["argv"])
+    assert first["argv"][first["argv"].index("--session-id") + 1] == c
+    assert "--resume" not in first["argv"]
+    # c, idle now, is parked to make room for a's.
+    wait_for(lambda: last_text(host, a) == "a again", timeout=15)
 
 
 def test_short_memory_parks_an_idle_session_or_refuses_saying_so(host, monkeypatch):
@@ -449,8 +463,8 @@ def test_short_memory_parks_an_idle_session_or_refuses_saying_so(host, monkeypat
     wait_for(lambda: state(host, a) == "parked")
     wait_for(lambda: state(host, b) == "working")
     ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: c")
-    assert not ok and d["status"] == 503 and d["code"] == "busy"
-    assert "low on memory (600 MB free)" in d["error"]
+    assert ok and d["held"] is True
+    assert "low on memory (600 MB free)" in d["busy"]["why"]
 
 
 def _task(host, sid, sub, **kw):
@@ -520,12 +534,13 @@ def test_a_full_host_does_not_park_a_session_with_a_task(host, monkeypatch):
     wait_for(lambda: state(host, a) == "waiting")
     _task(host, a, "task_started", task_type="local_agent", is_backgrounded=True)
     ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: b")
-    assert not ok and d["status"] == 503 and d["code"] == "busy"
-    assert host.sup.get(a)["live"]
+    assert ok and d["held"] is True
+    b = d["session"]
+    time.sleep(2.5)                         # a delivery tick: still no room
+    assert host.sup.get(a)["live"] and not host.sup.get(b)["live"]
     _task(host, a, "task_notification", status="completed")
-    b = start(host, "reply: b")
-    wait_for(lambda: state(host, a) == "parked")
-    wait_for(lambda: last_text(host, b) == "b")
+    wait_for(lambda: state(host, a) == "parked", timeout=10)
+    wait_for(lambda: last_text(host, b) == "b", timeout=10)
 
 
 def test_resume_brings_a_parked_session_back_saying_nothing(host, monkeypatch):

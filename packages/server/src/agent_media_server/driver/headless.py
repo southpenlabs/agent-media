@@ -307,7 +307,10 @@ class HeadlessDriver:
         send._record_turn(session, text)
         return True, {"session": session, "pane": None, "opened": True, "fresh": True,
                       "tmux": None, "agent": agent, "submitted": True,
-                      "driver": HEADLESS, "acked": bool(r.get("acked"))}
+                      "driver": HEADLESS, "acked": bool(r.get("acked")),
+                      # Every slot busy: made, its first message held (`busy`).
+                      **({"held": True} if r.get("held") else {}),
+                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {})}
 
     def send(self, session, body, text, *, quote=""):
         from .. import archive, rest, send, shell
@@ -351,7 +354,9 @@ class HeadlessDriver:
                       # Held for a pending restart of the session host (§6.1),
                       # or for the usage limit's reset (`quota`).
                       **({"held": True} if r.get("held") else {}),
-                      **({"quota": r["quota"]} if isinstance(r.get("quota"), dict) else {})}
+                      **({"quota": r["quota"]} if isinstance(r.get("quota"), dict) else {}),
+                      # Or until one of the busy sessions finishes (`busy`).
+                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {})}
 
     def resume(self, session):
         from .. import rest
