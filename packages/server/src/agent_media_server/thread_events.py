@@ -19,6 +19,8 @@ sends only what changed:
     watching    {"streams", "devices"} — how many streams hold this thread
                 open and whose, after the snapshot and whenever that changes
     replaced    {} — this stream's client opened another (`?client=`); it ends
+    closed      {} — closed from another screen (`close`); it ends, and the
+                client should not reopen it until the thread is shown again
     ping        {} after PING_S of silence
 
 **One watcher per session**, shared by every connection to it, started by the
@@ -668,9 +670,41 @@ def open_threads() -> dict:
     from agent_media_core import watching as _watching
 
     with _LOCK:
-        out = {s: {**_watching_of(w), "on_screen": sum(_counts(x) for x in w.subs)}
+        out = {s: {**_watching_of(w), "on_screen": sum(_counts(x) for x in w.subs),
+                   "title": (w._last.get("title") or {}).get("title") or ""}
                for s, w in _WATCHERS.items() if w.subs}
-    return {"threads": out, "pocketed": {s: round(t) for s, t in _watching.pocketed().items()}}
+    pocketed = {s: round(t) for s, t in _watching.pocketed().items()}
+    # A thread leased open with no stream has no watcher to name it.
+    titles = {s: sessions.title_of(s) or "" for s in pocketed if s not in out}
+    return {"threads": out, "pocketed": pocketed, "titles": titles}
+
+
+def close(session: str, by: str = "") -> int:
+    """`POST /threads/{session}/close`: end every stream holding `session`
+    open, and give back its screen-off lease, so it stops counting as open
+    and a When open reply waits for a tap (David, 2 Nov 2026: a × on a row
+    of the open threads, from a long press on a thread's ←). Each stream
+    gets `closed` first; the app does not reopen it until the thread is
+    shown again. How many streams were ended."""
+    from agent_media_core import watching as _watching
+
+    with _LOCK:
+        w = _WATCHERS.pop(session, None)
+        subs = list(w.subs) if w else []
+        for x in subs:
+            x.dropped = True
+            x.put("closed", {})
+        if w:
+            w.subs.clear()
+            w.stop()
+        _publish()
+    try:
+        _watching.pocket(session, False)
+    except OSError:
+        pass
+    print(f"thread {session[:8]} closed from {by or '?'}: {len(subs)} stream(s) ended",
+          file=sys.stderr, flush=True)
+    return len(subs)
 
 
 def _publish() -> None:

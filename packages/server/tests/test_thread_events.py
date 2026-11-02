@@ -270,6 +270,30 @@ def test_a_page_reopening_its_stream_ends_the_old_one(server, signed_in, convo):
     assert body["threads"] == {}
 
 
+def test_closing_a_thread_ends_its_streams(server, signed_in, convo):
+    # The × on a row of the open threads (a long press on ←, David, 2 Nov
+    # 2026): every stream of it ends, told `closed`, and it is not open.
+    a = Stream(server, f"/threads/{SID}/events?client=p1", AUTH)
+    a.event()
+    b = Stream(server, f"/threads/{SID}/events?client=p2", AUTH)
+    b.event()
+    _, body = call(server, "GET", "/threads/open", headers=AUTH)
+    assert "title" in body["threads"][SID] and body["titles"] == {}
+    res, body = call(server, "POST", f"/threads/{SID}/close", {}, headers=AUTH)
+    assert res.status == 200 and body == {"ok": True, "closed": 2}
+    assert res.getheader("Access-Control-Allow-Origin") == "*"
+    assert a.next("closed") == {} and b.next("closed") == {}
+    assert thread_events.watching() == {}
+    _, body = call(server, "GET", "/threads/open", headers=AUTH)
+    assert body["threads"] == {}
+    res, body = call(server, "POST", f"/threads/{SID}/close", {}, headers=AUTH)
+    assert body == {"ok": True, "closed": 0}
+    res, _ = call(server, "POST", "/threads/not-a-session/close", {}, headers=AUTH)
+    assert res.status == 400
+    a.close()
+    b.close()
+
+
 def test_threads_open_is_gated(server, signed_in, convo, monkeypatch):
     monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
     res, _ = call(server, "GET", "/threads/open", headers=AUTH)

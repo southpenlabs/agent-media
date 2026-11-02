@@ -488,6 +488,7 @@ CORS_POST_PATHS = frozenset({"/pair", "/enrol"})
 THREAD_EVENTS = re.compile(r"/threads/([^/]+)/events")
 # The sheet a held stream was opened under is closed (§11 `?hold=1`).
 THREAD_RELEASE = re.compile(r"/threads/([^/]+)/release")
+THREAD_CLOSE = re.compile(r"/threads/([^/]+)/close")
 # A thread's background agents (§6.12), and one agent's own log.
 THREAD_AGENTS = re.compile(r"/threads/([^/]+)/agents")
 AGENT_LOG = re.compile(r"/threads/([^/]+)/agents/([^/]+)/log")
@@ -533,7 +534,7 @@ def cors_path(path: str) -> bool:
     """Whether `path` is an app route a browser on another origin may reach
     (any method): `CORS_PATHS`, a thread's event stream, or its agents."""
     return path in CORS_PATHS or any(r.fullmatch(path)
-                                     for r in (THREAD_EVENTS, THREAD_RELEASE, THREAD_AGENTS, AGENT_LOG,
+                                     for r in (THREAD_EVENTS, THREAD_RELEASE, THREAD_CLOSE, THREAD_AGENTS, AGENT_LOG,
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
@@ -3216,6 +3217,21 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 400, {"ok": False, "error": "not a session id"})
             return True
         _json(h, 200, {"ok": True, "released": thread_events.release(_opener(user))})
+    elif THREAD_CLOSE.fullmatch(path):
+        # A thread closed from another screen (the app's open threads list,
+        # §11 "Which threads are open"): its streams end, so it stops
+        # counting as open.
+        from . import thread_events
+
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        session = THREAD_CLOSE.fullmatch(path).group(1)
+        if not sessions._SESSION.fullmatch(session):
+            _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        _json(h, 200, {"ok": True, "closed": thread_events.close(session, _opener(user))})
     elif path == "/threads/hold":
         # The phone's What's new is up, or closed (§11): none of its
         # streams counts as on screen meanwhile, a stale one included.

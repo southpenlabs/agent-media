@@ -8484,6 +8484,7 @@ increasing `id`, and `retry: 2000` first.
 | `title` | `{"title"}` (19 Oct 2026) — the thread's name, so an open thread's header follows a rename made elsewhere | a live thread's name changes (the name it gives itself after its first turn, `/rename` at the terminal; checked on the 1 s / 3 s re-read, from the cached `/sessions/state` sweep), or any thread is renamed through `POST /rename` (at once) |
 | `watching` | `{"streams", "devices"}` (2 Nov 2026) — how many streams hold this thread open, this one included, and whose (device names, each once) | after the snapshot, and whenever a stream to the thread opens or closes |
 | `replaced` | `{}` (2 Nov 2026) — the same page opened another stream to this thread (`?client=`, below); this one ends after it | once, last |
+| `closed` | `{}` (2 Nov 2026) — the thread was closed from another screen (`POST /threads/{session}/close`, below); this one ends after it, and the client does not reopen it until the thread is shown again | once, last |
 | `ping` | `{}` | 15 s of silence |
 
 `isRunning` is `state == "working"`, `pending`, or the last message's
@@ -8544,6 +8545,15 @@ streams that count as on screen (not held under What's new). `pocketed`:
 the threads leased open as a screen went off (core `watching.py`), which
 play as open until the lease ends. The app marks these in its thread list
 (`thread_events.open_threads`).
+
+Each thread also carries `"title"` (its name as its stream last sent it,
+`""` when none), and `"titles": {"<session>": "<name>"}` names the
+pocketed threads that have no stream. **`POST /threads/{session}/close`**
+(gated, CORS, body ignored) → `{"ok": true, "closed": N}`: every stream
+of the thread ends (each sent `closed` first) and its screen-off lease is
+given back, so it no longer counts as open and a When open reply waits for
+a tap. 400 for a bad session id. The app's × on a row of its open threads
+list (a long press on a thread's ←, David, 2 Nov 2026).
 
 **Only a thread that stays open plays (30 Oct 2026).** Its held Normal
 replies play once the stream has stayed open `OPEN_DWELL_S` (1.5 s), not on
