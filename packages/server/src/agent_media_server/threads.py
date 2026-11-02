@@ -555,7 +555,6 @@ def _envelope(session: str, lines: list, *, limit: int = MESSAGES_LIMIT,
     # the transcript.
     from agent_media_core import activity as _activity
     working = _activity.attach(session, lines)
-    pending = pending or bool(working)
     # The ghost prompt rides along with every poll: it appears a few seconds
     # after the turn it follows, so a one-off read at page-open would mostly
     # find it not there yet.
@@ -564,6 +563,15 @@ def _envelope(session: str, lines: list, *, limit: int = MESSAGES_LIMIT,
     # what it is stopped on come from sessiond instead of a screen.
     hl = None if pane else driver.headless_state(session)
     live = bool(pane) or bool(hl and hl["live"])
+    if not live:
+        # A turn is closed by its Stop hook. A session ended before that ran
+        # (parked by sessiond seconds after its reply, exit 143, the hook cut
+        # off) left its last turn open, and the phone said "working" under a
+        # thread that had ended until the next message (David, 2 Nov 2026:
+        # "It says it's working but the session is ended... why is that?").
+        # Nobody running it, nothing is working — as for the messages below.
+        working = None
+    pending = pending or bool(working)
     last = lines[-1] if lines else {}
     # The thread as the terminal has it (transcript.py). A prompt is in the
     # transcript the moment it is typed, well before any speech of it, so a
