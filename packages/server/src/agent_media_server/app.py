@@ -761,7 +761,7 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         _json(h, 403, {"ok": False, "code": "guest",
                        "error": "a guest may read and listen here, not change anything"})
         return True
-    if path.startswith("/accounts/spotify/"):
+    if path.startswith(("/accounts/spotify/", "/accounts/spotify-speaker/")):
         # Signing in with Spotify; the callback has no bearer (spotify_auth).
         from . import spotify_auth
 

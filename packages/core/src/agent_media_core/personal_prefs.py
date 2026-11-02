@@ -640,6 +640,27 @@ def _shown(field: str, user: Optional[str]) -> Any:
     return v
 
 
+def spotify_speaker_status() -> Optional[dict]:
+    """The Spotify speaker's `{signed_in, running, name, start, finish,
+    signout}`, or None where no add-on provides it or it is not allowed.
+    The add-on's object answers `status()`, `begin()` (the sign-in link),
+    `finish(address)` (the address the browser was sent back to) and
+    `sign_out()`."""
+    from . import personal_use
+    if not personal_use.allowed("spotify-speaker"):
+        return None
+    p = personal_use.provider("spotify-speaker")
+    try:
+        st = dict(p.status())
+    except Exception as e:  # noqa: BLE001 — no row rather than no Settings
+        import sys
+        print(f"personal settings: spotify speaker status: {e}", file=sys.stderr)
+        return None
+    return {"signed_in": bool(st.get("signed_in")), "running": bool(st.get("running")),
+            "name": str(st.get("name") or ""), "start": "/accounts/spotify-speaker/start",
+            "finish": "/accounts/spotify-speaker/finish", "signout": "/accounts/spotify-speaker/signout"}
+
+
 def status(user: Optional[str] = None) -> dict:
     """What GET /settings/personal answers: the groups and their fields with
     labels, values (a secret only as `set`), where each comes from, and
@@ -689,6 +710,12 @@ def status(user: Optional[str] = None) -> dict:
                                     "signout": "/accounts/spotify/signout"}
             except Exception:  # noqa: BLE001
                 pass
+            # This server as a Spotify speaker, where an add-on provides it
+            # (personal_use "spotify-speaker"; David, 2 Nov 2026: "should we
+            # put them both in the settings page with an explanation?").
+            speaker = spotify_speaker_status()
+            if speaker is not None:
+                group["spotify_speaker"] = speaker
         groups.append(group)
     return {"scope": SCOPE, "groups": groups, "sources": sources(user),
             "privacy": ("Kept on this server only, readable by its admins. Your birth details "

@@ -43,12 +43,14 @@ METHODS = {
                           "their sign-in cookies, and Find on Messenger"),
     "facebook-stories": ("MEDIA_STORIES", "Facebook's and Instagram's stories reframed in the app"),
     "facebook-previews": ("MEDIA_FACEBOOK_PREVIEWS", "Facebook pages read as Facebook's own link previewer"),
+    "spotify-speaker": ("MEDIA_SPOTIFY_SPEAKER",
+                        "this server as a Spotify Connect speaker for the house rooms, through an unofficial client"),
     "signed-in-reading": ("MEDIA_SIGNED_IN_READING",
                           "pages read, and friends-only videos played, with the app's stored sign-ins"),
 }
 
 #: The methods an add-on provides, not this package (ADDON_GROUP entries).
-ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-previews"}
+ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-previews", "spotify-speaker"}
 ADDON_GROUP = "agent_media.addons"
 _PROVIDERS: dict[str, Any] = {}
 _LOADED: list = [False]
