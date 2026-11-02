@@ -70,6 +70,30 @@ def test_another_sessions_mail_is_not_held_over_a_card(host):
     assert e.value.code == "pending"
 
 
+def test_held_mail_waits_behind_a_card_that_came_up_while_it_was_held(host):
+    # Held with no card up; by the time it is due a card is: it stays held
+    # and the card stays up, then goes once the card is answered.
+    sid = start(host, "reply: a")
+    wait_for(lambda: _said(host.sup, sid) == "a")
+    _pend()
+    _fresh(host.sup)
+    assert host.sup.send(sid, "[From X] reply: mail", keep_pending=True)["held"] is True
+    host.sup.send(sid, "tool: touch q", _internal=True)
+    wait_for(lambda: state(host, sid) == "approval")
+    rs.clear_pending()
+    _fresh(host.sup)
+    host.sup.deliver_due()                   # tried, and kept for the next call
+    time.sleep(0.3)
+    assert state(host, sid) == "approval" and host.sup.get(sid)["pending"]
+    assert [m["text"] for m in sessiond.read_record(sid)["held"]] == ["[From X] reply: mail"]
+    rid = host.sup.get(sid)["pending"][0]["request_id"]
+    host.sup.answer(sid, rid, {"behavior": "allow", "updatedInput": {}})
+    wait_for(lambda: state(host, sid) == "waiting")
+    host.sup.deliver_due()
+    wait_for(lambda: "mail" in _said(host.sup, sid))
+    assert sessiond.read_record(sid)["held"] == []
+
+
 def test_held_messages_outlive_the_restart(host):
     sid = start(host, "reply: a")
     wait_for(lambda: _said(host.sup, sid) == "a")
