@@ -24,6 +24,12 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   start a new chat"): the server's `/ask` wants a device's credential, so a
   session had been reaching into the driver by hand.
 
+* `wake` is a scheduled turn's way in (a timer's standing order, David,
+  3 Nov 2026: agents that run day-to-day work on their own): the folder's
+  live session is sent the order, and with none live a new one is started
+  with it, as `--persona` if given. A card up is never answered: the wake is
+  refused `pending` and the order waits for the next one.
+
 Nothing here records the words as David's turn (send._record_turn): they
 are another session's, marked by the `[From …]` the caller puts on them.
 
@@ -149,12 +155,19 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
         time.sleep(min(POLL_S, max(0.05, deadline - time.monotonic())))
 
 
-def start(cwd: str, text: str, *, model: str = "", plan: bool = False) -> tuple[int, dict]:
+def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
+          persona: str = "", role: str = "") -> tuple[int, dict]:
     """A fresh headless Claude session in `cwd` with `text` as its first
     message; `(rc, answer)` with the session id and its thread link. Filed
     under the workspace a new chat from the app would get (send.ask), and
     through sessiond's own `start`, so its refusals hold (a usage limit, a
-    restart pending). The words are not recorded as the listener's turn."""
+    restart pending). The words are not recorded as the listener's turn.
+
+    `persona` and `role` (ids from personas.listing) start it as their render,
+    the way the app's `/ask` does: appended to the system prompt, or put
+    before the first message by a sessiond that cannot take one. Always the
+    public render: a session started from another, or from a timer, is never
+    a private thread."""
     from agent_media_core import layout
     from agent_media_core.intake.context import thread_link_base
 
@@ -164,13 +177,53 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False) -> tuple[
     if not os.path.isdir(cwd):
         return RC_NONE, {"error": f"no folder {cwd}", "code": "none"}
     model, mode = session_settings.clean_new("claude", model, "plan" if plan else "")
+    persona, role = (persona or "").strip(), (role or "").strip()
+    prompt_file = None
+    if persona or role:
+        from . import personas
+
+        why = personas.check(persona, role, agent="claude", rows=personas.described())
+        if why:
+            return RC_USAGE, {"error": why, "code": "persona"}
+        made_it, rendered = personas.render(persona, role, "claude", "public")
+        if not made_it:
+            return RC_FAILED, {"error": f"could not render the persona: {rendered}",
+                               "code": "persona"}
+        if _call("ping", timeout=3.0).get("system_prompt") is True:
+            prompt_file = personas.write(rendered)
+        else:
+            text = personas.prepend(rendered, text)
     host = layout.workspace_for(layout.place_host(cwd), cwd)
     r = _call("start", cwd=cwd, text=text, agent="claude", workspace=host, model=model,
-              mode=mode, timeout=30.0)
+              mode=mode, timeout=30.0,
+              **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
     if not r.get("ok"):
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
     sid = str(r.get("session") or "")
-    return RC_SENT, {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
+    out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
+    if persona or role:
+        if prompt_file:
+            from . import personas
+
+            personas.name_for(prompt_file, sid)
+        out.update({"persona": persona, "role": role})
+    return RC_SENT, out
+
+
+def wake(cwd: str, text: str, *, model: str = "", persona: str = "", role: str = "",
+         views: list[dict] | None = None) -> tuple[int, dict]:
+    """`text` to the live session in `cwd`, or a new one started with it
+    (`start`, as `persona`/`role`); `(rc, answer)`, `woke` "sent" or
+    "started". Never over a card: that is RC_PENDING, with nothing started
+    beside it."""
+    if views is None:
+        views, _up = rows()
+    view, _why = find(_real(cwd), views)
+    if view is not None:
+        rc, ans = send(str(view["session"]), text)
+        return rc, {**ans, "woke": "sent"} if rc == RC_SENT else ans
+    rc, ans = start(cwd, text, model=model, persona=persona, role=role)
+    return rc, {**ans, "woke": "started"} if rc == RC_SENT else ans
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -188,7 +241,21 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("--model", default="", help="opus | sonnet | haiku | fable (default: "
                                                 "Claude's own)")
     st.add_argument("--plan", action="store_true", help="start in plan mode")
+    st.add_argument("--persona", default="", help="start as this persona (agent-personas id)")
+    st.add_argument("--role", default="", help="with this role (e.g. reviewer)")
     st.add_argument("--json", action="store_true")
+    wk = sub.add_parser("wake", help="a scheduled turn: the folder's live session is sent "
+                                     "the order, or one is started with it")
+    wk.add_argument("cwd", help="the folder the agent works in")
+    wk.add_argument("text", nargs="*", help="the order; '-' or nothing reads stdin")
+    wk.add_argument("--order", default="", help="read the order from this file (relative "
+                                                "to the folder)")
+    wk.add_argument("--from", dest="sender", default="",
+                    help="who it is from: prefixed as '[From Name]' unless the text has one")
+    wk.add_argument("--persona", default="", help="start as this persona if none is live")
+    wk.add_argument("--role", default="", help="with this role")
+    wk.add_argument("--model", default="", help="for a session it starts")
+    wk.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
     ls.add_argument("--cwd", default="", help="only this folder's")
@@ -228,7 +295,15 @@ def main(argv: list[str] | None = None) -> int:
                   f"{', '.join(flags):<24}  {b['cwd']}  {b['title']}")
         return 0
     text = " ".join(a.text).strip()
-    if not text or text == "-":
+    if a.cmd == "wake" and a.order and not text:
+        path = os.path.join(_real(a.cwd), os.path.expanduser(a.order))
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+        except OSError as e:
+            print(f"media session wake: cannot read the order: {e}", file=sys.stderr)
+            return RC_USAGE
+    elif not text or text == "-":
         text = sys.stdin.read().strip()
     if not text:
         print(f"media session {a.cmd}: nothing to say", file=sys.stderr)
@@ -242,13 +317,22 @@ def main(argv: list[str] | None = None) -> int:
               else f"media session {a.cmd}: {msg}", file=sys.stdout if a.json else sys.stderr)
         return RC_FAILED
     if a.cmd == "start":
-        rc, ans = start(a.cwd, text, model=a.model, plan=a.plan)
+        rc, ans = start(a.cwd, text, model=a.model, plan=a.plan, persona=a.persona, role=a.role)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:
             print(f"started {ans['session']} in {ans['cwd']}\n{ans['link']}")
         else:
             print(f"media session start: {ans.get('error')}", file=sys.stderr)
+        return rc
+    if a.cmd == "wake":
+        rc, ans = wake(a.cwd, text, model=a.model, persona=a.persona, role=a.role, views=views)
+        if a.json:
+            print(json.dumps({"ok": rc == RC_SENT, **ans}))
+        elif rc == RC_SENT:
+            print(f"{ans['woke']} {ans['session']}" + (f"\n{ans['link']}" if ans.get("link") else ""))
+        else:
+            print(f"media session wake: {ans.get('error')}", file=sys.stderr)
         return rc
     view, why = find(a.target, views)
     if view is None:

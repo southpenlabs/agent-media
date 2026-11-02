@@ -194,3 +194,69 @@ def test_sessiond_down_is_rc_1(host, capsys):
     sessiond.stop(host.srv)
     rc, d = run(capsys, "send", str(host.work), "hello")
     assert rc == 1 and d["code"] == "down"
+
+
+@pytest.fixture
+def kit(monkeypatch):
+    """A persona listing and render with no agent-personas repo: `kit` and
+    `reviewer` exist, and the render is a fixed text."""
+    from agent_media_server import personas
+
+    rows = [{"id": "kit", "kind": "persona"}, {"id": "reviewer", "kind": "role"}]
+    monkeypatch.setattr(personas, "described", lambda: rows)
+    monkeypatch.setattr(personas, "check",
+                        lambda p, r, agent="", rows=None: "" if p in ("", "kit") else
+                        f"unknown persona {p!r}")
+    got: list = []
+
+    def render(p, r, agent, mode="public"):
+        got.append((p, r, agent, mode))
+        return True, "You are Kit.\n"
+
+    monkeypatch.setattr(personas, "render", render)
+    return got
+
+
+def test_start_as_a_persona_appends_its_public_render_to_the_system_prompt(host, capsys, kit):
+    rc, d = run(capsys, "start", str(host.work), "--persona", "kit", "--role", "reviewer",
+                "reply:", "hi")
+    assert rc == 0 and d["persona"] == "kit" and d["role"] == "reviewer"
+    assert kit == [("kit", "reviewer", "claude", "public")]
+    spf = host.sup.sessions[d["session"]].system_prompt_file
+    assert spf and Path(spf).read_text() == "You are Kit.\n"
+    assert (Path(spf).parent / f"{d['session']}.md").exists()
+
+
+def test_start_as_an_unknown_persona_is_usage_and_starts_nothing(host, capsys, kit):
+    rc, d = run(capsys, "start", str(host.work), "--persona", "nobody", "hi")
+    assert rc == 2 and "unknown persona" in d["error"]
+    assert host.sup.sessions == {}
+
+
+def test_wake_starts_one_as_the_persona_then_sends_the_next_order_to_it(host, capsys, kit):
+    (host.work / "orders").mkdir()
+    (host.work / "orders" / "daily.md").write_text("reply: morning round\n")
+    rc, d = run(capsys, "wake", str(host.work), "--order", "orders/daily.md",
+                "--persona", "kit", "--from", "schedule")
+    assert rc == 0 and d["woke"] == "started"
+    sid = d["session"]
+    assert host.sup.sessions[sid].system_prompt_file
+    wait_for(lambda: "ok: [From Schedule] reply: morning round" in results(host, sid))
+    wait_for(lambda: state(host, sid) != "working")
+    rc, d = run(capsys, "wake", str(host.work), "--from", "schedule", "reply:", "again")
+    assert rc == 0 and d["woke"] == "sent" and d["session"] == sid
+    wait_for(lambda: "ok: [From Schedule] reply: again" in results(host, sid))
+    assert len(host.sup.sessions) == 1 and host.turns == []
+
+
+def test_wake_never_answers_a_card_nor_starts_one_beside_it(host, capsys):
+    sid = start(host, "tool: touch a")
+    wait_for(lambda: state(host, sid) == "approval")
+    rc, d = run(capsys, "wake", str(host.work), "reply: order")
+    assert rc == 4 and d["code"] == "pending"
+    assert list(host.sup.sessions) == [sid]
+
+
+def test_wake_with_an_unreadable_order_is_usage(host, capsys):
+    rc = hm.main(["wake", str(host.work), "--order", "missing.md"])
+    assert rc == 2 and "cannot read the order" in capsys.readouterr().err

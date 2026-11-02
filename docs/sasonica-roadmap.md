@@ -1090,7 +1090,9 @@ ahead.
    prompt on a schedule ("every weekday at 8, check X and tell me"), made
    and listed in the app, run as a headless session; its result arrives as
    a thread plus a digest or alert through the alert store (§6.17), so it
-   plays from Home like the other digests. Proposal to write.
+   plays from Home like the other digests. Step 1 built 3 Nov 2026: `media
+   session wake` (a host timer's standing order, as a persona);
+   [proposals/2026-11-03-scheduled-turns.md](proposals/2026-11-03-scheduled-turns.md).
    (The third idea from the same list, share sheet and camera into a thread,
    was already built 25–26 Sep; only direct-share icons remain.)
 12. **See what it's building** (David, 1 Oct 2026) — a dev server or HTML

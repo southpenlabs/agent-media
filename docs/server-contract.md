@@ -5927,6 +5927,13 @@ A headless Claude whose sessiond predates this (its `ping` lacks
 kept: a resume may be handed it again. The answer carries `persona`, `role`
 and `persona_via`.
 
+`media session start|wake --persona <id> [--role <r>]` (3 Nov 2026,
+`headless_mail.py`) starts a headless Claude the same way, from a shell or
+a timer: public render, appended as above or prepended for an old sessiond;
+an unknown id is exit 2 with nothing started. `wake` sends a folder's live
+session its standing order (`--order <file>`) and starts one only when none
+is live ([proposals/2026-11-03-scheduled-turns.md](proposals/2026-11-03-scheduled-turns.md)).
+
 ### 6.25 Contacts — gated (17 Oct 2026)
 
 People, not rooms (`docs/proposals/2026-10-17-contacts.md`, steps 1 and
