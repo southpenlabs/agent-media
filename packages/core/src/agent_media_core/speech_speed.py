@@ -12,7 +12,8 @@ next. That stays the default. The listener can choose (David, 31 Oct and
 - `start`: the speed a reply starts at when it starts afresh, 1× unless set
   ("a start speed other than 1×").
 - `per_thread`: each thread keeps the speed it was last heard at; a thread
-  heard for the first time starts at the start speed.
+  heard for the first time starts at the start speed. Switched off, every
+  thread's speed is forgotten.
 - `break_min`: with the speed carrying between replies, it goes back to the
   start speed when nothing has been spoken for this many minutes (0: never).
 
@@ -95,6 +96,12 @@ def save_settings(**changes) -> dict:
             raise ValueError(f"start must be one of {', '.join(map(str, STARTS))}")
         cur["start"] = v
     if "per_thread" in changes and changes["per_thread"] is not None:
+        # Switched off, every thread's speed is forgotten, so switching it on
+        # again starts fresh (David, 2 Nov 2026: "Is there a setting for a
+        # global reset for threads that keep their speed?" — "Reset when
+        # switched off").
+        if cur["per_thread"] and not changes["per_thread"]:
+            forget_threads()
         cur["per_thread"] = bool(changes["per_thread"])
     if "break_min" in changes and changes["break_min"] is not None:
         v = int(changes["break_min"])
@@ -113,6 +120,13 @@ def reset_after_reply() -> bool:
 def set_reset_after_reply(on: bool) -> bool:
     """Save the choice and return it."""
     return save_settings(reset=bool(on))["reset"]
+
+
+def forget_threads() -> None:
+    """Every thread's remembered speed dropped; when last heard kept."""
+    heard = _heard()
+    if heard.pop("threads", None) is not None:
+        _write(_heard_path(), heard)
 
 
 def _heard() -> dict:

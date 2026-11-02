@@ -2241,7 +2241,8 @@ any of `reset`, `start` (one of `starts`: 1, 1.25, 1.5, 1.75, 2),
 `per_thread` (bool) and `break_min` (one of `breaks`: 0, 5, 15, 30, 60; 0 is
 never), 400 for anything else. `reset` goes back to `start`, not 1×.
 `per_thread`: each thread starts at the rate it was last heard at, a new one
-at `start`. `break_min`: with the rate carrying on, a reply after that long
+at `start`; switched off, every thread's rate is forgotten, so on again starts
+fresh. `break_min`: with the rate carrying on, a reply after that long
 with nothing spoken starts at `start`. Applied as a live reply starts and
 ends (`at_reply_start` / `at_reply_end`); what was heard is kept in
 `<state_dir>/speech-speed-heard.json`.

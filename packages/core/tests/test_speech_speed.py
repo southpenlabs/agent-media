@@ -109,3 +109,15 @@ def test_each_thread_keeps_its_own_speed(sent):
     # Back in the first: its own speed again.
     assert speech_speed.at_reply_start("sock", "fast") is True
     assert StateStore().get_speech_speed() == 1.75
+
+
+def test_switching_per_thread_off_forgets_every_thread(sent):
+    speech_speed.save_settings(per_thread=True, start=1.0)
+    StateStore().set_speech_speed(1.75)
+    speech_speed.at_reply_end("sock", "fast", now=500.0)
+    speech_speed.save_settings(per_thread=False)
+    speech_speed.save_settings(per_thread=True)
+    assert speech_speed.at_reply_start("sock", "fast") is True
+    assert StateStore().get_speech_speed() == 1.0
+    # When last heard is kept, for the break.
+    assert speech_speed._heard().get("last_end") == 500.0
