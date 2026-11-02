@@ -47,6 +47,13 @@ What makes it safe to run unattended (David, 18 Oct 2026):
   it gives up: the record goes, the held messages are delivered, and the
   host alert is raised. A second request while one waits joins it. Exit 0
   for a drain scheduled or joined.
+* **announced** (3 Nov 2026; David: "Can we have some sort of alert when
+  it's going to restart? an audible one might be nice too"): a restart of
+  sessiond is said aloud, through `media say --alert` (the alert chime, then
+  the words; held while the phone's ringer is silent), when it is scheduled
+  ("… once 2 busy sessions finish"), when it happens, and when it gives up.
+  `MEDIA_RESTART_ANNOUNCE=0` keeps it quiet. Never from a dry run, and never
+  for a joined request (the first one said it).
 * **health check**: each restarted service must be up within
   `MEDIA_RESTART_HEALTH_S` (20 s). A canvas must also answer HTTP. A failure
   raises the host alert `restart-services.<host>` (§6.17), which the phone
@@ -455,6 +462,39 @@ def _start_drain(selected: list[Service], after: float, waits: list[dict],
         return {"id": uuid.uuid4().hex[:12], "since": round(now, 3),
                 "deadline": round(now + after + drain_max_s(), 3),
                 "alive_until": round(now + after + ALIVE_S, 3), "only": names,
+def announce_on() -> bool:
+    """MEDIA_RESTART_ANNOUNCE, on unless 0/off. Under pytest only when a test
+    sets it to 1: many tests delete every MEDIA_ variable, and a restart test
+    that announced through the real `media say` spawned ten of them on the
+    first run (3 Nov 2026)."""
+    v = (os.environ.get("MEDIA_RESTART_ANNOUNCE") or "").strip().lower()
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return v in ("1", "on", "yes", "true")
+    return v not in ("0", "off", "no", "false")
+
+
+def announce(text: str) -> None:
+    """Say `text` aloud, as an alert (`media say --alert`: the chime first),
+    detached: a restart never waits for its announcement, nor fails by it."""
+    if not announce_on():
+        return
+    tool = shutil.which("media")
+    if not tool:
+        return
+    try:
+        subprocess.Popen([tool, "say", "--alert", text], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as e:
+        print(f"restart-services: announce: {e}", file=sys.stderr)
+
+
+def _busy_words(waits: list[dict]) -> str:
+    """"once 2 busy sessions finish" / "once a busy session finishes"."""
+    n = len({w.get("session") or w.get("label") or i for i, w in enumerate(waits)})
+    return "once a busy session finishes" if n == 1 else f"once {n} busy sessions finish"
+
+
                 "by": caller, "state": "waiting", "waiting_on": waits,
                 "host": host(), "unit": "", "log": ""}
     rec = _update_pending(fn)
@@ -503,6 +543,11 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
     while True:
         rec = read_pending()
         if not rec or rec.get("id") != rid:
+    if any(is_sessiond(s) for s in selected):
+        when = (_busy_words(waits) if waits
+                else f"in about {max(1, int(round(after)))} seconds")
+        announce(f"Heads up: the session host will restart {when}. "
+                 "New messages wait until it is back.")
             emit("the pending restart was cancelled")
             res["rc"] = BUSY
             return res
@@ -538,6 +583,8 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
         _update_pending(lambda r: {**r, "waiting_on": waits,
                                    "alive_until": round(now + ALIVE_S, 3),
                                    "checked": round(now, 3)}
+            if any(is_sessiond(s) for s in selected):
+                announce("Restarting the session host now.")
                         if r and r.get("id") == rid else r)
         _sleep(drain_poll_s())
 
@@ -549,6 +596,9 @@ def _svdir() -> "Optional[Path]":
     from . import cli
 
     return cli._sv_dir()
+            if any(is_sessiond(s) for s in selected):
+                announce("The session host restart gave up: sessions stayed busy. "
+                         "Held messages are going through now.")
 
 
 def _restart_one(s: Service) -> "tuple[bool, str]":
@@ -780,7 +830,7 @@ PASS_ENV = ("PATH", "HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOM
             "MEDIA_VISUAL_PORT", "MEDIA_VISUAL_MAGICDNS_HOST", "AGENT_ALERT_URL",
             "MEDIA_RESTART_HEALTH_S", "MEDIA_RESTART_RETRY_S",
             "MEDIA_RESTART_WAIT_MAX_S", "MEDIA_RESTART_DRAIN_MAX_S",
-            "MEDIA_RESTART_DRAIN_POLL_S")
+            "MEDIA_RESTART_DRAIN_POLL_S", "MEDIA_RESTART_ANNOUNCE")
 
 
 def fire_argv(selected: list[Service], force: bool, drain: bool = False) -> list[str]:

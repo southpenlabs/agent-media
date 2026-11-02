@@ -44,6 +44,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # and fail anywhere else. test_layout.py unpins it where it needs to.
     monkeypatch.setenv("MEDIA_LAYOUT", "projects-per-tmux-session")
     monkeypatch.setenv("MEDIA_SESSIOND_RECOVER_REPLY", "0")
+    # A restart of sessiond is said aloud (restart_services.announce, `media
+    # say --alert`): never from a test, which would speak on the real phone.
+    monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "0")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     # Files a reply names are copied into the upload root as the thread is
     # read (file_links.py): never into the real ~/shared, and no copy

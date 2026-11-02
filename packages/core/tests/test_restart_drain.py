@@ -183,3 +183,54 @@ def test_setup_installs_the_post_tool_use_hook(tmp_path):
     assert "restart-pending.json" in cmd
     assert setup._row_context(args, check_only=True)[0] == "ok"
     assert setup._row_context(args, check_only=False)[0] == "ok"
+
+
+# ---- said aloud (3 Nov 2026) ---------------------------------------------------
+
+@pytest.fixture()
+def said(monkeypatch):
+    out: list[str] = []
+    monkeypatch.setattr(rs, "announce", out.append)
+    return out
+
+
+def test_a_drain_is_announced_when_scheduled_then_when_it_fires(host, monkeypatch, said):
+    host.session("11111111-aaaa", state="working")
+    host.session("22222222-bbbb", state="working")
+    _run("--only", "sessiond", "--after", "10")
+    assert said == ["Heads up: the session host will restart once 2 busy sessions finish. "
+                    "New messages wait until it is back."]
+    host.session("11111111-aaaa", state="waiting")
+    host.session("22222222-bbbb", state="waiting")
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    assert rs.main(["--fire", "--only", "agent-media-sessiond", "--drain"]) == 0
+    assert said[-1] == "Restarting the session host now."
+
+
+def test_a_quiet_host_is_announced_by_its_delay_and_a_joined_one_not_again(host, said):
+    _run("--only", "sessiond", "--after", "10")
+    assert said == ["Heads up: the session host will restart in about 10 seconds. "
+                    "New messages wait until it is back."]
+    _run("--only", "sessiond", "--after", "10")
+    assert len(said) == 1
+
+
+def test_giving_up_is_announced(host, monkeypatch, said):
+    monkeypatch.setenv("MEDIA_RESTART_DRAIN_MAX_S", "0")
+    host.session("11111111-aaaa", state="working")
+    _run("--only", "sessiond", "--after", "0.001")
+    rs._update_pending(lambda r: {**r, "deadline": r["since"] - 1})
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    rs.main(["--fire", "--only", "agent-media-sessiond", "--drain"])
+    assert said[-1].startswith("The session host restart gave up")
+
+
+def test_announce_says_it_as_an_alert_unless_switched_off(monkeypatch):
+    runs = []
+    monkeypatch.setattr(rs.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(rs.subprocess, "Popen", lambda argv, **kw: runs.append(argv))
+    rs.announce("hello")
+    assert runs == []                      # the suite's own switch: off
+    monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "1")
+    rs.announce("hello")
+    assert runs == [["/fake/media", "say", "--alert", "hello"]]

@@ -52,6 +52,9 @@ def host(tmp_path, monkeypatch):
     _script(bin_ / "systemctl", FAKE_SYSTEMCTL)
     _script(bin_ / "systemd-run", FAKE_LOGGER)
     _script(bin_ / "agent-alert", FAKE_LOGGER)
+    # restart_services.announce runs `media say --alert`: a stand-in, so a
+    # restart test never speaks through the real one.
+    _script(bin_ / "media", FAKE_LOGGER)
     log = tmp_path / "calls.log"
     log.touch()
     for k in list(os.environ):
@@ -70,6 +73,7 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_UNITS", " ".join(UNITS))
     monkeypatch.setenv("FAKE_DOWN", "")
     monkeypatch.setenv("MEDIA_RESTART_HEALTH_S", "0")
+    monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "0")
     monkeypatch.setattr(cli, "_sv_dir", lambda: None)
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: False)
 

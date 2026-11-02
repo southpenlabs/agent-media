@@ -345,6 +345,12 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     it would drain.
   The phone sees it as `restart_pending` on `/targets` and the thread
   (server-contract §6.1).
+  - it is **said aloud** (3 Nov 2026): `media say --alert` (the alert
+    chime, then the words; held while the phone's ringer is silent) when a
+    drain of sessiond is scheduled ("… will restart once 2 busy sessions
+    finish"), when it fires, and when it gives up. A joined request says
+    nothing new. `MEDIA_RESTART_ANNOUNCE=0` keeps it quiet; under pytest
+    it is off unless a test sets it to 1.
 - **Resuming** (19 Oct 2026, any restart of sessiond, `--force` and a crash
   included). Before a stop parks anything, sessiond writes on each live
   session's record what it was doing (`cut_off`); a crashed instance's

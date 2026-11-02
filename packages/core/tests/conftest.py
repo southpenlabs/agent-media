@@ -74,6 +74,14 @@ def _no_inherited_music_level(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_restart_announcement(monkeypatch):
+    """A restart of sessiond is said aloud (restart_services.announce runs
+    `media say --alert`), which from a test would speak on the real phone.
+    test_restart_drain turns it on against a stand-in."""
+    monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "0")
+
+
+@pytest.fixture(autouse=True)
 def _no_remote_say(monkeypatch):
     """Keep the suite on the local render path.
 
