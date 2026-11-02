@@ -30,6 +30,12 @@ def test_a_link_without_its_file_plays_from_the_link():
     assert music_recent.playable_book(it["uri"])
 
 
+def test_youtubes_title_wins_over_the_words_shared_with_it(monkeypatch):
+    # A share's words are often the sharing app's label ("Share link").
+    monkeypatch.setattr(podcast_links, "_title", lambda vid: "Talking Drupal #576")
+    assert podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Share link")["title"] == "Talking Drupal #576"
+
+
 def test_the_file_is_the_uri_while_it_is_there(_dirs):
     podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
     _dirs.mkdir()

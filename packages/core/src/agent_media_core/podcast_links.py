@@ -118,7 +118,9 @@ def add(url: str, title: str = "", fetch: bool = True) -> dict:
     vid = youtube_id(url)
     if not vid:
         return _add_episode(url, title)
-    title = title.strip() or _title(vid) or url
+    # YouTube's own title first: what comes with a share is often the
+    # sharing app's label, not the video's ("Share link", 2 Nov 2026).
+    title = _title(vid) or title.strip() or url
     links = [x for x in _load() if x.get("vid") != vid]
     links.append({"vid": vid, "url": f"https://www.youtube.com/watch?v={vid}",
                   "title": title, "added": time.time()})
