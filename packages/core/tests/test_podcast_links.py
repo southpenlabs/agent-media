@@ -103,3 +103,19 @@ def test_prune_clears_the_oldest_downloads_and_keeps_their_links(_dirs, monkeypa
     assert gone == [files[1]]          # the oldest but the one just fetched
     assert files[0].exists() and files[2].exists()
     assert len(podcast_links.items()) == 3
+
+
+def test_a_download_plays_from_its_web_address(_dirs, monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_DIR", str(tmp_path / "cache" / "links"))
+    monkeypatch.setenv("MEDIA_BOOK_HTTP_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setenv("MEDIA_BOOK_BASEURL_PHONE", "http://red5:8780")
+    podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
+    f = tmp_path / "cache" / "links" / "Talk #1 [AAAAAAAAAAA].opus"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"x")
+    assert podcast_links.play_url(str(f)) == "http://red5:8780/links/Talk%20%231%20%5BAAAAAAAAAAA%5D.opus"
+    # Only a saved link's download, nothing else on the host.
+    other = tmp_path / "cache" / "links" / "Other [BBBBBBBBBBB].opus"
+    other.write_bytes(b"x")
+    assert podcast_links.play_url(str(other)) is None
+    assert podcast_links.play_url("yt:https://www.youtube.com/watch?v=AAAAAAAAAAA") is None

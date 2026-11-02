@@ -192,6 +192,23 @@ def items() -> list[dict]:
     return out
 
 
+def play_url(uri: str) -> Optional[str]:
+    """The web address the phone's music player fetches a saved link's
+    download from (the book files' server: MEDIA_BOOK_BASEURL_PHONE over
+    MEDIA_BOOK_HTTP_ROOT), or None when `uri` is not one or is not served.
+    The book channel cannot take it: on the phone that is the app's speech
+    player, which cannot read Termux's cache and drops a book for the next
+    spoken line (David, 2 Nov 2026: tapped, the player "grays out like it's
+    going to but it doesn't play")."""
+    p = Path(uri).expanduser()
+    if p.parent != folder() or not p.is_file() or not any(i["uri"] == uri for i in items()):
+        return None
+    from .sinks.book import http_url_for
+    from .types import Target
+
+    return http_url_for(p, Target(name="phone"))
+
+
 # ---- downloading -----------------------------------------------------------------
 
 def _log_path() -> Path:

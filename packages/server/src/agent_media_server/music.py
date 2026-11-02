@@ -815,7 +815,11 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         uri = body.get("uri")
         if not isinstance(uri, str) or not uri.strip() or not _played_book(uri.strip()):
             return False, {"error": "uri must be a book or podcast from the Media tab's lists", "status": 400}
-        done, said = _run_book(uri.strip())
+        from agent_media_core import podcast_links
+
+        # A saved link's download plays as music, from its web address.
+        url = podcast_links.play_url(uri.strip())
+        done, said = _run(["play", url]) if url else _run_book(uri.strip())
         _reset_cache()
         if not done:
             print(f"music: book play failed: {said}", file=sys.stderr)
