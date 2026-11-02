@@ -109,10 +109,11 @@ device gets its token):
   POST /session/close  {"session"} → close the pane it runs in
   POST /session/discard {"session"} → take back a new chat /ask started
                        in the last 10 minutes: stopped, closed, deleted
-  POST /session/stop {"session", "speech"?: "auto"|"silence"} → stop what
+  POST /session/stop {"session", "speech"?: "auto"|"silence"|"keep"} → stop what
                   is happening: interrupt the turn while it works (a headless
                   session's interrupt, or Escape into a working pane), else
-                  stop this thread's speech (stop.py, §12)
+                  stop this thread's speech; `keep` only interrupts, for a
+                  waiting message's Send now (stop.py, §12)
   POST /session/retract {"session", "id"?, "text"?} → take back your last
                   message: interrupt the turn and its queue, mark the message,
                   and the next one says so (retract.py, §6.19)

@@ -8740,6 +8740,13 @@ it on **a second press of stop within 5 s of the first**. The first press is
 gentle, and the second is the explicit one, so speech is never lost by
 accident. The speech bar's own pause and stop stay separate from this.
 
+`"speech": "keep"` (2 Nov 2026) is **Send now** on a message waiting behind
+a running turn (`/reply` answered `queued: true`): the turn is interrupted
+as above, its queue kept, so the waiting message runs as the next turn, and
+nothing else happens. There is no cutoff, since that next turn's reply is
+the one asked for, and no speech is stopped, working or not. Idle, it does
+nothing. Pinned by `test_stop.py`.
+
 Rules that hold in every case:
 
 - Speech from **another thread** is never touched.

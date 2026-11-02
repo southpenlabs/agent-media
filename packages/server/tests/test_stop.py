@@ -82,6 +82,22 @@ def test_working_pane_is_interrupted_and_speech_left_alone(server, signed_in, pa
     assert core_submit.session_speech_cut(OTHER) == {}
 
 
+def test_keep_interrupts_with_no_cutoff_and_touches_no_speech(server, signed_in, pane, voice):
+    # A waiting message's Send now: the turn stops so the queue runs next,
+    # and that reply must be heard, so no cutoff; idle, it does nothing.
+    screen, keys = pane
+    now, stopped = voice
+    screen[:] = ["working", "working", "waiting"]
+    now.update(speaking=True, session=SID)
+    st, body = stop(server, {"session": SID, "speech": "keep"})
+    assert st == 200, body
+    assert body["did"] == "interrupted" and body["cutoff"] is None
+    assert keys == [["send-keys", "-t", "%42", "Escape"]]
+    assert stopped == [] and core_submit.session_speech_cut(SID) == {}
+    st, body = stop(server, {"session": SID, "speech": "keep"})
+    assert body["did"] == "nothing" and body["speech"] == "left" and stopped == []
+
+
 def test_idle_pane_with_its_speech_playing_stops_the_speech(server, signed_in, pane, voice):
     screen, keys = pane
     now, stopped = voice
@@ -199,7 +215,7 @@ def test_not_live_is_nothing(server, signed_in, pane, voice, monkeypatch):
 def test_bad_requests(server, signed_in, pane, voice):
     assert stop(server, {"session": "nope"})[0] == 400
     st, body = stop(server, {"session": SID, "speech": "loud"})
-    assert st == 400 and body["error"] == "speech must be auto or silence"
+    assert st == 400 and body["error"] == "speech must be auto, silence or keep"
     res, _ = call(server, "OPTIONS", "/session/stop")
     assert res.status == 204 and res.getheader("Access-Control-Allow-Origin") == "*"
 

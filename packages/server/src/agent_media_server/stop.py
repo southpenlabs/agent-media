@@ -14,7 +14,10 @@ app's `onCancel` sends):
 * neither → nothing.
 
 `speech: "silence"` (the app's second press within 5 s) also stops this
-thread's speech whatever the turn is doing. Another thread's speech is never
+thread's speech whatever the turn is doing. `speech: "keep"` (a waiting
+message's Send now, 2 Nov 2026) interrupts a working turn and nothing else:
+no cutoff and no speech stopped, since the messages queued behind the turn
+run next and their reply is to be heard. Another thread's speech is never
 touched, and a session stopped on a question is never pressed — that answer
 belongs to `/session/answer`.
 
@@ -32,7 +35,7 @@ import time
 
 from . import auth, driver, sessions, speech
 
-_MODES = ("auto", "silence")
+_MODES = ("auto", "silence", "keep")
 
 
 def session_stop(session: str, mode: str, bearer: str) -> tuple[bool, dict]:
@@ -44,7 +47,7 @@ def session_stop(session: str, mode: str, bearer: str) -> tuple[bool, dict]:
         return False, err
     mode = (mode or "auto").strip().lower()
     if mode not in _MODES:
-        return False, {"error": "speech must be auto or silence", "status": 400}
+        return False, {"error": "speech must be auto, silence or keep", "status": 400}
     drv = driver.for_session(session)
     before = drv.state(session)
     # The stop time. Both cuts are stamped with the press, not with whenever
@@ -63,8 +66,8 @@ def session_stop(session: str, mode: str, bearer: str) -> tuple[bool, dict]:
         # The cutoff goes down before the keys, so a reply the turn finishes
         # while they land is already behind it — and comes up again if nothing
         # was interrupted, since that turn's reply is then still worth hearing.
-        had_cutoff = speech.has_cutoff(session)
-        cutoff = speech.cut_session(session, "after", pressed)
+        had_cutoff = True if mode == "keep" else speech.has_cutoff(session)
+        cutoff = None if mode == "keep" else speech.cut_session(session, "after", pressed)
         ok, r = drv.interrupt(session)
         interrupted = bool(ok and r.get("interrupted"))
         if not interrupted:
@@ -85,7 +88,8 @@ def session_stop(session: str, mode: str, bearer: str) -> tuple[bool, dict]:
     # This thread's speech, stopped: the clip it is on (only when it is the
     # one heard) and everything it has waiting. `silence` drops what is
     # waiting even while another thread is the one heard.
-    stop_it = mode == "silence" or (this_thread and before["state"] != "working")
+    stop_it = mode == "silence" or (mode == "auto" and this_thread
+                                    and before["state"] != "working")
     flushed = 0
     if stop_it:
         flushed = len(speech.waiting_for(session, pressed))
