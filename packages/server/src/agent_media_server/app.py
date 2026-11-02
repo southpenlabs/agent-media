@@ -836,6 +836,9 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A saved podcast link's download, the same way (podcast_links.served).
         if path.startswith("/podcasts/files/"):
             return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
+        # A cached track for the app's music player, the same way (music_app.served).
+        if path.startswith("/music/files/"):
+            return _signed_track(h, path.removeprefix("/music/files/"))
         return _get(h, path)
     if method == "POST":
         return _post(h, path)
@@ -866,6 +869,21 @@ def _signed_podcast(h: BaseHTTPRequestHandler, name: str) -> bool:
 
     sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
     found = podcast_links.served(name, sig)
+    if not found:
+        _json(h, 404, {"ok": False, "error": "no such file"})
+        return True
+    f, ctype = found
+    _send_file(h, f, f.stat().st_size, ctype)
+    return True
+
+
+def _signed_track(h: BaseHTTPRequestHandler, name: str) -> bool:
+    """`GET /music/files/<name>?sig=` — a track from the rooms cache for the
+    app's music player off the tailnet; the link is the credential."""
+    from agent_media_core.sinks import music_app
+
+    sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
+    found = music_app.served(name, sig)
     if not found:
         _json(h, 404, {"ok": False, "error": "no such file"})
         return True

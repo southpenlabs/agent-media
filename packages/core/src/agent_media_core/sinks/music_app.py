@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Optional
@@ -72,7 +73,44 @@ def _served_url(path: str) -> Optional[str]:
     except OSError as e:
         log.warning("sink-music-app: cannot link %s under %s: %s", src, root, e)
         return None
+    public = os.environ.get("MEDIA_PUBLIC_URL", "").strip().rstrip("/")
+    if public and _SERVED_NAME.fullmatch(src.name) and src.suffix.lower() in SERVED_TYPES:
+        # Off the tailnet: a signed link on the public server, good for this
+        # one file (`GET /music/files/<name>?sig=`, served below); the clip
+        # server above stays the fallback (David, 2 Nov 2026: "aren't we
+        # trying to avoid using the tailnet?" — "yeah, let's do that too").
+        return f"{public}/music/files/{src.name}?sig={_sig(src.name)}"
     return f"{base}/music/{urllib.parse.quote(src.name)}"
+
+
+#: What the public route serves: a cached track's own name, nothing else.
+_SERVED_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,120}")
+SERVED_TYPES = {".mka": "audio/x-matroska", ".webm": "audio/webm", ".m4a": "audio/mp4", ".opus": "audio/ogg",
+                ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".flac": "audio/flac", ".aac": "audio/aac"}
+
+
+def _sig(name: str) -> str:
+    from .. import clip_sign
+
+    # Its own scope, so a speech clip's signature never opens a track.
+    return clip_sign.sign("music:" + name)
+
+
+def served(name: str, sig: str) -> Optional[tuple[Path, str]]:
+    """A linked track and its content type for `GET /music/files/<name>?sig=`,
+    else None (a bad name, signature, or no file alike)."""
+    import hmac
+
+    ctype = SERVED_TYPES.get(Path(name or "").suffix.lower())
+    if not ctype or not _SERVED_NAME.fullmatch(name or "") or ".." in name:
+        return None
+    if not sig or not hmac.compare_digest(_sig(name), sig):
+        return None
+    root = os.environ.get("MEDIA_BOOK_HTTP_ROOT", "")
+    if not root:
+        return None
+    f = Path(root).expanduser() / "music" / name
+    return (f, ctype) if f.is_file() else None
 
 
 def _title_beside(path: str) -> str:
