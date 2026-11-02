@@ -238,6 +238,44 @@ def test_one_watcher_per_session_and_it_stops_with_the_last(server, signed_in, c
     assert _wait(lambda: thread_events.watching() == {})
 
 
+def test_a_page_reopening_its_stream_ends_the_old_one(server, signed_in, convo):
+    # The page's watchdog gave up on a stream (the network dropped) and
+    # opened another: the old one still looks up from here, so the thread
+    # held two streams for minutes and counted as open (David, 2 Nov 2026).
+    a = Stream(server, f"/threads/{SID}/events?client=page1", AUTH)
+    a.event()
+    assert a.next("watching") == {"streams": 1, "devices": ["david"]}
+    other = Stream(server, f"/threads/{SID}/events?client=page2", AUTH)
+    other.event()
+    assert other.next("watching")["streams"] == 2
+    b = Stream(server, f"/threads/{SID}/events?client=page1", AUTH)
+    b.event()
+    assert a.next("replaced") == {}
+    with pytest.raises((EOFError, TimeoutError)):
+        a.next("never", deadline=1.0)
+    assert thread_events.watching() == {SID: 2}
+    assert b.next("watching")["streams"] == 2
+    # Two pages are two streams; a bad client id is no client id.
+    res, body = call(server, "GET", "/threads/open", headers=AUTH)
+    assert res.status == 200 and body["threads"][SID]["streams"] == 2
+    assert res.getheader("Access-Control-Allow-Origin") == "*"
+    assert body["threads"][SID]["on_screen"] == 2
+    odd = Stream(server, f"/threads/{SID}/events?client=a%20b", AUTH)
+    odd.event()
+    assert _wait(lambda: thread_events.watching() == {SID: 3})
+    for st in (a, b, other, odd):
+        st.close()
+    assert _wait(lambda: thread_events.watching() == {})
+    _, body = call(server, "GET", "/threads/open", headers=AUTH)
+    assert body["threads"] == {}
+
+
+def test_threads_open_is_gated(server, signed_in, convo, monkeypatch):
+    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    res, _ = call(server, "GET", "/threads/open", headers=AUTH)
+    assert res.status == 401
+
+
 def test_pings_keep_a_quiet_stream_alive(server, signed_in, convo):
     st = Stream(server, f"/threads/{SID}/events", AUTH)
     st.event()

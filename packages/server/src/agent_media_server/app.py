@@ -398,7 +398,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -1668,6 +1668,17 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # fall through to the caller's 404 on a socket it already wrote to.
         _thread_events(h, events.group(1), query)
         return True
+    if path == "/threads/open":
+        # Which threads are open on a screen, on how many streams and whose
+        # (thread_events.open_threads): the app marks them in its list.
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        from . import thread_events
+
+        _json(h, 200, {"ok": True, **thread_events.open_threads()})
+        return True
     if path == "/feedback/settings":
         # Settings' "Send What's new replies to the Sasonica team" (feedback.py).
         from . import feedback
@@ -2212,8 +2223,12 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
     # else the login — what a waiting reply played on the open is noted with.
     who = _opener(user)
     held = (qs.get("hold") or [""])[0] == "1"
+    # The page that opened it: its reconnect replaces a stream it gave up on.
+    client = (qs.get("client") or [""])[0].strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", client):
+        client = ""
     return thread_events.serve(h, session, limit=limit, gzip=thread_events.accepts_gzip(h),
-                               device=who, held=held)
+                               device=who, held=held, client=client)
 
 
 def _opener(user: dict) -> str:

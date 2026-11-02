@@ -138,6 +138,11 @@ def _pockets() -> dict[str, float]:
             if isinstance(t, (int, float)) and t > now}
 
 
+def pocketed() -> dict[str, float]:
+    """`{session: until}`: the threads leased open as a screen went off."""
+    return _pockets()
+
+
 def pocket(session: str, on: bool) -> float:
     """Lease `session` open for `pocket_s()` (the screen went off on it), or
     give its lease back (`on` false: the page shows again). Answers the

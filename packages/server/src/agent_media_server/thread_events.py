@@ -16,6 +16,9 @@ sends only what changed:
     pending     {"pending": bool} — a reply is in and no answer has landed
     recap       the latest recap, or null
     agents      {"running", "total"} — the thread's background agents (§6.12)
+    watching    {"streams", "devices"} — how many streams hold this thread
+                open and whose, after the snapshot and whenever that changes
+    replaced    {} — this stream's client opened another (`?client=`); it ends
     ping        {} after PING_S of silence
 
 **One watcher per session**, shared by every connection to it, started by the
@@ -108,10 +111,13 @@ _TICKING = ("sentence", "elapsed", "server_time", "paused", "delay")
 class Subscriber:
     """One connection's end of a watcher: a queue of `(event, data)`."""
 
-    def __init__(self, device: str = "", held: bool = False) -> None:
+    def __init__(self, device: str = "", held: bool = False, client: str = "") -> None:
         self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self.dropped = False
         self.device = device
+        # The page that opened it (`?client=`): a stream it opens again
+        # replaces this one (`subscribe`).
+        self.client = client
         # Opened under a sheet the user has not closed yet (`?hold=1`, the
         # app's What's new): streamed as usual, but not on screen — nothing
         # plays for it until `release`.
@@ -430,17 +436,35 @@ def renamed(session: str, title: str) -> None:
         w._update("title", {"title": title}, emit=True)
 
 
-def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watcher, Subscriber] | None:
+def subscribe(session: str, device: str = "", held: bool = False,
+              client: str = "") -> tuple[Watcher, Subscriber] | None:
     """A new subscriber to `session`'s watcher (started if it is the first),
     or None when a cap is reached. `device`: who opened it, for the row a
     waiting reply is played from (`_play_waiting`). `held`: opened under a
-    sheet (`Subscriber.held`): its waiting replies wait for `release`."""
+    sheet (`Subscriber.held`): its waiting replies wait for `release`.
+
+    `client`: the page that opened it (`?client=`). A stream that page
+    already has to this thread is a dead one it gave up on: its watchdog
+    reconnected after the network dropped, and the old connection is still
+    up as far as this end can tell (the tunnel keeps taking its pings until
+    the edge times it out, minutes later). It is ended now, so one page is
+    one stream and the thread does not count as open on a screen nobody has
+    (David, 2 Nov 2026: a thread held two streams for minutes and kept
+    speaking)."""
     with _LOCK:
-        total = sum(len(w.subs) for w in _WATCHERS.values())
         w = _WATCHERS.get(session)
+        stale = [x for x in w.subs if x.client == client] if (w and client) else []
+        for x in stale:
+            w.subs.remove(x)
+            x.dropped = True
+            x.put("replaced", {})  # wakes its loop, which ends on `dropped`
+        if stale:
+            print(f"thread {session[:8]}: {device or '?'} reopened it; its old stream ends",
+                  file=sys.stderr, flush=True)
+        total = sum(len(w.subs) for w in _WATCHERS.values())
         if total >= MAX_TOTAL or (w and len(w.subs) >= MAX_PER_SESSION):
             return None
-        sub = Subscriber(device, held)
+        sub = Subscriber(device, held, client)
         if held and device:
             _hold(device)
         # A watcher in the table always has subscribers: the last one out
@@ -459,6 +483,7 @@ def subscribe(session: str, device: str = "", held: bool = False) -> tuple[Watch
         # reply played behind What's new and nothing said who was watching).
         print(f"thread {session[:8]} open by {device or '?'}{' (held)' if held else ''}, "
               f"{len(w.subs)} open", file=sys.stderr, flush=True)
+        _tell_watching(w)
     if start:
         w.prime()
         w.start()
@@ -615,7 +640,37 @@ def unsubscribe(w: Watcher, sub: Subscriber) -> None:
             w.stop()
             if _WATCHERS.get(w.session) is w:
                 del _WATCHERS[w.session]
+        else:
+            _tell_watching(w)
         _publish()
+
+
+def _watching_of(w: Watcher) -> dict:
+    """`{"streams", "devices"}`: how many streams hold `w`'s thread open,
+    and whose, each device once."""
+    return {"streams": len(w.subs),
+            "devices": sorted({x.device for x in w.subs if x.device})}
+
+
+def _tell_watching(w: Watcher) -> None:
+    """Under `_LOCK`: every stream of `w` hears how many it is one of."""
+    data = _watching_of(w)
+    for x in w.subs:
+        x.put("watching", data)
+
+
+def open_threads() -> dict:
+    """`GET /threads/open`: every thread held open on a screen —
+    `{"threads": {session: {"streams", "devices", "on_screen"}}, "pocketed":
+    {session: until}}`. `on_screen` is the streams that count (not under
+    What's new); `pocketed`, the threads leased open as a screen went off
+    (core's watching.py), which play as open until the lease ends."""
+    from agent_media_core import watching as _watching
+
+    with _LOCK:
+        out = {s: {**_watching_of(w), "on_screen": sum(_counts(x) for x in w.subs)}
+               for s, w in _WATCHERS.items() if w.subs}
+    return {"threads": out, "pocketed": {s: round(t) for s, t in _watching.pocketed().items()}}
 
 
 def _publish() -> None:
@@ -692,7 +747,7 @@ class _Out:
 
 
 def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
-          device: str = "", held: bool = False) -> bool:
+          device: str = "", held: bool = False, client: str = "") -> bool:
     """Hold the connection open and stream `session` to it until it goes.
 
     Runs on the handler's own thread. Auth and the session check are the
@@ -704,7 +759,7 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
     client went, it fell too far behind, the snapshot failed, or a bug): a
     caller must never write a second answer onto this socket.
     """
-    got = subscribe(session, device, held)
+    got = subscribe(session, device, held, client)
     if got is None:
         from .app import _json
 

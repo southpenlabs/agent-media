@@ -8472,6 +8472,8 @@ increasing `id`, and `retry: 2000` first.
 | `agents` | `{"running", "total"}` — the thread's background agents (§6.12) | an agent starts, ends or resumes (checked on the 1 s / 3 s re-read) |
 | `move` | `{"move_pending", "move_failed", "project", "cwd"}` (19 Oct 2026) — a move waiting for the session to be free, one that failed when it ran (each `null` when none), and where the thread is now (§6.15) | a move is asked for, starts waiting on something else, lands, fails or is cancelled (checked on the 1 s / 3 s re-read) |
 | `title` | `{"title"}` (19 Oct 2026) — the thread's name, so an open thread's header follows a rename made elsewhere | a live thread's name changes (the name it gives itself after its first turn, `/rename` at the terminal; checked on the 1 s / 3 s re-read, from the cached `/sessions/state` sweep), or any thread is renamed through `POST /rename` (at once) |
+| `watching` | `{"streams", "devices"}` (2 Nov 2026) — how many streams hold this thread open, this one included, and whose (device names, each once) | after the snapshot, and whenever a stream to the thread opens or closes |
+| `replaced` | `{}` (2 Nov 2026) — the same page opened another stream to this thread (`?client=`, below); this one ends after it | once, last |
 | `ping` | `{}` | 15 s of silence |
 
 `isRunning` is `state == "working"`, `pending`, or the last message's
@@ -8512,6 +8514,26 @@ minutes (`HOLD_S`, an app killed with the sheet up) — and `{"held": false}`
 streams count again and the threads they show play their waiting replies as
 on an open (nothing plays if the device was not held). `release` above does
 the same for the whole device. 400 `"held must be true or false"`.
+
+**One page, one stream (2 Nov 2026).** `?client=<id>` (1–64 of
+`A-Za-z0-9_-`, anything else ignored) names the page that opened the
+stream. A new stream with the same id to the same thread ends the page's
+older one at once (it gets `replaced`, then closes). The older one is a
+stream the page gave up on: its watchdog reconnected after the network
+dropped, and through the tunnel the dead connection keeps taking pings
+until the edge times it out, minutes later. Without this the thread held
+two streams for minutes and counted as open after the screen had gone
+(David, 2 Nov 2026: the Redesigning thread "kept speaking"). A client
+without `client` is counted as before.
+
+**Which threads are open: `GET /threads/open`** (2 Nov 2026; gated like
+the stream) → `{"ok": true, "threads": {"<session>": {"streams",
+"devices", "on_screen"}}, "pocketed": {"<session>": <until, epoch s>}}`.
+`streams` and `devices` as the `watching` event; `on_screen` is the
+streams that count as on screen (not held under What's new). `pocketed`:
+the threads leased open as a screen went off (core `watching.py`), which
+play as open until the lease ends. The app marks these in its thread list
+(`thread_events.open_threads`).
 
 **Only a thread that stays open plays (30 Oct 2026).** Its held Normal
 replies play once the stream has stayed open `OPEN_DWELL_S` (1.5 s), not on
