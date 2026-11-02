@@ -97,6 +97,27 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
                   "suggestion": sessions.suggestion_for(session, pane)}
 
 
+def git_changes(session: str, bearer: str, path: str = "") -> tuple[bool, dict]:
+    """`GET /session/git` (§6.49): the session folder's changed files and
+    unpushed commits, or with `path` that file's diff. Read-only."""
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    cwd = sessions.session_cwd(session)
+    if path:
+        got = git_state.file_diff(cwd, path)
+        if got is None:
+            return False, {"error": "not a changed file in this thread's folder", "status": 404}
+        return True, got
+    got = git_state.changes(cwd)
+    if got is None:
+        return False, {"error": "this thread's folder is not a git checkout", "status": 404}
+    return True, got
+
+
 def conversation(item: str, bearer: str) -> tuple[bool, dict]:
     """Whether `item` is a conversation this caller may reply to.
 

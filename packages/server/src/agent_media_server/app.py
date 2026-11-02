@@ -401,7 +401,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings",
+    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
@@ -1828,6 +1828,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = session_settings.get(qs.get("session", [""])[0], _bearer(h),
                                           agent=qs.get("agent", ["claude"])[0],
                                           profile=qs.get("profile", [""])[0])
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/git":
+        # The status line's changes, read-only (§6.49): `?session=` lists the
+        # folder's changed files and unpushed commits, `&path=` one file's diff.
+        qs = parse_qs(query)
+        ok, detail = threads.git_changes(qs.get("session", [""])[0], _bearer(h),
+                                         qs.get("path", [""])[0])
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/commands":
         # The slash menu for the reply box: what this session's terminal

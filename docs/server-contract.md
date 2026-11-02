@@ -789,7 +789,8 @@ newest page, as without it. Other harnesses' threads find their line ids
   `branch` is `null` on a detached HEAD; `changed` counts the entries
   `git status --porcelain` lists (changed, staged and untracked files);
   `ahead` / `behind` are against the branch's upstream, 0 without one.
-  Kept 15 s per folder (`git_state.py`).
+  Kept 15 s per folder (`git_state.py`). The files and diffs behind it:
+  §6.49.
 
 **A line**
 
@@ -8049,6 +8050,30 @@ or without bridges.
   save puts it in the practice list (a YouTube link as `add` does, an
   episode as a single saved episode, `saved_as` its id there); 404 for an
   unknown id.
+
+### 6.49 A thread's changes: files and diffs behind the git line — gated (built 3 Nov 2026)
+
+Code: `agent_media_server/git_state.py` (`changes`, `file_diff`),
+`threads.git_changes`. Pinned by `packages/server/tests/test_git_state.py`.
+David, 3 Nov 2026: "Can we make that Git status line clickable? maybe we
+could see diffs from it. sort of like what Paseo does" — read-only.
+
+- `GET /session/git?session=<id>` → `{"ok", "branch", "changed", "ahead",
+  "behind", "files", "more", "commits"}`: the §6.2 `git` fields read fresh,
+  then the files `git status --porcelain` lists in the session folder's
+  checkout (at most 300; `more` counts the rest). A file is `{"path"
+  (from the checkout's top), "status" (git's two letters, trimmed: `M`,
+  `A`, `D`, `R`, `MM`, `??`), "from"? (a rename's old name), "added"?,
+  "removed"? (lines against HEAD), "binary"?, "untracked"?}`; an untracked
+  folder is listed once, as `dir/`. `commits` are those not yet pushed
+  (`@{upstream}..HEAD`, at most 50): `{"sha" (short), "subject"}`. 404 when
+  the folder is not a git checkout.
+- `GET /session/git?session=<id>&path=<path>` → `{"ok", "path", "status",
+  "diff", "binary", "truncated"}`: that file's unified diff against HEAD
+  (staged and unstaged together; an untracked file as all new), cut at
+  200 000 characters (`truncated`), empty for a binary file. Only a path
+  the listing has, or a file under an untracked folder it lists: anything
+  else in the folder is 404.
 
 ### Pairing
 
