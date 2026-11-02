@@ -8058,29 +8058,59 @@ or without bridges.
   episode as a single saved episode, `saved_as` its id there); 404 for an
   unknown id.
 
-### 6.49 A thread's changes: files and diffs behind the git line — gated (built 3 Nov 2026)
+### 6.49 A thread's changes: files, history and diffs behind the git line — gated (built 3 Nov 2026)
 
-Code: `agent_media_server/git_state.py` (`changes`, `file_diff`),
-`threads.git_changes`. Pinned by `packages/server/tests/test_git_state.py`.
-David, 3 Nov 2026: "Can we make that Git status line clickable? maybe we
-could see diffs from it. sort of like what Paseo does" — read-only.
+Code: `agent_media_server/git_state.py` (`changes`, `file_diff`, `commit`,
+`commit_diff`, `web_of`), `threads.git_changes`. Pinned by
+`packages/server/tests/test_git_state.py`. David, 3 Nov 2026: "Can we make
+that Git status line clickable? maybe we could see diffs from it. sort of
+like what Paseo does" — read-only; then history, commit diffs and links to
+the folder's forge ("let's make it work for some other popular git
+repositories too... including forgejo").
 
 - `GET /session/git?session=<id>` → `{"ok", "branch", "changed", "ahead",
-  "behind", "files", "more", "commits"}`: the §6.2 `git` fields read fresh,
-  then the files `git status --porcelain` lists in the session folder's
-  checkout (at most 300; `more` counts the rest). A file is `{"path"
-  (from the checkout's top), "status" (git's two letters, trimmed: `M`,
-  `A`, `D`, `R`, `MM`, `??`), "from"? (a rename's old name), "added"?,
-  "removed"? (lines against HEAD), "binary"?, "untracked"?}`; an untracked
-  folder is listed once, as `dir/`. `commits` are those not yet pushed
-  (`@{upstream}..HEAD`, at most 50): `{"sha" (short), "subject"}`. 404 when
-  the folder is not a git checkout.
+  "behind", "files", "more", "commits", "history", "remote",
+  "default_branch", "links"}`:
+  - the §6.2 `git` fields, read fresh;
+  - `files`: what `git status --porcelain` lists in the session folder's
+    checkout (at most 300; `more` counts the rest), each `{"path" (from the
+    checkout's top), "status" (git's two letters, trimmed: `M`, `A`, `D`,
+    `R`, `MM`, `??`), "from"? (a rename's old name), "added"?, "removed"?
+    (lines against HEAD), "binary"?, "untracked"?}`; an untracked folder is
+    listed once, as `dir/`;
+  - `history`: the branch's last 30 commits, newest first, each `{"sha"
+    (short), "full", "subject", "author", "at" (epoch s), "pushed", "url"}`.
+    `pushed` is whether a remote branch has it (`null` when the checkout
+    has no remote at all); `url` is its page on the forge, for a pushed
+    commit on a known one, else `null`;
+  - `commits`: the history's unpushed ones, `{"sha", "subject"}` (kept for
+    older apps);
+  - `remote`: `{"kind", "host", "web"}` for the upstream's remote (else
+    `origin`) when its host is a known forge, else `null`. Kinds: `github`,
+    `gitlab`, `bitbucket`, `forgejo`, `gitea`, `sourcehut`. Known by name:
+    github.com, gitlab.com, bitbucket.org, codeberg.org (forgejo), gitea.com,
+    git.sr.ht; a self-hosted one is named in the server's env,
+    `MEDIA_GIT_FORGES=git.example.org=forgejo,code.example.com=gitlab`
+    (`host` or `host:port`). `web` is always https, credentials dropped;
+  - `default_branch`: the remote's HEAD branch, `null` when not known;
+  - `links`: `{"branch", "compare"}`, the branch's page and the branch
+    against the default one (`null` on the default branch, without an
+    upstream, on an unknown forge, and `compare` always on sourcehut).
+  404 when the folder is not a git checkout.
 - `GET /session/git?session=<id>&path=<path>` → `{"ok", "path", "status",
   "diff", "binary", "truncated"}`: that file's unified diff against HEAD
   (staged and unstaged together; an untracked file as all new), cut at
   200 000 characters (`truncated`), empty for a binary file. Only a path
   the listing has, or a file under an untracked folder it lists: anything
   else in the folder is 404.
+- `GET /session/git?session=<id>&commit=<sha>` → `{"ok", "sha", "full",
+  "subject", "body", "author", "at", "pushed", "url", "files", "more"}`: a
+  commit on HEAD's own history (a hex sha, 4 to 40 characters; a name is
+  refused), its files as in `files` above (`status` one letter: `M`, `A`,
+  `D`, `R`), against its first parent (a root commit against nothing). 404
+  for anything not on the branch.
+- `GET /session/git?session=<id>&commit=<sha>&path=<path>` → as `&path=`,
+  that file's diff in that commit; 404 when the commit did not change it.
 
 ### Pairing
 

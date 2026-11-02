@@ -85,3 +85,89 @@ def test_changes_outside_a_checkout(tmp_path, monkeypatch):
     git_state._cache.clear()
     assert git_state.changes(str(tmp_path)) is None
     assert git_state.file_diff(str(tmp_path), "x") is None
+
+
+@pytest.mark.parametrize("url,web,kind", [
+    ("git@github.com:a/b.git", "https://github.com/a/b", "github"),
+    ("https://user:tok@github.com/a/b.git", "https://github.com/a/b", "github"),
+    ("ssh://git@gitlab.com:2222/g/sub/r.git", "https://gitlab.com/g/sub/r", "gitlab"),
+    ("https://codeberg.org/a/b", "https://codeberg.org/a/b", "forgejo"),
+    ("git@bitbucket.org:a/b.git", "https://bitbucket.org/a/b", "bitbucket"),
+    ("https://git.sr.ht/~a/b", "https://git.sr.ht/~a/b", "sourcehut"),
+])
+def test_web_of_known_forges(url, web, kind):
+    got = git_state.web_of(url)
+    assert got["web"] == web and got["kind"] == kind
+
+
+def test_web_of_a_self_hosted_forge_needs_naming(monkeypatch):
+    assert git_state.web_of("git@git.example.org:me/r.git") is None
+    monkeypatch.setenv("MEDIA_GIT_FORGES", "git.example.org=forgejo, code.example.com=gitlab")
+    r = git_state.web_of("https://git.example.org:3000/me/r.git")
+    assert r == {"kind": "forgejo", "host": "git.example.org", "web": "https://git.example.org:3000/me/r"}
+    assert git_state.web_of("git@code.example.com:t/r")["kind"] == "gitlab"
+
+
+def test_links_per_forge():
+    gh = {"kind": "github", "web": "https://github.com/a/b"}
+    gl = {"kind": "gitlab", "web": "https://gitlab.com/a/b"}
+    fj = {"kind": "forgejo", "web": "https://codeberg.org/a/b"}
+    bb = {"kind": "bitbucket", "web": "https://bitbucket.org/a/b"}
+    sh = {"kind": "sourcehut", "web": "https://git.sr.ht/~a/b"}
+    assert git_state.commit_url(gh, "abc") == "https://github.com/a/b/commit/abc"
+    assert git_state.commit_url(gl, "abc") == "https://gitlab.com/a/b/-/commit/abc"
+    assert git_state.commit_url(bb, "abc") == "https://bitbucket.org/a/b/commits/abc"
+    assert git_state.branch_url(fj, "topic") == "https://codeberg.org/a/b/src/branch/topic"
+    assert git_state.compare_url(gh, "main", "topic") == "https://github.com/a/b/compare/main...topic"
+    assert git_state.compare_url(gl, "main", "topic") == "https://gitlab.com/a/b/-/compare/main...topic"
+    assert git_state.compare_url(fj, "main", "topic") == "https://codeberg.org/a/b/compare/main...topic"
+    assert git_state.compare_url(bb, "main", "topic") == "https://bitbucket.org/a/b/branches/compare/topic%0Dmain"
+    assert git_state.compare_url(sh, "main", "topic") is None
+    assert git_state.compare_url(gh, "main", "main") is None
+
+
+def test_history_commit_and_commit_diff(repo):
+    (repo / "a.txt").write_text("one\n")
+    _commit(repo, "a.txt")
+    (repo / "a.txt").write_text("two\n")
+    _commit(repo, "a.txt")
+    got = git_state.changes(str(repo))
+    h = got["history"]
+    # No remote: nothing is "not pushed", and nothing links.
+    assert len(h) == 3 and h[0]["pushed"] is None and h[0]["url"] is None and got["commits"] == []
+    assert got["remote"] is None and got["links"] == {"branch": None, "compare": None}
+    c = git_state.commit(str(repo), h[0]["sha"])
+    assert c["files"] == [{"path": "a.txt", "status": "M", "added": 1, "removed": 1}]
+    d = git_state.commit_diff(str(repo), h[0]["sha"], "a.txt")
+    assert "-one" in d["diff"] and "+two" in d["diff"]
+    # The first commit: all new against the empty tree.
+    assert git_state.commit(str(repo), h[-1]["sha"])["files"] == []
+    assert git_state.commit(str(repo), h[1]["sha"])["files"][0]["status"] == "A"
+
+
+def test_commit_only_on_the_branch(repo):
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+    run("checkout", "-q", "-b", "side")
+    (repo / "s.txt").write_text("s\n")
+    _commit(repo, "s.txt")
+    side = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    run("checkout", "-q", "work")
+    assert git_state.commit(str(repo), side) is None
+    assert git_state.commit(str(repo), "HEAD") is None  # names are not shas
+    assert git_state.commit(str(repo), "zz") is None
+    assert git_state.commit_diff(str(repo), side, "s.txt") is None
+
+
+def test_pushed_and_not_against_a_remote(repo, tmp_path):
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "up.git")], check=True)
+    run("remote", "add", "origin", str(tmp_path / "up.git"))
+    run("push", "-q", "-u", "origin", "work")
+    (repo / "late.txt").write_text("x\n")
+    _commit(repo, "late.txt")
+    git_state._cache.clear()
+    got = git_state.changes(str(repo))
+    assert [c["pushed"] for c in got["history"]] == [False, True]
+    assert got["ahead"] == 1 and [c["subject"] for c in got["commits"]] == ["add"]
+    # A plain path is no forge: no links.
+    assert got["remote"] is None and got["history"][1]["url"] is None

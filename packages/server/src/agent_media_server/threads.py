@@ -97,9 +97,10 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
                   "suggestion": sessions.suggestion_for(session, pane)}
 
 
-def git_changes(session: str, bearer: str, path: str = "") -> tuple[bool, dict]:
-    """`GET /session/git` (§6.49): the session folder's changed files and
-    unpushed commits, or with `path` that file's diff. Read-only."""
+def git_changes(session: str, bearer: str, path: str = "", commit: str = "") -> tuple[bool, dict]:
+    """`GET /session/git` (§6.49): the session folder's changed files, history
+    and web links; with `path` that file's diff; with `commit` that commit's
+    files, and with both that file's diff in it. Read-only."""
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
@@ -107,6 +108,11 @@ def git_changes(session: str, bearer: str, path: str = "") -> tuple[bool, dict]:
     if not user:
         return False, err
     cwd = sessions.session_cwd(session)
+    if commit:
+        got = (git_state.commit_diff(cwd, commit, path) if path else git_state.commit(cwd, commit))
+        if got is None:
+            return False, {"error": "not a commit on this branch, or a file it did not change", "status": 404}
+        return True, got
     if path:
         got = git_state.file_diff(cwd, path)
         if got is None:
