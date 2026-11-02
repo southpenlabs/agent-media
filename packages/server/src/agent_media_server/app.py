@@ -833,6 +833,9 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A rendered clip by signed link, for a player off the tailnet (clip_sign.py).
         if path.startswith("/speech/clips/"):
             return _signed_clip(h, path.removeprefix("/speech/clips/"))
+        # A saved podcast link's download, the same way (podcast_links.served).
+        if path.startswith("/podcasts/files/"):
+            return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
         return _get(h, path)
     if method == "POST":
         return _post(h, path)
@@ -850,6 +853,21 @@ def _signed_clip(h: BaseHTTPRequestHandler, name: str) -> bool:
     found = clip_sign.resolve(name, sig)
     if not found:
         _json(h, 404, {"ok": False, "error": "no such clip"})
+        return True
+    f, ctype = found
+    _send_file(h, f, f.stat().st_size, ctype)
+    return True
+
+
+def _signed_podcast(h: BaseHTTPRequestHandler, name: str) -> bool:
+    """`GET /podcasts/files/<id><ext>?sig=` — a saved link's download for the
+    phone's music player off the tailnet; the link is the credential."""
+    from agent_media_core import podcast_links
+
+    sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
+    found = podcast_links.served(name, sig)
+    if not found:
+        _json(h, 404, {"ok": False, "error": "no such file"})
         return True
     f, ctype = found
     _send_file(h, f, f.stat().st_size, ctype)

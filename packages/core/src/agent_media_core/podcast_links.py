@@ -192,21 +192,63 @@ def items() -> list[dict]:
     return out
 
 
+#: The download types the public route serves, and how it names them.
+SERVED_TYPES = {".opus": "audio/ogg", ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".mp3": "audio/mpeg",
+                ".webm": "audio/webm", ".mka": "audio/x-matroska", ".aac": "audio/aac"}
+
+
+def _sig(name: str) -> str:
+    from . import clip_sign
+
+    # Its own scope, so a speech clip's signature never opens a download.
+    return clip_sign.sign("podcast-link:" + name)
+
+
 def play_url(uri: str) -> Optional[str]:
     """The web address the phone's music player fetches a saved link's
-    download from (the book files' server: MEDIA_BOOK_BASEURL_PHONE over
-    MEDIA_BOOK_HTTP_ROOT), or None when `uri` is not one or is not served.
-    The book channel cannot take it: on the phone that is the app's speech
-    player, which cannot read Termux's cache and drops a book for the next
-    spoken line (David, 2 Nov 2026: tapped, the player "grays out like it's
-    going to but it doesn't play")."""
+    download from, or None when `uri` is not one. The book channel cannot
+    take it: on the phone that is the app's speech player, which cannot read
+    Termux's cache and drops a book for the next spoken line (David, 2 Nov
+    2026: tapped, the player "grays out like it's going to but it doesn't
+    play").
+
+    A signed link on the public server (MEDIA_PUBLIC_URL, `GET /podcasts/
+    files/<id><ext>?sig=`, good for that one file), so it plays off the
+    tailnet; without one, the book files' server (MEDIA_BOOK_BASEURL_PHONE
+    over MEDIA_BOOK_HTTP_ROOT) as the fallback."""
     p = Path(uri).expanduser()
-    if p.parent != folder() or not p.is_file() or not any(i["uri"] == uri for i in items()):
+    if p.parent != folder() or not p.is_file():
         return None
+    x = next((x for x in _load() if x.get("vid") and file_for(x["vid"]) == p), None)
+    if x is None:
+        return None
+    public = os.environ.get("MEDIA_PUBLIC_URL", "").strip().rstrip("/")
+    if public and p.suffix.lower() in SERVED_TYPES:
+        name = x["vid"] + p.suffix.lower()
+        return f"{public}/podcasts/files/{name}?sig={_sig(name)}"
     from .sinks.book import http_url_for
     from .types import Target
 
     return http_url_for(p, Target(name="phone"))
+
+
+def served(name: str, sig: str) -> Optional[tuple[Path, str]]:
+    """A download and its content type for `GET /podcasts/files/<name>?sig=`,
+    else None (a bad name, signature, or no file alike)."""
+    import hmac
+
+    vid, _, ext = (name or "").rpartition(".")
+    ctype = SERVED_TYPES.get("." + ext.lower())
+    if not ctype or not vid.replace("-", "").replace("_", "").isalnum() or len(vid) != 11:
+        return None
+    if not sig or not hmac.compare_digest(_sig(name), sig):
+        return None
+    if not any(x.get("vid") == vid for x in _load()):
+        return None
+    f = file_for(vid)
+    if f is None or f.parent != folder() or f.suffix.lower() != "." + ext.lower():
+        return None
+    return f, ctype
 
 
 # ---- downloading -----------------------------------------------------------------

@@ -109,6 +109,7 @@ def test_a_download_plays_from_its_web_address(_dirs, monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_PODCAST_LINK_DIR", str(tmp_path / "cache" / "links"))
     monkeypatch.setenv("MEDIA_BOOK_HTTP_ROOT", str(tmp_path / "cache"))
     monkeypatch.setenv("MEDIA_BOOK_BASEURL_PHONE", "http://red5:8780")
+    monkeypatch.delenv("MEDIA_PUBLIC_URL", raising=False)
     podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
     f = tmp_path / "cache" / "links" / "Talk #1 [AAAAAAAAAAA].opus"
     f.parent.mkdir(parents=True)
@@ -119,3 +120,24 @@ def test_a_download_plays_from_its_web_address(_dirs, monkeypatch, tmp_path):
     other.write_bytes(b"x")
     assert podcast_links.play_url(str(other)) is None
     assert podcast_links.play_url("yt:https://www.youtube.com/watch?v=AAAAAAAAAAA") is None
+
+
+def test_off_the_tailnet_a_download_has_a_signed_public_link(_dirs, monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_PUBLIC_URL", "https://example.test/")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
+    _dirs.mkdir()
+    f = _dirs / "Talk #1 [AAAAAAAAAAA].opus"
+    f.write_bytes(b"x")
+    url = podcast_links.play_url(str(f))
+    assert url.startswith("https://example.test/podcasts/files/AAAAAAAAAAA.opus?sig=")
+    sig = url.rsplit("=", 1)[1]
+    assert podcast_links.served("AAAAAAAAAAA.opus", sig) == (f, "audio/ogg")
+    # The signature opens that file only; a speech clip's never opens one.
+    from agent_media_core import clip_sign
+    assert podcast_links.served("AAAAAAAAAAA.opus", "0" * 32) is None
+    assert podcast_links.served("AAAAAAAAAAA.opus", clip_sign.sign("AAAAAAAAAAA.opus")) is None
+    assert podcast_links.served("AAAAAAAAAAA.mp3", sig) is None
+    # A link no longer saved is not served, signature or not.
+    podcast_links.remove("AAAAAAAAAAA", keep_link=False)
+    assert podcast_links.served("AAAAAAAAAAA.opus", sig) is None

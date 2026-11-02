@@ -49,3 +49,22 @@ def test_a_signature_is_for_its_own_clip(clips):
     assert clip_sign.signed("https://x/speech/clips/", "a.mp3") == \
         f"https://x/speech/clips/a.mp3?sig={clip_sign.sign('a.mp3')}"
     assert (clips.parent / "state" / "agent-media" / "clip-sign.key").stat().st_mode & 0o077 == 0
+
+
+def test_a_saved_podcast_download_by_signed_link(server, monkeypatch, tmp_path):
+    # `GET /podcasts/files/<id><ext>?sig=` (2 Nov 2026): the phone's music
+    # player fetches a saved link's download off the tailnet.
+    from agent_media_core import podcast_links
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_DIR", str(tmp_path / "links"))
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
+    monkeypatch.setattr(podcast_links, "_title", lambda vid: "Talk")
+    podcast_links.add("https://youtu.be/AAAAAAAAAAA")
+    (tmp_path / "links").mkdir()
+    (tmp_path / "links" / "Talk [AAAAAAAAAAA].opus").write_bytes(b"OggS")
+    sig = podcast_links._sig("AAAAAAAAAAA.opus")
+    res, body = call(server, "GET", f"/podcasts/files/AAAAAAAAAAA.opus?sig={sig}")
+    assert res.status == 200 and res.getheader("Content-Type") == "audio/ogg" and body == b"OggS"
+    res, _ = call(server, "GET", f"/podcasts/files/AAAAAAAAAAA.opus?sig={clip_sign.sign('AAAAAAAAAAA.opus')}")
+    assert res.status == 404
