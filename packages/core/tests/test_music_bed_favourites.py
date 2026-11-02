@@ -24,6 +24,9 @@ def isolated(monkeypatch, tmp_path):
     for name in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
                  "XDG_DATA_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name))
+    # A personal install: the YouTube search these sources use is a
+    # personal-use add-on's (a stand-in from the conftest).
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
     # These pin what plays with every tempo allowed; slow only (on by
     # default) has its own tests (test_music_bed_slow.py).
@@ -609,3 +612,11 @@ def test_an_unknown_key_or_verdict_is_refused(tmp_path):
         F.verdict("nope", "like")
     with pytest.raises(ValueError):
         F.verdict("k1", "love")
+
+
+def test_youtube_is_not_searched_without_the_add_on(monkeypatch):
+    from agent_media_core import personal_use
+    monkeypatch.delitem(personal_use._PROVIDERS, "youtube-search")
+    monkeypatch.setattr(F, "_mpd", lambda *a: (_ for _ in ()).throw(AssertionError("Mopidy asked")))
+    assert F.search("Portishead Glory Box") == [] and F.lookup("abcdefghijk") is None
+

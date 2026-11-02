@@ -270,7 +270,11 @@ def credit(entry: dict) -> dict:
 
 def search(genre: str) -> list[dict]:
     """Songs Mopidy's YouTube Music search finds for `genre`: `{id, title,
-    artist, dur}`, 1.5 to 20 minutes long."""
+    artist, dur}`, 1.5 to 20 minutes long; none where no personal-use
+    add-on allows searching YouTube (music_bed_favourites._may_search)."""
+    from . import music_bed_favourites
+    if not music_bed_favourites._may_search():
+        return []
     raw = _mpd(f'search any "{QUERIES[genre]}"')[0]
     out, cur = [], None
     for line in raw.splitlines():

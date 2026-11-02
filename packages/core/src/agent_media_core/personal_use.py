@@ -51,6 +51,8 @@ METHODS = {
                           "YouTube audio downloaded on a residential device for the speakers, the phone, books and podcasts"),
     "youtube-streaming": ("MEDIA_YOUTUBE_STREAMING",
                           "YouTube played as a stream by Mopidy or mpv, outside YouTube's own player"),
+    "youtube-search": ("MEDIA_YOUTUBE_SEARCH",
+                       "YouTube Music searched and looked up through Mopidy-YouTube for the backing music"),
     "youtube-accounts": ("MEDIA_YOUTUBE_ACCOUNTS",
                          "your YouTube likes and history read through ytmusicapi with sign-ins copied from a browser"),
     "spotify-speaker": ("MEDIA_SPOTIFY_SPEAKER",
@@ -63,7 +65,7 @@ METHODS = {
 ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-previews", "spotify-speaker",
                  "youtube-accounts", "youtube-metadata",
                  "youtube-radio", "youtube-downloads",
-                 "youtube-streaming"}
+                 "youtube-streaming", "youtube-search"}
 ADDON_GROUP = "agent_media.addons"
 _PROVIDERS: dict[str, Any] = {}
 _LOADED: list = [False]

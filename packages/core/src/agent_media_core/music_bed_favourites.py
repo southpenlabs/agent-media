@@ -688,7 +688,17 @@ def _songs(raw: str) -> list[dict]:
     return out
 
 
+def _may_search() -> bool:
+    """Whether Mopidy's YouTube Music may be searched and looked up here: a
+    personal-use add-on's to allow (youtube_addon "youtube-search"; 2 Nov
+    2026: "All YouTube methods now"), as Mopidy-YouTube is the host's."""
+    from . import youtube_addon
+    return youtube_addon.get("youtube-search") is not None
+
+
 def search(query: str) -> list[dict]:
+    if not _may_search():
+        return []
     return _songs(_mpd(f'search any "{_q(query)}"')[0])
 
 
@@ -697,6 +707,8 @@ def lookup(vid: str, data: Optional[dict] = None) -> Optional[dict]:
     `data`'s lookups or Mopidy."""
     if data is not None and vid in data["lookups"]:
         return data["lookups"][vid]
+    if not _may_search():
+        return None
     try:
         got = _songs(_mpd(f'find file "youtube:video:{_q(vid)}"')[0])
     except Exception as e:  # noqa: BLE001

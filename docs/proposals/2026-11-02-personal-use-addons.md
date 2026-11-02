@@ -12,6 +12,28 @@ name or link it, so the product neither ships nor promotes it. The app side stay
 is for now (David: "Server side only for now"); the bridges, Find on
 Messenger and the stories log are the next server methods to move.
 
+## The YouTube methods (2 Nov 2026)
+
+David: "Is YT profiles something that should be in the add-on?" — "All
+YouTube methods now" … "might as well do downloads along with it". Six
+methods, asked for through `youtube_addon.get(name)`; each has its own
+setting beside `MEDIA_PERSONAL_USE`, and without the add-on each caller
+takes the public alternative:
+
+| Method | What the add-on does | Without it |
+|---|---|---|
+| `youtube-accounts` (`MEDIA_YOUTUBE_ACCOUNTS`) | reads the listener's YouTube likes and history (ytmusicapi with copied sign-ins; `ytmusic_reader.py`), lists the yt-profile sign-ins | nothing read; Settings says it is not available |
+| `youtube-metadata` (`MEDIA_YOUTUBE_METADATA`) | yt-dlp's probe of a shared link, playlist ids, titles, lengths | a link judged by its shape; the single link, not the playlist; oEmbed titles; no lengths |
+| `youtube-radio` (`MEDIA_RADIO_YOUTUBE`, still required) | the radio's Mix and the DJ's search, on the phone | the hand-off player by name only |
+| `youtube-downloads` (`MEDIA_YOUTUBE_DOWNLOADS`) | the house speakers' fetch and copy, the phone's fetch and play, audiobook imports (`audiobook-fetch`), the Podcasts tab's downloads | nothing downloaded; files already cached still play |
+| `youtube-streaming` (`MEDIA_YOUTUBE_STREAMING`) | allows Mopidy or mpv to stream YouTube | a YouTube stream is refused (`sinks.music.StreamRefused`) |
+| `youtube-search` (`MEDIA_YOUTUBE_SEARCH`) | allows Mopidy-YouTube's search and lookup for the backing music | the backing music's YouTube sources find nothing |
+
+Streaming and search have nothing to call: Mopidy-YouTube and mpv's
+yt-dlp are the host's programs, so the add-on only grants them. The
+helpers the downloads run on the phone (`play-local`, `fetch-track`) were
+never in this repository.
+
 ## What it does and does not change
 
 Open source does not make a method fit a service's terms: those bind the

@@ -31,8 +31,12 @@ allowed in a commercial system").
 ## Consequences
 
 - The list and each method's public alternative:
-  `docs/proposals/2026-11-02-personal-use-switch.md`. YouTube's methods are
-  not gated yet (David's choice for now).
+  `docs/proposals/2026-11-02-personal-use-switch.md`. YouTube's methods
+  moved to the add-on too (2 Nov 2026: "Is YT profiles something that
+  should be in the add-on?" — "All YouTube methods now" … "might as well do
+  downloads along with it"): youtube-accounts, youtube-metadata,
+  youtube-radio, youtube-downloads, youtube-streaming and youtube-search
+  (`agent_media_core/youtube_addon.py`).
 - These methods move into a separate open-source add-on, installed by its
   user, so the product itself carries none of them ("Switch now, add-ons
   later"), kept outside this repository and installed by its user, through

@@ -28,6 +28,9 @@ def isolated(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     for name in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name))
+    # A personal install: the YouTube search these sources use is a
+    # personal-use add-on's (a stand-in from the conftest).
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     monkeypatch.setenv("MEDIA_MUSIC_BED_WEATHER", "off")
     monkeypatch.setenv("MEDIA_AUDIO_DIR", str(tmp_path / "audio"))
     # YouTube Music reachable (personal_prefs.youtube_why), as the streaming
