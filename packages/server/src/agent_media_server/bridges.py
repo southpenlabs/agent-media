@@ -903,7 +903,9 @@ def start_watch() -> None:
     """The canvas's watch, once per process: every WATCH_INTERVAL_S, each
     bridge's sign-ins as alerts. Idle on a host with no bridges or no owner
     (MATRIX_OWNER_ID); `MEDIA_BRIDGES_WATCH=0` leaves it off."""
-    if _WATCH_STARTED.is_set() or (os.environ.get("MEDIA_BRIDGES_WATCH") or "1").strip() == "0":
+    from agent_media_core import personal_use
+    if _WATCH_STARTED.is_set() or (os.environ.get("MEDIA_BRIDGES_WATCH") or "1").strip() == "0" \
+            or not personal_use.allowed("messaging-bridges"):
         return
     _WATCH_STARTED.set()
 

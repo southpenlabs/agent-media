@@ -1264,11 +1264,16 @@ def _contact_find(h: BaseHTTPRequestHandler, cid: str) -> None:
     """`POST /contacts/<id>/find {"network"[, "confirm": <id> | "none":
     true]}` (§6.25): one search on that network's bridge, the pick, or "None
     of these"; gated as the card is, the owner's book only."""
+    from agent_media_core import personal_use
+
     from . import contacts_find
 
     user, err = auth.gate(_bearer(h))
     if not user:
         _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    if not personal_use.allowed("messaging-bridges"):
+        _json(h, 404, {"ok": False, "error": "no bridges on this server"})
         return
     body = _read_json(h)
     body = body if isinstance(body, dict) else {}
@@ -1554,8 +1559,14 @@ def _bridges(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     a method and path that is not one of them (the caller's 404)."""
     from urllib.parse import unquote
 
+    from agent_media_core import personal_use
+
     from . import bridges
 
+    if not personal_use.allowed("messaging-bridges"):
+        # Unofficial clients of Meta's and Google's services: a personal
+        # install's only (personal_use.py); a public one has no bridges.
+        return False
     query = h.path.partition("?")[2]
     bearer = _bearer(h)
     icon = BRIDGE_ICON.fullmatch(path) if method == "GET" else None

@@ -111,14 +111,30 @@ def read(kind: str, sid: str) -> dict:
     return got
 
 
+def _oembed_only(kind: str, sid: str) -> dict:
+    """What Spotify's documented oEmbed says (name, cover), no tracks: the
+    public way, where its embed page is not read (personal_use)."""
+    try:
+        o = json.loads(_get("https://open.spotify.com/oembed?url=" + urllib.parse.quote(
+            f"https://open.spotify.com/{kind}/{sid}", safe=""), timeout=8))
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"couldn't read that from Spotify ({e})") from e
+    return {"title": o.get("title") or "Spotify", "artist": None, "art": o.get("thumbnail_url"), "tracks": []}
+
+
 def add(url: str, title: str = "") -> dict:
     """Save a Spotify album, playlist or song for the Music tab. Returns
-    ``{"added": "music", "id", "title", "tracks"}``; ValueError otherwise."""
+    ``{"added": "music", "id", "title", "tracks"}``; ValueError otherwise.
+    Its tracks are read from Spotify's embed page only where personal use
+    allows (personal_use "spotify-via-youtube"); elsewhere it is saved by
+    its oEmbed name and cover, to play on Spotify itself."""
+    from . import personal_use
+
     p = parse(url)
     if not p:
         raise ValueError("a music link must be a Spotify album, playlist or song")
     kind, sid = p
-    got = read(kind, sid)
+    got = read(kind, sid) if personal_use.allowed("spotify-via-youtube") else _oembed_only(kind, sid)
     key = f"spotify-{kind}-{sid}"
     albums = [a for a in _load() if a["key"] != key]
     albums.append({"key": key, "kind": kind, "url": f"https://open.spotify.com/{kind}/{sid}",
@@ -216,10 +232,21 @@ def _watch(vid: str) -> str:
 
 def play(key: str) -> dict:
     """Start a saved album on the music channel: its first track found and
-    played now, the rest queued in the background."""
+    played now, the rest queued in the background. Where personal use does
+    not allow playing Spotify's lists from YouTube, it plays on the
+    listener's own Spotify instead (spotify_remote), or says so."""
+    from . import personal_use
+
     a = find(key)
     if not a:
         return {"ok": False, "error": "no saved album under that id"}
+    if not personal_use.allowed("spotify-via-youtube") or not a.get("tracks"):
+        from . import spotify_remote
+        r = spotify_remote.play(spotify_uri(key) or "")
+        if isinstance(r, dict) and r.get("ok"):
+            return {**r, "title": a.get("title"), "on": "spotify"}
+        said = r.get("error") if isinstance(r, dict) else None
+        return {"ok": False, "error": said or "play it on Spotify: sign in to Spotify in Settings, or open it in Spotify"}
     first = None
     for i in range(min(len(a["tracks"]), 5)):
         vid = _resolve(a["key"], i)
@@ -242,6 +269,10 @@ def play(key: str) -> dict:
 
 def queue(key: str, start: int) -> int:
     """Find and add tracks `start`… after what is playing; how many were added."""
+    from . import personal_use
+
+    if not personal_use.allowed("spotify-via-youtube"):
+        return 0
     a = find(key)
     n = 0
     for i in range(start, len(a["tracks"]) if a else 0):

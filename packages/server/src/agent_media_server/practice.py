@@ -105,7 +105,9 @@ def embed_play() -> str:
     personal use (David, 2 Nov 2026: "I'd like to keep the current
     functionality for myself but yeah, we should probably change the
     public version to that")."""
-    return "page" if os.environ.get("MEDIA_PRACTICE_EMBED_PLAY", "").strip().lower() == "page" else "widget"
+    from agent_media_core import personal_use
+
+    return "page" if personal_use.allowed("insight-timer-page") else "widget"
 
 
 def control(body: dict, bearer: str) -> tuple[bool, dict]:

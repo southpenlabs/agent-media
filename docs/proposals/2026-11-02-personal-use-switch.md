@@ -3,7 +3,10 @@
 David, 2 Nov 2026, after Insight Timer's terms led to `embed_play`
 (§6.45): "We should probably include that method for the other functions
 that wouldn't be allowed in a commercial system ... Or something similar?"
-Status: **proposal**, nothing built beyond `MEDIA_PRACTICE_EMBED_PLAY`.
+Status: **built** 2 Nov 2026 for Spotify via YouTube, Insight Timer and
+the Facebook/bridges methods (David: "Allowed alternative"; YouTube left
+out for now). Next: these methods moved out into a separate open-source
+add-on (David: "Switch now, add-ons later").
 
 ## The idea
 
@@ -11,8 +14,8 @@ One install-wide setting says the server serves only its owner's personal
 use: `MEDIA_PERSONAL_USE=1`. Off in the package, on red5. Each method a
 public product could not use asks one place (`personal_use.allowed(name)`)
 whether it may run; each keeps its own switch to turn it off (or on) alone.
-`GET /features` lists what is on (`"personal": {"on", "methods": [...]}`),
-and the app shows the allowed alternative where one exists — the maker's
+`GET /features` lists what is on
+(`"personal_use"`) and the app shows the allowed alternative where one exists — the maker's
 own player, a link out to their app — or leaves the feature out.
 
 `docs/decisions/` gets the rule: a new feature that depends on a method in

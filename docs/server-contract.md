@@ -4359,17 +4359,19 @@ local look, never a network call:
 | `org` | the notes tree's capture file exists (`/org/setup`'s `org` row is ok) |
 | `music` | `MEDIA_DUCK_ROOMS_STREAM` is set, or the play history has a music row |
 | `contacts` | the contacts store (`contacts.db`) or a Google client file exists |
-| `bridges` | a Matrix bridge config is found (`MATRIX_BRIDGES`, §6.26) |
+| `bridges` | a Matrix bridge config is found (`MATRIX_BRIDGES`, §6.26) and personal use allows `messaging-bridges` (below); else `/bridges` and `/contacts/<id>/find` answer 404 and the bridge watcher does not start |
 | `personas` | the personas repo is there (`MEDIA_PERSONAS_DIR`, default `~/agent-personas`) |
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
 | `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
-| `read_page` | always: `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) |
+| `read_page` | `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) — where personal use allows `signed-in-reading` |
+| `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
 | `youtube` | YouTube Music is reachable: `MEDIA_RADIO_YOUTUBE=1` and a phone to fetch through (`MEDIA_PHONE_JOBS=1` or `MEDIA_MUSIC_LOCAL_SSH`) |
-| `stories` | unless `MEDIA_STORIES` is `off` (or `0`, `false`, `no`): the app's Chats tab offers its stories row, which opens Facebook's and Instagram's own stories in the phone's signed-in browser; nothing about it is sent to the server |
+| `stories` | personal use allows `facebook-stories` (its own setting `MEDIA_STORIES`): the app's Chats tab offers its stories row, which opens Facebook's and Instagram's own stories in the phone's signed-in browser; nothing about it is sent to the server |
+| `personal_use` | `{"on", "methods": {name: allowed}}` (2 Nov 2026; `personal_use.py`, `docs/proposals/2026-11-02-personal-use-switch.md`): what this install allows that a public product could not. `on` is `MEDIA_PERSONAL_USE=1`: the server serves only its owner's personal use, and every method may run; unset (the package's default), none may and each feature uses its public alternative. A method's own setting wins either way. Methods: `spotify-via-youtube` (`MEDIA_SPOTIFY_VIA_YOUTUBE`; else a Spotify link is saved by its oEmbed name and cover and played on Spotify itself, §6.46), `insight-timer-profiles` (`MEDIA_PRACTICE_PROFILES`; else no teacher profiles or places, §6.45), `insight-timer-page` (`MEDIA_PRACTICE_EMBED_PLAY`; `embed_play`, §6.45), `messaging-bridges` (`MEDIA_BRIDGES`), `facebook-stories` (`MEDIA_STORIES`), `facebook-previews` (`MEDIA_FACEBOOK_PREVIEWS`; else a Facebook link's card is fetched as a browser, §6.18), `signed-in-reading` (`MEDIA_SIGNED_IN_READING`) |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.

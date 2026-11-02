@@ -29,6 +29,8 @@ def isolated(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith(("MEDIA_", "RELAY_")):
             monkeypatch.delenv(k, raising=False)
+    # Facebook as its own previewer: a personal install's only (personal_use.py).
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     for d in ("HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         monkeypatch.setenv(d, str(tmp_path / d.lower()))
     link_preview._reset_for_tests()

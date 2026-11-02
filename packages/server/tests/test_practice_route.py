@@ -121,7 +121,12 @@ def test_embed_play_is_the_widget_unless_the_owner_says_page(server, shelf, sign
     embed = {"id": "it:x", "title": "Yoga Nidra", "source": "embed", "embed": "https://widgets.insighttimer.com/track/x"}
     monkeypatch.setattr(lib, "items", lambda: [embed])
     monkeypatch.delenv("MEDIA_PRACTICE_EMBED_PLAY", raising=False)
+    monkeypatch.delenv("MEDIA_PERSONAL_USE", raising=False)
     assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "widget"
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "page", "a personal install"
+    monkeypatch.setenv("MEDIA_PRACTICE_EMBED_PLAY", "widget")
+    assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "widget", "its own setting wins"
     monkeypatch.setenv("MEDIA_PRACTICE_EMBED_PLAY", "page")
     assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "page"
     monkeypatch.setattr(lib, "items", lambda: [{**embed, "source": "youtube"}])

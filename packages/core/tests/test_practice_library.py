@@ -202,6 +202,7 @@ def test_a_teacher_not_on_insight_timer_has_no_profile(monkeypatch):
 
 
 def test_teacher_places_from_the_kept_profiles(monkeypatch):
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
     L._profiles_path().parent.mkdir(parents=True, exist_ok=True)
     L._profiles_path().write_text(json.dumps({
         "purarasa": {"profile": {"region": "Vilnius, Lithuania", "photo": "p.jpg"}, "at": 1},

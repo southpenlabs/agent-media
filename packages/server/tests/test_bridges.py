@@ -218,6 +218,8 @@ def isolated(monkeypatch, tmp_path):
     for k in list(os.environ):
         if k.startswith(("MATRIX_", "MEDIA_")):
             monkeypatch.delenv(k, raising=False)
+    # Bridges are a personal install's only (personal_use.py).
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     for d in ("home", "config", "cache"):
         (tmp_path / d).mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))

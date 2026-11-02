@@ -100,8 +100,13 @@ def _embeddable(href: str) -> bool | None:
 
 
 def _facebook(url: str) -> dict:
+    from agent_media_core import personal_use
+
+    # As Facebook's own previewer only where personal use allows it; a
+    # public install asks as a browser, and shows what that gets.
+    ua = FB_UA if personal_use.allowed("facebook-previews") else MOBILE_UA
     try:
-        final, _ctype, page = _fetch(url, FB_UA)
+        final, _ctype, page = _fetch(url, ua)
     except Exception:  # noqa: BLE001 — a page we cannot read may still embed
         final, page = url, ""
     canonical = _meta(page, "og:url") or final

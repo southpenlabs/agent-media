@@ -790,7 +790,11 @@ def teacher_places(names: list[str]) -> dict:
     """`{name: {"region", "country", "state", "city", "photo"}}` for the teachers whose
     profile is kept (none for one not found), for the Teachers list's
     Where filter; those never looked up are looked up in the background, a
-    few seconds apart, and a next listing has them."""
+    few seconds apart, and a next listing has them. None where personal use
+    does not allow Insight Timer's profiles."""
+    from . import personal_use
+    if not personal_use.allowed("insight-timer-profiles"):
+        return {}
     try:
         kept = json.loads(_profiles_path().read_text())
     except (OSError, ValueError):
@@ -818,7 +822,8 @@ _PROFILING: list = [False]
 
 
 def _fill_profiles(names: list[str]) -> None:
-    if not names or _PROFILING[0] or os.environ.get("MEDIA_PRACTICE_PROFILES") == "0":
+    from . import personal_use
+    if not names or _PROFILING[0] or not personal_use.allowed("insight-timer-profiles"):
         return
     import threading
     _PROFILING[0] = True
@@ -852,8 +857,11 @@ def teacher_profile(name: str, fresh: bool = False) -> dict:
     ttl = PROFILE_TTL_S if hit and hit.get("profile") else PROFILE_MISS_TTL_S
     if hit and not fresh and time.time() - float(hit.get("at") or 0) < ttl:
         return {"name": name, "profile": hit.get("profile")}
-    if os.environ.get("MEDIA_PRACTICE_PROFILES") == "0":
-        return {"name": name, "profile": (hit or {}).get("profile")}
+    from . import personal_use
+    if not personal_use.allowed("insight-timer-profiles"):
+        # Not asked of Insight Timer's internal endpoints, and what was kept
+        # from them not shown, where personal use does not allow it.
+        return {"name": name, "profile": None}
     try:
         profile = _insight_timer(name)
     except Exception:  # noqa: BLE001 — the last one known, or none

@@ -100,6 +100,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     # … and who an artist, author or show is (media_people).
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
+    # The tests exercise the personal-use methods (personal_use.py) as a
+    # personal install has them; test_personal_use.py checks a public one.
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
     # the real ~/.amux token: on red5 that is the live server, which would

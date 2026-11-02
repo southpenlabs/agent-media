@@ -27,11 +27,15 @@ PERSONAL = {"weather", "astro", "listenbrainz", "youtube"}
 
 def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path):
     _bare(monkeypatch, tmp_path)
+    monkeypatch.delenv("MEDIA_PERSONAL_USE", raising=False)
     res, obj = call(server, "GET", "/features", headers=AUTH)
     assert res.status == 200
-    # Quick chat is this server's own (quick.py): there on every one.
+    # Quick chat is this server's own (quick.py): there on every one. No
+    # personal-use method on a bare, public install (personal_use.py).
+    from agent_media_core import personal_use
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
-                   "read_page": True, "stories": True, "personal": True}
+                   "read_page": False, "signed_in": False, "stories": False, "personal": True,
+                   "personal_use": {"on": False, "methods": {m: False for m in personal_use.METHODS}}}
     assert "/features" in app.CORS_PATHS
 
 
@@ -62,9 +66,13 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     monkeypatch.setenv("MEDIA_LISTENBRAINZ_USER", "someone")
     monkeypatch.setenv("MEDIA_RADIO_YOUTUBE", "1")
     monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    monkeypatch.delenv("MEDIA_PRACTICE_PROFILES", raising=False)
+    from agent_media_core import personal_use
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
-                   "read_page": True, "stories": True, "personal": True}
+                   "read_page": True, "signed_in": True, "stories": True, "personal": True,
+                   "personal_use": {"on": True, "methods": {m: True for m in personal_use.METHODS}}}
 
 
 def test_music_from_the_play_history(signed_in, monkeypatch, tmp_path):

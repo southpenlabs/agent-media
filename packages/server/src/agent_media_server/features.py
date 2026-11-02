@@ -31,9 +31,15 @@ never a network call, so the app can ask on every start.
   youtube   YouTube Music is reachable: downloads on (MEDIA_RADIO_YOUTUBE)
             and a phone to fetch through
   stories   the Chats tab's stories row (26 Oct 2026): a tap opens Facebook's
-            or Instagram's own stories in the app's signed-in browser; on
-            unless MEDIA_STORIES is off/0/false/no. Nothing about it reaches
-            the server: this is only whether the row is offered
+            or Instagram's own stories in the app's signed-in browser; only
+            where personal use allows it (personal_use "facebook-stories",
+            MEDIA_STORIES its own setting). Nothing about it reaches the
+            server: this is only whether the row is offered
+  signed_in the app's signed-in browser may read pages and play friends-only
+            videos (personal_use "signed-in-reading"); read_page follows it
+  personal_use  {"on", "methods": {name: allowed}} (personal_use.py, 2 Nov
+            2026): what this install allows that a public product could
+            not; bridges also needs "messaging-bridges"
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -69,15 +75,23 @@ def _contacts() -> bool:
 
 
 def _bridges() -> bool:
+    from agent_media_core import personal_use
+
     from . import bridges
 
-    return bool(bridges.discover())
+    return personal_use.allowed("messaging-bridges") and bool(bridges.discover())
 
 
 def _stories() -> bool:
-    import os
+    from agent_media_core import personal_use
 
-    return os.environ.get("MEDIA_STORIES", "").strip().lower() not in ("off", "0", "false", "no")
+    return personal_use.allowed("facebook-stories")
+
+
+def _signed_in() -> bool:
+    from agent_media_core import personal_use
+
+    return personal_use.allowed("signed-in-reading")
 
 
 def _personas() -> bool:
@@ -96,7 +110,7 @@ def _personal(name: str):
 
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
-          "read": lambda: True, "read_page": lambda: True, "stories": _stories,
+          "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
           "personal": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
@@ -118,4 +132,6 @@ def features(bearer: str) -> tuple[bool, dict]:
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
-    return True, detect()
+    from agent_media_core import personal_use
+
+    return True, {**detect(), "personal_use": personal_use.report()}
