@@ -113,7 +113,7 @@ def test_spotify_sign_in_and_read(monkeypatch):
     with pytest.raises(ValueError):
         A.spotify_finish("c", "wrong", now=110.0)
     assert A.spotify_finish("c", q["state"][0], now=110.0) == {"user": "David"}
-    assert calls[0][1]["code_verifier"] and A.spotify_signed_in() == {"signed_in": True, "user": "David"}
+    assert calls[0][1]["code_verifier"] and A.spotify_signed_in() == {"signed_in": True, "user": "David", "can_play": False}
     assert oct(A._sp_path().stat().st_mode & 0o777) == "0o600"
     songs = {s["title"]: s for s in A.spotify_songs(now=200.0)}
     assert songs["Paranoid"]["loved"] and songs["Teardrop"]["plays"] == 2 * 5 + 5 + 1

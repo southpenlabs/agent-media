@@ -16,7 +16,8 @@ a track's YouTube id is kept once found.
 queues the rest in the background (`python -m … queue <key>`), finding each
 as it goes, so the music starts in a second or two. The Music tab lists
 them as its `albums` list (music_recent); a row's uri is ``album:<key>``,
-which `POST /music {"action": "play"}` hands here.
+which `POST /music {"action": "play"}` hands here. `POST /music {"action":
+"spotify"}` plays one on Spotify itself instead (spotify_remote).
 """
 
 from __future__ import annotations
@@ -152,8 +153,18 @@ def items() -> list[dict]:
                     "inferred": False, "kind": "music", "artist": a.get("artist") or None,
                     "album": a.get("title") if a.get("kind") == "album" else None,
                     "song": None, "genre": None, "tracks": len(a.get("tracks") or []),
-                    "source": "spotify"})
+                    "source": "spotify", "link": a.get("url")})
     return out
+
+
+def spotify_uri(key: str) -> Optional[str]:
+    """``spotify:<kind>:<id>`` for a saved one, for playing on Spotify
+    itself (spotify_remote)."""
+    a = find(key)
+    if not a:
+        return None
+    sid = a["key"].rsplit("-", 1)[-1]
+    return f"spotify:{a['kind']}:{sid}"
 
 
 # ---- playing -------------------------------------------------------------------

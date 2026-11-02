@@ -67,15 +67,20 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     title = str(body.get("title") or "")
     if not url.startswith(("http://", "https://")):
         return False, {"error": "url must be an http(s) link"}
+    # Where the app shows what was added (the Media tab and its list).
+    show = {"podcast": {"tab": "podcast", "list": "saved"}, "practice": {"tab": "practice"},
+            "music": {"tab": "music", "list": "albums"}}.get(to)
     try:
         if to == "podcast":
-            return True, podcast_links.add(url, title=title)
+            return True, {**podcast_links.add(url, title=title), "show": show}
         if to == "practice":
-            return True, practice_library.add(url, title=title)
+            return True, {**practice_library.add(url, title=title), "show": show}
         if to == "book":
             return True, _book(url)
         if to == "music":
-            return True, music_links.add(url, title=title)
+            # Spotify's own name for it, not the words shared beside the link
+            # ("Check out … on Spotify").
+            return True, {**music_links.add(url), "show": show}
     except ValueError as e:
         return False, {"error": str(e)}
     except RuntimeError as e:

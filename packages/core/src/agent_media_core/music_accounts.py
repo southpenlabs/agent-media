@@ -155,7 +155,9 @@ def youtube_summary() -> str:
 SPOTIFY_AUTH = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN = "https://accounts.spotify.com/api/token"
 SPOTIFY_API = "https://api.spotify.com/v1"
-SPOTIFY_SCOPES = "user-top-read user-library-read user-read-recently-played"
+# Reading, and (2 Nov 2026, spotify_remote) playing on his Spotify devices.
+SPOTIFY_SCOPES = ("user-top-read user-library-read user-read-recently-played "
+                  "user-read-playback-state user-modify-playback-state")
 PENDING_S = 600.0
 
 
@@ -254,7 +256,7 @@ def spotify_finish(code: str, state: str, now: Optional[float] = None) -> dict:
         pass
     d.pop("pending", None)
     d.update(refresh_token=got["refresh_token"], user=me.get("display_name") or me.get("id") or "",
-             signed_in_at=now)
+             signed_in_at=now, scope=got.get("scope") or "")
     d.pop("read", None)
     _sp_save(d)
     return {"user": d["user"]}
@@ -262,12 +264,13 @@ def spotify_finish(code: str, state: str, now: Optional[float] = None) -> dict:
 
 def spotify_signed_in() -> dict:
     d = _sp_load()
-    return {"signed_in": bool(d.get("refresh_token")), "user": d.get("user") or None}
+    return {"signed_in": bool(d.get("refresh_token")), "user": d.get("user") or None,
+            "can_play": "user-modify-playback-state" in str(d.get("scope") or "").split()}
 
 
 def spotify_sign_out() -> None:
     d = _sp_load()
-    for k in ("refresh_token", "user", "read", "signed_in_at"):
+    for k in ("refresh_token", "user", "read", "signed_in_at", "scope"):
         d.pop(k, None)
     _sp_save(d)
 
@@ -277,6 +280,8 @@ def _sp_access(d: dict) -> str:
                                 "client_id": spotify_client_id()})
     if got.get("refresh_token"):
         d["refresh_token"] = got["refresh_token"]
+    if got.get("scope"):
+        d["scope"] = got["scope"]
     return got["access_token"]
 
 

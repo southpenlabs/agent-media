@@ -79,3 +79,18 @@ def test_a_spotify_album_goes_to_music(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "POST", "/media/links",
                     {"action": "remove", "id": "album:spotify-album-1qiw9zXdtK5Xidv4j8W28Y"}, AUTH)
     assert res.status == 200
+
+
+def test_playing_on_spotify_signed_out_says_how(server, shelf, signed_in, monkeypatch):
+    from agent_media_core import music_links
+    monkeypatch.setattr(music_links, "read", lambda kind, sid: {
+        "title": "The Heart Chronicles", "artist": "Eli Poz", "art": None,
+        "tracks": [{"artist": "Eli Poz", "title": "First Love"}]})
+    call(server, "POST", "/media/links",
+         {"url": "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y", "to": "music"}, AUTH)
+    res, obj = call(server, "POST", "/music",
+                    {"action": "spotify", "uri": "album:spotify-album-1qiw9zXdtK5Xidv4j8W28Y"}, AUTH)
+    assert res.status == 409, obj
+    assert obj["code"] == "signed_out" and obj["link"] == "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y"
+    res, obj = call(server, "POST", "/music", {"action": "spotify", "uri": "album:nope"}, AUTH)
+    assert res.status == 404

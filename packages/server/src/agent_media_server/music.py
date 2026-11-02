@@ -77,6 +77,8 @@ ACTIONS = {
     "unlike": "unlike", "undislike": "undislike",
     # The house speakers one by one, and what is playing to another place.
     "room": "room", "move": "move",
+    # A saved Spotify album played on one of his Spotify devices (spotify_remote).
+    "spotify": "spotify",
     # The song the music bed played under a reply, by its speech history id.
     "song": "play",
     # Suggest what is playing (or `uri`) for the backing music; `off` takes
@@ -751,6 +753,27 @@ def _played_book(uri: str) -> bool:
     return music_recent.playable_book(uri)
 
 
+def _spotify_play(body: dict) -> tuple[bool, dict]:
+    """A saved album (`uri` album:…) played on Spotify itself, on `device`
+    or the one Spotify makes plain (agent_media_core.spotify_remote). A
+    refusal carries `code`: signed_out, sign_in_again, premium, no_device
+    (with `link`, the album on Spotify, which opens the app), choose (with
+    `devices`) or spotify."""
+    from agent_media_core import music_links, spotify_remote
+
+    uri = str(body.get("uri") or "")
+    a = music_links.find(uri) if uri.startswith("album:") else None
+    if not a:
+        return False, {"error": "uri must be a saved album (album:…)", "status": 404}
+    try:
+        r = spotify_remote.play(music_links.spotify_uri(uri) or "", device=str(body.get("device") or ""))
+    except spotify_remote.RemoteError as e:
+        return False, {"error": str(e), "code": e.code, "link": a.get("url"), **e.extra, "status": 409}
+    except Exception as e:  # noqa: BLE001 — Spotify unreachable
+        return False, {"error": f"couldn't reach Spotify: {e}", "code": "spotify", "status": 502}
+    return True, {"spotify": True, "device": r.get("device"), "title": a.get("title")}
+
+
 def _clock(seconds: float) -> str:
     s = max(0, int(round(seconds)))
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
@@ -798,6 +821,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             print(f"music: book play failed: {said}", file=sys.stderr)
             return False, {"error": said or "book failed", "status": 502, **_answer()}
         return True, _answer()
+    elif action == "spotify":
+        return _spotify_play(body)
     elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("album:"):
         # A row of Show → Albums: a saved Spotify album, played from YouTube.
         from agent_media_core import music_links

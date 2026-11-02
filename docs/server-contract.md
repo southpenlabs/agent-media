@@ -7860,7 +7860,8 @@ downloaded version has been removed to save space".
   each (on the share screen, and a paste box on a tab whose id it is),
   so a tab added here needs no app change.
 - `POST /media/links {"url", "to", "title"?}` → `{"ok", "added", "title",
-  …}`. `podcast`: a podcast app's episode link (1 Nov 2026: PodcastOne, Pocket
+  "show"?, …}`; `show` (2 Nov 2026) is where the app opens to see it:
+  `{"tab", "list"?}` (a Media tab, and its Show list). `podcast`: a podcast app's episode link (1 Nov 2026: PodcastOne, Pocket
   Casts, Apple Podcasts…; `title` the words shared with it), its audio
   found by `podcast_resolve` (the link itself, Apple's episode id, the
   page's audio, else the iTunes directory searched with the shared words,
@@ -7889,6 +7890,17 @@ downloaded version has been removed to save space".
   downloads in `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`);
   past `MEDIA_PODCAST_LINK_MAX_MB` (1000) the oldest downloads are deleted
   after each new one, their links kept.
+- `POST /music {"action": "spotify", "uri": "album:…", "device"?}` (2 Nov
+  2026; David: "Can we implement playing from Spotify too?") plays a saved
+  album on one of the listener's own Spotify devices through Spotify
+  Connect (`spotify_remote`; Premium, and a Spotify sign-in made after the
+  playback scopes were added): `device`, else the active one, else the only
+  one. → `{"ok", "spotify": true, "device", "title"}`. 409 with `code`:
+  `signed_out`, `sign_in_again`, `premium`, `no_device` (Spotify open
+  nowhere; `link` is the album on Spotify, which opens the app), `choose`
+  (`devices`: `[{id, name, type}]`, ask and send `device`) or `spotify`.
+  404 for an album not saved. The accounts group's `spotify` gains
+  `can_play`.
   `MEDIA_PODCAST_LINK_FETCH=0` saves without downloading. Not a guest POST.
 
 ## 7. `/events` (v0) — canvas-wide, not the app's stream
