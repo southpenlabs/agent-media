@@ -281,6 +281,10 @@ def _answer_of(content) -> str:
 #: possibly followed by the harness's own notes about it.
 _PEER = re.compile(r'^<cross-session-message\b(?P<attrs>[^>]*)>\s*(?P<body>.*?)\s*</cross-session-message>', re.S)
 _PEER_NAME = re.compile(r'\bfrom-name="([^"]*)"')
+#: The same, signed in words: agent mail (`agent-mail-deliver`, `media session
+#: send`) and the session host's own notes (sessiond's resume after a restart,
+#: the drain) start "[From <name>] ".
+_SIGNED = re.compile(r"^\[From (?P<name>[^\]\n]{1,40})\]\s*(?P<body>.+)", re.S)
 
 
 def _user_text(content) -> tuple[str, bool]:
@@ -509,6 +513,18 @@ class Builder:
                 name = _PEER_NAME.search(peer.group("attrs"))
                 self.messages[-1]["peer"] = {"name": (name.group(1) if name else "") or "another session"}
             return
+        signed = _SIGNED.match(stripped)
+        if signed:
+            # So the listener sees a restart's "resumed" note as the host's,
+            # and mail as its sender's, not as words of their own.
+            body = strip_system_blocks(signed.group("body")).strip()
+            if body:
+                self._user(rec, body)
+                if self.messages and self.messages[-1]["parts"][0].get("text") == _cut(body, TEXT_MAX):
+                    name = signed.group("name").strip()
+                    self.messages[-1]["peer"] = {
+                        "name": "Session host" if name == "the session host" else name}
+                return
         words = strip_system_blocks(stripped)
         if not words:
             # A task notification, a reminder, a local command's output:

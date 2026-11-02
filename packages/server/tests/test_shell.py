@@ -75,3 +75,15 @@ def test_same_command_twice_is_two_messages():
 
 def test_speech_leaves_bash_mode_out():
     assert strip_system_blocks(shell.message("pwd", "/w", "")) == ""
+
+
+def test_signed_mail_and_the_session_hosts_notes_are_not_the_listeners():
+    # A restart's resume note (sessiond `resume_note`) and agent mail read as
+    # their sender's, untagged, like a <cross-session-message>.
+    got = _build("[From the session host] The session host restarted while you were working.",
+                 "[From Cece] Draft is in the inbox.\n\nSecond paragraph.",
+                 "my own words")
+    assert [(m["parts"][0]["text"], m.get("peer")) for m in got] == [
+        ("The session host restarted while you were working.", {"name": "Session host"}),
+        ("Draft is in the inbox.\n\nSecond paragraph.", {"name": "Cece"}),
+        ("my own words", None)]
