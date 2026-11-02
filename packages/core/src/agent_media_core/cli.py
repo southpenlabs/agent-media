@@ -8896,12 +8896,14 @@ def cmd_attach(a) -> int:
     as its thumbnail, tapped full size), and fetches it through `GET /upload`,
     which serves only the upload root. So each file is copied into today's
     folder there (MEDIA_UPLOAD_DIR, else ~/shared), never over another, and
-    the line to put in the reply is printed; speech skips the line.
+    the line to put in the reply is printed; speech skips the line
+    (shared_files.share, which the server's linking of paths named in a
+    reply uses too).
     """
     from pathlib import Path
 
-    root = Path(os.path.expanduser(os.environ.get("MEDIA_UPLOAD_DIR") or "~/shared"))
-    folder = root / datetime.date.today().isoformat()
+    from . import shared_files
+
     rc = 0
     for src in a.files:
         p = Path(src).expanduser()
@@ -8909,19 +8911,7 @@ def cmd_attach(a) -> int:
             print(f"media attach: not a file: {src}", file=sys.stderr)
             rc = 2
             continue
-        try:
-            inside = p.resolve().is_relative_to(root.resolve())
-        except OSError:
-            inside = False
-        if inside:
-            dest = p.resolve()
-        else:
-            folder.mkdir(parents=True, exist_ok=True)
-            stem, ext = p.stem.lstrip(".") or "shared", p.suffix
-            dest, n = folder / f"{stem}{ext}", 2
-            while dest.exists():
-                dest, n = folder / f"{stem}-{n}{ext}", n + 1
-            shutil.copy2(p, dest)
+        dest = shared_files.share(p)
         print(f"Shared file: {dest}")
     return rc
 

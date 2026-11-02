@@ -45,6 +45,13 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_LAYOUT", "projects-per-tmux-session")
     monkeypatch.setenv("MEDIA_SESSIOND_RECOVER_REPLY", "0")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # Files a reply names are copied into the upload root as the thread is
+    # read (file_links.py): never into the real ~/shared, and no copy
+    # remembered from another test.
+    monkeypatch.setenv("MEDIA_UPLOAD_DIR", str(tmp_path / "shared"))
+    from agent_media_server import file_links
+
+    file_links.reset_cache()
     # The phone's contacts are read, and a Join written back to Google
     # (contacts_writeback.py), through `agent-phone-adb shell`: never the
     # real phone from a test. A test that needs one sets a stand-in.

@@ -69,7 +69,7 @@ import threading
 import time
 import zlib
 
-from . import agents, background, driver, reactions, replies, retract, sessions, threads, transcript
+from . import agents, background, driver, file_links, reactions, replies, retract, sessions, threads, transcript
 
 log = logging.getLogger("agent-media.server.thread_events")
 
@@ -340,6 +340,7 @@ class Watcher:
         replies.mark(self.session, msgs)
         retract.mark(self.session, msgs)
         reactions.mark(self.session, msgs)
+        file_links.mark(msgs)
         live = bool(self._last.get("state", {}).get("session_live"))
         if not live:
             for m in msgs:

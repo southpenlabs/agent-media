@@ -5113,6 +5113,29 @@ Authorization: Bearer <device token>
   already there is left where it is) and prints the line; the app draws the
   reply's lines as chips the same way, and speech skips them
   (`intake/_text.py` `strip_markdown`).
+- A file a reply only names is a chip too (3 Nov 2026; David: "that PNG
+  link isn't clickable by the way. can we get any relevant formats clickable
+  from here"). When a thread's messages are read (`/conversation/log`, the
+  thread stream §11), each assistant reply's text parts — never a user
+  message, a tool part or reasoning — are looked over for absolute or `~/`
+  paths, bare, in backticks or as a markdown link's target, that name an
+  image (png, jpg, jpeg, gif, webp, avif, heic, heif, bmp), a video (mp4,
+  m4v, webm, mov), audio (mp3, wav, ogg, opus, m4a, aac, flac) or a PDF. Each
+  is copied into the upload root as `media attach` copies it (once per source
+  path, mtime and size, remembered in `state_dir()/shared-links.json`) and a
+  `Shared file: <copy>` line is added after the words; a `Shared file:` line
+  pointing outside the upload root is rewritten to a copy (any extension, as
+  `media attach` takes). Only what is sent is changed, never the transcript,
+  so speech is as before. Not linked: a path with a hidden part (except
+  `.playwright-mcp` and `.local-previews`, where screenshots land), one under
+  a folder named with "secret" or `.ssh`, `.gnupg` and the like (as written
+  and as resolved), /proc, /sys, /dev, /run, anything not a non-empty
+  readable regular file, or over `MEDIA_SHARED_LINK_MAX_MB` (100, never more
+  than `MEDIA_UPLOAD_MAX_MB`); from a bare path, html and svg (active
+  content) and txt, md and csv (named all the time; a chip each would bury
+  the ones that matter). At most 8 added per reply. `GET /upload` still serves
+  only the upload root. Code: `agent_media_server/file_links.py`; pinned by
+  `packages/server/tests/test_file_links.py`.
 - A question card can carry a clip (25 Oct 2026: "I'd like to get these audio
   options in the cards"): an AskUserQuestion option whose `description` (or a
   question whose text) has a line `Shared file: <path>` with an audio

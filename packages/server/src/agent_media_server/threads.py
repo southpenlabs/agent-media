@@ -406,14 +406,17 @@ MESSAGES_MAX = 500
 def messages_for(session: str, lines: list, *, working: bool, live: bool,
                  limit: int = MESSAGES_LIMIT, before: str = "", around: str = "",
                  jump: dict | None = None) -> tuple[list, bool]:
-    """`_messages_for`, with the messages taken back marked (retract.py)."""
-    from . import reactions, replies, retract
+    """`_messages_for`, with the messages taken back marked (retract.py) and
+    the files its replies name linked (file_links.py)."""
+    from . import file_links, reactions, replies, retract
 
     msgs, older = _messages_for(session, lines, working=working, live=live, limit=limit,
                                 before=before, around=around, jump=jump)
     replies.mark(session, msgs)
     retract.mark(session, msgs)
     reactions.mark(session, msgs)
+    # Files a reply names, as chips (file_links.py, §6.18).
+    file_links.mark(msgs)
     return msgs, older
 
 

@@ -39,7 +39,9 @@ def max_bytes() -> int:
 
 
 def root() -> Path:
-    return Path(os.path.expanduser(os.environ.get("MEDIA_UPLOAD_DIR") or "~/shared"))
+    from agent_media_core import shared_files
+
+    return shared_files.root()
 
 
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
