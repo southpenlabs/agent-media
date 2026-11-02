@@ -9162,6 +9162,19 @@ writes nothing to tmux.
   the phone. `normal` drops the overlay: the user's own settings decide, and
   whatever still asks comes to the phone. Verified end to end on 22 Sep 2026:
   a project `allow: Bash(*)` did not pre-approve a Bash call under strict.
+  `folder` (3 Nov 2026; per session, only when a start names it, never from
+  the environment; `media session start|wake --permissions folder`) is for
+  an agent working on its own in a folder of its own: `--setting-sources
+  project,local`, and an overlay holding the user's settings minus their
+  `permissions` (so the hooks still run), with `--permission-mode default`.
+  The folder's `.claude/settings.json` allow and deny rules are then all it
+  may do unasked; the rest comes to the phone. Claude Code ignores a
+  folder's allow rules until the folder is trusted (`hasTrustDialogAccepted`
+  in `~/.claude.json`, set by accepting the trust dialog once there), so an
+  untrusted folder is as strict as strict. Claude only: opencode treats it as
+  strict. Verified 3 Nov 2026 with `claude -p`: a user hook in the overlay
+  ran, a project `deny: Bash(*--yes*)` blocked `echo beta --yes`, and an
+  unlisted `touch` was refused.
 - **Speech**: the hooks run under `-p`, so a headless reply is spoken by the
   Stop hook like a pane's, with `source_session` set, `source_pane` empty,
   and (since the hook honours `MEDIA_SOURCE_WORKSPACE`) the same

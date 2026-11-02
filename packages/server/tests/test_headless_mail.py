@@ -260,3 +260,9 @@ def test_wake_never_answers_a_card_nor_starts_one_beside_it(host, capsys):
 def test_wake_with_an_unreadable_order_is_usage(host, capsys):
     rc = hm.main(["wake", str(host.work), "--order", "missing.md"])
     assert rc == 2 and "cannot read the order" in capsys.readouterr().err
+
+
+def test_wake_starts_with_the_permission_profile_it_is_given(host, capsys):
+    rc, d = run(capsys, "wake", str(host.work), "--permissions", "folder", "reply: hi")
+    assert rc == 0 and d["woke"] == "started"
+    assert sessiond.read_record(d["session"])["permissions"] == "folder"

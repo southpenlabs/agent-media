@@ -18,6 +18,18 @@ ask rule shadows the allow rule it mirrors; deny rules keep working. Plus
 `--permission-mode default`, overriding a `defaultMode` of `auto` or
 `acceptEdits`.
 
+A third profile, **folder** (3 Nov 2026), is for an agent that works on its
+own in a folder of its own (`media session wake`, headless_mail.py): the
+folder's `.claude/settings.json` is the whole of what it may do unasked, and
+everything else is a request to the phone. The user's allow rules cannot be
+shadowed there (an `ask` rule matching `Bash(*)` would shadow the folder's
+own `Bash(notmuch search:*)` too), so the session loads only the project and
+local settings sources (`--setting-sources project,local`) and gets the
+user's settings back through the overlay, minus their `permissions`: the
+hooks still run. Claude Code ignores a folder's allow rules until the folder
+is trusted (`hasTrustDialogAccepted`); untrusted, the folder profile is as
+strict as strict. Only ever asked for by name: never from the environment.
+
 `MEDIA_HEADLESS_PERMISSIONS=normal` switches a host back to the normal
 settings ("if it gets too busy"): no overlay, the user's own mode and rules.
 Pending requests still come to the phone either way
@@ -34,7 +46,7 @@ import json
 import os
 from pathlib import Path
 
-STRICT, NORMAL = "strict", "normal"
+STRICT, NORMAL, FOLDER = "strict", "normal", "folder"
 
 #: Allowed without asking: tools that only read, or only talk to the model.
 #: Nothing that runs a command, writes a file, fetches a URL or starts a
@@ -49,7 +61,9 @@ ASK_TOOLS = ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "
 def mode(requested: str = "") -> str:
     """The profile for a new session: `requested` if it names one, else
     `MEDIA_HEADLESS_PERMISSIONS`, else strict. Anything unrecognised is
-    strict — a typo must not open things up."""
+    strict — a typo must not open things up. Folder only when requested."""
+    if (requested or "").strip().lower() == FOLDER:
+        return FOLDER
     for raw in (requested, os.environ.get("MEDIA_HEADLESS_PERMISSIONS") or ""):
         m = (raw or "").strip().lower()
         if m in (STRICT, NORMAL):
@@ -96,6 +110,22 @@ def strict_settings(cwd: str) -> dict:
     return {"permissions": {"defaultMode": "default", "allow": list(SAFE_TOOLS), "ask": ask}}
 
 
+def folder_settings() -> dict:
+    """The overlay for a folder session: the user's settings (hooks, env,
+    plugins), shared then local, without their permissions, and the default
+    permission mode."""
+    out: dict = {}
+    for f in (_claude_dir() / "settings.json", _claude_dir() / "settings.local.json"):
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            out.update({k: v for k, v in data.items() if k != "permissions"})
+    out["permissions"] = {"defaultMode": "default"}
+    return out
+
+
 def base_mode(profile: str, cwd: str = "") -> str:
     """The permission mode a session goes back to when plan mode is turned
     off: strict's `default`; under normal, the user's own `defaultMode`."""
@@ -114,11 +144,15 @@ def base_mode(profile: str, cwd: str = "") -> str:
 
 
 def cli_args(profile: str, cwd: str, session: str, root: Path) -> list[str]:
-    """The `claude` arguments for `profile`. Strict writes the overlay first."""
-    if mode(profile) == NORMAL:
+    """The `claude` arguments for `profile`. Strict and folder write the
+    overlay first."""
+    m = mode(profile)
+    if m == NORMAL:
         return []
     path = Path(root) / f"{session}.settings.json"
     tmp = path.with_name(f".{path.name}.{os.getpid()}")
-    tmp.write_text(json.dumps(strict_settings(cwd), indent=1))
+    tmp.write_text(json.dumps(folder_settings() if m == FOLDER else strict_settings(cwd),
+                              indent=1))
     os.replace(tmp, path)
-    return ["--settings", str(path), "--permission-mode", "default"]
+    return (["--setting-sources", "project,local"] if m == FOLDER else []) + [
+        "--settings", str(path), "--permission-mode", "default"]

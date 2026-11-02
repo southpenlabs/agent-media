@@ -78,10 +78,11 @@ _TRACKED = frozenset({"session.status", "session.idle", "session.error",
 
 def ruleset(profile: str) -> list[dict] | None:
     """A new session's permission rules: strict asks for anything that is not
-    reading; normal leaves opencode's own config in charge."""
+    reading; normal leaves opencode's own config in charge. Folder is
+    Claude's alone (permissions.py) and is strict here."""
     from . import permissions
 
-    if profile != permissions.STRICT:
+    if profile == permissions.NORMAL:
         return None
     return ([{"permission": "*", "pattern": "*", "action": "ask"}]
             + [{"permission": p, "pattern": "*", "action": "allow"} for p in SAFE])

@@ -692,6 +692,34 @@ def test_normal_permissions_load_the_users_own_settings(host, monkeypatch):
     assert sessiond.read_record(sid)["permissions"] == "normal"
 
 
+def test_folder_permissions_load_only_the_folders_rules_and_keep_the_users_hooks(host):
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    cfg.mkdir(parents=True, exist_ok=True)
+    hooks = {"Stop": [{"hooks": [{"type": "command", "command": "say-it"}]}]}
+    (cfg / "settings.json").write_text(json.dumps({
+        "hooks": hooks, "permissions": {"defaultMode": "auto", "allow": ["Bash(*)"]}}))
+    from agent_media_server.driver import headless
+
+    r = headless.call("start", cwd=str(host.work), text="reply: a", agent="claude",
+                      workspace="p-work", permissions="folder", timeout=30.0)
+    assert r.get("ok"), r
+    sid = r["session"]
+    wait_for(lambda: state(host, sid) == "waiting")
+    argv = starts(host)[0]["argv"]
+    assert argv[argv.index("--setting-sources") + 1] == "project,local"
+    assert argv[argv.index("--permission-mode") + 1] == "default"
+    overlay = json.loads(Path(argv[argv.index("--settings") + 1]).read_text())
+    assert overlay["hooks"] == hooks
+    assert overlay["permissions"] == {"defaultMode": "default"}    # Bash(*) is not in it
+    assert sessiond.read_record(sid)["permissions"] == "folder"
+
+
+def test_folder_is_never_taken_from_the_environment(monkeypatch):
+    monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "folder")
+    assert permissions.mode() == "strict"
+    assert permissions.mode("folder") == "folder"
+
+
 def test_an_unknown_profile_is_strict(monkeypatch):
     monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "yolo")
     assert permissions.mode() == "strict"

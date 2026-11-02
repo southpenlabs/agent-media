@@ -156,7 +156,7 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
 
 
 def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
-          persona: str = "", role: str = "") -> tuple[int, dict]:
+          persona: str = "", role: str = "", permissions: str = "") -> tuple[int, dict]:
     """A fresh headless Claude session in `cwd` with `text` as its first
     message; `(rc, answer)` with the session id and its thread link. Filed
     under the workspace a new chat from the app would get (send.ask), and
@@ -167,7 +167,8 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     the way the app's `/ask` does: appended to the system prompt, or put
     before the first message by a sessiond that cannot take one. Always the
     public render: a session started from another, or from a timer, is never
-    a private thread."""
+    a private thread. `permissions` names its profile (permissions.py:
+    strict, normal, folder); empty is the host's."""
     from agent_media_core import layout
     from agent_media_core.intake.context import thread_link_base
 
@@ -195,7 +196,7 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
             text = personas.prepend(rendered, text)
     host = layout.workspace_for(layout.place_host(cwd), cwd)
     r = _call("start", cwd=cwd, text=text, agent="claude", workspace=host, model=model,
-              mode=mode, timeout=30.0,
+              mode=mode, permissions=permissions, timeout=30.0,
               **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
     if not r.get("ok"):
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
@@ -211,7 +212,7 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
 
 
 def wake(cwd: str, text: str, *, model: str = "", persona: str = "", role: str = "",
-         views: list[dict] | None = None) -> tuple[int, dict]:
+         permissions: str = "", views: list[dict] | None = None) -> tuple[int, dict]:
     """`text` to the live session in `cwd`, or a new one started with it
     (`start`, as `persona`/`role`); `(rc, answer)`, `woke` "sent" or
     "started". Never over a card: that is RC_PENDING, with nothing started
@@ -222,7 +223,8 @@ def wake(cwd: str, text: str, *, model: str = "", persona: str = "", role: str =
     if view is not None:
         rc, ans = send(str(view["session"]), text)
         return rc, {**ans, "woke": "sent"} if rc == RC_SENT else ans
-    rc, ans = start(cwd, text, model=model, persona=persona, role=role)
+    rc, ans = start(cwd, text, model=model, persona=persona, role=role,
+                    permissions=permissions)
     return rc, {**ans, "woke": "started"} if rc == RC_SENT else ans
 
 
@@ -243,6 +245,9 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("--plan", action="store_true", help="start in plan mode")
     st.add_argument("--persona", default="", help="start as this persona (agent-personas id)")
     st.add_argument("--role", default="", help="with this role (e.g. reviewer)")
+    st.add_argument("--permissions", default="", choices=("", "strict", "normal", "folder"),
+                    help="its permission profile (default: the host's); folder: the "
+                         "folder's own .claude/settings.json decides, the rest asks the phone")
     st.add_argument("--json", action="store_true")
     wk = sub.add_parser("wake", help="a scheduled turn: the folder's live session is sent "
                                      "the order, or one is started with it")
@@ -255,6 +260,8 @@ def _parser() -> argparse.ArgumentParser:
     wk.add_argument("--persona", default="", help="start as this persona if none is live")
     wk.add_argument("--role", default="", help="with this role")
     wk.add_argument("--model", default="", help="for a session it starts")
+    wk.add_argument("--permissions", default="", choices=("", "strict", "normal", "folder"),
+                    help="for a session it starts (see start)")
     wk.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
@@ -317,7 +324,8 @@ def main(argv: list[str] | None = None) -> int:
               else f"media session {a.cmd}: {msg}", file=sys.stdout if a.json else sys.stderr)
         return RC_FAILED
     if a.cmd == "start":
-        rc, ans = start(a.cwd, text, model=a.model, plan=a.plan, persona=a.persona, role=a.role)
+        rc, ans = start(a.cwd, text, model=a.model, plan=a.plan, persona=a.persona,
+                        role=a.role, permissions=a.permissions)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:
@@ -326,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"media session start: {ans.get('error')}", file=sys.stderr)
         return rc
     if a.cmd == "wake":
-        rc, ans = wake(a.cwd, text, model=a.model, persona=a.persona, role=a.role, views=views)
+        rc, ans = wake(a.cwd, text, model=a.model, persona=a.persona, role=a.role,
+                       permissions=a.permissions, views=views)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:

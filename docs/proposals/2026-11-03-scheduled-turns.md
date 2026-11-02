@@ -15,7 +15,7 @@ existing timer runs a script, and `media session start` took no persona.
 ## Step 1: `media session wake` (built)
 
 ```
-media session wake <folder> --order orders/daily.md --persona <id> --from schedule
+media session wake <folder> --order orders/daily.md --persona <id> --permissions folder --from schedule
 ```
 
 - The folder's live headless session is sent the order (`send`: queued
@@ -29,8 +29,13 @@ media session wake <folder> --order orders/daily.md --persona <id> --from schedu
 The schedule itself is the host's: a systemd user timer, a cron line, or
 anything else that runs a command. agent-media ships no timers and names no
 agents. What an agent may do on its own is its folder's business: its
-`CLAUDE.md`, and its `.claude/settings.json` permissions, which sessiond's
-Claude reads like any other.
+`CLAUDE.md`, and its `.claude/settings.json` permissions. Under the default
+strict profile every command it runs would be a card on the phone, the
+folder's allow rules included, so a scheduled agent starts with the
+**folder** profile (contract, headless sessions: Permissions): the folder's
+allow and deny rules decide, the user's do not apply, the user's hooks still
+run, and anything else is a card. The folder must be trusted once
+(Claude Code's trust dialog) or its allow rules are ignored.
 
 ## Later
 
