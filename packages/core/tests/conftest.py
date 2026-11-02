@@ -344,9 +344,9 @@ def _no_music_bed_network(monkeypatch):
     monkeypatch.setattr(music_bed_favourites, "_run", refuse)
     # A tune's distinctiveness is asked of a model (rate_renown): unrated.
     monkeypatch.setattr(music_bed_favourites, "_rate", lambda songs: {})
-    # His YouTube accounts are read by a separate process (music_accounts).
+    # His YouTube accounts are read by an add-on, none here unless a test
+    # registers one (music_accounts); Spotify over HTTP, refused.
     from agent_media_core import music_accounts
-    monkeypatch.setattr(music_accounts, "_run", refuse)
     monkeypatch.setattr(music_accounts, "_http", refuse)
     for key in [k for k in os.environ if k.startswith("MEDIA_MUSIC_BED_FAVOURITES")]:
         monkeypatch.delenv(key, raising=False)

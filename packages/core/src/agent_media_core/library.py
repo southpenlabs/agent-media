@@ -223,17 +223,14 @@ def expand_youtube_playlist(uri: str, *, limit: Optional[int] = None) -> Optiona
     if not purl:
         return None
     cap = int(limit or os.environ.get("MEDIA_AUDIOBOOK_PLAYLIST_MAX", "200"))
-    ytdlp = os.environ.get("MEDIA_YTDLP_BIN", "yt-dlp")
-    try:
-        proc = subprocess.run(
-            [ytdlp, "--flat-playlist", "--no-warnings", "--ignore-errors",
-             "--print", "%(id)s", "--playlist-end", str(cap), purl],
-            capture_output=True, text=True, timeout=300, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-metadata")
+    if addon is None:
         return None
-    ids = [ln.strip() for ln in proc.stdout.splitlines()
-           if ln.strip() and ln.strip() != "NA"]
+    try:
+        ids = list(addon.playlist_ids(purl, cap, 300))
+    except Exception:  # noqa: BLE001 — the single link, as before
+        return None
     return [f"https://www.youtube.com/watch?v={vid}" for vid in ids] or None
 
 

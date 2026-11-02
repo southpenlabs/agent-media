@@ -41,8 +41,13 @@ def _fake_run(stdout):
 
 
 def test_expand_returns_mpv_uris(monkeypatch):
-    monkeypatch.setattr(subprocess, "run", _fake_run("id1\nid2\nNA\n\nid3\n"))
+    # The listing is the personal-use add-on's (youtube-metadata): a stand-in.
+    from agent_media_core import personal_use
+    asked = []
+    meta = type("Meta", (), {"playlist_ids": staticmethod(lambda url, limit, timeout: asked.append(url) or ["id1", "id2", "id3"])})()
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-metadata", meta)
     out = m._expand_youtube_playlist("yt:https://www.youtube.com/playlist?list=PL1")
+    assert asked == ["https://www.youtube.com/playlist?list=PL1"]
     assert out == [
         "mpv:https://www.youtube.com/watch?v=id1",
         "mpv:https://www.youtube.com/watch?v=id2",

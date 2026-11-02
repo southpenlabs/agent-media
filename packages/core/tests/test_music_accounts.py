@@ -1,6 +1,7 @@
 """His YouTube accounts as taste (music_accounts; David, 1 Nov 2026: "link
 my YouTube and Spotify accounts for preferences" ... "can we reuse that?").
-The reader process is faked at music_accounts._run."""
+The reading is a personal-use add-on's ("youtube-accounts"): a stand-in
+here, counting its reads."""
 import json
 import os
 
@@ -29,9 +30,21 @@ def isolated(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     for name in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name))
-    monkeypatch.setenv("MEDIA_YTMUSIC_PYTHON", "/usr/bin/python3")
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     ran = []
-    monkeypatch.setattr(A, "_run", lambda argv: (ran.append(argv), json.dumps(READ))[1])
+
+    class Reader:
+        def songs(self, profiles):
+            ran.append(list(profiles))
+            return READ["accounts"]
+
+        def signins(self, chosen, read):
+            return [{"name": n, "chosen": n in chosen, "oauth": False,
+                     "songs": len((read.get(n) or {}).get("songs") or []) or None, "error": None}
+                    for n in ("main", "music", "spare")]
+    from agent_media_core import personal_use
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-accounts", Reader())
+    monkeypatch.setattr(personal_use, "_LOADED", [True])
     return ran
 
 
@@ -45,7 +58,7 @@ def test_profiles_are_read_merged_and_kept_a_day(isolated, monkeypatch):
     songs = A.youtube_songs(now=1000.0)
     assert songs["aaaaaaaaaaa"]["liked"] is True
     assert songs["bbbbbbbbbbb"]["plays"] == 3 and songs["bbbbbbbbbbb"]["liked"] is False
-    assert isolated[0][-3:] == ["main", "music", "dead"] and isolated[0][1] == "-I"
+    assert isolated[0] == ["main", "music", "dead"]
     A.youtube_songs(now=2000.0)
     assert len(isolated) == 1  # the kept read
     A.youtube_songs(now=1000.0 + A.TTL_S + 1)
@@ -57,9 +70,12 @@ def test_a_failed_read_keeps_the_last(isolated, monkeypatch):
     monkeypatch.setenv("MEDIA_YOUTUBE_PROFILES", "main")
     A.youtube_songs(now=0.0)
 
-    def boom(argv):
-        raise OSError("gone")
-    monkeypatch.setattr(A, "_run", boom)
+    from agent_media_core import personal_use
+
+    class Broken:
+        def songs(self, profiles):
+            raise OSError("gone")
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-accounts", Broken())
     assert "aaaaaaaaaaa" in A.youtube_songs(now=A.TTL_S * 2)
 
 
@@ -139,17 +155,16 @@ def test_spotify_needs_a_client_id():
         P.update({"spotify.client_id": "not-an-id"})
 
 
-def test_youtube_signins_are_the_cookie_files_chosen_first(tmp_path, monkeypatch):
-    d = tmp_path / "cookies"
-    d.mkdir()
-    for n in ("davidj4", "davidj4music", "zed", "none", "oauth_client"):
-        (d / f"{n}.txt").write_text("# cookies")
-    (d / "davidj4-oauth.json").write_text("{}")
-    (d / "active.txt").symlink_to(d / "davidj4.txt")
-    monkeypatch.setenv("MEDIA_YT_PROFILE_DIR", str(d))
-    monkeypatch.setattr(A, "youtube_profiles", lambda: ["davidj4music"])
-    monkeypatch.setattr(A, "last", lambda: {"accounts": [{"profile": "davidj4music", "songs": [{}, {}]}]})
+def test_without_the_add_on_nothing_is_read(isolated, monkeypatch):
+    from agent_media_core import personal_use
+    monkeypatch.setenv("MEDIA_YOUTUBE_PROFILES", "main")
+    monkeypatch.delitem(personal_use._PROVIDERS, "youtube-accounts")
+    assert A.youtube_songs() == {} and A.youtube_signins() == [] and isolated == []
+    assert A.youtube_why() == "Not available on this server."
+
+
+def test_signins_come_from_the_add_on_with_the_last_read(isolated, monkeypatch):
+    monkeypatch.setenv("MEDIA_YOUTUBE_PROFILES", "music")
+    A.youtube_songs(now=0.0)
     got = A.youtube_signins()
-    assert [x["name"] for x in got] == ["davidj4music", "davidj4", "zed"]
-    assert got[0] == {"name": "davidj4music", "chosen": True, "oauth": False, "songs": 2, "error": None}
-    assert got[1]["oauth"] is True and got[1]["songs"] is None
+    assert [(x["name"], x["chosen"], x["songs"]) for x in got] == [("main", False, 2), ("music", True, 1), ("spare", False, None)]

@@ -154,12 +154,12 @@ def test_lengths_are_looked_up_in_the_background(monkeypatch):
     assert asked[-1] == ["BBBBBBBBBBB"]
 
 
-def test_youtube_lengths_read_the_phones_answer(monkeypatch):
-    import subprocess
-    seen = []
-    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: (seen.append(argv), type("R", (), {"stdout": "AAAAAAAAAAA 1820\nBBBBBBBBBBB NA\n", "returncode": 0})())[1])
+def test_youtube_lengths_come_from_the_add_on(monkeypatch):
+    from agent_media_core import personal_use
+    assert L._youtube_lengths(["AAAAAAAAAAA"]) == {}  # no add-on: no lengths
+    meta = type("Meta", (), {"lengths": staticmethod(lambda vids: {"AAAAAAAAAAA": 1820.0})})()
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-metadata", meta)
     assert L._youtube_lengths(["AAAAAAAAAAA", "BBBBBBBBBBB"]) == {"AAAAAAAAAAA": 1820}
-    assert seen[0][0] == "ssh" and "--skip-download" in seen[0][-1] and "watch?v=AAAAAAAAAAA" in seen[0][-1]
 
 
 def test_the_old_meditation_files_are_moved_across_once():

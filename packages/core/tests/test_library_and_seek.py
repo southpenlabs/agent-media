@@ -54,13 +54,11 @@ def test_youtube_playlist_url_detects_real_playlists():
     assert library.youtube_playlist_url("https://www.youtube.com/watch?v=6Pm736hLECw&list=PLx") is None
 
 
-def test_expand_youtube_playlist_uses_ytdlp(monkeypatch):
-    def fake_run(cmd, **kw):
-        assert "--flat-playlist" in cmd
-        assert "https://www.youtube.com/playlist?list=PL123" in cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout="id1\nNA\nid2\n", stderr="")
-
-    monkeypatch.setattr(library.subprocess, "run", fake_run)
+def test_expand_youtube_playlist_asks_the_add_on(monkeypatch):
+    from agent_media_core import personal_use
+    assert library.expand_youtube_playlist("playlist:PL123") is None  # no add-on
+    meta = type("Meta", (), {"playlist_ids": staticmethod(lambda url, limit, timeout: ["id1", "id2"] if url.endswith("PL123") else [])})()
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-metadata", meta)
     assert library.expand_youtube_playlist("playlist:PL123") == [
         "https://www.youtube.com/watch?v=id1",
         "https://www.youtube.com/watch?v=id2",

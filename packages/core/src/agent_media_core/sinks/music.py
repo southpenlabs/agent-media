@@ -181,18 +181,15 @@ def _expand_youtube_playlist(uri: str) -> Optional[List[str]]:
     if not purl:
         return None
     cap = int(os.environ.get("MEDIA_MUSIC_PLAYLIST_MAX", "50"))
-    ytdlp = os.environ.get("MEDIA_YTDLP_BIN", "yt-dlp")
+    from .. import youtube_addon
+    addon = youtube_addon.get("youtube-metadata")
+    if addon is None:
+        return None
     try:
-        proc = subprocess.run(
-            [ytdlp, "--flat-playlist", "--no-warnings", "--ignore-errors",
-             "--print", "%(id)s", "--playlist-end", str(cap), purl],
-            capture_output=True, text=True, timeout=90,
-        )
-    except (OSError, subprocess.SubprocessError) as e:
+        ids = list(addon.playlist_ids(purl, cap, 90))
+    except Exception as e:  # noqa: BLE001
         log.warning("playlist expand failed for %s (%s); using fallback", purl, e)
         return None
-    ids = [ln.strip() for ln in proc.stdout.splitlines()
-           if ln.strip() and ln.strip() != "NA"]
     if not ids:
         log.warning("playlist expand returned no tracks for %s; using fallback", purl)
         return None

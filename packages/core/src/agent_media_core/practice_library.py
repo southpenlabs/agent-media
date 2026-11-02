@@ -400,29 +400,16 @@ def _probe(uri: str) -> Optional[int]:
 
 
 def _youtube_lengths(vids: list[str]) -> dict:
-    """`{vid: seconds}` for YouTube videos, asked of yt-dlp on the phone in
-    one call (no download): YouTube refuses this host's address, as
-    podcast_links.fetch and audiobook-fetch know."""
-    import shlex
-    import subprocess
-    if not vids:
+    """`{vid: seconds}` for YouTube videos, from the add-on (youtube_addon
+    "youtube-metadata"); without one, none."""
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-metadata")
+    if not vids or addon is None:
         return {}
-    phone = os.environ.get("AUDIOBOOK_PHONE_HOST", "p8a")
-    urls = " ".join(shlex.quote(f"https://www.youtube.com/watch?v={v}") for v in vids)
-    remote = f"yt-dlp --no-warnings --ignore-errors --skip-download --print '%(id)s %(duration)s' {urls}"
     try:
-        r = subprocess.run(["ssh", "-o", "ConnectTimeout=12", "-o", "BatchMode=yes", phone, remote],
-                           capture_output=True, text=True, timeout=60 + 15 * len(vids))
-    except (OSError, subprocess.TimeoutExpired):
+        return {str(k): int(v) for k, v in dict(addon.lengths(list(vids))).items()}
+    except Exception:  # noqa: BLE001 — no lengths this time
         return {}
-    out = {}
-    for line in r.stdout.splitlines():
-        vid, _, dur = line.strip().partition(" ")
-        try:
-            out[vid] = int(float(dur))
-        except ValueError:
-            continue
-    return out
 
 
 def _measure_all(todo: list[dict]) -> dict:
@@ -554,13 +541,19 @@ def feeds() -> list[dict]:
 
 
 def _yt_title(url: str) -> str:
+    """A video's title: the add-on's (youtube_addon "youtube-metadata"),
+    else YouTube's public oEmbed."""
+    from . import music_recent, youtube_addon
+    addon = youtube_addon.get("youtube-metadata")
     try:
-        import subprocess
-        r = subprocess.run(["yt-dlp", "--no-warnings", "--skip-download", "--print", "title", url],
-                           capture_output=True, text=True, timeout=30)
-        return r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else ""
-    except (OSError, IndexError, Exception):  # noqa: BLE001
-        return ""
+        if addon is not None:
+            got = str(addon.title(url) or "")
+            if got:
+                return got
+    except Exception:  # noqa: BLE001
+        pass
+    vid = youtube_id(url)
+    return music_recent._oembed(vid) if vid else ""
 
 
 def add(url: str, title: str = "") -> dict:

@@ -1,4 +1,4 @@
-"""His music accounts as taste: YouTube through yt-profile's sign-ins.
+"""His music accounts as taste: YouTube accounts and Spotify.
 
 David, 1 Nov 2026: "I'd like to also link my YouTube and Spotify accounts
 for preferences" ... "can we reuse that?" (docs/proposals/
@@ -6,16 +6,15 @@ for preferences" ... "can we reuse that?" (docs/proposals/
 (music_bed_favourites.gather) counts what these return as it counts the
 state store's likes and plays.
 
-**YouTube.** The accounts are yt-profile profile names (Settings → Music →
-About you, `youtube.profiles`, else MEDIA_YOUTUBE_PROFILES; comma
-separated). Each is read by `ytmusic_reader.py`, run as its own process
-under a Python that has ytmusicapi (MEDIA_YTMUSIC_PYTHON, else Mopidy's
-pipx venv), from yt-profile's dir (MEDIA_YT_PROFILE_DIR, else
-~/.config/yt-dlp/cookies): YouTube Music history and likes where the
-profile's headers work, and liked music videos and mostly-music playlists
-through the YouTube Data API where it has an OAuth token. Read only. The
-last read is kept (`<state_dir>/music-accounts-youtube.json`) for
-Settings to say how many songs each account gave, and reused for a day.
+**YouTube.** The accounts are named in Settings → Music → About you
+(`youtube.profiles`, else MEDIA_YOUTUBE_PROFILES; comma separated). Reading
+them — YouTube Music's history and likes through ytmusicapi with sign-ins
+copied from a browser — is not something a public product may do, so it
+is a personal-use add-on's (personal_use "youtube-accounts", 2 Nov 2026:
+"Is YT profiles something that should be in the add-on?" — "All YouTube
+methods now"); without one, nothing is read. Read only. The last read is
+kept (`<state_dir>/music-accounts-youtube.json`) for Settings to say how
+many songs each account gave, and reused for a day.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import time
 from pathlib import Path
 from typing import Optional
@@ -31,7 +29,6 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 TTL_S = 24 * 3600.0
-READ_TIMEOUT_S = 600
 
 
 def youtube_profiles() -> list[str]:
@@ -40,56 +37,19 @@ def youtube_profiles() -> list[str]:
     return [p.strip() for p in str(raw).split(",") if p.strip()]
 
 
-def youtube_python() -> Optional[str]:
-    v = (os.environ.get("MEDIA_YTMUSIC_PYTHON") or "").strip()
-    if v:
-        return v
-    p = Path.home() / ".local/share/pipx/venvs/mopidy/bin/python"
-    return str(p) if p.exists() else None
-
-
-def profile_dir() -> Path:
-    v = (os.environ.get("MEDIA_YT_PROFILE_DIR") or "").strip()
-    return Path(v).expanduser() if v else Path.home() / ".config/yt-dlp/cookies"
-
-
-#: Files in the profile folder that are not a sign-in of their own.
-_NOT_SIGNINS = {"active", "active-book", "none", "oauth_client", "oauth_web"}
-
-
-def youtube_signins() -> list[dict]:
-    """The YouTube sign-ins `yt-profile` keeps on this server (a cookies
-    file each, `<name>.txt`; `oauth` when `<name>-oauth.json` sits beside
-    it), by name, with what the last read got from the ones set: `songs`
-    and `error`. For Settings to tick rather than type (David, 2 Nov 2026:
-    "there's a, separated list of them, but don't they need to sign ins?")."""
-    d = profile_dir()
-    if not d.is_dir():
-        return []
-    chosen = youtube_profiles()
-    read = {a.get("profile"): a for a in (last().get("accounts") or []) if isinstance(a, dict)}
-    out = []
-    for p in sorted(d.glob("*.txt")):
-        name = p.stem
-        if p.is_symlink() or name in _NOT_SIGNINS or name.endswith("-oauth"):
-            continue
-        a = read.get(name) or {}
-        out.append({"name": name, "chosen": name in chosen,
-                    "oauth": (d / f"{name}-oauth.json").exists(),
-                    "songs": len(a.get("songs") or []) if a else None,
-                    "error": (a.get("error") or None) if a and not a.get("songs") else None})
-    out.sort(key=lambda x: (not x["chosen"], x["name"]))
-    return out
+def _reader():
+    """The add-on that reads YouTube accounts (personal_use
+    "youtube-accounts": ytmusicapi with sign-ins copied from a browser,
+    which a public product could not use), or None. It answers
+    `songs(profiles)` → ``[{profile, auth, songs, error}]`` and
+    `signins(chosen, read)` → ``[{name, chosen, oauth, songs, error}]``."""
+    from . import personal_use
+    return personal_use.provider("youtube-accounts") if personal_use.allowed("youtube-accounts") else None
 
 
 def _cache() -> Path:
     from ._paths import state_dir
     return state_dir() / "music-accounts-youtube.json"
-
-
-def _run(argv: list[str]) -> str:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=READ_TIMEOUT_S,
-                          stdin=subprocess.DEVNULL).stdout
 
 
 def last() -> dict:
@@ -100,26 +60,37 @@ def last() -> dict:
         return {}
 
 
+def youtube_signins() -> list[dict]:
+    """The YouTube sign-ins the add-on knows on this server, chosen first,
+    with what the last read got from the chosen ones; [] without it. For
+    Settings to tick rather than type (David, 2 Nov 2026: "there's a,
+    separated list of them, but don't they need to sign ins?")."""
+    r = _reader()
+    if r is None:
+        return []
+    read = {a.get("profile"): a for a in (last().get("accounts") or []) if isinstance(a, dict)}
+    try:
+        return list(r.signins(youtube_profiles(), read))
+    except Exception as e:  # noqa: BLE001 — no list rather than no Settings
+        log.info("music accounts: YouTube sign-ins: %s", e)
+        return []
+
+
 def youtube_accounts(now: Optional[float] = None, fresh: bool = False) -> list[dict]:
     """`[{"profile", "auth", "songs": [...], "error"}]` for the profiles
     set; the kept read when it is under a day old and for the same
-    profiles. [] when none are set or the reader cannot run."""
+    profiles. [] when none are set or no add-on reads them."""
     profiles = youtube_profiles()
-    if not profiles:
+    r = _reader()
+    if not profiles or r is None:
         return []
     now = time.time() if now is None else now
     kept = last()
     if (not fresh and kept.get("profiles") == profiles
             and now - float(kept.get("at", 0)) < TTL_S):
         return kept.get("accounts") or []
-    py = youtube_python()
-    if not py:
-        log.info("music accounts: no Python with ytmusicapi (MEDIA_YTMUSIC_PYTHON)")
-        return kept.get("accounts") or []
-    script = Path(__file__).with_name("ytmusic_reader.py")
     try:
-        got = json.loads(_run([py, "-I", str(script), str(profile_dir()), *profiles]) or "{}")
-        accounts = got.get("accounts") or []
+        accounts = list(r.songs(profiles))
     except Exception as e:  # noqa: BLE001 — the last read stands
         log.info("music accounts: YouTube read failed: %s", e)
         return kept.get("accounts") or []
@@ -148,11 +119,11 @@ def youtube_songs(now: Optional[float] = None) -> dict[str, dict]:
 
 def youtube_why() -> Optional[str]:
     """None when every profile set gave songs at the last read."""
+    if _reader() is None:
+        return "Not available on this server."
     profiles = youtube_profiles()
     if not profiles:
-        return "Not set: name your yt-profile accounts (MEDIA_YOUTUBE_PROFILES on the server)."
-    if not youtube_python():
-        return "Not available: no Python with ytmusicapi on this server (MEDIA_YTMUSIC_PYTHON)."
+        return "Not set: tick the YouTube accounts to read."
     kept = last()
     if not kept:
         return None

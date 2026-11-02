@@ -42,8 +42,6 @@ import json
 import logging
 import os
 import re
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 from urllib.parse import urlparse
@@ -239,12 +237,14 @@ def probe(url: str, *, timeout: float = 30.0,
 
 
 def _run_ytdlp(args: List[str], timeout: float) -> str:
-    exe = os.environ.get("MEDIA_YTDLP") or shutil.which("yt-dlp")
-    if not exe:
-        raise ShareError("yt-dlp not installed")
-    r = subprocess.run([exe, *args], capture_output=True, text=True,
-                       timeout=timeout, check=True)
-    return r.stdout
+    """A link's details, from the personal-use add-on (youtube_addon
+    "youtube-metadata"); without one there is no probe, and the link is
+    judged by its shape."""
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-metadata")
+    if addon is None:
+        raise ShareError("no link details on this server")
+    return json.dumps(addon.probe(args[-1], timeout))
 
 
 def _longform_s() -> float:
