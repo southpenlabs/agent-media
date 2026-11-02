@@ -51,6 +51,7 @@ from .route import (
     resolve,
 )
 from . import library, phone_player
+from . import youtube_addon as _youtube_addon
 from .sinks import SinkBook, SinkMusic, SinkSpeech
 from .sinks.book import normalize_uri
 from .sinks.music_router import SinkMusicRouter
@@ -727,20 +728,21 @@ def book_play(uri: str, resume: bool = True, start_ms: int = -1,
                     "count": len(playlist), "uncached": len(uncached),
                     "reason": (f"downloading {len(uncached)} playlist item(s) on phone; "
                                "will auto-play the last fetched item when ready"
-                               if started else "playlist not cached and audiobook-fetch unavailable")}
+                               if started else "playlist not cached, and downloading from YouTube isn't available here")}
     elif library.is_youtube(norm):
         vid = library.video_id(norm)
         cached = library.cached_path(vid, t) if vid else None
         if cached is not None:
             norm = str(cached)
-        elif os.environ.get("MEDIA_BOOK_DIRECT_YT", "0") not in ("", "0", "false", "no"):
+        elif (os.environ.get("MEDIA_BOOK_DIRECT_YT", "0") not in ("", "0", "false", "no")
+              and _youtube_addon.get("youtube-streaming") is not None):
             pass  # residential: fall through and let the book mpv stream it
         else:
             started = library.start_fetch(norm, play=True, target=t)
             return {"ok": False, "fetching": started, "uri": norm,
                     "reason": ("downloading on phone; will auto-play when ready"
                                if started
-                               else "not cached and audiobook-fetch unavailable")}
+                               else "not cached, and downloading from YouTube isn't available here")}
     if t.name not in ("", "local") and not norm.startswith(("http://", "https://", "rtsp://")):
         p = Path(norm).expanduser()
         # The phone's own player first (Sasonica's ExoPlayer, see phone_player):

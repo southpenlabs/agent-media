@@ -416,7 +416,10 @@ def _no_practice_lookups(monkeypatch):
         raise AssertionError("a test reached the YouTube add-on's stand-in")
     _yt_radio = type("YTRadio", (), {"mix": staticmethod(_never), "search": staticmethod(_never)})()
     monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})(),
-                                            "youtube-radio": _yt_radio})
+                                            "youtube-radio": _yt_radio,
+                                            # Streaming has nothing to call: it is allowed, as on
+                                            # a personal install; a test of the refusal drops it.
+                                            "youtube-streaming": object()})
     monkeypatch.setattr(_pu, "_LOADED", [True])
     # The person's own embed index (practice_embed) never joins a test's list.
     monkeypatch.delenv("MEDIA_PRACTICE_EMBED_INDEX", raising=False)

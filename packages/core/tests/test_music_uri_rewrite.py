@@ -40,3 +40,19 @@ def test_to_music_uri(uri, want):
 def test_mpv_scheme_is_music_content_type():
     # No-intent ducking fallback must treat an mpv: URI as music.
     assert detect_content_type("mpv:https://youtu.be/x") is ContentType.MUSIC
+
+
+def test_a_youtube_stream_is_refused_without_the_add_on(monkeypatch):
+    from agent_media_core import personal_use
+    from agent_media_core.sinks import music as m
+    assert m._may_stream("mpv:/home/u/.cache/music-offline/a82hE1aupo8.mka")  # a file always plays
+    assert m._may_stream("mpv:https://www.youtube.com/watch?v=a82hE1aupo8")   # the stand-in allows it
+    monkeypatch.delitem(personal_use._PROVIDERS, "youtube-streaming")
+    for uri in ("mpv:https://www.youtube.com/watch?v=a82hE1aupo8", "yt:https://www.youtube.com/playlist?list=PL1", "ytsearch:x"):
+        try:
+            m._may_stream(uri)
+        except m.StreamRefused:
+            continue
+        raise AssertionError(f"{uri} streamed")
+    assert m._may_stream("https://stream.example/radio") == "https://stream.example/radio"
+

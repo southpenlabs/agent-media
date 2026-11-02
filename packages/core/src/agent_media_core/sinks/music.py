@@ -247,6 +247,28 @@ def _parse_kv(text: str) -> dict:
     return out
 
 
+class StreamRefused(OSError):
+    """A YouTube link left to stream where streaming YouTube is not allowed."""
+
+
+def _youtube_stream(uri: str) -> bool:
+    """Whether `uri` would have Mopidy stream from YouTube (a watch or
+    playlist URL, a `yt:`/`youtube:` URI, a search), not play a file."""
+    u = uri[len("mpv:"):] if uri.startswith("mpv:") else uri
+    return bool(_YT_HOST_RE.search(u)) or u.startswith(("yt:", "youtube:", "ytsearch", "playlist:", "channel:"))
+
+
+def _may_stream(uri: str) -> str:
+    """`uri`, or StreamRefused when it streams YouTube and no personal-use
+    add-on allows that (youtube_addon "youtube-streaming"; 2 Nov 2026: "All
+    YouTube methods now")."""
+    if _youtube_stream(uri):
+        from .. import youtube_addon
+        if youtube_addon.get("youtube-streaming") is None:
+            raise StreamRefused("YouTube can't be streamed on this server, and it couldn't be downloaded")
+    return uri
+
+
 def _localise_youtube(uri: str) -> str:
     """Swap an `mpv:<watch-url>` for an `mpv:<rooms-local file>` when possible.
 
@@ -276,7 +298,7 @@ class SinkMusic:
             # a detached helper downloads and appends the rest as they land
             # (Mopidy-YouTube's own playlist expansion is unreliable).
             from . import music_fetch
-            first = _localise_youtube(playlist[0])
+            first = _may_stream(_localise_youtube(playlist[0]))
             with _connect(target) as s:
                 if replace:
                     _cmd(s, "clear")
@@ -287,6 +309,7 @@ class SinkMusic:
             return
         uri = _to_music_uri(uri)  # YouTube → mpv: backend; else unchanged
         uri = _localise_youtube(uri)  # …and mpv:<watch-url> → local file
+        uri = _may_stream(uri)  # still a stream: only where that is allowed
         with _connect(target) as s:
             if replace:
                 _cmd(s, "clear")

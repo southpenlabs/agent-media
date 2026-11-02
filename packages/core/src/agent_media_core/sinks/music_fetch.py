@@ -129,11 +129,15 @@ def append_fetched(urls: List[str]) -> None:
     arrive as their downloads finish. Tracks that fail to fetch are appended
     as plain watch URLs so the queue order is preserved.
     """
-    from .music import SinkMusic
+    from .music import SinkMusic, StreamRefused, _may_stream
     m = SinkMusic()
     for url in urls:
         path = ensure_local(url)
-        uri = f"mpv:{path}" if path else f"mpv:{url}"
+        try:
+            uri = f"mpv:{path}" if path else _may_stream(f"mpv:{url}")
+        except StreamRefused:
+            log.warning("music_fetch: %s couldn't be downloaded and may not stream; skipped", url)
+            continue
         try:
             m.enqueue(uri)
         except OSError as e:

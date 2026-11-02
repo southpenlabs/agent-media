@@ -114,7 +114,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
         raise AssertionError("a test reached the YouTube add-on's stand-in")
     _yt_radio = type("YTRadio", (), {"mix": staticmethod(_never), "search": staticmethod(_never)})()
     monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})(),
-                                            "youtube-radio": _yt_radio})
+                                            "youtube-radio": _yt_radio,
+                                            # Streaming has nothing to call: it is allowed, as on
+                                            # a personal install; a test of the refusal drops it.
+                                            "youtube-streaming": object()})
     monkeypatch.setattr(_pu, "_LOADED", [True])
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with
