@@ -107,7 +107,14 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # an installed personal-use add-on even where there is one: a test
     # registers what it needs (facebook-previews' agent is one line).
     from agent_media_core import personal_use as _pu
-    monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})()})
+    # youtube-radio is a stand-in that is never asked (a test fakes
+    # radio_io.youtube_mix / radio_dj.search itself), so the radio's own
+    # switch, MEDIA_RADIO_YOUTUBE, decides as it did before the add-on.
+    def _never(*a, **kw):
+        raise AssertionError("a test reached the YouTube add-on's stand-in")
+    _yt_radio = type("YTRadio", (), {"mix": staticmethod(_never), "search": staticmethod(_never)})()
+    monkeypatch.setattr(_pu, "_PROVIDERS", {"facebook-previews": type("FB", (), {"user_agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"})(),
+                                            "youtube-radio": _yt_radio})
     monkeypatch.setattr(_pu, "_LOADED", [True])
     # A device job (`media restart-services --host`, `media update --host`,
     # doctor --fix) asks this host's canvas, by default 127.0.0.1:8781 with

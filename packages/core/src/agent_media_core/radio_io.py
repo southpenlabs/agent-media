@@ -33,8 +33,6 @@ import contextlib
 import logging
 import os
 import re
-import shlex
-import subprocess
 import threading
 from typing import Optional
 
@@ -113,22 +111,21 @@ def query(song: dict) -> tuple[str, str, str]:
 # ---- sources -------------------------------------------------------------------
 
 def youtube_mix(vid: str) -> list[dict]:
-    """YouTube's Mix for `vid`, listed on the phone: ``[{id, title, channel, dur}]``."""
-    from .sinks import music_local
+    """YouTube's Mix for `vid`: ``[{id, title, channel, dur}]``, listed by
+    the personal-use add-on (youtube_addon "youtube-radio": `mix(vid, n,
+    timeout)` → `parse`'s lines); none without it."""
+    from . import youtube_addon
 
-    url = f"https://www.youtube.com/watch?v={vid}&list=RD{vid}"
-    remote = ("yt-dlp --no-warnings --flat-playlist --playlist-end "
-              f"{MIX_LEN} --print '%(id)s\t%(title)s\t%(channel)s\t%(duration)s' "
-              f"{shlex.quote(url)}")
+    addon = youtube_addon.get("youtube-radio")
+    if addon is None:
+        return []
     try:
-        r = subprocess.run(music_local.phone_argv(remote), capture_output=True,
-                           text=True, timeout=float(os.environ.get("MEDIA_RADIO_MIX_TIMEOUT", "60")))
-    except (subprocess.TimeoutExpired, OSError) as e:
+        out = parse(addon.mix(vid, MIX_LEN, float(os.environ.get("MEDIA_RADIO_MIX_TIMEOUT", "60"))) or "")
+    except Exception as e:  # noqa: BLE001
         log.warning("radio: listing the Mix of %s failed: %s", vid, e)
         return []
-    out = parse(r.stdout or "")
     if not out:
-        log.warning("radio: the Mix of %s listed nothing: %s", vid, (r.stderr or "").strip()[-200:])
+        log.warning("radio: the Mix of %s listed nothing", vid)
     return out
 
 
@@ -608,13 +605,17 @@ def default_player(where: str) -> str:
 
 
 def youtube_on() -> bool:
-    """Whether the YouTube path may run here: MEDIA_RADIO_YOUTUBE=1.
+    """Whether the YouTube path may run here: MEDIA_RADIO_YOUTUBE=1, and a
+    personal-use add-on that provides it (youtube_addon "youtube-radio").
 
     Off unless a server's owner turns it on for themselves (licensing
-    proposal, step 2): downloading from YouTube is theirs to decide on their
-    own server, and not something Sasonica offers anyone by default.
+    proposal, step 2): YouTube is theirs to decide on their own server, and
+    not something Sasonica carries or offers anyone (2 Nov 2026: "All
+    YouTube methods now").
     """
-    return (os.environ.get("MEDIA_RADIO_YOUTUBE") or "").strip() == "1"
+    from . import youtube_addon
+    return ((os.environ.get("MEDIA_RADIO_YOUTUBE") or "").strip() == "1"
+            and youtube_addon.get("youtube-radio") is not None)
 
 
 def available() -> bool:

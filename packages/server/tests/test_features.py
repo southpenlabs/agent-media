@@ -36,7 +36,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": False, "signed_in": False, "stories": False, "personal": True,
                    "personal_use": {"on": False, "methods": {m: False for m in personal_use.METHODS},
-                                    "addons": ["facebook-previews"]}}
+                                    "addons": ["facebook-previews", "youtube-radio"]}}
     assert "/features" in app.CORS_PATHS
 
 

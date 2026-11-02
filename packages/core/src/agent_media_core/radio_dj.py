@@ -31,8 +31,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shlex
-import subprocess
 import time
 from typing import Optional
 
@@ -171,22 +169,20 @@ def ask(st: dict, n: int = PICKS) -> tuple[list[str], str]:
 
 
 def search(lines: list[str]) -> list[dict]:
-    """The first YouTube result for each line, found on the phone."""
-    from . import radio_io
-    from .sinks import music_local
+    """The first YouTube result for each line, from the personal-use add-on
+    (youtube_addon "youtube-radio": `search(lines, timeout)` → radio_io.parse's
+    lines, the line asked as a fifth field); none without it."""
+    from . import radio_io, youtube_addon
 
-    if not lines:
+    addon = youtube_addon.get("youtube-radio")
+    if not lines or addon is None:
         return []
-    urls = " ".join(shlex.quote(f"ytsearch1:{q}") for q in lines)
-    remote = ("yt-dlp --no-warnings --flat-playlist --ignore-errors "
-              f"--print '%(id)s\t%(title)s\t%(channel)s\t%(duration)s\t%(playlist)s' {urls}")
     try:
-        r = subprocess.run(music_local.phone_argv(remote), capture_output=True, text=True,
-                           timeout=float(os.environ.get("MEDIA_RADIO_MIX_TIMEOUT", "60")) + 10 * len(lines))
-    except (subprocess.TimeoutExpired, OSError) as e:
+        out = addon.search(list(lines), float(os.environ.get("MEDIA_RADIO_MIX_TIMEOUT", "60")) + 10 * len(lines))
+    except Exception as e:  # noqa: BLE001
         log.warning("radio-dj: searching failed: %s", e)
         return []
-    return radio_io.parse(r.stdout or "")
+    return radio_io.parse(out or "")
 
 
 def by_name(lines: list[str]) -> list[dict]:

@@ -45,6 +45,8 @@ METHODS = {
     "facebook-previews": ("MEDIA_FACEBOOK_PREVIEWS", "Facebook pages read as Facebook's own link previewer"),
     "youtube-metadata": ("MEDIA_YOUTUBE_METADATA",
                          "YouTube's titles, lengths, playlists and a shared link's details read with yt-dlp"),
+    "youtube-radio": ("MEDIA_RADIO_YOUTUBE",
+                      "the radio's YouTube Mix and the DJ's song search listed with yt-dlp"),
     "youtube-accounts": ("MEDIA_YOUTUBE_ACCOUNTS",
                          "your YouTube likes and history read through ytmusicapi with sign-ins copied from a browser"),
     "spotify-speaker": ("MEDIA_SPOTIFY_SPEAKER",
@@ -55,7 +57,8 @@ METHODS = {
 
 #: The methods an add-on provides, not this package (ADDON_GROUP entries).
 ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-previews", "spotify-speaker",
-                 "youtube-accounts", "youtube-metadata"}
+                 "youtube-accounts", "youtube-metadata",
+                 "youtube-radio"}
 ADDON_GROUP = "agent_media.addons"
 _PROVIDERS: dict[str, Any] = {}
 _LOADED: list = [False]
