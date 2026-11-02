@@ -6,10 +6,15 @@ import pytest
 
 from agent_media_visual import canvas
 
+SID = "9bce6871-1164-43c7-bb6f-6064758ccae8"
+#: Verbs that only run for a named thread.
+NEEDS_SESSION = {"replay-unheard"}
+
 
 def test_the_bar_gets_only_listener_verbs():
     for action in canvas._APP_SPEECH_ACTIONS:
-        assert canvas.ctl_argv("speech", action, 1) is not None
+        sarg = SID if action in NEEDS_SESSION else ""
+        assert canvas.ctl_argv("speech", action, 1, sarg) is not None, action
     assert "mute-keep" not in canvas._APP_SPEECH_ACTIONS
     assert "goto" not in canvas._APP_SPEECH_ACTIONS
 
@@ -25,6 +30,11 @@ def test_the_player_gets_the_popups_listening_keys():
     assert canvas.ctl_argv("speech", "replay", 1, "--id 3") == ["replay", "1"]
     # A transcript line's own turn, by history id — not an index, not clamped.
     assert canvas.ctl_argv("speech", "replay-id", 48213) == ["replay", "--id", "48213"]
+    # A reply notification's Play: that thread's unheard replies, and only
+    # with a thread — never every thread's.
+    assert canvas.ctl_argv("speech", "replay-unheard", 1, sid) == [
+        "replay", "--unheard", "--session", sid]
+    assert canvas.ctl_argv("speech", "replay-unheard", 1) is None
     # Stop ends the reply being heard, as `media stop`; it never touches the turn.
     assert "stop" in canvas._APP_SPEECH_ACTIONS
     assert canvas.ctl_argv("speech", "stop", 1) == ["stop"]
@@ -49,7 +59,8 @@ def test_every_verb_the_canvas_sends_is_one_the_cli_accepts():
     canvas._LAST_CLIP["key"] = "%42"
     parser = _build_parser()
     for action in sorted(canvas._APP_SPEECH_ACTIONS):
-        argv = canvas.ctl_argv("speech", action, 1, "3")
+        argv = canvas.ctl_argv("speech", action, 1,
+                               SID if action in NEEDS_SESSION else "3")
         assert argv is not None, action
         try:
             parser.parse_args(argv)

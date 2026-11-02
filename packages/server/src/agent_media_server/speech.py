@@ -27,7 +27,7 @@ from . import audio, auth, mic_state, sessions, threads
 #: turn, unlike POST /session/stop: full screen's speech rail (20 Oct 2026).
 _APP_SPEECH_ACTIONS = frozenset({
     "toggle", "skip-", "skip+", "para-", "para+", "jump-end",
-    "prev", "replay", "replay-id", "again", "speed-", "speed+", "speed0", "vol-", "vol+", "mute",
+    "prev", "replay", "replay-unheard", "replay-id", "again", "speed-", "speed+", "speed0", "vol-", "vol+", "mute",
     "goto-sentence", "stop",
 })
 
@@ -61,7 +61,8 @@ def run_ctl(action: str, arg: int, sentence: int | None = None,
     `sentence` is the index for `goto-sentence` and `replay-id`'s "from
     here"; it rides as the canvas's `sarg` (its `arg` is clamped 1-999, and
     sentence zero is the one most often asked for). `session` is `replay`'s
-    thread, already checked, and rides the same way."""
+    thread (and `replay-unheard`'s), already checked, and rides the same
+    way."""
     if _CTL is None:
         return ""
     if session:

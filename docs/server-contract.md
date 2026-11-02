@@ -2974,7 +2974,7 @@ and on every refusal.
 `{"action", "arg"?, "sentence"?, "session"?}` → `{"ok": true, "out": "<what media printed>"}`.
 
 Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
-`para+`, `jump-end`, `prev`, `replay`, `replay-id`, `speed-`, `speed+`,
+`para+`, `jump-end`, `prev`, `replay`, `replay-unheard`, `replay-id`, `speed-`, `speed+`,
 `speed0`, `vol-`, `vol+`, `mute`, `goto-sentence`, `stop`.
 - `stop` (20 Oct 2026) ends the reply being heard, as `media stop` does; the
   next one waiting still plays. It never touches the turn: that is
@@ -2988,6 +2988,14 @@ Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
   popup's `r`. Not uuid-shaped: 400 `"not a session id"`. Send it from
   inside a thread; with replies held rather than spoken, "the newest of
   all" is often a thread the listener is not in.
+- `replay-unheard` (2 Nov 2026), with `session` (required: 400
+  `"replay-unheard needs a session"`): that thread's unheard replies (held,
+  never played: `unheard` on its lines), oldest first, each chained to the
+  next as a `replay-id` of an unheard reply is, so a Stop ends the run
+  (`media replay --unheard --session S`). With none unheard it is that
+  thread's `replay`. The Play on the app's reply notification sends it, so
+  a thread is heard without opening the app. A server without it answers
+  400 `"unknown action"`; the app then sends `replay` with the session.
 - End of reply (`jump-end`) ticks like a Stop (the `cut` earcon), on the
   live reply and on a replay; on a replayed question it moves to the answer
   without one.

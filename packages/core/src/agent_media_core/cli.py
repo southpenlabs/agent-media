@@ -3468,6 +3468,18 @@ def _next_unheard(row: dict) -> Optional[int]:
     return later[-1]["id"] if later else None
 
 
+def _oldest_unheard(session: str) -> Optional[dict]:
+    """The thread's oldest held reply not yet heard, with audio, or None.
+    Replayed, it goes on through the later ones (`_next_unheard`): a reply
+    notification's Play reads the thread's unheard replies in order (David,
+    2 Nov 2026: per thread, not a summary of all of them)."""
+    waiting = [r for r in _speech_history(200, session=session)   # newest first
+               if isinstance(r.get("id"), int)
+               and r["extras"].get("held") and not r["extras"].get("heard")
+               and _row_has_audio(r)]
+    return waiting[-1] if waiting else None
+
+
 def _question_before(row: dict) -> Optional[dict]:
     """The listener's own turn this reply answers, or None.
 
@@ -4186,6 +4198,14 @@ def cmd_replay(a) -> int:
                     else _replay_row(row, from_sentence=start, **kw))
         print(f"media replay: no clip with id {a.id}", file=sys.stderr)
         return 1
+    # A reply notification's Play: the thread's unheard replies, oldest
+    # first, chained; with none unheard, its newest reply as Replay has it.
+    if getattr(a, "unheard", False) and getattr(a, "session", None):
+        row = _oldest_unheard(a.session)
+        if row is not None:
+            then_id = _next_unheard(row)
+            return _replay_row(row, **({"then_id": then_id} if then_id is not None else {}))
+        return _do_replay(1, session=a.session)
     # A thread named by the caller (the app's Replay, inside that thread):
     # its own newest reply, never another thread's. On 25 Sep 2026 the bar's
     # Replay read David a reply held in a thread he was not in.
@@ -9851,6 +9871,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--session", default=None,
                    help="the conversation (Claude session id) to replay from — "
                         "the app's Replay inside a thread")
+    s.add_argument("--unheard", action="store_true",
+                   help="with --session: that thread's unheard replies, "
+                        "oldest first (its newest reply when none is)")
     s.add_argument("--id", type=int, default=None,
                    help="replay by stable history id instead (see "
                         "'history --lines'; used by the clip browser)")

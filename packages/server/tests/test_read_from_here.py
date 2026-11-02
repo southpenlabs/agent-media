@@ -181,3 +181,21 @@ def test_replay_session_is_validated(server, shelf, signed_in, replays):
     res, obj = call(server, "POST", "/speech/ctl",
                     {"action": "replay", "arg": 1, "session": "../x"}, AUTH)
     assert res.status == 400 and replays == []
+
+
+def test_replay_unheard_plays_that_threads_waiting_replies(server, shelf, signed_in, replays):
+    """A reply notification's Play (2 Nov 2026): that thread's unheard
+    replies, oldest first, without the app open."""
+    sid = "9bce6871-1164-43c7-bb6f-6064758ccae8"
+    res, obj = call(server, "POST", "/speech/ctl",
+                    {"action": "replay-unheard", "session": sid}, AUTH)
+    assert res.status == 200 and obj["ok"] is True
+    assert replays == [["replay", "--unheard", "--session", sid]]
+
+
+def test_replay_unheard_needs_a_thread(server, shelf, signed_in, replays):
+    res, obj = call(server, "POST", "/speech/ctl", {"action": "replay-unheard"}, AUTH)
+    assert res.status == 400 and obj["error"] == "replay-unheard needs a session"
+    res, obj = call(server, "POST", "/speech/ctl",
+                    {"action": "replay-unheard", "session": "../x"}, AUTH)
+    assert res.status == 400 and replays == []

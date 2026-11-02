@@ -253,7 +253,7 @@ def _media(args: list[str], timeout: int = 10) -> str:
 #: Speech verbs that start a replay. A replay now waits (MEDIA_REPLAY_WAIT_S,
 #: 8s) for a speaking reply to step aside before it pushes, and the push
 #: itself is round trips to the phone, so ten seconds would kill it midway.
-_REPLAY_VERBS = frozenset({"replay", "replay-id", "again", "prev"})
+_REPLAY_VERBS = frozenset({"replay", "replay-unheard", "replay-id", "again", "prev"})
 
 
 def _media_ctl(args: list[str], timeout: int) -> str:
@@ -1524,6 +1524,10 @@ def ctl_argv(channel: str, action: str, arg: int,
             # one: that thread's newest reply, not the newest of all.
             "replay": ["replay", str(arg)]
                       + (["--session", sarg] if _SESSION_ARG.fullmatch(sarg) else []),
+            # A reply notification's Play: the thread's unheard replies,
+            # oldest first. Only with a thread: never every thread's.
+            "replay-unheard": (["replay", "--unheard", "--session", sarg]
+                               if _SESSION_ARG.fullmatch(sarg) else None),
             # A transcript line's own turn, by its history id (never clamped),
             # from one of its sentences when `sarg` names it ("read from
             # here" in the app: one command, so there is no replay-then-seek

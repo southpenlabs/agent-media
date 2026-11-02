@@ -67,3 +67,35 @@ def test_replay_by_id_chains_the_next_unheard(store, monkeypatch):
     assert cli.cmd_replay(a) == 0
     # The token handed down by the reply before it goes on to its replay.
     assert calls == [(first, {"then_id": second, "lock_fd": 7})]
+
+
+def _unheard_ns(session):
+    return argparse.Namespace(id=None, from_sentence=None, again=False,
+                              unheard=True, session=session, index=1)
+
+
+def test_replay_unheard_starts_at_the_threads_oldest(store, monkeypatch):
+    # A reply notification's Play (David, 2 Nov 2026): that thread's unheard
+    # replies in order, from the oldest, never another thread's.
+    _row(store, "elsewhere", session="s2", held=True)
+    played = _row(store, "played", held=True)
+    store.mark_heard(played)
+    first = _row(store, "one", held=True)
+    _row(store, "spoken at once")
+    second = _row(store, "two", held=True)
+    calls = []
+    monkeypatch.setattr(cli, "_replay_row",
+                        lambda row, **kw: calls.append((row["id"], kw)) or 0)
+    assert cli.cmd_replay(_unheard_ns("s1")) == 0
+    assert calls == [(first, {"then_id": second})]
+
+
+def test_replay_unheard_with_none_waiting_is_the_threads_newest(store, monkeypatch):
+    played = _row(store, "played", held=True)
+    store.mark_heard(played)
+    asked = []
+    monkeypatch.setattr(cli, "_do_replay",
+                        lambda index, session=None: asked.append((index, session)) or 0)
+    monkeypatch.setattr(cli, "_replay_row", lambda row, **kw: pytest.fail("no unheard row"))
+    assert cli.cmd_replay(_unheard_ns("s1")) == 0
+    assert asked == [(1, "s1")]

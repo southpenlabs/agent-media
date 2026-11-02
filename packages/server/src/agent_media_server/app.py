@@ -2933,9 +2933,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                     return True
         # `replay` inside a thread names it: that thread's newest reply, not
         # the newest of all (§6.5, 25 Sep 2026). Only a well-formed id rides.
-        session = str(body.get("session") or "") if action == "replay" else ""
+        # `replay-unheard` (a reply notification's Play) must name it: that
+        # thread's unheard replies, oldest first, or its newest when none is.
+        session = (str(body.get("session") or "")
+                   if action in ("replay", "replay-unheard") else "")
         if session and not sessions._SESSION.fullmatch(session):
             _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        if action == "replay-unheard" and not session:
+            _json(h, 400, {"ok": False, "error": "replay-unheard needs a session"})
             return True
         out = speech.run_ctl(action, arg, sentence, session)
         print(f"speech/ctl: {action} -> {out.strip()[:120]!r}", file=sys.stderr)
