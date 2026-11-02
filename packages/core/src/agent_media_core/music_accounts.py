@@ -53,6 +53,35 @@ def profile_dir() -> Path:
     return Path(v).expanduser() if v else Path.home() / ".config/yt-dlp/cookies"
 
 
+#: Files in the profile folder that are not a sign-in of their own.
+_NOT_SIGNINS = {"active", "active-book", "none", "oauth_client", "oauth_web"}
+
+
+def youtube_signins() -> list[dict]:
+    """The YouTube sign-ins `yt-profile` keeps on this server (a cookies
+    file each, `<name>.txt`; `oauth` when `<name>-oauth.json` sits beside
+    it), by name, with what the last read got from the ones set: `songs`
+    and `error`. For Settings to tick rather than type (David, 2 Nov 2026:
+    "there's a, separated list of them, but don't they need to sign ins?")."""
+    d = profile_dir()
+    if not d.is_dir():
+        return []
+    chosen = youtube_profiles()
+    read = {a.get("profile"): a for a in (last().get("accounts") or []) if isinstance(a, dict)}
+    out = []
+    for p in sorted(d.glob("*.txt")):
+        name = p.stem
+        if p.is_symlink() or name in _NOT_SIGNINS or name.endswith("-oauth"):
+            continue
+        a = read.get(name) or {}
+        out.append({"name": name, "chosen": name in chosen,
+                    "oauth": (d / f"{name}-oauth.json").exists(),
+                    "songs": len(a.get("songs") or []) if a else None,
+                    "error": (a.get("error") or None) if a and not a.get("songs") else None})
+    out.sort(key=lambda x: (not x["chosen"], x["name"]))
+    return out
+
+
 def _cache() -> Path:
     from ._paths import state_dir
     return state_dir() / "music-accounts-youtube.json"

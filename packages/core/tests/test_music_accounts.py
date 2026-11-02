@@ -137,3 +137,19 @@ def test_spotify_needs_a_client_id():
     assert A.spotify_songs() == []
     with pytest.raises(P.Invalid):
         P.update({"spotify.client_id": "not-an-id"})
+
+
+def test_youtube_signins_are_the_cookie_files_chosen_first(tmp_path, monkeypatch):
+    d = tmp_path / "cookies"
+    d.mkdir()
+    for n in ("davidj4", "davidj4music", "zed", "none", "oauth_client"):
+        (d / f"{n}.txt").write_text("# cookies")
+    (d / "davidj4-oauth.json").write_text("{}")
+    (d / "active.txt").symlink_to(d / "davidj4.txt")
+    monkeypatch.setenv("MEDIA_YT_PROFILE_DIR", str(d))
+    monkeypatch.setattr(A, "youtube_profiles", lambda: ["davidj4music"])
+    monkeypatch.setattr(A, "last", lambda: {"accounts": [{"profile": "davidj4music", "songs": [{}, {}]}]})
+    got = A.youtube_signins()
+    assert [x["name"] for x in got] == ["davidj4music", "davidj4", "zed"]
+    assert got[0] == {"name": "davidj4music", "chosen": True, "oauth": False, "songs": 2, "error": None}
+    assert got[1]["oauth"] is True and got[1]["songs"] is None

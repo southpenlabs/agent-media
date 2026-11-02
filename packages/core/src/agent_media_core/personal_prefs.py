@@ -690,6 +690,18 @@ def status(user: Optional[str] = None) -> dict:
                 row["device_location"] = True
             if f == "listenbrainz.token":
                 row["link"] = LISTENBRAINZ_TOKEN_URL
+            if f == "youtube.profiles":
+                # The sign-ins there are, to tick (the value stays the names,
+                # comma separated, as a POST sends it).
+                try:
+                    from . import music_accounts
+                    row["choices"] = music_accounts.youtube_signins()
+                    row["choices_hint"] = ("Your YouTube sign-ins on this server. Tick the accounts whose likes, "
+                                           "history and music playlists count toward Your favourites, "
+                                           "instrumental. Read only. To add one, sign in on the server "
+                                           "with yt-profile add <name>.")
+                except Exception:  # noqa: BLE001 — the typed field stands
+                    pass
             rows.append(row)
         group = {"id": gid, "label": label, "fields": rows,
                  "available": why[gid] is None, "reason": why[gid]}
