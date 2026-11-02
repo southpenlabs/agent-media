@@ -4709,6 +4709,11 @@ def cmd_replay_track(a) -> int:
         raise SystemExit(0)
 
     began = time.time()
+    # Put back once the cleanup below is done: left ignored, SIGTERM stays
+    # ignored in whatever ran this (pytest, in the tests), and every process
+    # started from it after inherits that (test_procinfo_kill_group failed
+    # after any replay test, 3 Nov 2026).
+    prev_term = _signal.getsignal(_signal.SIGTERM)
     try:
         _signal.signal(_signal.SIGTERM, _term)
     except (ValueError, OSError):
@@ -4736,6 +4741,11 @@ def cmd_replay_track(a) -> int:
             except TypeError:
                 stop()
             except Exception:  # noqa: BLE001
+                pass
+        if prev_term is not None:
+            try:
+                _signal.signal(_signal.SIGTERM, prev_term)
+            except (ValueError, OSError, TypeError):
                 pass
 
 
