@@ -1423,10 +1423,14 @@ def _handle_stop(payload: dict) -> int:
     # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
     # (strip_markdown already took the marker out of the words), and the
     # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).
-    from ._text import extract_sound, quoted_passages
+    from ._text import extract_sound, extract_tune, quoted_passages
     raw, sound = extract_sound(raw)
     if sound:
         metadata["sound"] = sound
+    # `[[tune: Artist - Title]]`: a song after the reply (reply_tune.py).
+    raw, tune = extract_tune(raw)
+    if tune:
+        metadata["tune"] = tune
     quoted = quoted_passages(raw)
     if quoted:
         metadata["quoted"] = quoted

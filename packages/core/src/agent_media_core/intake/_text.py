@@ -465,6 +465,28 @@ def extract_sound(text: str) -> tuple[str, Optional[str]]:
     return out.strip(), found
 
 
+#: `[[tune: Artist - Title]]`: the agent naming a song to play after its
+#: reply's speech, picked for what the reply said (reply_tune.py,
+#: docs/proposals/2026-11-03-reply-tune.md). An instruction, never words,
+#: like `[[sound:]]`: stripped from speech here and from the thread.
+_TUNE_RE = re.compile(r"\[\[\s*tune\s*:\s*([^\]\n]+?)\s*\]\]", re.IGNORECASE)
+_TUNE_LINE_RE = re.compile(r"(?m)^[ \t]*\[\[\s*tune\s*:[^\]\n]*\]\][ \t]*(?:\n|$)", re.IGNORECASE)
+_TUNE_INLINE_RE = re.compile(r"[ \t]*\[\[\s*tune\s*:[^\]\n]*\]\]", re.IGNORECASE)
+
+
+def extract_tune(text: str) -> tuple[str, Optional[str]]:
+    """(`text` without its `[[tune:]]` markers, the first one's song line or
+    None). A marker alone on its line takes the line with it."""
+    if not text or "[[" not in text:
+        return text, None
+    m = _TUNE_RE.search(text)
+    if not m:
+        return text, None
+    out = _TUNE_LINE_RE.sub("", text)
+    out = _TUNE_INLINE_RE.sub("", out)
+    return out.strip(), m.group(1).strip() or None
+
+
 _QUOTE_BLOCK_LINE = re.compile(r"^[ \t]{0,3}>[ \t]?(.*)$")
 
 
@@ -518,7 +540,7 @@ def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -
         return ""
     out = _SHARED_FILE_RE.sub("", text) if "Shared file: " in text else text
     if "[[" in out:
-        out = extract_sound(out)[0]
+        out = extract_tune(extract_sound(out)[0])[0]
     out = suppress_code_blocks(out, describe, paragraphs)
     out = suppress_tables(out, describe, paragraphs)
     if paragraphs:

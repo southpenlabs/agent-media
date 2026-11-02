@@ -94,3 +94,32 @@ def play(spotify_uri: str, device: str = "") -> dict:
     body = {"uris": [spotify_uri]} if spotify_uri.startswith("spotify:track:") else {"context_uri": spotify_uri}
     _call("PUT", f"/me/player/play?device_id={pick['id']}", tok, body)
     return {"ok": True, "device": pick.get("name") or ""}
+
+
+def search_track(artist: str, title: str) -> Optional[dict]:
+    """Spotify's top hit for a song line: ``{uri, name, artist, art, url}``,
+    or None. Code takes the hit; it is never shown to a model (Developer
+    Terms IV.2.1: Spotify Content is not ingested into an AI model)."""
+    import urllib.parse
+
+    q = f'track:"{title}"' + (f' artist:"{artist}"' if artist else "")
+    got = _call("GET", "/search?" + urllib.parse.urlencode({"q": q, "type": "track", "limit": 1}),
+                _token())
+    items = ((got.get("tracks") or {}).get("items")) or []
+    if not items and artist:
+        got = _call("GET", "/search?" + urllib.parse.urlencode(
+            {"q": f"{artist} {title}", "type": "track", "limit": 1}), _token())
+        items = ((got.get("tracks") or {}).get("items")) or []
+    if not items:
+        return None
+    t = items[0]
+    images = (t.get("album") or {}).get("images") or []
+    return {"uri": t.get("uri"), "name": t.get("name") or "",
+            "artist": ", ".join(a.get("name") or "" for a in t.get("artists") or []),
+            "art": images[0].get("url") if images else None,
+            "url": (t.get("external_urls") or {}).get("spotify")}
+
+
+def is_playing() -> bool:
+    """Whether Spotify is playing on any of the listener's devices now."""
+    return bool(_call("GET", "/me/player", _token()).get("is_playing"))

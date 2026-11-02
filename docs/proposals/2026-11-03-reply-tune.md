@@ -3,7 +3,11 @@
 David, 3 Nov 2026: "Can we play a tune on Spotify after a reply chosen by
 the reply's relevance? Is that legal in a distributable package?" — "yes
 please" (to writing this up).
-Status: **proposed**.
+Status: **steps 1–3 built** 3 Nov 2026 (`reply_tune.py`, off unless
+`MEDIA_REPLY_TUNE=handoff|spotify`); step 4, the app's switch, to come.
+David, after this was written: "Yes, please... and read Spotify's official
+terms" — read the same day (below), and they moved the Spotify route
+behind the personal-use switch.
 
 ## The idea
 
@@ -51,38 +55,66 @@ If music was already playing, no tune plays.
 
 ## Is it legal in the package
 
-**Yes, in the form above**, with two lines not to cross.
+Read on 3 Nov 2026 from Spotify's own pages: the Developer Terms ("Version
+10, effective as of 15 May, 2025"), the Developer Policy (same date) and the
+quota modes page.
 
-1. **Nothing from Spotify goes into a model.** Spotify's Developer Terms
-   (v10, in force since 15 May 2025) forbid training a model on Spotify
-   Content *or otherwise ingesting it into one*. In the design above the
-   model never sees Spotify data: the agent writes the song line itself,
-   and code takes Spotify's top search hit. Showing the model Spotify's
-   search results, the listener's playlists, saved tracks or recently played
-   to choose from would cross that line. Any such variant is a
-   `personal_use` method (`docs/decisions/2026-11-02-personal-use.md`).
-   Whether runtime use without training counts as "ingesting" is not
-   settled publicly, which is why the safe design avoids it entirely.
-2. **Spotify plays in Spotify's player, on its own.** No mixing it with,
-   ducking it under, or recording it with our speech; no clipping a song to
-   a jingle. The Connect route tells the listener's device to play, and
-   that is all.
+**The hand-off route: yes.** It uses none of Spotify's developer platform:
+the listener's own app plays a search they could have typed, under their
+subscription. This is the product's route.
 
-Hand-off involves no Spotify developer terms at all: the listener's own app
-plays a search the listener could have typed.
+**The Spotify Connect route: personal use only** (`personal_use`
+`spotify-reply-tune`, per `docs/decisions/2026-11-02-personal-use.md`).
+These clauses leave it in doubt for a public product:
 
-**The quota is a practical limit, not a legal one.** A Spotify developer app
-in development mode serves a handful of hand-listed users. Extended access
-has been only for organisations with ≥250k monthly users since May 2025. So a
-distributable package has each install register its own Spotify app (as
-`music_accounts` already expects, `spotify_client_id()`). A hosted
-sasonica.com cannot offer the Connect route to the public, but it can offer
-hand-off.
+- Policy III.3: "Do not create a voice-enabled SDA that enables a user to
+  control Spotify with their voice, or any kind of voice assistant that
+  provides voice-control functionality." Sasonica is a voice assistant; here
+  the agent rather than the listener's voice picks the song, but the clause
+  is broad.
+- Policy III.5: "Do not create any product or service which is integrated
+  with streams or content from another service." Sasonica also plays
+  YouTube, Audiobookshelf and radio.
+- Policy II.5: "there shall be no playback of Spotify Content without
+  showing relevant cover art and metadata in your SDA." With II.4.1–2
+  (attribute with the Spotify Marks, link back), a public version would
+  need a card with the art, the name and a link for every tune.
+- Terms III.1.1 licenses an app "for private personal use" on "Approved
+  Devices" (desktops, laptops, tablets, mobiles, "and such other devices
+  that we approve in writing"); a server sending the commands is not listed.
+
+These hold for the route even when private:
+
+- **Nothing from Spotify goes into a model.** Terms IV.2.1 / Policy III.14:
+  no "otherwise ingesting Spotify Content into a machine learning or AI
+  model", with no carve-out for use at the moment of a request. Terms II.8
+  defines Spotify Content to include "metadata, playlists, and user data",
+  so search results count. The agent writes the song line; code takes the
+  top hit (`spotify_remote.search_track`), and no model sees it.
+- **No overlap.** Policy III.7: "Do not permit any device or system to
+  segue, mix, re-mix, or overlap any Spotify Content with any other audio
+  content." The tune starts after the speech; the next reply's speech must
+  pause Spotify rather than duck it (open question below).
+- **Not stored.** Terms IV.3.1: "Do not store Spotify Content indefinitely."
+  `reply-tune.json` keeps only the last hit, for the cooldown.
+- **Quota:** an app in development mode serves "up to 5 authenticated
+  Spotify users", and needs its owner on Premium. Since 15 May 2025 extended
+  mode is open only to organisations ("at least 250k MAUs"). Each install
+  registers its own client ID (Terms VI.1.2–3: a separate code per app,
+  never shared).
 
 **spotifyd** (an unofficial Spotify Connect speaker built on librespot)
 stays as it is: host setup on red5, never in this repository.
 
 ## Steps
+
+What was built: `[[tune:]]` parsed (`intake/_text.extract_tune`) and taken
+out of the speech and the thread (`transcript.display_text`); after
+`submit_event` has said the reply, `reply_tune.after_reply` plays it, once
+per cooldown (`MEDIA_REPLY_TUNE_COOLDOWN_MIN`, default 30), not while a
+radio station or the route's player is playing; the agent note (`[tune]`)
+told only where a route is on. Spotify device: `MEDIA_REPLY_TUNE_DEVICE`
+(id or name), else the active one.
 
 1. The marker: parse `[[tune: …]]`, strip it from speech and display, record
    it on the reply. Add the agent note and the cooldown.
@@ -95,13 +127,19 @@ stays as it is: host setup on red5, never in this repository.
 
 ## Open questions
 
+- After the song ends, the listener's app may keep going (Spotify's
+  autoplay). Whether a tune should stop when it ends is not settled yet.
+- Whether the next reply's speech pauses the hand-off app or ducks it
+  under (Android audio focus): it should pause. Check this on the phone.
+- A reply that was cut off (barge-in, stop) still plays its tune today.
+
 - The cooldown, and whether it applies per thread or across the whole house.
 - Whether the reply card shows the tune (a small "♪ Artist – Title" line
   that opens it in the listener's app). Probably yes; it is the reply's own
   text.
 
-Sources: Spotify Developer Terms v10 as reported by
-[Hypebot](https://www.hypebot.com/updated-spotify-terms-mean-you-cant-use-their-data-but-they-can-use-yours/)
-and the [Vorp Labs tracker](https://vorplabs.com/agent-tools/spotify-api-changes)
-(check developer.spotify.com's own terms page before building step 3);
-quota modes per `2026-09-29-licensed-music.md`.
+Sources (read 3 Nov 2026):
+[Developer Terms](https://developer.spotify.com/terms),
+[Developer Policy](https://developer.spotify.com/policy),
+[Quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
+Terms §IX–X and Appendix A were not read word for word.

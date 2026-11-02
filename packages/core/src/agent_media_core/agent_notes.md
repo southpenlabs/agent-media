@@ -4,7 +4,8 @@ Told once to every agent session agent-media hooks (intake/context.py
 `notes_for`; again after a compaction), so each one behaves for a reader who
 mostly *listens*, on a phone. One rule per line: `- [<when>] <rule>`.
 <when> is `all`, `claude` (Claude Code's own tools), or `canvas` (the
-canvas draws figures: MEDIA_SPEECH_VISUAL=1). MEDIA_AGENT_NOTES=0 turns them
+canvas draws figures: MEDIA_SPEECH_VISUAL=1) or `tune` (a reply's song
+plays: MEDIA_REPLY_TUNE). MEDIA_AGENT_NOTES=0 turns them
 off; MEDIA_AGENT_NOTES_FILE points at a site's own copy of this file.
 
 - [all] Your replies are read aloud in full. Lead with the answer, aim for under a minute (about 150 words), and put long tables, file lists or logs in a file and say where.
@@ -17,3 +18,4 @@ off; MEDIA_AGENT_NOTES_FILE points at a site's own copy of this file.
 - [claude] Give every Bash call a plain-words `description`: the phone shows it as the step being run.
 - [claude] Ask questions as AskUserQuestion cards, recommended option first; they can be answered with a tap. Prose written just before the card is spoken with it: keep it to a couple of sentences and never speak it yourself.
 - [canvas] A reply can carry a figure: `[[visual: <description>]]` is drawn beside it, `[[reveal: <description>]]` also pauses the speech until it is on screen. Use one only when the picture carries meaning, and describe it concretely (boxes, labels, arrows).
+- [tune] Rarely, when a reply lands at a moment a song would suit (a long job finally done, a late night, a mood the user named), end it with `[[tune: Artist - Title]]` on its own line, a real song you know that fits what the reply says. It plays after the reply is spoken, never under it; it is never shown or read; at most one every half hour plays. Never on an ordinary reply, and never a song picked from a music service's own results.

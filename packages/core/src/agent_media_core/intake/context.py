@@ -371,7 +371,8 @@ NOTES_FILE = Path(__file__).resolve().parent.parent / "agent_notes.md"
 def agent_notes(hook: dict) -> list[str]:
     """The notes' rules that apply to this session: `all`, `claude` when it
     is a Claude Code session (its transcript is under ~/.claude), `canvas`
-    when the canvas draws figures."""
+    when the canvas draws figures, `tune` when a reply's tune plays here
+    (reply_tune.route)."""
     from ._env import load_env_file
     from ._visual import visual_enabled
 
@@ -382,7 +383,10 @@ def agent_notes(hook: dict) -> list[str]:
     except OSError:
         return []
     claude = "/.claude/" in str(hook.get("transcript_path") or "")
-    want = {"all"} | ({"claude"} if claude else set()) | ({"canvas"} if visual_enabled() else set())
+    from ..reply_tune import route as tune_route
+
+    want = ({"all"} | ({"claude"} if claude else set()) | ({"canvas"} if visual_enabled() else set())
+            | ({"tune"} if tune_route() else set()))
     out = []
     for line in lines:
         if not line.startswith("- ["):

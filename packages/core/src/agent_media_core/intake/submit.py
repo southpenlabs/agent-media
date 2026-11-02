@@ -4100,12 +4100,15 @@ def submit_event(event: Event,
         # A `[[sound: done]]` / `[[sound: fail]]` marker from any source (the
         # Claude hook takes it out itself): never words, and its earcon is
         # played before the voice.
-        from ._text import extract_sound
+        from ._text import extract_sound, extract_tune
         clean, sound = extract_sound(event.text)
+        clean, tune = extract_tune(clean)
         if clean != event.text:
             meta = dict(event.metadata or {})
             if sound and not meta.get("sound"):
                 meta["sound"] = sound
+            if tune and not meta.get("tune"):
+                meta["tune"] = tune
             event = dataclasses.replace(event, text=clean, metadata=meta)
     # One reply makes dozens of calls to the same few players — the broker
     # claim, the music and book probes, a snapshot every tick of the follow
@@ -4114,8 +4117,14 @@ def submit_event(event: Event,
     # longer (see _mpv_ipc.reuse_connections).
     from ..sinks import _mpv_ipc
     with _mpv_ipc.reuse_connections():
-        return _submit_event(event, state=state, coordinator=coordinator,
-                             sink=sink, playback_allowed=playback_allowed)
+        row = _submit_event(event, state=state, coordinator=coordinator,
+                            sink=sink, playback_allowed=playback_allowed)
+    # `[[tune: Artist - Title]]`: its song once the reply has been said
+    # (reply_tune.py; off unless MEDIA_REPLY_TUNE names a route).
+    if row is not None and (event.metadata or {}).get("tune"):
+        from .. import reply_tune
+        reply_tune.after_reply(event, row)
+    return row
 
 
 def _submit_event(event: Event,

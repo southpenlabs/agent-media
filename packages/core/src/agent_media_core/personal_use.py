@@ -57,6 +57,9 @@ METHODS = {
                          "your YouTube likes and history read through ytmusicapi with sign-ins copied from a browser"),
     "spotify-speaker": ("MEDIA_SPOTIFY_SPEAKER",
                         "this server as a Spotify Connect speaker for the house rooms, through an unofficial client"),
+    "spotify-reply-tune": ("MEDIA_REPLY_TUNE_SPOTIFY",
+                           "a reply's tune played on your Spotify devices through Spotify's Web API "
+                           "(its Developer Policy III.3 and III.5 leave an assistant doing this in doubt)"),
     "signed-in-reading": ("MEDIA_SIGNED_IN_READING",
                           "pages read, and friends-only videos played, with the app's stored sign-ins"),
 }

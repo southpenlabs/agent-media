@@ -1821,14 +1821,15 @@ def join_speech(msgs: list[dict], lines: list[dict]) -> None:
 
 #: A `[[visual: …]]` / `[[reveal: …]]` marker, as the Stop hook reads it
 #: (intake/_visual.py), or a `[[sound: done]]` / `[[sound: fail]]` one (its
-#: earcon before the voice, intake/_text.py extract_sound), with the spaces
-#: around it.
-_MARKER = re.compile(r"[ \t]*\[\[\s*(?:visual|reveal|sound)\s*:\s*.+?\s*\]\][ \t]*",
+#: earcon before the voice, intake/_text.py extract_sound), or a
+#: `[[tune: Artist - Title]]` one (a song after the reply, reply_tune.py),
+#: with the spaces around it.
+_MARKER = re.compile(r"[ \t]*\[\[\s*(?:visual|reveal|sound|tune)\s*:\s*.+?\s*\]\][ \t]*",
                      re.IGNORECASE | re.DOTALL)
 
 
 def display_text(text: str) -> str:
-    """`text` without its `[[visual:]]` / `[[reveal:]]` / `[[sound:]]` markers —
+    """`text` without its `[[visual:]]` / `[[reveal:]]` / `[[sound:]]` / `[[tune:]]` markers —
     instructions to the canvas or the player, never words for anyone to read. The markdown
     stays (the client renders it). A marker mid-sentence leaves one space; one
     on a line of its own leaves no blank line behind."""
