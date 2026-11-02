@@ -747,6 +747,24 @@ def publish_chapters(session: str, folder: Path, *, target=None) -> int:
         return 0
 
 
+def _fill_starts(starts: list, durations, n: int) -> list:
+    """Measured sentence starts, with the ones not reached yet predicted.
+
+    Starts are measured as the player reaches each sentence, so a reply still
+    playing (or cut off) has them only as far as it got. The rest follow from
+    the last measured start plus the clip lengths in between, and each new
+    measurement corrects them. Without that a timeline stopped where the voice
+    was: the app's sentence marks crowded into the part already heard
+    (David, 2 Nov 2026: "The ticks aren't spaced out properly, all the way
+    to the end of the line").
+    """
+    out = [float(x) for x in starts]
+    durs = [float(d or 0) for d in (durations or [])]
+    while out and len(out) < n and len(out) <= len(durs):
+        out.append(out[-1] + durs[len(out) - 1])
+    return out
+
+
 def _live_turn(session: str) -> Optional[dict]:
     """The turn being spoken *right now* for `session`, as
     `{at, text, listener}`, or None.
@@ -813,11 +831,9 @@ def _live_turn(session: str) -> Optional[dict]:
         # has begun moves a beat behind the voice at every boundary. So the
         # ones still to come are predicted from the last measured start plus
         # the clip lengths in between, and each new measurement corrects them.
-        offsets = [float(x) for x in ex["clip_starts_s"]]
-        durations = [float(d or 0) for d in (ex.get("clip_durations_s") or [])]
-        n = len(ex.get("clip_sentences") or [])
-        while offsets and len(offsets) < n and len(offsets) <= len(durations):
-            offsets.append(offsets[-1] + durations[len(offsets) - 1])
+        offsets = _fill_starts([float(x) for x in ex["clip_starts_s"]],
+                               ex.get("clip_durations_s"),
+                               len(ex.get("clip_sentences") or []))
     if not offsets and ex.get("clip_durations_s"):
         acc = 0.0
         for d in ex.get("clip_durations_s") or []:
@@ -1055,8 +1071,10 @@ def conversation_log(session: str, folder: Path, *, target=None,
                 continue
             if not line.get("live") and "sentences" not in line:
                 turn = said[newest]
-                offsets = [round(float(x), 3)
-                           for x in (getattr(turn, "starts", None) or [])]
+                offsets = [round(x, 3) for x in _fill_starts(
+                    getattr(turn, "starts", None) or [],
+                    getattr(turn, "durations", None),
+                    len(getattr(turn, "sentences", None) or []))]
                 if offsets and offsets[0] > 0:
                     # From the first word, as `pos` counts (see _live_turn):
                     # the app bolds this timeline against the player's own

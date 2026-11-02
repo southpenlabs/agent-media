@@ -652,6 +652,30 @@ def test_the_newest_turn_carries_its_timeline_without_being_live(tmp_path, monke
     assert "sentences" not in lines[0]
 
 
+def test_a_newest_turn_measured_part_way_predicts_the_rest(tmp_path, monkeypatch):
+    """Starts are measured as the player reaches each sentence, so a reply
+    still playing on the phone (or cut off) has them only as far as it got.
+    The rest follow from the clip lengths, so the app's sentence marks span
+    the whole reply instead of crowding into the part already heard (David,
+    2 Nov 2026: "The ticks aren't spaced out properly, all the way to the end
+    of the line")."""
+    from agent_media_core import book_tracks as bt, session_feed
+    folder = tmp_path / "p-agent-media" / "A talk"
+    monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
+    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
+    monkeypatch.setattr(bt, "_live_turn", lambda s: None)
+    hist = [session_feed.Turn(at=300.0, text="One. Two. Three. Four.",
+                              sentences=["One.", "Two.", "Three.", "Four."],
+                              durations=[1.0, 2.0, 3.0, 4.0],
+                              starts=[5.0, 6.4])]
+    monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
+
+    newest = bt.conversation_log("sess-1", folder)[-1]
+    # From the first word, measured where measured, then by the clip lengths.
+    assert newest["offsets"] == [0.0, 1.4, 3.4, 6.4]
+    assert newest["measured"] is True
+
+
 def test_an_unmeasured_turn_apportions_its_offsets(tmp_path, monkeypatch):
     """A reply that never played far enough to measure a start still gets a
     timeline — summed clip lengths — and is labelled as not measured, because
