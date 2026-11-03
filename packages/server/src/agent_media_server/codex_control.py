@@ -105,7 +105,7 @@ def configure(session: str, *, model: str | None, mode: str | None) -> tuple[boo
             if before is None:
                 return False, {"error": "this Codex thread is not loaded", "status": 409}
             if before["status"] != "idle":
-                return False, {"error": "wait for the turn or question to finish, then change it", "status": 409}
+                return False, {"error": "wait for the turn or question to finish, then change it", "status": 409, "busy": True}
             params = {"threadId": session}
             if model is not None:
                 params["model"] = model

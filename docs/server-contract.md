@@ -2215,9 +2215,12 @@ now; a parked headless one takes it at its resume).
   for `--resume`. `plan` reads the latest `system/init` while the process
   runs (an approved plan leaves plan mode by itself).
 - Pane: `/model <id>` typed in, and shift+tab pressed until the footer
-  says (or stops saying) "plan mode on"; only between turns — 409 `"wait
-  for the turn to finish, then change it"` otherwise, 409 when the session
-  is not running. The model is read from the transcript's last assistant
+  says (or stops saying) "plan mode on"; only between turns. A change asked
+  for mid-turn (a pane, or Codex's daemon) is kept and made as soon as the
+  turn ends, or before the next reply goes in (3 Nov 2026; it was a 409
+  before): the answer is `ok` with `told: false`, the chosen `model`/`plan`
+  shown, and `pending: {"model"?, "plan"?}` naming what is still to be
+  made; `pending` is gone once it is. 409 when the session is not running. The model is read from the transcript's last assistant
   message. herdr panes: `can.plan` false.
 - opencode (28 Sep 2026): `model` and `model_id` are the `provider/model`
   its last message went to (or the one picked since); `models` is its free

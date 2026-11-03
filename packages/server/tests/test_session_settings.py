@@ -18,6 +18,16 @@ CYCLE = ["", "⏵⏵ accept edits on (shift+tab to cycle)", "⏸ plan mode on (s
          "⏵⏵ bypass permissions on"]
 
 
+@pytest.fixture(autouse=True)
+def _no_watcher(monkeypatch):
+    """A change kept for the turn's end is made here by `apply_pending`, not
+    by a polling thread."""
+    ss._PENDING.clear()
+    monkeypatch.setattr(ss, "_start_watch", lambda s: None)
+    yield
+    ss._PENDING.clear()
+
+
 @pytest.fixture()
 def pane(monkeypatch, tmp_path):
     monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
@@ -77,10 +87,34 @@ def test_plan_on_cycles_shift_tab_until_the_footer_says_so_and_back_off(pane):
     assert ok and pane.at == 3
 
 
-def test_a_working_pane_is_not_typed_into(pane):
+def test_a_working_pane_keeps_the_change_for_the_turns_end(pane):
     pane.state = "working"
     ok, d = ss.post(SID, {"model": "opus"}, "t")
-    assert not ok and d["status"] == 409 and pane.typed == []
+    assert ok and pane.typed == [] and d["told"] is False
+    assert d["model"] == "opus" and d["pending"] == {"model": "opus"}
+    ok, d = ss.post(SID, {"plan": True}, "t")       # a second choice joins it
+    assert ok and d["plan"] is True and d["pending"] == {"model": "opus", "plan": True}
+    assert ss.apply_pending(SID) == "busy" and pane.typed == [] and pane.at == 0
+    pane.state = "waiting"
+    assert ss.apply_pending(SID) == "done"
+    assert pane.typed == ["/model opus"] and pane.at == 2
+    assert "pending" not in ss.get(SID, "t")[1] and ss.apply_pending(SID) == ""
+
+
+def test_a_change_made_between_turns_replaces_the_waiting_one(pane):
+    pane.state = "working"
+    ss.post(SID, {"model": "opus"}, "t")
+    pane.state = "waiting"
+    ok, d = ss.post(SID, {"model": "haiku"}, "t")
+    assert ok and "pending" not in d and pane.typed == ["/model haiku"]
+    assert ss.apply_pending(SID) == ""
+
+
+def test_a_waiting_change_is_dropped_after_a_very_long_turn(pane):
+    pane.state = "working"
+    ss.post(SID, {"model": "opus"}, "t")
+    ss._PENDING[SID]["at"] -= ss._PENDING_MAX_S + 1
+    assert ss.apply_pending(SID) == "failed" and ss.pending(SID) == {}
 
 
 def test_other_agents_cannot(pane, monkeypatch):
@@ -268,7 +302,9 @@ def test_opencode_that_does_not_take_it_is_left_as_it_was(oc_pane):
 
 def test_opencode_refuses_mid_turn_plan_and_strangers(oc_pane):
     oc_pane.state = "working"
-    assert ss.post(OC, {"model": "opencode/big-pickle"}, "t")[1]["status"] == 409
+    assert ss.post(OC, {"model": "opencode/big-pickle"}, "t")[1]["pending"] == {
+        "model": "opencode/big-pickle"}
+    ss._PENDING.clear()
     oc_pane.state = "waiting"
     assert ss.post(OC, {"plan": True}, "t")[1]["status"] == 400
     assert ss.post(OC, {"model": "--help"}, "t")[1]["status"] == 400
@@ -451,7 +487,9 @@ def test_pi_that_does_not_have_it_closes_its_picker(pi_pane):
 
 def test_pi_refuses_mid_turn_plan_and_strangers(pi_pane):
     pi_pane.state = "working"
-    assert ss.post(PI, {"model": "venice/kimi-k3"}, "t")[1]["status"] == 409
+    assert ss.post(PI, {"model": "venice/kimi-k3"}, "t")[1]["pending"] == {
+        "model": "venice/kimi-k3"}
+    ss._PENDING.clear()
     pi_pane.state = "waiting"
     assert ss.post(PI, {"plan": True}, "t")[1]["status"] == 400
     assert ss.post(PI, {"model": "--help"}, "t")[1]["status"] == 400

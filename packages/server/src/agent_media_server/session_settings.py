@@ -280,6 +280,10 @@ def _answer(session: str, **extra) -> dict:
              else _native_sheet(st["agent"], session) if st["agent"] in ("codex", "grok")
              else _opencode_sheet(st["model"]) if st["agent"] == "opencode"
              else _pi_sheet(session, st["model"]) if st["agent"] == "pi" else models())
+    waiting = pending(session)
+    if waiting:
+        # Shown as chosen; `pending` says it is made when the turn ends.
+        st = {**st, **waiting, "pending": waiting}
     return {"session": session, "models": sheet, **st, **extra}
 
 
@@ -556,18 +560,144 @@ def post(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
     if model is None and plan is None:
         return False, {"error": "nothing to change (model or plan)", "status": 400}
     mode = None if plan is None else ("plan" if plan else "")
+    ok, detail = _apply(session, agent, model, mode)
+    if not ok and detail.get("busy"):
+        # Mid-turn: kept, and made at the turn's end (`_watch`), not refused.
+        _defer(session, agent, model, mode)
+        return True, _answer(session, told=False)
+    if not ok:
+        return False, detail
+    _settled(session, model, mode)
+    return True, _answer(session, told=bool(detail.get("told")))
+
+
+def _apply(session: str, agent: str, model: str | None,
+           mode: str | None) -> tuple[bool, dict]:
     if agent == "codex":
         from . import codex_control
 
         if codex_control.state(session) is not None:
-            ok, detail = codex_control.configure(session, model=model, mode=mode)
-        else:
-            ok, detail = driver.for_session(session).configure(session, model=model, mode=mode)
-    else:
-        ok, detail = driver.for_session(session).configure(session, model=model, mode=mode)
+            return codex_control.configure(session, model=model, mode=mode)
+    return driver.for_session(session).configure(session, model=model, mode=mode)
+
+
+# --- a change made mid-turn ---------------------------------------------------
+#
+# A pane (or Codex's daemon) takes a model or plan change only between turns.
+# One asked for while it works is kept here and made as soon as the turn ends:
+# `_watch` tries again every `_PENDING_POLL_S`, and a reply about to go in
+# (send.reply → `apply_pending`) makes it first, so the next turn runs on it.
+# The answer meanwhile shows the change as made, with `pending` saying what is
+# still to be done (David, 3 Nov 2026: "make it do this automatically at the
+# next turn rather than erroring").
+
+#: session -> {"agent", "model"?, "mode"?, "at"}.
+_PENDING: dict[str, dict] = {}
+_PENDING_LOCK = threading.Lock()
+_WATCHING: set[str] = set()
+_PENDING_POLL_S = 1.0
+#: A turn longer than this and the change is dropped (the pane is likely gone).
+_PENDING_MAX_S = 6 * 3600.0
+
+
+def _defer(session: str, agent: str, model: str | None, mode: str | None) -> None:
+    with _PENDING_LOCK:
+        p = _PENDING.setdefault(session, {"agent": agent})
+        p["at"] = time.time()
+        if model is not None:
+            p["model"] = model
+        if mode is not None:
+            p["mode"] = mode
+    _start_watch(session)
+
+
+def _start_watch(session: str) -> None:
+    with _PENDING_LOCK:
+        if session in _WATCHING:
+            return
+        _WATCHING.add(session)
+    threading.Thread(target=_watch, args=(session,), daemon=True,
+                     name=f"settings-pending-{session[:8]}").start()
+
+
+def _settled(session: str, model: str | None, mode: str | None) -> None:
+    """A change made now replaces the same one still waiting."""
+    with _PENDING_LOCK:
+        p = _PENDING.get(session)
+        if not p:
+            return
+        if model is not None:
+            p.pop("model", None)
+        if mode is not None:
+            p.pop("mode", None)
+        if "model" not in p and "mode" not in p:
+            _PENDING.pop(session, None)
+
+
+def pending(session: str) -> dict:
+    """What is waiting for the turn's end: `{"model"?, "plan"?}`, or {}."""
+    with _PENDING_LOCK:
+        p = dict(_PENDING.get(session) or {})
+    out: dict = {}
+    if "model" in p:
+        out["model"] = p["model"]
+    if "mode" in p:
+        out["plan"] = p["mode"] == "plan"
+    return out
+
+
+def apply_pending(session: str) -> str:
+    """Make the waiting change if the session is between turns. "done", "busy"
+    (still working; kept), "failed" (dropped, logged) or "" (nothing waiting)."""
+    with _PENDING_LOCK:
+        p = dict(_PENDING.get(session) or {})
+    if "model" not in p and "mode" not in p:
+        return ""
+    model, mode = p.get("model"), p.get("mode")
+    ok, detail = _apply(session, str(p.get("agent") or ""), model, mode)
+    if not ok and detail.get("busy"):
+        if time.time() - float(p.get("at") or 0) > _PENDING_MAX_S:
+            log.info("settings: %s still busy after %.0f h; dropped %s", session[:8],
+                     _PENDING_MAX_S / 3600, p)
+            with _PENDING_LOCK:
+                _PENDING.pop(session, None)
+            return "failed"
+        return "busy"
+    with _PENDING_LOCK:
+        cur = _PENDING.get(session)
+        # Only what was tried is settled: a newer choice made meanwhile waits on.
+        if cur is not None:
+            if "model" in cur and cur.get("model") == model:
+                cur.pop("model")
+            if "mode" in cur and cur.get("mode") == mode:
+                cur.pop("mode")
+            if "model" not in cur and "mode" not in cur:
+                _PENDING.pop(session, None)
     if not ok:
-        return False, detail
-    return True, _answer(session, told=bool(detail.get("told")))
+        log.warning("settings: %s's waiting change %s not made (%s)", session[:8],
+                    {k: v for k, v in (("model", model), ("mode", mode)) if v is not None},
+                    detail.get("error"))
+        return "failed"
+    log.info("settings: %s's waiting change made at the turn's end", session[:8])
+    return "done"
+
+
+def _watch(session: str) -> None:
+    try:
+        while True:
+            time.sleep(_PENDING_POLL_S)
+            try:
+                if apply_pending(session) != "busy" and not pending(session):
+                    return
+            except Exception as e:  # noqa: BLE001 — kept for the next try
+                log.warning("settings: %s waiting change (%s)", session[:8], e)
+    finally:
+        with _PENDING_LOCK:
+            _WATCHING.discard(session)
+            again = bool(_PENDING.get(session, {}).keys() & {"model", "mode"})
+        if again:
+            # A choice that landed as this watcher ended.
+            _start_watch(session)
 
 
 def configure_pane(session: str, *, model: str | None = None,
@@ -586,7 +716,7 @@ def configure_pane(session: str, *, model: str | None = None,
     if st != "waiting":
         why = "a question" if st == "approval" else "the turn"
         return False, {"error": f"wait for {why} to finish, then change it", "status": 409,
-                       "state": st}
+                       "state": st, "busy": True}
     if agent in ("codex", "grok"):
         from . import native_settings
 

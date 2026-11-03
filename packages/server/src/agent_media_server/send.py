@@ -1235,6 +1235,14 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
             # The loop's quick model in, or the thread's own back (voice_model.py),
             # before the words go in so their turn runs on it.
             voice_model.on_reply(session, voice)
+        # A model or plan change asked for mid-turn, made before these words
+        # go in so their turn runs on it (session_settings.apply_pending).
+        try:
+            from . import session_settings
+
+            session_settings.apply_pending(session)
+        except Exception as e:  # noqa: BLE001 — the words still go in
+            log.warning("send: %s waiting settings (%s)", session[:8], e)
 
     if mode == "branch" and driver.owned_headless(session):
         # A branch runs where the thread it came from ran (proposal §8): a

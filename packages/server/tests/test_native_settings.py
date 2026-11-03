@@ -118,8 +118,10 @@ def test_grok_plan_rejected_before_model_change(codex):
     assert not codex.typed
 
 
-def test_codex_route_capabilities_changes_and_busy_refusal(codex, monkeypatch):
+def test_codex_route_capabilities_changes_and_busy_deferral(codex, monkeypatch):
     monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
+    monkeypatch.setattr(ss, "_start_watch", lambda s: None)
+    ss._PENDING.clear()
     driver._reset_for_tests()
     ss._CHOSEN.clear()
     monkeypatch.setattr(auth, "gate", lambda b: ({"id": "u"}, {}))
@@ -135,12 +137,14 @@ def test_codex_route_capabilities_changes_and_busy_refusal(codex, monkeypatch):
     assert ss.new_sheet("codex")["can"] == {"model": True, "plan": True}
     assert ss.new_sheet("grok")["can"] == {"model": True, "plan": False}
     codex.state = "working"
-    assert ss.post(SID, {"model": "gpt-example"}, "token")[1]["status"] == 409
+    assert ss.post(SID, {"model": "gpt-example"}, "token")[1]["pending"] == {
+        "model": "gpt-example"}
     assert not codex.typed
     codex.state = "waiting"
     ok, result = ss.post(SID, {"model": "gpt-example", "plan": True}, "token")
     assert ok, result
     assert result["model"] == "gpt-example" and result["plan"]
+    assert ss.pending(SID) == {}       # made between turns, so nothing waits
     assert ss.post(SID, {"model": "haiku"}, "token")[1]["status"] == 400
     ss._CHOSEN.clear()
 
