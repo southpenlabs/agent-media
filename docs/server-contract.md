@@ -7636,6 +7636,21 @@ asks for a clip it has just recorded and shows them under its chip. 404 for
 a path that is not a shared file, 409 with no speech-to-text set up, 502
 when the service fails. Cached by the clip, so the send asks nothing again.
 
+**The recording itself** (David, 3 Nov 2026: a dictation mode where the app
+records and the server transcribes each stretch, split at the speaker's
+pauses): `POST /transcribe[?language=xx]` with `Content-Type: audio/*` (or
+`application/octet-stream`) and the recording as the body — webm/opus or
+ogg/opus from a WebView's MediaRecorder, a few seconds to ~30 s — →
+`{"ok", "text", "ms", "provider"}`: its words (`""` for silence) and how
+long the service took. The extension it goes to the service with comes from
+the Content-Type (`audio/webm` → webm, `audio/ogg` → ogg, …; octet-stream by
+its first bytes). `language` (an ISO code) is a hint; anything else is
+dropped. Same bearer as `{path}` (a paired device), checked before the body
+is read. 400 for an empty body, 413 over 8 MiB, 503 with no speech-to-text
+set up, 502 when the service fails, each with `error` in plain words.
+Nothing is kept but the cached transcript. Any other Content-Type is the
+`{path}` form.
+
 ### 6.37 The words of a room's voice notes (built 29 Oct 2026)
 
 Code: `agent_media_server/voice_notes.py`, `matrix.Room.set_transcript`.

@@ -569,6 +569,10 @@ def body_limit(path: str) -> int:
         from . import contacts
 
         return contacts.IMPORT_MAX
+    if path == "/transcribe":
+        from . import voice_clips
+
+        return voice_clips.AUDIO_MAX   # a stretch of dictation, as audio (§6.36)
     # A Termux job's output (phone_jobs.py): up to 1 MiB each of out and
     # err, which JSON may escape to several times that.
     return 8 * MAX_BODY * 16 if path == "/jobs/result" else MAX_BODY
@@ -3368,6 +3372,22 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # voice_clips.session_transcribe).
         from . import voice_clips
 
+        if voice_clips.is_audio_body(h.headers.get("Content-Type", "")):
+            # The recording itself: a stretch of dictation (§6.36).
+            try:
+                length = int(h.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            lang = parse_qs(h.path.partition("?")[2]).get("language", [""])[0]
+            lang = lang if re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?", lang) else ""
+            ok, detail = voice_clips.session_transcribe_audio(
+                h.rfile, length, h.headers.get("Content-Type", ""), _bearer(h), language=lang)
+            if not ok and detail.get("status") != 502:
+                # Refused before the body was read (as /upload): left
+                # unread, so the connection cannot carry another request.
+                h.close_connection = True
+            _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+            return True
         body = _read_json(h) or {}
         ok, detail = voice_clips.session_transcribe(str(body.get("path") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
