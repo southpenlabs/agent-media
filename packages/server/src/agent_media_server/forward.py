@@ -16,6 +16,11 @@ chooses one chat or several, and each gets the message:
 From a room the server takes the message as it holds it; from an agent's
 chat the app sends its words (`text`). Each chat is tried; the answer says
 which took it and which did not.
+
+`move: true` (David, 4 Nov 2026: a Move beside Cancel and Edit on your
+latest message, for words sent in the wrong chat): the words reach an
+agent's chat as your own message, with no `Forwarded from` line — the app
+then takes the original back (§6.19) and opens the chat they went to.
 """
 
 from __future__ import annotations
@@ -77,9 +82,10 @@ def _shared_copy(info: dict, name: str) -> str | None:
 
 
 def session_forward(session: str, mid: str, to: list, bearer: str, *,
-                    text: str = "") -> tuple[bool, dict]:
-    """`{"session", "id", "to": [session…], "text"?}` → `{"session", "id",
-    "sent": [session…], "failed": [{"session", "error"}]}`."""
+                    text: str = "", move: bool = False) -> tuple[bool, dict]:
+    """`{"session", "id", "to": [session…], "text"?, "move"?}` → `{"session",
+    "id", "sent": [session…], "failed": [{"session", "error"}]}`. `move`:
+    an agent's chat gets the words as yours, no `Forwarded from` line."""
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
@@ -116,7 +122,7 @@ def session_forward(session: str, mid: str, to: list, bearer: str, *,
                 if ok and got.get("text"):
                     ok, detail = room.send(got["text"])
             else:
-                lines = [f"Forwarded from {origin}:"]
+                lines = [] if move else [f"Forwarded from {origin}:"]
                 if got.get("text"):
                     lines.append(got["text"])
                 if got.get("media"):

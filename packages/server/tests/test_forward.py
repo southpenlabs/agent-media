@@ -72,6 +72,17 @@ def test_from_an_agent_the_words_come_with_it_and_refusals(rooms):
     assert forward.session_forward(SID, "a-1", [b.thread], "tok")[1]["status"] == 400
 
 
+def test_a_move_gives_an_agent_the_words_as_yours(rooms):
+    # Move it (4 Nov 2026): no "Forwarded from" line; a room gets the words as ever.
+    a, b, put, agent = rooms
+    ok, d = forward.session_forward(SID, "a-1", [b.thread], "tok", text="paint the shed blue", move=True)
+    assert ok and put[-1][1]["body"] == "paint the shed blue"
+    ok, d = forward.session_forward(a.thread, "$1", [SID], "tok", move=True)
+    assert ok and d["sent"] == [SID]
+    (s, text), = agent
+    assert s == SID and text == "party at 8, bring snacks"
+
+
 def test_one_chat_failing_does_not_stop_the_rest(rooms, monkeypatch):
     a, b, put, agent = rooms
     monkeypatch.setattr(send, "reply", lambda *a, **k: (False, {"error": "no such session"}))

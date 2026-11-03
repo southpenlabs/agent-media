@@ -3475,7 +3475,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = forward.session_forward(str(body.get("session") or ""),
                                              str(body.get("id") or ""), body.get("to"),
-                                             _bearer(h), text=str(body.get("text") or ""))
+                                             _bearer(h), text=str(body.get("text") or ""),
+                                             move=bool(body.get("move")))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/session/edit", "/session/unsend"):
         # Your own message in a room, edited or unsent (server-contract.md

@@ -5247,8 +5247,11 @@ Authorization: Bearer <device token>
 Code: `agent_media_server/retract.py`, the drivers' `interrupt(drop_queued=)`.
 Pinned by `packages/server/tests/test_retract.py`. The app's tap on your own
 latest message: **Cancel** takes it back; **Edit** takes it back and puts its
-words in the reply box, to be sent again changed. A correction, not a rewind
-(David, 27 Sep 2026): the original stays in the transcript, struck through.
+words in the reply box, to be sent again changed; **Move** (4 Nov 2026)
+sends the words to another chat as your own (§6.40 with `move: true`), or
+carries them to a new chat's box, then takes the original back and opens the
+chat they went to. A correction, not a rewind (David, 27 Sep 2026): the
+original stays in the transcript, struck through.
 
 - **Range** (26 Oct 2026, video in the app): one `Range: bytes=…` (a span,
   `N-`, or `-N`) is answered `206 Partial Content` with `Content-Range` and
@@ -7844,8 +7847,9 @@ Code: `agent_media_server/forward.py`. Pinned by
 apps do (David, 20 Oct 2026: forward a message; "send to several chats at
 once").
 
-`POST /session/forward {"session", "id", "to": ["<session>", …], "text"?}`
-→ `{"ok", "session", "id", "sent": [...], "failed": [{"session", "error"}]}`.
+`POST /session/forward {"session", "id", "to": ["<session>", …], "text"?,
+"move"?}` → `{"ok", "session", "id", "sent": [...], "failed": [{"session",
+"error"}]}`.
 `to` is 1 to 20 chats of any kind; the chat it came from is skipped. From a
 Matrix room the message is taken as the room holds it (404 when it does
 not); from an agent's chat `text` is its words (400 when there are none).
@@ -7859,6 +7863,12 @@ not); from an agent's chat `text` is its words (400 when there are none).
 
 Each chat is tried on its own: one that refuses is in `failed` with its
 reason and the rest still get it. 400 for a bad session id or `to`.
+
+**`move: true`** (4 Nov 2026; the app's Move beside Cancel and Edit on your
+latest message, §6.19, for words sent in the wrong chat): an agent's chat
+gets the words as your own message, no `Forwarded from` line. The app then
+takes the original back (`/session/retract`) and opens the chat they went
+to; a room is sent to as ever.
 
 ### 6.41 Group info: members, rename, leave — gated (built 30 Oct 2026)
 
