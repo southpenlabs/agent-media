@@ -249,3 +249,49 @@ def test_a_failed_stop_says_no_cue():
     assert not question_gate.cut_unanswerable(lambda: "no player", submit=sent.append)
     time.sleep(0.1)
     assert sent == []
+
+
+# --- the black screen's reach (David, 3 Nov 2026) ------------------------------
+
+def test_a_black_screen_answers_for_its_threads_only():
+    watching.black("phone", True, [SID])
+    assert question_gate.answerable(SID)
+    assert not question_gate.answerable("other-thread")
+    watching.black("phone", True, [])        # no thread open, nothing pinned
+    assert not question_gate.answerable(SID)
+    watching.black("phone", True)            # every thread
+    assert question_gate.answerable("other-thread")
+    watching.black("phone", False)
+    assert not watching.black_screen_on() and not watching.black_covers(SID)
+
+
+def test_a_lease_from_before_reaches_every_thread():
+    from agent_media_core._paths import state_dir
+
+    (state_dir() / watching.BLACK_NAME).write_text(json.dumps({"app": time.time() + 60}))
+    assert watching.black_screen_on() and watching.black_covers("any-thread")
+    (state_dir() / watching.BLACK_NAME).write_text(json.dumps({"app": time.time() - 1}))
+    assert not watching.black_screen_on()
+
+
+def test_the_voice_names_a_thread_it_moves_to_under_a_black_screen():
+    from agent_media_core.intake import submit as S
+
+    def reply(session, title, **md):
+        return Event(text="Done.", source=Source.CLAUDE_CODE,
+                     metadata={"kind": "stop", "session": session, "title": title, **md})
+
+    # No black screen: nothing said, but the thread is noted.
+    assert S._thread_lead(reply("t-a", "Fix the build")) == ""
+    watching.black("phone", True)
+    assert S._thread_lead(reply("t-a", "Fix the build")) == ""          # same thread
+    assert S._thread_lead(reply("t-b", "Write the release notes for Sasonica today")) \
+        == "From Write the release notes for Sasonica."
+    assert S._thread_lead(reply("t-b", "Write the release notes")) == ""
+    # A question too; never the cue, thinking or a replay.
+    assert S._thread_lead(_question()) == "From Wire the question gate."
+    assert S._thread_lead(reply("t-c", "Other", ask_cue=True)) == ""
+    assert S._thread_lead(reply("t-c", "Other", thinking=True)) == ""
+    assert S._thread_lead(Event(text="Ding.", source=Source.CLAUDE_CODE,
+                                metadata={"kind": "notif", "session": "t-d"})) == ""
+    watching.black("phone", False)

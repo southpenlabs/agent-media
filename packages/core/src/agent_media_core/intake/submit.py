@@ -3125,6 +3125,48 @@ def _reply_title(metadata, window: str) -> str:
     return " ".join(str(title or window or "").split())
 
 
+#: Which thread the voice last spoke for (`_thread_lead`).
+_LAST_THREAD_NAME = "voice-last-thread"
+
+
+def _thread_lead(event: Event) -> str:
+    """"From <thread>." when the voice moves to another thread's reply or
+    question while a black screen is up, where nothing on screen says whose
+    it is (David, 3 Nov 2026: "Name the thread on switch"); "" otherwise.
+    Every reply and question notes its thread, black screen or not, so the
+    first one after the black screen goes up is named only if the thread
+    changed. Never raises."""
+    md = event.metadata or {}
+    if md.get("thinking") or md.get("ask_cue") or md.get("replay"):
+        return ""
+    if not (md.get("ask") or md.get("kind") == "stop"):
+        return ""
+    session = _source_session(md)
+    if not session:
+        return ""
+    try:
+        path = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")) \
+            / "agent-media" / _LAST_THREAD_NAME
+        try:
+            last = path.read_text().strip()
+        except OSError:
+            last = ""
+        if last != session:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(session)
+        if not last or last == session:
+            return ""
+        from .. import watching
+        if not watching.black_screen_on():
+            return ""
+        words = _reply_title(md, "").split()[:6]
+        short = " ".join(words).rstrip(".,;:!?-–— ")
+        return f"From {short}." if short else ""
+    except Exception as e:  # noqa: BLE001 — a missing name never stops the reply
+        log.info("thread lead: %s", e)
+        return ""
+
+
 def _nav_flag_path(target: Target) -> Path:
     """File the popup writes to request a sentence/paragraph jump (`media skip`).
 
@@ -4174,6 +4216,12 @@ def _submit_event(event: Event,
         text = event.text.strip()
         if not text:
             return None
+        if not thinking:
+            # Named when the voice moves to another thread under a black
+            # screen (_thread_lead).
+            lead = _thread_lead(event)
+            if lead and not text.startswith(lead):
+                text = f"{lead} {text}"
 
     def _gather() -> str:
         """The streamed reply's whole text, waiting for the model to finish

@@ -2137,7 +2137,16 @@ Pinned by `packages/server/tests/test_reap.py` and
 
 #### `POST /device/black` — gated (30 Oct 2026)
 
-`{"on": true|false, "device"?}` → `{"ok": true, "device", "on", "until"}`.
+`{"on": true|false, "device"?, "session"?, "reach"?}` → `{"ok": true, "device", "on", "until", "reach", "session"}`.
+
+`session` is the thread on the page under the black screen, `reach` the
+threads it answers for (3 Nov 2026): `"thread"` (that thread only, the
+default when a thread is named), `"pinned"` (that thread and the pinned
+ones, read again at each renewal) or `"all"` (every thread; the default
+when none is named, as an app from before sends). The app reports again at
+once when either changes while it is up — a swipe to another thread moves
+it. While the voice moves to another thread's reply or question under a
+black screen, it says "From <thread title>." first (the first six words).
 
 The app's black screen is up (`true`) or down (`false`). The app sends
 `true` when it goes up and again every 30 s while it stays, and `false`
@@ -2148,7 +2157,7 @@ answered by voice there.
 A question is read in full only where it can be answered: its thread on
 screen in the app (its event stream, §11; a `/session/pocket` lease is the
 screen off and does not count), its pane the one the desk is on, black
-screen mode up on some device, or the thread hands-free (the app's loop,
+screen mode up on some device and reaching this thread, or the thread hands-free (the app's loop,
 `/reply` with `voice: true`). Otherwise, at every speech level, it is held
 with its Play (`extras.held`) like an unwatched reply, and opening the thread
 plays it — an `auto` or `interrupt` thread's too — and a short cue is spoken
@@ -2157,8 +2166,8 @@ instead: "A question in <thread title>." (the first six words of it). A
 minute per thread. A question read while answerable whose turn to speak
 comes after the listener left is held and cued then.
 
-A question already being read is asked again 3 s after the black screen
-goes down (`false`) and after a thread's last event stream closes (3 Nov
+A question already being read is asked again 3 s after every black screen
+report (down, or up over another thread or with a narrower reach) and after a thread's last event stream closes (3 Nov
 2026): if it can no longer be answered, and its thread was not on screen
 when the phone was locked (a `/session/pocket` lease), it is stopped, held
 for its thread as above (opening the thread reads it from the start) and

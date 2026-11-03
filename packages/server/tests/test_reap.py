@@ -702,7 +702,8 @@ def test_black_screen_is_leased_on_and_off(server, shelf, signed_in, typed):
     assert obj["device"] == "p8a" and watching.black_screen_on()
     assert question_gate.answerable(SID2)
     res, obj = call(server, "POST", "/device/black", {"on": False, "device": "p8a"}, AUTH)
-    assert obj == {"ok": True, "device": "p8a", "on": False, "until": 0}
+    assert obj == {"ok": True, "device": "p8a", "on": False, "until": 0,
+                   "reach": "all", "session": ""}
     assert not watching.black_screen_on() and not question_gate.answerable(SID2)
     res, obj = call(server, "POST", "/device/black", {"on": True}, AUTH)
     assert obj["device"] == "app" and watching.black_screen_on()
@@ -713,23 +714,52 @@ def test_black_screen_is_leased_on_and_off(server, shelf, signed_in, typed):
 
 def test_black_screen_down_and_a_thread_leaving_recheck_the_question(server, shelf, signed_in, typed,
                                                                      monkeypatch):
-    """Down, or a thread off screen: a question still being read is asked
-    about again (speech.recheck_question_soon); up, nothing."""
+    """Every report, or a thread off screen: a question still being read is
+    asked about again (speech.recheck_question_soon)."""
     from agent_media_server import speech, thread_events
 
     asked = []
     monkeypatch.setattr(speech, "recheck_question_soon", lambda *a, **k: asked.append(1))
     call(server, "POST", "/device/black", {"on": True, "device": "p8a"}, AUTH)
-    assert asked == []
+    assert asked == [1]                      # up: it may reach fewer threads
     call(server, "POST", "/device/black", {"on": False, "device": "p8a"}, AUTH)
-    assert asked == [1]
+    assert asked == [1, 1]
     monkeypatch.setattr(thread_events, "_LAST_ON", {SID2: 1})
     with thread_events._LOCK:
         thread_events._publish()
-    assert asked == [1, 1]
+    assert asked == [1, 1, 1]
     with thread_events._LOCK:
         thread_events._publish()             # nothing left: nothing more
-    assert asked == [1, 1]
+    assert asked == [1, 1, 1]
+
+
+def test_the_black_screen_reaches_its_thread_the_pinned_ones_or_all(server, shelf, signed_in,
+                                                                     typed):
+    """David, 3 Nov 2026: the black screen and its access to multiple
+    threads — the thread under it, the pinned ones too, or every thread."""
+    from agent_media_core import question_gate, watching
+    from agent_media_server import pins as P
+
+    res, obj = call(server, "POST", "/device/black", {"on": True, "device": "p8a", "session": SID},
+                    AUTH)
+    assert res.status == 200 and obj["reach"] == "thread" and obj["session"] == SID
+    assert watching.black_covers(SID) and not watching.black_covers(SID2)
+    assert question_gate.answerable(SID) and not question_gate.answerable(SID2)
+    P.set_pinned(SID2, True)
+    try:
+        call(server, "POST", "/device/black",
+             {"on": True, "device": "p8a", "session": SID, "reach": "pinned"}, AUTH)
+        assert watching.black_covers(SID) and watching.black_covers(SID2)
+        assert not watching.black_covers("someone-else")
+    finally:
+        P.set_pinned(SID2, False)
+    call(server, "POST", "/device/black", {"on": True, "device": "p8a", "session": SID, "reach": "all"},
+         AUTH)
+    assert watching.black_covers("someone-else")
+    res, obj = call(server, "POST", "/device/black", {"on": True, "reach": "loud"}, AUTH)
+    assert res.status == 400 and obj["error"] == "reach must be thread, pinned or all"
+    call(server, "POST", "/device/black", {"on": False, "device": "p8a"}, AUTH)
+    assert not watching.black_covers(SID)
 
 
 def test_a_question_recheck_never_runs_outside_the_server(monkeypatch):

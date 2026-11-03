@@ -10,8 +10,10 @@ and so read in full, when (`answerable`):
 - its thread is on screen in the app (watching.py's open streams; a pocket
   lease is the screen off, so it does not count), or its pane is the one the
   desk is on, or it runs in another app's front-end (toast.py);
-- black screen mode is up on a device (watching.py's black lease, `POST
-  /device/black`): the listener answers by voice there;
+- black screen mode is up on a device and reaches this thread
+  (watching.py's black lease, `POST /device/black`: the thread under it,
+  the pinned ones, or every thread, as the listener chose): the listener
+  answers by voice there;
 - the thread is hands-free (voice_mode.py: the app's loop is on).
 
 Otherwise the question is held, with its Play and toast, like a reply
@@ -58,7 +60,7 @@ def answerable(session: str) -> bool:
         from . import voice_mode, watching
         from .intake import toast
 
-        return bool(watching.black_screen_on()
+        return bool(watching.black_covers(session)
                     or (session and voice_mode.active(session))
                     or watching.is_open(session)      # on screen; not a pocket lease
                     or toast._in_other_app()

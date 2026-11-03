@@ -166,7 +166,7 @@ device gets its token):
                   off on that thread (true), or it shows again (false): a
                   pocket-level reply plays for MEDIA_POCKET_S after
                   (agent_media_core/watching.py, pins.py)
-  POST /device/black {"on": true|false, "device"?} → the app's black screen
+  POST /device/black {"on": true|false, "device"?, "session"?, "reach"?} → the app's black screen
                   is up (renewed every 30 s) or down: a question is read in
                   full while it is (agent_media_core/question_gate.py, pins.py)
   GET|POST /speech/default {"level"} → the level of every thread with none
@@ -3617,7 +3617,9 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The app's black screen is up: questions can be answered by voice.
         body = _read_json(h) or {}
         ok, detail = pins.device_black(body.get("on"), _bearer(h),
-                                       device=body.get("device"))
+                                       device=body.get("device"),
+                                       session=body.get("session"),
+                                       reach=body.get("reach"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/thinking":
         from . import thinking_speech

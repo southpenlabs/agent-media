@@ -195,9 +195,16 @@ def is_open(session: str, pocketed: bool = False) -> bool:
 # server cannot see it, so the app leases it on (`POST /device/black`) when
 # the black screen goes up, renews the lease every 30 s while it is up, and
 # gives it back when it goes. `<state_dir>/device-black.json` is
-# `{"<device>": <until, epoch s>}`; a lease runs out after MEDIA_BLACK_S
-# (default 90), so an app killed with the black screen up stops counting
-# within a minute and a half.
+# `{"<device>": {"until": <epoch s>, "sessions"?: [...]}}` (a bare `until`
+# from before reads as reaching every thread); a lease runs out after
+# MEDIA_BLACK_S (default 90), so an app killed with the black screen up stops
+# counting within a minute and a half.
+#
+# Its reach (David, 3 Nov 2026: "better ways to manage the black screen and
+# its access to multiple threads"): `sessions` are the threads it answers for
+# — the one under it, and the pinned ones when the listener chose those —
+# and a lease without it answers for every thread (the reach "all", or an
+# app from before).
 
 BLACK_NAME = "device-black.json"
 
@@ -209,8 +216,8 @@ def black_s() -> int:
         return 90
 
 
-def _blacks() -> dict[str, float]:
-    """The unexpired black screen leases."""
+def _blacks() -> dict[str, dict]:
+    """The unexpired black screen leases, `{"until", "sessions"?}` each."""
     try:
         data = json.loads((state_dir() / BLACK_NAME).read_text())
     except (OSError, ValueError):
@@ -218,19 +225,29 @@ def _blacks() -> dict[str, float]:
     if not isinstance(data, dict):
         return {}
     now = time.time()
-    return {d: t for d, t in data.items()
-            if isinstance(t, (int, float)) and t > now}
+    out: dict[str, dict] = {}
+    for d, v in data.items():
+        rec = {"until": v} if isinstance(v, (int, float)) else v
+        if not isinstance(rec, dict) or not isinstance(rec.get("until"), (int, float)):
+            continue
+        if rec["until"] > now:
+            out[d] = rec
+    return out
 
 
-def black(device: str, on: bool) -> float:
-    """Lease black screen mode on for `device` for `black_s()`, or give the
-    lease back (`on` false). Answers the lease's end, 0 for none."""
+def black(device: str, on: bool, sessions: list[str] | None = None) -> float:
+    """Lease black screen mode on for `device` for `black_s()`, answering for
+    `sessions` (None: every thread), or give the lease back (`on` false).
+    Answers the lease's end, 0 for none."""
     device = (device or "").strip() or "app"
     leases = _blacks()
     leases.pop(device, None)
     until = time.time() + black_s() if on and black_s() > 0 else 0.0
     if until:
-        leases[device] = until
+        rec: dict = {"until": until}
+        if sessions is not None:
+            rec["sessions"] = [s for s in dict.fromkeys(sessions) if isinstance(s, str) and s]
+        leases[device] = rec
     path = state_dir() / BLACK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
@@ -242,3 +259,13 @@ def black(device: str, on: bool) -> float:
 def black_screen_on() -> bool:
     """Is black screen mode up on some device (an unexpired lease)?"""
     return bool(_blacks())
+
+
+def black_covers(session: str) -> bool:
+    """Does a black screen up now answer for `session`: one reaching every
+    thread, or one whose threads include it?"""
+    for rec in _blacks().values():
+        reach = rec.get("sessions")
+        if not isinstance(reach, list) or (session and session in reach):
+            return True
+    return False

@@ -130,7 +130,11 @@ def session_pocket(session: str, flag, bearer: str) -> tuple[bool, dict]:
     return True, {"session": session, "until": until}
 
 
-def device_black(flag, bearer: str, device="") -> tuple[bool, dict]:
+#: The black screen's reach (`POST /device/black`'s `reach`).
+BLACK_REACHES = ("thread", "pinned", "all")
+
+
+def device_black(flag, bearer: str, device="", session=None, reach=None) -> tuple[bool, dict]:
     """`POST /device/black {"on", "device"?}`: the app's black screen went up
     (true; renewed every 30 s while it stays) or down (false). While the lease
     lasts a question card is read in full even with its card out of view: it
@@ -144,24 +148,41 @@ def device_black(flag, bearer: str, device="") -> tuple[bool, dict]:
         return False, {"error": "on must be true or false", "status": 400}
     if device is not None and not isinstance(device, str):
         return False, {"error": "device must be a string", "status": 400}
+    if session is not None and not isinstance(session, str):
+        return False, {"error": "session must be a string", "status": 400}
+    if reach is not None and reach not in BLACK_REACHES:
+        return False, {"error": "reach must be thread, pinned or all", "status": 400}
     device = (device or "").strip()[:80] or "app"
+    session = (session or "").strip()[:128]
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    # The threads it answers for (watching.black_covers): the one under it,
+    # with the pinned ones for "pinned" (read again at each renewal, every
+    # 30 s), none named for "all" — and none for an app that names no
+    # thread, which reaches every thread as before. With no thread open,
+    # "thread" and "pinned" answer for the pinned ones only.
+    reach = reach or ("thread" if session else "all")
+    sessions = None
+    if reach != "all":
+        sessions = [session] if session else []
+        if reach == "pinned":
+            sessions += sorted(pinned())
     try:
-        until = watching.black(device, flag)
+        until = watching.black(device, flag, sessions)
     except OSError as e:
         return False, {"error": f"could not save the lease ({e})", "status": 500}
-    if not until:
-        # Down: a question being read for a thread not in view can no
-        # longer be answered by voice, so it is stopped and cued.
-        try:
-            from . import speech
+    # Down, or up over another thread or with a narrower reach: a question
+    # being read for a thread it no longer reaches can no longer be answered
+    # by voice, so it is stopped and cued.
+    try:
+        from . import speech
 
-            speech.recheck_question_soon()
-        except Exception:  # noqa: BLE001
-            pass
-    return True, {"device": device, "on": bool(until), "until": until}
+        speech.recheck_question_soon()
+    except Exception:  # noqa: BLE001
+        pass
+    return True, {"device": device, "on": bool(until), "until": until,
+                  "reach": reach, "session": session}
 
 
 def speech_default(bearer: str, level=None) -> tuple[bool, dict]:
