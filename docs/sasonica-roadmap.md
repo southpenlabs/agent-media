@@ -422,6 +422,17 @@ or Mark all read, clears it.
 
 ## In flight
 
+**The black screen and its threads** (David, 3 Nov 2026: "better ways to
+manage the black screen and it's access to multiple threads"; all four of
+the ideas). The lease names the thread under it and a reach (this thread by
+default, pinned threads too, every thread; the black screen key's menu), so
+other threads' questions are only cued; a level sideways swipe on the black
+opens the newest thread with something waiting or goes back; the voice says
+"From <thread>." when it moves to another thread under a black screen.
+Server live (agent-media `939b4482`); the app's half (sasonica-app
+`1ce7afd`) ships with the next APK. Until then the app names no thread, so
+the black screen still reaches every thread.
+
 **The power button into the black screen** (David, 3 Nov 2026: "Can we
 hijack the power button for black screen mode?"; he chose the re-wake).
 Android never gives an app the power key, so the shell watches the screen
