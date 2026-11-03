@@ -9,8 +9,13 @@ Nov 2026) for `spotify-via-youtube`, `insight-timer-profiles` and
 by its author rather than by the product's maker, under AGPL-3.0-or-later
 (David: "Your personal GitHub"; "I guess agpl"). This repository does not
 name or link it, so the product neither ships nor promotes it. The app side stays as it
-is for now (David: "Server side only for now"); the bridges, Find on
-Messenger and the stories log are the next server methods to move.
+is for now (David: "Server side only for now"). **Step 1 for
+`messaging-bridges` built** (3 Nov 2026): the bridge relay, the sign-in
+watcher, Find on Messenger and texting through a bridge are the add-on's,
+reached through `bridge_addon`; the bridge upkeep (release installs,
+follow the homeserver) is the add-on's `bridge-upkeep` command, configured
+by settings, with each host's own choices kept on the host. The stories
+log is the next server method to move.
 
 ## The YouTube methods (2 Nov 2026)
 

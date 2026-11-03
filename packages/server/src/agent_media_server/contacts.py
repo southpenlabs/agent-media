@@ -2028,7 +2028,10 @@ def _card_mail(c: dict) -> dict | None:
 def card(cid: str) -> dict | None:
     """`GET /contacts/<id>`'s contact: the merged card, its sources, and the
     rooms that are this person's."""
-    from . import contacts_edit, contacts_find, contacts_level, contacts_photos, contacts_text
+    from . import bridge_addon, contacts_edit, contacts_level, contacts_photos, contacts_text
+
+    # Find on Messenger is the messaging-bridges add-on's (bridge_addon).
+    contacts_find = bridge_addon.contacts_find()
 
     conn = _connect(create=False)
     if conn is None:
@@ -2036,7 +2039,7 @@ def card(cid: str) -> dict | None:
     try:
         got = conn.execute("SELECT name, card, updated FROM contacts WHERE id=?", (cid,)).fetchone()
         pics = contacts_photos.index(conn) if got else {}
-        said_none = contacts_find.dismissed_for(conn, cid) if got else set()
+        said_none = contacts_find.dismissed_for(conn, cid) if got and contacts_find else set()
         level = contacts_level.of(conn, cid) if got else None
     finally:
         conn.close()
@@ -2045,7 +2048,7 @@ def card(cid: str) -> dict | None:
     c = json.loads(got[1])
     return {"id": cid, "crm": _crm_of(c), "name": got[0], "names": c.get("names") or [],
             "photo": contacts_photos.field(cid, c, pics),
-            "find": contacts_find.findable(c, said_none),
+            "find": contacts_find.findable(c, said_none) if contacts_find else [],
             "phones": c.get("phones") or [], "emails": c.get("emails") or [],
             "addresses": c.get("addresses") or [], "organizations": c.get("organizations") or [],
             "websites": c.get("websites") or [], "birthday": c.get("birthday") or None,
@@ -2492,9 +2495,11 @@ def _reset_for_tests() -> None:
     _ACCESSES.clear()
     _ACCESSES[""] = _ACCESS
     _PENDING.clear()
-    from . import contacts_find
+    from . import bridge_addon
 
-    contacts_find._reset_for_tests()
+    contacts_find = bridge_addon.contacts_find()
+    if contacts_find is not None:
+        contacts_find._reset_for_tests()
 
 
 # --- the background sync --------------------------------------------------------

@@ -4394,7 +4394,7 @@ local look, never a network call:
 | `org` | the notes tree's capture file exists (`/org/setup`'s `org` row is ok) |
 | `music` | `MEDIA_DUCK_ROOMS_STREAM` is set, or the play history has a music row |
 | `contacts` | the contacts store (`contacts.db`) or a Google client file exists |
-| `bridges` | a Matrix bridge config is found (`MATRIX_BRIDGES`, §6.26) and personal use allows `messaging-bridges` (below); else `/bridges` and `/contacts/<id>/find` answer 404 and the bridge watcher does not start |
+| `bridges` | the `messaging-bridges` add-on (below) is installed and allowed, and finds a Matrix bridge config (`MATRIX_BRIDGES`, §6.26); else `/bridges` and `/contacts/<id>/find` answer 404 and the bridge watcher does not start |
 | `personas` | the personas repo is there (`MEDIA_PERSONAS_DIR`, default `~/agent-personas`) |
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
 | `read` | always: this server answers `POST /read` (§6.7a; the app offers Read it only then) |
@@ -4406,7 +4406,7 @@ local look, never a network call:
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
 | `youtube` | YouTube Music is reachable: `MEDIA_RADIO_YOUTUBE=1` and a phone to fetch through (`MEDIA_PHONE_JOBS=1` or `MEDIA_MUSIC_LOCAL_SSH`) |
 | `stories` | personal use allows `facebook-stories` (its own setting `MEDIA_STORIES`): the app's Chats tab offers its stories row, which opens Facebook's and Instagram's own stories in the phone's signed-in browser; nothing about it is sent to the server |
-| `personal_use` | `{"on", "methods": {name: allowed}, "addons": [names]}` (2 Nov 2026; `addons`: the methods a separate add-on provides here — `spotify-via-youtube`, `insight-timer-profiles`, `facebook-previews`, `spotify-speaker` and the six `youtube-*` methods are not in this package at all, but in a personal-use add-on installed separately (`agent_media.addons` entry points), and are allowed only where one is; `personal_use.py`, `docs/proposals/2026-11-02-personal-use-switch.md`): what this install allows that a public product could not. `on` is `MEDIA_PERSONAL_USE=1`: the server serves only its owner's personal use, and every method may run; unset (the package's default), none may and each feature uses its public alternative. A method's own setting wins either way. Methods: `spotify-via-youtube` (`MEDIA_SPOTIFY_VIA_YOUTUBE`; else a Spotify link is saved by its oEmbed name and cover and played on Spotify itself, §6.46), `insight-timer-profiles` (`MEDIA_PRACTICE_PROFILES`; else no teacher profiles or places, §6.45), `insight-timer-page` (`MEDIA_PRACTICE_EMBED_PLAY`; `embed_play`, §6.45), `messaging-bridges` (`MEDIA_BRIDGES`), `facebook-stories` (`MEDIA_STORIES`), `facebook-previews` (`MEDIA_FACEBOOK_PREVIEWS`; else a Facebook link's card is fetched as a browser, §6.18), `signed-in-reading` (`MEDIA_SIGNED_IN_READING`), `spotify-speaker` (`MEDIA_SPOTIFY_SPEAKER`; §6.42), and YouTube's, all add-on methods (2 Nov 2026): `youtube-accounts` (`MEDIA_YOUTUBE_ACCOUNTS`; else nothing read), `youtube-metadata` (`MEDIA_YOUTUBE_METADATA`; else shared links judged by shape, oEmbed titles, no lengths), `youtube-radio` (`MEDIA_RADIO_YOUTUBE`, still required; else the hand-off player), `youtube-downloads` (`MEDIA_YOUTUBE_DOWNLOADS`; else nothing downloaded, cached files still play), `youtube-streaming` (`MEDIA_YOUTUBE_STREAMING`; else a YouTube stream is refused) and `youtube-search` (`MEDIA_YOUTUBE_SEARCH`; else the backing music finds nothing on YouTube) |
+| `personal_use` | `{"on", "methods": {name: allowed}, "addons": [names]}` (2 Nov 2026; `addons`: the methods a separate add-on provides here — `spotify-via-youtube`, `insight-timer-profiles`, `facebook-previews`, `spotify-speaker`, `messaging-bridges` and the six `youtube-*` methods are not in this package at all, but in a personal-use add-on installed separately (`agent_media.addons` entry points), and are allowed only where one is; `personal_use.py`, `docs/proposals/2026-11-02-personal-use-switch.md`): what this install allows that a public product could not. `on` is `MEDIA_PERSONAL_USE=1`: the server serves only its owner's personal use, and every method may run; unset (the package's default), none may and each feature uses its public alternative. A method's own setting wins either way. Methods: `spotify-via-youtube` (`MEDIA_SPOTIFY_VIA_YOUTUBE`; else a Spotify link is saved by its oEmbed name and cover and played on Spotify itself, §6.46), `insight-timer-profiles` (`MEDIA_PRACTICE_PROFILES`; else no teacher profiles or places, §6.45), `insight-timer-page` (`MEDIA_PRACTICE_EMBED_PLAY`; `embed_play`, §6.45), `messaging-bridges` (`MEDIA_BRIDGES`; an add-on method since 3 Nov 2026, §6.26), `facebook-stories` (`MEDIA_STORIES`), `facebook-previews` (`MEDIA_FACEBOOK_PREVIEWS`; else a Facebook link's card is fetched as a browser, §6.18), `signed-in-reading` (`MEDIA_SIGNED_IN_READING`), `spotify-speaker` (`MEDIA_SPOTIFY_SPEAKER`; §6.42), and YouTube's, all add-on methods (2 Nov 2026): `youtube-accounts` (`MEDIA_YOUTUBE_ACCOUNTS`; else nothing read), `youtube-metadata` (`MEDIA_YOUTUBE_METADATA`; else shared links judged by shape, oEmbed titles, no lengths), `youtube-radio` (`MEDIA_RADIO_YOUTUBE`, still required; else the hand-off player), `youtube-downloads` (`MEDIA_YOUTUBE_DOWNLOADS`; else nothing downloaded, cached files still play), `youtube-streaming` (`MEDIA_YOUTUBE_STREAMING`; else a YouTube stream is refused) and `youtube-search` (`MEDIA_YOUTUBE_SEARCH`; else the backing music finds nothing on YouTube) |
 
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.
@@ -6710,6 +6710,9 @@ fetched again. **404** no such contact; **503** the phone cannot be reached
 
 #### Find on a network — `POST /contacts/<id>/find` — gated, owner only (19 Oct 2026)
 
+The `messaging-bridges` add-on's (3 Nov 2026, §6.26): without it the
+route answers 404 and every card's `find` is `[]`.
+
 A card's `find` lists the networks it may be searched on: `["messenger"]`
 when the person has no handle there and "None of these" was not said for
 them (always `[]` outside the owner's book). It is David's own act: one
@@ -7025,8 +7028,19 @@ bridgev2 provisioning API (`/_matrix/provision/v3`, bearer = its
 `provisioning.shared_secret`, `?user_id=` the owner's Matrix id). The
 server relays it so the app can see each bridge's sign-ins and sign in,
 sign in again or sign out, without the bot chat. The app stays generic: it
-draws whatever step a bridge sends (`bridges.py`; pinned by
-`packages/server/tests/test_bridges.py`).
+draws whatever step a bridge sends.
+
+**Not in this package** (3 Nov 2026): the bridges are unofficial clients of
+their services, so everything that reaches one — this section's routes, the
+sign-in watcher, Find on a network (§6.25), texting a contact and an SMS
+through a bridge — is the `messaging-bridges` method of a personal-use
+add-on installed separately (§6.11a `personal_use`). agent-media asks
+`bridge_addon.bridges()` / `contacts_find()`; without the add-on, or with
+it not allowed, `/bridges…` and `/contacts/<id>/find` answer 404 and
+nothing reaches a bridge. What follows describes the routes where the
+add-on is installed. The owner's own networks from their exports
+(`profile`, below) stay this package's (`owner_networks.py`). Pinned here
+by `packages/server/tests/test_bridge_addon.py`; the add-on pins the rest.
 
 **Which bridges.** Found from their config files: `MATRIX_BRIDGES` (a
 comma-separated list of paths or globs; default

@@ -94,14 +94,16 @@ class GmessagesSender:
 
     def send(self, number: str, body: str, txn: str) -> str:
         from agent_media_core import matrix
-        from . import bridges
+        from . import bridge_addon
         env = self._env()
         token, owner = env.get("MATRIX_OWNER_TOKEN") or "", matrix.owner_of(env)
         homeserver = (env.get("MATRIX_HOMESERVER") or "").rstrip("/")
         if not token or not owner or not homeserver:
             raise SmsError("No Matrix owner login for texts (MATRIX_OWNER_TOKEN, MATRIX_OWNER_ID, "
                            "MATRIX_HOMESERVER; run matrix-owner-login)")
-        bridge = bridges.find(self.cfg.get("bridge") or "gmessages")
+        # The bridges are the messaging-bridges add-on's (bridge_addon).
+        bridges = bridge_addon.bridges()
+        bridge = bridges.find(self.cfg.get("bridge") or "gmessages") if bridges is not None else None
         if bridge is None:
             raise SmsError("The Google Messages bridge was not found (its provisioning secret)")
         q = {"user_id": owner}

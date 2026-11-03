@@ -14,7 +14,8 @@ never a network call, so the app can ask on every start.
   music     the house speakers have a music stream, or anything was ever
             played as music here (the play history)
   contacts  the contacts store exists, or a Google client is set up for it
-  bridges   a Matrix bridge config was found (bridges.discover)
+  bridges   a Matrix bridge config was found, by the messaging-bridges
+            add-on where one is installed and allowed (bridge_addon)
   personas  the personas repo is there (personas.repo_dir)
   quick     quick chat (quick.py, 26 Oct 2026): this server answers
             `/ask {"agent": "quick"}`; always true here, so an older server,
@@ -75,11 +76,10 @@ def _contacts() -> bool:
 
 
 def _bridges() -> bool:
-    from agent_media_core import personal_use
+    from . import bridge_addon
 
-    from . import bridges
-
-    return personal_use.allowed("messaging-bridges") and bool(bridges.discover())
+    bridges = bridge_addon.bridges()
+    return bridges is not None and bool(bridges.discover())
 
 
 def _stories() -> bool:

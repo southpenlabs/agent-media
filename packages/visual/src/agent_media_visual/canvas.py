@@ -2333,9 +2333,12 @@ def main() -> None:
     from agent_media_server import feedback as _feedback
     _feedback.start()
     # Each bridge's sign-ins as alerts, every 10 min: bridge.<id> at warn while
-    # one needs signing in again (agent_media_server.bridges, §6.26).
-    from agent_media_server import bridges as _bridges
-    _bridges.start_watch()
+    # one needs signing in again (§6.26) — the messaging-bridges add-on's
+    # watcher, where it is installed and allowed (bridge_addon).
+    from agent_media_server import bridge_addon as _bridge_addon
+    _bridges = _bridge_addon.bridges()
+    if _bridges is not None:
+        _bridges.start_watch()
     # The table of threads open in the app (core's watching.py), read by the
     # Stop hook: its path pinned now and this process named its owner, so only
     # this server ever writes it.

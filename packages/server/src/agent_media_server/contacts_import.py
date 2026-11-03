@@ -317,7 +317,7 @@ def _take(out: dict, counts: dict, kind, raw: bytes, fname: str) -> None:
 # (`profile_v2`) and Instagram's personal_information.json (`profile_user`)
 # say the exporter's own name, email, phone and username: what a bridge
 # leaves out of a sign-in (Messenger gives no email), filled in from
-# `owner-networks.json` (bridges.owner_networks, contract §6.26 `profile`).
+# `owner-networks.json` (owner_networks.py, contract §6.26 `profile`).
 
 PROFILE_FILES = ("profile_information.json", "personal_information.json")
 PROFILE_FIELDS = ("name", "email", "phone", "username")
@@ -395,12 +395,12 @@ def save_owner_profiles(profiles: dict[str, dict]) -> dict[str, list[str]]:
     (0600, written whole and atomically), replacing that network's entry and
     keeping the others'. The owner's book only: another account's import
     writes nothing. `{network: [the fields kept]}`, never the values."""
-    from . import bridges, contacts
+    from . import contacts, owner_networks
 
     if not profiles or not contacts.is_owner():
         return {}
-    path = bridges.owner_networks_path()
-    have = bridges.owner_networks()
+    path = owner_networks.owner_networks_path()
+    have = owner_networks.owner_networks()
     said: dict[str, list[str]] = {}
     for net, fields in profiles.items():
         kept = {k: fields[k] for k in PROFILE_FIELDS if fields.get(k)}

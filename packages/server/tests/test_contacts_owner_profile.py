@@ -1,6 +1,6 @@
 """The owner's own profile from a Facebook or Instagram export
 (contacts_import.save_owner_profiles → owner-networks.json, read by
-bridges.owner_networks for Settings → Bridges, §6.26 `profile`). Made-up
+owner_networks for Settings → Bridges, §6.26 `profile`). Made-up
 files only; HOME, the config dir and the state dir are throwaway, and no
 MEDIA_* or MATRIX_* setting of this host leaks in."""
 
@@ -15,7 +15,7 @@ import zipfile
 
 import pytest
 
-from agent_media_server import bridges, contacts, contacts_exports, contacts_import, matrix
+from agent_media_server import contacts, contacts_exports, contacts_import, matrix, owner_networks
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +78,7 @@ IG_ZIP = {"personal_information/personal_information/personal_information.json":
 
 
 def _saved() -> dict:
-    return json.loads(bridges.owner_networks_path().read_text(encoding="utf-8"))
+    return json.loads(owner_networks.owner_networks_path().read_text(encoding="utf-8"))
 
 
 def test_facebook_profile_is_kept_with_the_friends(caplog):
@@ -88,9 +88,9 @@ def test_facebook_profile_is_kept_with_the_friends(caplog):
     assert got["imported"].get("facebook_friends") == 1
     assert _saved() == {"facebook": {"name": "Zoë Example", "email": "zoe@example.invalid",
                                      "phone": "+61400000123", "username": "zoe.example"}}
-    mode = stat.S_IMODE(os.stat(bridges.owner_networks_path()).st_mode)
+    mode = stat.S_IMODE(os.stat(owner_networks.owner_networks_path()).st_mode)
     assert mode == 0o600
-    assert bridges.owner_networks()["facebook"]["email"] == "zoe@example.invalid"
+    assert owner_networks.owner_networks()["facebook"]["email"] == "zoe@example.invalid"
     # the values are never logged, only the field names
     logged = caplog.text
     for secret in ("zoe@example.invalid", "+61400000123", "zoe.example", "Zoë Example"):
@@ -130,7 +130,7 @@ def test_another_book_writes_nothing():
     with contacts.as_account("acct-0123456789abcdef0123"):
         got = contacts.import_export(_zip(FB_ZIP), "facebook.zip")
     assert "profile" not in got
-    assert not bridges.owner_networks_path().exists()
+    assert not owner_networks.owner_networks_path().exists()
 
 
 def test_not_a_profile_is_ignored():

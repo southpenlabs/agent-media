@@ -72,6 +72,9 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     from agent_media_core import personal_use
     for m in personal_use.ADDON_METHODS:
         personal_use.register(m, object())
+    # The messaging-bridges add-on as a stand-in: it finds the bridge config written above.
+    personal_use.register("messaging-bridges", type("MB", (), {"bridges": type("B", (), {
+        "discover": staticmethod(lambda: [str(bridge / "config.yaml")])})})())
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": True, "signed_in": True, "stories": True, "personal": True,

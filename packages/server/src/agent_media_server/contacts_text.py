@@ -63,10 +63,12 @@ class TimedOut(Exception):
 
 def _bridges() -> list:
     """The bridges a chat may be started on, in `SERVICES` order."""
-    from . import bridges, matrix
+    from . import bridge_addon, matrix
 
+    # The bridges are the messaging-bridges add-on's (bridge_addon): none without it.
+    bridges = bridge_addon.bridges()
     read = matrix._bridges()
-    if not read:
+    if not read or bridges is None:
         return []
     found =[b for b in bridges.discover() if b.bot and b.bot in read and not b.unset]
     order = list(SERVICES)
@@ -204,8 +206,9 @@ def start(cid: str, service: str, address: str) -> dict:
     room read so it is a Matrix row. Never sends them anything. KeyError (no
     such person), ValueError (not one of their services or addresses),
     NotOwner, NotDrivable, Refused, TimedOut."""
-    from . import bridges, contacts, matrix
+    from . import bridge_addon, contacts, matrix
 
+    bridges = bridge_addon.bridges()
     got = services(cid)
     address = (address or "").strip()
     if not address.startswith("@"):
@@ -223,7 +226,7 @@ def start(cid: str, service: str, address: str) -> dict:
     if got["why"]:
         raise NotDrivable(got["why"])
     b = next((b for b in _bridges() if b.id == service), None)
-    if b is None:
+    if b is None or bridges is None:
         raise ValueError(f"they cannot be texted on {service} here")
     try:
         resp = bridges._call(b, "POST", f"/create_dm/{urllib.parse.quote(address, safe='')}",

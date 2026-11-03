@@ -66,6 +66,7 @@ METHODS = {
 
 #: The methods an add-on provides, not this package (ADDON_GROUP entries).
 ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-previews", "spotify-speaker",
+                 "messaging-bridges",
                  "youtube-accounts", "youtube-metadata",
                  "youtube-radio", "youtube-downloads",
                  "youtube-streaming", "youtube-search"}
