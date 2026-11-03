@@ -29,6 +29,16 @@ copied into agent-media.env. OPENAI_API_KEY counts only when its base is
 OpenAI's own (`OPENAI_BASE_URL` unset or api.openai.com): on a gateway host
 it is often the gateway's.
 
+The app's Settings can choose too (David, 3 Nov 2026: "I'd probably prefer
+it to come from the settings", kept per host): `<state_dir>/stt.json`, mode
+0600, `{"chosen": "auto"|<name>, "keys": {<name>: <key>}, "models":
+{<name>: <model>}}` (`save_settings`, `settings`). It is read first: a key
+there beats the environment and the gateway's file for that service (and is
+taken as OpenAI's own whatever OPENAI_BASE_URL says), a model there beats
+MEDIA_STT_MODEL, and `chosen` = a name uses only that service — none when it
+has no key from anywhere. "auto", or no file, is the order above (and
+MEDIA_STT_PROVIDER). MEDIA_STT=0 still turns it all off.
+
 The clip goes as 16 kHz mono MP3 when ffmpeg is there (small, and a format
 every one of them takes), else as it is. A transcript is kept by the clip's
 SHA-256 under the cache dir, so the same clip is never paid for twice.
@@ -95,46 +105,160 @@ def _key(var: str) -> str:
     return ""
 
 
-def _usable(name: str, var: str) -> str:
-    """The key `name` would use, or "" when it is not set up."""
+def _key_from(var: str) -> tuple[str, str | None]:
+    """`var`'s value and where it came from: "env", "gateway" or None."""
+    v = os.environ.get(var, "").strip()
+    if v:
+        return v, "env"
+    v = _key(var)
+    return (v, "gateway") if v else ("", None)
+
+
+# ---- the app's choice (<state_dir>/stt.json) ------------------------------
+
+def settings_path() -> Path:
+    from .._paths import state_dir
+
+    return state_dir() / "stt.json"
+
+
+def _load() -> dict:
+    try:
+        data = json.loads(settings_path().read_text())
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    chosen = data.get("chosen")
+    keys = data.get("keys") if isinstance(data.get("keys"), dict) else {}
+    models = data.get("models") if isinstance(data.get("models"), dict) else {}
+    return {"chosen": chosen if chosen in NAMES else "auto",
+            "keys": {n: str(v) for n, v in keys.items() if n in NAMES and str(v).strip()},
+            "models": {n: str(v) for n, v in models.items() if n in NAMES and str(v).strip()}}
+
+
+def settings() -> dict:
+    """The file's content with each key as `true` (never the key itself)."""
+    data = _load()
+    return {**data, "keys": {n: True for n in data["keys"]}}
+
+
+def save_settings(chosen: str | None = None, key: tuple[str, str | None] | None = None,
+                  model: tuple[str, str | None] | None = None) -> dict:
+    """Change the app's choice: `chosen` "auto" or a name, `key` (name, value)
+    — an empty value removes it — and `model` (name, value), the same. Written
+    0600. ValueError for a name that is not one of NAMES. Answers settings()."""
+    for name in ([chosen] if chosen is not None and chosen != "auto" else []) + \
+            [p[0] for p in (key, model) if p is not None]:
+        if name not in NAMES:
+            raise ValueError(f"{name!r} is not a speech-to-text service here "
+                             f"(one of auto, {', '.join(NAMES)})")
+    data = _load()
+    if chosen is not None:
+        data["chosen"] = chosen
+    for field, pair in (("keys", key), ("models", model)):
+        if pair is None:
+            continue
+        name, value = pair
+        value = (value or "").strip()
+        if value:
+            data[field][name] = value
+        else:
+            data[field].pop(name, None)
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=1)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    return settings()
+
+
+def _find(name: str, var: str, saved: dict | None = None) -> tuple[str, str | None]:
+    """The key `name` would use and where it came from ("settings", "env",
+    "gateway"), or ("", None) when it is not set up. A custom server needs
+    MEDIA_STT_URL; its key may be "" (it wants none)."""
+    saved = _load() if saved is None else saved
+    mine = saved["keys"].get(name, "").strip()
     if name == "custom":
-        return "-" if os.environ.get("MEDIA_STT_URL", "").strip() else ""
-    key = _key(var)
+        if not os.environ.get("MEDIA_STT_URL", "").strip():
+            return "", None
+        if mine:
+            return mine, "settings"
+        key, src = _key_from("MEDIA_STT_KEY")
+        return key, src or "env"
+    if mine:
+        return mine, "settings"
+    key, src = _key_from(var)
     if name == "openai" and key:
         base = os.environ.get("OPENAI_BASE_URL", "").strip()
         if base and "api.openai.com" not in base:
-            return ""
+            return "", None
     if name == "gemini" and not key:
-        key = _key("GOOGLE_API_KEY")
-    return key
+        key, src = _key_from("GOOGLE_API_KEY")
+    return key, src
+
+
+def _usable(name: str, var: str, saved: dict | None = None) -> bool:
+    if name == "custom":
+        return bool(os.environ.get("MEDIA_STT_URL", "").strip())
+    return bool(_find(name, var, saved)[0])
+
+
+def default_model(name: str) -> str:
+    return next(p[4] for p in PROVIDERS if p[0] == name)
 
 
 def provider() -> dict | None:
-    """The service in use: `{"name", "kind", "base", "model"}`, or None when
-    none is set up (or it is turned off)."""
+    """The service in use: `{"name", "kind", "base", "key", "model", "from"}`,
+    or None when none is set up (or it is turned off). `from` is where the
+    key came from: "settings", "env" or "gateway"."""
     if os.environ.get("MEDIA_STT", "1") == "0":
         return None
-    want = os.environ.get("MEDIA_STT_PROVIDER", "").strip().lower()
+    saved = _load()
+    want = saved["chosen"] if saved["chosen"] != "auto" else \
+        os.environ.get("MEDIA_STT_PROVIDER", "").strip().lower()
     for name, kind, var, base, model in PROVIDERS:
         if want and name != want:
             continue
-        key = _usable(name, var)
-        if not key:
+        if not _usable(name, var, saved):
             continue
+        key, src = _find(name, var, saved)
         if name == "custom":
             base = os.environ["MEDIA_STT_URL"].strip().rstrip("/")
-            key = _key("MEDIA_STT_KEY")
-        return {"name": name, "kind": kind, "base": base, "key": key,
-                "model": os.environ.get("MEDIA_STT_MODEL", "").strip() or model}
+        model = (saved["models"].get(name) or os.environ.get("MEDIA_STT_MODEL", "").strip()
+                 or model)
+        return {"name": name, "kind": kind, "base": base, "key": key, "model": model,
+                "from": src}
     return None
 
 
 def status() -> dict:
     """What `/settings` and the CLI say: in use and what else is set up, no keys."""
     p = provider()
-    ready = [n for n, _k, var, _b, _m in PROVIDERS if _usable(n, var)]
+    saved = _load()
+    ready = [n for n, _k, var, _b, _m in PROVIDERS if _usable(n, var, saved)]
     return {"provider": p["name"] if p else None, "model": p["model"] if p else None,
-            "available": ready}
+            "from": p["from"] if p else None, "chosen": saved["chosen"], "available": ready}
+
+
+def choices() -> list[dict]:
+    """One row per service, in order (custom only with MEDIA_STT_URL):
+    `{"name", "model", "has_key", "from"}` — never a key."""
+    saved = _load()
+    out = []
+    for name, _kind, var, _base, model in PROVIDERS:
+        if name == "custom" and not os.environ.get("MEDIA_STT_URL", "").strip():
+            continue
+        key, src = _find(name, var, saved)
+        has = _usable(name, var, saved)
+        out.append({"name": name,
+                    "model": saved["models"].get(name)
+                    or os.environ.get("MEDIA_STT_MODEL", "").strip() or model,
+                    "has_key": has, "from": src if has else None})
+    return out
 
 
 def _small(path: Path, tmp: Path) -> tuple[Path, str]:

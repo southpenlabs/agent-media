@@ -35,7 +35,8 @@ def clean(tmp_path, monkeypatch):
 
 def test_none_set_up():
     assert stt.provider() is None
-    assert stt.status() == {"provider": None, "model": None, "available": []}
+    assert stt.status() == {"provider": None, "model": None, "from": None, "chosen": "auto",
+                            "available": []}
     with pytest.raises(stt.SttError):
         stt.transcribe(__file__)
 
@@ -103,3 +104,32 @@ def test_a_clip_too_big(tmp_path, monkeypatch):
     clip.write_bytes(b"12345")
     with pytest.raises(stt.SttError, match="too long"):
         stt.transcribe(clip)
+
+
+def test_the_settings_file_beats_the_environment(tmp_path, monkeypatch):
+    """The app's choice (stt.json, 3 Nov 2026): a key there beats the env and
+    the gateway's file, a chosen service is the only one, "auto" is the order."""
+    import os
+    import stat
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("GROQ_API_KEY", "g-env")
+    assert stt.provider()["from"] == "env"
+    stt.save_settings(key=("groq", "g-mine"))
+    p = stt.provider()
+    assert (p["name"], p["key"], p["from"]) == ("groq", "g-mine", "settings")
+    path = stt.settings_path()
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert json.loads(path.read_text())["keys"] == {"groq": "g-mine"}
+    assert stt.settings() == {"chosen": "auto", "keys": {"groq": True}, "models": {}}
+    stt.save_settings(chosen="gemini")
+    assert stt.provider() is None                     # chosen, but no key anywhere
+    stt.save_settings(key=("gemini", "gm"), model=("gemini", "gemini-2.5-pro"))
+    p = stt.provider()
+    assert (p["name"], p["key"], p["model"]) == ("gemini", "gm", "gemini-2.5-pro")
+    stt.save_settings(chosen="auto", key=("groq", ""))
+    p = stt.provider()
+    assert (p["name"], p["key"], p["from"]) == ("groq", "g-env", "env")
+    assert [c["name"] for c in stt.choices()] == ["groq", "openai", "openrouter", "gemini"]
+    with pytest.raises(ValueError):
+        stt.save_settings(chosen="whisperer")

@@ -23,6 +23,9 @@ never a network call, so the app can ask on every start.
   read      the share sheet's Read it (read_it.py, 26 Oct 2026): this server
             answers `POST /read`; always true here, as quick
   read_page `POST /read {"page"}` takes a page the phone read (signed in)
+  stt       this server answers GET|POST /speech/stt (stt_settings.py, 3 Nov
+            2026): the app may choose the speech-to-text and paste its key;
+            always true here, as quick
   personal  this server answers /settings/personal (personal.py, 30 Oct
             2026): always true here, so an older server leaves it out
   weather   a place for the weather is set (Settings or MEDIA_MUSIC_BED_WEATHER)
@@ -111,7 +114,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "stt": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 

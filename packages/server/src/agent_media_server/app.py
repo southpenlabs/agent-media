@@ -175,6 +175,10 @@ device gets its token):
                   long readings: off, generated (a mood or style), his
                   streaming music or the online library, each with Auto;
                   the server's (music_bed.py)
+  GET|POST /speech/stt {"chosen"?, "key"?, "provider"?, "model"?} → which
+                  speech-to-text this host uses for dictation and voice
+                  clips, and its key, kept here 0600; never answers a key
+                  (stt_settings.py, agent_media_core/transcribe)
   GET|POST /speech/balance {"balance"} → how loud speech is next to music
                   in the app, -100..100; the server's (speech_balance.py)
   GET|POST /speech/speed-reset {"reset"} → whether the speech rate goes
@@ -406,7 +410,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
+    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -2187,6 +2191,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Music under a long reading (music_bed.py): off, auto or a mood.
         ok, detail = pins.speech_music_bed(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/stt":
+        # Which speech-to-text this host uses for dictation (stt_settings.py).
+        from . import stt_settings
+
+        ok, detail = stt_settings.stt(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # The phone's voice or the server's (render/device.py).
         ok, detail = pins.speech_voice(_bearer(h))
@@ -3682,6 +3692,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             ok, detail = pins.speech_music_bed(_bearer(h), choice=body.get("choice"))
             _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/stt":
+        # Settings' Microphone → Dictation: the service and its key (stt_settings.py).
+        from . import stt_settings
+
+        ok, detail = stt_settings.stt(_bearer(h), _read_json(h) or {})
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/music-bed/song":
         # Like or dislike the favourite a long reply sang out.
         body = _read_json(h) or {}

@@ -7651,6 +7651,49 @@ set up, 502 when the service fails, each with `error` in plain words.
 Nothing is kept but the cached transcript. Any other Content-Type is the
 `{path}` form.
 
+### 6.36a Choosing the speech-to-text from Settings — gated (built 3 Nov 2026)
+
+Code: `agent_media_server/stt_settings.py`; the choice and keys are
+`agent_media_core/transcribe` (`settings`, `save_settings`). Pinned by
+`test_stt_settings.py` and core's `test_transcribe.py`. David, 3 Nov 2026:
+"I'd probably prefer it to come from the settings" — per host. The app shows
+it in Settings → Microphone → Dictation; `GET /features` says `"stt": true`
+where the server answers it.
+
+`GET /speech/stt` (a paired device's bearer, as `/speech/music-bed`) →
+
+```json
+{"ok": true, "provider": "openai", "chosen": "auto", "model": "gpt-4o-mini-transcribe",
+ "choices": [{"name": "groq", "label": "Groq", "model": "whisper-large-v3-turbo",
+              "has_key": false, "from": null},
+             {"name": "openai", "label": "OpenAI", "model": "gpt-4o-mini-transcribe",
+              "has_key": true, "from": "settings"}, …]}
+```
+
+`provider` is the service dictation and voice clips use now (null when none
+is, or `MEDIA_STT=0`), `model` its model. `choices` is one row per service
+in the order auto tries them — `custom` ("Your own server") first, only when
+`MEDIA_STT_URL` is set, then Groq, OpenAI, OpenRouter (Gemini), Google
+Gemini — with whether it has a key and where the key came from: `settings`
+(pasted here), `env` (the server's environment), `gateway` (the LiteLLM
+gateway's env file), null for none. A key is never answered.
+
+`POST /speech/stt {"chosen"?, "key"?, "provider"?, "model"?}` saves, then
+answers as `GET`. `chosen` is `"auto"` (the order above, and
+`MEDIA_STT_PROVIDER`) or a service's name, which is then the only one used —
+`provider` null while it has no key from anywhere. `key` is for `provider`,
+or for `chosen` when that is a name; `""` (or null) removes the pasted key,
+and the environment's or gateway's counts again. `model` the same way (null
+or `""` back to the default). A pasted key beats the environment and the
+gateway for its service. 400, with `error` in plain words, for an unknown
+name, a key or model with no service named, or a body with none of
+`chosen`, `key`, `model`; 500 when the file cannot be written.
+
+Kept on the host in `<state_dir>/stt.json`, mode 0600:
+`{"chosen": "auto"|<name>, "keys": {<name>: <key>}, "models": {<name>: <model>}}`.
+`python -m agent_media_core.transcribe` prints the service in use, the
+choice and where its key came from (`from`).
+
 ### 6.37 The words of a room's voice notes (built 29 Oct 2026)
 
 Code: `agent_media_server/voice_notes.py`, `matrix.Room.set_transcript`.
