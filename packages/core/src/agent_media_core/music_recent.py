@@ -48,7 +48,17 @@ def _asked(row: dict) -> bool:
     extras = row.get("extras") if isinstance(row.get("extras"), dict) else {}
     if "interruption" in extras:
         return False
+    if _NOT_MUSIC.search(uri):
+        return False
     return not uri.startswith(("/", "http://localhost", "http://127.0.0.1", "file:"))
+
+
+#: A saved podcast episode or a book served from red5's clip server, played
+#: through the music player (a session's workaround, then a tap on the Music
+#: list's row replaying it as music): the Podcasts and Books tabs hold those
+#: (David, 3 Nov 2026: a Talking Drupal episode in the Music list — "this
+#: looks like it was incorrectly categorised").
+_NOT_MUSIC = re.compile(r"^https?://[^/]+/(?:podcast-links|books|conversations)/")
 
 
 def _vid(uri: str) -> Optional[str]:

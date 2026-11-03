@@ -46,6 +46,13 @@ def test_newest_first_one_per_video_players_rows_left_out(st):
     assert [r["title"] for r in got] == ["Named AAAAAAAAAAA", "B"]
 
 
+def test_a_podcast_episode_played_as_music_is_not_music(st):
+    st.add_history(sink="music", uri="yt:https://www.youtube.com/watch?v=AAAAAAAAAAA", started_at=100)
+    st.add_history(sink="music", uri="http://red5:8780/podcast-links/Talking%20Drupal%20%23576.opus", started_at=200)
+    st.add_history(sink="music", uri="http://red5:8780/books/Some%20Book.mp3", started_at=300)
+    assert [r["uri"][-11:] for r in music_recent.recent(store=st)] == ["AAAAAAAAAAA"]
+
+
 def test_an_old_play_is_given_the_conversation_that_spoke_just_before(st):
     _speech(st, 1000, "earlier")
     _speech(st, 1090, "asker")
