@@ -66,6 +66,18 @@ one more:
   sign-in relay (`bridges.py`), Find on Messenger (`contacts_find.py`), the
   stories tray log, and the Facebook previewer agent. agent-media keeps
   small hooks where each plugs in, and every public alternative.
+- With the bridges go their upkeep tools, now host tooling on red5
+  (`agent-bridge-update` in David's own config): installing an official
+  bridge release after checking its sha256sums, and `follow`, which
+  restarts a bridge that started before the homeserver last did (a mautrix
+  bridge reads the server's capabilities once, so after tuwunel 1.9.4 made
+  room version 12 the default, new chats failed until the bridges
+  restarted; 3 Nov 2026). They get settings for the bridge list, the
+  homeserver's unit and URL first. red5's own choices stay on the host:
+  which bridges, the timers, and the Teams fork that is staged for David
+  (David, 3 Nov 2026: "should some of the bridge stuff be put in the
+  sasonica add-ons rather than my personal agent-config?" — with the
+  messaging-bridges move).
 - Matrix itself stays in agent-media: Matrix-native chats are fine.
 
 ## The app side: a build of its own
