@@ -7766,18 +7766,30 @@ bridged apps do (David, 20 Oct 2026, per-chat controls), in every kind of
 chat. Not `/session/pin`, which keeps a session from the idle reaper.
 
 `POST /session/mark {"session", "top"?: bool, "unread"?: bool}` →
-`{"ok", "session", "top", "marked_unread"}`. `top: true` pins the chat to
+`{"ok", "session", "top", "marked_unread", "carried"}`. `top: true` pins the chat to
 the top of the list (`top` is when, epoch seconds; pinning again keeps the
 first time), `false` unpins it. `unread: true` marks it unread until it is
 opened; the app sends `unread: false` when it opens a chat so marked. In a
 Matrix room `unread` is also written as the owner's room account data
 `m.marked_unread` and `com.famedly.marked_unread` (`{"unread"}`), which
-the bridges carry to the network's own mark; a failure there is logged
-and the mark here still holds. 400 for a bad session id, neither field, or
-a value not true/false; 404 for a session nothing knows.
+a bridge that handles it carries to the network's own mark; a failure there
+is logged and the mark here still holds. 400 for a bad session id, neither
+field, or a value not true/false; 404 for a session nothing knows.
 
-Every `/targets` row (§6.1) carries `top` (epoch or null) and
-`marked_unread`. Kept in `<state_dir>/chat-marks.json`.
+- **`carried`** (4 Nov 2026; David: "how do we indicate that in the app?"):
+  whether the network itself will show the mark — `true`, `false`, or
+  `null` for a chat with no network (an agent's, a room no bridge carries).
+  Only mautrix-whatsapp handles `m.marked_unread` (its binary has
+  `HandleMarkedUnread`); the Meta, Instagram, Google Messages, Telegram and
+  Teams bridges do not (checked 4 Nov 2026), so for those the mark holds
+  here and the native app stays read. The app labels the item "Mark unread
+  (here only)" on such a row and says so after the tap. `[marks] carried =
+  ["whatsapp", …]` in config.toml names the networks whose bridge carries
+  it, for when a newer bridge adds it; the default is `["whatsapp"]`.
+
+Every `/targets` row (§6.1) carries `top` (epoch or null), `marked_unread`
+and `mark_carried` (as `carried`, from the row's `network`). Kept in
+`<state_dir>/chat-marks.json`.
 
 ### 6.39 Edit and unsend your message in a room — gated (built 29 Oct 2026)
 

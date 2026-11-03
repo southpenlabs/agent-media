@@ -28,9 +28,11 @@ def test_pin_to_top_and_mark_unread_an_agent_chat(server, signed_in, pane, voice
     rows = chat_marks.add_marks([{"session": SID}, {"session": OTHER}])
     assert rows[0]["top"] == first and rows[0]["marked_unread"] is True
     assert rows[1]["top"] is None and rows[1]["marked_unread"] is False
+    # An agent's chat has no network to carry the mark.
+    assert rows[0]["mark_carried"] is None and body["carried"] is None
     mark(server, {"session": SID, "top": False})
     st, body = mark(server, {"session": SID, "unread": False})
-    assert body == {"ok": True, "session": SID, "top": None, "marked_unread": False}
+    assert body == {"ok": True, "session": SID, "top": None, "marked_unread": False, "carried": None}
     assert chat_marks.STORE.get(SID) is None
 
 
@@ -72,3 +74,29 @@ def test_a_rooms_mark_unread_goes_to_the_network(room):
     # Pinning a room touches nothing on the network.
     chat_marks.session_mark(room.thread, "tok", top=True)
     assert len(room.put) == 4
+
+
+def test_only_a_bridge_that_handles_the_mark_carries_it(room, monkeypatch):
+    # mautrix-whatsapp has HandleMarkedUnread; the Meta, Instagram, Google
+    # Messages, Telegram and Teams bridges do not (4 Nov 2026).
+    room.network = {"id": "whatsapp", "name": "WhatsApp"}
+    ok, d = chat_marks.session_mark(room.thread, "tok", unread=True)
+    assert ok and d["carried"] is True
+    assert chat_marks.add_marks([{"session": room.thread, "network": room.network}])[0]["mark_carried"] is True
+    room.network = {"id": "gmessages", "name": "Google Messages"}
+    ok, d = chat_marks.session_mark(room.thread, "tok", unread=False)
+    assert ok and d["carried"] is False
+    assert chat_marks.add_marks([{"session": room.thread, "network": room.network}])[0]["mark_carried"] is False
+    # The room flag is still written: a newer bridge may pick it up.
+    assert room.put[-1][1] == {"unread": False}
+    # A plain room (no bridge) and an agent's chat: null.
+    room.network = None
+    assert chat_marks.session_mark(room.thread, "tok", top=True)[1]["carried"] is None
+    assert chat_marks.add_marks([{"session": room.thread}])[0]["mark_carried"] is None
+    # config.toml names the networks whose bridge carries it.
+    from agent_media_core import config
+
+    monkeypatch.setattr(config, "load", lambda path=None: {"marks": {"carried": ["gmessages", "WhatsApp"]}})
+    assert chat_marks.carried({"id": "gmessages"}) is True
+    assert chat_marks.carried({"id": "whatsapp"}) is True
+    assert chat_marks.carried({"id": "meta"}) is False
