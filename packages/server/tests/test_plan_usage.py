@@ -54,3 +54,15 @@ def test_no_login_and_a_failed_ask(monkeypatch):
         raise OSError("401")
     ok, d = plan_usage.get("b", fetch=boom)
     assert not ok and d["code"] == "unavailable" and d["status"] == 502
+
+
+def test_extra_usage_in_currency_units():
+    raw = {"limits": [], "extra_usage": {"is_enabled": True, "monthly_limit": 4876, "used_credits": 3932.0,
+                                          "utilization": 80.6, "currency": "AUD", "decimal_places": 2,
+                                          "spend_limit_reached": False}}
+    extra = plan_usage.shape(raw)["extra"]
+    assert extra == {"percent": 80.6, "currency": "AUD", "limit": 48.76, "used": 39.32, "left": 9.44,
+                     "decimal_places": 2, "limit_reached": False}
+    raw["extra_usage"].update(used_credits=5000, spend_limit_reached=True)
+    assert plan_usage.shape(raw)["extra"]["left"] == 0.0
+    assert plan_usage.shape(raw)["extra"]["limit_reached"] is True

@@ -7383,8 +7383,15 @@ host's own Claude login, and are kept for a minute.
                 "percent": 34,
                 "resets_at": 1793145599,    // epoch seconds, or null
                 "severity": "normal"|"warning"|…}],
-   "extra": {"percent": 0.0, "currency": "AUD"} | null}   // paid overflow, when on
+   "extra": {"percent": 80.6, "currency": "AUD",          // paid overflow, when on
+             "limit": 48.76, "used": 39.32, "left": 9.44, // the month's, in currency units
+             "decimal_places": 2, "limit_reached": false} | null}
 ```
+
+`extra`'s amounts are the endpoint's (which counts in the currency's
+smallest unit) divided by `10 ** decimal_places`; any it leaves out is
+`null`. The app shows `left` in place of a window that has reached 100%,
+until that window resets (3 Nov 2026).
 
 404 `no_login` when Claude is not signed in on the host; 502 `unavailable`
 when Anthropic did not answer (an expired login included). A kind the app

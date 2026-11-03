@@ -67,10 +67,35 @@ def shape(raw: dict) -> dict:
         windows.append({
             "kind": kind, "label": model or None, "percent": int(lim["percent"]),
             "resets_at": _epoch(lim.get("resets_at")), "severity": lim.get("severity") or "normal"})
-    extra = raw.get("extra_usage") or {}
-    return {"windows": windows,
-            "extra": ({"percent": extra.get("utilization"), "currency": extra.get("currency")}
-                      if extra.get("is_enabled") else None)}
+    return {"windows": windows, "extra": _extra(raw.get("extra_usage") or {})}
+
+
+def _extra(extra: dict) -> Optional[dict]:
+    """The paid overflow, when on: the month's limit, what is used and what
+    is left, in the currency's units (the endpoint counts in its smallest,
+    `decimal_places` of them), and whether the limit is reached. The app
+    shows what is left once a window reaches 100% (David, 3 Nov 2026: "once
+    usage gets to 100% display available usage credit until rate limits
+    reset")."""
+    if not extra.get("is_enabled"):
+        return None
+    try:
+        places = int(extra.get("decimal_places") if extra.get("decimal_places") is not None else 2)
+    except (TypeError, ValueError):
+        places = 2
+    unit = 10 ** places
+
+    def money(v: object) -> Optional[float]:
+        try:
+            return round(float(v) / unit, places)
+        except (TypeError, ValueError):
+            return None
+
+    limit, used = money(extra.get("monthly_limit")), money(extra.get("used_credits"))
+    left = round(max(0.0, limit - used), places) if limit is not None and used is not None else None
+    return {"percent": extra.get("utilization"), "currency": extra.get("currency"),
+            "limit": limit, "used": used, "left": left, "decimal_places": places,
+            "limit_reached": bool(extra.get("spend_limit_reached"))}
 
 
 def get(bearer: str, *, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
