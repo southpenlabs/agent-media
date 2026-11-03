@@ -422,6 +422,16 @@ or Mark all read, clears it.
 
 ## In flight
 
+**The power button into the black screen** (David, 3 Nov 2026: "Can we
+hijack the power button for black screen mode?"; he chose the re-wake).
+Android never gives an app the power key, so the shell watches the screen
+going off: a press (not the timeout) with a thread open turns it straight
+back on into the black screen, over the lock screen; a press with it up
+really locks; a tap down asks for the unlock. Off by default, a switch in
+the black screen key's hold menu. Committed (sasonica-app `584df90`,
+PowerBlack.java), unit and mock tests pass; not yet tried on the phone,
+where it ships with the next APK.
+
 **The app in a browser: its own mic and speaker** (David, 16 Oct 2026: "why
 aren't there any mic and speaker control settings in the player on the
 browser's version?" — then: both, dictation and replies spoken in the
