@@ -30,3 +30,6 @@ abs.env
 
 # The web app bundle a local binary build copies in (deploy/binary/build.sh).
 packages/server/src/agent_media_server/web_app/
+
+# Screenshots and samples sessions make to show David (shared-file chips allow it, 9053d749); never committed.
+.local-previews/
