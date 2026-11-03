@@ -2363,6 +2363,41 @@ ahead.
     owner and say so in the reply. Not built; the first case was done by
     hand (agent-mail #143).
 
+54. **The e2e suites on Playwright Test, and the app issues they surfaced**
+    (David, 4 Nov 2026: "we have 7 hours of tests?!" — a timed run showed
+    ~70 min; "Playwright Test, full rewrite now"; "it's okay to stall other
+    sessions, I'd rather get this right"). **The rewrite: DONE 4 Nov 2026**
+    on sasonica-app branch `playwright-test` (worktree sasonica-app-pwtest):
+    all 192 script suites are `test/*.spec.mjs`, a mock per spec file on a
+    free port, 982 fixed sleeps gone or justified, 945 tests green in 40 min
+    on two workers, `.github/workflows/e2e.yml` on every push (Forgejo takes
+    it as is); `test/MIGRATING.md` has the conventions. Merge waits on the
+    shared checkout's main, which has diverged from origin (3 unpushed vs 29,
+    an AutoBlack.java conflict; the sasonica-app session was mailed). Then,
+    first, the two David decided (4 Nov): (a) the contract stands — remove
+    the GET /conversation/log?messages=1&limit=30 the app sends beside the
+    thread's stream on open and reconnect (useThread.ts; §11: one request,
+    the snapshot is the thread); (b) the input box's chosen height fits:
+    kept but capped so the box fits with the keyboard up (at most ~40% of
+    the visible height), never below three lines, the full choice back when
+    the keyboard goes, and restored at the largest text size. Then the rest
+    the suites marked as known failures with their cause, all red on main
+    before: at the largest text the Plan-mode slide tip (lib/toolsTip.ts)
+    covers the chip row so New chat's where-chip can't be tapped; at 1.5×
+    the live reply's top Pause key can't be tapped while follow-along moves
+    the view; in landscape with the speech bar up the top jump-pill row sits
+    under the header; whatsNew.ts NEWS ids out of order (2026-11-03e twice);
+    mock/server.mjs answers GET /mock/groups twice (the GROUP_EDITS handler
+    shadows `?on=1`, groups suite red); the stories-tray slot's height
+    transition stalls at ~75% in headless Chromium; tools' new-chat model
+    chip reads "Model ▾" not the host's default. After that, the cleanup
+    (David, 4 Nov: "a big code cleanup while we're at it"):
+    sasonica-app docs/notes/cleanup-survey.md, R1–R11 ranked, starting with
+    one storage helper and flag-store factory, the duplicate music pollers,
+    time formatters and AskBox, dead code, then splitting native.ts and
+    api/index.ts, the 6,000-line mock, ThreadPage and Thread, one speech
+    store, the Java splits.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
