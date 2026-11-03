@@ -462,27 +462,6 @@ def clear_pending(rid: str = "") -> bool:
     return bool(gone)
 
 
-def _hhmm(t: float) -> str:
-    return time.strftime("%H:%M", time.localtime(t))
-
-
-def _start_drain(selected: list[Service], after: float, waits: list[dict],
-                 caller: str, emit: Callable[[str], None], res: dict) -> dict:
-    """The non-fire half of a drained restart: join a pending one, or write
-    the record (holding starts now) and schedule the detached run."""
-    import uuid
-
-    names = [s.name for s in selected]
-    now = time.time()
-    joined: list[dict] = []
-
-    def fn(rec):
-        if is_active(rec, now):
-            joined.append(rec)
-            return {**rec, "only": sorted(set(rec.get("only") or []) | set(names))}
-        return {"id": uuid.uuid4().hex[:12], "since": round(now, 3),
-                "deadline": round(now + after + drain_max_s(), 3),
-                "alive_until": round(now + after + ALIVE_S, 3), "only": names,
 def announce_on() -> bool:
     """MEDIA_RESTART_ANNOUNCE, on unless 0/off. Under pytest only when a test
     sets it to 1: many tests delete every MEDIA_ variable, and a restart test
@@ -516,6 +495,27 @@ def _busy_words(waits: list[dict]) -> str:
     return "once a busy session finishes" if n == 1 else f"once {n} busy sessions finish"
 
 
+def _hhmm(t: float) -> str:
+    return time.strftime("%H:%M", time.localtime(t))
+
+
+def _start_drain(selected: list[Service], after: float, waits: list[dict],
+                 caller: str, emit: Callable[[str], None], res: dict) -> dict:
+    """The non-fire half of a drained restart: join a pending one, or write
+    the record (holding starts now) and schedule the detached run."""
+    import uuid
+
+    names = [s.name for s in selected]
+    now = time.time()
+    joined: list[dict] = []
+
+    def fn(rec):
+        if is_active(rec, now):
+            joined.append(rec)
+            return {**rec, "only": sorted(set(rec.get("only") or []) | set(names))}
+        return {"id": uuid.uuid4().hex[:12], "since": round(now, 3),
+                "deadline": round(now + after + drain_max_s(), 3),
+                "alive_until": round(now + after + ALIVE_S, 3), "only": names,
                 "by": caller, "state": "waiting", "waiting_on": waits,
                 "host": host(), "unit": "", "log": ""}
     rec = _update_pending(fn)
@@ -543,6 +543,11 @@ def _busy_words(waits: list[dict]) -> str:
         emit(f"waiting on: {_reason(w)}")
     emit(f"scheduled: {' '.join(names)} in {int(round(after))} s ({sch['how']} "
          f"{sch['unit']}; log: {sch['log']})")
+    if any(is_sessiond(s) for s in selected):
+        when = (_busy_words(waits) if waits
+                else f"in about {max(1, int(round(after)))} seconds")
+        announce(f"Heads up: the session host will restart {when}. "
+                 "New messages wait until it is back.")
     emit(f"draining until {_hhmm(rec['deadline'])}: new messages to sessiond's sessions "
          "are held (delivered after the restart) and new chats refused; busy sessions "
          "are asked to end their turn. It restarts as soon as none is busy "
@@ -564,11 +569,6 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
     while True:
         rec = read_pending()
         if not rec or rec.get("id") != rid:
-    if any(is_sessiond(s) for s in selected):
-        when = (_busy_words(waits) if waits
-                else f"in about {max(1, int(round(after)))} seconds")
-        announce(f"Heads up: the session host will restart {when}. "
-                 "New messages wait until it is back.")
             emit("the pending restart was cancelled")
             res["rc"] = BUSY
             return res
@@ -583,6 +583,8 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
                             if r and r.get("id") == rid else r)
             emit(f"nothing busy after {(now - float(rec.get('since') or now)) / 60:.1f} min:"
                  " restarting")
+            if any(is_sessiond(s) for s in selected):
+                announce("Restarting the session host now.")
             try:
                 res["rc"] = restart(selected, emit)
             finally:
@@ -594,6 +596,9 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
                 emit(f"gave up, still busy: {r}")
             clear_pending(rid)
             names = " ".join(s.name for s in selected)
+            if any(is_sessiond(s) for s in selected):
+                announce("The session host restart gave up: sessions stayed busy. "
+                         "Held messages are going through now.")
             alert("warn", f"restart of {names} on {host()} gave up: still busy after "
                   f"{(now - float(rec.get('since') or now)) / 60:.0f} min of draining",
                   "\n".join(reasons), f"media restart-services --only {names} --after 10")
@@ -604,8 +609,6 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
         _update_pending(lambda r: {**r, "waiting_on": waits,
                                    "alive_until": round(now + ALIVE_S, 3),
                                    "checked": round(now, 3)}
-            if any(is_sessiond(s) for s in selected):
-                announce("Restarting the session host now.")
                         if r and r.get("id") == rid else r)
         _sleep(drain_poll_s())
 
@@ -617,9 +620,6 @@ def _svdir() -> "Optional[Path]":
     from . import cli
 
     return cli._sv_dir()
-            if any(is_sessiond(s) for s in selected):
-                announce("The session host restart gave up: sessions stayed busy. "
-                         "Held messages are going through now.")
 
 
 def _restart_one(s: Service) -> "tuple[bool, str]":
