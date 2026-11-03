@@ -2319,6 +2319,21 @@ ahead.
     `MEDIA_RENDER_ENGINE` and `OPENAI_BASE_URL` in red5's env. *Queued 3 Nov
     2026.*
 
+52. **The TV follows my phone** (David, 3 Nov 2026: "using the remote for
+    sasonica is a bit cumbersome. remote viewing of another sasonica
+    installation could be quite beneficial"; chose follow mode over full
+    remote viewing) — a "Follow my phone" switch on a TV (or any device):
+    the thread opened on a chosen phone opens there too and keeps the reply
+    being read in view, so David types and talks on the phone and watches the
+    big screen. The phone already says which thread is on screen (the black
+    screen lease, the question gate's "in view"); the server passes that to
+    the following device as a frame on its stream, the setting kept with the
+    device record (Settings → Devices, like "Pause what's playing here"). The
+    TV opens what it is told, and a press on its own remote turns follow off
+    until the switch is set again. Not screen mirroring: seeing and tapping
+    the TV's own screen from the phone was judged not worth its cost, with
+    Android casting already there. *Queued 3 Nov 2026.*
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
