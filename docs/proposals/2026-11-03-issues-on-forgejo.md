@@ -1,7 +1,10 @@
 # Issues on Forgejo: one list, fed by what already exists
 
-**Status:** proposed 3 Nov 2026, for the week Forgejo comes up on the new
-machine. Nothing here is built. Carries forward §6.44 (a thread as a ticket),
+**Status:** accepted 4 Nov 2026 as roadmap item 55, with one change:
+the forge is whatever the repo uses, not Forgejo in particular (David:
+"we need issues for platforms without forgejo too. maybe an integration
+for whatever version control system is being used"). See
+[Any forge, or none](#any-forge-or-none) below. Nothing here is built. Carries forward §6.44 (a thread as a ticket),
 the [community feedback](2026-10-31-community-feedback.md) relay and the
 agent-mail bug reports (#138, #141, 3 Nov 2026).
 
@@ -118,6 +121,35 @@ by mail since 3 Nov (#138, #141, and what follows) in
 thread link, and state, so the week Forgejo is up they are opened as its
 first issues with their history intact.
 
+## Any forge, or none
+
+The record is "the repo's issue tracker", and the server finds out which
+one that is. One interface — open, close, comment, list open, read the
+state of a number — with a backend per host, chosen from the repo's
+`origin` remote unless `[forge]` in config.toml names one:
+
+- **Forgejo / Gitea**: `/api/v1/repos/{owner}/{repo}/issues`, a token
+  with `issue:write`.
+- **GitHub**: `/repos/{owner}/{repo}/issues`, the `gh` token where one is
+  logged in, else `MEDIA_FORGE_TOKEN`. The GitHub mirror's issues stay
+  off *here* only because the move is to Forgejo; another install on
+  GitHub gets them.
+- **GitLab**: `/projects/{id}/issues`, numbers are the project `iid`.
+- **Local** (no remote, a bare host, nothing reachable): `issues.json`
+  holds the same fields — number, title, body, labels, state, comments,
+  thread — numbered from 1 per install. Show → Issues in the app is the
+  list, so the whole flow works with no forge at all. When a forge is
+  configured later, `media issues import` opens each local issue there
+  and records the forge number beside the local one; the thread badge
+  shows the forge's.
+
+Every path above (§1 thread-as-issue, §2 mail reports, §3 feedback
+triage, §4 the roadmap sync) calls the interface, never a forge's API.
+`media issues` (list, open, close, comment, import) is the CLI and what
+`agent-mail send --issue` and the roadmap sync use. The bug template is
+kept once and written to `.forgejo/ISSUE_TEMPLATE/bug.md` and
+`.github/ISSUE_TEMPLATE/bug.md` alike; GitLab reads `.gitlab/issue_templates/`.
+
 ## Not in this proposal
 
 - A tracker of our own in agent-media. Forgejo is the one being installed;
@@ -125,5 +157,6 @@ first issues with their history intact.
 - Showing the forge's issue list inside the app. Show → Issues stays the
   thread list filtered (§6.44); the number on a badge opens the forge in
   the browser. Worth revisiting if the forge becomes the daily list.
-- GitHub. The move is to Forgejo; the GitHub mirror keeps CI until the
-  runner moves, and its issues stay off.
+- Turning on the GitHub mirror's issues for this install. The move is to
+  Forgejo; the mirror keeps CI until the runner moves. The GitHub backend
+  exists for installs whose repo lives there.

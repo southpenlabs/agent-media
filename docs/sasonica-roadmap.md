@@ -2398,6 +2398,31 @@ ahead.
     api/index.ts, the 6,000-line mock, ThreadPage and Thread, one speech
     store, the Java splits.
 
+55. **Issues: one list, on whatever forge the repo uses** (David, 3 Nov
+    2026: "how will we better make a proper issue system out of this?";
+    4 Nov 2026, on the Forgejo proposal: "Yes but we need issues for
+    platforms without forgejo too. maybe an integration for whatever
+    version control system is being used"). The proposal
+    [issues on Forgejo](proposals/2026-11-03-issues-on-forgejo.md) stands
+    as the shape — Forgejo's issues are the record, the thread-as-issue
+    badge (§6.44), agent-mail bug reports and the feedback relay open and
+    close them — but the forge is an adapter, not Forgejo: the server
+    reads the repo's `origin` remote (or `MEDIA_FORGE_URL`) and picks a
+    backend by host — Forgejo/Gitea (`/api/v1`), GitHub (`/repos/…/issues`,
+    `gh` token), GitLab (`/projects/:id/issues`, `iid`) — behind one
+    interface (open, close, comment, list open, read state by number).
+    An install with no forge, or none it can reach, gets the local
+    backend: `issues.json` grows the same fields (number, title, body,
+    labels, state, comments) and the app's Show → Issues is the list, so
+    nothing here needs a forge to work and a forge, when one appears,
+    imports the local list and takes over the numbers. Config:
+    `[forge]` in config.toml (`kind`, `url`, `repo`, token from the env),
+    `auto` by default; `media issues` (list, open, close, import) is the
+    CLI and what `agent-mail send --issue` calls. `.forgejo/` and
+    `.github/ISSUE_TEMPLATE` carry the same bug template. Until built:
+    docs/notes/issues-to-import.md holds the reports sent by mail. Not
+    started; for the week the forge comes up.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
