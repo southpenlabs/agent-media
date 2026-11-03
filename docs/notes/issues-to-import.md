@@ -13,6 +13,12 @@ line each: mail id, subject, thread, state.
 - #141 (sam → sasonica-app, 3 Nov 2026) A sung-out song's copy leaks in
   the speech player and plays on with no control — thread
   https://red5.sasonica.com/app/t/0f6bc739-97c7-4e2a-ac28-54ebac72631f —
-  claimed 3 Nov by the What's new thread
-  (https://red5.sasonica.com/app/t/4725339a-565b-4889-959f-5afc804d920d),
-  fix in progress.
+  fixed 3 Nov (sasonica-app 7355e68, every song copy stoppable; mail
+  #142 replies). Not yet pushed or on the phone. Open doubt: the leaked
+  track had content MUSIC and the speech player's copies are
+  SONIFICATION, so the sound David heard may have been the music player or
+  the page's own <audio>; dumpsys's `content=` tells them apart next time.
+- Handoff note (What's new thread, 3 Nov): #141's fix 7355e68 is on main
+  unpushed; #138 (one track behind, Media3Music.adoptSong vs playlistClear /
+  append-play) is still open on the app side; the Forgejo issues proposal
+  is committed (b07c57c3), waiting for David's view.
