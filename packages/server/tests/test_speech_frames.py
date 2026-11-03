@@ -611,3 +611,27 @@ def test_a_report_behind_frames_the_phone_lost_is_its_word(endpoint):
     assert ipc("get_property", "idle-active")["data"] is True
     assert ipc("get_property", "playlist-count")["data"] == 0
     ipc.close()
+
+
+def test_a_report_that_lists_the_phones_queue_is_taken_whole():
+    # Start radio: the app took the song on itself (no frame), then the
+    # station cleared behind it and queued two more. Before the list came
+    # with the report, the model had only the two, and named the first of
+    # them over the song playing (agent-mail #138, 3 Nov 2026).
+    m = speech_frames.Model()
+    song = "http://localhost:6616/Tb0MC0jFv6M.mka?x=1&v=Tb0MC0jFv6M"
+    m.report({"pos": 0, "count": 1, "idle": False}, current=True)
+    assert m.path() is None
+    m.report({"pos": 0, "count": 1, "idle": False, "entries": [song]}, current=True)
+    assert m.path() == song
+    m.apply({"op": "clear"})
+    m.apply({"op": "load", "uri": "http://localhost:6616/HLrqNhgdiC0.mka", "mode": "append-play"})
+    assert m.entries == [song, "http://localhost:6616/HLrqNhgdiC0.mka"]
+    assert m.path() == song
+    # A list that does not match the count (a speech reply, which lists
+    # nothing) is not taken.
+    m.report({"pos": 0, "count": 2, "idle": False, "entries": []}, current=True)
+    assert m.entries == [song, "http://localhost:6616/HLrqNhgdiC0.mka"]
+    # Nor one from a report behind the frames.
+    m.report({"pos": 0, "count": 1, "entries": ["x"]}, current=False)
+    assert m.path() == song

@@ -227,6 +227,18 @@ class Model:
         if current:
             count = int(r.get("count", len(self.entries)))
             pos = int(r.get("pos", self.pos))
+            listed = r.get("entries")
+            if isinstance(listed, list) and len(listed) == count:
+                # The phone's own list (its music player sends it): what it
+                # holds, whatever was sent. A song the app took on itself —
+                # Start radio carries the song a reply sang out into the music
+                # player, no frame from here — was missing from the front of
+                # ours, so path named the next song over the one playing
+                # (sasonica-app agent-mail #138; David, 3 Nov 2026: "now
+                # playing is displaying a different song than what it's
+                # playing").
+                self.entries = [str(e) for e in listed]
+                self.cut = []
             # A phone that plays an index counts at least that many.
             count = max(count, pos + 1)
             # The phone stopped or cleared by itself: our entries end there.
