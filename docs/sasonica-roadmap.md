@@ -2332,7 +2332,16 @@ ahead.
     TV opens what it is told, and a press on its own remote turns follow off
     until the switch is set again. Not screen mirroring: seeing and tapping
     the TV's own screen from the phone was judged not worth its cost, with
-    Android casting already there. *Queued 3 Nov 2026.*
+    Android casting already there. **Built 3 Nov 2026** (agent-media
+    `e60b5b73`, sasonica-app `60fd509`): Settings → Devices has "Follow my
+    phone" on each device, the phone picked under it (this phone by
+    default); `POST /devices/follow` keeps it with the device record. What a
+    phone has open is the thread it last opened a stream to; the following
+    device hears it as a `follow` frame on `GET /sessions/events?follow=1`
+    (and asks `GET /device/follow` every 20 s while showing, and on coming to
+    the front, to know when to hold that stream). A key press or touch on the
+    following device turns it off (`POST /device/follow {"on": false}`) and
+    says so for a few seconds. Contract §6.21g.
 
 ## Loose ends
 
