@@ -202,3 +202,86 @@ def left_by_now(question: Event, session: str) -> bool:
     log.info("question gate: %s left before its question's turn; held", session[:8])
     speak_cue(cue, wait=False)
     return True
+
+
+# --- a question being read when the black screen goes down --------------------
+#
+# A question read in full because black screen mode was up keeps being read
+# after the listener lifts the cover and goes to another thread, where it
+# cannot be answered (David, 3 Nov 2026: "why is there a ask user question
+# being read out while I'm not on that thread? ... coming from the black
+# screen"). `left_by_now` only re-asks a question still waiting for its turn,
+# so when the lease goes down (`POST /device/black` false), and when a thread
+# leaves the screen, the one being read now is asked again a moment later
+# (the server's speech.recheck_question_soon): no longer answerable, and its
+# thread not locked on screen (a pocket lease), it is stopped, held for its
+# thread as `hold` would have (opening the thread reads it), and its cue said.
+# `<state_dir>/question-gate-cut.json` names the turn cut, by its
+# `started_at`, for submit_event's history write (`was_cut`), which runs in
+# the process that was playing it.
+
+CUT_NAME = "question-gate-cut.json"
+
+
+def _mark_cut(started_at) -> None:
+    try:
+        path = state_dir() / CUT_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"started_at": float(started_at), "at": time.time()}))
+        tmp.replace(path)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def was_cut(started_at) -> bool:
+    """Was the turn that began at `started_at` stopped by `cut_unanswerable`?"""
+    try:
+        got = json.loads((state_dir() / CUT_NAME).read_text())
+        return abs(float(got.get("started_at")) - float(started_at)) < 0.01
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def cut_unanswerable(stop, submit=None) -> bool:
+    """The question being read now (or paused), if it can no longer be
+    answered where it is read: stop it with `stop()` (answers "" when done,
+    else why not), mark the turn for its history write, and say its cue.
+    True when cut. A replay is left alone: someone asked for it. Never
+    raises."""
+    try:
+        from .state import StateStore
+        from .types import Source
+
+        np = StateStore().get_now_playing("speech") or {}
+        ex = np.get("extras") or {}
+        if not isinstance(ex, dict) or not ex.get("ask") or ex.get("replay"):
+            return False
+        session = str(ex.get("source_session") or "")
+        if not session or answerable(session):
+            return False
+        from . import watching
+        if watching.is_open(session, pocketed=True):
+            # Its thread was on screen when the phone was locked: put away
+            # mid-question is not a look elsewhere.
+            return False
+        _mark_cut(np.get("started_at"))
+        why = stop()
+        if why:
+            log.info("question gate: could not stop %s's question: %s", session[:8], why)
+            return False
+        log.info("question gate: %s's question stopped, its thread not in view", session[:8])
+        try:
+            source = Source(str(ex.get("source") or ""))
+        except ValueError:
+            source = Source.CLAUDE_CODE
+        md = {"title": ex.get("source_title") or "", "window": ex.get("source_window") or "",
+              "tmux": ex.get("source_tmux_session") or "", "pane": ex.get("source_pane") or "",
+              "tool_use_id": ex.get("tool_use_id") or "", "voice_from": "session"}
+        question = Event(text="", source=source, voice=ex.get("voice") or None,
+                         metadata={k: v for k, v in md.items() if v})
+        speak_cue(cue_event(question, session), wait=False, submit=submit)
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.info("question gate: cut check failed: %s", e)
+        return False

@@ -2157,6 +2157,14 @@ instead: "A question in <thread title>." (the first six words of it). A
 minute per thread. A question read while answerable whose turn to speak
 comes after the listener left is held and cued then.
 
+A question already being read is asked again 3 s after the black screen
+goes down (`false`) and after a thread's last event stream closes (3 Nov
+2026): if it can no longer be answered, and its thread was not on screen
+when the phone was locked (a `/session/pocket` lease), it is stopped, held
+for its thread as above (opening the thread reads it from the start) and
+cued. A replay is never cut. The app sends a `false` that did not land
+again on its next check until the server has it.
+
 - `device`: the app's name for itself, default `"app"`; each device has its
   own lease. `until`: the lease's end, epoch seconds; 0 after `false`. A
   lease runs out after `MEDIA_BLACK_S` (default 90; 0 turns leases off), so

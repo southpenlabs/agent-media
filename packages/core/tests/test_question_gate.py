@@ -183,3 +183,69 @@ def test_the_submit_recheck_routes_a_question_to_the_gate(monkeypatch):
                         lambda e, s: seen.append((e.text, s)) or True)
     assert submit._unwatched_by_now(_question(), SID) is True
     assert seen == [("Ship it? Yes, or no.", SID)]
+
+
+# --- the black screen comes down mid-question (David, 3 Nov 2026) -------------
+
+def _speaking_question(**ex):
+    from agent_media_core.state import StateStore
+
+    started = time.time()
+    StateStore().set_now_playing(
+        "speech", "/tmp/q.wav", started, target="local",
+        extras={"ask": True, "source_session": SID, "source": "claude-code",
+                "source_title": "Wire the question gate", "tool_use_id": "toolu_x",
+                "voice": "af_heart", **ex})
+    return started
+
+
+def test_a_question_read_out_of_view_is_cut_held_and_cued(monkeypatch):
+    sent, stops = [], []
+    started = _speaking_question()
+    assert question_gate.cut_unanswerable(lambda: stops.append(1) or "",
+                                          submit=sent.append)
+    for _ in range(50):                      # the cue is said from a thread
+        if sent:
+            break
+        time.sleep(0.02)
+    assert stops == [1]
+    assert question_gate.was_cut(started)
+    assert not question_gate.was_cut(started + 5)
+    assert [e.text for e in sent] == ["A question in Wire the question gate."]
+    assert sent[0].metadata.get("ask_cue") and not sent[0].metadata.get("ask")
+
+
+def test_a_question_still_answerable_is_not_cut():
+    stops = []
+    _speaking_question()
+    watching.publish({SID: 1})               # its thread on screen
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    watching.publish({})
+    watching.black("phone", True)            # the black screen still up
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    watching.black("phone", False)
+    watching.pocket(SID, True)               # phone locked on its thread
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    assert stops == []
+
+
+def test_a_replay_or_a_reply_is_never_cut():
+    from agent_media_core.state import StateStore
+
+    stops = []
+    _speaking_question(replay=True)
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    StateStore().set_now_playing("speech", "/tmp/r.wav", time.time(), target="local",
+                                 extras={"source_session": SID})
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    StateStore().clear_now_playing("speech")
+    assert not question_gate.cut_unanswerable(lambda: stops.append(1) or "")
+    assert stops == []
+
+
+def test_a_failed_stop_says_no_cue():
+    sent = []
+    _speaking_question()
+    assert not question_gate.cut_unanswerable(lambda: "no player", submit=sent.append)
+    time.sleep(0.1)
+    assert sent == []

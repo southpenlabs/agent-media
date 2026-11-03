@@ -710,6 +710,10 @@ def close(session: str, by: str = "") -> int:
     return len(subs)
 
 
+#: The threads on screen at the last publish, to see one leave.
+_LAST_ON: dict[str, int] = {}
+
+
 def _publish() -> None:
     """Tell the Stop hook which threads are on screen (core's watching.py:
     a Normal reply from one plays at once). Under `_LOCK`. Only the server
@@ -721,6 +725,18 @@ def _publish() -> None:
     # waits, and plays on `release` with the rest.
     on = {s: n for s, w in _WATCHERS.items() if (n := sum(_counts(x) for x in w.subs))}
     _watching.publish_pinned(on)
+    gone = set(_LAST_ON) - set(on)
+    _LAST_ON.clear()
+    _LAST_ON.update(on)
+    if gone:
+        # A thread left the screen: a question of its still being read,
+        # with nowhere left to answer it, is stopped and cued (speech.py).
+        try:
+            from . import speech
+
+            speech.recheck_question_soon()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def watching() -> dict[str, int]:

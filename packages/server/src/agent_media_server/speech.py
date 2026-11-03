@@ -10,6 +10,7 @@ a whitelisted speech transport verb. This package never imports `visual`.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Callable
 
@@ -119,6 +120,45 @@ def stop_speech() -> str:
         return ""
     except Exception as e:  # noqa: BLE001 — reported, never raised into a route
         return str(e) or type(e).__name__
+
+
+# --- a question read where it can no longer be answered -----------------------
+#
+# The black screen came down, or a thread left the screen: a question being
+# read for a thread no longer in view is stopped, held for its thread and
+# cued (core's question_gate.cut_unanswerable; David, 3 Nov 2026). Asked a
+# moment later, once, not at once: a stream that reconnects, or a hop from
+# the black screen to the thread under it, is not a look away.
+
+#: Seconds after the change before the question is asked about.
+QUESTION_RECHECK_S = 3.0
+_QCHECK: list = [None]
+_QCHECK_LOCK = threading.Lock()
+
+
+def recheck_question_soon(delay: float = QUESTION_RECHECK_S) -> bool:
+    """Ask, `delay` seconds from now, whether the question being read can
+    still be answered, and cut it if not. Only in the running server (the
+    watching table pinned at its start): a test must never stop a real
+    player. True when scheduled."""
+    from agent_media_core import watching
+
+    if watching._PINNED is None:
+        return False
+
+    def run() -> None:
+        from agent_media_core import question_gate
+
+        question_gate.cut_unanswerable(stop_speech)
+
+    with _QCHECK_LOCK:
+        if _QCHECK[0] is not None:
+            _QCHECK[0].cancel()
+        t = threading.Timer(delay, run)
+        t.daemon = True
+        _QCHECK[0] = t
+        t.start()
+    return True
 
 
 # --- the per-session speech marker (/session/stop, server-contract.md §12) -----

@@ -4891,8 +4891,22 @@ def _submit_event(event: Event,
             # Stopped part-way by the listener (a Stop, or a reply that ended
             # the reading): where, so the message's ▶ resumes there.
             from ..sinks.speech import stopped_here
+            from .. import question_gate
             stop_at = stopped_here(started_at)
-            if stop_at is not None:
+            if (event.metadata or {}).get("ask") and question_gate.was_cut(started_at):
+                # A question stopped because its thread went out of view as
+                # the black screen came down (question_gate.cut_unanswerable):
+                # held for its thread, as one held on arrival is — opening
+                # the thread reads it from the start.
+                try:
+                    from . import toast
+                    toast.remember(event, ask=True,
+                                   key=str(event.metadata.get("dedup_key") or ""))
+                    extras["held"] = True
+                    extras["dedup_key"] = event.metadata["dedup_key"]
+                except Exception as e:  # noqa: BLE001 — the row matters more
+                    log.info("question gate: holding the cut question failed: %s", e)
+            elif stop_at is not None:
                 extras["stopped_at"] = {"sentence": stop_at, "at": time.time()}
             elif left_paused_at is not None:
                 # Never resumed: the pause outlasted the hold, which is not
@@ -5441,6 +5455,10 @@ def _submit_event(event: Event,
                 # rather than the run-together sentence the voice was given.
                 if event.metadata.get("ask"):
                     extras["ask"] = event.metadata["ask"]
+                    # Its card, for the cue said if it is cut off
+                    # (question_gate.cut_unanswerable): once per card.
+                    if event.metadata.get("tool_use_id"):
+                        extras["tool_use_id"] = event.metadata["tool_use_id"]
                 # The reply's dedup key, so the turn being spoken joins its
                 # message by key while it plays (book_tracks._live_turn →
                 # transcript.join_speech). Without it the live line joined by

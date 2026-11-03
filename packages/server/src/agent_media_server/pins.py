@@ -134,8 +134,10 @@ def device_black(flag, bearer: str, device="") -> tuple[bool, dict]:
     """`POST /device/black {"on", "device"?}`: the app's black screen went up
     (true; renewed every 30 s while it stays) or down (false). While the lease
     lasts a question card is read in full even with its card out of view: it
-    can be answered by voice there (`agent_media_core.question_gate`). Gated
-    as `/session/pocket`; answers `until`, the lease's end, 0 for none."""
+    can be answered by voice there (`agent_media_core.question_gate`); down,
+    a question still being read for a thread not in view is stopped and cued
+    (`speech.recheck_question_soon`). Gated as `/session/pocket`; answers
+    `until`, the lease's end, 0 for none."""
     from agent_media_core import watching
 
     if not isinstance(flag, bool):
@@ -150,6 +152,15 @@ def device_black(flag, bearer: str, device="") -> tuple[bool, dict]:
         until = watching.black(device, flag)
     except OSError as e:
         return False, {"error": f"could not save the lease ({e})", "status": 500}
+    if not until:
+        # Down: a question being read for a thread not in view can no
+        # longer be answered by voice, so it is stopped and cued.
+        try:
+            from . import speech
+
+            speech.recheck_question_soon()
+        except Exception:  # noqa: BLE001
+            pass
     return True, {"device": device, "on": bool(until), "until": until}
 
 

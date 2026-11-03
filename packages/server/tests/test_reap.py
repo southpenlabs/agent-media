@@ -711,6 +711,37 @@ def test_black_screen_is_leased_on_and_off(server, shelf, signed_in, typed):
     assert "/device/black" in app.CORS_PATHS
 
 
+def test_black_screen_down_and_a_thread_leaving_recheck_the_question(server, shelf, signed_in, typed,
+                                                                     monkeypatch):
+    """Down, or a thread off screen: a question still being read is asked
+    about again (speech.recheck_question_soon); up, nothing."""
+    from agent_media_server import speech, thread_events
+
+    asked = []
+    monkeypatch.setattr(speech, "recheck_question_soon", lambda *a, **k: asked.append(1))
+    call(server, "POST", "/device/black", {"on": True, "device": "p8a"}, AUTH)
+    assert asked == []
+    call(server, "POST", "/device/black", {"on": False, "device": "p8a"}, AUTH)
+    assert asked == [1]
+    monkeypatch.setattr(thread_events, "_LAST_ON", {SID2: 1})
+    with thread_events._LOCK:
+        thread_events._publish()
+    assert asked == [1, 1]
+    with thread_events._LOCK:
+        thread_events._publish()             # nothing left: nothing more
+    assert asked == [1, 1]
+
+
+def test_a_question_recheck_never_runs_outside_the_server(monkeypatch):
+    """No pinned watching table (a test, a CLI): no timer that could stop a
+    real player."""
+    from agent_media_core import watching
+    from agent_media_server import speech
+
+    monkeypatch.setattr(watching, "_PINNED", None)
+    assert speech.recheck_question_soon(0) is False
+
+
 def test_black_screen_is_gated(server, shelf, monkeypatch):
     from agent_media_core import watching
     from agent_media_server import auth_abs
