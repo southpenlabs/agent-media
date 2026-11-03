@@ -37,8 +37,24 @@ the note rides on Claude Code's **PostToolUse** too: ``media-hook-context
 nothing until a restart is pending in a sessiond session (``RESTART_HOOK``).
 PostToolUse is the one hook that runs inside a turn and adds context to it
 (its ``additionalContext`` follows the tool's result). A subagent's tool
-calls fire it too (``agent_id`` in the input): those are not told, since a
-subagent told to end its turn would stop its parent's work half done.
+calls fire it too (``agent_id`` in the input). A background agent keeps its
+parent's session busy, so a restart waits on it; it is told too, its own
+note (``SUBAGENT_RESTART_NOTE``, once per agent): finish the step, leave
+nothing half-done, and hand back a status report. Its parent is resumed
+after the restart with each cut-off agent named, to relaunch it (David,
+3 Nov 2026: "how do we make background agents to comply to restart
+requests?").
+
+``media-hook-context --low`` is the **low-priority agent type**'s hook (its
+definition, ``low-priority``, in agent-config's Claude harness, names it in
+its frontmatter). On each of the agent's tool calls it notes the agent
+under ``<state>/low-agents/<agent_id>``, so a drained restart waits for it
+no longer than ``MEDIA_RESTART_LOW_GRACE_S`` (restart_services
+``yields_to_restart``); on a Bash call it also starts a detached helper that
+finds the command's shell as it starts and renices it, and what it has
+started, to nice 19 and the idle I/O class. The command itself is not
+rewritten: a rewritten command would no longer match David's permission
+rules, and rtk's Bash hook rewrites commands already.
 
 Neither prints anything on anything unexpected, and both exit 0: a prompt
 must never be blocked, nor a status line broken, by this.
@@ -431,16 +447,28 @@ def _link_note(hook: dict, d: Path) -> str:
 #: What a session a drained restart waits on is told (restart_services.py).
 RESTART_NOTE = ("A restart of the session host is waiting. Finish the step you're on "
                 "and end your turn; don't start new background agents or background "
-                "commands until it's done. You'll be resumed automatically.")
+                "commands until it's done. Background agents of yours are told as well "
+                "and will hand back; don't relaunch them before the restart. You'll be "
+                "resumed automatically.")
+
+#: What a background agent of such a session is told (once per agent).
+SUBAGENT_RESTART_NOTE = (
+    "A restart of the session host is waiting, and it waits on you. Finish the step "
+    "you're on, commit nothing half-done, remove any temporary worktree or scratch "
+    "checkout you made, and hand back now with a short status report: what is done "
+    "(commits pushed), what is left, and anything uncommitted and where it is, so you "
+    "can be relaunched after the restart. Start no new long commands.")
 
 
 def _restart_note(hook: dict, d: Path) -> str:
     """`RESTART_NOTE`, once per pending restart, to a sessiond session it is
     waiting on (not for a question card only: that waits on David, not on
-    the agent), and never to a subagent."""
+    the agent); `SUBAGENT_RESTART_NOTE`, once per agent, to a background
+    agent of one."""
     sid = (os.environ.get("MEDIA_SESSIOND_SESSION") or "").strip()
-    if not sid or hook.get("agent_id"):
+    if not sid:
         return ""
+    agent = str(hook.get("agent_id") or "").strip()
     try:
         from .. import restart_services as rs
 
@@ -452,14 +480,189 @@ def _restart_note(hook: dict, d: Path) -> str:
                           and w.get("kind") != "question"
                           for w in rec.get("waiting_on") or []):
         return ""
-    marker = d / f"{sid}.restart"
+    # A subagent's marker is its own: `told_to_end` reads the session's.
+    marker = d / (f"{sid}.{_safe(agent)}.restart" if agent else f"{sid}.restart")
     try:
         if marker.read_text().strip() == str(rec["id"]):
             return ""
     except OSError:
         pass
     marker.write_text(str(rec["id"]))
-    return RESTART_NOTE
+    return SUBAGENT_RESTART_NOTE if agent else RESTART_NOTE
+
+
+def _safe(name: str) -> str:
+    """`name` as a file name: the characters an agent id has, nothing else."""
+    return "".join(c for c in name if c.isalnum() or c in "-_")[:80]
+
+
+#: The low-priority agent type (agent-config's harnesses/claude agents).
+LOW_AGENT_TYPE = "low-priority"
+
+
+def low_dir() -> Path:
+    d = state_dir().parent / "low-agents"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def is_low_agent(agent_id: str) -> bool:
+    """Whether `agent_id` (a background task's id: Claude Code's agent id) is
+    a low-priority agent, as its own hook noted (`low_hook`)."""
+    name = _safe(agent_id)
+    return bool(name) and (low_dir() / name).exists()
+
+
+def _prune_low(d: Path, now: float, keep_s: float = 7 * 86400) -> None:
+    for p in d.iterdir():
+        try:
+            if now - p.stat().st_mtime > keep_s:
+                p.unlink()
+        except OSError:
+            pass
+
+
+def low_hook(hook: dict) -> None:
+    """`media-hook-context --low` (PreToolUse, from the low-priority agent's
+    frontmatter): note the agent, and on a Bash call lower the command's
+    priority once it has started (`_renice_soon`). Prints nothing."""
+    import time
+
+    agent = _safe(str(hook.get("agent_id") or ""))
+    if not agent:
+        return
+    d = low_dir()
+    p = d / agent
+    now = time.time()
+    if not p.exists():
+        _prune_low(d, now)
+        p.write_text(json.dumps({"session": hook.get("session_id") or "", "since": round(now, 3)}))
+    if hook.get("tool_name") != "Bash":
+        return
+    cmd = str((hook.get("tool_input") or {}).get("command") or "")
+    if cmd.strip():
+        _renice_soon(cmd)
+
+
+def _claude_pid() -> int:
+    """The Claude Code process this hook runs under: the nearest ancestor
+    whose command line names claude (the hook runs under a shell of its)."""
+    pid = os.getppid()
+    for _ in range(6):
+        try:
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            if any(b"claude" in a.rsplit(b"/", 1)[-1] for a in argv[:2]):
+                return pid
+            pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+        if pid <= 1:
+            break
+    return 0
+
+
+def _renice_soon(cmd: str) -> None:
+    """Fork a detached helper that waits for the shell running `cmd` to
+    appear under Claude Code and renices it and its descendants. Linux
+    only; anything unexpected leaves the command as it was."""
+    if not Path("/proc/self").exists():
+        return
+    root = _claude_pid()
+    if not root:
+        return
+    # A fragment of the command as it will appear in the shell's argv (rtk
+    # may prefix it, so not its start alone): its longest line, trimmed.
+    frag = max(cmd.splitlines(), key=len).strip()[:120]
+    if len(frag) < 3:
+        return
+    try:
+        pid = os.fork()
+    except OSError:
+        return
+    if pid:
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+        return
+    # First child: a session of its own, fork again and leave, so the hook
+    # returns at once and the helper is no child of Claude Code's.
+    try:
+        os.setsid()
+        if os.fork():
+            os._exit(0)
+        devnull = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(devnull, fd)
+        _renice_loop(root, frag.encode())
+    finally:
+        os._exit(0)
+
+
+def _children(pid: int) -> list[int]:
+    try:
+        out = []
+        for t in Path(f"/proc/{pid}/task").iterdir():
+            out += [int(c) for c in (t / "children").read_text().split()]
+        return out
+    except (OSError, ValueError):
+        return []
+
+
+def _tree(pid: int) -> list[int]:
+    seen, todo = [], [pid]
+    while todo:
+        p = todo.pop()
+        if p in seen:
+            continue
+        seen.append(p)
+        todo += _children(p)
+    return seen
+
+
+def _lower(pid: int) -> None:
+    import subprocess
+
+    try:
+        os.setpriority(os.PRIO_PROCESS, pid, 19)
+    except OSError:
+        return
+    # The idle I/O class; util-linux's ionice, as Python has no call for it.
+    subprocess.run(["ionice", "-c3", "-p", str(pid)], capture_output=True, timeout=2,
+                   check=False)
+
+
+def _renice_loop(root: int, frag: bytes, waits: "tuple[float, ...]" = (0, 1, 4, 15, 60)) -> None:
+    """Look for `frag` in the argv of a new descendant of `root` for up to
+    5 s; then lower it and its tree, and again a few times while it runs, for
+    whatever it started before it was lowered (later children inherit)."""
+    import time
+
+    found = 0
+    for _ in range(100):
+        for p in _tree(root)[1:]:
+            try:
+                argv = Path(f"/proc/{p}/cmdline").read_bytes()
+            except OSError:
+                continue
+            if frag in argv and b"media-hook-context" not in argv:
+                found = p
+                break
+        if found:
+            break
+        time.sleep(0.05)
+    if not found:
+        return
+    for wait in waits:
+        time.sleep(wait)
+        if not Path(f"/proc/{found}").exists():
+            return
+        for p in _tree(found):
+            try:
+                if os.getpriority(os.PRIO_PROCESS, p) < 19:
+                    _lower(p)
+            except OSError:
+                pass
 
 
 def told_to_end(sid: str, restart_id: str) -> bool:
@@ -487,6 +690,9 @@ def restart_note_for(hook: dict) -> str:
 
 def _hook() -> None:
     hook = json.load(sys.stdin)
+    if "--low" in sys.argv[1:]:
+        low_hook(hook)
+        return
     note = restart_note_for(hook) if "--restart" in sys.argv[1:] else note_for(hook)
     if note:
         print(note)

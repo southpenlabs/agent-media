@@ -15,7 +15,9 @@ See README.md for the packages and docs/server-contract.md for the server.
   checks. With `--after`, a busy sessiond is drained rather than refused:
   new messages are held, busy sessions are told to end their turn, it
   restarts once none is busy, and cut-off sessions are resumed. If you are
-  told "A restart of the session host is waiting", end your turn. Details: docs/reference/version-skew-monitoring.md ("Restarting
+  told "A restart of the session host is waiting", end your turn (a
+  background agent told so hands back a status report instead). Use the
+  `low-priority` agent type for non-critical background work only. Details: docs/reference/version-skew-monitoring.md ("Restarting
   safely, and from inside a chat") and
   packages/core/src/agent_media_core/restart_services.py.
 - Never `systemctl restart agent-media-sessiond` (or any direct restart of

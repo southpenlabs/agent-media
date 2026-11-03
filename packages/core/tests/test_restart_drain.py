@@ -151,12 +151,72 @@ def test_the_restart_note_is_told_once_to_a_waited_on_session(host, monkeypatch)
     assert context.restart_note_for(_hook()) == ""
 
 
-def test_a_subagent_is_not_told(host, monkeypatch):
-    host.session("11111111-aaaa", state="working")
+def test_a_background_agent_is_told_its_own_note_once(host, monkeypatch):
+    host.session("11111111-aaaa", state="working", tasks=1)
     _run("--only", "sessiond", "--after", "10")
     monkeypatch.setenv("MEDIA_SESSIOND_SESSION", "11111111-aaaa")
-    assert context.restart_note_for(_hook(agent_id="a1")) == ""
-    assert context.restart_note_for(_hook()) != ""
+    out = json.loads(context.restart_note_for(_hook(agent_id="a1")))
+    note = out["hookSpecificOutput"]["additionalContext"]
+    assert "hand back" in note and "status report" in note
+    assert context.restart_note_for(_hook(agent_id="a1")) == ""   # once per agent
+    assert context.restart_note_for(_hook(agent_id="a2")) != ""   # another agent
+    # The session's own note is apart, and says its agents are told.
+    own = json.loads(context.restart_note_for(_hook()))["hookSpecificOutput"]["additionalContext"]
+    assert "end your turn" in own and "Background agents of yours are told" in own
+
+
+def _low(agent_id: str) -> None:
+    context.low_hook({"agent_id": agent_id, "session_id": "11111111-aaaa",
+                      "tool_name": "Read", "tool_input": {}})
+
+
+def _agents(*ids: str) -> list[dict]:
+    return [{"id": i, "description": "", "type": "local_agent"} for i in ids]
+
+
+def test_low_priority_agents_hold_a_drain_only_for_the_grace(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_RESTART_LOW_GRACE_S", "120")
+    host.session("11111111-aaaa", state="waiting", tasks=1, task_list=_agents("alow"))
+    _low("alow")
+    assert context.is_low_agent("alow") and not context.is_low_agent("other")
+    _run("--only", "sessiond", "--after", "10")
+    rec = rs.pending()
+    assert [w["kind"] for w in rec["waiting_on"]] == ["agents"]     # within the grace
+    v = rs.sessiond_sessions()[0]
+    assert not rs.yields_to_restart(v, now=rec["since"] + 60)
+    assert rs.yields_to_restart(v, now=rec["since"] + 121)
+    monkeypatch.setenv("MEDIA_RESTART_LOW_GRACE_S", "0")
+    sessiond = [s for s in rs.services() if rs.is_sessiond(s)]
+    assert sessiond and rs.waiting_on(sessiond, drain=True) == []
+
+
+def test_an_ordinary_agent_or_a_turn_still_holds_it(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_RESTART_LOW_GRACE_S", "0")
+    _low("alow")
+    host.session("11111111-aaaa", state="waiting", tasks=2, task_list=_agents("alow", "anormal"))
+    host.session("22222222-bbbb", state="working", tasks=1, task_list=_agents("alow"))
+    host.session("33333333-cccc", state="waiting", tasks=2, task_list=_agents("alow"))
+    _run("--only", "sessiond", "--after", "10")
+    held = sorted(w["session"] for w in rs.pending()["waiting_on"])
+    assert held == ["11111111-aaaa", "22222222-bbbb", "33333333-cccc"]
+
+
+def test_the_low_hook_lowers_the_command_it_sees_start(tmp_path):
+    import os
+    import subprocess
+
+    tag = f"lowprio-{os.getpid()}"
+    child = subprocess.Popen(["sh", "-c", f"sleep 5; : {tag}"])
+    mine = os.getpriority(os.PRIO_PROCESS, os.getpid())
+    try:
+        context._renice_loop(os.getpid(), tag.encode(), waits=(0,))
+        assert os.getpriority(os.PRIO_PROCESS, child.pid) == 19
+        assert os.getpriority(os.PRIO_PROCESS, os.getpid()) == mine   # never its root
+    finally:
+        child.kill()
+        child.wait()
+    # Nothing to find: it gives up quietly.
+    context._renice_loop(os.getpid(), b"no-such-command-anywhere", waits=(0,))
 
 
 def test_the_prompt_hook_carries_it_too(host, monkeypatch):

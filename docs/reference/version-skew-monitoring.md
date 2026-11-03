@@ -331,7 +331,19 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     UserPromptSubmit, so the note rides on a PostToolUse hook,
     `media-hook-context --restart`, added by `media setup`'s context row
     behind a shell test that runs nothing unless a restart is pending in a
-    sessiond session. Subagents' tool calls are not told.
+    sessiond session. A background agent is told too (3 Nov 2026), with a
+    note of its own: finish the step, commit nothing half-done, remove its
+    scratch worktree and hand back a status report, once per agent. Its
+    session is busy while it runs, so this is what lets a drain finish.
+  - **Low-priority agents** (3 Nov 2026; the `low-priority` agent type in
+    agent-config's Claude harness, for non-critical work only). Its
+    frontmatter hook, `media-hook-context --low`, notes each such agent
+    under `$XDG_STATE_HOME/agent-media/low-agents/` and renices each Bash
+    command it starts to nice 19 and the idle I/O class (from outside: the
+    command is not rewritten, so permission rules and rtk's hook still
+    see it as written). A session busy with nothing but such agents stops
+    holding a drain `MEDIA_RESTART_LOW_GRACE_S` (120) after it began; one
+    still going is cut off, and the resume names it for relaunch.
   - the detached run (`--fire --drain`) checks every 3 s
     (`MEDIA_RESTART_DRAIN_POLL_S`) and restarts **the moment nothing is
     busy**. A session busy only with a question or permission card does

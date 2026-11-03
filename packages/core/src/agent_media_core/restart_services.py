@@ -299,6 +299,38 @@ def question_only(v: dict) -> bool:
             and not v.get("queued"))
 
 
+def low_grace_s() -> float:
+    """How long a drained restart waits on low-priority background agents
+    (MEDIA_RESTART_LOW_GRACE_S, 120 s by default)."""
+    try:
+        return max(0.0, float(os.environ.get("MEDIA_RESTART_LOW_GRACE_S") or 120))
+    except ValueError:
+        return 120.0
+
+
+def yields_to_restart(v: dict, now: "Optional[float]" = None) -> bool:
+    """Whether all a session is busy with is low-priority background agents
+    (the `low-priority` agent type, intake/context.py `low_hook`) and the
+    pending restart has waited `low_grace_s` for them: such work is never
+    worth holding a restart up for (David, 3 Nov 2026: "Can we make better
+    use of priority settings?"). They are told to hand back first
+    (`SUBAGENT_RESTART_NOTE`); one still going is cut off, and its session
+    is resumed naming it, to relaunch it."""
+    if busy_kind(v) != "agents" or v.get("queued"):
+        return False
+    tasks = [t for t in v.get("task_list") or [] if isinstance(t, dict)]
+    if not tasks or len(tasks) < int(v.get("tasks") or 0):
+        return False
+    rec = pending()
+    if not rec:
+        return False
+    if (time.time() if now is None else now) - float(rec.get("since") or 0) < low_grace_s():
+        return False
+    from .intake import context
+
+    return all(context.is_low_agent(str(t.get("id") or "")) for t in tasks)
+
+
 def waiting_on(selected: list[Service], caller: str = "", *, now: bool = False,
                drain: bool = False) -> list[dict]:
     """What restarting `selected` now would cut off, one dict each:
@@ -317,7 +349,7 @@ def waiting_on(selected: list[Service], caller: str = "", *, now: bool = False,
                                        "would die with it"})
                 continue
             why = session_busy(v)
-            if not why or (drain and question_only(v)):
+            if not why or (drain and (question_only(v) or yields_to_restart(v))):
                 continue
             out.append({"session": sid, "kind": busy_kind(v) or "turn", "label": _label(v),
                         "why": ", ".join(why)})
