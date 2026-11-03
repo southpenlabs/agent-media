@@ -4658,6 +4658,10 @@ data: {}
   twice. The notifier posts "Back · <title>", tapping it opens the thread.
   A thread that was archived is unarchived as it comes due (§6.4
   `/session/remind`), so the one it opens is in the list.
+- `follow` (3 Nov 2026; only with `?follow=1`): `{"phone", "name",
+  "session", "title", "at"}` — the thread open on the phone this device
+  follows, every field null while it follows none (§6.21g). After the first
+  `sessions` frame always, then on each change.
 - `ping`: `{}` after `?ping=` seconds of silence — 15 to 300, default 15,
   clamped. A phone asks for a long one so an idle connection wakes the radio
   only for real changes.
@@ -5585,6 +5589,44 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   fallback). A screen whose own address is unknown (loopback) never pauses.
 - Polled: a screen with `on` false may ask once a minute; with `on`, every
   300 ms (hpo's ducker does).
+
+### 6.21g A device that follows a phone (built 3 Nov 2026)
+
+David, 3 Nov 2026: "using the remote for sasonica is a bit cumbersome"
+(roadmap item 52). He types and talks on the phone and watches the
+living-room TV: with a device's "Follow my phone" switch on, the thread
+opened on the chosen phone opens there too, and that device's own thread
+page keeps the reply being read in view (its follow-along, as on any
+screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
+
+- `POST /devices/follow {"id", "phone": <device id> | null}` — a device that
+  may manage devices, as `/devices/pause` (401/403 otherwise). 400
+  `bad_follow` for a body without `phone`, a `phone` that is not a string or
+  null, or a device following itself; 400 `no_such_phone` for an unknown
+  phone; 404 for an unknown id. → `{ok, id, devices}`. Every `/devices` row
+  then has `follow` (the phone's id, null when off; absent until set).
+- `GET /device/follow` — any paired device, for itself (401 otherwise). →
+  `{ok, phone, name, session, title, at}`: the phone it follows, its name,
+  the thread open on it (`at`: when it was opened, epoch seconds) and that
+  thread's title. Every field null while it follows nobody (or a phone since
+  revoked); `session` null until the phone opens a thread after a restart.
+- `POST /device/follow {"on": false}` — the device turns its own following
+  off: a press on its own remote or screen. → as `GET`. `{"on": true}` is
+  400: following is set from Settings → Devices. 401 for anything but a
+  paired device.
+- **What a phone has open** is the thread it opened a stream to last
+  (`GET /threads/{session}/events`, §11): the app holds one for the thread on
+  its screen. A reconnect to the same thread is no change; going back to the
+  list leaves the last thread showing. Kept in memory: a restart forgets it
+  until the phone opens a thread again.
+- **The frame.** `GET /sessions/events?follow=1` (§6.13) adds `event:
+  follow` with `GET /device/follow`'s fields (no `ok`): after the first
+  `sessions` frame always, then whenever they change — the phone opens
+  another thread, the switch is set or cleared — at once (the change wakes
+  the stream). A title alone changing is not sent again. The app holds this
+  stream while its device follows, and asks `GET /device/follow` (every 20 s
+  and on coming to the front) to know when to.
+- In `/features`: `follow: true`.
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 

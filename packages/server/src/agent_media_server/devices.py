@@ -380,6 +380,21 @@ def set_pause(device_id: str, on: bool, pause_for: list[str] | None = None) -> b
         return True
 
 
+def set_follow(device_id: str, phone: str | None) -> bool:
+    """Which phone this device follows (`follow`: its device id, None when
+    off): the thread opened on that phone opens here too (follow.py, §6.21g).
+    From an admin's app (`POST /devices/follow`), or the device itself
+    turning it off. False for an unknown id."""
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        if (hit.get("follow") or None) != (phone or None):
+            _save([{**d, "follow": phone or None} if d is hit else d for d in rows])
+        return True
+
+
 def may_enrol(device: dict | None) -> bool:
     """Whether this device may pair another one, list them, or revoke one.
 

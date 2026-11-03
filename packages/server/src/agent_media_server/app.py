@@ -426,7 +426,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -2226,6 +2226,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, detail.pop("status", 400), {"ok": False, **detail})
             return True
         _send_file(h, detail["file"], detail["size"], detail["type"])
+    elif path == "/device/follow":
+        # What this device follows, and the thread open on that phone now
+        # (follow.py, §6.21g): asked when it has no stream open.
+        from . import follow
+
+        ok, detail = follow.get(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
     elif path == "/screen/now":
         # Should this device pause what is playing on it (screens.py): its
         # switch, a phone's mic or a voice, the phone at home.
@@ -2290,6 +2297,11 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
     client = (qs.get("client") or [""])[0].strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", client):
         client = ""
+    # The thread on this device's screen now: a device following it opens
+    # it too (follow.py, §6.21g).
+    from . import follow
+
+    follow.opened(auth.device_id(bearer), session)
     return thread_events.serve(h, session, limit=limit, gzip=thread_events.accepts_gzip(h),
                                device=who, held=held, client=client)
 
@@ -2340,6 +2352,10 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
     wants_notes = (qs.get("notes") or [""])[0] in ("1", "true")
     # `?remind=1`: a `reminders` frame for the Bring back… reminders that are due (remind.py).
     wants_remind = (qs.get("remind") or [""])[0] in ("1", "true")
+    # `?follow=1`: a `follow` frame naming the thread open on the phone this
+    # device follows (follow.py, §6.21g).
+    follow_dev = (auth.device_id(bearer) or None) if (
+        qs.get("follow") or [""])[0] in ("1", "true") else None
 
     def _after(k: str) -> int | None:
         try:
@@ -2360,7 +2376,8 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
                          handoff_device=handoff_dev,
                          handoff_after=_after("handoff_after"),
                          book_device=book_dev, book_after=_after("book_after"),
-                         want_notes=wants_notes, want_remind=wants_remind)
+                         want_notes=wants_notes, want_remind=wants_remind,
+                         follow_device=follow_dev)
 
 
 def _thread_agents(h: BaseHTTPRequestHandler, session: str, agent_id: str | None,
@@ -2845,6 +2862,41 @@ def _devices_pause(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
+def _devices_follow(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/follow {"id", "phone": <device id> | null}` — whether a
+    device follows a phone: the thread opened there opens on it too
+    (follow.py, §6.21g). Asked of a device that may manage devices, like the
+    pause switch."""
+    from . import follow
+
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    phone = body.get("phone")
+    if "phone" not in body or not (phone is None or isinstance(phone, str)) \
+            or (isinstance(phone, str) and (not phone.strip() or phone == device_id)):
+        _json(h, 400, {"ok": False, "code": "bad_follow",
+                       "error": 'expected {"id", "phone": another device\'s id, or null}'})
+        return
+    rows = {d.get("id") for d in devices.list_devices()}
+    if phone and phone not in rows:
+        _json(h, 400, {"ok": False, "code": "no_such_phone",
+                       "error": "no device with that phone id"})
+        return
+    if not devices.set_follow(device_id, phone):
+        _json(h, 404, {"ok": False, "code": "no_such_device",
+                       "error": "no device with that id"})
+        return
+    follow.changed()
+    print(f"devices: {user.get('device')} set {device_id} to follow {phone or 'nobody'}",
+          file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
@@ -2858,6 +2910,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_role(h)
     elif path == "/devices/pause":
         _devices_pause(h)
+    elif path == "/devices/follow":
+        _devices_follow(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
     elif path == "/contacts/import":
@@ -3219,6 +3273,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         ok, detail = speech_frames.report(dev, _read_json(h),
                                           channel=path.split("/")[1])
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/follow":
+        # A following device turns itself off: a press on its own remote
+        # (follow.py, §6.21g). Turning it on is /devices/follow's.
+        from . import follow
+
+        ok, detail = follow.stop(_bearer(h), _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/mic":
         # A paired device's mic opened or closed (§6.21e, mic_state.py): hpo's

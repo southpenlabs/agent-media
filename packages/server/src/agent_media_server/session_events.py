@@ -38,6 +38,12 @@ thread's one word.
                changes (one coming due, or opened and cleared). The client
                keeps what it has already told (session and `at`) so a
                reconnect does not tell it twice
+    follow     {"phone", "name", "session", "title", "at"} — only when asked,
+               `?follow=1` (§6.21g, follow.py): the thread open on the phone
+               this device follows, every field null while it follows none.
+               After the first `sessions` frame always, then whenever it
+               changes (the phone opens another thread, the switch is set or
+               cleared)
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -67,7 +73,7 @@ import logging
 import threading
 import time
 
-from . import alerts, auth, mic, notes, phone, remind, sessions
+from . import alerts, auth, follow, mic, notes, phone, remind, sessions
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -161,6 +167,7 @@ class _Watcher:
         self.mic_head = 0
         self.phone_head = 0
         self.notes_head = 0
+        self.follow_head = 0
         self.remind_head: tuple = ()
         self.version = 0
         self.thread: threading.Thread | None = None
@@ -177,13 +184,15 @@ class _Watcher:
         mic_head = mic.version()
         phone_head = phone.version()
         notes_head = notes.version()
+        follow_head = follow.version()
         # A reminder coming due is a change, noticed here (≤ POLL_S late).
         remind_head = remind.due_key()
         with self.cond:
             if (rows != self.rows or head != self.alerts_head or mic_head != self.mic_head
                     or phone_head != self.phone_head or notes_head != self.notes_head
-                    or remind_head != self.remind_head):
+                    or remind_head != self.remind_head or follow_head != self.follow_head):
                 self.rows = rows
+                self.follow_head = follow_head
                 self.remind_head = remind_head
                 self.alerts_head = head
                 self.mic_head = mic_head
@@ -239,12 +248,14 @@ def poke() -> None:
     head = mic.version()
     phone_head = phone.version()
     notes_head = notes.version()
+    follow_head = follow.version()
     with w.cond:
         if w.rows is None:
             return
         w.mic_head = head
         w.phone_head = phone_head
         w.notes_head = notes_head
+        w.follow_head = follow_head
         w.version += 1
         w.cond.notify_all()
 
@@ -284,7 +295,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
           music_after: int | None = None, handoff_device: str | None = None,
           handoff_after: int | None = None, book_device: str | None = None,
           book_after: int | None = None, want_notes: bool = False,
-          want_remind: bool = False) -> bool:
+          want_remind: bool = False, follow_device: str | None = None) -> bool:
     """Hold the connection and stream the session list until it goes. Auth
     is the caller's (app.py), done before this. `mic_for` is None when the
     client did not ask for `mic` frames, else the connecting device's id
@@ -307,6 +318,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     this host used to put up over `ssh termux-notification`.
     `want_remind`: `reminders` frames (remind.py) — the Bring back… reminders
     that have come due, for the phone to post "Back · <title>".
+    `follow_device`: `follow` frames (follow.py) — the thread open on the
+    phone this device follows.
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
@@ -359,6 +372,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         seen_phone: list[dict] = []
         seen_notes: list[dict] = []
         seen_remind: list[dict] | None = None
+        seen_follow: dict | None = None
         from agent_media_core import catchup as _catchup
         latest = _catchup.last() if catchup else None
         # Only a recent one on connecting: the phone keeps the last id it posted.
@@ -430,6 +444,15 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                         last_sent = time.monotonic()
                     elif seen_remind is None:
                         seen_remind = due_now
+                if follow_device is not None:
+                    # Compared without its title: a title settling later is
+                    # not a reason to tell the device again.
+                    fs = follow.state(follow_device)
+                    key = {k: v for k, v in fs.items() if k != "title"}
+                    if key != seen_follow:
+                        seen_follow = key
+                        send("follow", fs)
+                        last_sent = time.monotonic()
                 if want_notes:
                     open_notes = notes.open_notes()
                     if open_notes != seen_notes:
