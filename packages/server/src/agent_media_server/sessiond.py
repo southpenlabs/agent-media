@@ -56,7 +56,12 @@ What it does per session:
   7.6 GB, 4-core host), and fewer when the host is short of memory: below
   `MEDIA_SESSIOND_MIN_FREE_MB` available (default 1024) there is no room for
   another. Either way one more parks the least recently used idle one (by
-  the same test), or is refused with a sentence when none is idle.
+  the same test), or is refused with a sentence when none is idle. A
+  session held only by low-priority background agents (the `low-priority`
+  agent type) gives its slot up: its agents are told to hand back (the
+  squeeze record their hook reads), and `MEDIA_RESTART_LOW_GRACE_S` (120)
+  later it is parked, cut off `why: "slot"`, and resumed naming its agents
+  once there is room and no other session holds messages (`_yield_low`).
 
 It writes nothing to tmux. Transcripts land where Claude Code puts them
 (`~/.claude/projects/…`), so the canvas's transcript reader works unchanged.
@@ -725,6 +730,48 @@ def interrupt_killed_note(s: "Session", killed: list[dict]) -> str:
             "transcript) rather than start over, and tell David you did.")
 
 
+def _low_only(s: "Session") -> bool:
+    """Whether all `s` is busy with is low-priority background agents: its
+    turn over, nothing pending or queued, and every task in flight one the
+    low-priority agent's hook has noted (core intake/context.py)."""
+    if not s.running or s.state != "waiting" or s.pending or s.queued or s.held:
+        return False
+    tasks = s.task_list()
+    if not tasks:
+        return False
+    try:
+        from agent_media_core.intake import context
+    except ImportError:
+        return False
+    return all(context.is_low_agent(str(t.get("id") or "")) for t in tasks)
+
+
+def _low_grace_s() -> float:
+    try:
+        from agent_media_core.restart_services import low_grace_s
+    except ImportError:
+        return 120.0
+    return low_grace_s()
+
+
+def _write_squeeze(rec: "dict | None") -> None:
+    """The squeeze record the low-priority agents' hook reads, or none."""
+    try:
+        from agent_media_core.intake import context
+    except ImportError:
+        return
+    p = context.squeeze_path()
+    try:
+        if rec is None:
+            p.unlink(missing_ok=True)
+        else:
+            tmp = p.with_name(f".{p.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(rec))
+            os.replace(tmp, p)
+    except OSError:
+        pass
+
+
 def resume_note(s: "Session", cut: dict) -> str:
     """The message a session cut off by a restart is resumed with: what was
     running, and what to do about it."""
@@ -761,7 +808,11 @@ def resume_note(s: "Session", cut: dict) -> str:
         n = int(cut["queued"])
         what.append(f"{n} message{'s' if n != 1 else ''} sent to you mid-turn that may "
                     "not have reached you (check the thread's last messages)")
-    if cut.get("why") == "drain":
+    if cut.get("why") == "slot":
+        note = (tag + "Another chat needed a session slot, so the session host parked "
+                "this one while only low-priority background agents were running in it. "
+                "There is room again.")
+    elif cut.get("why") == "drain":
         # Told to end its turn early for a drain (intake/context.py's
         # RESTART_NOTE): its work is not done, whatever its last reply said.
         last = " ".join(str(cut.get("last_text") or "").split())
@@ -1057,6 +1108,8 @@ class Supervisor:
         self.sessions: dict[str, Session] = {}
         #: Set once this instance is stopping (`begin_stop`).
         self.stopping = False
+        #: A slot wanted while only low-priority agents hold sessions (`_yield_low`).
+        self._squeeze: dict | None = None
         #: The pending-restart record as last read, and when (`draining`).
         self._restart_rec: dict | None = None
         self._restart_read_at: float | None = None
@@ -1312,6 +1365,11 @@ class Supervisor:
                     continue
                 if cut.get("why") == "quota" and not cut.get("due"):
                     continue
+                if cut.get("why") == "slot":
+                    # Parked to free a slot: back only once no one else waits.
+                    if any(x.held for x in self.sessions.values() if x is not s):
+                        continue
+                    cut["due"] = True
                 if s.held or cut.get("due"):
                     todo.append(s.id)
         done = []
@@ -1360,7 +1418,8 @@ class Supervisor:
                     s.quota_resumed = float(cut.get("at") or time.time())
                 self._save(s)
         if text:
-            why = {"quota": "the usage limit", "drain": "the drain"}.get(
+            why = {"quota": "the usage limit", "drain": "the drain",
+               "slot": "a slot freed"}.get(
                 str(cut.get("why")), "the restart")
             try:
                 self.send(sid, text, _internal=True)
@@ -2206,10 +2265,13 @@ class Supervisor:
         free = mem_available_mb()
         short = bool(live) and free is not None and free < min_free_mb()
         if len(live) < max_live() and not short:
+            self._end_squeeze()
             return
         idle = sorted((x for x in live if x.state == "waiting" and not x.pending
                        and not x.queued and not x.active_tasks()),
                       key=lambda x: x.idle_since())
+        if not idle and self._yield_low(live):
+            return
         if not idle:
             if short:
                 raise Refused(f"the host is low on memory ({free:.0f} MB free) with "
@@ -2218,6 +2280,47 @@ class Supervisor:
             raise Refused(f"{len(live)} phone sessions are busy on this host; "
                           "close one or wait for one to finish", "busy")
         self._park(idle[0])
+
+    def _yield_low(self, live: "list[Session]") -> bool:
+        """Under the lock, with no idle session to park: a session held only
+        by low-priority background agents (the `low-priority` agent type,
+        core intake/context.py) gives its slot up. Its agents are told first
+        (the squeeze record, read by their own hook); `low_grace_s` later the
+        least recently active one is parked, cut off with what it was
+        running (`why: "slot"`), to be resumed naming its agents once there
+        is room and no one else is waiting (`deliver_due`). True when one
+        was parked (David, 3 Nov 2026: "when will it pause it if we're
+        running low on available sessions?")."""
+        low = sorted((x for x in live if _low_only(x)), key=lambda x: x.idle_since())
+        if not low:
+            self._end_squeeze()
+            return False
+        now = time.time()
+        if self._squeeze is None:
+            self._squeeze = {"id": uuid.uuid4().hex[:12], "since": round(now, 3),
+                             "sessions": [x.id for x in low]}
+            log.info("sessiond: a slot is wanted; %d session(s) held only by "
+                     "low-priority agents told to hand back", len(low))
+        else:
+            self._squeeze["sessions"] = [x.id for x in low]
+        _write_squeeze(self._squeeze)
+        if now - float(self._squeeze["since"]) < _low_grace_s():
+            return False
+        s = low[0]
+        s.cut_off = {"state": s.state, "turn": False, "question": False,
+                     "tasks": s.task_list(now), "queued": 0, "last_text": s.last_text,
+                     "at": round(now, 3), "why": "slot"}
+        self._save(s)
+        log.info("sessiond: %s parked for a slot (%d low-priority agent(s) cut off)",
+                 s.id[:8], len(s.cut_off["tasks"]))
+        self._park(s)
+        self._end_squeeze()
+        return True
+
+    def _end_squeeze(self) -> None:
+        if self._squeeze is not None:
+            self._squeeze = None
+            _write_squeeze(None)
 
     def _park(self, s: Session) -> None:
         if s.agent == "opencode":

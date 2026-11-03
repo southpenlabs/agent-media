@@ -543,6 +543,55 @@ def test_a_full_host_does_not_park_a_session_with_a_task(host, monkeypatch):
     wait_for(lambda: last_text(host, b) == "b", timeout=10)
 
 
+def test_a_full_host_parks_a_session_held_only_by_low_priority_agents(host, monkeypatch):
+    """A slot wanted while the only busy session is held by low-priority
+    agents (David, 3 Nov 2026): they are told, the grace passes, it is
+    parked with its agents named, and it comes back once no one waits."""
+    from agent_media_core.intake import context
+
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    monkeypatch.setenv("MEDIA_RESTART_LOW_GRACE_S", "3")
+    a = start(host, "reply: a")
+    wait_for(lambda: state(host, a) == "waiting")
+    _task(host, a, "task_started", task_type="local_agent", is_backgrounded=True,
+          description="sweep the buttons")
+    context.low_hook({"agent_id": "a3f6", "tool_name": "Read", "tool_input": {}})
+    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: b")
+    assert ok and d["held"] is True
+    b = d["session"]
+    # Within the grace: a stays, its low-priority agent is told once.
+    wait_for(lambda: (context.read_squeeze() or {}).get("sessions") == [a], timeout=5)
+    assert host.sup.get(a)["live"]
+    monkeypatch.setenv("MEDIA_SESSIOND_SESSION", a)
+    out = context.low_hook({"agent_id": "a3f6", "tool_name": "Read", "tool_input": {},
+                            "hook_event_name": "PreToolUse"})
+    assert "waiting for a session slot" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert context.low_hook({"agent_id": "a3f6", "tool_name": "Read", "tool_input": {}}) == ""
+    monkeypatch.delenv("MEDIA_SESSIOND_SESSION")
+    # Past it: a is parked for b, cut off naming its agent; b runs.
+    wait_for(lambda: state(host, a) == "parked", timeout=12)
+    wait_for(lambda: last_text(host, b) == "b", timeout=10)
+    assert context.read_squeeze() is None
+    note = sessiond.resume_note(host.sup.sessions[a], {
+        "why": "slot", "tasks": [{"id": "a3f6", "type": "local_agent",
+                                  "description": "sweep the buttons"}]})
+    assert "needed a session slot" in note and "a3f6" in note and "SendMessage" in note
+
+
+def test_an_ordinary_agent_never_yields_its_slot(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    monkeypatch.setenv("MEDIA_RESTART_LOW_GRACE_S", "0")
+    a = start(host, "reply: a")
+    wait_for(lambda: state(host, a) == "waiting")
+    _task(host, a, "task_started", task_type="local_agent", is_backgrounded=True)
+    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: b")
+    assert ok and d["held"] is True
+    time.sleep(2.5)
+    assert host.sup.get(a)["live"]
+    from agent_media_core.intake import context
+    assert context.read_squeeze() is None
+
+
 def test_resume_brings_a_parked_session_back_saying_nothing(host, monkeypatch):
     sid = start(host, "reply: a")
     wait_for(lambda: state(host, sid) == "waiting")

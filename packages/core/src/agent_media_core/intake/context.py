@@ -522,26 +522,75 @@ def _prune_low(d: Path, now: float, keep_s: float = 7 * 86400) -> None:
             pass
 
 
-def low_hook(hook: dict) -> None:
+#: What a low-priority agent is told when its session's slot is wanted.
+SLOT_NOTE = (
+    "Another chat is waiting for a session slot on this host, and the session you "
+    "run in is held only by low-priority work like yours. Finish the step you're "
+    "on, commit nothing half-done, remove any temporary worktree or scratch checkout "
+    "you made, and hand back now with a short status report: what is done (commits "
+    "pushed), what is left, and anything uncommitted and where it is. In about two "
+    "minutes the session is parked whether or not you have finished; you can be "
+    "continued later.")
+
+
+def squeeze_path() -> Path:
+    """sessiond's slot squeeze (sessiond `_ensure_room`): `{"id", "since",
+    "sessions"}` while a message waits for a slot and only low-priority work
+    holds the sessions named."""
+    return state_dir().parent / "slot-squeeze.json"
+
+
+def read_squeeze() -> "dict | None":
+    try:
+        rec = json.loads(squeeze_path().read_text())
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) and rec.get("id") else None
+
+
+def _slot_note(agent: str, d: Path) -> str:
+    """`SLOT_NOTE`, once per squeeze, to a low-priority agent of a session
+    the squeeze names."""
+    sid = (os.environ.get("MEDIA_SESSIOND_SESSION") or "").strip()
+    rec = read_squeeze() if sid else None
+    if not rec or sid not in (rec.get("sessions") or []):
+        return ""
+    marker = d / f"{sid}.{agent}.slot"
+    try:
+        if marker.read_text().strip() == str(rec["id"]):
+            return ""
+    except OSError:
+        pass
+    marker.write_text(str(rec["id"]))
+    return SLOT_NOTE
+
+
+def low_hook(hook: dict) -> str:
     """`media-hook-context --low` (PreToolUse, from the low-priority agent's
-    frontmatter): note the agent, and on a Bash call lower the command's
-    priority once it has started (`_renice_soon`). Prints nothing."""
+    frontmatter): note the agent, tell it once when its session's slot is
+    wanted (`_slot_note`, the hook JSON returned), and on a Bash call lower
+    the command's priority once it has started (`_renice_soon`)."""
     import time
 
     agent = _safe(str(hook.get("agent_id") or ""))
     if not agent:
-        return
+        return ""
     d = low_dir()
     p = d / agent
     now = time.time()
     if not p.exists():
         _prune_low(d, now)
         p.write_text(json.dumps({"session": hook.get("session_id") or "", "since": round(now, 3)}))
-    if hook.get("tool_name") != "Bash":
-        return
-    cmd = str((hook.get("tool_input") or {}).get("command") or "")
-    if cmd.strip():
-        _renice_soon(cmd)
+    if hook.get("tool_name") == "Bash":
+        cmd = str((hook.get("tool_input") or {}).get("command") or "")
+        if cmd.strip():
+            _renice_soon(cmd)
+    note = _slot_note(agent, state_dir())
+    if not note:
+        return ""
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": hook.get("hook_event_name") or "PreToolUse",
+        "additionalContext": note}})
 
 
 def _claude_pid() -> int:
@@ -691,7 +740,9 @@ def restart_note_for(hook: dict) -> str:
 def _hook() -> None:
     hook = json.load(sys.stdin)
     if "--low" in sys.argv[1:]:
-        low_hook(hook)
+        out = low_hook(hook)
+        if out:
+            print(out)
         return
     note = restart_note_for(hook) if "--restart" in sys.argv[1:] else note_for(hook)
     if note:

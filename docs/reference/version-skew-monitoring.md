@@ -343,7 +343,11 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     command is not rewritten, so permission rules and rtk's hook still
     see it as written). A session busy with nothing but such agents stops
     holding a drain `MEDIA_RESTART_LOW_GRACE_S` (120) after it began; one
-    still going is cut off, and the resume names it for relaunch.
+    still going is cut off, and the resume names it for relaunch. The
+    same goes for a **session slot** (sessiond's cap, `MEDIA_SESSIOND_MAX`,
+    or memory short): with no idle session to park, one held only by such
+    agents has them told to hand back and is parked after the same grace,
+    then resumed once a slot is free and no one else is waiting.
   - the detached run (`--fire --drain`) checks every 3 s
     (`MEDIA_RESTART_DRAIN_POLL_S`) and restarts **the moment nothing is
     busy**. A session busy only with a question or permission card does
