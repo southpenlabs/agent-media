@@ -85,9 +85,21 @@ def _interim(harness: str, parts: list[dict], i: int) -> bool:
     message. The Stop hook speaks only the turn's last message, so these
     were never heard (David, 28 Oct 2026: "why don't I get these thought
     messages read out?"); they are its public progress, as Codex's
-    commentary is."""
-    return harness == "claude" and any(
-        q.get("type") == "tool" for q in parts[i + 1:])
+    commentary is.
+
+    Not words that lead into a question card: they are read with the
+    question (the AskUserQuestion read-out's lead-in), and a turn that goes
+    on after the answer puts its later steps in the same message, so they
+    were read again as thinking (David, 3 Nov 2026: "why is this reply being
+    repeated as thinking?"). The first step or card after the words decides."""
+    if harness != "claude":
+        return False
+    for q in parts[i + 1:]:
+        if q.get("type") == "ask":
+            return False
+        if q.get("type") == "tool":
+            return True
+    return False
 
 
 def _parts(messages: list[dict], harness: str = "") -> dict[tuple[str, int], str]:

@@ -598,3 +598,15 @@ def test_claude_words_before_a_step_are_read_but_not_the_final_reply():
     assert T._parts(msgs, "claude") == {("m1", 1): "Will do. I'll push this fix first."}
     # Other harnesses keep their rule: only reasoning and commentary.
     assert T._parts(msgs, "codex") == {}
+
+
+def test_words_leading_into_a_question_card_are_not_read_as_thinking():
+    """David, 3 Nov 2026: 'why is this reply being repeated as thinking?' —
+    the words before a card are read with the question, and the steps the
+    turn takes after the answer land in the same message."""
+    msgs = [{"id": "m1", "role": "assistant", "parts": [
+                {"type": "text", "text": "Here are four ideas."},
+                {"type": "ask", "ask": [], "status": "answered"},
+                {"type": "text", "text": "All four, then. Starting on the server."},
+                {"type": "tool", "name": "Bash", "description": "Read the code"}]}]
+    assert T._parts(msgs, "claude") == {("m1", 2): "All four, then. Starting on the server."}
