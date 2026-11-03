@@ -553,6 +553,16 @@ class HandoffPlayer:
         with contextlib.suppress(ipc.MpvIpcError, OSError):
             ipc.set_property(self._ep(), "force-media-title", query(song)[0])
 
+    def volume(self, percent: float) -> None:
+        """The hand-off player's volume, 0–100 (mpv's scale): the phone turns
+        its media volume to that share of where it was and puts it back when
+        the song is over (HandoffMusic.volume). For a reply's tune, which
+        starts quiet (reply_tune.level)."""
+        from .sinks import _mpv_ipc as ipc
+
+        with contextlib.suppress(ipc.MpvIpcError, OSError):
+            ipc.set_property(self._ep(), "volume", float(max(0.0, min(100.0, percent))))
+
     def _command(self, *args) -> None:
         from .sinks import _mpv_ipc as ipc
 

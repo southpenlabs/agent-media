@@ -3,8 +3,17 @@
 David, 3 Nov 2026: "Can we play a tune on Spotify after a reply chosen by
 the reply's relevance? Is that legal in a distributable package?" — "yes
 please" (to writing this up).
-Status: **steps 1–3 built** 3 Nov 2026 (`reply_tune.py`, off unless
-`MEDIA_REPLY_TUNE=handoff|spotify`); step 4, the app's switch, to come.
+Status: **steps 1–4 built** (1–3 on 3 Nov 2026, `reply_tune.py`, off unless
+`MEDIA_REPLY_TUNE=handoff|spotify`; 4 on 4 Nov 2026: the `tune` switch among
+`/speech/music-bed`'s settings, off by default, under **Sing it out** on the
+full player and in Settings → Music). David's doubts, 4 Nov: a song he was
+not already listening to can take him away from his thoughts on the reply,
+so it is his to switch on; it starts quiet, at the backing music level
+("Use the speech versus music slider for the volume adjustment"): the
+hand-off route lowers the phone's media volume to that share and puts it
+back before the next reply speaks, the Spotify route sets the device's
+volume. Next, David's "let's try both for now": the level slider under the
+reply while its song plays, and in the mini player's song bar.
 David, after this was written: "Yes, please... and read Spotify's official
 terms" — read the same day (below), and they moved the Spotify route
 behind the personal-use switch.

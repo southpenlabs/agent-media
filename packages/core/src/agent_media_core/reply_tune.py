@@ -25,11 +25,35 @@ nothing plays:
   assistant controlling Spotify) and III.5 (no product integrated with
   another service's content) leave an assistant doing this in doubt.
 
-**When it does not.** In a thinking readout; within the cooldown
-(``MEDIA_REPLY_TUNE_COOLDOWN_MIN``, default 30 minutes, across the whole
-install); while a radio station is on; while the route's player is already
-playing. It plays after the speech, never under it (Developer Policy III.7:
-no overlapping Spotify with other audio).
+**When it does not.** While the switch is off (below); in a thinking
+readout; within the cooldown (``MEDIA_REPLY_TUNE_COOLDOWN_MIN``, default 30
+minutes, across the whole install); while a radio station is on; while the
+route's player is already playing. It plays after the speech, never under
+it (Developer Policy III.7: no overlapping Spotify with other audio).
+
+**The switch and the start level** (David, 4 Nov 2026: a song he was not
+already listening to can take him away from his thoughts on the reply, so
+it should be his to switch on and start quiet — "put the sing it out
+feature as an option on the full size media player"; "Use the speech
+versus music slider for the volume adjustment").
+
+- ``tune`` (bool, "A tune after some replies"): one setting among the music
+  bed's (``GET /speech/music-bed`` ``settings``, ``settings()`` here),
+  listed only while a route is on, so an app without one never offers it;
+  the app puts it under Sing it out on the full player and in Settings →
+  Music. Off by default, whatever the route; ``MEDIA_REPLY_TUNE_ON=1``
+  turns it on for a host with no Settings. Stored in ``music-bed.json``
+  with the other switches.
+- The start level is the backing music level's (``level()``): the slider
+  that sets how loud music sits under the voice, and how far his own music
+  drops under a reply, also says how loud the song starts — its dB against
+  the voice as a share of full volume (a fifth at the default -14
+  dB, two thirds at -4, a twentieth at the bottom). No slider of its own.
+  The hand-off route sets the hand-off player's volume before it asks for
+  the song: the phone turns its media volume to that share and puts it
+  back before the next reply speaks, or when the song is over or stopped
+  (HandoffMusic.java). The Spotify route sets the device's volume with the
+  Web API (an official call: no term bars it).
 """
 
 from __future__ import annotations
@@ -48,6 +72,15 @@ log = logging.getLogger(__name__)
 
 ROUTES = ("handoff", "spotify")
 DEFAULT_COOLDOWN_MIN = 30.0
+#: The settings an app renders among the music bed's (settings()).
+SETTING_IDS = ("tune",)
+ON_LABEL = "A tune after some replies"
+ON_HINT = ("Rarely, after a reply that earns one, the agent names a song that fits it, "
+           "and your music app plays it once the reply has been read. At most one every "
+           "half hour, never over music you are playing. It starts at the backing music "
+           "level and your volume keys take it from there.")
+#: The song never starts below this share of full volume, whatever the slider says.
+MIN_LEVEL = 5
 
 
 def route() -> Optional[str]:
@@ -60,6 +93,62 @@ def route() -> Optional[str]:
         if not personal_use.allowed("spotify-reply-tune"):
             return None
     return r
+
+
+def _stored(name: str):
+    from . import music_bed
+    return music_bed._stored().get(name)
+
+
+def on() -> bool:
+    """Whether a tune may play: Settings' switch, else MEDIA_REPLY_TUNE_ON,
+    else off."""
+    v = _stored("tune")
+    if isinstance(v, bool):
+        return v
+    return (os.environ.get("MEDIA_REPLY_TUNE_ON") or "").strip().lower() in ("1", "on", "true", "yes")
+
+
+def level() -> int:
+    """How loud the song starts, percent of full: the backing music level
+    (music_bed.gain_db, the slider on the full player and in Settings →
+    Music) as shown against the voice, 10 ** (dB / 20); never under
+    MIN_LEVEL, never over 100. Never raises (MIN_LEVEL on any failure)."""
+    try:
+        from . import music_bed
+        db = music_bed.shown_gain(music_bed.gain_db())
+        return int(round(min(100.0, max(float(MIN_LEVEL), 100.0 * 10 ** (db / 20.0)))))
+    except Exception:  # noqa: BLE001 — a level must never cost a reply
+        return MIN_LEVEL
+
+
+def settings() -> list[dict]:
+    """The switch as GET /speech/music-bed lists it; none without a route,
+    so an app that cannot play a tune never offers one."""
+    if route() is None:
+        return []
+    return [{"id": "tune", "kind": "bool", "label": ON_LABEL, "hint": ON_HINT,
+             "value": on(), "set": isinstance(_stored("tune"), bool)}]
+
+
+def check_setting(name: str, value) -> None:
+    """ValueError unless `value` is right for `name` (null forgets it)."""
+    if name != "tune":
+        raise ValueError(f"no music bed setting {name!r}")
+    if value is not None and not isinstance(value, bool):
+        raise ValueError("tune must be true, false or null")
+
+
+def set_stored(name: str, value) -> None:
+    """Save one of SETTING_IDS in music-bed.json (null forgets it)."""
+    from . import music_bed
+    check_setting(name, value)
+    d = music_bed._stored()
+    if value is None:
+        d.pop(name, None)
+    else:
+        d[name] = bool(value)
+    music_bed._store(d)
 
 
 def cooldown_s() -> float:
@@ -131,6 +220,8 @@ def _after_reply(event, row: int) -> Optional[str]:
     r = route()
     if r is None:
         return _skip("off (MEDIA_REPLY_TUNE)", line)
+    if not on():
+        return _skip("off (the switch)", line)
     prev = last()
     if prev.get("at") and time.time() - float(prev["at"]) < cooldown_s():
         return _skip("within the cooldown", line)
@@ -141,11 +232,12 @@ def _after_reply(event, row: int) -> Optional[str]:
     if not title:
         return _skip("no title", line)
     entry = {"at": time.time(), "line": line, "route": r, "row": row,
+             "level": level(),
              "session": md.get("session_id") or md.get("session") or None}
     if r == "handoff":
-        why = _handoff(line, artist, title)
+        why = _handoff(line, artist, title, entry["level"])
     else:
-        why, found = _spotify(artist, title)
+        why, found = _spotify(artist, title, entry["level"])
         if found:
             entry["track"] = found
     if why:
@@ -155,7 +247,7 @@ def _after_reply(event, row: int) -> Optional[str]:
     return None
 
 
-def _handoff(line: str, artist: str, title: str) -> Optional[str]:
+def _handoff(line: str, artist: str, title: str, start_level: int = 100) -> Optional[str]:
     from . import radio_io
 
     why = radio_io.handoff_ready()
@@ -166,13 +258,16 @@ def _handoff(line: str, artist: str, title: str) -> Optional[str]:
     if props and not props.get("idle-active") and not props.get("pause"):
         return "the hand-off player is playing"
     song = {"id": _song_id(line), "q": f"{artist} - {title}" if artist else title}
+    # Quiet from the first note: the level goes before the ask, and the
+    # phone puts its volume back when the song is over (HandoffMusic.java).
+    player.volume(start_level)
     if not player.send(song, replace=True):
         return "the hand-off player did not take it"
     player.label(song)
     return None
 
 
-def _spotify(artist: str, title: str) -> tuple[Optional[str], Optional[dict]]:
+def _spotify(artist: str, title: str, start_level: int = 100) -> tuple[Optional[str], Optional[dict]]:
     from . import spotify_remote as sr
 
     try:
@@ -181,7 +276,14 @@ def _spotify(artist: str, title: str) -> tuple[Optional[str], Optional[dict]]:
         found = sr.search_track(artist, title)
         if not found or not found.get("uri"):
             return "Spotify has no such song", None
-        sr.play(found["uri"], _device(sr))
+        device = _device(sr)
+        try:
+            # A device that does not take a volume (some Connect speakers)
+            # says so; the song still plays, at the device's own level.
+            sr.set_volume(start_level, device)
+        except sr.RemoteError as e:
+            log.info("reply tune: Spotify volume not set: %s", e)
+        sr.play(found["uri"], device)
         return None, found
     except sr.RemoteError as e:
         return f"Spotify: {e.code}: {e}", None

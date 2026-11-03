@@ -120,6 +120,17 @@ def search_track(artist: str, title: str) -> Optional[dict]:
             "url": (t.get("external_urls") or {}).get("spotify")}
 
 
+def set_volume(percent: int, device: str = "") -> None:
+    """Set the device's volume (0–100; the active one with no `device`):
+    ``PUT /me/player/volume``. RemoteError when the device takes none."""
+    import urllib.parse
+
+    q = {"volume_percent": int(max(0, min(100, percent)))}
+    if device:
+        q["device_id"] = device
+    _call("PUT", "/me/player/volume?" + urllib.parse.urlencode(q), _token())
+
+
 def is_playing() -> bool:
     """Whether Spotify is playing on any of the listener's devices now."""
     return bool(_call("GET", "/me/player", _token()).get("is_playing"))

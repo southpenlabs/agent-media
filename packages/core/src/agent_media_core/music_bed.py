@@ -1587,7 +1587,14 @@ def settings() -> list[dict]:
               "value": slow_on(), "set": stored_slow() is not None},
              {"id": "topic", "kind": "bool", "label": TOPIC_LABEL, "hint": TOPIC_HINT,
               "value": topic_on(), "set": stored_topic() is not None}]
-            + music_bed_mix.settings() + _calm_settings())
+            + music_bed_mix.settings() + _calm_settings() + _tune_settings())
+
+
+def _tune_settings() -> list[dict]:
+    """A tune after some replies and its start level (reply_tune), listed
+    only while a route is on."""
+    from . import reply_tune
+    return reply_tune.settings()
 
 
 def _calm_settings() -> list[dict]:
@@ -1607,7 +1614,7 @@ def set_settings(values: dict) -> None:
     """Save `{id: value}` from POST /speech/music-bed's `settings` (null
     forgets one). ValueError for an unknown id or a bad value, before any
     is saved."""
-    from . import music_bed_mix
+    from . import music_bed_mix, reply_tune
     if not isinstance(values, dict) or not values:
         raise ValueError("settings must be an object of {id: value}")
     for k, v in values.items():
@@ -1624,8 +1631,13 @@ def set_settings(values: dict) -> None:
         elif k in music_bed_mix.IDS:
             if v is not None and not isinstance(v, bool):
                 raise ValueError(f"{k} must be true, false or null")
+        elif k in reply_tune.SETTING_IDS:
+            reply_tune.check_setting(k, v)
         else:
             raise ValueError(f"no music bed setting {k!r}")
+    for k in reply_tune.SETTING_IDS:
+        if k in values:
+            reply_tune.set_stored(k, values[k])
     for k in music_bed_mix.IDS:
         if k in values:
             music_bed_mix.set_switch(k, values[k])

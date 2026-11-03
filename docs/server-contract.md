@@ -2618,6 +2618,28 @@ repeated section is the chorus), run out of process with the Demucs venv's
 Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
 fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
 
+**A tune after some replies, and Sing it out on the full player (4 Nov
+2026)** (`reply_tune.py`; David: "let's put the sing it out feature as an
+option on the full size media player" — "Use the speech versus music slider
+for the volume adjustment"). `settings` carries one more switch,
+**`tune`** ("A tune after some replies", `kind` bool, off by default),
+listed only while the server has a route for it (`MEDIA_REPLY_TUNE`
+handoff|spotify; `MEDIA_REPLY_TUNE_ON=1` turns the switch on for a host
+with no Settings); `POST {"settings": {"tune": true|false|null}}` sets it
+(null forgets it, back to the env). With it on, a reply ending with
+`[[tune: Artist - Title]]` has its song played by the listener's music app
+once the reply has been read (docs/proposals/2026-11-03-reply-tune.md).
+The song starts at the backing music level (`gain_db` as shown, against
+the voice, as a share of full: 10^(dB/20), a fifth at the default -14 dB,
+never under 5 %): on the hand-off route the server sets the hand-off
+player's `volume` (0–100) before the ask, and the phone turns its media
+volume to that share and puts it back when the song is over or stopped, or
+before the next reply speaks (sasonica-app HandoffMusic.java); on the
+Spotify route the device's volume is set with the Web API. The app puts
+`vocal` and `tune` under **Sing it out** on the full player, a folding
+group under Levels (sasonica-app components/PlayerSingItOut.tsx), as well
+as in Settings → Music. Pinned by `packages/core/tests/test_reply_tune.py`.
+
 **Singing it out: the song and its controls (31 Oct 2026)** (David: "The
 new singing it out feature is awesome!" — he picked like and dislike, and
 radio from the song). `after` also carries the song, for the phone to show
