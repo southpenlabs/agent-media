@@ -26,7 +26,7 @@ TABS = [
     {"id": "podcast", "label": "Podcasts", "takes": "a YouTube video or a podcast episode"},
     {"id": "practice", "label": "Practice", "takes": "a YouTube video or a podcast feed"},
     {"id": "book", "label": "Books", "takes": "a YouTube video or playlist"},
-    {"id": "music", "label": "Music", "takes": "a Spotify album, playlist or song"},
+    {"id": "music", "label": "Music", "takes": "a Spotify album, playlist or song, or a YouTube video or playlist"},
 ]
 
 

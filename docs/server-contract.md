@@ -3631,7 +3631,7 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 
 | kind | lists |
 |---|---|
-| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved) |
+| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs, and from 3 Nov YouTube videos and playlists (`source` `youtube`, `link`), saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved) |
 | `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most` |
 | `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most`, `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
@@ -8107,8 +8107,19 @@ downloaded version has been removed to save space".
   saved as `album:spotify-<kind>-<id>` (`tracks`); listed in
   `GET /music/recent?list=albums`. Playing it finds each track on YouTube
   (the original, not live, a cover or karaoke, kept once found), starts the
-  first and queues the rest behind it. 400 for a link the tab does not take
-  or an unknown `to`.
+  first and queues the rest behind it. Or (3 Nov 2026; David: "build it
+  but put it into the sassonica-personal add-ons if it breaks YouTube's
+  terms of service. if not, add it to regular sasonica") a YouTube video
+  or playlist (watch, youtu.be, shorts, music.youtube.com or a playlist
+  link; a watch link inside a playlist is the video), saved by YouTube's
+  documented oEmbed (name, channel as `artist`, picture) as
+  `album:youtube-video-<id>` or `album:youtube-playlist-<id>`, `tracks`
+  0; its row's `source` is `"youtube"` and `link` the video or playlist,
+  for the app to open in YouTube itself. `POST /music {"action": "play",
+  "uri": "album:youtube-…"}` hands it to the music player, which plays
+  YouTube only where the add-on's `youtube-streaming` or
+  `youtube-downloads` allows it; elsewhere 409 with `code` `"youtube"`
+  and `link`. 400 for a link the tab does not take or an unknown `to`.
 - `POST /media/links {"action": "remove", "id", "keep_link"?}` → `{"ok",
   "removed"}`: a saved podcast link and its download, or with `keep_link`
   only the download (it plays from the link after), or a saved album

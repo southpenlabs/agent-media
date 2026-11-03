@@ -828,7 +828,9 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     elif action == "spotify":
         return _spotify_play(body)
     elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("album:"):
-        # A row of Show → Albums: a saved Spotify album, played from YouTube.
+        # A row of Show → Albums: a saved Spotify album, played from YouTube,
+        # or a saved YouTube video or playlist (refused with code "youtube"
+        # and its link where YouTube can't be played here).
         from agent_media_core import music_links
 
         if not music_links.find(body["uri"]):
@@ -836,7 +838,9 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         r = music_links.play(body["uri"])
         _reset_cache()
         if not r.get("ok"):
-            return False, {"error": r.get("error") or "album failed", "status": 502, **_answer()}
+            extra = {k: r[k] for k in ("code", "link") if r.get(k)}
+            return False, {"error": r.get("error") or "album failed", "status": 409 if extra else 502,
+                           **extra, **_answer()}
         return True, _answer()
     elif action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("radio:"):
         # A row of Show → Stations: that station back on.

@@ -96,3 +96,29 @@ def test_playing_on_spotify_signed_out_says_how(server, shelf, signed_in, monkey
     assert obj["code"] == "signed_out" and obj["link"] == "https://open.spotify.com/album/1qiw9zXdtK5Xidv4j8W28Y"
     res, obj = call(server, "POST", "/music", {"action": "spotify", "uri": "album:nope"}, AUTH)
     assert res.status == 404
+
+
+def test_a_youtube_video_goes_to_music_and_says_where_to_play_it(server, shelf, signed_in, monkeypatch):
+    # YouTube's oEmbed as a stand-in; playing it refused, as on a server
+    # without the add-on's youtube-streaming or youtube-downloads.
+    import json
+    import subprocess
+
+    from agent_media_core import music_links
+    monkeypatch.setattr(music_links, "_get", lambda url, timeout=15.0: json.dumps(
+        {"title": "The Spoils", "author_name": "MassiveAttackVEVO", "thumbnail_url": None}).encode())
+    res, obj = call(server, "POST", "/media/links",
+                    {"url": "https://youtu.be/8r31DFrFs5A?si=x", "to": "music"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["id"] == "album:youtube-video-8r31DFrFs5A" and obj["show"] == {"tab": "music", "list": "albums"}
+    _, obj = call(server, "GET", "/music/recent?list=albums", None, AUTH)
+    [row] = obj["items"]
+    assert row["source"] == "youtube" and row["link"] == "https://www.youtube.com/watch?v=8r31DFrFs5A"
+
+    class R:
+        returncode, stdout = 1, ""
+        stderr = "YouTube can't be streamed on this server, and it couldn't be downloaded"
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: R())
+    res, obj = call(server, "POST", "/music", {"action": "play", "uri": row["uri"]}, AUTH)
+    assert res.status == 409, obj
+    assert obj["code"] == "youtube" and obj["link"] == "https://www.youtube.com/watch?v=8r31DFrFs5A"

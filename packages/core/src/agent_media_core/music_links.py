@@ -1,4 +1,5 @@
-"""Spotify albums, playlists and songs shared into the Music tab.
+"""Spotify albums, playlists and songs, and YouTube videos and playlists,
+shared into the Music tab.
 
 David, 2 Nov 2026: "Is there a way to share a link to an album from
 Spotify?" A link is kept in ``<state_dir>/music-links.json`` as
@@ -13,6 +14,16 @@ track from YouTube is a personal install's only: the `spotify-via-youtube`
 add-on does it (personal_use; a separately installed package,
 docs/proposals/2026-11-02-personal-use-addons.md), asked for `read`,
 `play` and `queue` where it is installed and allowed.
+
+A YouTube video or playlist is saved the same way (David, 3 Nov 2026:
+"build it but put it into the sassonica-personal add-ons if it breaks
+YouTube's terms of service. if not, add it to regular sasonica"): kept by
+the name, channel and picture YouTube's documented oEmbed gives, its row's
+`source` "youtube" and `link` the video, which the app opens in YouTube
+itself. Playing it here goes through the music player, where streaming or
+downloading YouTube is the youtube-streaming and youtube-downloads add-on
+methods' only (sinks.music._may_stream); without them `play` says so and
+gives the link.
 """
 
 from __future__ import annotations
@@ -29,6 +40,11 @@ from typing import Optional
 from ._paths import state_dir
 
 _SPOTIFY = re.compile(r"^https?://open\.spotify\.com/(?:intl-[a-z-]+/)?(album|playlist|track)/([A-Za-z0-9]{10,40})")
+_YOUTUBE_VIDEO = re.compile(
+    r"^https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/)|youtu\.be/)"
+    r"([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
+_YOUTUBE_LIST = re.compile(
+    r"^https?://(?:(?:www|m|music)\.)?youtube\.com/playlist\?(?:[^#]*&)?list=([A-Za-z0-9_-]{10,64})")
 UA = "Mozilla/5.0 (X11; Linux x86_64) agent-media"
 
 
@@ -60,7 +76,37 @@ def parse(url: str) -> Optional[tuple[str, str]]:
 
 
 def is_music_link(url: str) -> bool:
+    """A Spotify link (what the share sheet's Play it saves and plays here);
+    a YouTube link keeps the share pipeline's own path there."""
     return parse(url) is not None
+
+
+def parse_youtube(url: str) -> Optional[tuple[str, str]]:
+    """``("video" | "playlist", id)`` for a YouTube watch, short, youtu.be
+    or playlist link. A watch link inside a playlist is the video."""
+    u = (url or "").strip()
+    m = _YOUTUBE_VIDEO.match(u)
+    if m:
+        return "video", m.group(1)
+    m = _YOUTUBE_LIST.match(u)
+    return ("playlist", m.group(1)) if m else None
+
+
+def _youtube_url(kind: str, yid: str) -> str:
+    return (f"https://www.youtube.com/watch?v={yid}" if kind == "video"
+            else f"https://www.youtube.com/playlist?list={yid}")
+
+
+def _youtube_oembed(kind: str, yid: str) -> dict:
+    """What YouTube's documented oEmbed says: name, channel, picture."""
+    try:
+        o = json.loads(_get("https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(
+            _youtube_url(kind, yid), safe=""), timeout=8))
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"couldn't read that from YouTube ({e})") from e
+    art = o.get("thumbnail_url") or (f"https://i.ytimg.com/vi/{yid}/hqdefault.jpg" if kind == "video" else None)
+    return {"title": str(o.get("title") or "YouTube").strip(),
+            "artist": str(o.get("author_name") or "").strip() or None, "art": art}
 
 
 def _get(url: str, timeout: float = 15.0) -> bytes:
@@ -90,7 +136,10 @@ def add(url: str, title: str = "") -> dict:
 
     p = parse(url)
     if not p:
-        raise ValueError("a music link must be a Spotify album, playlist or song")
+        y = parse_youtube(url)
+        if y:
+            return _add_youtube(*y, title=title)
+        raise ValueError("a music link must be a Spotify album, playlist or song, or a YouTube video or playlist")
     kind, sid = p
     addon = personal_use.provider("spotify-via-youtube") if personal_use.allowed("spotify-via-youtube") else None
     got = addon.read(kind, sid) if addon else _oembed_only(kind, sid)
@@ -102,6 +151,18 @@ def add(url: str, title: str = "") -> dict:
     _save(albums)
     return {"added": "music", "id": f"album:{key}", "title": title.strip() or got["title"],
             "artist": got["artist"], "tracks": len(got["tracks"])}
+
+
+def _add_youtube(kind: str, yid: str, title: str = "") -> dict:
+    got = _youtube_oembed(kind, yid)
+    key = f"youtube-{kind}-{yid}"
+    name = title.strip() or got["title"]
+    albums = [a for a in _load() if a["key"] != key]
+    albums.append({"key": key, "kind": kind, "source": "youtube", "url": _youtube_url(kind, yid),
+                   "title": name, "artist": got["artist"], "art": got["art"], "tracks": [],
+                   "added": time.time()})
+    _save(albums)
+    return {"added": "music", "id": f"album:{key}", "title": name, "artist": got["artist"], "tracks": 0}
 
 
 def remove(key: str) -> bool:
@@ -128,7 +189,7 @@ def items() -> list[dict]:
                     "inferred": False, "kind": "music", "artist": a.get("artist") or None,
                     "album": a.get("title") if a.get("kind") == "album" else None,
                     "song": None, "genre": None, "tracks": len(a.get("tracks") or []),
-                    "source": "spotify", "link": a.get("url")})
+                    "source": a.get("source") or "spotify", "link": a.get("url")})
     return out
 
 
@@ -136,7 +197,7 @@ def spotify_uri(key: str) -> Optional[str]:
     """``spotify:<kind>:<id>`` for a saved one, for playing on Spotify
     itself (spotify_remote)."""
     a = find(key)
-    if not a:
+    if not a or a.get("source") == "youtube":
         return None
     sid = a["key"].rsplit("-", 1)[-1]
     return f"spotify:{a['kind']}:{sid}"
@@ -154,6 +215,8 @@ def play(key: str) -> dict:
     a = find(key)
     if not a:
         return {"ok": False, "error": "no saved album under that id"}
+    if a.get("source") == "youtube":
+        return _play_youtube(a)
     addon = personal_use.provider("spotify-via-youtube") if personal_use.allowed("spotify-via-youtube") else None
     if addon and a.get("tracks"):
         return addon.play(key)
@@ -163,6 +226,26 @@ def play(key: str) -> dict:
         return {**r, "title": a.get("title"), "on": "spotify"}
     said = r.get("error") if isinstance(r, dict) else None
     return {"ok": False, "error": said or "play it on Spotify: sign in to Spotify in Settings, or open it in Spotify"}
+
+
+def _play_youtube(a: dict) -> dict:
+    """A saved YouTube row through the music player (`media music play`),
+    which streams or downloads it only where an add-on allows that; else
+    the link, to open in YouTube."""
+    import subprocess
+    import sys
+
+    try:
+        r = subprocess.run([sys.executable, "-m", "agent_media_core.cli", "music", "play", a["url"]],
+                           capture_output=True, text=True, timeout=60)
+        ok, said = r.returncode == 0, (r.stderr or r.stdout or "").strip()[-300:]
+    except (subprocess.TimeoutExpired, OSError) as e:
+        ok, said = False, str(e)
+    if ok:
+        return {"ok": True, "title": a.get("title"), "on": "music"}
+    return {"ok": False, "code": "youtube", "link": a.get("url"),
+            "error": "YouTube can't be played on this server: open it in YouTube"
+            if "can't be streamed" in said or not said else said}
 
 
 def queue(key: str, start: int) -> int:

@@ -1,4 +1,4 @@
-"""Spotify albums, playlists and songs saved for the Music tab (music_links.py).
+"""Spotify albums, playlists and songs, and YouTube links, saved for the Music tab (music_links.py).
 
 Nothing is fetched or played: the spotify-via-youtube add-on is a stand-in
 (the add-on tests its own reading and playing)."""
@@ -71,6 +71,77 @@ def test_without_the_addon_it_plays_on_spotify(monkeypatch):
     assert music_links.play(got["id"])["on"] == "spotify" and music_links.queue(got["id"], 1) == 0
 
 
-def test_only_spotify_links():
+def test_only_spotify_and_youtube_links():
     with pytest.raises(ValueError):
-        music_links.add("https://www.youtube.com/watch?v=AAAAAAAAAAA")
+        music_links.add("https://soundcloud.com/someone/a-song")
+
+
+def test_parse_youtube_links():
+    p = music_links.parse_youtube
+    assert p("https://youtu.be/8r31DFrFs5A?si=Fozv6bwCFWSwC8uM") == ("video", "8r31DFrFs5A")
+    assert p("https://www.youtube.com/watch?v=8r31DFrFs5A&list=PL0123456789") == ("video", "8r31DFrFs5A")
+    assert p("https://m.youtube.com/watch?feature=share&v=8r31DFrFs5A") == ("video", "8r31DFrFs5A")
+    assert p("https://music.youtube.com/watch?v=8r31DFrFs5A") == ("video", "8r31DFrFs5A")
+    assert p("https://www.youtube.com/shorts/8r31DFrFs5A") == ("video", "8r31DFrFs5A")
+    assert p("https://www.youtube.com/playlist?list=PLabcdefghij123") == ("playlist", "PLabcdefghij123")
+    assert p("https://www.youtube.com/@MassiveAttackVEVO") is None
+    assert p("https://example.com/watch?v=8r31DFrFs5A") is None
+    # The share sheet's Play it keeps its own path for a YouTube link.
+    assert not music_links.is_music_link("https://youtu.be/8r31DFrFs5A")
+
+
+def _youtube_oembed(monkeypatch):
+    asked = []
+
+    def get(url, timeout=15.0):
+        asked.append(url)
+        return json.dumps({"title": "Massive Attack - The Spoils ft. Hope Sandoval",
+                           "author_name": "MassiveAttackVEVO",
+                           "thumbnail_url": "https://i.ytimg.com/vi/8r31DFrFs5A/hqdefault.jpg"}).encode()
+    monkeypatch.setattr(music_links, "_get", get)
+    return asked
+
+
+def test_a_youtube_video_lands_in_the_albums_list(monkeypatch):
+    asked = _youtube_oembed(monkeypatch)
+    got = music_links.add("https://youtu.be/8r31DFrFs5A?si=Fozv6bwCFWSwC8uM")
+    assert got == {"added": "music", "id": "album:youtube-video-8r31DFrFs5A",
+                   "title": "Massive Attack - The Spoils ft. Hope Sandoval",
+                   "artist": "MassiveAttackVEVO", "tracks": 0}
+    assert asked and asked[0].startswith("https://www.youtube.com/oembed?")
+    [row] = music_recent.listed(kind="music", which="albums")
+    assert row["source"] == "youtube" and row["link"] == "https://www.youtube.com/watch?v=8r31DFrFs5A"
+    assert row["art"] == "https://i.ytimg.com/vi/8r31DFrFs5A/hqdefault.jpg"
+    assert music_links.spotify_uri(row["id"]) is None
+    # Saved again: one row, not two.
+    music_links.add("https://www.youtube.com/watch?v=8r31DFrFs5A")
+    assert len(music_links.items()) == 1
+
+
+def test_a_youtube_row_plays_through_the_music_player(monkeypatch):
+    _youtube_oembed(monkeypatch)
+    got = music_links.add("https://www.youtube.com/playlist?list=PLabcdefghij123")
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: ran.append(argv) or R())
+    assert music_links.play(got["id"]) == {"ok": True, "title": got["title"], "on": "music"}
+    assert ran[0][-3:] == ["music", "play", "https://www.youtube.com/playlist?list=PLabcdefghij123"]
+
+
+def test_a_youtube_row_refused_here_gives_its_link(monkeypatch):
+    _youtube_oembed(monkeypatch)
+    got = music_links.add("https://youtu.be/8r31DFrFs5A")
+
+    class R:
+        returncode, stdout = 1, ""
+        stderr = "YouTube can't be streamed on this server, and it couldn't be downloaded"
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: R())
+    r = music_links.play(got["id"])
+    assert not r["ok"] and r["code"] == "youtube" and r["link"] == "https://www.youtube.com/watch?v=8r31DFrFs5A"
+    assert "open it in YouTube" in r["error"]
