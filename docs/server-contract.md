@@ -1410,6 +1410,22 @@ restarted (or the restart gives up). Show it as "held until the server
 restarts", not as failed. A new chat is refused meanwhile: 503 `code:
 "restart_pending"`, with a sentence.
 
+**Send now** on a held message (3 Nov 2026; David: "a way of overriding
+the hold on a message for a restart"): `POST /session/release
+{"session"}` (gated, CORS) lets that thread through the pending restart.
+What is held for it is given to the agent at once, in order; what is sent
+to it afterwards is not held; it is not asked to end its turn; and the
+restart waits for it, as for any busy thread (it gives up at its deadline
+as ever). Other threads stay held. The answer: `{"ok": true, "session",
+"released": <how many went>, "held": <how many still wait: no room yet, or
+a card up>, "through": <whether a restart was pending to let it through>}`.
+With no restart pending it sends what is held, as the restart's end would.
+400 for a bad session id, 404 `not_found` for one the host does not have,
+503 `down` when the host is not running, 501 `unsupported` from a host too
+old for it (the message then goes after the restart). Offer it beside
+"held until the server restarts"; not for a message held for the usage
+limit or a free slot.
+
 **Held for the usage limit** (20 Oct 2026): while the account's usage limit
 holds (§6.1 `quota`, §17 "The usage limit"), a reply to a Claude thread is
 held the same way and the answer carries `"quota": {"resets_at", "state"}`

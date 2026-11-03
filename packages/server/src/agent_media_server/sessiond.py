@@ -87,7 +87,10 @@ record saying it), and the next start resumes each session cut off — mid-
 turn, a card up, background work — once, with `resume_note`. Idle ones are
 not woken, except one that ended its turn because the drain told it to
 (23 Oct 2026, `_drain_cut`: the context hook's marker names the restart):
-its work was cut short, so it is resumed too, told to carry on.
+its work was cut short, so it is resumed too, told to carry on. A session
+let through (`release`, 3 Nov 2026: the app's Send now on a held message)
+has its held messages sent at once and is held no more; it is not asked to
+end its turn, and the restart waits for it like any busy session.
 
 **An interrupt spares background agents** (23 Oct 2026). Every Claude spawn
 first sends an `initialize` declaring `perTaskStopAffordance` (`_initialize`):
@@ -120,7 +123,8 @@ Ops (request `{"op", …}` → `{"ok": true, …}` or `{"ok": false, "error",
 "code"}`): `ping`, `list`, `get`, `start`, `send`, `resume`, `interrupt`,
 `answer`, `close`, `park`, `events`, `configure` (model and plan mode;
 session_settings.py), `relocate` (the directory a moved thread resumes in;
-moves.py). `send` with `keep_pending` is refused `pending` rather than
+moves.py), `release` (what is held for a restart goes now, and the restart
+lets the session through: the app's Send now). `send` with `keep_pending` is refused `pending` rather than
 answer a waiting card the way typing does (another session's mail,
 headless_mail.py).
 
@@ -1243,6 +1247,43 @@ class Supervisor:
             self._restart_read_at = now
         return self._restart_rec if rs.is_active(self._restart_rec) else None
 
+    def _holds_for_restart(self, session: str) -> bool:
+        """Whether a message to `session` is held: a restart is pending and
+        has not let it through (`release`)."""
+        rec = self.draining()
+        if not rec:
+            return False
+        from agent_media_core import restart_services as rs
+
+        return not rs.lets_through(rec, session)
+
+    def release(self, session: str) -> dict:
+        """The app's Send now on a message held for a restart (David, 3 Nov
+        2026: "a way of overriding the hold on a message for a restart"):
+        the pending restart lets this session through (core restart_services
+        `let_through`), so what is held for it goes now, in order, and what
+        is sent to it next is not held; it is not asked to end its turn, and
+        the restart waits for it as for any busy session. With no restart
+        pending, what is held goes as `deliver_due` would send it.
+        `{"released": how many went, "held": how many still wait (no room
+        yet, a card up), "through": whether a restart let it through}`."""
+        with self.lock:
+            s = self._get(session)
+            before = len(s.held)
+        through = False
+        if self.draining():
+            from agent_media_core import restart_services as rs
+
+            through = rs.let_through(s.id) is not None
+            self._restart_read_at = None   # read the record again: it changed
+        self._deliver(s.id)
+        with self.lock:
+            left = len(s.held)
+        log.info("sessiond: %s released from the pending restart (%d sent, %d left)",
+                 s.id[:8], before - left, left)
+        return {"session": s.id, "released": before - left, "held": left,
+                "through": through}
+
     def deliver_due(self) -> list[str]:
         """Unless a restart is pending: resume each session a restart cut off
         (`resume_note`), then deliver the messages held for it, in order.
@@ -2328,7 +2369,7 @@ class Supervisor:
             held = self._quota_hold(session, text, uid, keep_pending)
             if held is not None:
                 return held
-        if not _fresh and not _internal and self.draining():
+        if not _fresh and not _internal and self._holds_for_restart(session):
             with self.lock:
                 s = self._get(session)
                 if keep_pending and (s.pending or s.state == "approval"):
@@ -3067,6 +3108,8 @@ class Supervisor:
                                                 keep_pending=bool(req.get("keep_pending")))}
             if op == "rename":
                 return {"ok": True, **self.rename(sid, str(req.get("title") or ""))}
+            if op == "release":
+                return {"ok": True, **self.release(sid)}
             if op == "resume":
                 return {"ok": True, **self.resume(sid)}
             if op == "relocate":

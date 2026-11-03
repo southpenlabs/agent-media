@@ -114,6 +114,9 @@ device gets its token):
                   session's interrupt, or Escape into a working pane), else
                   stop this thread's speech; `keep` only interrupts, for a
                   waiting message's Send now (stop.py, §12)
+  POST /session/release {"session"} → Send now on a message held for a
+                  restart: its held messages go now and the restart waits
+                  for the session (stop.py session_release, §6.2.2)
   POST /session/retract {"session", "id"?, "text"?} → take back your last
                   message: interrupt the turn and its queue, mark the message,
                   and the next one says so (retract.py, §6.19)
@@ -400,7 +403,7 @@ CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
-    "/session/stop", "/session/thinking-speech", "/session/voice",
+    "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice",
@@ -3121,6 +3124,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             print(f"stop: refused ({detail.get('error')}) for "
                   f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/release":
+        # Send now on a message held for a restart (stop.py session_release).
+        from . import stop
+
+        body = _read_json(h) or {}
+        ok, detail = stop.session_release(str(body.get("session") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/mic/ask", "/mic/cancel", "/mic/answer"):
         # The phone as the TV's mic (server-contract.md §6.20, mic.py; David,

@@ -447,7 +447,8 @@ def _restart_note(hook: dict, d: Path) -> str:
         rec = rs.pending()
     except Exception:  # noqa: BLE001 — a note is never worth failing a hook
         return ""
-    if not rec or not any(isinstance(w, dict) and w.get("session") == sid
+    # Let through (the app's Send now on a held message): it is not asked to stop.
+    if not rec or rs.lets_through(rec, sid) or not any(isinstance(w, dict) and w.get("session") == sid
                           and w.get("kind") != "question"
                           for w in rec.get("waiting_on") or []):
         return ""

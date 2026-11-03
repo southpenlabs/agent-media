@@ -405,6 +405,27 @@ def pending(now: "Optional[float]" = None) -> "Optional[dict]":
     return rec if is_active(rec, now) else None
 
 
+def let_through(sid: str) -> "Optional[dict]":
+    """Let sessiond session `sid` through the pending restart (David, 3 Nov
+    2026: "a way of overriding the hold on a message for a restart"; by his
+    answer, the restart waits): its held messages go now, what is sent to it
+    is no longer held, it is not told to end its turn (intake/context.py),
+    and the restart waits for it as for any busy session. Kept in the
+    record's `through`, which every writer carries over. The record, or None
+    when no restart is pending."""
+    def fn(rec):
+        if not is_active(rec) or sid in (rec.get("through") or []):
+            return rec
+        return {**rec, "through": [*(rec.get("through") or []), sid]}
+    rec = _update_pending(fn)
+    return rec if is_active(rec) and lets_through(rec, sid) else None
+
+
+def lets_through(rec: "Optional[dict]", sid: str) -> bool:
+    """Whether the pending restart `rec` lets `sid` through (`let_through`)."""
+    return bool(rec and sid and sid in (rec.get("through") or []))
+
+
 def _update_pending(fn: "Callable[[Optional[dict]], Optional[dict]]") -> "Optional[dict]":
     """Read, change and write the record under a lock (the scheduler joining a
     drain and the detached run both write it). `fn` returns the new record,

@@ -310,3 +310,50 @@ def test_a_drained_session_busy_again_at_the_stop_is_cut_off_mid_turn(host):
     host.sup.begin_stop()
     cut = sessiond.read_record(sid)["cut_off"]
     assert cut["why"] == "restart" and cut["drained"] and cut["turn"]
+
+
+# --- Send now on a held message: the restart lets the session through ------------
+
+def test_release_sends_what_is_held_and_holds_no_more(host):
+    # David, 3 Nov 2026: "a way of overriding the hold on a message for a restart".
+    sid = start(host, "reply: a")
+    other = start(host, "reply: b")
+    wait_for(lambda: _said(host.sup, sid) == "a" and _said(host.sup, other) == "b")
+    _pend()
+    _fresh(host.sup)
+    assert host.sup.send(sid, "reply: one")["held"] is True
+    assert host.sup.send(sid, "reply: two")["held"] is True
+    assert host.sup.send(other, "reply: kept")["held"] is True
+    r = driver.headless.call("release", session=sid, timeout=15.0)
+    assert r["ok"] and r["through"] is True and r["held"] == 0
+    wait_for(lambda: _said(host.sup, sid) == "two")
+    assert sessiond.read_record(sid)["held"] == []
+    assert rs.lets_through(rs.read_pending(), sid)
+    # What is sent to it now goes in; the other thread is still held.
+    _fresh(host.sup)
+    assert not host.sup.send(sid, "reply: three").get("held")
+    wait_for(lambda: _said(host.sup, sid) == "three")
+    assert [m["text"] for m in sessiond.read_record(other)["held"]] == ["reply: kept"]
+    assert host.sup.deliver_due() == []
+
+
+def test_release_with_no_restart_pending_sends_what_is_held(host):
+    sid = start(host, "reply: a")
+    wait_for(lambda: _said(host.sup, sid) == "a")
+    _pend()
+    _fresh(host.sup)
+    assert host.sup.send(sid, "reply: late")["held"] is True
+    rs.clear_pending()
+    _fresh(host.sup)
+    r = host.sup.release(sid)
+    assert r["through"] is False and r["released"] == 1
+    wait_for(lambda: _said(host.sup, sid) == "late")
+
+
+def test_release_route_needs_a_session_id_and_the_key():
+    from agent_media_server import stop
+
+    ok, d = stop.session_release("not a session", "x")
+    assert not ok and d["status"] == 400
+    ok, d = stop.session_release("11111111-2222-3333-4444-555555555555", "")
+    assert not ok and d.get("status") in (401, 403)

@@ -114,3 +114,31 @@ def session_stop(session: str, mode: str, bearer: str) -> tuple[bool, dict]:
     return True, {"session": session, "did": did, "interrupted": interrupted,
                   "why": None if interrupted else why, "speech": said,
                   "cutoff": cutoff, "flushed": flushed, "state": after["state"]}
+
+
+def session_release(session: str, bearer: str) -> tuple[bool, dict]:
+    """`POST /session/release` — Send now on a message held for a restart
+    (server-contract.md §6.2.2 `held`; David, 3 Nov 2026: "a way of
+    overriding the hold on a message for a restart"). The pending restart
+    lets the session through: its held messages go now, it is held no more
+    and not asked to end its turn, and the restart waits for it (sessiond.py
+    `release`). Only a headless session is ever held."""
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from .driver import headless
+
+    r = headless.call("release", session=session, timeout=30.0)
+    if not r.get("ok"):
+        code = str(r.get("code") or "internal")
+        if code == "bad_request":
+            # A session host from before the op: restarted, it has it.
+            return False, {"error": "the session host is too old to send it now; "
+                           "it goes after the restart", "code": "unsupported", "status": 501}
+        return False, {"error": str(r.get("error") or "the session host refused"),
+                       "code": code, "status": headless._STATUS.get(code, 500)}
+    return True, {"session": session, "released": int(r.get("released") or 0),
+                  "held": int(r.get("held") or 0), "through": bool(r.get("through"))}
