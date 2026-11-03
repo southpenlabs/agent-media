@@ -2302,6 +2302,23 @@ ahead.
     channel as a show (its feed; the channel's id needs the phone, since
     red5 cannot read YouTube's pages).
 
+50. **Speech-to-text from your own server** (David, 3 Nov 2026: "we should
+    also add a local option for red2 when it arrives next week ... for STT
+    and TTS") — the Dictation picker's "Your own server" entry takes a URL
+    (an OpenAI-shaped Whisper server on red2: speaches / faster-whisper-server
+    or whisper.cpp's) and an optional key, `POST /speech/stt {url}` saving it
+    on the host; today that provider is reached only through `MEDIA_STT_URL`
+    in the host's env. Waits on the per-host speech-to-text settings
+    (`GET/POST /speech/stt`, in flight 3 Nov 2026). The Whisper install on
+    red2 itself is host setup, not the package. *Queued 3 Nov 2026.*
+
+51. **The server voice from your own server** (same ask) — a Settings entry
+    beside the speech-to-text one for the server voice's engine: a Kokoro
+    server on red2 (OpenAI-shaped `/v1/audio/speech`), chosen and addressed
+    from the app, with the engine's voices listed; today only
+    `MEDIA_RENDER_ENGINE` and `OPENAI_BASE_URL` in red5's env. *Queued 3 Nov
+    2026.*
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
