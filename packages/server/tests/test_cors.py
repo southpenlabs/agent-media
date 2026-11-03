@@ -84,3 +84,23 @@ def test_a_502_or_504_through_cloudflare_is_sent_as_one_it_passes():
     tailnet = SimpleNamespace(headers={})
     assert [app._status(tunnel, c) for c in (400, 409, 502, 504)] == [400, 409, 500, 503]
     assert [app._status(tailnet, c) for c in (502, 504)] == [502, 504]
+
+
+@pytest.mark.parametrize("path", ["/devices", "/devices/code", "/devices/revoke", "/devices/role", "/devices/pause", "/devices/follow"])
+def test_device_management_preflight_is_readable_by_android(server, path):
+    res = _request(server, "OPTIONS", path, {
+        "Origin": "https://localhost",
+        "Access-Control-Request-Method": "GET" if path == "/devices" else "POST",
+        "Access-Control-Request-Headers": "authorization,content-type",
+    })
+    assert res.status == 204
+    assert res.getheader("Access-Control-Allow-Origin") == "*"
+    assert "Authorization" in res.getheader("Access-Control-Allow-Headers")
+
+
+def test_devices_refusal_is_not_disguised_as_network_failure(server, monkeypatch):
+    from agent_media_server import auth
+    monkeypatch.setattr(auth, "gate", lambda *a, **kw: (None, {"status": 401, "error": "not paired"}))
+    res = _request(server, "GET", "/devices", {"Origin": "https://localhost"})
+    assert res.status == 401
+    assert res.getheader("Access-Control-Allow-Origin") == "*"

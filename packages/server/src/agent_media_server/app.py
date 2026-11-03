@@ -432,6 +432,11 @@ CORS_PATHS = frozenset({
     "/follow/trace",
 })
 
+# Device management spends the caller's bearer, like the other app routes.
+# Both successful answers and refusals must be readable by Capacitor's webview.
+DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role"})
+CORS_PATHS = CORS_PATHS | DEVICE_PATHS
+
 # Where the audio goes (audio.py). Its own set, joined here, so the block
 # below stays self-contained.
 AUDIO_PATHS = frozenset({"/audio/targets", "/audio/target"})
