@@ -2343,6 +2343,26 @@ ahead.
     following device turns it off (`POST /device/follow {"on": false}`) and
     says so for a few seconds. Contract §6.21g.
 
+53. **A blocked session tells the one in its way** (David, 3 Nov 2026,
+    after the What's new thread could not fast-forward the shared app
+    checkout past another session's unsaved `app.css`/`Thread.tsx` edits:
+    "moving forward I'd like you to contact that session automatically in
+    cases like this") — when a session in a shared working tree is stopped
+    by another session's work (a pull or fast-forward refused by unstaged
+    edits, a merge conflict in a file it did not touch, an agent-mail bug
+    already fixed elsewhere), it finds the owner and tells them, without
+    being asked. Pieces: (a) `tree-owner <file>…`, in agent-mail's skills:
+    which session last edited each unstaged file, from the folder's
+    transcripts (the Edit/Write `file_path` lines, newest first) and the
+    worktrees' branches, with its thread link; (b) a durable mail to the
+    folder's shared mailbox naming the files, what blocks, and what to do
+    (commit or carve out, then `merge --ff-only`, rebuild), plus
+    `agent-mail-deliver` to the live pane and, for a headless session, a
+    post into its thread; (c) the rule in each shared repo's CLAUDE.md:
+    never wait silently or work around another session's edits — mail the
+    owner and say so in the reply. Not built; the first case was done by
+    hand (agent-mail #143).
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
