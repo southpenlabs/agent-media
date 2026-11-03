@@ -1089,13 +1089,22 @@ def session_states(bearer: str) -> tuple[bool, dict]:
     the app can match its shelf without asking for each item. A session not
     listed is not live. Each row carries `mem_mb`, and the answer a `host`
     block, both computed inside the same cached sweep. Gated like
-    `/conversations`.
+    `/conversations`. While a restart of the session host waits, the answer
+    carries `restart_pending` (sessiond.restart_view), so the app's poll
+    can say so on any thread (David, 3 Nov 2026: "Can we have some sort of
+    alert when it's going to restart?").
     """
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
     rows, host = cached_states()
-    return True, {"sessions": rows, "host": host}
+    out = {"sessions": rows, "host": host}
+    from . import sessiond
+
+    restart = sessiond.restart_view()
+    if restart:
+        out["restart_pending"] = restart
+    return True, out
 
 
 def cached_states() -> tuple[list[dict], dict]:

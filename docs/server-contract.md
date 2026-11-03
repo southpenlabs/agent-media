@@ -634,6 +634,10 @@ What each live session is doing.
   waits on (`why_waiting: "agents"`, §6.15). Code:
   `agent_media_server/background.py`; older servers leave it out.
 - Only live sessions are listed. Absent means not live.
+- `restart_pending` (4 Nov 2026; additive, top level, only while there is
+  one): the same object as `/targets`' (§6.1), so the app's 5-second poll
+  can put "Restart waiting" on any thread while it holds. Older servers
+  leave it out.
 - `mem_mb` (22 Sep 2026): resident memory of the session's agent process
   (the claude / codex / pi / hermes process `live_sessions` found) **and all
   its descendants** — MCP servers, sandboxes — in whole MB (`procmem.py`).
