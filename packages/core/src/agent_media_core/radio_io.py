@@ -516,6 +516,9 @@ class HandoffPlayer:
         if song.get("yt"):
             # A real YouTube id: YouTube Music can be asked by link.
             fields["yt"] = song["id"]
+        if song.get("tune"):
+            # A reply's tune (reply_tune): the phone shows it as the reply's song.
+            fields["tune"] = "1"
         return f"handoff/{song['id']}?" + urllib.parse.urlencode(fields)
 
     def send(self, song: dict, replace: bool = False) -> bool:

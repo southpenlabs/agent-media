@@ -257,7 +257,9 @@ def _handoff(line: str, artist: str, title: str, start_level: int = 100) -> Opti
     props = player.props() or {}
     if props and not props.get("idle-active") and not props.get("pause"):
         return "the hand-off player is playing"
-    song = {"id": _song_id(line), "q": f"{artist} - {title}" if artist else title}
+    # `tune`: the phone shows it as the reply's song, with Stop and the
+    # level slider under the reply and in the mini player (HandoffMusic).
+    song = {"id": _song_id(line), "q": f"{artist} - {title}" if artist else title, "tune": True}
     # Quiet from the first note: the level goes before the ask, and the
     # phone puts its volume back when the song is over (HandoffMusic.java).
     player.volume(start_level)

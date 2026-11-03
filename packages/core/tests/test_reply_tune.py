@@ -12,6 +12,9 @@ import pytest
 from agent_media_core import radio, radio_io, reply_tune, spotify_remote as sr
 from agent_media_core.intake._text import extract_tune, strip_markdown
 
+#: The real hand-off player's entry builder, before the fixture stands it in.
+REAL_ENTRY = radio_io.HandoffPlayer.entry
+
 
 @pytest.fixture(autouse=True)
 def scratch(monkeypatch, tmp_path):
@@ -88,6 +91,7 @@ def test_handoff_asks_the_listeners_app_by_name(handoff):
     (song, replace), = handoff.sent
     assert song["q"] == "Nina Simone - Feeling Good" and replace is True
     assert len(song["id"]) == 11
+    assert song["tune"] is True and "&tune=1" in REAL_ENTRY(song)   # shown as the reply's song
     assert reply_tune.last()["row"] == 7
 
 
