@@ -404,6 +404,19 @@ or Mark all read, clears it.
 
 ## In flight
 
+**Ask about this page** (David, 3 Nov 2026: "I'd like a new chat button on
+most pages... which should carry what page I'm on so that I can ask
+questions about what I see"). Building in sasonica-app branch `ask-key`: an
+Ask key in the top bar of every page but a thread and New chat
+(`components/AskKey.tsx`, mounted once in root and drawn into each page's
+`header.bar`); it opens New chat with a removable chip, "About: Devices →
+p8a, seen 2 h ago", from `usePageContext({label, summary, folder})`
+(`lib/pageContext.ts`), sent as a visible "[Looking at: …]" first line. A
+Screenshot toggle on the chip attaches the page as it was (`lib/pageShot.ts`:
+the shell's new `PageShotPlugin`, else a DOM redraw) through `/upload`. A
+doc's or a project's folder starts the chat in the place that holds it. No
+server change.
+
 **The app in a browser: its own mic and speaker** (David, 16 Oct 2026: "why
 aren't there any mic and speaker control settings in the player on the
 browser's version?" — then: both, dictation and replies spoken in the
