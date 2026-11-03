@@ -68,6 +68,24 @@ Where things live:
 
 ## Done
 
+**Ask about this page** (David, 3 Nov 2026: "I'd like a new chat button on
+most pages... which should carry what page I'm on so that I can ask
+questions about what I see"). Merged to sasonica-app main (`7dd434f`;
+`7937e7b`, `0b0a43d`) and deployed to both local web builds, 3 Nov 2026: an
+Ask key in the top bar of every page but a thread and New chat
+(`components/AskKey.tsx`, mounted once in root and drawn into each page's
+`header.bar`); it opens New chat with a removable chip, "About: Devices →
+Phone (This device) Seen just now", from `usePageContext({label, summary,
+folder})` (`lib/pageContext.ts`; real summaries on home, media, devices,
+device, doc, docs, person, people, note, org, projects, search, settings,
+threads/chats/messages, digest(s), harnesses, bridges; the rest their title
+and route), sent as a visible "[Looking at: … (/route)]" first line. A
+Screenshot toggle attaches the page as it was (`lib/pageShot.ts`) through
+`/upload`: a DOM redraw in a browser, the WebView's own pixels in the shell
+once an APK with the new `PageShotPlugin` is installed (needs a CI build).
+A doc's or a project's threads' folder starts the chat in the place that
+holds it. No server change. Test: `test/askkey.mjs`.
+
 **Sasonica accounts** (David, 29 Sep 2026: the split — Drupal on
 cms.sasonica.com owns accounts and is the OIDC issuer; a Sasonica Matrix
 homeserver comes later). Accounts enrol devices, they do not authenticate
@@ -403,19 +421,6 @@ thread never opened there counts as read up to its first look. Opening one,
 or Mark all read, clears it.
 
 ## In flight
-
-**Ask about this page** (David, 3 Nov 2026: "I'd like a new chat button on
-most pages... which should carry what page I'm on so that I can ask
-questions about what I see"). Building in sasonica-app branch `ask-key`: an
-Ask key in the top bar of every page but a thread and New chat
-(`components/AskKey.tsx`, mounted once in root and drawn into each page's
-`header.bar`); it opens New chat with a removable chip, "About: Devices →
-p8a, seen 2 h ago", from `usePageContext({label, summary, folder})`
-(`lib/pageContext.ts`), sent as a visible "[Looking at: …]" first line. A
-Screenshot toggle on the chip attaches the page as it was (`lib/pageShot.ts`:
-the shell's new `PageShotPlugin`, else a DOM redraw) through `/upload`. A
-doc's or a project's folder starts the chat in the place that holds it. No
-server change.
 
 **The app in a browser: its own mic and speaker** (David, 16 Oct 2026: "why
 aren't there any mic and speaker control settings in the player on the
