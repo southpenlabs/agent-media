@@ -4900,6 +4900,11 @@ def _submit_event(event: Event,
                 # thread list reads (StateStore.left_paused).
                 extras["stopped_at"] = {"sentence": left_paused_at,
                                         "at": time.time(), "paused": True}
+            elif not muted and not extras.get("held"):
+                # Played to its end: the resume position says so
+                # (reply_position; David, 3 Nov 2026: "mark the reply with
+                # a resume position"), so no copy of it is played again.
+                extras["heard"] = True
         if (event.metadata or {}).get("private"):
             extras["private"] = True        # played, never kept (StateStore.add_history)
             _forget_clips(extras.get("clip_uris") or [str(first_clip)])

@@ -673,6 +673,8 @@ def _work_of_record(rec: dict) -> dict | None:
 #: it (`Supervisor._recover_reply`), which is checked this long after the result.
 RECOVER_WITHIN_S = 60.0
 RECOVER_AFTER_S = 45.0
+#: How long the recovery waits on a reply its hook is still speaking.
+RECOVER_WAIT_S = 900.0
 
 
 #: How long before the host's stop a session that ended by itself still
@@ -2225,8 +2227,28 @@ class Supervisor:
         hook its time, then, if the history has no reply from this session
         since the turn ended, run it again with MEDIA_HOOK_HOLD: the reply is
         kept with its play key and a toast, not read out late. The hook's
-        own text dedup covers a first run that lands at the same moment."""
+        own text dedup covers a first run that lands at the same moment.
+
+        A reply's row is written only when it has been spoken, so one still
+        playing (or rendering, or waiting its turn) is found by its claim
+        (core intake/reply_claims.py) instead: waited for while its hook
+        lives, and recovered only if that hook dies before handing it on
+        (David, 3 Nov 2026: a 56-second reply, still being read at 45 s,
+        was filed again as a held copy and played again on opening)."""
         time.sleep(max(0.0, at + RECOVER_AFTER_S - time.time()))
+        try:
+            from agent_media_core.intake import reply_claims
+
+            deadline = time.time() + RECOVER_WAIT_S
+            while True:
+                seen = reply_claims.for_session(sid, at - 5)
+                if seen["done"]:
+                    return
+                if not seen["working"] or time.time() >= deadline:
+                    break
+                time.sleep(2.0)
+        except Exception:  # noqa: BLE001 — unsure: the history check decides
+            log.debug("sessiond: recover %s: claims unread", sid[:8], exc_info=True)
         try:
             from agent_media_core.state import StateStore
 

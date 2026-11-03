@@ -47,3 +47,47 @@ def test_a_missing_reply_is_kept_held(monkeypatch):
     assert k["env"]["MEDIA_HOOK_HOLD"] == "1" and k["env"]["PATH"] == "/bin"
     assert json.loads(k["input"]) == {"hook_event_name": "Stop", "session_id": "sid-1",
                                       "cwd": "/tmp", "last_assistant_message": "All done."}
+
+
+# ---- a reply still being spoken has no row yet: its claim (3 Nov 2026) ------------
+# David, 3 Nov 2026: a 56-second reply was still being read 45 s after the
+# turn, so the history had nothing from the session, and a held copy was
+# filed and played again when he opened the thread. The Stop hook claims a
+# reply as it commits to it (core intake/reply_claims.py); sessiond reads it.
+
+def _claim_as(monkeypatch, session, *, done, alive=True):
+    from agent_media_core.intake import reply_claims
+
+    monkeypatch.setattr(reply_claims, "_alive", lambda pid: alive)
+    assert reply_claims.claim(reply_claims.key_of("All done."), session)
+    if done:
+        reply_claims.done(reply_claims.key_of("All done."))
+    return reply_claims
+
+
+def test_a_reply_handed_on_is_left_alone(monkeypatch):
+    _claim_as(monkeypatch, "sid-1", done=True)
+    assert _run(monkeypatch, []) == []
+
+
+def test_a_reply_still_speaking_is_waited_for_then_left_alone(monkeypatch):
+    rc = _claim_as(monkeypatch, "sid-1", done=False)
+    sleeps = []
+
+    def _sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 2:          # the reply ends while sessiond waits
+            rc.done(rc.key_of("All done."))
+    monkeypatch.setattr(sessiond.time, "sleep", _sleep)
+    assert _run(monkeypatch, []) == []
+    assert len(sleeps) >= 2
+
+
+def test_a_hook_killed_before_handing_on_is_recovered(monkeypatch):
+    _claim_as(monkeypatch, "sid-1", done=False, alive=False)
+    assert len(_run(monkeypatch, [])) == 1
+
+
+def test_another_sessions_claim_does_not_count(monkeypatch):
+    _claim_as(monkeypatch, "sid-2", done=True)
+    assert len(_run(monkeypatch, [])) == 1

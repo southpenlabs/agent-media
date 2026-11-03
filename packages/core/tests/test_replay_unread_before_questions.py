@@ -88,7 +88,7 @@ def test_the_run_hands_the_token_to_the_next_reply(monkeypatch):
         sentences="", offsets="", pane="", durations="[5.0]", lock_fd=fd,
         rank=S._UNREAD_RANK, then_id=42)) == 0
     argv, kept = child[-1]
-    assert argv[-5:] == ["replay", "--id", "42", "--lock-fd", str(fd)]
+    assert argv[-6:] == ["replay", "--resume", "--id", "42", "--lock-fd", str(fd)]
     assert len(kept) == 1
     question = S._SpeechPlaybackLock()
     assert not question.take_within(0.3, rank=S._PRIO_RANK[Priority.HIGH],

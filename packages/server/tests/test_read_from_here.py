@@ -190,7 +190,7 @@ def test_replay_unheard_plays_that_threads_waiting_replies(server, shelf, signed
     res, obj = call(server, "POST", "/speech/ctl",
                     {"action": "replay-unheard", "session": sid}, AUTH)
     assert res.status == 200 and obj["ok"] is True
-    assert replays == [["replay", "--unheard", "--session", sid]]
+    assert replays == [["replay", "--unheard", "--resume", "--session", sid]]
 
 
 def test_replay_unheard_needs_a_thread(server, shelf, signed_in, replays):

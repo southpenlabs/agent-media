@@ -549,6 +549,33 @@ def test_a_described_code_block_does_not_cost_the_reply_its_live_line(script):
     assert reply["spoken"]["live"] == {k: live[k] for k in T.LIVE_FIELDS}
 
 
+def test_a_replayed_held_copy_is_followed_in_its_bubble(script):
+    """Two rows of one reply (David, 3 Nov 2026): the copy spoken live and a
+    held copy filed beside it. Opening the thread replayed the held one;
+    the message had joined the first by key, so the live line was a line no
+    message had, and the bubble had no bold. The live copy wins."""
+    script.prompt("Where does the bridge upkeep go?")
+    script.text("The bridge upkeep will move into the add-on.")
+    out = msgs()
+    reply = out[1]
+    key = T.spoken_keys(texts(reply)[-1])[0]
+    live = {"live": True, "sentences": ["The bridge upkeep will move into the add-on."],
+            "sentence": 0, "offsets": [0.0], "elapsed": 1.0,
+            "server_time": 100.0, "delay": 0.0, "paused": False}
+    spoken = _line("agent", "The bridge upkeep will move into the add-on.",
+                   reply["at"] + 5, key=key, rid=23815)
+    held = _line("agent", "The bridge upkeep will move into the add-on.",
+                 reply["at"] + 50, key=key, rid=23814, **live)
+    T.join_speech(out, [spoken, held])
+    assert reply["spoken"]["id"] == 23814
+    assert reply["spoken"]["live"] == {k: live[k] for k in T.LIVE_FIELDS}
+    # Not playing: the first copy, as before.
+    out = msgs()
+    held.pop("live")
+    T.join_speech(out, [spoken, held])
+    assert out[1]["spoken"]["id"] == 23815
+
+
 def test_a_reply_keyed_before_paragraphs_were_kept_still_joins(script):
     """strip_markdown keeps paragraph breaks since 18 Oct 2026 (so a heading
     is a sentence of its own); a reply spoken before then was keyed on the

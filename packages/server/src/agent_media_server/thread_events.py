@@ -621,8 +621,10 @@ def _play_waiting(session: str, device: str = "") -> None:
             log.exception("thread %s opened: could not note the play on %s",
                           session[:8], rid)
         with open(state_dir() / "opened-replay.log", "ab") as err:
+            # From where it was left off (`--resume`, reply_position): a
+            # reply stopped part-way, here or in another copy, picks up there.
             subprocess.Popen([sys.executable, "-m", "agent_media_core.cli",
-                              "replay", "--id", str(rid)],
+                              "replay", "--id", str(rid), "--resume"],
                              start_new_session=True, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=err)
     except Exception:  # noqa: BLE001 — a missed replay leaves its Play

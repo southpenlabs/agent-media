@@ -65,6 +65,7 @@ from .._paths import state_dir
 from ..state import StateStore
 from ..types import Event, Priority, Source
 from ._env import load_env_file
+from . import reply_claims
 from ._text import strip_markdown, strip_shared_files, strip_system_blocks
 from .submit import submit_event
 
@@ -694,9 +695,13 @@ def _dedup_seen(state: StateStore, text: str, ttl_seconds: int = 300) -> bool:
     """Crude text-hash dedup over the recent history table.
 
     Returns True if this exact text has been spoken in the last
-    `ttl_seconds` (so caller should skip emitting again).
+    `ttl_seconds` (so caller should skip emitting again), or is being
+    spoken now: a reply's row is written only when its playback ends, so
+    one still playing is found by its claim (`reply_claims`).
     """
     key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+    if reply_claims.standing(key):
+        return True
     cutoff = time.time() - ttl_seconds
     for row in state.recent_history(sink="speech", limit=20):
         if (row.get("started_at") or 0) < cutoff:
@@ -1097,8 +1102,24 @@ def _play_now(event: Event) -> None:
     state = StateStore()
     if _dedup_seen(state, event.text):
         return
-    event.metadata["dedup_key"] = hashlib.sha1(
-        event.text.encode("utf-8")).hexdigest()
+    key = reply_claims.key_of(event.text)
+    event.metadata["dedup_key"] = key
+    # The reply's trace from now, not from when its playback ends and its
+    # row is written (reply_claims): a second Stop for the same words — a
+    # sibling hook, or sessiond's recovery while this one is still speaking
+    # — finds it and stands down (David, 3 Nov 2026: a reply read twice).
+    if not reply_claims.claim(key, str(event.metadata.get("session") or "")):
+        return
+    try:
+        _play_claimed(event, state)
+    except BaseException:
+        reply_claims.release(key)
+        raise
+    reply_claims.done(key)
+
+
+def _play_claimed(event: Event, state: StateStore) -> None:
+    """`_play_now` once the reply is claimed: stamp, rewrite and submit."""
     # Commit to speaking: the notif-suppression window keys off this stamp, and
     # detached playback won't report back.
     _write_stamp(_stamp_dir() / "stop-last", int(time.time()))

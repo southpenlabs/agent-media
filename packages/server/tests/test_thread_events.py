@@ -376,7 +376,7 @@ def test_a_reply_played_on_open_notes_it_on_its_row(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: ran.append(argv))
     before = time.time()
     thread_events._play_waiting(SID, "p8a")
-    assert ran and ran[0][-2:] == ["--id", str(rid)]
+    assert ran and ran[0][-3:] == ["--id", str(rid), "--resume"]
     got = st.history_row(rid)["extras"]["opened_play"]
     assert got["device"] == "p8a" and before - 1 <= got["at"] <= time.time() + 1
     # Opened by nobody known: just when.

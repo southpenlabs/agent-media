@@ -3465,6 +3465,7 @@ def _next_unheard(row: dict) -> Optional[int]:
              if isinstance(r.get("id"), int) and r["id"] > rid
              and r["extras"].get("held") and not r["extras"].get("heard")
              and _row_has_audio(r)]
+    later = _not_heard_elsewhere(later)
     return later[-1]["id"] if later else None
 
 
@@ -3477,7 +3478,49 @@ def _oldest_unheard(session: str) -> Optional[dict]:
                if isinstance(r.get("id"), int)
                and r["extras"].get("held") and not r["extras"].get("heard")
                and _row_has_audio(r)]
+    waiting = _not_heard_elsewhere(waiting)
     return waiting[-1] if waiting else None
+
+
+def _not_heard_elsewhere(rows: list) -> list:
+    """`rows` (held, unheard) less the held copies of a reply already heard
+    to the end in another copy (reply_position), which are marked heard
+    as they go: not played again (David, 3 Nov 2026: a reply spoken, then
+    its held duplicate played on the thread's open)."""
+    if not rows:
+        return rows
+    from . import reply_position
+    try:
+        store = StateStore()
+        pool = store.recent_history(sink="speech", limit=400)
+    except Exception:  # noqa: BLE001 — unsure: as they are
+        return rows
+    out = []
+    for r in rows:
+        if r["extras"].get("dedup_key") and \
+                reply_position.heard_to_any(r, pool) is None:
+            try:
+                store.mark_heard(int(r["id"]))
+            except Exception:  # noqa: BLE001 — the mark is cosmetic
+                pass
+            continue
+        out.append(r)
+    return out
+
+
+def _resume_start(row: dict) -> Optional[int]:
+    """The sentence a `--resume` play of `row` starts at
+    (`reply_position.resume_from`, clamped to the reply's sentences), or
+    None for the top."""
+    from . import reply_position
+    try:
+        n = reply_position.resume_from(row)
+    except Exception:  # noqa: BLE001 — from the top, then
+        return None
+    smap = replay_sentence_map(row)
+    if not n or not smap:
+        return None
+    return min(n, len(smap) - 1)
 
 
 def _question_before(row: dict) -> Optional[dict]:
@@ -3819,8 +3862,15 @@ def _seek_when_loaded(sock, secs: float, tries: int = 20) -> bool:
 def _replay_under(ex: dict, speech_target: Target, sink) -> str:
     """Start what was under the reply on a phone now, or hand it to the
     follower: the JSON for its `--under` ("" for nothing to hand on). Only
-    a row that recorded one asks anything (music_bed_replay). Never raises."""
-    if not (ex.get("bed") or ex.get("under_tone") or ex.get("thinking")):
+    a row that recorded one, or an agent's reply that recorded nothing (a
+    held reply never went through submit's bed: `resolve` chooses one now),
+    asks anything (music_bed_replay). Never raises."""
+    recorded = ex.get("bed") or ex.get("under_tone") or ex.get("thinking")
+    # Nothing recorded and nothing to choose by (the listener's words, a row
+    # with no folder): nothing. A held reply used to stop here too, so its
+    # Play — and its play on the thread's open — had no music under it,
+    # where its spoken copy had (David, 3 Nov 2026).
+    if not recorded and (ex.get("listener") or not ex.get("cwd")):
         return ""
     try:
         if str(_socket_for(speech_target)).startswith("tcp://"):
@@ -3829,9 +3879,11 @@ def _replay_under(ex: dict, speech_target: Target, sink) -> str:
                                    speech_target, sink)
             return ""
         # Resolved by the follower, so the probe for other audio does not
-        # hold the push back.
-        return json.dumps({"ex": {k: ex[k] for k in ("bed", "under_tone", "thinking")
-                                  if ex.get(k)},
+        # hold the push back. What `resolve` reads: the record, or the
+        # folder and length it chooses afresh by.
+        keys = (("bed", "under_tone", "thinking") if recorded
+                else ("cwd", "clip_durations_s", "clip_uris"))
+        return json.dumps({"ex": {k: ex[k] for k in keys if ex.get(k)},
                            "target": speech_target.name})
     except Exception as e:  # noqa: BLE001 — never cost the replay
         print(f"media replay: no music under it ({e})", file=sys.stderr)
@@ -4188,6 +4240,8 @@ def cmd_replay(a) -> int:
                     and row.get("source") != "listener"):
                 row = None
         if row is not None:
+            if start is None and getattr(a, "resume", False):
+                start = _resume_start(row)
             then_id = _next_unheard(row)
             kw = {"then_id": then_id} if then_id is not None else {}
             # Handed down by the follower of the reply before this one.
@@ -4204,7 +4258,10 @@ def cmd_replay(a) -> int:
         row = _oldest_unheard(a.session)
         if row is not None:
             then_id = _next_unheard(row)
-            return _replay_row(row, **({"then_id": then_id} if then_id is not None else {}))
+            kw = {"then_id": then_id} if then_id is not None else {}
+            start = _resume_start(row) if getattr(a, "resume", False) else None
+            return (_replay_row(row, from_sentence=start, **kw) if start
+                    else _replay_row(row, **kw))
         return _do_replay(1, session=a.session)
     # A thread named by the caller (the app's Replay, inside that thread):
     # its own newest reply, never another thread's. On 25 Sep 2026 the bar's
@@ -5011,7 +5068,7 @@ def _follow_replay(a) -> int:
             token = None
         try:
             subprocess.Popen([sys.executable, "-m", "agent_media_core.cli",
-                              "replay", "--id", str(then_id)]
+                              "replay", "--resume", "--id", str(then_id)]
                              + (["--lock-fd", str(fd)] if fd is not None else []),
                              start_new_session=True, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL,
@@ -9880,6 +9937,10 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--from-sentence", type=int, default=None, metavar="N",
                    help="with --id: start at sentence N (0-based) of that "
                         "reply, where its clips allow it")
+    s.add_argument("--resume", action="store_true",
+                   help="with --id or --unheard: start where the listener "
+                        "left off (the reply's resume position, in any copy "
+                        "of it), unless --from-sentence says")
     s.add_argument("--again", action="store_true",
                    help="the last reply from where it was stopped, else the "
                         "open thread's newest (a headset's play with nothing "

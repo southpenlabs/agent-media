@@ -1760,18 +1760,24 @@ def join_speech(msgs: list[dict], lines: list[dict]) -> None:
     """
     agent = [l for l in lines if l.get("who") == "agent" and l.get("at") is not None]
     you = [l for l in lines if l.get("who") == "you" and l.get("at") is not None]
-    by_key: dict[str, dict] = {}
+    by_key: dict[str, list] = {}
     for l in agent:
         if l.get("key"):
-            by_key.setdefault(l["key"], l)
+            by_key.setdefault(l["key"], []).append(l)
     claimed: set[int] = set()
 
     replies = [m for m in msgs if m["role"] == "assistant" and not m.get("compacted")]
     for m in replies:
         for text in _final_texts(m):
             for k in spoken_keys(text):
-                line = by_key.get(k)
-                if line is not None and id(line) not in claimed:
+                free = [c for c in by_key.get(k, ()) if id(c) not in claimed]
+                # Of two rows with the key (a held copy filed beside the
+                # spoken one), the one being played now: a replay of either
+                # is then followed in the bubble. Joined to the first, a
+                # replay of the second lit a line no message had, and the
+                # bubble had no bold (David, 3 Nov 2026). Else the oldest.
+                line = next((c for c in free if c.get("live")), free[0] if free else None)
+                if line is not None:
                     claimed.add(id(line))
                     m["spoken"] = _spoken(line)
                     break

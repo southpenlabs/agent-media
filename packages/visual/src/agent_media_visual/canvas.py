@@ -1525,8 +1525,9 @@ def ctl_argv(channel: str, action: str, arg: int,
             "replay": ["replay", str(arg)]
                       + (["--session", sarg] if _SESSION_ARG.fullmatch(sarg) else []),
             # A reply notification's Play: the thread's unheard replies,
-            # oldest first. Only with a thread: never every thread's.
-            "replay-unheard": (["replay", "--unheard", "--session", sarg]
+            # oldest first, each from where it was left off (`--resume`,
+            # reply_position). Only with a thread: never every thread's.
+            "replay-unheard": (["replay", "--unheard", "--resume", "--session", sarg]
                                if _SESSION_ARG.fullmatch(sarg) else None),
             # A transcript line's own turn, by its history id (never clamped),
             # from one of its sentences when `sarg` names it ("read from

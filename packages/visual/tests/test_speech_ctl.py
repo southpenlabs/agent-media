@@ -33,7 +33,7 @@ def test_the_player_gets_the_popups_listening_keys():
     # A reply notification's Play: that thread's unheard replies, and only
     # with a thread — never every thread's.
     assert canvas.ctl_argv("speech", "replay-unheard", 1, sid) == [
-        "replay", "--unheard", "--session", sid]
+        "replay", "--unheard", "--resume", "--session", sid]
     assert canvas.ctl_argv("speech", "replay-unheard", 1) is None
     # Stop ends the reply being heard, as `media stop`; it never touches the turn.
     assert "stop" in canvas._APP_SPEECH_ACTIONS

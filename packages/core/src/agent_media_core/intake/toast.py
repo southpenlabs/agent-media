@@ -400,9 +400,18 @@ def take_for_opened(session: str) -> Optional[int]:
         rid = _wait_for_row(key, 2000) if i == len(mine) - 1 else _row_for(key, 2000)
         if rid is None:
             continue
-        ex = (store.history_row(rid) or {}).get("extras") or {}
-        if not ex.get("heard"):
-            return rid
+        row = store.history_row(rid) or {}
+        ex = row.get("extras") or {}
+        if ex.get("heard"):
+            continue
+        # A held copy of a reply already heard to the end in another copy
+        # (reply_position): heard, not played again (David, 3 Nov 2026: a
+        # reply spoken, then its held duplicate played on the open).
+        from .. import reply_position
+        if row and reply_position.heard_to_any(row, store=store) is None:
+            store.mark_heard(int(rid))
+            continue
+        return rid
     return None
 
 

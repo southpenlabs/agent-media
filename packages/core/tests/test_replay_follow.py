@@ -440,7 +440,7 @@ def test_heard_out_on_the_phone_it_goes_on_to_the_next_unheard(store, monkeypatc
     heard, _ = _held_track(monkeypatch, [_on(0), _on(1), _on(2)] * 3 + [IDLE],
                            then_id=14232, spawned=spawned)
     assert heard == [14231]
-    assert [argv[-3:] for argv in spawned] == [["replay", "--id", "14232"]]
+    assert [argv[-4:] for argv in spawned] == [["replay", "--resume", "--id", "14232"]]
 
 
 def test_stalled_on_the_phone_it_goes_no_further(store, monkeypatch):

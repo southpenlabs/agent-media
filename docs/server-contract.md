@@ -8679,6 +8679,19 @@ through the thread (opened and left at once, on the way to another) had its
 question read out while David was on a different thread
 (`thread_events._play_if_stayed`).
 
+**From where it was left (3 Nov 2026).** A reply played on the open starts
+at its resume position (`media replay --id N --resume`,
+`agent_media_core.reply_position`): the first sentence not heard, from
+history `extras.stopped_at` — the same place the message's `resume` (§6.2)
+names. A reply can have two rows with one `key` in a thread (a held copy
+filed beside the copy that was spoken); the position is the reply's, not
+the row's: heard to the end in any copy (`extras.heard`, written since
+3 Nov 2026 for a reply played live to its end as well as for a held one a
+replay finished; a row from before, played and never stopped, counts as
+heard) and the held copy is marked heard and not played; stopped part-way
+in one, the other picks up there. The chain through a thread's unheard
+replies (`replay-unheard`, the follower's next) does the same.
+
 **Compression.** With `Accept-Encoding: gzip` (not `q=0`) the stream is
 gzipped: `Content-Encoding: gzip`, `Vary: Accept-Encoding`, still
 `Cache-Control: no-store` and `X-Accel-Buffering: no`, no Content-Length.

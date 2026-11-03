@@ -61,7 +61,7 @@ def _playing(tp):
 def test_heard_out_the_question_hands_on_to_its_reply(spawned, monkeypatch):
     _player(monkeypatch, [_playing(1.0), _playing(4.2)])
     assert _track() == 0
-    assert spawned and spawned[-1][-3:] == ["replay", "--id", "42"]
+    assert spawned and spawned[-1][-4:] == ["replay", "--resume", "--id", "42"]
 
 
 def test_a_stop_mid_question_plays_nothing_more(spawned, monkeypatch):
@@ -101,7 +101,7 @@ def test_the_phones_player_says_it_played_out(spawned, monkeypatch):
     # Even when the last poll caught it well short of the end.
     _player(monkeypatch, [_playing(1.0)], eof=True)
     assert _track() == 0
-    assert spawned and spawned[-1][-3:] == ["replay", "--id", "42"]
+    assert spawned and spawned[-1][-4:] == ["replay", "--resume", "--id", "42"]
 
 
 def test_media_stop_notes_what_it_stopped(tmp_path, monkeypatch):
