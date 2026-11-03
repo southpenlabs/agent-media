@@ -1912,16 +1912,17 @@ Pinned by `packages/server/tests/test_remind.py`.
   of one). A tag is made an org tag: a leading `#` dropped, spaces and dashes
   `_`; then letters, digits, `_@#%`, at most 40 characters, else 400 `"not a
   tag: …"`. At most 20 per thread. None of the three: 400.
-- 409 `"this thread is not in your org files yet; try again in a few
-  minutes"` when no node has the session (newer than the last export); 423
-  on a sealed thread; 400 `"not a session id"`.
-- `"hold": true` (29 Oct 2026): a thread just started, as the app's new
-  chat filed in the spaces in view (§6.28) — with no node yet the tags are
-  kept in `held-tags.json` instead of a 409 and answered with `"held":
-  true`; rows show them at once, and the first `/targets` after the
-  exporter writes the node puts them in its `#+filetags` and drops the
-  hold. A hold with no node after 7 days is dropped. With a node, `hold`
-  changes nothing.
+- 423 on a sealed thread; 400 `"not a session id"`.
+- No node has the session (newer than the last export, or a thread too
+  short for the exporter to write at all, which it never does): the tags
+  are kept in `held-tags.json` and answered with `"held": true`; rows show
+  them at once, and the first `/targets` after the exporter writes the node
+  puts them in its `#+filetags` and drops the hold. A hold older than 7
+  days whose thread no harness has any more is dropped; one whose thread
+  still exists is kept. Until 4 Nov 2026 this was 409 `"this thread is not
+  in your org files yet; try again in a few minutes"` unless the body
+  carried `"hold": true` (29 Oct 2026, the app's new chat, §6.28); the flag
+  is still accepted and changes nothing.
 - `GET /tags` → `{"ok": true, "tags": [{"tag", "count"}]}`: every thread tag
   in use, most used first, for a filter and for suggestions.
 - Both in `CORS_PATHS`.

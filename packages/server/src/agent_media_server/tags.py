@@ -23,10 +23,11 @@ cannot start with `home_`.
 in file order); `GET /tags` lists every tag in use with its count, for a
 filter and for suggestions; `POST /session/tags {"session", "add"?, "remove"?,
 "tags"?}` edits one thread's — `tags` replaces the set, `add` and `remove`
-change it. A thread with no node yet (a conversation newer than the last
-export, which runs every few minutes) is 409: there is nothing to edit until
-the exporter has written it, and writing a node here would mean guessing the
-exporter's own tags.
+change it. A thread with no node yet (newer than the last export, or too
+short for the exporter to write at all) has them held in `held-tags.json`
+and answered `"held": true`; rows show them from the hold, and the first
+list after a node appears writes them into it. Writing a node here would
+mean guessing the exporter's own tags, so the hold waits instead.
 
 `POST /session/tags/suggest {"session"}` → `{"session", "tags"}`: a few
 tags for the thread. First the tags already in use that fit it, found with
@@ -184,8 +185,10 @@ def _jsonmaps():
 
 _CHAT = _PEOPLE = _HELD = None
 
-#: A held thread's tags are dropped after this long with no node (an id that
-#: never became a thread).
+#: A held thread's tags are dropped after this long with no node when no
+#: harness has the thread any more (an id that never became a thread, or one
+#: since deleted). A thread that still exists keeps them: a short one is
+#: never exported, and its tags are its own all the same.
 HELD_FOR_S = 7 * 86400
 
 
@@ -228,13 +231,23 @@ def _settle_held(nodes: dict) -> dict[str, list[str]]:
                 out[sid] = tags                     # next time
                 continue
             done.append(sid)
-        elif now - float((v or {}).get("at") or 0) > HELD_FOR_S:
+        elif now - float((v or {}).get("at") or 0) > HELD_FOR_S and not _exists(sid):
             done.append(sid)
         else:
             out[sid] = tags
     if done:
         _held().update(lambda m: any([m.pop(s, None) is not None for s in done]))
     return out
+
+
+def _exists(session: str) -> bool:
+    """Whether some harness still has the thread (sessions.session_exists)."""
+    try:
+        from . import sessions
+
+        return sessions.session_exists(session)
+    except Exception:  # noqa: BLE001 — unsure means keep the hold
+        return True
 
 
 def _stored(m, key: str) -> list[str]:
@@ -481,9 +494,13 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
             detail["auto"] = tags_auto.auto_tags(session)
         return ok, ({"session": session, **detail} if ok else detail)
     found = _nodes().get(session)
-    if not found and body.get("hold") is True:
-        # A thread just started (the app's new chat, filed in the spaces in
-        # view): kept until the exporter writes its node, then put in it.
+    if not found:
+        # No node yet: a thread just started (the app's new chat), one the
+        # exporter has not reached, or a short one it never writes (fewer
+        # turns than its --min-turns). Kept here until a node appears, then
+        # put in it (_settle_held). Until 4 Nov 2026 this was a 409 unless
+        # the app sent "hold": true; a short thread's tags could never be
+        # saved ("try again in a few minutes" meant never).
         import time
 
         h = _held()
@@ -499,9 +516,6 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         except OSError as e:
             return False, {"error": f"could not save the tags ({e})", "status": 500}
         return True, {"session": session, "tags": want, "held": True}
-    if not found:
-        return False, {"error": "this thread is not in your org files yet; "
-                                "try again in a few minutes", "status": 409}
     current: list[str] = []
     for _, node in found:
         current += [t for t in node["tags"] if t not in current]

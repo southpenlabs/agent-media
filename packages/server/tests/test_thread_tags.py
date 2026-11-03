@@ -89,9 +89,11 @@ def test_refusals(server, shelf, signed_in):
     assert res.status == 400 and obj["error"].startswith("not a tag")
     res, obj = call(server, "POST", "/session/tags", {"session": SID}, AUTH)
     assert res.status == 400
-    # A thread the exporter has not written yet: nothing to edit.
+    # A thread the exporter has not written yet: held, never refused (a short
+    # thread is never exported, so "try again later" would mean never).
     res, obj = call(server, "POST", "/session/tags", {"session": SID, "add": ["x"]}, AUTH)
-    assert res.status == 409 and "org files" in obj["error"]
+    assert res.status == 200 and obj["tags"] == ["x"] and obj["held"] is True
+    tags._held().drop(SID)
 
 
 def test_tags_are_gated(server, shelf, monkeypatch):
@@ -413,12 +415,21 @@ def test_a_new_threads_tags_are_held_until_its_node(server, shelf, signed_in):
     assert _row(targets, SID)["tags"] == ["voice", "family", "Work_stuff"]
     assert ":voice:family:Work_stuff:" in p.read_text()
     assert tags._held().all() == {}
-    # Without hold, a thread with no node is still a 409.
+    # Without "hold" too (4 Nov 2026): the flag is accepted and makes no difference.
     res, obj = call(server, "POST", "/session/tags", {"session": SID2, "add": ["x"]}, AUTH)
-    assert res.status == 409
+    assert res.status == 200 and obj["held"] is True
+    _, targets = call(server, "GET", "/targets", headers=AUTH)
+    assert _row(targets, SID2)["tags"] == ["x"]
 
 
-def test_held_tags_expire(server, shelf, signed_in):
+def test_held_tags_expire(server, shelf, signed_in, monkeypatch):
+    # A stale hold on a thread no harness has any more is dropped ...
+    monkeypatch.setattr(tags, "_exists", lambda s: False)
     tags._held().put(SID, {"tags": ["family"], "at": 1.0})
     tags._settle_held({})
     assert tags._held().all() == {}
+    # ... one on a thread that still exists (too short to be exported) is kept.
+    monkeypatch.setattr(tags, "_exists", lambda s: True)
+    tags._held().put(SID, {"tags": ["family"], "at": 1.0})
+    assert tags._settle_held({}) == {SID: ["family"]}
+    assert SID in tags._held().all()
