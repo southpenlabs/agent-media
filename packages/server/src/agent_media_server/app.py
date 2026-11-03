@@ -583,7 +583,7 @@ _TOKEN_OK: Callable[[BaseHTTPRequestHandler], bool] | None = None
 
 
 def register(*, speech_state: Callable[[], dict] | None = None,
-             speech_ctl: Callable[[str, int], str] | None = None,
+             speech_ctl: Callable[..., str] | None = None,
              pictures_for: Callable[[str], tuple[list, bool]] | None = None,
              token_ok: Callable[[BaseHTTPRequestHandler], bool] | None = None) -> None:
     """What the server needs from the process serving it, handed in rather
@@ -2995,6 +2995,19 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                 if sentence is None:
                     _json(h, 400, {"ok": False, "error": "sentence must be a sentence index"})
                     return True
+        # `replay-id` with `then: "next"` (§6.5, 3 Nov 2026): Keep reading
+        # after a send. Once the reply has played to its end, the thread's
+        # next reply follows — the one that cut it, still waiting to speak,
+        # or the next not heard to its end. The thread is `session`.
+        then = ""
+        if action == "replay-id" and body.get("then") is not None:
+            if body.get("then") != "next":
+                _json(h, 400, {"ok": False, "error": 'then must be "next"'})
+                return True
+            then = str(body.get("session") or "")
+            if not sessions._SESSION.fullmatch(then):
+                _json(h, 400, {"ok": False, "error": 'then "next" needs a session'})
+                return True
         # `replay` inside a thread names it: that thread's newest reply, not
         # the newest of all (§6.5, 25 Sep 2026). Only a well-formed id rides.
         # `replay-unheard` (a reply notification's Play) must name it: that
@@ -3007,7 +3020,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if action == "replay-unheard" and not session:
             _json(h, 400, {"ok": False, "error": "replay-unheard needs a session"})
             return True
-        out = speech.run_ctl(action, arg, sentence, session)
+        out = (speech.run_ctl(action, arg, sentence, session, then=then)
+               if then else speech.run_ctl(action, arg, sentence, session))
         print(f"speech/ctl: {action} -> {out.strip()[:120]!r}", file=sys.stderr)
         reply = {"ok": True, "out": out}
         if out.startswith("error: "):

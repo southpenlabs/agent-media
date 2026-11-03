@@ -121,6 +121,44 @@ def test_replay_id_sentence_is_validated(server, shelf, signed_in, replays, bad)
     assert replays == []
 
 
+# --- replay-id, then the thread's next reply (Keep reading after a send) ------------
+
+def test_replay_id_then_next_follows_with_the_threads_next_reply(server, shelf, signed_in,
+                                                                 replays):
+    """David, 3 Nov 2026: Keep reading, tapped while the next reply speaks,
+    resumes the cut reply and plays the next one after it."""
+    sid = "45628bf4-a304-47e8-bbc2-83ebd1ceadff"
+    res, obj = call(server, "POST", "/speech/ctl",
+                    {"action": "replay-id", "arg": 23777, "sentence": 4,
+                     "then": "next", "session": sid}, AUTH)
+    assert res.status == 200 and obj["ok"] is True
+    assert replays == [["replay", "--id", "23777", "--from-sentence", "4",
+                        "--then-next", sid]]
+    replays.clear()
+    call(server, "POST", "/speech/ctl",
+         {"action": "replay-id", "arg": 23777, "then": "next", "session": sid}, AUTH)
+    assert replays == [["replay", "--id", "23777", "--then-next", sid]]
+
+
+@pytest.mark.parametrize("body, error", [
+    ({"then": "next"}, 'then "next" needs a session'),
+    ({"then": "next", "session": "../x"}, 'then "next" needs a session'),
+    ({"then": "all", "session": "45628bf4-a304-47e8-bbc2-83ebd1ceadff"}, 'then must be "next"'),
+])
+def test_replay_id_then_is_validated(server, shelf, signed_in, replays, body, error):
+    res, obj = call(server, "POST", "/speech/ctl",
+                    {"action": "replay-id", "arg": 23777, **body}, AUTH)
+    assert res.status == 400 and obj == {"ok": False, "error": error}
+    assert replays == []
+
+
+def test_a_session_without_then_does_not_change_replay_id(server, shelf, signed_in, replays):
+    call(server, "POST", "/speech/ctl",
+         {"action": "replay-id", "arg": 23777, "session": "45628bf4-a304-47e8-bbc2-83ebd1ceadff"},
+         AUTH)
+    assert replays == [["replay", "--id", "23777"]]
+
+
 # --- /speech/sentences ----------------------------------------------------------------
 
 def _spoken_row(**extras) -> int:

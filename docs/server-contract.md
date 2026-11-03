@@ -3006,7 +3006,7 @@ and on every refusal.
 
 #### `POST /speech/ctl` — gated
 
-`{"action", "arg"?, "sentence"?, "session"?}` → `{"ok": true, "out": "<what media printed>"}`.
+`{"action", "arg"?, "sentence"?, "session"?, "then"?}` → `{"ok": true, "out": "<what media printed>"}`.
 
 Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
 `para+`, `jump-end`, `prev`, `replay`, `replay-unheard`, `replay-id`, `speed-`, `speed+`,
@@ -3031,6 +3031,27 @@ Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
   thread's `replay`. The Play on the app's reply notification sends it, so
   a thread is heard without opening the app. A server without it answers
   400 `"unknown action"`; the app then sends `replay` with the session.
+- `then: "next"` on `replay-id` (3 Nov 2026), with `session` (the thread;
+  400 `then "next" needs a session` without a uuid-shaped one, 400 `then
+  must be "next"` for any other value): Keep reading after a send. Once
+  the reply has played to its end, the thread's next reply follows (`media
+  replay --id ID [--from-sentence N] --then-next S`). Decided at that end,
+  not when asked, because the reply that cut this one may still be
+  speaking for the first time and have no history row: a reply of the
+  thread waiting for the voice (the one that stepped aside for this
+  replay, or one queued) takes it and picks up where it was; otherwise
+  the thread's oldest reply after this one not heard to its end in any
+  copy (held and never played, or `resume`) is replayed from where it was
+  left, and its own unheard run follows it. Not after a Stop, a cut or a
+  barge-in. The replay holds the token above a question
+  (`_UNREAD_RANK`) and waits up to 20 s for the reply speaking to reach
+  the end of its sentence and step aside (it resumes afterwards), so a
+  question being asked waits too. The app's Keep reading sends it with
+  the cut reply's `resume.sentence`, also while the next reply is
+  speaking (David, 3 Nov 2026: "continue reading should be redeemable
+  even after the next reply is in progress. It should then play the next
+  reply after it has continued to the end"). A server without it ignores
+  `then` and plays the reply alone.
 - End of reply (`jump-end`) ticks like a Stop (the `cut` earcon), on the
   live reply and on a replay; on a replayed question it moves to the answer
   without one.

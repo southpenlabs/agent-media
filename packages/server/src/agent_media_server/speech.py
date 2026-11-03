@@ -57,15 +57,20 @@ def current_state() -> dict:
 
 
 def run_ctl(action: str, arg: int, sentence: int | None = None,
-            session: str = "") -> str:
+            session: str = "", then: str = "") -> str:
     """Run one speech verb already checked against `_APP_SPEECH_ACTIONS`.
     `sentence` is the index for `goto-sentence` and `replay-id`'s "from
     here"; it rides as the canvas's `sarg` (its `arg` is clamped 1-999, and
     sentence zero is the one most often asked for). `session` is `replay`'s
     thread (and `replay-unheard`'s), already checked, and rides the same
-    way."""
+    way. `then` is `replay-id`'s `then: "next"` thread (already checked):
+    once the reply has played to its end, that thread's next reply follows
+    (`media replay --then-next`)."""
     if _CTL is None:
         return ""
+    if then:
+        return _CTL(action, arg, "" if sentence is None else str(int(sentence)),
+                    then=then)
     if session:
         return _CTL(action, arg, session)
     if sentence is None:

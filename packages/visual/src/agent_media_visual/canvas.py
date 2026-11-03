@@ -296,10 +296,11 @@ def _media_ctl(args: list[str], timeout: int) -> str:
     return (stdout or "").strip()
 
 
-def _speech_ctl(action: str, arg: int, sarg: str = "") -> str:
+def _speech_ctl(action: str, arg: int, sarg: str = "", then: str = "") -> str:
     """One whitelisted speech verb for the app's speech bar (/speech/ctl).
-    `sarg` is a sentence index (goto-sentence, replay-id from a sentence)."""
-    argv = ctl_argv("speech", action, arg, sarg)
+    `sarg` is a sentence index (goto-sentence, replay-id from a sentence).
+    `then`: replay-id's follow-on thread (`then: "next"`)."""
+    argv = ctl_argv("speech", action, arg, sarg, then=then)
     if argv is None:
         return ""
     if action in _REPLAY_VERBS:
@@ -1506,10 +1507,11 @@ _SESSION_ARG = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 
 def ctl_argv(channel: str, action: str, arg: int,
-             sarg: str = "") -> list[str] | None:
+             sarg: str = "", then: str = "") -> list[str] | None:
     """Whitelisted button/key → `media` argv. None = unknown/unsupported combo.
     The maps mirror the popup's handle_key dispatch. `sarg` carries free text
-    for the popup's typed-seek (`s`) and open-URL (`o`) keys."""
+    for the popup's typed-seek (`s`) and open-URL (`o`) keys. `then` is a
+    thread id for `replay-id`: its next reply follows (`--then-next`)."""
     if action == "select" and channel in ("speech", "music", "book"):
         # Persist the channel choice — the popup opens on it, and the video
         # poller broadcasts it back so every canvas follows.
@@ -1533,8 +1535,12 @@ def ctl_argv(channel: str, action: str, arg: int,
             # from one of its sentences when `sarg` names it ("read from
             # here" in the app: one command, so there is no replay-then-seek
             # race).
+            # `then`: Keep reading after a send — once it has played to
+            # its end, the thread's next reply follows (`--then-next`).
             "replay-id": ["replay", "--id", str(arg)]
-                         + (["--from-sentence", sarg] if sarg.isdigit() else []),
+                         + (["--from-sentence", sarg] if sarg.isdigit() else [])
+                         + (["--then-next", then]
+                            if _SESSION_ARG.fullmatch(then) else []),
             # A headset's play with nothing loaded on the phone: the last
             # reply where it was stopped, else the open thread's newest.
             "again": ["replay", "--again"],
@@ -2219,7 +2225,7 @@ class Handler(BaseHTTPRequestHandler):
 # routes too.
 _app.register(
     speech_state=lambda: speech_state(),
-    speech_ctl=lambda action, arg, sarg="": _speech_ctl(action, arg, sarg),
+    speech_ctl=lambda action, arg, sarg="", then="": _speech_ctl(action, arg, sarg, then),
     pictures_for=_state.pictures_for,
     token_ok=lambda handler: _authorized(handler))
 

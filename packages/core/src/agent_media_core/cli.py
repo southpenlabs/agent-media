@@ -3469,6 +3469,45 @@ def _next_unheard(row: dict) -> Optional[int]:
     return later[-1]["id"] if later else None
 
 
+#: How long a Keep reading replay (`replay --then-next`) waits for the reply
+#: speaking to reach the end of its sentence and step aside.
+_KEEP_READING_WAIT_S = 20.0
+
+
+def _next_to_resume(session: str, after_id: int) -> Optional[int]:
+    """What a Keep reading replay of row `after_id` goes on to once it has
+    played to its end (`replay --then-next`; David, 3 Nov 2026: "It should
+    then play the next reply after it has continued to the end").
+
+    None while a reply of `session` is waiting for the voice: the reply that
+    cut this one and stepped aside for it, or one queued behind it. That one
+    takes the token as the replay lets go and picks up where it was.
+    Otherwise the id of the thread's oldest reply after `after_id` not heard
+    to its end in any copy (reply_position: held and never played, or
+    stopped part way), replayed from where it was left; None when every one
+    after it was heard."""
+    from .intake.submit import speech_queue
+    try:
+        if any(q.get("session") == session for q in speech_queue()):
+            return None
+    except Exception:  # noqa: BLE001 — unsure: look at the rows
+        pass
+    from . import reply_position
+    later = [r for r in _speech_history(200, session=session)   # newest first
+             if isinstance(r.get("id"), int) and r["id"] > after_id
+             and _row_has_audio(r)]
+    if not later:
+        return None
+    try:
+        pool = StateStore().recent_history(sink="speech", limit=400)
+    except Exception:  # noqa: BLE001
+        pool = []
+    for r in reversed(later):                                   # oldest first
+        if reply_position.heard_to_any(r, pool) is not None:
+            return int(r["id"])
+    return None
+
+
 def _oldest_unheard(session: str) -> Optional[dict]:
     """The thread's oldest held reply not yet heard, with audio, or None.
     Replayed, it goes on through the later ones (`_next_unheard`): a reply
@@ -3644,7 +3683,8 @@ def _replay_rank(row: dict) -> int:
 
 
 def _replay_row(row: dict, from_sentence: Optional[int] = None,
-                then_id: Optional[int] = None, lock_fd: int = -1) -> int:
+                then_id: Optional[int] = None, lock_fd: int = -1,
+                then_next: Optional[str] = None) -> int:
     """Play one speech-history row: push its clips to the speech target and
     refresh now_playing (+ position follower). The traversal path addresses
     rows by index (`_do_replay`); the clip browser addresses them by history
@@ -3657,7 +3697,13 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
 
     `lock_fd` is a playback token already held, handed down by the follower
     of the replay before this one in a chain (`replay-track --then-id`), so
-    nothing waiting gets in between the two."""
+    nothing waiting gets in between the two.
+
+    `then_next` (a thread id): Keep reading after a send (`replay
+    --then-next`). The follower goes on, at the end, to the thread's next
+    reply not yet heard to its end (`_next_to_resume`), and the token is held
+    at `_UNREAD_RANK`, so the reply that cut this one, a question included,
+    steps aside at the end of its sentence and resumes after it."""
     uri = row.get("uri")
     if not uri:
         return 1
@@ -3712,6 +3758,13 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
     _stop_replay_trackers()
     replay_lock = None
     rank = _replay_rank(row)
+    wait_s = _replay_wait_s()
+    if then_next:
+        from .intake.submit import _UNREAD_RANK
+        rank = max(rank, _UNREAD_RANK)
+        # The reply speaking steps aside only at the end of its sentence:
+        # pushed over instead, it would not be resumed after this one.
+        wait_s = max(wait_s, _KEEP_READING_WAIT_S)
     if recorded and lock_fd is not None and lock_fd >= 0:
         from .intake.submit import _SpeechPlaybackLock
         replay_lock = _SpeechPlaybackLock.adopt(lock_fd, rank=rank,
@@ -3719,7 +3772,7 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
     elif recorded:
         from .intake.submit import _SpeechPlaybackLock
         replay_lock = _SpeechPlaybackLock(kind="replay")
-        if not replay_lock.take_within(_replay_wait_s(), rank=rank,
+        if not replay_lock.take_within(wait_s, rank=rank,
                                        session=f"replay:{os.getpid()}"):
             print("media replay: speech is busy; playing anyway",
                   file=sys.stderr)
@@ -3737,7 +3790,8 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
         # it itself only when no follower runs).
         return _push_replay(row, ex, clip_uris, clip_durations, replay_text,
                             speech_target, pane, recorded, replay_lock,
-                            start=start, then_id=then_id, rank=rank)
+                            start=start, then_id=then_id, rank=rank,
+                            then_next=(then_next if recorded else None))
     finally:
         # Handed to the follower, the descriptor is closed here and the token
         # lives on in it; otherwise this is the release.
@@ -3893,7 +3947,8 @@ def _replay_under(ex: dict, speech_target: Target, sink) -> str:
 def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
                  replay_text: str, speech_target: Target, pane: str,
                  recorded: bool, replay_lock, start: int = 0,
-                 then_id: Optional[int] = None, rank: Optional[int] = None) -> int:
+                 then_id: Optional[int] = None, rank: Optional[int] = None,
+                 then_next: Optional[str] = None) -> int:
     """The body of `_replay_row` once the token is settled: push the clips,
     label them, write now_playing and spawn the follower.
 
@@ -4148,6 +4203,8 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
             + (["--lock-fd", str(lock_fd)] if lock_fd is not None else [])
             + (["--rank", str(rank)] if lock_fd is not None and rank is not None else [])
             + (["--then-id", str(then_id)] if then_id is not None else [])
+            + (["--then-next", then_next, "--then-after", str(row["id"])]
+               if then_next and then_id is None else [])
             + (["--heard-id", str(held_id)] if held_id is not None else [])
             + (["--under", under_arg] if under_arg else []),
             start_new_session=True,
@@ -4242,8 +4299,15 @@ def cmd_replay(a) -> int:
         if row is not None:
             if start is None and getattr(a, "resume", False):
                 start = _resume_start(row)
-            then_id = _next_unheard(row)
-            kw = {"then_id": then_id} if then_id is not None else {}
+            then_next = getattr(a, "then_next", None)
+            if then_next:
+                # Keep reading (§6.5 `then: "next"`): what follows is decided
+                # when this one ends, since the reply it cut may still be
+                # speaking for the first time and have no row yet.
+                kw: dict = {"then_next": then_next}
+            else:
+                then_id = _next_unheard(row)
+                kw = {"then_id": then_id} if then_id is not None else {}
             # Handed down by the follower of the reply before this one.
             lock_fd = getattr(a, "lock_fd", -1)
             if lock_fd is not None and lock_fd >= 0:
@@ -5048,6 +5112,23 @@ def _follow_replay(a) -> int:
         return 0
 
     then_id = getattr(a, "then_id", None)
+    then_next = getattr(a, "then_next", None)
+    then_after = getattr(a, "then_after", None)
+    then_found: list = []
+
+    def _then_row() -> Optional[int]:
+        """The row to go on to: `--then-id`, or with `--then-next` the
+        thread's next unfinished reply, looked up once, at the end."""
+        if then_id is not None:
+            return then_id
+        if not then_next or then_after is None:
+            return None
+        if not then_found:
+            try:
+                then_found.append(_next_to_resume(then_next, int(then_after)))
+            except Exception:  # noqa: BLE001 — nothing follows, then
+                then_found.append(None)
+        return then_found[0]
 
     def _then() -> int:
         """Start the row queued behind this one (`--then-id`: the reply after
@@ -5059,6 +5140,9 @@ def _follow_replay(a) -> int:
         that replay would wait on us for it. Both lanes hand on: the clock
         lane (the phone) as well as the player-polling one."""
         nonlocal token
+        next_id = _then_row()
+        if next_id is None:
+            return 0
         fd = token.fileno if token is not None and os.name != "nt" else None
         if token is not None and fd is None:
             try:
@@ -5068,7 +5152,7 @@ def _follow_replay(a) -> int:
             token = None
         try:
             subprocess.Popen([sys.executable, "-m", "agent_media_core.cli",
-                              "replay", "--resume", "--id", str(then_id)]
+                              "replay", "--resume", "--id", str(next_id)]
                              + (["--lock-fd", str(fd)] if fd is not None else []),
                              start_new_session=True, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL,
@@ -5240,7 +5324,7 @@ def _follow_replay(a) -> int:
             # already, and an answered question keeps no place to resume.
             if _answered_now():
                 _step_aside()
-                return _then() if then_id is not None else 0
+                return _then() if _then_row() is not None else 0
             if gone.is_set():
                 # Nothing is playing it any more. Stamp where it had got to,
                 # as a Stop does, so ▶ picks up there instead of the top.
@@ -5250,7 +5334,7 @@ def _follow_replay(a) -> int:
                 if reached.is_set():
                     _mark_heard(heard_id)
                     _finish()
-                    return _then() if then_id is not None else 0
+                    return _then() if _then_row() is not None else 0
                 if last < len(timeline["offsets"]) - 1:
                     from .sinks.speech import mark_speech_stopped
                     mark_speech_stopped(sentence=max(last, 0), tick=False)
@@ -5261,7 +5345,7 @@ def _follow_replay(a) -> int:
             if _ended_by_listener():
                 target = _active_speech_target()
                 _step_aside()
-                if then_id is not None:
+                if _then_row() is not None:
                     return _then()
                 _end_tick(target)
                 return 0
@@ -5294,7 +5378,7 @@ def _follow_replay(a) -> int:
                     _finish()
                     # The phone lane (David, 16 Oct 2026: opening a thread
                     # read the first of two unheard replies, not the second).
-                    return _then() if then_id is not None else 0
+                    return _then() if _then_row() is not None else 0
                 return _finish()
             idx = 0
             for i, off in enumerate(offsets):
@@ -5376,12 +5460,12 @@ def _follow_replay(a) -> int:
         if _answered_now():
             # Answered: on to the reply queued behind it, if one is.
             _step_aside()
-            return _then() if then_id is not None else 0
+            return _then() if _then_row() is not None else 0
         if _ended_by_listener():
             # End of the question moves on to its answer.
             target = _active_speech_target()
             _step_aside()
-            if then_id is not None:
+            if _then_row() is not None:
                 return _then()
             _end_tick(target)
             return 0
@@ -5409,7 +5493,7 @@ def _follow_replay(a) -> int:
                         _mark_heard(heard_id)
                     # A question the listener answered while it played has
                     # had its answer: the reply queued behind it is not due.
-                    if then_id is not None and read_idx[0] is None \
+                    if _then_row() is not None and read_idx[0] is None \
                             and _heard_out(last_snap):
                         return _then()
                     return 0
@@ -9945,6 +10029,12 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="the last reply from where it was stopped, else the "
                         "open thread's newest (a headset's play with nothing "
                         "loaded)")
+    s.add_argument("--then-next", default=None, metavar="SESSION",
+                   help="with --id: once it has played to its end, go on to "
+                        "the thread's next reply after it not yet heard to "
+                        "its end, from where it was left (Keep reading after "
+                        "a send; a reply of the thread still waiting to "
+                        "speak plays instead)")
     # With --id: the playback token, already held by the replay before this
     # one in a chain and handed down (replay-track's --then-id).
     s.add_argument("--lock-fd", type=int, default=-1, help=argparse.SUPPRESS)
@@ -9972,6 +10062,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # A history row to replay once this one has played to its end (the
     # reply after a replayed question). Not after a Stop or a barge-in.
     s.add_argument("--then-id", type=int, default=None)
+    # Resolved only at the end instead (`replay --then-next`): the thread
+    # whose next unfinished reply after row --then-after follows.
+    s.add_argument("--then-next", default=None)
+    s.add_argument("--then-after", type=int, default=None)
     # A held reply's row, marked heard only once the replay reaches its last
     # sentence (not when its clips were pushed).
     s.add_argument("--heard-id", type=int, default=None)

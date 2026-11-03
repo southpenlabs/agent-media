@@ -30,6 +30,12 @@ def test_the_player_gets_the_popups_listening_keys():
     assert canvas.ctl_argv("speech", "replay", 1, "--id 3") == ["replay", "1"]
     # A transcript line's own turn, by history id — not an index, not clamped.
     assert canvas.ctl_argv("speech", "replay-id", 48213) == ["replay", "--id", "48213"]
+    # Keep reading after a send (`then: "next"`): the thread's next reply
+    # follows; a `then` that is not a thread id is dropped.
+    assert canvas.ctl_argv("speech", "replay-id", 48213, "4", then=sid) == [
+        "replay", "--id", "48213", "--from-sentence", "4", "--then-next", sid]
+    assert canvas.ctl_argv("speech", "replay-id", 48213, then="../x") == [
+        "replay", "--id", "48213"]
     # A reply notification's Play: that thread's unheard replies, and only
     # with a thread — never every thread's.
     assert canvas.ctl_argv("speech", "replay-unheard", 1, sid) == [
@@ -67,3 +73,5 @@ def test_every_verb_the_canvas_sends_is_one_the_cli_accepts():
         except SystemExit as e:  # argparse's way of refusing
             pytest.fail(f"media cannot run what the canvas sends for "
                         f"{action}: {' '.join(argv)} ({e})")
+    # replay-id's follow-on, too.
+    parser.parse_args(canvas.ctl_argv("speech", "replay-id", 1, "3", then=SID))
