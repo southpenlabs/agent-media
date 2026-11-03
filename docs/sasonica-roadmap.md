@@ -2434,6 +2434,32 @@ ahead.
   `[[visual:]]` marker is easily 400 characters, which is the whole window
   `_norm(…)[:400]` looks at: the reply scored 0.45 against its own live
   line where the bar is 0.6, joined nothing, and the thread had no live
+56. **Speech bubbles for new replies, like Google Messages** (David, 4 Nov
+    2026: "Can we have speech bubbles pop up for new messages like Google
+    messages does?" — asked which shape: "I'm not sure. maybe we can
+    experiment with rotating all of them"). **Built 4 Nov 2026** (sasonica-app
+    `Bubbles.java`, `BubbleText.java`, `BubbleActivity`,
+    `BubbleLightActivity`). A thread's "New reply" / "Needs you" notice is an
+    Android conversation: a long-lived shortcut per thread, the notice in
+    messaging style from a Person named after the thread, the reply's words
+    in it (one `GET /conversation/log?session=&messages=1&limit=6` per
+    notice from the notifier's thread, §6.2.2), so the thread sits in the
+    Conversations section with a priority of its own. With bubbles allowed
+    for the app (Android 11+; the person long-presses a notice, or Settings
+    → Notifications → Bubbles), the notice floats as a bubble. Settings →
+    Notifications → Speech bubbles rotates the shapes (`bubbles` in the
+    notifier's prefs, `BackgroundNotify.setBubbles`): **full** (default; the
+    thread page itself in a second WebView of the app — same plugins, the
+    page's `open` event from `ACTION_BUBBLE`, which leaves the notice up
+    since a bubble lives with it), **light** (a native card: the thread's
+    last lines read again every 4 s while it is up, a box that `POST
+    /reply`s, Speak (the thread in the app listening, the `?listen=1`
+    route), Play (`replay-unheard`) and Open), **conv** (the conversation
+    notice only, no floating window) and **off** (the plain notice). Left:
+    David's verdict after trying each; whether the full bubble's page should
+    hide its nav and open compact (`?bubble=1`); a Person avatar of the
+    agent's own instead of the app icon; the second WebView's cost on a
+    phone with little memory.
 37. **Sasonica in Android Auto** (David, 20 Oct 2026: "would this app work
     on Android auto?" — "y"). Today it doesn't show in the car: speech and
     music come through the car's speakers, but the app declares no
