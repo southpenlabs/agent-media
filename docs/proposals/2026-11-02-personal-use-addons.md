@@ -71,14 +71,14 @@ one more:
   sign-in relay (`bridges.py`), Find on Messenger (`contacts_find.py`), the
   stories tray log, and the Facebook previewer agent. agent-media keeps
   small hooks where each plugs in, and every public alternative.
-- With the bridges go their upkeep tools, now host tooling on red5
+- With the bridges go their upkeep tools, until now host tooling on the owner's server
   (`agent-bridge-update` in David's own config): installing an official
   bridge release after checking its sha256sums, and `follow`, which
   restarts a bridge that started before the homeserver last did (a mautrix
   bridge reads the server's capabilities once, so after tuwunel 1.9.4 made
   room version 12 the default, new chats failed until the bridges
   restarted; 3 Nov 2026). They get settings for the bridge list, the
-  homeserver's unit and URL first. red5's own choices stay on the host:
+  homeserver's unit and URL first. The owner's own choices stay on their host:
   which bridges, the timers, and the Teams fork that is staged for David
   (David, 3 Nov 2026: "should some of the bridge stuff be put in the
   sasonica add-ons rather than my personal agent-config?" — with the
@@ -95,7 +95,7 @@ Timer's page (about 3,500 lines of Java and some TypeScript).
 - **Recommended:** they move into the add-on repository, and the app gets
   a second Android build flavour, `personal`, built from source with them;
   the distributed build (`public`) has none of them. CI builds `public`;
-  a person builds `personal` themselves (red5's runner builds David's).
+  a person builds `personal` themselves.
 - Alternative: a companion APK the app hands those screens to. Cleaner
   separation, but a second app to install, sign and keep in step.
 
@@ -103,8 +103,8 @@ Timer's page (about 3,500 lines of Java and some TypeScript).
 
 1. The add-on repository and package, the entry point, `allowed()` asking
    it; move the server methods; agent-media's tests run with and without
-   it. red5 installs it.
-2. The app's `personal` flavour and the moved Android pieces; red5 builds
+   it. The owner installs it.
+2. The app's `personal` flavour and the moved Android pieces; the owner builds
    and installs `personal` for David.
 3. A short README in the add-on: what each method does, why it is not in
    the product, and that its user takes on the service's terms.
