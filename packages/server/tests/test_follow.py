@@ -64,7 +64,7 @@ def test_bad_bodies(server, rig):
 
 def test_the_device_asks_what_it_follows(server, rig):
     off = {"ok": True, "phone": None, "name": None, "session": None, "title": None, "at": None,
-           "view": None, "phones": []}
+           "view": None, "path": None, "phones": []}
     res, body = call(server, "GET", "/device/follow", headers=rig["tv_h"])
     assert res.status == 200 and body == off
     devices.set_follow(rig["tv"], rig["phone"])
@@ -213,8 +213,28 @@ def test_the_chat_list_is_mirrored(server, rig):
 
 
 def test_view_bad_bodies(server, rig):
-    for bad in ({}, {"view": "grid"}, {"view": "thread"}, {"view": "thread", "session": 3}):
+    for bad in ({}, {"view": "grid"}, {"view": "thread"}, {"view": "thread", "session": 3},
+                {"view": "page"}, {"view": "page", "path": "media"},
+                {"view": "page", "path": "/" + "x" * 400}):
         res, _ = call(server, "POST", "/device/view", bad, rig["phone_h"])
         assert res.status == 400, bad
     res, _ = call(server, "POST", "/device/view", {"view": "list"}, AUTH)
     assert res.status == 401
+
+
+def test_any_page_is_mirrored(server, rig):
+    """David, 5 Nov 2026: "Can the mirroring also work for all other pages?" """
+    devices.set_follow(rig["tv"], rig["phone"])
+    follow.opened(rig["phone"], SID)
+    res, body = call(server, "POST", "/device/view", {"view": "page", "path": "/media"},
+                     rig["phone_h"])
+    assert res.status == 200, body
+    st = follow.state(rig["tv"])
+    assert (st["view"], st["path"], st["session"]) == ("page", "/media", SID)
+    v = follow.version()
+    call(server, "POST", "/device/view", {"view": "page", "path": "/media"}, rig["phone_h"])
+    assert follow.version() == v                          # the same page: no change
+    call(server, "POST", "/device/view", {"view": "page", "path": "/org"}, rig["phone_h"])
+    assert follow.state(rig["tv"])["path"] == "/org" and follow.version() > v
+    call(server, "POST", "/device/view", {"view": "list", "path": "/"}, rig["phone_h"])
+    assert (follow.state(rig["tv"])["view"], follow.state(rig["tv"])["path"]) == ("list", "/")

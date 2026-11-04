@@ -64,35 +64,40 @@ def opened(device_id: str, session: str) -> None:
         was = _OPEN.get(device_id)
         if was and was["session"] == session and was.get("view") == "thread":
             return
-        _OPEN[device_id] = {"session": session, "at": round(time.time(), 3), "view": "thread"}
+        _OPEN[device_id] = {"session": session, "at": round(time.time(), 3), "view": "thread",
+                            "path": None}
     _bump()
 
 
-VIEWS = ("list", "thread")
+VIEWS = ("list", "thread", "page")
+MAX_PATH = 300
 
 
 def view(bearer: str, body) -> tuple[bool, dict]:
-    """`POST /device/view {"view": "list"|"thread", "session"?}` — what this
-    device shows now, from its app as it moves (David, 5 Nov 2026: "it only
-    mirrors the chat window and not the chat list"). A thread is also
-    learnt from its stream (`opened`); the list only from this."""
+    """`POST /device/view {"view": "list"|"thread"|"page", "session"?, "path"?}`
+    — what this device shows now, from its app as it moves (David, 5 Nov
+    2026: "it only mirrors the chat window and not the chat list"; "Can the
+    mirroring also work for all other pages?"). `path` is the app's own
+    route ("/media", "/t/<id>"), required for "page", kept for the others.
+    A thread is also learnt from its stream (`opened`)."""
     me = auth.device_id(bearer)
     if not me:
         return False, {"status": 401, "error": "a paired device only"}
-    v = body.get("view") if isinstance(body, dict) else None
-    session = body.get("session") if isinstance(body, dict) else None
+    b = body if isinstance(body, dict) else {}
+    v, session, path = b.get("view"), b.get("session"), b.get("path")
     if v not in VIEWS or (session is not None and not isinstance(session, str)) \
-            or (v == "thread" and not session):
+            or (v == "thread" and not session) \
+            or (path is not None and not (isinstance(path, str) and path.startswith("/")
+                                          and len(path) <= MAX_PATH)) \
+            or (v == "page" and not path):
         return False, {"status": 400, "code": "bad_view",
-                       "error": 'expected {"view": "list"} or {"view": "thread", "session"}'}
-    if v == "thread":
-        opened(me, session)
-        return True, {"view": v}
+                       "error": 'expected {"view": "list"|"page", "path"?} or {"view": "thread", "session", "path"?}'}
     with _LOCK:
         was = _OPEN.get(me) or {}
-        if was.get("view") == "list":
+        keep = session if v == "thread" else was.get("session")
+        if was.get("view") == v and was.get("session") == keep and was.get("path") == path:
             return True, {"view": v}
-        _OPEN[me] = {"session": was.get("session"), "at": round(time.time(), 3), "view": "list"}
+        _OPEN[me] = {"session": keep, "at": round(time.time(), 3), "view": v, "path": path}
     _bump()
     return True, {"view": v}
 
@@ -104,14 +109,15 @@ def changed() -> None:
 
 def state(device_id: str) -> dict:
     """What `device_id` mirrors: `{"phone", "name", "session", "title", "at",
-    "view", "phones"}`. Of the devices it mirrors (`phones`), the one used
-    last (`phone`, its `name`): the one whose screen changed latest, the first
-    when none has shown anything since a restart. `view` "list" or "thread"
-    (null until it shows something), `session` the thread it opened last
-    (still there on "list", so going back to a thread is no surprise).
+    "view", "path", "phones"}`. Of the devices it mirrors (`phones`), the one
+    used last (`phone`, its `name`): the one whose screen changed latest, the
+    first when none has shown anything since a restart. `view` "list",
+    "thread" or "page", and `path` the app's route when its app said (null
+    until it shows something); `session` the thread it opened last (still
+    there on "list" and "page", so going back to a thread is no surprise).
     Every field null (`phones` []) when the switch is off."""
     off = {"phone": None, "name": None, "session": None, "title": None, "at": None,
-           "view": None, "phones": []}
+           "view": None, "path": None, "phones": []}
     if not device_id:
         return off
     rows = {d.get("id"): d for d in devices.list_devices()}
@@ -136,7 +142,8 @@ def state(device_id: str) -> dict:
         except Exception:  # noqa: BLE001 — a title is never worth the frame
             title = None
     return {"phone": phone, "name": rows[phone].get("name") or None, "session": session,
-            "title": title, "at": got.get("at"), "view": got.get("view"), "phones": phones}
+            "title": title, "at": got.get("at"), "view": got.get("view"),
+            "path": got.get("path"), "phones": phones}
 
 
 def get(bearer: str) -> tuple[bool, dict]:

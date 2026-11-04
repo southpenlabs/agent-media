@@ -5688,20 +5688,25 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   `/devices` row then has `follow_from` (the list) and `follow` (its first,
   null when off; for an app that knows one); both absent until set.
 - `GET /device/follow` — any paired device, for itself (401 otherwise). →
-  `{ok, phone, name, session, title, at, view, phones}`: of the devices it
+  `{ok, phone, name, session, title, at, view, path, phones}`: of the devices it
   mirrors (`phones`, revoked ones left out), the one used last (`phone`,
   its `name`) — the one whose screen changed latest, the first listed when
   none has shown anything since a restart; what it shows, `view` `"list"`
-  (the chat list) or `"thread"`, null until it shows something; the thread
+  (the chat list), `"thread"` or `"page"` (any other), and its `path` (the
+  app's route, null when its app did not say), null until it shows something; the thread
   it opened last (`session`, still set on `"list"`), when its screen last
   changed (`at`, epoch seconds) and that thread's title. Every field null
   and `phones` `[]` while it mirrors nobody.
-- `POST /device/view {"view": "list"}` or `{"view": "thread", "session"}` —
-  what this device shows now, from its app as it moves (David, 5 Nov 2026:
-  "it only mirrors the chat window and not the chat list"). → `{ok, view}`.
-  400 `bad_view` for anything else, 401 for anything but a paired device. A
-  thread is also learnt from its stream (below); the list only from this.
-  The same view again is no change.
+- `POST /device/view {"view": "list"|"page", "path"?}` or `{"view":
+  "thread", "session", "path"?}` — what this device shows now, from its app
+  as it moves (David, 5 Nov 2026: "it only mirrors the chat window and not
+  the chat list"; "Can the mirroring also work for all other pages?").
+  `path` is the app's own route (`/media`, `/org`, `/t/<id>`; starts with
+  `/`, 300 characters at most), required for `"page"`. → `{ok, view}`. 400
+  `bad_view` for anything else, 401 for anything but a paired device. A
+  thread is also learnt from its stream (below); the list and other pages
+  only from this. The same view, session and path again is no change. Which
+  pages stay a device's own (pairing, its own settings) is the app's choice.
 - `POST /device/follow {"on": false}` — the device turns its own following
   off: a press on its own remote or screen. → as `GET`. `{"on": true}` is
   400: following is set from Settings → Devices. 401 for anything but a
