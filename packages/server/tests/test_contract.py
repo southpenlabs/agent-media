@@ -386,6 +386,9 @@ def test_ask_empty_is_400(server, shelf, signed_in):
 
 def test_reply_to_a_live_session_shape(server, shelf, signed_in, typed, monkeypatch):
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%42"})
+    # Not this machine's real pane %42: a working one there answered `queued`.
+    from agent_media_server import send as send_mod
+    monkeypatch.setattr(send_mod, "_pane_working", lambda *a, **k: False)
     res, obj = call(server, "POST", "/reply", {"item": "li_1", "text": "yes"}, AUTH)
     assert res.status == 200, obj
     assert keys(obj) == {"ok", "session", "pane", "opened", "submitted"}

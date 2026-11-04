@@ -150,6 +150,9 @@ def test_conversation_by_session_has_the_suggestion(server, shelf, signed_in, mo
 def test_reply_by_session_types_into_its_pane(server, shelf, signed_in, typed,
                                               no_abs_get, monkeypatch):
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%42"})
+    # Not this machine's real pane %42: a working one there answered `queued`.
+    from agent_media_server import send as send_mod
+    monkeypatch.setattr(send_mod, "_pane_working", lambda *a, **k: False)
     res, obj = call(server, "POST", "/reply", {"session": SID, "text": "yes"}, AUTH)
     assert res.status == 200, obj
     assert obj == {"ok": True, "session": SID, "pane": "%42", "opened": False,
