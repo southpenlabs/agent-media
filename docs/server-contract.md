@@ -322,6 +322,17 @@ Everything a message can be pointed at.
   (`you_wrote.py`); Hermes threads have `null`/`false`. The app's Show →
   Sent lists the rows with `you_at` (newest first) and Waiting for reply
   those with `last_from_you`.
+- `model`, `model_label` (every row, 4 Nov 2026): the id of the model an
+  agent thread's last reply ran on (`claude-fable-5-1`, `gpt-5.3-codex`,
+  opencode's and pi's `provider/model`) and the short name the app lists
+  it under — a Claude model's family (`Fable`, `Opus`, `Sonnet`, `Haiku`:
+  the name the plan's weekly limit is scoped by, §6.30), another's id
+  without its provider — else `null` (no reply yet; Gemini and Hermes,
+  whose stores do not say; Matrix rooms, quick chats, sealed rows). Read
+  from the transcript's end and cached per file (`session_model.py`). The
+  app's Chats filter lists each agent's models under it, with how many
+  threads each has (David, 4 Nov 2026: "which chats are using which
+  models").
 - `mail_from` (every row, 28 Oct 2026): the sender's name (`"Cece"`) when
   another agent's mail started the thread — its first words are
   `[From Name] …` (agent-mail-deliver, `media session send`; not

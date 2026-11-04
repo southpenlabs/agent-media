@@ -1519,6 +1519,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
 
     And `mail_from`: the sender, while the thread is one another agent's mail
     started and David has not written in (`mail_threads`), else None.
+
+    And `model`, `model_label`: the id of the model an agent thread's last
+    reply ran on and its short name (`session_model`), else None.
     """
     from . import archive, pins, rest
 
@@ -1577,6 +1580,7 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # the default (/speech/default); `speech_from` says which (20 Oct 2026).
     from agent_media_core.speak_priority import SPEAKS, _fallback, default_level, levels
     lv, dflt = levels(), default_level()
+    from . import session_model
     from .drafts import draft_times
 
     drafted = draft_times()
@@ -1609,6 +1613,10 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
             # "how come they all don't have that?"). `source: "last"`.
             if not row.get("recap") and reply and reply["text"]:
                 row["recap"] = _reply_recap(sid, reply)
+            # The model its last reply ran on and its short name, cached per
+            # file too (session_model.py): the list's agent → model filter
+            # (David, 4 Nov 2026).
+            row["model"], row["model_label"] = session_model.of_row(row, paths)
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted

@@ -37,7 +37,6 @@ last reply is remembered here (`_CHOSEN`) until a reply carries it.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -102,39 +101,14 @@ def clean_new(agent: str, model: str, mode: str) -> tuple[str, str]:
 
 
 def _last_model(session: str) -> tuple[str, float]:
-    """The model named by the transcript's last assistant message, and when."""
-    from . import transcript
+    """The model named by the transcript's last assistant message, and when
+    (session_model.claude_tail)."""
+    from . import session_model, transcript
 
     path = transcript.transcript_path(session)
     if not path:
         return "", 0.0
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            f.seek(max(0, f.tell() - 256 * 1024))
-            lines = f.read().splitlines()
-    except OSError:
-        return "", 0.0
-    for raw in reversed(lines):
-        if b'"assistant"' not in raw:
-            continue
-        try:
-            obj = json.loads(raw)
-        except ValueError:
-            continue
-        model = str(((obj.get("message") or {}).get("model")) or "")
-        if obj.get("type") == "assistant" and model and not model.startswith("<"):
-            return model, _when(obj.get("timestamp"))
-    return "", 0.0
-
-
-def _when(stamp) -> float:
-    from datetime import datetime
-
-    try:
-        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0.0
+    return session_model.claude_tail(str(path))
 
 
 def _pane_plan(pane: str) -> bool:
