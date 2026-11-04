@@ -6,15 +6,17 @@ types and talks on the phone and watches the living-room TV. Not screen
 mirroring: the following device runs its own app and is told which thread
 to show; its own thread page keeps the reply being read in view.
 
-- The switch is kept with the device record (`follow`: the phone's device
-  id, absent or null when off), set from an admin's app with
-  `POST /devices/follow {"id", "phone"}` (Settings → Devices, beside "Pause
-  what's playing here"). The following device turns itself off with
+- The switch is kept with the device record (`follow_from`: the devices it
+  mirrors, the one used last shown; `follow`: the first, for older apps),
+  set from an admin's app with `POST /devices/follow {"id", "phones"}` (or
+  `"phone"`, one) — Settings → Devices' "Mirror paired device", beside
+  "Pause what's playing here". The following device turns itself off with
   `POST /device/follow {"on": false}`: a press on its own remote or screen.
 - What a phone has open is the thread it opened a stream to last
   (`GET /threads/{session}/events`, recorded by `opened`): the app opens one
   for the thread on its screen and nothing else, and a reconnect of the same
-  thread is no change.
+  thread is no change. The chat list is told: `POST /device/view` (David,
+  5 Nov 2026: "it only mirrors the chat window and not the chat list").
 - The following device hears it as a `follow` frame on the stream it
   already holds outbound, `GET /sessions/events?follow=1` (session_events.py),
   and asks `GET /device/follow` for its state when it has no stream.
@@ -31,7 +33,9 @@ import time
 from . import auth, devices
 
 _LOCK = threading.Lock()
-#: {device id: {"session", "at"}} — the thread each device opened last.
+#: {device id: {"session", "at", "view"}} — the thread each device opened
+#: last, when it last showed something, and whether it shows that thread or
+#: the chat list now.
 _OPEN: dict[str, dict] = {}
 _VERSION = 0
 
@@ -58,10 +62,39 @@ def opened(device_id: str, session: str) -> None:
         return
     with _LOCK:
         was = _OPEN.get(device_id)
-        if was and was["session"] == session:
+        if was and was["session"] == session and was.get("view") == "thread":
             return
-        _OPEN[device_id] = {"session": session, "at": round(time.time(), 3)}
+        _OPEN[device_id] = {"session": session, "at": round(time.time(), 3), "view": "thread"}
     _bump()
+
+
+VIEWS = ("list", "thread")
+
+
+def view(bearer: str, body) -> tuple[bool, dict]:
+    """`POST /device/view {"view": "list"|"thread", "session"?}` — what this
+    device shows now, from its app as it moves (David, 5 Nov 2026: "it only
+    mirrors the chat window and not the chat list"). A thread is also
+    learnt from its stream (`opened`); the list only from this."""
+    me = auth.device_id(bearer)
+    if not me:
+        return False, {"status": 401, "error": "a paired device only"}
+    v = body.get("view") if isinstance(body, dict) else None
+    session = body.get("session") if isinstance(body, dict) else None
+    if v not in VIEWS or (session is not None and not isinstance(session, str)) \
+            or (v == "thread" and not session):
+        return False, {"status": 400, "code": "bad_view",
+                       "error": 'expected {"view": "list"} or {"view": "thread", "session"}'}
+    if v == "thread":
+        opened(me, session)
+        return True, {"view": v}
+    with _LOCK:
+        was = _OPEN.get(me) or {}
+        if was.get("view") == "list":
+            return True, {"view": v}
+        _OPEN[me] = {"session": was.get("session"), "at": round(time.time(), 3), "view": "list"}
+    _bump()
+    return True, {"view": v}
 
 
 def changed() -> None:
@@ -70,18 +103,29 @@ def changed() -> None:
 
 
 def state(device_id: str) -> dict:
-    """What `device_id` follows: `{"phone", "name", "session", "title", "at"}`,
-    every field null when its switch is off (or names a device since revoked).
-    `session` is null until the phone opens a thread after a restart."""
-    off = {"phone": None, "name": None, "session": None, "title": None, "at": None}
+    """What `device_id` mirrors: `{"phone", "name", "session", "title", "at",
+    "view", "phones"}`. Of the devices it mirrors (`phones`), the one used
+    last (`phone`, its `name`): the one whose screen changed latest, the first
+    when none has shown anything since a restart. `view` "list" or "thread"
+    (null until it shows something), `session` the thread it opened last
+    (still there on "list", so going back to a thread is no surprise).
+    Every field null (`phones` []) when the switch is off."""
+    off = {"phone": None, "name": None, "session": None, "title": None, "at": None,
+           "view": None, "phones": []}
     if not device_id:
         return off
     rows = {d.get("id"): d for d in devices.list_devices()}
-    phone = str((rows.get(device_id) or {}).get("follow") or "")
-    if not phone or phone not in rows:
+    me = rows.get(device_id) or {}
+    listed = me.get("follow_from")
+    if listed is None:
+        listed = [me["follow"]] if me.get("follow") else []
+    phones = [p for p in listed if p in rows and p != device_id]
+    if not phones:
         return off
     with _LOCK:
-        got = dict(_OPEN.get(phone) or {})
+        seen = {p: dict(_OPEN[p]) for p in phones if p in _OPEN}
+    phone = max(seen, key=lambda p: seen[p].get("at") or 0) if seen else phones[0]
+    got = seen.get(phone) or {}
     session = got.get("session")
     title = None
     if session:
@@ -92,7 +136,7 @@ def state(device_id: str) -> dict:
         except Exception:  # noqa: BLE001 — a title is never worth the frame
             title = None
     return {"phone": phone, "name": rows[phone].get("name") or None, "session": session,
-            "title": title, "at": got.get("at")}
+            "title": title, "at": got.get("at"), "view": got.get("view"), "phones": phones}
 
 
 def get(bearer: str) -> tuple[bool, dict]:

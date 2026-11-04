@@ -380,18 +380,23 @@ def set_pause(device_id: str, on: bool, pause_for: list[str] | None = None) -> b
         return True
 
 
-def set_follow(device_id: str, phone: str | None) -> bool:
-    """Which phone this device follows (`follow`: its device id, None when
-    off): the thread opened on that phone opens here too (follow.py, §6.21g).
-    From an admin's app (`POST /devices/follow`), or the device itself
-    turning it off. False for an unknown id."""
+def set_follow(device_id: str, phone: str | None, phones: list[str] | None = None) -> bool:
+    """Which devices this one mirrors (follow.py, §6.21g): `follow_from`, the
+    list (David, 5 Nov 2026: several, the one used last shown), and `follow`,
+    its first, for an app that knows only one. `phone` alone is a list of
+    one; None and [] are off. From an admin's app (`POST /devices/follow`), or
+    the device itself turning it off. False for an unknown id."""
+    keep = [str(x) for x in (phones if phones is not None else ([phone] if phone else []))
+            if str(x).strip() and str(x) != device_id]
+    keep = list(dict.fromkeys(keep))
+    first = keep[0] if keep else None
     with _locked():
         rows = _load(fresh=True)
         hit = next((d for d in rows if d.get("id") == device_id), None)
         if hit is None:
             return False
-        if (hit.get("follow") or None) != (phone or None):
-            _save([{**d, "follow": phone or None} if d is hit else d for d in rows])
+        if (hit.get("follow") or None) != first or list(hit.get("follow_from") or []) != keep:
+            _save([{**d, "follow": first, "follow_from": keep} if d is hit else d for d in rows])
         return True
 
 

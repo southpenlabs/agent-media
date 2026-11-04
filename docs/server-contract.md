@@ -5677,17 +5677,31 @@ opened on the chosen phone opens there too, and that device's own thread
 page keeps the reply being read in view (its follow-along, as on any
 screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
 
-- `POST /devices/follow {"id", "phone": <device id> | null}` — a device that
-  may manage devices, as `/devices/pause` (401/403 otherwise). 400
-  `bad_follow` for a body without `phone`, a `phone` that is not a string or
-  null, or a device following itself; 400 `no_such_phone` for an unknown
-  phone; 404 for an unknown id. → `{ok, id, devices}`. Every `/devices` row
-  then has `follow` (the phone's id, null when off; absent until set).
+- `POST /devices/follow {"id", "phones": [device ids]}` — which devices it
+  mirrors; the one **used last** is shown (David, 5 Nov 2026: "should it be
+  possible to mirror multiple devices?"). `[]` is off. The older
+  `{"id", "phone": <device id> | null}` is a list of one. A device that may
+  manage devices, as `/devices/pause` (401/403 otherwise). 400 `bad_follow`
+  for neither key, a `phones` that is not a list of ids, a `phone` that is
+  not a string or null, or a device following itself; 400 `no_such_phone`
+  for an unknown one; 404 for an unknown id. → `{ok, id, devices}`. Every
+  `/devices` row then has `follow_from` (the list) and `follow` (its first,
+  null when off; for an app that knows one); both absent until set.
 - `GET /device/follow` — any paired device, for itself (401 otherwise). →
-  `{ok, phone, name, session, title, at}`: the phone it follows, its name,
-  the thread open on it (`at`: when it was opened, epoch seconds) and that
-  thread's title. Every field null while it follows nobody (or a phone since
-  revoked); `session` null until the phone opens a thread after a restart.
+  `{ok, phone, name, session, title, at, view, phones}`: of the devices it
+  mirrors (`phones`, revoked ones left out), the one used last (`phone`,
+  its `name`) — the one whose screen changed latest, the first listed when
+  none has shown anything since a restart; what it shows, `view` `"list"`
+  (the chat list) or `"thread"`, null until it shows something; the thread
+  it opened last (`session`, still set on `"list"`), when its screen last
+  changed (`at`, epoch seconds) and that thread's title. Every field null
+  and `phones` `[]` while it mirrors nobody.
+- `POST /device/view {"view": "list"}` or `{"view": "thread", "session"}` —
+  what this device shows now, from its app as it moves (David, 5 Nov 2026:
+  "it only mirrors the chat window and not the chat list"). → `{ok, view}`.
+  400 `bad_view` for anything else, 401 for anything but a paired device. A
+  thread is also learnt from its stream (below); the list only from this.
+  The same view again is no change.
 - `POST /device/follow {"on": false}` — the device turns its own following
   off: a press on its own remote or screen. → as `GET`. `{"on": true}` is
   400: following is set from Settings → Devices. 401 for anything but a
@@ -5695,7 +5709,8 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
 - **What a phone has open** is the thread it opened a stream to last
   (`GET /threads/{session}/events`, §11): the app holds one for the thread on
   its screen. A reconnect to the same thread is no change; going back to the
-  list leaves the last thread showing. Kept in memory: a restart forgets it
+  list is told by `POST /device/view`, and an app that does not tell it
+  leaves the last thread showing. Kept in memory: a restart forgets it
   until the phone opens a thread again.
 - **The frame.** `GET /sessions/events?follow=1` (§6.13) adds `event:
   follow` with `GET /device/follow`'s fields (no `ok`): after the first

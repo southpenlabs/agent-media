@@ -426,7 +426,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/device/view", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -2868,10 +2868,10 @@ def _devices_pause(h: BaseHTTPRequestHandler) -> None:
 
 
 def _devices_follow(h: BaseHTTPRequestHandler) -> None:
-    """`POST /devices/follow {"id", "phone": <device id> | null}` — whether a
-    device follows a phone: the thread opened there opens on it too
-    (follow.py, §6.21g). Asked of a device that may manage devices, like the
-    pause switch."""
+    """`POST /devices/follow {"id", "phones": [device ids]}` (or `"phone": <id>
+    | null`, one) — which devices this one mirrors, the one used last shown
+    (follow.py, §6.21g); [] or null is off. Asked of a device that may manage
+    devices, like the pause switch."""
     from . import follow
 
     user, err = auth.may_enrol(_bearer(h))
@@ -2881,23 +2881,28 @@ def _devices_follow(h: BaseHTTPRequestHandler) -> None:
         return
     body = _read_json(h) or {}
     device_id = str(body.get("id") or "").strip()
-    phone = body.get("phone")
-    if "phone" not in body or not (phone is None or isinstance(phone, str)) \
-            or (isinstance(phone, str) and (not phone.strip() or phone == device_id)):
+    if "phones" in body:
+        phones = body.get("phones")
+        good = isinstance(phones, list) and all(isinstance(p, str) and p.strip() for p in phones)
+    else:
+        phone = body.get("phone")
+        good = "phone" in body and (phone is None or (isinstance(phone, str) and phone.strip()))
+        phones = [phone] if good and phone else []
+    if not good or device_id in phones:
         _json(h, 400, {"ok": False, "code": "bad_follow",
-                       "error": 'expected {"id", "phone": another device\'s id, or null}'})
+                       "error": 'expected {"id", "phones": [other devices\' ids]} or {"id", "phone": an id or null}'})
         return
     rows = {d.get("id") for d in devices.list_devices()}
-    if phone and phone not in rows:
+    if any(p not in rows for p in phones):
         _json(h, 400, {"ok": False, "code": "no_such_phone",
                        "error": "no device with that phone id"})
         return
-    if not devices.set_follow(device_id, phone):
+    if not devices.set_follow(device_id, None, phones):
         _json(h, 404, {"ok": False, "code": "no_such_device",
                        "error": "no device with that id"})
         return
     follow.changed()
-    print(f"devices: {user.get('device')} set {device_id} to follow {phone or 'nobody'}",
+    print(f"devices: {user.get('device')} set {device_id} to follow {', '.join(phones) or 'nobody'}",
           file=sys.stderr)
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
@@ -3284,6 +3289,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         ok, detail = speech_frames.report(dev, _read_json(h),
                                           channel=path.split("/")[1])
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/view":
+        # What this device shows now, the chat list or a thread: a device
+        # mirroring it shows the same (follow.py, §6.21g).
+        from . import follow
+
+        ok, detail = follow.view(_bearer(h), _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/follow":
         # A following device turns itself off: a press on its own remote

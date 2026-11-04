@@ -63,7 +63,8 @@ def test_bad_bodies(server, rig):
 
 
 def test_the_device_asks_what_it_follows(server, rig):
-    off = {"ok": True, "phone": None, "name": None, "session": None, "title": None, "at": None}
+    off = {"ok": True, "phone": None, "name": None, "session": None, "title": None, "at": None,
+           "view": None, "phones": []}
     res, body = call(server, "GET", "/device/follow", headers=rig["tv_h"])
     assert res.status == 200 and body == off
     devices.set_follow(rig["tv"], rig["phone"])
@@ -149,3 +150,71 @@ def test_opening_a_thread_stream_is_what_the_phone_has_open(server, screen, rig)
         assert follow.state(rig["tv"])["session"] == SID2
     finally:
         st.close()
+
+
+# --- several devices, and the chat list (David, 5 Nov 2026: "should it be
+# possible to mirror multiple devices?"; "it only mirrors the chat window and
+# not the chat list") ------------------------------------------------------------
+
+def test_several_devices_the_one_used_last_is_shown(server, rig, monkeypatch):
+    _, tablet = _device("Tablet")
+    res, body = call(server, "POST", "/devices/follow",
+                     {"id": rig["tv"], "phones": [rig["phone"], tablet]}, rig["phone_h"])
+    assert res.status == 200, body
+    row = next(d for d in body["devices"] if d["id"] == rig["tv"])
+    assert row["follow_from"] == [rig["phone"], tablet] and row["follow"] == rig["phone"]
+    st = follow.state(rig["tv"])
+    assert st["phone"] == rig["phone"] and st["phones"] == [rig["phone"], tablet]
+    clock = {"t": 100.0}
+    monkeypatch.setattr(follow.time, "time", lambda: clock["t"])
+    follow.opened(rig["phone"], SID)
+    clock["t"] = 200.0
+    follow.opened(tablet, SID2)
+    st = follow.state(rig["tv"])
+    assert (st["phone"], st["name"], st["session"]) == (tablet, "Tablet", SID2)
+    clock["t"] = 300.0
+    follow.opened(rig["phone"], SID2)
+    assert follow.state(rig["tv"])["phone"] == rig["phone"]
+
+
+def test_a_list_body_off_and_bad(server, rig):
+    tv, h = rig["tv"], rig["phone_h"]
+    res, body = call(server, "POST", "/devices/follow", {"id": tv, "phones": []}, h)
+    assert res.status == 200 and next(d for d in body["devices"] if d["id"] == tv).get("follow") is None
+    for bad in ({"id": tv, "phones": "x"}, {"id": tv, "phones": [3]}, {"id": tv, "phones": [tv]}):
+        res, _ = call(server, "POST", "/devices/follow", bad, h)
+        assert res.status == 400, bad
+    res, body = call(server, "POST", "/devices/follow", {"id": tv, "phones": ["d_nope"]}, h)
+    assert body["code"] == "no_such_phone"
+
+
+def test_an_old_row_with_one_phone_still_follows_it(rig):
+    devices.set_follow(rig["tv"], rig["phone"])
+    assert follow.state(rig["tv"])["phones"] == [rig["phone"]]
+
+
+def test_the_chat_list_is_mirrored(server, rig):
+    devices.set_follow(rig["tv"], rig["phone"])
+    follow.opened(rig["phone"], SID)
+    assert follow.state(rig["tv"])["view"] == "thread"
+    v = follow.version()
+    res, body = call(server, "POST", "/device/view", {"view": "list"}, rig["phone_h"])
+    assert res.status == 200 and body == {"ok": True, "view": "list"}
+    st = follow.state(rig["tv"])
+    assert st["view"] == "list" and st["session"] == SID   # the last thread kept
+    assert follow.version() > v
+    v = follow.version()
+    call(server, "POST", "/device/view", {"view": "list"}, rig["phone_h"])
+    assert follow.version() == v                          # the list again: no change
+    res, _ = call(server, "POST", "/device/view", {"view": "thread", "session": SID2},
+                  rig["phone_h"])
+    st = follow.state(rig["tv"])
+    assert (st["view"], st["session"]) == ("thread", SID2)
+
+
+def test_view_bad_bodies(server, rig):
+    for bad in ({}, {"view": "grid"}, {"view": "thread"}, {"view": "thread", "session": 3}):
+        res, _ = call(server, "POST", "/device/view", bad, rig["phone_h"])
+        assert res.status == 400, bad
+    res, _ = call(server, "POST", "/device/view", {"view": "list"}, AUTH)
+    assert res.status == 401
