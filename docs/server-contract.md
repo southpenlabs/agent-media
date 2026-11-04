@@ -1398,7 +1398,12 @@ Response:
 ```
 
 `branch` adds `"branched": true`. `opened: true` means a window was
-revived. Show "opening" rather than "sent".
+revived. Show "opening" rather than "sent". `"queued": true` (4 Nov 2026)
+means the pane's turn was running when the words went in (its screen read
+`working`): the agent takes them at its next step or as the next turn.
+Show the message as queued until its line arrives; Send now (§12 `keep`)
+is for a headless thread only, since an Escape in a pane puts what was
+queued back into its box.
 
 **Headless** (§17): nothing is flattened — the agent gets the text as
 written, and a quote rides as its own paragraph (a Markdown `>` quote) —

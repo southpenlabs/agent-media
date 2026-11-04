@@ -1309,6 +1309,12 @@ def _deliver_pane(session: str, body: str, text: str) -> tuple[bool, dict]:
         if err:
             return False, {"error": err, "pane": pane or None}
         opened = True
+    # A turn running now: the agent takes the words when it is ready (Claude
+    # Code at its next tool step, or as the next turn), so the answer says
+    # `queued`, as a headless send's does, and the app marks the message
+    # queued until it lands (David, 4 Nov 2026: "Can we add the status of
+    # queued when a message has been queued").
+    queued = not opened and _pane_working(session, pane)
     body = for_pane(body, pane, agent)
     send_err = _send_to_pane(pane, body)
     if send_err:
@@ -1328,4 +1334,13 @@ def _deliver_pane(session: str, body: str, text: str) -> tuple[bool, dict]:
     archive.unarchive_quietly(session)
     rest.clear_quietly(session)
     return True, {"session": session, "pane": pane, "opened": opened,
-                  "submitted": True}
+                  "submitted": True, **({"queued": True} if queued else {})}
+
+
+def _pane_working(session: str, pane: str) -> bool:
+    """Whether that pane's agent is mid-turn; a screen that cannot be read
+    counts as not."""
+    try:
+        return sessions.activity_of(session, pane)["state"] == "working"
+    except Exception:
+        return False
