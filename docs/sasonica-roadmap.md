@@ -2482,7 +2482,9 @@ ahead.
     ... simultaneous channels"). `docs/proposals/2026-11-05-now-playing-canvas.md`.
     Step 1 (the reply's picture and sentence take over Now playing): server
     half DONE (agent-media `97b84b74`, `/speech/now` `images`/`figure`); the
-    app half in progress. Steps 2-4 (a video for what plays, a separate
+    app half DONE 5 Nov 2026 (sasonica-app `8291d9e6`: ReplyNow, Show the
+    music / Show the reply, Full screen, a Now playing key on the speech
+    sheet; thinking lines do not take over). Steps 2-4 (a video for what plays, a separate
     video channel, the wall reading the same stage) not started.
 
 ## Loose ends
