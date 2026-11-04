@@ -2464,8 +2464,8 @@ ahead.
       work. Placement is therefore per folder: `pin` (the default; the
       folder's sessions stay where its shared tree is) or `anywhere`
       (a worker may take it, from its own clone, committing and pushing as
-      it goes). Open question for David: which folders, if any, are
-      `anywhere` at first.
+      it goes). David's decision (4 Nov 2026): none at first; every
+      folder stays pinned until a session is started with a host named.
     - **Manual first.** `media session start --host <worker>` and a `host`
       field on session rows and /targets, so the app can show where a
       thread runs. Automatic placement (most free slots and memory among
