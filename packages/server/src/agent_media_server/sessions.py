@@ -331,6 +331,50 @@ def session_cwd(session: str) -> str:
     return cwd
 
 
+
+_LATEST_TAIL = 256 * 1024
+_LATEST: dict[str, tuple[int, float, str]] = {}
+
+
+def latest_cwd(session: str) -> str:
+    """The directory `session` is in now, for its git branch and changes
+    (git_state.py): the last `cwd` in the tail of its Claude Code transcript,
+    so a session that went into a worktree partway through shows that
+    worktree's branch (David, 4 Nov 2026). A moved thread's new directory,
+    and `session_cwd` when the tail has none (another harness, an unreadable
+    transcript). Cached on the transcript's size and mtime."""
+    from . import moves, recaps
+
+    hit = moves.moved_cwd(session)
+    if hit:
+        return hit
+    path = recaps.transcript_path(session)
+    if path:
+        try:
+            st = os.stat(path)
+            got = _LATEST.get(session)
+            if got and got[0] == st.st_size and got[1] == st.st_mtime and got[2]:
+                return got[2]
+            with open(path, "rb") as fh:
+                fh.seek(max(0, st.st_size - _LATEST_TAIL))
+                tail = fh.read().splitlines()
+            cwd = ""
+            for line in reversed(tail):
+                if b'"cwd"' not in line:
+                    continue
+                try:
+                    cwd = str(json.loads(line).get("cwd") or "")
+                except (ValueError, AttributeError):
+                    continue
+                if cwd:
+                    break
+            if cwd:
+                _LATEST[session] = (st.st_size, st.st_mtime, cwd)
+                return cwd
+        except OSError:
+            pass
+    return session_cwd(session)
+
 def project_of(cwd: str, folder: str = "") -> str | None:
     """A session's project, as the layout names one (agent_media_core/
     layout.py), or None when nothing says.

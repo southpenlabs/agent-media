@@ -787,12 +787,16 @@ newest page, as without it. Other harnesses' threads find their line ids
   saved as `<state>/agent-media/context/<session>.window`), else by the
   reply's model (Opus 5.5: 1 000 000), else 200 000, or 1 000 000 once
   `used` is past 200 000.
-- `git` (1 Nov 2026): the session folder's checkout, for the status line
-  under the input box: `{"branch", "changed", "ahead", "behind"}`, or `null`
+- `git` (1 Nov 2026): the session folder's checkout, shown beside the
+  thread's project in its header (under the input box while the header is
+  folded): `{"branch", "changed", "ahead", "behind"}`, or `null`
   when the folder is not in a git checkout (or git is slow or missing).
   `branch` is `null` on a detached HEAD; `changed` counts the entries
   `git status --porcelain` lists (changed, staged and untracked files);
   `ahead` / `behind` are against the branch's upstream, 0 without one.
+  The folder is the one the session is in now, the last `cwd` its
+  transcript records (4 Nov 2026), so a session that went into a worktree
+  shows that worktree; §6.49 reads the same one (`sessions.latest_cwd`).
   Kept 15 s per folder (`git_state.py`). The files and diffs behind it:
   §6.49.
 
