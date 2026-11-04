@@ -8,6 +8,11 @@ Every agent row of `/targets` gets two fields:
   `gpt-5.3-codex`, opencode's and pi's `provider/model`), else None — a
   thread that has not replied, a harness whose store does not say (Gemini,
   Hermes), nothing readable.
+  A model chosen for it since (the reply box's model chip, POST
+  /session/settings) wins once chosen: a parked thread switched from Fable
+  to Opus counts as Opus before it replies again (David, 4 Nov 2026: "I've
+  changed quite a few of the models in the list and the list hasn't changed
+  to match").
 - `model_label`: the short name the app lists it under, else None. A Claude
   model's family (`Fable`, `Opus`, `Sonnet`, `Haiku`: the name the plan's
   weekly limit is scoped by, §6.30, whichever harness ran it), another's
@@ -137,9 +142,32 @@ def model_of(session: str, harness: str = "", path: str = "") -> str:
     return model
 
 
-def of_row(row: dict, paths: dict) -> tuple[str | None, str | None]:
+def chosen(session: str, harness: str, headless: str = "") -> str:
+    """The model chosen for `session` and not yet replied on, else "": a
+    change waiting for the turn to end, then what sessiond keeps for a
+    headless thread (`headless`, its record's `model`), then a pane told
+    `/model` (session_settings._CHOSEN)."""
+    from . import session_settings as ss
+
+    with ss._PENDING_LOCK:
+        p = ss._PENDING.get(session)
+    if p and p.get("model"):
+        return str(p["model"])
+    if headless:
+        return headless
+    if harness == "claude":
+        with ss._LOCK:
+            c = ss._CHOSEN.get(session)
+        # Only until it replies: a later `/model` typed in the terminal shows in the reply.
+        if c and c[0] and c[1] > ss._last_model(session)[1]:
+            return c[0]
+    return ""
+
+
+def of_row(row: dict, paths: dict, headless: str = "") -> tuple[str | None, str | None]:
     """`(model, model_label)` for an agent's row, its transcript found
-    through `paths` (`{session: (harness, path)}`) when it is there."""
+    through `paths` (`{session: (harness, path)}`) when it is there; a model
+    chosen since (`chosen`; `headless` is sessiond's) wins over the reply's."""
     sid = str(row.get("session") or "")
     harness = str(row.get("harness") or "claude")
     if not sid or harness in ("matrix", "quick") or row.get("sealed"):
@@ -149,4 +177,7 @@ def of_row(row: dict, paths: dict) -> tuple[str | None, str | None]:
     if found and found[0] and not row.get("harness"):
         harness = str(found[0])
     model = model_of(sid, harness, path)
+    pick = chosen(sid, harness, headless)
+    if pick and label_of(pick) != label_of(model):
+        model = pick
     return (model or None), (label_of(model) or None)

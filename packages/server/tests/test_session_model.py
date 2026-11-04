@@ -86,3 +86,21 @@ def test_labels():
     assert session_model.label_of("claude-haiku-4-5-20251001") == "Haiku"
     assert session_model.label_of("openai/gpt-5") == "gpt-5"
     assert session_model.label_of("") == ""
+
+
+def test_a_model_chosen_since_wins_over_the_last_reply(tmp_path):
+    from agent_media_server import session_settings as ss
+
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text(_user(1) + "\n" + _reply("claude-fable-5-1", 2) + "\n")
+    paths = {SID: ("claude", str(path))}
+    row = {"session": SID, "harness": "claude"}
+    assert session_model.of_row(row, paths, "opus") == ("opus", "Opus"), "sessiond's kept choice"
+    assert session_model.of_row(row, paths, "fable") == ("claude-fable-5-1", "Fable"), "the same family keeps the full id"
+    with ss._PENDING_LOCK:
+        ss._PENDING[SID] = {"agent": "claude", "model": "sonnet"}
+    try:
+        assert session_model.of_row(row, paths, "opus")[1] == "Sonnet", "a change waiting for the turn's end first"
+    finally:
+        with ss._PENDING_LOCK:
+            ss._PENDING.pop(SID, None)

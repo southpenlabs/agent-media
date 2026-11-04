@@ -1368,7 +1368,9 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
         row.update({"recap": recaps.recap_for(sid), "archived": sid in flags,
                     "rested": None if row["live"] else rest.row_mark(sid, False, marks),
                     "pinned": sid in pinned, "driver": "headless", "drivable": True,
-                    "harness": str(v.get("agent") or "claude"), "source": "sessiond"})
+                    "harness": str(v.get("agent") or "claude"), "source": "sessiond",
+                    # The model kept for it (session_model.chosen), popped before the list goes out.
+                    "_chosen": str(v.get("model") or "")})
         out.append(row)
     return out
 
@@ -1616,7 +1618,8 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
             # The model its last reply ran on and its short name, cached per
             # file too (session_model.py): the list's agent → model filter
             # (David, 4 Nov 2026).
-            row["model"], row["model_label"] = session_model.of_row(row, paths)
+            row["model"], row["model_label"] = session_model.of_row(row, paths, row.pop("_chosen", ""))
+        row.pop("_chosen", None)
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted

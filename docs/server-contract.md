@@ -329,7 +329,10 @@ Everything a message can be pointed at.
   the name the plan's weekly limit is scoped by, §6.30), another's id
   without its provider — else `null` (no reply yet; Gemini and Hermes,
   whose stores do not say; Matrix rooms, quick chats, sealed rows). Read
-  from the transcript's end and cached per file (`session_model.py`). The
+  from the transcript's end and cached per file (`session_model.py`); a
+  model chosen since (the model chip, POST /session/settings: a change
+  waiting for the turn's end, sessiond's kept choice, a pane told
+  `/model`) wins, so `model` is then that alias (`opus`). The
   app's Chats filter lists each agent's models under it, with how many
   threads each has (David, 4 Nov 2026: "which chats are using which
   models").
