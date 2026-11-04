@@ -3038,6 +3038,9 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if action not in speech._APP_SPEECH_ACTIONS:
             _json(h, 400, {"ok": False, "error": "unknown action"})
             return True
+        # A key pressed here: on Automatic the speech comes here (speech_frames.used).
+        from . import speech_frames as frames_hub
+        frames_hub.used(auth.device_id(_bearer(h)) or None)
         # `arg` is the turn index for prev/replay, kept by the app the way
         # the popup keeps hist_idx: 1 is the latest reply.
         # `replay-id` carries a history row id instead, which is not an
@@ -3118,6 +3121,9 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # `session` is the v1 form (server-contract.md §10); `item` stays
         # until the ABS exit, and `session` wins when both are sent.
         body = _read_json(h) or {}
+        # Sent from here: on Automatic the reply is spoken here (speech_frames.used).
+        from . import speech_frames as frames_hub
+        frames_hub.used(auth.device_id(_bearer(h)) or None)
         ok, detail = send.reply(
             str(body.get("item") or ""),
             refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),

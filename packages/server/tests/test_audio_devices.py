@@ -89,3 +89,56 @@ def test_only_a_paired_connected_device_can_be_selected():
     with pytest.raises(ValueError, match="not connected"):
         audio_devices.select("speech", "device:d_tv")
     assert frames.output_device("speech") is None
+
+
+def test_automatic_follows_the_device_used_last_not_the_one_that_reconnected():
+    # David, 4 Nov 2026: a restart reconnected the TV after the phone, and the
+    # TV took the speech though nobody had used it in a day.
+    phone = frames.listening("d_phone", True)
+    frames.used("d_phone")
+    tv = frames.listening("d_tv", True)
+    assert frames._HUBS["speech"].device() == "d_phone"
+    assert frames.playing_stream(phone) and not frames.playing_stream(tv)
+    # Across a restart: both reconnect, the TV last.
+    frames._reset_for_tests()
+    frames.listening("d_phone", True)
+    tv = frames.listening("d_tv", True)
+    assert frames._HUBS["speech"].device() == "d_phone"
+    # Using the TV brings it there.
+    frames.used("d_tv")
+    assert frames.playing_stream(tv)
+
+
+def test_nothing_used_yet_is_the_newest_stream_as_before():
+    frames.listening("d_phone", True)
+    tv = frames.listening("d_tv", True)
+    assert frames.playing_stream(tv)
+
+
+def test_using_a_device_moves_what_is_playing_at_its_playhead():
+    frames.listening("d_phone", True)
+    frames.used("d_phone")
+    frames.listening("d_tv", True)
+    hub = frames._HUBS["speech"]
+    frames._send([{"op": "load", "uri": "https://example.test/one", "mode": "replace"},
+                  {"op": "seek", "t": 4}], hub)
+    frames.used("d_tv")
+    stop, snap = frames.frames_after(0)[-2:]
+    assert stop["device"] == "d_phone" and stop["ops"] == [{"op": "stop"}]
+    assert snap["device"] == "d_tv" and snap["ops"][0]["uri"] == "https://example.test/one"
+
+
+def test_a_picked_speaker_holds_against_use_elsewhere():
+    tv = frames.listening("d_tv", True)
+    frames.select_output("speech", "d_tv")
+    phone = frames.listening("d_phone", True)
+    frames.used("d_phone")
+    assert frames.playing_stream(tv) and not frames.playing_stream(phone)
+
+
+def test_a_device_not_connected_takes_nothing():
+    tv = frames.listening("d_tv", True)
+    frames.used("d_phone")
+    assert frames.playing_stream(tv)
+    phone = frames.listening("d_phone", True)  # It reconnects: used last, so it plays.
+    assert frames.playing_stream(phone)

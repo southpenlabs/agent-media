@@ -33,7 +33,7 @@ def block(channel: str, base: dict) -> dict:
         return base
     selected = speech_frames.output_device(channel)
     current = speech_frames._HUBS[channel].device()
-    generic = [{**o, "label": "Automatic app player", "why": "The most recently connected app"}
+    generic = [{**o, "label": "Automatic app player", "why": "The app you used last"}
                if o.get("name") == "sasonica" else o for o in base.get("options", [])]
     result = {**base, "options": [*generic, *offered]}
     if base.get("current") == "sasonica" and current:

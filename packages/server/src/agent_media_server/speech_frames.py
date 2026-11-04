@@ -320,12 +320,24 @@ class _Hub:
         self.played_at = 0
 
     def device(self) -> str | None:
+        """The picked device when one is picked (it holds, connected or not);
+        on Automatic the connected device used last (`used`), then the
+        stream opened last. Not the newest stream alone: after a restart
+        every app reconnects, and a TV nobody had touched in a day came back
+        after the phone and took the speech (David, 4 Nov 2026: "I thought
+        it was configured to play on the most recently used device")."""
         with self.lock:
             selected = output_device(self.channel)
             eligible = {k: v for k, v in self.listeners.items() if not selected or v[0] == selected}
             if not eligible:
                 return None
-            return eligible[_newest(eligible)][0]
+            if selected or self.channel not in FOLLOWS_USE:
+                return eligible[_newest(eligible)][0]
+            last = _last_used()
+            def when(k: int) -> float:
+                d = eligible[k][0]
+                return last.get(d, 0.0) if isinstance(d, str) else 0.0
+            return eligible[max(eligible, key=lambda k: (when(k), k))][0]
 
 
 _TRACE_LOCK = threading.Lock()
@@ -434,29 +446,91 @@ def select_output(channel: str, device: str | None) -> None:
             os.replace(tmp, path)
         else:
             path.unlink(missing_ok=True)
-        new = hub.device()
-        if old == new:
+        if not _hand_over(hub, old, hub.device()):
             return
-        m = hub.model
-        if not m.idle and m.path():
-            if old:
-                hub.seq += 1
-                hub.frames.append({"seq": hub.seq, "at": round(time.time(), 3),
-                                   "device": old, "ops": [{"op": "stop"}]})
-            if new:
-                ops = [{"op": "load", "uri": uri, "mode": "replace" if i == 0 else "append"}
-                       for i, uri in enumerate(m.entries)]
-                ops += [{"op": "meta", "name": k, "value": v} for k, v in m.stored.items()]
-                ops += [{"op": "pos", "i": m.pos}, {"op": "seek", "t": max(0, m.playhead())},
-                        {"op": "speed", "v": m.speed}, {"op": "volume", "v": m.volume},
-                        {"op": "mute", "on": m.muted}, {"op": "pause", "on": m.paused}]
-                hub.seq += 1
-                hub.seq_moved = hub.seq
-                hub.frames.append({"seq": hub.seq, "at": round(time.time(), 3),
-                                   "device": new, "ops": ops})
-        hub.reported_at = 0
     from . import session_events
     session_events.poke()
+
+
+#: The channels whose Automatic follows the device used last: speech.
+FOLLOWS_USE = ("speech",)
+_USED: dict[str, float] | None = None
+_USED_LOCK = threading.Lock()
+
+
+def _used_path():
+    from agent_media_core._paths import state_dir
+    return state_dir() / "frames-last-used.json"
+
+
+def _last_used() -> dict[str, float]:
+    """device id → when the listener last used it (wall time), kept across
+    restarts: a restart is when it matters."""
+    global _USED
+    with _USED_LOCK:
+        if _USED is None:
+            try:
+                raw = json.loads(_used_path().read_text())
+                _USED = {str(k): float(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+            except (OSError, ValueError, TypeError):
+                _USED = {}
+        return _USED
+
+
+def used(device: str | None) -> None:
+    """The listener used `device`: sent from it, or pressed a speech key on
+    it. On Automatic its speech moves there, mid-reply at the playhead as a
+    pick in the speaker sheet moves it; a picked speaker is left alone."""
+    if not device:
+        return
+    before = {c: _HUBS[c].device() for c in FOLLOWS_USE}
+    last = _last_used()
+    with _USED_LOCK:
+        last[device] = round(time.time(), 3)
+        try:
+            path = _used_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(last))
+            os.replace(tmp, path)
+        except OSError:
+            pass  # This run still follows it; the next starts from the file it had.
+    moved = False
+    for channel in FOLLOWS_USE:
+        hub = _HUBS[channel]
+        with hub.lock:
+            if output_device(channel):
+                continue
+            moved = _hand_over(hub, before[channel], hub.device()) or moved
+    if moved:
+        from . import session_events
+        session_events.poke()
+
+
+def _hand_over(hub: "_Hub", old: str | None, new: str | None) -> bool:
+    """What is playing moves from `old` to `new`: a targeted stop to the old
+    one, a snapshot at the playhead to the new. Called with hub.lock held."""
+    if old == new:
+        return False
+    m = hub.model
+    if not m.idle and m.path():
+        if old:
+            hub.seq += 1
+            hub.frames.append({"seq": hub.seq, "at": round(time.time(), 3),
+                               "device": old, "ops": [{"op": "stop"}]})
+        if new:
+            ops = [{"op": "load", "uri": uri, "mode": "replace" if i == 0 else "append"}
+                   for i, uri in enumerate(m.entries)]
+            ops += [{"op": "meta", "name": k, "value": v} for k, v in m.stored.items()]
+            ops += [{"op": "pos", "i": m.pos}, {"op": "seek", "t": max(0, m.playhead())},
+                    {"op": "speed", "v": m.speed}, {"op": "volume", "v": m.volume},
+                    {"op": "mute", "on": m.muted}, {"op": "pause", "on": m.paused}]
+            hub.seq += 1
+            hub.seq_moved = hub.seq
+            hub.frames.append({"seq": hub.seq, "at": round(time.time(), 3),
+                               "device": new, "ops": ops})
+    hub.reported_at = 0
+    return True
 
 
 def seq(channel: str = "speech") -> int:
@@ -1053,5 +1127,7 @@ def start(listen: str | None = None, upstream: str | None = None,
 
 
 def _reset_for_tests() -> None:
+    global _USED
+    _USED = None
     for c in CHANNELS:
         _HUBS[c] = _Hub(c)

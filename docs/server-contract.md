@@ -3170,9 +3170,14 @@ days since written). The bearer travels as a header, so the app fetches a
 Blob rather than handing the URL to `<audio>`. 400 no text, 413 over 2000
 characters, 502 the render failed (`error` says why). Same gate as
 `/speech/ctl`. The browser's reports go to `POST /speech/state` like the
-phone's; the newest `speech=frames` stream is the one frames go to, so a
-browser turned on takes speech from the phone until the phone's stream
-reconnects.
+phone's. Which `speech=frames` stream the frames go to: a speaker picked in
+the speaker sheet (`device:<id>`) holds, connected or not; on Automatic it
+is the connected device used last — a `POST /reply` sent from it or a
+`POST /speech/ctl` key pressed on it moves the speech there, mid-reply at
+the playhead, and the times are kept in `<state_dir>/frames-last-used.json`
+so a restart, which reconnects every app, does not hand speech to whichever
+came back last (4 Nov 2026). A device never used falls back to the newest
+stream.
 
 #### `GET /speech/clips/<name>?sig=…` — signed link (24 Oct 2026)
 
