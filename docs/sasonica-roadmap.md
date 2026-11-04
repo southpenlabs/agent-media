@@ -422,6 +422,24 @@ or Mark all read, clears it.
 
 ## In flight
 
+**The black screen from the phone's senses, raise to ear, flip to shush,
+buzzes you can tell apart** (David, 4 Nov 2026: "I'd like black screen mode
+to kick in quickly when not looking at the screen... do you have any more
+suggestions like that?"; he picked covered/pocketed, lying flat, no face
+(camera, opt-in), raise to ear, flip to shush and distinct haptics, and
+said covered must be the proximity sensor alone, never the tilt, as his
+cradle faces down). Built in sasonica-app (`9b898535`, SensorBlack.java,
+FaceWatch.java, Buzz.java, lib/buzz.ts): switches in the black screen key's
+hold menu under "By itself, when you're not looking" (Covered or in a
+pocket on from the start; Lying flat face up; No face in front) and "In
+your hand" (Raise to your ear to talk: the earpiece, the screen off
+against the cheek under the proximity wake lock, the mic; Face down stops
+the reply). Buzzes: two short for a reply, long-short-long for a question,
+a tick as the mic opens; Settings → Notifications. Unit and mock tests
+pass; ships with the next APK and is to be felt out on the phone: the
+earpiece as a media track's preferred device, and the ear pose (lifted
+within 2.5 s, held upright, in use) against a pocket.
+
 **The black screen and its threads** (David, 3 Nov 2026: "better ways to
 manage the black screen and it's access to multiple threads"; all four of
 the ideas). The lease names the thread under it and a reach (this thread by
