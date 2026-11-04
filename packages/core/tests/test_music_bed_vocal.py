@@ -206,3 +206,26 @@ def test_sections_finds_the_repeated_chorus(tmp_path):
     assert all(abs(x - y) < 1.5 for x, y in zip(out["bounds"], want))
     starts = [round(c[0]) for c in out["choruses"]]
     assert len(starts) == 3 and abs(starts[0]) < 2 and abs(starts[1] - 28) < 2
+
+
+def test_the_two_sliders_in_settings(monkeypatch):
+    """David, 5 Nov 2026: the thresholds as two sliders in Settings → Music."""
+    from agent_media_core import music_bed as B
+
+    got = {x["id"]: x for x in B.settings()}
+    s, n = got["vocal_min_s"], got["vocal_min_sentences"]
+    assert s["kind"] == n["kind"] == "range"
+    assert (s["min"], s["max"], s["step"], s["unit"], s["value"], s["set"]) == (0, 120, 5, "s", 45, False)
+    assert (n["min"], n["max"], n["step"], n["unit"], n["value"]) == (0, 30, 1, "sentences", 12)
+    ids = [x["id"] for x in B.settings()]
+    assert ids.index("vocal_min_s") == ids.index("vocal") + 1       # right after its switch
+    monkeypatch.setenv("MEDIA_MUSIC_BED_VOCAL_MIN_S", "10")
+    assert {x["id"]: x for x in B.settings()}["vocal_min_s"]["value"] == 10   # the env, unset in Settings
+    B.set_settings({"vocal_min_s": 20, "vocal_min_sentences": 2})
+    assert V.min_seconds() == 20 and V.min_sentences() == 2           # Settings wins over the env
+    assert V.is_long(20.0, 1) and V.is_long(None, 2) and not V.is_long(19.0, 1)
+    for bad in ({"vocal_min_s": 121}, {"vocal_min_sentences": -1}, {"vocal_min_s": True}):
+        with pytest.raises(ValueError):
+            B.set_settings(bad)
+    B.set_settings({"vocal_min_s": None, "vocal_min_sentences": None})
+    assert V.min_seconds() == 10 and V.min_sentences() == 12

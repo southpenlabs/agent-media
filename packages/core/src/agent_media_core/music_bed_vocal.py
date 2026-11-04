@@ -80,12 +80,87 @@ def is_long(est_s: Optional[float], n_sentences: int) -> bool:
     MEDIA_MUSIC_BED_VOCAL_MIN_S / _MIN_SENTENCES set their own (David, 5 Nov
     2026: "let's include a lot more singing out so we can test it").
     Either one reached is enough."""
-    from . import music_bed as B
-    min_s = _env_num("MEDIA_MUSIC_BED_VOCAL_MIN_S", B.DEFAULT_MIN_S)
-    min_n = _env_num("MEDIA_MUSIC_BED_VOCAL_MIN_SENTENCES", B.DEFAULT_MIN_SENTENCES)
+    min_s, min_n = min_seconds(), min_sentences()
     if est_s is not None and est_s >= min_s:
         return True
     return n_sentences >= min_n
+
+
+# ---- how long a reply must be: two sliders in Settings → Music ----------------------------
+# (David, 5 Nov 2026: "Maybe they could be adjusted in settings in the music
+# section" — two sliders, seconds and sentences.) Settings' value, else the
+# env, else the bed's default; kept in music-bed.json with the switches.
+
+#: (id, label, hint, min, max, step, unit) of each, in the order Settings lists them.
+RANGES = (
+    ("vocal_min_s", "Sing it out after replies of at least",
+     "A reply this long when read aloud, or with the sentences below, ends in the song.",
+     0, 120, 5, "s"),
+    ("vocal_min_sentences", "Or at least this many sentences",
+     "Fewer sentences, and the reply's own length decides.",
+     0, 30, 1, "sentences"),
+)
+RANGE_IDS = tuple(r[0] for r in RANGES)
+_ENV = {"vocal_min_s": "MEDIA_MUSIC_BED_VOCAL_MIN_S",
+        "vocal_min_sentences": "MEDIA_MUSIC_BED_VOCAL_MIN_SENTENCES"}
+
+
+def _default(name: str) -> float:
+    from . import music_bed as B
+    return B.DEFAULT_MIN_S if name == "vocal_min_s" else float(B.DEFAULT_MIN_SENTENCES)
+
+
+def _stored_num(name: str) -> Optional[float]:
+    from . import music_bed
+    v = music_bed._stored().get(name)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _value(name: str) -> float:
+    v = _stored_num(name)
+    return v if v is not None else _env_num(_ENV[name], _default(name))
+
+
+def min_seconds() -> float:
+    return _value("vocal_min_s")
+
+
+def min_sentences() -> float:
+    return _value("vocal_min_sentences")
+
+
+def settings() -> list[dict]:
+    """The two sliders as GET /speech/music-bed lists them (kind "range")."""
+    out = []
+    for i, label, hint, lo, hi, step, unit in RANGES:
+        v = _value(i)
+        out.append({"id": i, "kind": "range", "label": label, "hint": hint,
+                    "min": lo, "max": hi, "step": step, "unit": unit,
+                    "value": int(v) if float(v).is_integer() else v,
+                    "set": _stored_num(i) is not None})
+    return out
+
+
+def check_setting(name: str, value) -> None:
+    """ValueError unless `value` suits slider `name` (null forgets it)."""
+    for i, _l, _h, lo, hi, _s, _u in RANGES:
+        if i == name:
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                      or not lo <= float(value) <= hi):
+                raise ValueError(f"{name} must be a number from {lo} to {hi}, or null")
+            return
+    raise ValueError(f"no music bed setting {name!r}")
+
+
+def set_stored(name: str, value) -> None:
+    from . import music_bed
+    check_setting(name, value)
+    d = music_bed._stored()
+    if value is None:
+        d.pop(name, None)
+    else:
+        d[name] = float(value)
+    music_bed._store(d)
 
 
 def _env_num(name: str, default: float) -> float:
