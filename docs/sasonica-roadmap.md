@@ -438,8 +438,10 @@ the reply). Buzzes: two short for a reply, long-short-long for a question,
 a tick as the mic opens; Settings → Notifications. Then (David: "tilt for
 black screen mode and shake for wake up... if the proximity sensor isn't
 covered") Tipped away from you (the screen flipped past vertical away
-from you) and Shake to wake, both only with the sensor uncovered, off
-until switched on. Unit and mock tests pass; ships with the next APK and is to be felt out on the phone: the
+from you) and Shake to wake, both only with the sensor uncovered, and A
+look at the screen wakes it (the camera keeps looking under the black
+cover; a face back after 4 s away takes it down), all off until switched
+on. Unit and mock tests pass; ships with the next APK and is to be felt out on the phone: the
 earpiece as a media track's preferred device, and the ear pose (lifted
 within 2.5 s, held upright, in use) against a pocket.
 
