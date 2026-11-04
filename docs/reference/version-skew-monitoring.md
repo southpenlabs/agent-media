@@ -304,7 +304,9 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     it. A restart of sessiond *now* from inside one of its sessions is
     refused as well, because it would end that chat.
   - **speech services** (tts-shim, sink-speech, speech-state, clips, the
-    speech fifo) are refused while a reply is being spoken.
+    speech fifo, and the canvas, which carries the speech frames) are
+    refused while a reply is being spoken, and while one is waiting for
+    the voice: a restart in the gap between two replies cuts the next one.
 - `--after SECONDS` runs the restart later and returns at once with the unit
   name. Under systemd it is a transient user unit (`systemd-run --user
   --on-active=N --collect`), outside every caller's cgroup, so it survives

@@ -209,6 +209,19 @@ def test_canvas_refused_while_speaking(host, monkeypatch, capsys):
     assert _run("--only", "canvas") == 0
 
 
+def test_speech_services_refused_while_a_reply_waits(host, monkeypatch, capsys):
+    """Nothing speaking, but a reply is waiting for the voice: a restart in
+    that gap cuts the next reply (the canvas restart of 4 Nov 2026 went
+    through between one reply's end and the next)."""
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: False)
+    monkeypatch.setattr(rs, "speech_waiting", lambda: 2)
+    assert _run("--only", "canvas") == 3
+    assert "2 reply(ies) waiting to be spoken" in capsys.readouterr().out
+    assert _run("--only", "mcp") == 0   # not a speech service
+    monkeypatch.setattr(rs, "speech_waiting", lambda: 0)
+    assert _run("--only", "canvas") == 0
+
+
 def test_after_schedules_a_transient_unit_and_returns(host, capsys, monkeypatch):
     monkeypatch.setenv("MEDIA_SESSIOND_SESSION", "33333333-cccc")
     assert _run("--only", "sessiond", "--after", "10") == 0

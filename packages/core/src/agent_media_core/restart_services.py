@@ -289,6 +289,20 @@ def speech_in_flight() -> bool:
     return cli._speech_in_flight()
 
 
+def speech_waiting() -> int:
+    """How many replies are waiting for the voice (intake/submit.py
+    `speech_queue`): said, not yet heard. A restart in the gap between
+    one reply ending and the next taking the token cuts the next one just
+    as surely as a restart mid-reply (the canvas restart of 4 Nov 2026
+    went through in such a gap)."""
+    try:
+        from .intake.submit import speech_queue
+
+        return len(speech_queue())
+    except Exception:  # noqa: BLE001 — unsure: not a reason to refuse
+        return 0
+
+
 def question_only(v: dict) -> bool:
     """Whether all a session is busy with is a question or permission card
     waiting on David: no task in flight, nothing queued. A drain does not
@@ -358,15 +372,22 @@ def waiting_on(selected: list[Service], caller: str = "", *, now: bool = False,
                         "why": "restarting it now would end this chat (you run inside "
                                "one of its sessions). Use --after 10"})
     speech = [s.short for s in selected if is_speech(s)]
-    if speech and speech_in_flight():
-        out.append({"session": "", "kind": "speech", "label": "a reply is being spoken",
-                    "why": f"{', '.join(speech)} would cut it off"})
+    if speech:
+        if speech_in_flight():
+            out.append({"session": "", "kind": "speech", "label": "a reply is being spoken",
+                        "why": f"{', '.join(speech)} would cut it off"})
+        else:
+            n = speech_waiting()
+            if n:
+                out.append({"session": "", "kind": "speech",
+                            "label": f"{n} reply(ies) waiting to be spoken",
+                            "why": f"{', '.join(speech)} would cut the next one off"})
     return out
 
 
 def _reason(w: dict) -> str:
     if w["kind"] == "speech":
-        return f"speech: a reply is being spoken ({w['why']})"
+        return f"speech: {w['label']} ({w['why']})"
     return f"sessiond: {w['label'] + ' ' if w['label'] else ''}{w['why']}"
 
 
