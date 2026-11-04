@@ -2446,6 +2446,37 @@ ahead.
     docs/notes/issues-to-import.md holds the reports sent by mail. Not
     started; for the week the forge comes up.
 
+56. **Agent sessions on more than one machine** (David, 4 Nov 2026:
+    "Maybe we should look at load balancing agent sessions across multiple
+    machines"; "yep sounds good" to the shape below). The session host is
+    the ceiling: red5 has 4 cores and 8 GB, and three live sessions leave
+    about 1 GB free, so the slot hold (§ "Held for a free slot", 2 Nov)
+    already queues chats. sessiond already decides placement; it has one
+    place to put things.
+    - **sessiond stays the front door and the queue.** Other hosts run a
+      small worker that opens an outbound connection to it (the
+      off-the-tailnet rule), reports its slots and free memory, and runs
+      the agent CLI there. No new inbound path to a worker.
+    - **The hard part is state, not scheduling.** A session belongs to a
+      working tree, the env file, the speech and phone routes, and the
+      shared-checkout rules. A worker needs its own clone, so two sessions
+      on one project on two hosts stop seeing each other's uncommitted
+      work. Placement is therefore per folder: `pin` (the default; the
+      folder's sessions stay where its shared tree is) or `anywhere`
+      (a worker may take it, from its own clone, committing and pushing as
+      it goes). Open question for David: which folders, if any, are
+      `anywhere` at first.
+    - **Manual first.** `media session start --host <worker>` and a `host`
+      field on session rows and /targets, so the app can show where a
+      thread runs. Automatic placement (most free slots and memory among
+      the hosts allowed for the folder) comes once the manual form holds.
+    - **What follows a session:** its transcript stays on the worker and
+      the thread's log is served through the connection; speech and
+      `media attach` go back through the server, never straight from the
+      worker to a device; a restart drain counts the workers' sessions.
+    - The first worker is whichever second machine is up; homer when its
+      NVMe connector is fixed. Not started.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
