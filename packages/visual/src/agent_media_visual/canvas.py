@@ -1244,6 +1244,11 @@ def speech_state() -> dict:
         turn = _speech_turn()
         if turn:
             state["turn"] = turn
+        # The reply's dedup key: what its pictures are filed under, so
+        # /speech/now can name the pictures of the reply being heard (the
+        # app's Now playing shows them, 5 Nov 2026).
+        if ex.get("dedup_key"):
+            state["key"] = str(ex["dedup_key"])[:200]
     if (state["speaking"] or state.get("paused")) and ex.get("replay"):
         # What is heard is a recorded reply played again, not a new one. The
         # row is the replay's own: a reply that arrives while it plays waits

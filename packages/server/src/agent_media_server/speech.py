@@ -318,6 +318,15 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
     # timeline without being live: the bold survives losing the live row.
     if out["live"] and isinstance(state.get("turn"), dict):
         out["turn"] = state["turn"]
+    # The pictures the canvas drew for the reply being heard, as a log
+    # line's (§6.2 `images`, `figure`): the app's Now playing shows them
+    # while the reply takes it over. Only once drawn; a figure can come a
+    # few seconds after the voice starts.
+    if out["live"] and state.get("key"):
+        images, figure = threads.pictures_for_key(str(state["key"]))
+        if images:
+            out["images"] = images
+            out["figure"] = bool(figure)
     # Replies said but not heard yet, because the voice is busy. The app's
     # "New reply waiting". Named, like the live one, but title only: the
     # library item is looked up when it plays.

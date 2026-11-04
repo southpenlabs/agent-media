@@ -3051,6 +3051,14 @@ The speech bar.
   `turn.at` against its line and bolds `pos` against the offsets, on the
   player's own clock. That is the path that survives losing the live row.
 - `pos`, `dur` and `speed` may be `null`.
+- `images` and `figure` (5 Nov 2026): while live, the pictures the canvas
+  drew for the reply being heard, with the meaning a §6.2 line's have
+  (`/img/<name>` canvas-relative or absolute; `figure` true for a
+  `[[visual:]]` figure, false for ambient art). Joined by the reply's
+  dedup key (the speech row's `extras.dedup_key`, kept on a replay).
+  Absent when none is drawn yet (a figure can come seconds after the voice
+  starts) and when quiet. The app's Now playing shows them while a reply
+  takes it over.
 - `notif` (29 Oct 2026) is true while what is live is a notification or an
   alert (a Claude Code notification, an alert), not a reply or a question.
 - A device that pauses for speech asks `GET /screen/now` (§6.21f), not

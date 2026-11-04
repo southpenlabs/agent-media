@@ -595,6 +595,32 @@ def test_speech_now_names_the_turn_it_is_on(server, shelf, signed_in, monkeypatc
     assert "turn" not in quiet
 
 
+def test_speech_now_carries_the_live_reply_s_pictures(server, shelf, signed_in, monkeypatch):
+    """While live, the pictures drawn for the reply being heard (filed under
+    its dedup key) come with it, as a log line's `images`/`figure` — the app's
+    Now playing shows them (5 Nov 2026). None drawn, or quiet: absent."""
+    sid = "6c73498c-02c1-4846-8350-a82006973571"
+    from agent_media_server import threads
+    monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
+    monkeypatch.setattr(threads, "_PICTURES_FOR", lambda k: (
+        (["/img/fig.png"], True) if k == "k1" else ([], False)))
+    speech._NOW_CACHE.clear()
+    monkeypatch.setattr(canvas, "speech_state", lambda: {
+        "kind": "state", "speaking": True, "session": sid, "key": "k1"})
+    _, obj = call(server, "GET", "/speech/now", headers=AUTH)
+    assert obj["images"] == ["/img/fig.png"] and obj["figure"] is True
+
+    monkeypatch.setattr(canvas, "speech_state", lambda: {
+        "kind": "state", "speaking": True, "session": sid, "key": "k2"})
+    _, none = call(server, "GET", "/speech/now", headers=AUTH)
+    assert "images" not in none and "figure" not in none
+
+    monkeypatch.setattr(canvas, "speech_state", lambda: {
+        "kind": "state", "speaking": False, "key": "k1"})
+    _, quiet = call(server, "GET", "/speech/now", headers=AUTH)
+    assert "images" not in quiet
+
+
 def test_speech_ctl_says_why_a_replay_failed(server, shelf, signed_in, monkeypatch):
     monkeypatch.setattr(canvas, "_media_ctl", lambda argv, timeout: (
         "error: that reply's audio is no longer on this host (cache cleared)"))

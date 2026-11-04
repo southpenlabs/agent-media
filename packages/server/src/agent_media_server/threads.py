@@ -353,6 +353,18 @@ def set_pictures_for(fn: Callable[[str], tuple[list, bool]] | None) -> None:
     _PICTURES_FOR = fn
 
 
+def pictures_for_key(key: str) -> tuple[list, bool]:
+    """`(images, figure)` for the reply filed under `key`; `([], False)`
+    when there is no canvas or it drew nothing for it."""
+    pictures_for = _PICTURES_FOR
+    if pictures_for is None or not key:
+        return [], False
+    try:
+        return pictures_for(key)
+    except Exception:  # noqa: BLE001 — a missing picture is not a fault
+        return [], False
+
+
 def attach_pictures(lines: list) -> None:
     """Give each log line the picture(s) the canvas drew for that reply.
 

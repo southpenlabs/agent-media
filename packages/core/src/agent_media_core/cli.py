@@ -4056,6 +4056,10 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
     # this way, and untagged they read on after the answer.
     if ex.get("ask"):
         np_extras["ask"] = ex["ask"]
+    # What its pictures are filed under: a replay shows the same ones
+    # (/speech/now `images`).
+    if ex.get("dedup_key"):
+        np_extras["dedup_key"] = ex["dedup_key"]
     # Which record is audible. A clip picker draws its ▸ from this: without it
     # the only handle on "where you are" is the text, and two turns can say the
     # same thing. Absent on a live readout, which is correct — the turn being
