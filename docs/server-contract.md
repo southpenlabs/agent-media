@@ -8477,6 +8477,14 @@ repositories too... including forgejo").
   else `null` (the forge shows the last commit's version, not a change
   still in the folder). 404 for anything else: an ignored file, a folder,
   a path climbing out.
+- `&ignored=1` on either (5 Nov 2026, the app's Advanced → Hidden files;
+  David: "let's include hidden files with a developer options setting"):
+  `&tree=` reads the folder from disk instead, so what git ignores is
+  listed too, each such entry with `"ignored": true` (a folder is not
+  given `changed` then); `&blob=` opens any file in the checkout, with
+  `"ignored": true` when git does not list it (and `url` `null`). Any
+  `.git` folder, and anything a link takes outside the checkout, stay out
+  either way. A folder that exists but holds nothing is `entries: []`.
 
 ### Pairing
 

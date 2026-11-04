@@ -432,6 +432,12 @@ def commit_diff(cwd: str | None, sha: str, path: str) -> dict | None:
 # `git ls-files --cached --others --exclude-standard` lists (tracked, and
 # untracked but not ignored), so .env files, build output and anything
 # outside the checkout are never read. A folder is listed one level at a time.
+#
+# The same evening: "let's include hidden files with a developer options
+# setting" — with `ignored` (the app's Advanced → Hidden files), the folder
+# is read from disk instead, ignored files and folders marked `ignored`, and
+# any file in the checkout can be opened. `.git` and anything a link takes
+# outside the checkout stay out either way.
 
 MAX_ENTRIES = 1000
 MAX_TEXT = 200_000
@@ -451,7 +457,7 @@ def _clean(path: str) -> str | None:
     if path in ("", "."):
         return ""
     bits = path.split("/")
-    if any(b in ("", ".", "..") for b in bits) or bits[0] == ".git":
+    if any(b in ("", ".", "..", ".git") for b in bits):
         return None
     return path
 
@@ -506,14 +512,86 @@ def blob_url(remote: dict | None, sha: str, path: str, folder: bool = False) -> 
     return f"{web}{sep}{sha}" + (f"/{path}" if path else "")
 
 
-def tree(cwd: str | None, path: str = "") -> dict | None:
+def _ignored_of(top: str, paths: list[str]) -> set[str]:
+    """Which of `paths` (a folder's with a trailing "/") git ignores."""
+    if not paths:
+        return set()
+    try:
+        p = subprocess.run(["git", "--no-optional-locks", "-C", top, "check-ignore", "-z", "--stdin"],
+                           input="\0".join(paths).encode() + b"\0", capture_output=True, timeout=TIMEOUT_S * 2,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {x for x in p.stdout.decode("utf-8", "replace").split("\0") if x}
+
+
+def _tree_on_disk(top: str, under: str) -> dict | None:
+    """`tree` with hidden files: the folder as it is on disk."""
+    full = _inside(top, under)
+    if not full or not os.path.isdir(full):
+        return None
+    try:
+        found = sorted(os.scandir(full), key=lambda d: d.name.lower())
+    except OSError:
+        return None
+    status = _status_of(top)
+    folders, files, asks = [], [], []
+    for d in found:
+        p = f"{under}/{d.name}" if under else d.name
+        if d.name == ".git":
+            continue
+        try:
+            is_dir = d.is_dir()  # follows a link; one out of the checkout is left out below
+            if d.is_symlink() and not _inside(top, p):
+                continue
+            size = None if is_dir else d.stat().st_size
+        except OSError:
+            continue
+        e = {"name": d.name, "path": p}
+        if is_dir:
+            e["folder"] = True
+            folders.append(e)
+            asks.append(p + "/")
+        else:
+            e["size"] = size
+            if status(p):
+                e["status"] = status(p)
+            files.append(e)
+            asks.append(p)
+    ignored = _ignored_of(top, asks)
+    changed: dict[str, int] = {}
+    for f in (_listed(top, under) or []):
+        rest = f[len(under) + 1:] if under else f
+        name, sep, _ = rest.partition("/")
+        if sep and status(f):
+            changed[name] = changed.get(name, 0) + 1
+    for e in folders:
+        if e["path"] + "/" in ignored:
+            e["ignored"] = True
+        elif changed.get(e["name"]):
+            e["changed"] = changed[e["name"]]
+    for e in files:
+        if e["path"] in ignored:
+            e["ignored"] = True
+    return folders + files
+
+
+def tree(cwd: str | None, path: str = "", ignored: bool = False) -> dict | None:
     """One folder of the checkout: its folders, then its files, each with
     what git status says of it. None outside a checkout or for a folder git
-    lists nothing in."""
+    lists nothing in. With `ignored`, the folder as it is on disk, ignored
+    entries marked."""
     top = _top(cwd)
     under = _clean(path)
     if not top or under is None:
         return None
+    if ignored:
+        entries = _tree_on_disk(top, under)
+        if entries is None:
+            return None
+        remote = _remote(top)[0]
+        return {"tree": under, "entries": entries[:MAX_ENTRIES], "more": max(0, len(entries) - MAX_ENTRIES),
+                "url": blob_url(remote, _pushed_head(top), under, folder=True)}
     listed = _listed(top, under)
     if listed is None or (under and not listed):
         return None
@@ -551,14 +629,16 @@ def tree(cwd: str | None, path: str = "") -> dict | None:
             "url": blob_url(remote, _pushed_head(top), under, folder=True)}
 
 
-def blob(cwd: str | None, path: str) -> dict | None:
+def blob(cwd: str | None, path: str, ignored: bool = False) -> dict | None:
     """One file git lists in the checkout, as text (cut at MAX_TEXT), or
-    marked binary. None for anything else."""
+    marked binary. None for anything else. With `ignored`, any file in the
+    checkout outside .git."""
     top = _top(cwd)
     p = _clean(path)
     if not top or not p:
         return None
-    if p not in (_listed(top, p.rpartition("/")[0]) or []):
+    listed = p in (_listed(top, p.rpartition("/")[0]) or [])
+    if not listed and not ignored:
         return None
     full = _inside(top, p)
     if not full or not os.path.isfile(full):
@@ -572,8 +652,9 @@ def blob(cwd: str | None, path: str) -> dict | None:
     binary = b"\0" in raw[:_SNIFF]
     text = "" if binary else raw[:MAX_TEXT].decode("utf-8", "replace")
     status = _status_of(top)(p)
-    tracked = status != "??"
+    tracked = listed and status != "??"
     remote = _remote(top)[0]
     return {"path": p, "size": size, "status": status, "text": text, "binary": binary,
+            **({"ignored": True} if not listed else {}),
             "truncated": not binary and len(raw) > MAX_TEXT,
             "url": blob_url(remote, _pushed_head(top), p) if tracked else None}

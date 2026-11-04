@@ -259,3 +259,35 @@ def test_git_changes_routes_tree_and_blob(repo, monkeypatch):
     # Neither: the changes, as before.
     ok, got = threads.git_changes(sid, "t")
     assert ok and "files" in got
+
+
+def test_tree_and_blob_with_hidden_files(repo, tmp_path):
+    (repo / ".gitignore").write_text(".env\nbuild/\n")
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x\n")
+    _commit(repo, ".gitignore", "src")
+    (repo / ".env").write_text("TOKEN=secret\n")
+    (repo / "build" / "deep").mkdir(parents=True)
+    (repo / "build" / "deep" / "out.js").write_text("y\n")
+    (repo / "src" / "a.py").write_text("z\n")
+    (tmp_path / "outside.txt").write_text("not yours\n")
+    (repo / "away").symlink_to(tmp_path / "outside.txt")
+    got = git_state.tree(str(repo), "", ignored=True)
+    by = {e["name"]: e for e in got["entries"]}
+    # .git and a link out of the checkout never; ignored ones marked.
+    assert [e["name"] for e in got["entries"]] == ["build", "src", ".env", ".gitignore"]
+    assert by["build"] == {"name": "build", "path": "build", "folder": True, "ignored": True}
+    assert by[".env"]["ignored"] is True and by[".env"]["size"] == 13
+    assert by["src"]["changed"] == 1 and "ignored" not in by["src"]
+    inner = git_state.tree(str(repo), "build/deep", ignored=True)
+    assert inner["entries"] == [{"name": "out.js", "path": "build/deep/out.js", "size": 2, "ignored": True}]
+    env = git_state.blob(str(repo), ".env", ignored=True)
+    assert env["text"] == "TOKEN=secret\n" and env["ignored"] is True and env["url"] is None
+    assert "ignored" not in git_state.blob(str(repo), "src/a.py", ignored=True)
+    for bad in (".git/config", "away", "../outside.txt", "src/.git/x"):
+        assert git_state.blob(str(repo), bad, ignored=True) is None, bad
+    for bad in (".git", "../", "away"):
+        assert git_state.tree(str(repo), bad, ignored=True) is None, bad
+    # Without it, still only what git lists.
+    assert git_state.blob(str(repo), ".env") is None
+    assert git_state.tree(str(repo), "build") is None

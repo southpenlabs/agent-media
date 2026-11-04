@@ -98,7 +98,7 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
 
 
 def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
-                tree: str | None = None, blob: str = "") -> tuple[bool, dict]:
+                tree: str | None = None, blob: str = "", ignored: bool = False) -> tuple[bool, dict]:
     """`GET /session/git` (§6.49): the session folder's changed files, history
     and web links; with `path` that file's diff; with `commit` that commit's
     files, and with both that file's diff in it; with `tree` one folder of
@@ -111,12 +111,12 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
         return False, err
     cwd = sessions.latest_cwd(session)
     if blob:
-        got = git_state.blob(cwd, blob)
+        got = git_state.blob(cwd, blob, ignored=ignored)
         if got is None:
             return False, {"error": "not a file git lists in this thread's folder", "status": 404}
         return True, got
     if tree is not None:
-        got = git_state.tree(cwd, tree)
+        got = git_state.tree(cwd, tree, ignored=ignored)
         if got is None:
             return False, {"error": "not a folder git lists in this thread's folder", "status": 404}
         return True, got

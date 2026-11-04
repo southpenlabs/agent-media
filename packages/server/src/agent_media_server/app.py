@@ -1849,12 +1849,14 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The status line's changes, read-only (§6.49): `?session=` lists the
         # folder's changed files, history and web links, `&path=` one file's diff,
         # `&commit=` a commit's files (and with `&path=`, one file's diff in it),
-        # `&tree=` one folder of the checkout ("" for its top), `&blob=` one file.
+        # `&tree=` one folder of the checkout ("" for its top), `&blob=` one file;
+        # `&ignored=1` takes in what git ignores too (the app's Hidden files).
         qs = parse_qs(query, keep_blank_values=True)
         tree = qs["tree"][0] if "tree" in qs else None
         ok, detail = threads.git_changes(qs.get("session", [""])[0], _bearer(h),
                                          qs.get("path", [""])[0], qs.get("commit", [""])[0],
-                                         tree=tree, blob=qs.get("blob", [""])[0])
+                                         tree=tree, blob=qs.get("blob", [""])[0],
+                                         ignored=qs.get("ignored", [""])[0] == "1")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/commands":
         # The slash menu for the reply box: what this session's terminal
