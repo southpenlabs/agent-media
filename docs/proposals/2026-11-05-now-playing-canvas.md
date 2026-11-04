@@ -53,9 +53,13 @@ a screen across the room and the app show the same thing.
 
 ## Open questions
 
-- Sync: does a video separate from the audio follow the audio's position
-  (step 2), or run on its own clock (step 3)? Proposed: step 2 follows the
-  audio, step 3 runs on its own clock.
+- Sync: does a video separate from the audio follow the audio's position,
+  or run on its own clock? Step 2 follows the audio. Step 3 is undecided:
+  David leans to following the audio, "or maybe a bit of both" (5 Nov 2026).
+  One way to have both is a clip pinned to a point in the audio (it starts,
+  pauses and seeks with the audio from there) that loops or holds its last
+  frame on its own clock once it runs out. Not decided; step 3 is not yet
+  agreed either.
 - Decision 2026-09-21 (the canvas carries words): a clip is decoration
   unless it shows something the voice does not. Step 3 should keep that
   test: a clip the user asked for, or one that shows the thing being talked
