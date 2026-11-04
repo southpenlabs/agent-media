@@ -2486,6 +2486,16 @@ ahead.
     music / Show the reply, Full screen, a Now playing key on the speech
     sheet; thinking lines do not take over). Steps 2-4 (a video for what plays, a separate
     video channel, the wall reading the same stage) not started.
+58. **Files: the git sheet's All files, then a ladder of file access**
+    (David, 5 Nov 2026: a directory listing from the thread's header; "let's
+    include hidden files with a developer options setting"; "a hierarchy of
+    authorisation ... a combination of actual file permissions and Drupal
+    roles"). All files DONE (agent-media `54ffc15d`, sasonica-app
+    `cda2b601`); Hidden files under Advanced DONE (`375b3331`, `8d29bea1`),
+    admin devices only. The ladder (none / project / project+hidden / home
+    / system, Drupal roles mapped at enrol, the kernel as the wall between
+    people): `docs/proposals/2026-11-05-file-access.md`, not started past
+    step 0.
 
 ## Loose ends
 

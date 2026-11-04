@@ -8485,6 +8485,8 @@ repositories too... including forgejo").
   `"ignored": true` when git does not list it (and `url` `null`). Any
   `.git` folder, and anything a link takes outside the checkout, stay out
   either way. A folder that exists but holds nothing is `entries: []`.
+  An admin device's only: a member or guest gets 403 `not_admin`
+  (docs/proposals/2026-11-05-file-access.md).
 
 ### Pairing
 

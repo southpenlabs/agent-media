@@ -291,3 +291,20 @@ def test_tree_and_blob_with_hidden_files(repo, tmp_path):
     # Without it, still only what git lists.
     assert git_state.blob(str(repo), ".env") is None
     assert git_state.tree(str(repo), "build") is None
+
+
+@pytest.mark.parametrize("role,ok", [("admin", True), ("member", False), ("guest", False)])
+def test_hidden_files_are_an_admins(repo, monkeypatch, role, ok):
+    from agent_media_server import auth, sessions, threads
+    user = {"type": "root", "device": "d1", "role": role}
+    monkeypatch.setattr(auth, "gate", lambda bearer: (user, {}))
+    monkeypatch.setattr(sessions, "latest_cwd", lambda s: str(repo))
+    (repo / ".gitignore").write_text(".env\n")
+    (repo / ".env").write_text("TOKEN=secret\n")
+    sid = "0" * 8 + "-0000-0000-0000-" + "0" * 12
+    got_ok, got = threads.git_changes(sid, "t", blob=".env", ignored=True)
+    assert got_ok is ok
+    if not ok:
+        assert got["status"] == 403 and got["code"] == "not_admin"
+    # Without it, every role reads what git lists, as before.
+    assert threads.git_changes(sid, "t", tree="")[0] is True

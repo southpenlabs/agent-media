@@ -106,8 +106,12 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
-    user, err = auth.gate(bearer)
+    # What git ignores (.env files, keys) is an admin's to read: a member or
+    # guest device is 403 not_admin (docs/proposals/2026-11-05-file-access.md).
+    user, err = (auth.may_admin if ignored else auth.gate)(bearer)
     if not user:
+        if err.get("code") == "not_admin":
+            err = {**err, "error": "only an admin device may see hidden files: turn Hidden files off"}
         return False, err
     cwd = sessions.latest_cwd(session)
     if blob:
