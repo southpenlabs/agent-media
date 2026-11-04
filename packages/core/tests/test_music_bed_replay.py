@@ -348,3 +348,28 @@ def test_a_held_reply_with_nothing_recorded_gets_a_bed_chosen_now(monkeypatch):
     assert "plan" not in out and out["tone"].startswith("reply-")
     # The listener's own words get nothing.
     assert R.resolve({"listener": True}, None, other_audio=lambda: False) is None
+
+
+def test_a_long_held_reply_sings_out_when_played(monkeypatch):
+    """A held reply is first heard as a replay; the replay told the bed it
+    was short, so the song never came in after one (David, 5 Nov 2026: "I
+    just had an over 2-minute message with no singing it out at the end")."""
+    from agent_media_core import music_bed as mb
+    from agent_media_core import music_bed_replay as R
+    pick = mb.Pick("favourites", "auto", "blend")
+    plan = mb.Plan("under", "favourites", "auto", path=None)
+    monkeypatch.setattr(mb, "wanted", lambda est, n, kind="reply": pick)
+    monkeypatch.setattr(mb, "ready_or_warm", lambda p, target=None: True)
+    monkeypatch.setattr(mb, "choose", lambda p, other, target=None: plan)
+    long_ex = {"cwd": "/home/x/projects/agent-media", "held": True,
+               "clip_durations_s": [9.0] * 14, "clip_sentences": ["s"] * 14}
+    out = R.resolve(long_ex, None, other_audio=lambda: False)
+    assert out["long"] is True
+    assert R.from_json(R.to_json(out))["long"] is True        # across to the replay's follower
+    short = R.resolve({**long_ex, "clip_durations_s": [3.0], "clip_sentences": ["a"]}, None,
+                      other_audio=lambda: False)
+    assert short["long"] is False
+    started = []
+    monkeypatch.setattr(mb, "start", lambda p, target=None, sink=None, long=False: (started.append(long), (True, None))[1])
+    R.start(out, object(), object())
+    assert started == [True]                                  # the bed is told, so the mix carries the song

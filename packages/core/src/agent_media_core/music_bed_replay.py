@@ -169,8 +169,38 @@ def _afresh(ex: dict, target, other_audio=None) -> Optional[dict]:
     return {"plan": plan, "tone": tone}
 
 
+def _long(ex: dict) -> bool:
+    """Whether the row's reply is long enough to sing out after
+    (music_bed_vocal.is_long), by its clips' lengths and its sentences.
+    A held reply is first heard as a replay, so without this the song never
+    came in after one (David, 5 Nov 2026: "I just had an over 2-minute
+    message with no singing it out at the end")."""
+    try:
+        from . import music_bed_vocal
+        durs = [float(x) for x in (ex.get("clip_durations_s") or [])
+                if isinstance(x, (int, float))]
+        n = len(ex.get("clip_sentences") or ex.get("clip_uris") or [])
+        return music_bed_vocal.is_long(sum(durs) if durs else None, n)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _with_long(spec: Optional[dict], ex: dict) -> Optional[dict]:
+    if spec and spec.get("plan") is not None:
+        spec["long"] = _long(ex)
+    return spec
+
+
 def resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]] = None
             ) -> Optional[dict]:
+    """As `_resolve`, with ``long`` beside a bed: whether the reply is long
+    enough for the song to sing out after it (music_bed_vocal). Never raises."""
+    ex = ex or {}
+    return _with_long(_resolve(ex, target, other_audio), ex)
+
+
+def _resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]] = None
+             ) -> Optional[dict]:
     """What to play under a replay of the row whose extras are `ex` on
     `target`: ``{"plan": music_bed.Plan}``, ``{"tone": <earcon name>}``, or
     None (nothing, as before). `other_audio` asks whether anything else is
@@ -227,7 +257,7 @@ def start(spec: Optional[dict], target, sink) -> tuple[bool, Optional[Callable]]
         plan = spec.get("plan")
         if plan is not None:
             from . import music_bed as mb
-            under, stop = mb.start(plan, target, sink)
+            under, stop = mb.start(plan, target, sink, long=bool(spec.get("long")))
             if under or stop is not None:
                 return under, stop
         tone = spec.get("tone")
@@ -246,6 +276,8 @@ def to_json(spec: Optional[dict]) -> Optional[dict]:
     out: dict = {}
     if spec.get("tone"):
         out["tone"] = spec["tone"]
+    if spec.get("long"):
+        out["long"] = True
     plan = spec.get("plan")
     if plan is not None:
         out["plan"] = {"kind": plan.kind, "source": plan.source, "style": plan.style,
@@ -262,6 +294,8 @@ def from_json(data) -> Optional[dict]:
     out: dict = {}
     if data.get("tone"):
         out["tone"] = str(data["tone"])
+    if data.get("long"):
+        out["long"] = True
     p = data.get("plan")
     if isinstance(p, dict):
         from . import music_bed as mb
