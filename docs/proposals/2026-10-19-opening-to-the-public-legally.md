@@ -87,7 +87,11 @@ Beeper's do: `2026-11-04-bridges-on-the-phone.md` (David, 4 Nov 2026).
 5. **Microsoft**: a multi-tenant Entra app registration and, for some
    Graph permissions, publisher verification.
 6. **Release-build checks**: a CI check that the release APK has the
-   WebView user-agent strip turned off.
+   WebView user-agent strip turned off. Since 4 Nov 2026 the app has three
+   build types: release (public: `PERSONAL_USE` and the strip off, so bridge
+   sign-in and the stories tray are never registered), debug, and
+   `personal` (release's app ID and key, both on, for one person's own
+   phone; published under its own asset name). The check is still to write.
 
 ## The hot springs pitch (David, 19 Oct 2026)
 
