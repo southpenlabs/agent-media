@@ -2618,7 +2618,8 @@ finishes, the music keeps playing for a while, but not just as an
 instrumental" — "Just the chorus", "Long replies only"). A seventh switch,
 `vocal` ("Sing it out after long replies", on). For a reply long by the
 default thresholds (45 s estimated or 12 sentences, whatever
-`MEDIA_MUSIC_BED_MIN_S` says) over a favourites bed whose original is kept,
+`MEDIA_MUSIC_BED_MIN_S` says; `MEDIA_MUSIC_BED_VOCAL_MIN_S` and
+`_VOCAL_MIN_SENTENCES` set Sing it out's own, either one reached enough) over a favourites bed whose original is kept,
 the mix carries `"after": {"uri", "aligned", "inst_s", "orig_s", "bounds",
 "choruses", "xfade_ms", "fade_ms", "ahead_s", "fallback_s", "snap_s"}` (a
 phone's `uri` is the original's clip URI, prefetched) and `outro` "",

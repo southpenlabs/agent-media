@@ -4,7 +4,8 @@ an instrumental" — "Just the chorus", "Long replies only").
 
 When a LONG reply (music_bed.DEFAULT_MIN_S / DEFAULT_MIN_SENTENCES — 45 s
 or 12 sentences — whatever MEDIA_MUSIC_BED_MIN_S says, which is 0 on a host
-that puts a bed under every reply) had one of his favourites under it
+that puts a bed under every reply; MEDIA_MUSIC_BED_VOCAL_MIN_S and
+_MIN_SENTENCES set its own, to sing out after shorter replies) had one of his favourites under it
 (music_bed_favourites: an official or karaoke instrumental, or Demucs's
 no_vocals of the original), the voice's end hands over to the original
 song, vocals and all:
@@ -74,11 +75,25 @@ def tunable(name: str) -> float:
 
 
 def is_long(est_s: Optional[float], n_sentences: int) -> bool:
-    """A long reply by the default thresholds, whatever the env's minimum."""
+    """A reply long enough to sing out after: the bed's default thresholds
+    (45 s or 12 sentences), whatever MEDIA_MUSIC_BED_MIN_S says, unless
+    MEDIA_MUSIC_BED_VOCAL_MIN_S / _MIN_SENTENCES set their own (David, 5 Nov
+    2026: "let's include a lot more singing out so we can test it").
+    Either one reached is enough."""
     from . import music_bed as B
-    if est_s is not None and est_s >= B.DEFAULT_MIN_S:
+    min_s = _env_num("MEDIA_MUSIC_BED_VOCAL_MIN_S", B.DEFAULT_MIN_S)
+    min_n = _env_num("MEDIA_MUSIC_BED_VOCAL_MIN_SENTENCES", B.DEFAULT_MIN_SENTENCES)
+    if est_s is not None and est_s >= min_s:
         return True
-    return n_sentences >= B.DEFAULT_MIN_SENTENCES
+    return n_sentences >= min_n
+
+
+def _env_num(name: str, default: float) -> float:
+    try:
+        v = os.environ.get(name, "").strip()
+        return max(0.0, float(v)) if v else default
+    except ValueError:
+        return default
 
 
 # ---- the choices at the handover ----------------------------------------------------------

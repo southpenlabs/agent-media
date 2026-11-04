@@ -35,6 +35,14 @@ def test_long_is_the_default_thresholds_whatever_the_env(monkeypatch):
     assert V.is_long(45.0, 3) and V.is_long(None, 12) and not V.is_long(None, 11)
 
 
+def test_shorter_replies_sing_out_when_the_host_says(monkeypatch):
+    monkeypatch.setenv("MEDIA_MUSIC_BED_VOCAL_MIN_S", "10")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_VOCAL_MIN_SENTENCES", "3")
+    assert V.is_long(10.0, 1) and V.is_long(None, 3) and not V.is_long(9.0, 2)
+    monkeypatch.setenv("MEDIA_MUSIC_BED_VOCAL_MIN_S", "junk")
+    assert not V.is_long(20.0, 2)            # a bad value: the default 45 s
+
+
 # ---- where it comes in ----------------------------------------------------------------------
 
 def test_a_separated_bed_comes_in_at_its_own_position():
