@@ -841,7 +841,8 @@ def test_ask_new_starts_a_headless_session_and_it_is_listed(app_host, server, si
                    "driver": "headless", "drivable": True, "harness": "claude",
                    "source": "sessiond", "project": "work", "cwd": row["cwd"], "tags": [],
                    "quiet": None, "quiet_rule": None, "remind": None, "reminded": False, "issue": None, "spaces": ["project:work"], "mail_from": None,
-                   "top": None, "marked_unread": False, "mark_carried": None}
+                   "top": None, "marked_unread": False, "mark_carried": None,
+                   "model": None, "model_label": None}
     # Its directory, from its transcript; outside ~/projects the directory's
     # own name is its project on David's layout.
     assert Path(row["cwd"]).name == "work"
