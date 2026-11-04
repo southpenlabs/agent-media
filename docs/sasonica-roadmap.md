@@ -2476,6 +2476,14 @@ ahead.
       worker to a device; a restart drain counts the workers' sessions.
     - The first worker is whichever second machine is up; homer when its
       NVMe connector is fixed. Not started.
+57. **The canvas in the app's Now playing, then video beside audio**
+    (David, 5 Nov 2026: "Can we include the canvas in the app?" — "Reply
+    takes over"; "instead of album art it would be a video in now playing
+    ... simultaneous channels"). `docs/proposals/2026-11-05-now-playing-canvas.md`.
+    Step 1 (the reply's picture and sentence take over Now playing): server
+    half DONE (agent-media `97b84b74`, `/speech/now` `images`/`figure`); the
+    app half in progress. Steps 2-4 (a video for what plays, a separate
+    video channel, the wall reading the same stage) not started.
 
 ## Loose ends
 
