@@ -5657,6 +5657,16 @@ a desktop. Code: `screens.py`; tests in `test_screens.py`. Design:
   fallback). A screen whose own address is unknown (loopback) never pauses.
 - Polled: a screen with `on` false may ask once a minute; with `on`, every
   300 ms (hpo's ducker does).
+- **A screen never pauses the assistant's own audio.** That is the screen's
+  job, not the server's: `pause` says only that something else should stop.
+  A reply spoken in a browser on the screen's own machine still counts (it
+  should pause the video there), and the screen leaves Sasonica's audio
+  playing: the browser's player labels its media session artist and album
+  `Sasonica`, which hpo's ducker skips; the Android app never holds focus
+  over its own reply (David, 4 Nov 2026: "it should just exclude the
+  device's own sasonica audio ... that was the loop"). Windows shows one
+  media session per Chrome, so a video in another tab of the same Chrome
+  cannot be reached while Sasonica's is the one shown; another app can.
 
 ### 6.21g A device that follows a phone (built 3 Nov 2026)
 
