@@ -70,6 +70,28 @@ loops on `/screen/now` and pauses and resumes through the existing
 
 hpo's PowerShell script is retired when this works there.
 
+### Never the assistant's own audio (4 Nov 2026)
+
+A screen pauses everything playing on it except Sasonica's own voice. Once
+Chrome on hpo could speak replies itself, hpo's ducker paused Chrome's
+media session, which was that reply: it stopped a few seconds in and
+played on after (David, 4 Nov 2026: "it should just exclude the device's
+own sasonica audio ... that was the loop"). The rule belongs to every
+screen, not to hpo:
+
+- The voice names itself: Sasonica in a browser sets its media session's
+  artist and album to "Sasonica" (sasonica-app `webSpeaker.ts`).
+- A desktop helper skips any media session so named (hpo's script does,
+  dotfiles 519b7b9; `sasonica screen` must too, on Windows by SMTC media
+  properties, on Linux by the MPRIS player's metadata or identity).
+- The Android app never holds focus over its own reply (`PauseHold`).
+- The server keeps counting the voice wherever it plays: a reply in a
+  browser on a screen still pauses that screen's other players.
+
+Limit: Chrome shows Windows one media session at a time, so while
+Sasonica's is the one shown, a YouTube tab in the same Chrome cannot be
+paused; another app can.
+
 ## Away from home
 
 If David talks to the assistant on the bus, should the living-room TV pause
