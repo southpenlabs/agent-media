@@ -422,3 +422,158 @@ def commit_diff(cwd: str | None, sha: str, path: str) -> dict | None:
     paths = [path] + ([f["from"]] if f.get("from") else [])
     out = _git(top, "diff", "--no-ext-diff", "--no-color", "-M", parent, full, "--", *paths)
     return _diff_answer(path, f["status"], out)
+
+
+# ── All files: the checkout's folders and any file in them (5 Nov 2026) ───
+#
+# David, 5 Nov 2026: a directory listing from the thread's header, then "It
+# sounds like the git label does a lot of this anyway" — so the git sheet
+# gains an All files tab. Read-only, and only what git would show: the files
+# `git ls-files --cached --others --exclude-standard` lists (tracked, and
+# untracked but not ignored), so .env files, build output and anything
+# outside the checkout are never read. A folder is listed one level at a time.
+
+MAX_ENTRIES = 1000
+MAX_TEXT = 200_000
+_SNIFF = 8000
+
+
+def _top(cwd: str | None) -> str:
+    if not cwd or not os.path.isdir(cwd):
+        return ""
+    return (_git(cwd, "rev-parse", "--show-toplevel") or "").strip()
+
+
+def _clean(path: str) -> str | None:
+    """A path from the checkout's top, no leading or trailing "/" ("" for the
+    top); None for one that climbs out or names .git."""
+    path = (path or "").strip().strip("/")
+    if path in ("", "."):
+        return ""
+    bits = path.split("/")
+    if any(b in ("", ".", "..") for b in bits) or bits[0] == ".git":
+        return None
+    return path
+
+
+def _listed(top: str, under: str) -> list[str] | None:
+    spec = [f":(literal){under}/"] if under else []
+    out = _git(top, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *spec)
+    if out is None:
+        return None
+    return sorted({p for p in out.split("\0") if p})
+
+
+def _inside(top: str, path: str) -> str | None:
+    """`path`'s real place on disk when it stays inside the checkout."""
+    real_top = os.path.realpath(top)
+    full = os.path.realpath(os.path.join(top, path))
+    return full if full == real_top or full.startswith(real_top + os.sep) else None
+
+
+def _status_of(top: str):
+    """path → git's status letters, a file in an untracked folder as "??"."""
+    status = {e["path"]: e["status"] for e in (_status_entries(top) or [])}
+    loose = tuple(s for s, st in status.items() if st == "??" and s.endswith("/"))
+
+    def of(path: str) -> str | None:
+        return status.get(path) or ("??" if loose and path.startswith(loose) else None)
+    return of
+
+
+def _pushed_head(cwd: str) -> str:
+    """HEAD's full sha when a remote branch has it, else "" (no link)."""
+    full = (_git(cwd, "rev-parse", "--verify", "-q", "HEAD") or "").strip()
+    unpushed = _unpushed(cwd)
+    return full if full and unpushed is not None and full not in unpushed else ""
+
+
+def blob_url(remote: dict | None, sha: str, path: str, folder: bool = False) -> str | None:
+    """A file (or folder) at a commit on the forge's web pages."""
+    if not remote or not sha:
+        return None
+    kind, web = remote["kind"], remote["web"]
+    if kind == "gitlab":
+        sep = "/-/tree/" if folder else "/-/blob/"
+    elif kind == "bitbucket":
+        sep = "/src/"
+    elif kind in ("forgejo", "gitea"):
+        sep = "/src/commit/"
+    elif kind == "sourcehut":
+        return f"{web}/tree/{sha}" + (f"/item/{path}" if path else "")
+    else:
+        sep = "/tree/" if folder else "/blob/"
+    return f"{web}{sep}{sha}" + (f"/{path}" if path else "")
+
+
+def tree(cwd: str | None, path: str = "") -> dict | None:
+    """One folder of the checkout: its folders, then its files, each with
+    what git status says of it. None outside a checkout or for a folder git
+    lists nothing in."""
+    top = _top(cwd)
+    under = _clean(path)
+    if not top or under is None:
+        return None
+    listed = _listed(top, under)
+    if listed is None or (under and not listed):
+        return None
+    status = _status_of(top)
+    cut = len(under) + 1 if under else 0
+    folders: dict[str, int] = {}
+    files: list[dict] = []
+    for p in listed:
+        rest = p[cut:]
+        name, sep, _ = rest.partition("/")
+        if sep:
+            folders.setdefault(name, 0)
+            if status(p):
+                folders[name] += 1
+            continue
+        full = os.path.join(top, p)
+        if os.path.isdir(full):
+            # A submodule: a folder git does not list into.
+            folders.setdefault(name, 0)
+            continue
+        try:
+            size = os.lstat(full).st_size
+        except OSError:
+            continue  # deleted, not yet committed: the Changes tab has it
+        f = {"name": name, "path": p, "size": size}
+        if status(p):
+            f["status"] = status(p)
+        files.append(f)
+    entries = [{"name": n, "path": f"{under}/{n}" if under else n, "folder": True,
+                **({"changed": c} if c else {})}
+               for n, c in sorted(folders.items(), key=lambda kv: kv[0].lower())]
+    entries += sorted(files, key=lambda f: f["name"].lower())
+    remote = _remote(top)[0]
+    return {"tree": under, "entries": entries[:MAX_ENTRIES], "more": max(0, len(entries) - MAX_ENTRIES),
+            "url": blob_url(remote, _pushed_head(top), under, folder=True)}
+
+
+def blob(cwd: str | None, path: str) -> dict | None:
+    """One file git lists in the checkout, as text (cut at MAX_TEXT), or
+    marked binary. None for anything else."""
+    top = _top(cwd)
+    p = _clean(path)
+    if not top or not p:
+        return None
+    if p not in (_listed(top, p.rpartition("/")[0]) or []):
+        return None
+    full = _inside(top, p)
+    if not full or not os.path.isfile(full):
+        return None
+    try:
+        size = os.path.getsize(full)
+        with open(full, "rb") as fh:
+            raw = fh.read(MAX_TEXT + 1)
+    except OSError:
+        return None
+    binary = b"\0" in raw[:_SNIFF]
+    text = "" if binary else raw[:MAX_TEXT].decode("utf-8", "replace")
+    status = _status_of(top)(p)
+    tracked = status != "??"
+    remote = _remote(top)[0]
+    return {"path": p, "size": size, "status": status, "text": text, "binary": binary,
+            "truncated": not binary and len(raw) > MAX_TEXT,
+            "url": blob_url(remote, _pushed_head(top), p) if tracked else None}

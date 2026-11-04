@@ -97,10 +97,12 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
                   "suggestion": sessions.suggestion_for(session, pane)}
 
 
-def git_changes(session: str, bearer: str, path: str = "", commit: str = "") -> tuple[bool, dict]:
+def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
+                tree: str | None = None, blob: str = "") -> tuple[bool, dict]:
     """`GET /session/git` (§6.49): the session folder's changed files, history
     and web links; with `path` that file's diff; with `commit` that commit's
-    files, and with both that file's diff in it. Read-only."""
+    files, and with both that file's diff in it; with `tree` one folder of
+    the checkout, with `blob` one file in it (All files). Read-only."""
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
@@ -108,6 +110,16 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "") -> 
     if not user:
         return False, err
     cwd = sessions.latest_cwd(session)
+    if blob:
+        got = git_state.blob(cwd, blob)
+        if got is None:
+            return False, {"error": "not a file git lists in this thread's folder", "status": 404}
+        return True, got
+    if tree is not None:
+        got = git_state.tree(cwd, tree)
+        if got is None:
+            return False, {"error": "not a folder git lists in this thread's folder", "status": 404}
+        return True, got
     if commit:
         got = (git_state.commit_diff(cwd, commit, path) if path else git_state.commit(cwd, commit))
         if got is None:

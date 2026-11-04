@@ -171,3 +171,91 @@ def test_pushed_and_not_against_a_remote(repo, tmp_path):
     assert got["ahead"] == 1 and [c["subject"] for c in got["commits"]] == ["add"]
     # A plain path is no forge: no links.
     assert got["remote"] is None and got["history"][1]["url"] is None
+
+
+def test_tree_lists_one_folder_git_shows(repo):
+    (repo / "src" / "deep").mkdir(parents=True)
+    (repo / "src" / "a.py").write_text("print(1)\n")
+    (repo / "src" / "deep" / "b.py").write_text("x\n")
+    (repo / "README.md").write_text("hi\n")
+    (repo / ".gitignore").write_text(".env\nbuild/\n")
+    _commit(repo, "src", "README.md", ".gitignore")
+    (repo / ".env").write_text("TOKEN=secret\n")
+    (repo / "build").mkdir()
+    (repo / "build" / "out.js").write_text("x\n")
+    (repo / "src" / "a.py").write_text("print(2)\n")
+    (repo / "notes").mkdir()
+    (repo / "notes" / "n.txt").write_text("new\n")
+    got = git_state.tree(str(repo), "")
+    names = [(e["name"], e.get("folder", False)) for e in got["entries"]]
+    # Folders first, then files; ignored ones never appear.
+    assert names == [("notes", True), ("src", True), (".gitignore", False), ("README.md", False)]
+    by = {e["name"]: e for e in got["entries"]}
+    assert by["src"]["changed"] == 1 and by["notes"]["changed"] == 1
+    assert by["README.md"] == {"name": "README.md", "path": "README.md", "size": 3}
+    sub = git_state.tree(str(repo), "src/")
+    assert sub["tree"] == "src"
+    assert [e["path"] for e in sub["entries"]] == ["src/deep", "src/a.py"]
+    assert sub["entries"][1]["status"] == "M"
+    assert git_state.tree(str(repo), "notes")["entries"][0]["status"] == "??"
+    # Not listed, outside, or into .git: nothing.
+    for bad in ("build", "../", "src/../..", ".git", "missing"):
+        assert git_state.tree(str(repo), bad) is None, bad
+
+
+def test_blob_reads_only_files_git_lists(repo):
+    (repo / "a.txt").write_text("one\ntwo\n")
+    (repo / "bin.dat").write_bytes(b"\x00\x01\x02")
+    (repo / ".gitignore").write_text(".env\n")
+    _commit(repo, "a.txt", "bin.dat", ".gitignore")
+    (repo / ".env").write_text("TOKEN=secret\n")
+    (repo / "loose").mkdir()
+    (repo / "loose" / "x.md").write_text("# x\n")
+    got = git_state.blob(str(repo), "a.txt")
+    assert got["text"] == "one\ntwo\n" and got["status"] is None and not got["binary"]
+    assert got["size"] == 8 and got["url"] is None
+    assert git_state.blob(str(repo), "bin.dat")["binary"] is True
+    assert git_state.blob(str(repo), "loose/x.md")["status"] == "??"
+    for bad in (".env", "../r/.env", ".git/config", "loose", "", "nope.txt"):
+        assert git_state.blob(str(repo), bad) is None, bad
+
+
+def test_blob_cut_at_its_limit(repo, monkeypatch):
+    monkeypatch.setattr(git_state, "MAX_TEXT", 10)
+    (repo / "long.txt").write_text("x" * 50)
+    got = git_state.blob(str(repo), "long.txt")
+    assert got["text"] == "x" * 10 and got["truncated"] is True and got["size"] == 50
+
+
+def test_blob_and_tree_links_per_forge():
+    gh = {"kind": "github", "host": "github.com", "web": "https://github.com/o/r"}
+    assert git_state.blob_url(gh, "abc", "src/a.py") == "https://github.com/o/r/blob/abc/src/a.py"
+    assert git_state.blob_url(gh, "abc", "src", folder=True) == "https://github.com/o/r/tree/abc/src"
+    assert git_state.blob_url(gh, "abc", "", folder=True) == "https://github.com/o/r/tree/abc"
+    fj = {"kind": "forgejo", "host": "codeberg.org", "web": "https://codeberg.org/o/r"}
+    assert git_state.blob_url(fj, "abc", "a.py") == "https://codeberg.org/o/r/src/commit/abc/a.py"
+    gl = {"kind": "gitlab", "host": "gitlab.com", "web": "https://gitlab.com/o/r"}
+    assert git_state.blob_url(gl, "abc", "a.py") == "https://gitlab.com/o/r/-/blob/abc/a.py"
+    sh = {"kind": "sourcehut", "host": "git.sr.ht", "web": "https://git.sr.ht/~o/r"}
+    assert git_state.blob_url(sh, "abc", "a.py") == "https://git.sr.ht/~o/r/tree/abc/item/a.py"
+    assert git_state.blob_url(None, "abc", "a.py") is None
+    assert git_state.blob_url(gh, "", "a.py") is None
+
+
+def test_git_changes_routes_tree_and_blob(repo, monkeypatch):
+    from agent_media_server import auth, sessions, threads
+    monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
+    monkeypatch.setattr(sessions, "latest_cwd", lambda s: str(repo))
+    (repo / "a.txt").write_text("hi\n")
+    sid = "0" * 8 + "-0000-0000-0000-" + "0" * 12
+    ok, got = threads.git_changes(sid, "t", tree="")
+    assert ok and [e["name"] for e in got["entries"]] == ["a.txt"]
+    ok, got = threads.git_changes(sid, "t", blob="a.txt")
+    assert ok and got["text"] == "hi\n"
+    ok, got = threads.git_changes(sid, "t", blob=".git/HEAD")
+    assert not ok and got["status"] == 404
+    ok, got = threads.git_changes(sid, "t", tree="nowhere")
+    assert not ok and got["status"] == 404
+    # Neither: the changes, as before.
+    ok, got = threads.git_changes(sid, "t")
+    assert ok and "files" in got

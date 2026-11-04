@@ -8451,6 +8451,31 @@ repositories too... including forgejo").
   for anything not on the branch.
 - `GET /session/git?session=<id>&commit=<sha>&path=<path>` → as `&path=`,
   that file's diff in that commit; 404 when the commit did not change it.
+- `GET /session/git?session=<id>&tree=<folder>` (5 Nov 2026, the sheet's
+  All files tab; David: a directory listing from the thread's header) →
+  `{"ok", "tree", "entries", "more", "url"}`: one folder of the checkout,
+  from its top (`tree=` empty for the top itself; `tree` in the answer is
+  the folder without slashes). Only what `git ls-files --cached --others
+  --exclude-standard` lists, so ignored files (`.env`, build output) and
+  anything outside the checkout or in `.git` never appear. `entries`:
+  folders first, then files, each by name ignoring case, at most 1000
+  (`more` counts the rest): a folder `{"name", "path", "folder": true,
+  "changed"?}` (`changed`: how many files under it `git status` lists; a
+  submodule is a folder with nothing in it), a file `{"name", "path",
+  "size", "status"?}` (`status` as in `files`, `??` for a new one, also
+  inside an untracked folder). A tracked file deleted on disk is left out
+  (Changes has it). `url`: the folder on the forge at HEAD when HEAD is
+  pushed to a known one, else `null`. 404 outside a checkout and for a
+  folder git lists nothing in.
+- `GET /session/git?session=<id>&blob=<path>` → `{"ok", "path", "size",
+  "status", "text", "binary", "truncated", "url"}`: one file git lists (as
+  in `&tree=`), its text as UTF-8 (bad bytes replaced) cut at 200 000 bytes
+  (`truncated`), `""` and `binary: true` when a NUL is in its first 8 000
+  bytes. `status` is `null` for an unchanged file. `url`: the file on the
+  forge at HEAD, for a tracked file when HEAD is pushed to a known one,
+  else `null` (the forge shows the last commit's version, not a change
+  still in the folder). 404 for anything else: an ignored file, a folder,
+  a path climbing out.
 
 ### Pairing
 
