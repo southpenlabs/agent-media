@@ -61,6 +61,9 @@ provisioning API (§6.26). Sasonica ships no unofficial bridge, hosts none
 for customers and does not advertise any. This is roughly where Element
 and other Matrix clients sit.
 
+For public builds, bridges could instead run on the user's phone, as
+Beeper's do: `2026-11-04-bridges-on-the-phone.md` (David, 4 Nov 2026).
+
 - The public app build has no WebView fingerprint changes (drop the
   `; wv` strip behind a build flag that is off in release).
 - The §6.26 screen works with whatever the user's bridges offer; the
