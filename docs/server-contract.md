@@ -3498,6 +3498,13 @@ Speech:
 - `available` / `why` come from local checks only, never a connection: a
   local broker's socket must exist; a tcp bridge is `available` but carries a
   `why` while the mpv breaker has it marked slow. Cached 5 s.
+- When app players are connected (both channels), `sasonica` is labelled
+  "Automatic app player" and a `device:<id>` row is added per paired app.
+  A picked device is `current` (`overridden: true`); on Automatic `current`
+  stays `sasonica`, so Automatic is the ticked row, and its `why` names the
+  device it resolves to now. `plays_on` is that resolved `device:<id>`
+  either way (4 Nov 2026; before, Automatic answered the device as
+  `current` and could not be shown chosen).
 
 Music:
 - `current` is where music is playing **if the host knows it without asking

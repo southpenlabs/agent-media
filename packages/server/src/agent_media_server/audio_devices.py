@@ -33,11 +33,19 @@ def block(channel: str, base: dict) -> dict:
         return base
     selected = speech_frames.output_device(channel)
     current = speech_frames._HUBS[channel].device()
-    generic = [{**o, "label": "Automatic app player", "why": "The app you used last"}
+    # On Automatic the row stays the choice and says where it resolves now.
+    # Answering `current: device:<last used>` instead left Automatic never
+    # ticked: a tap on it came back as the device again (David, 4 Nov 2026:
+    # "I don't seem to be able to select Automatic for Speech Output").
+    names = {o["name"]: o["label"] for o in offered}
+    why = "The app you used last"
+    if current and not selected:
+        why += f" (now {names.get(PREFIX + current, current)})"
+    generic = [{**o, "label": "Automatic app player", "why": why}
                if o.get("name") == "sasonica" else o for o in base.get("options", [])]
     result = {**base, "options": [*generic, *offered]}
-    if base.get("current") == "sasonica" and current:
-        result["current"] = PREFIX + current
+    if current:
+        result["plays_on"] = PREFIX + current
     if selected:
         if channel == "speech" and base.get("current") == "sasonica":
             result.update(current=PREFIX + selected, overridden=True)

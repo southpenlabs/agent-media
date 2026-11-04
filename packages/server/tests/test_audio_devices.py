@@ -83,6 +83,24 @@ def test_picker_shows_named_devices_and_offline_choice():
     assert rows["device:d_tv"]["label"] == "Living-room TV"
 
 
+def test_automatic_stays_the_ticked_row_and_names_where_it_plays():
+    # David, 4 Nov 2026: "I don't seem to be able to select Automatic" — the
+    # block answered the last-used device as current, so Automatic never ticked.
+    frames.listening("d_phone", True)
+    frames.used("d_phone")
+    frames.listening("d_tv", True)
+    base = {"current": "sasonica", "overridden": False,
+            "options": [{"name": "sasonica", "label": "Phone (Sasonica)", "available": True}]}
+    block = audio_devices.block("speech", base)
+    assert block["current"] == "sasonica" and not block["overridden"]
+    assert block["plays_on"] == "device:d_phone"
+    auto = next(r for r in block["options"] if r["name"] == "sasonica")
+    assert auto["label"] == "Automatic app player" and "David’s phone" in auto["why"]
+    frames.select_output("speech", "d_tv")
+    block = audio_devices.block("speech", base)
+    assert block["current"] == "device:d_tv" and block["overridden"]
+
+
 def test_only_a_paired_connected_device_can_be_selected():
     with pytest.raises(ValueError, match="unknown paired"):
         audio_devices.select("speech", "device:d_unknown")
