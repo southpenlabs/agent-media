@@ -39,9 +39,11 @@ def test_an_artist_is_the_exact_name_with_its_linked_wikipedia_page(monkeypatch)
                                             {"type": "official homepage", "url": {"resource": "https://other.example"}}]},
         "https://www.wikidata.org/": {"entities": {"Q1": {"sitelinks": {"enwiki": {"title": "Chris Cornell"}}}}},
         P.WIKI_SUMMARY: {"extract": "An American musician.", "description": "American musician",
-                         "thumbnail": {"source": "https://img.example/cc.jpg"}, "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Chris_Cornell"}}}})
+                         "thumbnail": {"source": "https://img.example/cc.jpg"},
+                         "originalimage": {"source": "https://img.example/cc-full.jpg"}, "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Chris_Cornell"}}}})
     got = P.profile("artist", "Chris Cornell")["profile"]
     assert (got["region"], got["facts"], got["photo"]) == ("Seattle, United States", ["born 1964, died 2017"], "https://img.example/cc.jpg")
+    assert got["photo_large"] == "https://img.example/cc-full.jpg", "the original, for the full-screen view"
     assert [x["label"] for x in got["links"]] == ["Website", "Wikipedia", "MusicBrainz"]
     n = len(calls)
     assert P.profile("artist", "Chris Cornell")["profile"] == got and len(calls) == n, "kept, not asked again"
@@ -65,6 +67,8 @@ def test_a_show_from_the_directory_with_its_feeds_words(monkeypatch):
     got = P.profile("show", "Hamish & Andy")["profile"]
     assert got["facts"] == ["by LiSTNR", "Comedy", "358 episodes"] and got["description"] == "Two mates."
     assert got["links"] == [{"label": "Apple Podcasts", "url": "https://podcasts.apple.com/x"}]
+    assert got["photo_large"] is None, "artwork without a size in its address: none larger"
+    assert P._artwork_large("https://is1.example/a.jpg/600x600bb.jpg") == "https://is1.example/a.jpg/3000x3000bb.jpg"
 
 
 def test_off_or_unknown_kind_asks_nothing(monkeypatch):

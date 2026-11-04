@@ -794,7 +794,9 @@ def teacher_profile(name: str, fresh: bool = False) -> dict:
     key = _norm(name)
     hit = kept.get(key) if isinstance(kept.get(key), dict) else None
     ttl = PROFILE_TTL_S if hit and hit.get("profile") else PROFILE_MISS_TTL_S
-    if hit and not fresh and time.time() - float(hit.get("at") or 0) < ttl:
+    # One kept before profiles carried photo_large (the picture full size) is asked again.
+    stale = bool(hit and hit.get("profile") and "photo_large" not in hit["profile"])
+    if hit and not fresh and not stale and time.time() - float(hit.get("at") or 0) < ttl:
         return {"name": name, "profile": hit.get("profile")}
     from . import personal_use
     if not personal_use.allowed("insight-timer-profiles"):

@@ -176,11 +176,23 @@ def test_the_old_meditation_files_are_moved_across_once():
 def test_a_teachers_profile_comes_from_the_addon_kept_a_month(monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
     calls = []
-    profile = {"name": "Pura Rasa", "region": "Vilnius, Lithuania", "country": "Lithuania", "followers": 92037}
+    profile = {"name": "Pura Rasa", "region": "Vilnius, Lithuania", "country": "Lithuania", "followers": 92037,
+               "photo": "p.jpg", "photo_large": "p-large.jpg"}
     from agent_media_core import personal_use
     personal_use.register("insight-timer-profiles", type("IT", (), {"lookup": staticmethod(lambda n: calls.append(n) or profile)})())
     assert L.teacher_profile("Pura Rasa")["profile"] == profile
     assert L.teacher_profile("Pura Rasa")["profile"] == profile and calls == ["Pura Rasa"], "kept, not asked again"
+
+
+def test_a_profile_kept_before_photo_large_is_asked_again(monkeypatch):
+    monkeypatch.setenv("MEDIA_PRACTICE_PROFILES", "1")
+    from agent_media_core import personal_use
+    new = {"name": "Pura Rasa", "photo": "p.jpg", "photo_large": "p-large.jpg"}
+    personal_use.register("insight-timer-profiles", type("IT", (), {"lookup": staticmethod(lambda n: new)})())
+    L._profiles_path().parent.mkdir(parents=True, exist_ok=True)
+    L._profiles_path().write_text(json.dumps({"purarasa": {"profile": {"name": "Pura Rasa", "photo": "p.jpg"},
+                                                           "at": __import__("time").time()}}))
+    assert L.teacher_profile("Pura Rasa")["profile"] == new
 
 
 def test_without_the_addon_no_profile(monkeypatch):

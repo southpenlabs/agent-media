@@ -187,6 +187,7 @@ def _wiki(title: str) -> Optional[dict]:
         return None
     return {"description": d.get("extract"), "short": d.get("description") or "", "qid": d.get("wikibase_item"),
             "photo": (d.get("thumbnail") or {}).get("source"),
+            "photo_large": (d.get("originalimage") or {}).get("source"),
             "url": ((d.get("content_urls") or {}).get("desktop") or {}).get("page")}
 
 
@@ -234,6 +235,7 @@ def _artist(name: str) -> Optional[dict]:
     seen: set = set()
     links = [x for x in links if not (x["label"] in seen or seen.add(x["label"]))]
     return {"source": "musicbrainz", "name": a.get("name") or name, "photo": (wiki or {}).get("photo"),
+            "photo_large": (wiki or {}).get("photo_large"),
             "description": (wiki or {}).get("description"), "region": region, "facts": facts, "links": links,
             **_where(qid, ("P740", "P19") if group else ("P19", "P551"))}
 
@@ -270,7 +272,7 @@ def _author(name: str) -> Optional[dict]:
     links = [{"label": "Wikipedia", "url": wiki["url"]}] if wiki and wiki.get("url") else []
     place = _where((wiki or {}).get("qid"), ("P551", "P19"))
     return {"source": "wikipedia" if wiki else "audiobookshelf", "name": name, "photo": (wiki or {}).get("photo"),
-            "description": words, "region": ", ".join(x for x in (place.get("city"), place.get("country")) if x) or None,
+            "photo_large": (wiki or {}).get("photo_large"), "description": words, "region": ", ".join(x for x in (place.get("city"), place.get("country")) if x) or None,
             "facts": [wiki["short"]] if wiki and wiki.get("short") else [], "links": links, **place}
 
 
@@ -323,8 +325,18 @@ def _show(name: str) -> Optional[dict]:
     return {"source": "itunes", "name": hit.get("collectionName") or name, **place,
             "region": ", ".join(x for x in (place.get("city"), place.get("state"), place.get("country")) if x) or None,
             "photo": hit.get("artworkUrl600") or hit.get("artworkUrl100"),
+            "photo_large": _artwork_large(hit.get("artworkUrl600") or hit.get("artworkUrl100")),
             "description": _feed_words(hit["feedUrl"]) if hit.get("feedUrl") else None,
-            "region": None, "facts": facts, "links": links}
+            "facts": facts, "links": links}
+
+
+def _artwork_large(url: Optional[str]) -> Optional[str]:
+    """The directory's artwork as large as it is kept: its image server
+    gives the original when asked for more than that (1400 px is usual)."""
+    if not url:
+        return None
+    big = re.sub(r"/\d+x\d+bb\.(jpg|png|webp)$", r"/3000x3000bb.\1", url)
+    return big if big != url else None
 
 
 # ---- places for a whole list ----------------------------------------------------------
@@ -379,7 +391,8 @@ def profile(kind: str, name: str, fresh: bool = False) -> dict:
     key = f"{kind}:{_norm(name)}"
     hit = kept.get(key) if isinstance(kept.get(key), dict) else None
     ttl = TTL_S if hit and hit.get("profile") else MISS_TTL_S
-    stale = bool(hit and hit.get("profile") and "country" not in hit["profile"])
+    # Kept before a field it now has (country, then photo_large): asked again.
+    stale = bool(hit and hit.get("profile") and not {"country", "photo_large"} <= set(hit["profile"]))
     if hit and not fresh and not stale and time.time() - float(hit.get("at") or 0) < ttl:
         return {"name": name, "kind": kind, "profile": hit.get("profile")}
     if os.environ.get("MEDIA_PEOPLE") == "0":

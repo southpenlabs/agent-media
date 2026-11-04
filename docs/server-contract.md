@@ -8150,7 +8150,8 @@ names the first time they are read.
   exactly (letters and digits) counts, so no one is given someone else's
   page; `profile` is null for one not on Insight Timer (a podcast's show).
   404 for a name no item's `teacher` holds. `photo` is Insight Timer's
-  public image URL. MEDIA_PRACTICE_PROFILES=0 turns the lookups off.
+  public image URL; `photo_large` the same picture as uploaded, for a
+  full-screen view (null without one; the app falls back to `photo`). MEDIA_PRACTICE_PROFILES=0 turns the lookups off.
 - `POST /practice {"action": "play", "id", "target"?, "resume"?}` →
   `{"ok", "playing", "title"}`: plays it on the book channel, from the
   start unless `resume`. A recorded one is then eased out for a reply as
@@ -8322,8 +8323,13 @@ we could do the same with the other tabs? as in artist, author,
 podcaster" … "yeah let's do the other profiles too".
 
 - `GET /media/person?kind=artist|author|show&name=` → `{"ok", "name",
-  "kind", "profile": {"source", "name", "photo", "description", "region",
-  "facts": [..], "links": [{"label", "url"}]} | null}`. 400 for another
+  "kind", "profile": {"source", "name", "photo", "photo_large", "description",
+  "region", "facts": [..], "links": [{"label", "url"}]} | null}`.
+  `photo_large` is the largest the source keeps (Wikipedia's original
+  image, the directory's artwork at full size), for a full-screen view;
+  null where there is none (David, 5 Nov 2026: "click on profile pictures
+  for a full window view or whatever size the image allows"). A profile
+  kept from before it is asked again. 400 for another
   kind, or no name.
 - **artist**: MusicBrainz (the music facts layer,
   `proposals/2026-11-01-three-data-layers.md`), the artist whose name
