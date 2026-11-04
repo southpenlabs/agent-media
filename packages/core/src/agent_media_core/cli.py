@@ -10139,6 +10139,23 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="minutes of fade before the stop (default 3)")
     s.add_argument("--target", default="", help="rooms|local|phone")
     s.set_defaults(func=cmd_sleep)
+    s = sub.add_parser("tune", help="songs of the listener's own near some words "
+                                     "(tune_related; the reply's tune is reply_tune)")
+    tsub = s.add_subparsers(dest="tune_cmd", required=True)
+    t = tsub.add_parser("index", help="bring the index up to the plays: new songs, "
+                                       "MusicBrainz tags, embeddings")
+    t.add_argument("--lookups", type=int, default=None,
+                   help="MusicBrainz lookups this run (default 20)")
+    t.add_argument("--refresh", action="store_true", help="ask MusicBrainz again for every song")
+    t.set_defaults(func=cmd_tune_index)
+    t = tsub.add_parser("related", help="the songs nearest some words, best first")
+    t.add_argument("words", nargs="*", help="the words (a reply's gist); none with "
+                                            "--session reads the thread's last replies")
+    t.add_argument("--session", default="", help="a thread id (or its prefix): its last "
+                                                 "replies are the words")
+    t.add_argument("--limit", type=int, default=5)
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_tune_related)
     s = sub.add_parser("meditate",
                        help="a guided meditation: a script with [[pause: 20]] and "
                             "[[bell]] markers, said slowly over a bed, on the "
@@ -11027,6 +11044,38 @@ def _end_opts_before_time(argv: list[str]) -> list[str]:
             a.insert(j, "--")
         break
     return a
+
+
+def cmd_tune_index(a) -> int:
+    from . import tune_related
+
+    got = tune_related.index(lookups=a.lookups if a.lookups is not None else tune_related.DEFAULT_LOOKUPS,
+                             refresh=a.refresh)
+    print(f"{got['songs']} songs; {got['looked_up']} asked of MusicBrainz, {got['found']} found, "
+          f"{got['pending']} still to ask; {got['embedded']} embedded"
+          + ("" if got["embed"] else " (no embedding: Ollama not answering, word overlap instead)"))
+    return 0
+
+
+def cmd_tune_related(a) -> int:
+    from . import tune_related
+
+    text = " ".join(a.words or []).strip()
+    if a.session:
+        text = (text + "\n\n" + tune_related.session_text(a.session)).strip()
+    if not text:
+        print("tune related: give some words, or --session <id>", file=sys.stderr)
+        return 2
+    rows = tune_related.related(text, limit=a.limit)
+    if a.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return 0
+    if not rows:
+        print("no songs indexed yet: media tune index", file=sys.stderr)
+        return 1
+    for e in rows:
+        print(tune_related.line(e))
+    return 0
 
 
 def main(argv=None) -> int:

@@ -134,6 +134,51 @@ told only where a route is on. Spotify device: `MEDIA_REPLY_TUNE_DEVICE`
 4. The switch: Settings → Music, "A tune after some replies", off by default.
    `GET /features` says which routes are there, so the app stays generic.
 
+## Related songs: the listener's own, by embedding (4 Nov 2026)
+
+David, 4 Nov 2026: "in terms of playing songs that are related to the
+reply, do you think the reply can be reworded to a point where it matches a
+song too? We could even maybe use the agent-sessions links to find other
+relations" — "I like it! and maybe we can use music brains or something
+like that". Status: **`media tune related` built** (`tune_related.py`);
+the agent note and the reply's last line (below) to follow.
+
+**Not the reply bent to the song.** The reply's job is the answer, and
+David's doubt of the same day stands: a song can take him away from his
+thoughts on the reply. So the words are never reworded to fit a lyric. The
+other way round is cheap and allowed: the agent picks the tune first, and
+may close the reply with a line that leans into the title, only when it
+lands naturally (a note in `agent_notes.md`, no code).
+
+**The second picker: his own songs, nearest the words.** agent-sessions'
+zettel layer (`zk_related.py`) embeds every note and memory with
+nomic-embed-text through Ollama on red5 and writes each its neighbours.
+`tune_related.py` does the same for the songs he has played most and
+liked (`music_recent.listed`): each is a short text — artist, song, the
+iTunes catalogue's genre (`media_meta`) and MusicBrainz's community tags
+for the recording and its artist — embedded once and kept in
+`tune-related.json`. `media tune related <words>` embeds the words
+(`search_query:`) and prints the nearest songs; `--session <id>` takes the
+words from that thread's last replies, so a thread can keep one theme
+rather than each reply rolling dice. Without Ollama it falls back to word
+overlap. `media tune index` brings the index up to the plays, asking
+MusicBrainz for at most 20 new songs a run, one a second with the app's
+User-Agent as its service asks (its data is CC0).
+
+Why these songs rather than any the agent knows: they are familiar, which
+answers the "takes me away" worry; and the corpus is his own history, not
+a music service's search, so nothing from Spotify goes near a model
+(Terms IV.2.1) and the `[tune]` note's bar on a service's results holds.
+
+**Next:** the `[tune]` note points the agent at `media tune related`, so
+it names one of his own songs when one sits near the reply and its own
+pick otherwise; a `tune` route option that asks `related(reply)` itself
+when the agent wrote no marker (the server-side picker the first section
+set aside, now without a model call); the thread's zettel concepts as a
+second query, once agent-sessions exposes them; ListenBrainz's similar
+artists to widen a thin history. A thread's related songs could show in
+the full player under Sing it out, as a list to tap.
+
 ## Open questions
 
 - After the song ends, the listener's app may keep going (Spotify's
