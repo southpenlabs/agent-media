@@ -104,3 +104,30 @@ carers, drivers.
 8. **Pricing: open.** Options on the table: a monthly subscription
    (possibly NDIS-claimable), a free core with the acting agent paid, or
    sold through employers, care providers or vision organisations.
+
+## A swipe-heavy interface (David, 5 Nov 2026)
+
+"swipe gestures are awesome for visually impaired people! let's make a
+swipe heavy interface." The whole screen is the control surface, so there
+is never a button to find.
+
+- **The inbox as a stack.** Swipe right: next message. Left: hear it
+  again. Up: reply by voice. Down: later. Double tap: pause or play. Long
+  press: what the agent can do with it.
+- **Its own gesture pad.** TalkBack takes swipes for its own navigation,
+  so the audio mode speaks for itself and takes the whole screen's
+  gestures while it is on. The same commands are also offered as TalkBack
+  custom actions for those who keep TalkBack running. How Android lets an
+  app take raw gestures while TalkBack runs is to check; test with
+  TalkBack users either way.
+- **Confirming by sound.** Every gesture answers with a short earcon
+  (`earcons.py`), so the user knows it landed without looking.
+
+## The briefing
+
+- **Order: by what needs the user.** Things waiting on their answer
+  first, then news from people who matter, then what the agent already
+  handled, then the rest summed up in a line.
+- **Length: it depends** (David). Proposed: scaled to how much is waiting
+  and to the moment (a line between clients, longer at a quiet time or
+  after a long gap), always with a swipe for more on any one item.
