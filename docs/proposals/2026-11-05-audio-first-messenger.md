@@ -158,3 +158,22 @@ is never a button to find.
   user is free again after a call, client or meeting (as `catchup.py`
   does now); a swipe on the lock screen or a spoken word; and set times
   (morning, lunchtime, evening).
+
+## Voices, reporting, setup and privacy (David, 5 Nov 2026)
+
+- **A distinct voice per person**, chosen from a set and kept the same
+  every time, so the user knows who it is before the name.
+- **Reporting what the agent did: it depends** (David). Proposed: by
+  what is at stake. A simple reply is a line in the next briefing ("I
+  told Sam you'd call back"); a booking, a payment or anything new on the
+  user's behalf is said straight away; "what did you do?" gives the full
+  list at any time.
+- **Setup is a spoken conversation.** The agent talks the user through
+  it: who matters, what it may answer, which services to link. Sighted
+  help is offered only for sign-ins that need it.
+- **Private messages on a speaker: it depends** (David). Proposed: by
+  the sender, the content and who may be listening. From a doctor, a bank
+  or a contact marked private, or about health, money or anything
+  intimate, it says who and holds the words for earbuds or a swipe to
+  hear them anyway; the rest is read as usual. The user marks contacts
+  and can change what counts as private.
