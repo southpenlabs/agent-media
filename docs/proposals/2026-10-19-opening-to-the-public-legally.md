@@ -286,6 +286,74 @@ policies on outside business, IP created in the job and use of staff
 systems, so that the tools above and the pitch don't conflict with them.
 Declaring the interest early protects both sides.
 
+## Small accommodation: the guest side and automation (David, 5 Nov 2026)
+
+David, 5 Nov 2026: "Maybe accommodation ... starting with smaller companies
+and organisations." Then: "let's start with the guest facing side", and
+"I'm also interested in automation ideas." The target is the B&B,
+guesthouse, small lodge, hostel or glamping site run by one owner or a
+small team, who has no IT person and a house manual in their head.
+
+### The message concierge (first guest-facing feature)
+
+- **Setup is the house manual.** The owner pastes it in, or answers a short
+  spoken interview. Every answer comes from it; nothing is invented.
+- **Channel.** The booking confirmation carries a WhatsApp number, an SMS
+  number or a link. Guests type or send a voice note and get the answer in
+  their own language, spoken as well if they like. The spoken answer is
+  the edge over ordinary chatbots.
+- **The owner stays in charge.** What it cannot answer goes to the owner's
+  phone with a suggested reply to send in one tap. The owner's answer is
+  added to the manual, so it knows next time.
+- **Careful details.** Door codes and wifi go only to the booked guest,
+  and only near arrival.
+- **Booking platforms decide the channel.** Small places use Airbnb,
+  Booking.com, Little Hotelier or Lodgify. Airbnb messaging is open only
+  to approved partners, so WhatsApp or SMS is the realistic first channel;
+  check each platform's partner terms before any integration (official
+  access only, as with the bridges).
+
+### Other guest-facing ideas, for later
+
+- A spoken welcome by name before arrival: how to get in, where things
+  are, what is nearby, with the words shown as they are read.
+- Sound in the room: soundscapes, a sleep routine and a gentle wake-up,
+  and the guided meditations already in `meditate.py`.
+- Local walking tours as audio, played like an audiobook.
+- Messages at the edges of a stay: what to bring, a check-out reminder, a
+  thank-you with a review request.
+
+### Automation ideas (owner side)
+
+Ordered by how little they need from a booking platform:
+
+1. **Turnover.** Each booking's calendar feed (iCal, which Airbnb,
+   Booking.com and most small systems offer) tells the cleaner when a room
+   needs doing, with that day's notes ("late checkout", "extra bed"), and
+   tells the owner when it is done. No platform partnership needed.
+2. **The owner's morning briefing.** Arrivals, departures, cleans and
+   special requests read aloud: the accommodation form of the therapist's
+   rundown in `examples/wellness-demo`.
+3. **Before and after the stay.** A message sequence: booking confirmed,
+   a week before, the day before with arrival details, check-out morning,
+   then a review request that goes only to guests who did not raise a
+   problem.
+4. **Voice-note maintenance log.** A cleaner or owner says "the bathroom
+   tap is dripping in room 3"; it is logged, dated, and reminded until
+   done. A repeat fault in a room shows up as a pattern.
+5. **Supplies.** "Out of milk" or "low on towels" voice notes become one
+   shopping list sent to whoever shops.
+6. **Gaps and prices.** A weekly note: orphan nights between bookings,
+   dates with no enquiries, and what neighbouring places charge. It
+   suggests, never changes a price on its own.
+7. **Paperwork.** Receipts, deposits and balance reminders; a monthly
+   summary for the bookkeeper.
+
+Each automation acts only with the owner's setting, and anything that
+sends to a guest or spends money shows the owner first until they choose
+otherwise. Health, allergy or accessibility details a guest shares are
+treated as in the health-information rule above.
+
 ## Open questions for David
 
 - Which route, or which blend?
