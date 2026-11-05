@@ -385,6 +385,8 @@ from http.server import BaseHTTPRequestHandler
 from typing import Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .keepalive import BodyDrain
+
 from . import (abs_item, archive, auth, devices, drafts, harnesses, pins, routing, send,
                sessions, share, speech, threads)
 from . import alerts, audio, doc_chat, doc_read, music, org, org_calendar, org_chat, org_edit, org_listen, org_setup, org_zettel, refs, uploads
@@ -4355,7 +4357,7 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     return True
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(BodyDrain, BaseHTTPRequestHandler):
     """The app's routes and nothing else: the server without a canvas."""
 
     protocol_version = "HTTP/1.1"

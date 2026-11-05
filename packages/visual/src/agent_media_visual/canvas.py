@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs
 
+from agent_media_server.keepalive import BodyDrain
 from agent_media_server import app as _app
 from agent_media_server import panes as _panes
 from agent_media_server import speech as _speech
@@ -1749,7 +1750,7 @@ _MAX_BODY = _app.MAX_BODY
 _ACCESS_TOKEN = re.compile(r"(access_token=)[^&\s]*")
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(BodyDrain, BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
