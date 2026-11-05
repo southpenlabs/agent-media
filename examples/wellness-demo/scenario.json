@@ -1,0 +1,31 @@
+{
+  "_note": "Every venue, person and booking here is made up, for demos only.",
+  "venue": "Tidewater Bathhouse",
+  "therapist": "Jordan",
+  "date": "Thursday",
+  "bookings": [
+    {"time": "9:30", "guest": "Mia", "treatment": "hot stone ritual", "minutes": 60,
+     "room": "Kelp room", "notes": "first visit, prefers light pressure"},
+    {"time": "11:00", "guest": "Theo", "treatment": "deep tissue massage", "minutes": 45,
+     "room": "Driftwood room", "notes": "tight shoulders from desk work; asked for no talking"},
+    {"time": "1:30", "guest": "Priya and Sam", "treatment": "couples bathing ritual", "minutes": 90,
+     "room": "Tidal suite", "notes": "anniversary, a card is waiting at reception"},
+    {"time": "3:30", "guest": "Ana", "treatment": "pregnancy massage", "minutes": 60,
+     "room": "Kelp room", "notes": "24 weeks; side-lying only, no hot stones"}
+  ],
+  "treatment": {
+    "name": "hot stone ritual",
+    "guest": "Mia",
+    "room": "Kelp room",
+    "bed": "nature",
+    "welcome": "Welcome to the Kelp room, Mia. Settle in and let the warmth of the stones do the work. If anything is too warm, or the pressure is too much, just say so.",
+    "settle": "Let's begin with three slow breaths. In through the nose. And a long breath out. Let your shoulders drop a little further each time.",
+    "closing": "Your ritual is complete. There's no hurry. Take a few moments here, then sit up slowly. Warm tea is waiting for you in the lounge.",
+    "phases": [
+      {"name": "back and shoulders", "minutes": 20},
+      {"name": "legs and feet", "minutes": 15},
+      {"name": "arms and hands", "minutes": 10},
+      {"name": "face and scalp", "minutes": 10}
+    ]
+  }
+}
