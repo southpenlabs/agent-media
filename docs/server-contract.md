@@ -252,6 +252,19 @@ Everything a message can be pointed at.
  "places": [{"name": "agent-media", "path": "/home/ryer/projects/agent-media", "at": 1790000000.1, "mail": 2}]}
 ```
 
+- **`agent_workspaces`** (6 Nov 2026; always present, `[]` when there are
+  none): the business agents' folders, `[{project, id, name, path,
+  front}]`, the front one first, so the app lists them under an Agents
+  heading of their own (David: "their own folded Agents heading in the
+  app's menu, instead of being mixed in with the projects"). A workspace is
+  a direct child of an agents folder (`MEDIA_AGENT_WORKSPACES`, paths
+  separated by `os.pathsep`, default `~/spl/agents`) holding a CLAUDE.md;
+  `project` is the key the rows of a chat there carry, `id` the folder's
+  name (and its persona's id), `name` the persona's own `name:` (in
+  `MEDIA_PERSONAS_DIR`/personas) else the id capitalised, `path` the folder,
+  `front` true for the one David talks to (`MEDIA_AGENT_FRONT`, default
+  `nova`). Present means the server knows: the app stops guessing from
+  folder paths (agent_workspaces.py).
 - **`restart_pending`** (19 Oct 2026; additive, only while there is one):
   a restart of the session host is waiting for its busy sessions to finish
   (§17 "Draining"): `{"since", "deadline": <epoch s>, "state": "waiting" |
@@ -4196,9 +4209,16 @@ a git checkout, `git`: `{branch, changed, ahead, behind, last: {sha, at,
 subject}}` (`branch` null on a detached HEAD, `last` null with no commits).
 The app's project page draws the chats from its own thread list and the
 documents from `/docs`. `GET /project/list` — gated → `{"ok", "projects":
-[{project, path, group, folder}]}`: every project under the roots and the
+[{project, path, group, folder, kind}]}`: every project under the roots and the
 folders of their own, by group then folder, for the menu's All projects
-(project_page.py; docs/proposals/2026-11-06-project-page.md).
+(project_page.py; docs/proposals/2026-11-06-project-page.md). `kind` (6 Nov
+2026, every row and `/project/info` too) is `"project"` or `"agent"`: the
+business agents' folders (`/targets` `agent_workspaces`) come last as
+`"agent"` rows with `group` null and also `name`, `persona` (the persona id,
+or null when the personas repo has none of that id) and `front`, though they
+sit under no project root; `/project/info` answers for them by `project` or
+`path` with the same fields (David, 6 Nov 2026: the agents under their own
+Agents heading, not mixed in with the projects).
 
 `GET /search` answers a `docs` section too, on the first page only:
 `[{path, title, project, kind, snippet}]`, at most 8. These are documents

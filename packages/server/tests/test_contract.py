@@ -169,12 +169,41 @@ def test_a_user_not_allowed_to_reply_is_403(server, monkeypatch, path):
 
 # --- thread list ------------------------------------------------------------------
 
+def test_targets_agent_workspaces(server, shelf, signed_in, tmp_path, monkeypatch):
+    """`agent_workspaces` (6 Nov 2026, agent-mail #210/#212): the folders
+    under the agents folder holding a CLAUDE.md, named from their persona,
+    the front one first; [] when the folder is missing."""
+    from test_project_page import _agents
+
+    agents = _agents(tmp_path, monkeypatch)
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert obj["agent_workspaces"] == [
+        {"project": "nova", "id": "nova", "name": "Nova the Front",
+         "path": str(agents / "nova"), "front": True},
+        {"project": "vic", "id": "vic", "name": "Vic", "path": str(agents / "vic"),
+         "front": False}]
+    # `project` is what the rows of a chat in that folder carry.
+    assert sessions.project_of(str(agents / "vic")) == "vic"
+
+    monkeypatch.setenv("MEDIA_AGENT_FRONT", "vic")
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert [(a["id"], a["front"]) for a in obj["agent_workspaces"]] == [("vic", True), ("nova", False)]
+
+    monkeypatch.setenv("MEDIA_AGENT_WORKSPACES", str(tmp_path / "missing"))
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    assert obj["agent_workspaces"] == []
+
+
 def test_targets_shape(server, shelf, signed_in):
     res, obj = call(server, "GET", "/targets", headers=AUTH)
     assert res.status == 200
     # `project_groups` joined on 18 Oct 2026: which projects sit in a group;
     # `spaces` on 26 Oct 2026: the Chats strip's spaces (spaces.py).
-    assert keys(obj) == {"ok", "sessions", "places", "project_groups", "spaces"}
+    # `agent_workspaces` on 6 Nov 2026: the business agents' folders, always
+    # there ([] here: no agents folder), so the app stops guessing.
+    assert keys(obj) == {"ok", "sessions", "places", "project_groups", "spaces",
+                         "agent_workspaces"}
+    assert obj["agent_workspaces"] == []
     live, shelved = obj["sessions"]
     # `recap` and `archived` joined on 22 Sep 2026, deliberately: Claude
     # Code's latest "while you were away" summary, the list's preview line,

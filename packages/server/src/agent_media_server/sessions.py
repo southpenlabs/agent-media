@@ -925,7 +925,8 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     `sessions` are the conversations this host holds — running, lately
     shelved, and (within `STORE_DAYS`) whatever each harness's own store
     remembers; `places` are the directories a fresh session can be opened in;
-    `project_groups` says which projects sit in a group (`project_groups`).
+    `project_groups` says which projects sit in a group (`project_groups`);
+    `agent_workspaces` the business agents' folders (agent_workspaces.py).
     `history="all"` lifts the window, for the app's "Everything" filter.
     Gated like `/conversations`.
     """
@@ -941,6 +942,14 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     if mail is not None:
         out["project_mail"] = mail
     out["project_groups"] = project_groups()
+    # The business agents' folders, for the app's Agents heading
+    # (agent_workspaces.py; always there, [] on a host without any).
+    from . import agent_workspaces
+
+    try:
+        out["agent_workspaces"] = agent_workspaces.for_targets()
+    except Exception:  # noqa: BLE001 — a list without its Agents heading, not no list
+        out["agent_workspaces"] = []
     # The spaces the rows are filed in, for the Chats strip (spaces.py).
     from . import spaces
 

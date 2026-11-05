@@ -87,6 +87,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_ALERTS_INBOX", "0")
     # No ~/agent-personas: a host without the repo, unless a test makes one.
     monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(tmp_path / "no-agent-personas"))
+    # No ~/spl/agents: no business agents' folders, unless a test makes some.
+    monkeypatch.setenv("MEDIA_AGENT_WORKSPACES", str(tmp_path / "no-agent-workspaces"))
+    monkeypatch.delenv("MEDIA_AGENT_FRONT", raising=False)
     # A sign-in would tell its (stand-in) issuer about this server from a
     # thread (servers_report.py); test_servers_report.py turns it on.
     monkeypatch.setenv("MEDIA_SERVERS_REPORT", "0")

@@ -32,6 +32,7 @@ def test_a_projects_page_and_the_list(tree, server, tmp_path, monkeypatch):
 
     status, got = _call(server, "GET", "/project/info?project=p-app")
     assert status == 200 and got["root"] == str(repo) and got["project"] == "p-app"
+    assert got["kind"] == "project"
     g = got["git"]
     assert g["branch"] == "main" and g["changed"] == 1
     assert g["last"]["subject"] == "the first one" and g["last"]["at"] > 0
@@ -45,5 +46,53 @@ def test_a_projects_page_and_the_list(tree, server, tmp_path, monkeypatch):
 
     status, got = _call(server, "GET", "/project/list")
     assert status == 200
-    assert [(r["project"], r["folder"]) for r in got["projects"]] == [("p-app", "app"), ("p-plain", "plain")]
+    assert [(r["project"], r["folder"], r["kind"]) for r in got["projects"]] == \
+        [("p-app", "app", "project"), ("p-plain", "plain", "project")]
     assert _call(server, "GET", "/project/list", bearer="bad")[0] == 401
+
+
+def _agents(tmp_path, monkeypatch):
+    """Three folders under a tmp agents folder (two with CLAUDE.md), and a
+    personas repo naming nova (with a display name) and vic (without)."""
+    agents = tmp_path / "spl" / "agents"
+    for name in ("nova", "vic", "notes"):
+        (agents / name).mkdir(parents=True)
+    (agents / "nova" / "CLAUDE.md").write_text("# Nova\n")
+    (agents / "vic" / "CLAUDE.md").write_text("# Vic\n")
+    people = tmp_path / "agent-personas" / "personas"
+    people.mkdir(parents=True)
+    (people / "nova.md").write_text("---\nid: nova\nname: Nova the Front\nkind: persona\n---\nbody\n")
+    monkeypatch.setenv("MEDIA_AGENT_WORKSPACES", str(agents))
+    monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(tmp_path / "agent-personas"))
+    return agents
+
+
+def test_agent_rows_on_the_project_list(tree, server, tmp_path, monkeypatch):
+    agents = _agents(tmp_path, monkeypatch)
+    proj = tmp_path / "projects"
+    (proj / "plain").mkdir(parents=True)
+    monkeypatch.setenv("MEDIA_PROJECTS_DIR", str(proj))
+    monkeypatch.setenv("MEDIA_DOC_ROOTS", str(tmp_path / "nowhere"))
+    monkeypatch.setenv("MEDIA_PROJECT_DIRS", "")
+
+    status, got = _call(server, "GET", "/project/list")
+    assert status == 200
+    rows = got["projects"]
+    assert all(r["kind"] in ("project", "agent") for r in rows)
+    assert [r for r in rows if r["kind"] == "agent"] == [
+        {"project": "nova", "path": str(agents / "nova"), "group": None, "folder": "nova",
+         "kind": "agent", "name": "Nova the Front", "persona": "nova", "front": True},
+        {"project": "vic", "path": str(agents / "vic"), "group": None, "folder": "vic",
+         "kind": "agent", "name": "Vic", "persona": None, "front": False}]
+    assert [r["project"] for r in rows if r["kind"] == "project"] == ["p-plain"]
+
+    # An agent's page opens though its folder is under no project root.
+    status, page = _call(server, "GET", "/project/info?path=" + str(agents / "vic"))
+    assert status == 200 and page["kind"] == "agent" and page["root"] == str(agents / "vic")
+    assert page["project"] == "vic" and page["persona"] is None
+    status, page = _call(server, "GET", "/project/info?project=nova")
+    assert status == 200 and page["kind"] == "agent" and page["front"] is True
+
+    monkeypatch.setenv("MEDIA_AGENT_WORKSPACES", str(tmp_path / "missing"))
+    rows = _call(server, "GET", "/project/list")[1]["projects"]
+    assert [r["kind"] for r in rows] == ["project"]
