@@ -138,7 +138,7 @@ is never a button to find.
 - **Order: by what needs the user.** Things waiting on their answer
   first, then news from people who matter, then what the agent already
   handled, then the rest summed up in a line.
-- **Length: many factors** (David: "they'll be many factors to dictate
+- **Length: many factors** (agreed) (David: "they'll be many factors to dictate
   length of message"). The agent weighs them each time rather than one
   setting:
   - how much is waiting and how urgent it is;
@@ -163,7 +163,7 @@ is never a button to find.
 
 - **A distinct voice per person**, chosen from a set and kept the same
   every time, so the user knows who it is before the name.
-- **Reporting what the agent did: it depends** (David). Proposed: by
+- **Reporting what the agent did: it depends** (David), agreed as: by
   what is at stake. A simple reply is a line in the next briefing ("I
   told Sam you'd call back"); a booking, a payment or anything new on the
   user's behalf is said straight away; "what did you do?" gives the full
@@ -171,7 +171,7 @@ is never a button to find.
 - **Setup is a spoken conversation.** The agent talks the user through
   it: who matters, what it may answer, which services to link. Sighted
   help is offered only for sign-ins that need it.
-- **Private messages on a speaker: it depends** (David). Proposed: by
+- **Private messages on a speaker: it depends** (David), agreed as: by
   the sender, the content and who may be listening. From a doctor, a bank
   or a contact marked private, or about health, money or anything
   intimate, it says who and holds the words for earbuds or a swipe to
