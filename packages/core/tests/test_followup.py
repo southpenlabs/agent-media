@@ -19,7 +19,9 @@ def test_suggest_files_the_cleaned_line(monkeypatch, tmp_path):
     out = fu.suggest_followup("A long reply.", "sess-1", "k1")
     assert out == "go with projects, do the relabel."
     assert seen["model"] == "tiny"
-    assert fu.load_followup("sess-1") == {"text": out, "key": "k1", "at": fu.load_followup("sess-1")["at"]}
+    got = fu.load_followup("sess-1")
+    assert got == {"text": out, "replies": [out], "source": "model", "key": "k1",
+                   "at": got["at"]}
 
 
 def test_a_failed_call_files_nothing_and_keeps_the_last(monkeypatch, tmp_path):
@@ -52,3 +54,30 @@ def test_no_session_no_file(monkeypatch, tmp_path):
     assert fu.load_followup("") is None
     fu.save_followup("", "text", "k")
     assert not list(tmp_path.glob("**/*.json"))
+
+
+def test_up_to_three_lines_become_the_chips(monkeypatch, tmp_path):
+    _state(monkeypatch, tmp_path)
+    monkeypatch.setattr(_summary, "_chat", lambda p, t, timeout, model=None:
+                        "1. commit it\n2) run the tests first\n- commit it\n\n"
+                        "* leave it for now\nfourth one")
+    assert fu.suggest_followup("A reply.", "sess-1", "k1") == "commit it"
+    got = fu.load_followup("sess-1")
+    assert got["replies"] == ["commit it", "run the tests first", "leave it for now"]
+    assert got["text"] == "commit it"
+
+
+def test_the_agents_replies_are_filed_as_they_are(monkeypatch, tmp_path):
+    _state(monkeypatch, tmp_path)
+    fu.save_followup("sess-1", "Yes", "k2", replies=["Yes", "No"], source="agent")
+    got = fu.load_followup("sess-1")
+    assert (got["replies"], got["source"], got["key"]) == (["Yes", "No"], "agent", "k2")
+
+
+def test_a_file_from_before_the_chips_reads_as_one(tmp_path, monkeypatch):
+    _state(monkeypatch, tmp_path)
+    p = fu._path("sess-1")
+    p.parent.mkdir(parents=True)
+    p.write_text('{"text": "old line", "key": "k0", "at": 1}')
+    got = fu.load_followup("sess-1")
+    assert got["replies"] == ["old line"] and got["source"] == "model"

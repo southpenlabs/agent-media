@@ -487,6 +487,43 @@ def extract_tune(text: str) -> tuple[str, Optional[str]]:
     return out.strip(), m.group(1).strip() or None
 
 
+#: `[[replies: Commit it | Run the tests first | Leave it]]`: the agent
+#: offering the answers it expects, drawn as one-tap chips under the reply
+#: (docs/proposals/2026-11-06-one-tap-answers.md). An instruction, never
+#: words, like `[[sound:]]`: stripped from speech here and from the thread.
+_REPLIES_RE = re.compile(r"\[\[\s*replies\s*:\s*([^\]\n]+?)\s*\]\]", re.IGNORECASE)
+_REPLIES_LINE_RE = re.compile(r"(?m)^[ \t]*\[\[\s*replies\s*:[^\]\n]*\]\][ \t]*(?:\n|$)",
+                              re.IGNORECASE)
+_REPLIES_INLINE_RE = re.compile(r"[ \t]*\[\[\s*replies\s*:[^\]\n]*\]\]", re.IGNORECASE)
+#: At most this many chips, each at most this long: a chip is a tap, not a
+#: message to read.
+REPLIES_MAX = 4
+REPLY_CHARS = 80
+
+
+def extract_replies(text: str) -> tuple[str, list[str]]:
+    """(`text` without its `[[replies:]]` markers, the first one's answers).
+
+    Answers are split on `|`, trimmed, emptied ones and repeats dropped, at
+    most REPLIES_MAX of them, each at most REPLY_CHARS. A marker alone on its
+    line takes the line with it."""
+    if not text or "[[" not in text:
+        return text, []
+    m = _REPLIES_RE.search(text)
+    if not m:
+        return text, []
+    out = _REPLIES_LINE_RE.sub("", text)
+    out = _REPLIES_INLINE_RE.sub("", out)
+    seen: set[str] = set()
+    replies: list[str] = []
+    for part in m.group(1).split("|"):
+        part = " ".join(part.split())[:REPLY_CHARS].strip()
+        if part and part.lower() not in seen:
+            seen.add(part.lower())
+            replies.append(part)
+    return out.strip(), replies[:REPLIES_MAX]
+
+
 _QUOTE_BLOCK_LINE = re.compile(r"^[ \t]{0,3}>[ \t]?(.*)$")
 
 
@@ -540,7 +577,7 @@ def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -
         return ""
     out = _SHARED_FILE_RE.sub("", text) if "Shared file: " in text else text
     if "[[" in out:
-        out = extract_tune(extract_sound(out)[0])[0]
+        out = extract_replies(extract_tune(extract_sound(out)[0])[0])[0]
     out = suppress_code_blocks(out, describe, paragraphs)
     out = suppress_tables(out, describe, paragraphs)
     if paragraphs:

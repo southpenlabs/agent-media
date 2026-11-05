@@ -1125,7 +1125,7 @@ def envelope(r: Room, *, limit: int, before: str = "", around: str = "",
             jump = {"id": around, "found": False, "newer": False}
     _join_speech(r.thread, messages)
     out = {"session": r.thread, "lines": [], "messages": messages, "older": older,
-           "pending": False, "working": None, "approval": None, "suggestion": "",
+           "pending": False, "working": None, "approval": None, "suggestion": "", "suggestions": [],
            "recap": None, "context": None,
            "room": r.info()}
     if jump is not None:

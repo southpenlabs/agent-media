@@ -692,6 +692,8 @@ def _envelope(session: str, lines: list, *, limit: int = MESSAGES_LIMIT,
         pending = True
     suggestion = ("" if pending else
                   sessions.suggestion_for(session, pane, last.get("key") or ""))
+    suggestions = ([] if pending else
+                   sessions.suggestions_for(session, pane, last.get("key") or ""))
     # A session waiting on a permission dialog is not working and not
     # finished: it is stopped until somebody answers, and the phone is often
     # the only place anybody is looking.
@@ -712,6 +714,9 @@ def _envelope(session: str, lines: list, *, limit: int = MESSAGES_LIMIT,
     out = {"session": session, "lines": lines, "messages": messages, "older": older,
            "pending": pending, "working": working, "approval": approval,
            "suggestion": suggestion, "recap": recap,
+           # The one-tap chips under the reply (§6.2.1), [] while a turn is
+           # pending or a question card is up.
+           "suggestions": [] if approval else suggestions,
            # How full its context is, for the line under the title.
            "context": context.context_for(session),
            # Its folder's branch and changed files, beside its project in

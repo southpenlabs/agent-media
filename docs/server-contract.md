@@ -730,6 +730,18 @@ hook wrote for that same reply (`intake/_followup.py`). A follow-up is only
 offered for the reply it was written for. `""` when there is neither, or
 while a turn is pending.
 
+`suggestions` (6 Nov 2026; docs/proposals/2026-11-06-one-tap-answers.md):
+the one-tap chips under the latest reply, `[{"text", "source"}]`, at most
+four. `source` is `agent` (the reply ended with `[[replies: A | B]]`, which
+is stripped from its words and its speech, and the agent's answers are
+offered as given), else up to three of `model` (the follow-up model's
+lines) with `ghost` first when the terminal's ghost fits and says
+something else. Keyed to the reply like `suggestion`; `[]` while a turn is
+pending or a question card is up. `suggestion` stays the first chip's
+words for older clients. A tap sends the chip's `text` as an ordinary
+message (§6.4). The thread stream's `suggestion` event carries the same
+list as `replies` beside its `text`.
+
 #### `GET /conversation/log?item=<item>` · `?session=<session>` — gated
 
 The conversation — the chat itself — as **messages** read from the agent's

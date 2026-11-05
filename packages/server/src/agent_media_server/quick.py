@@ -211,7 +211,7 @@ def envelope(session: str, *, limit: int = 30, before: str = "") -> dict:
     with _guard:
         working = session in _thinking
     return {"session": session, "lines": [], "messages": msgs, "older": older,
-            "pending": working, "working": None, "approval": None, "suggestion": "",
+            "pending": working, "working": None, "approval": None, "suggestion": "", "suggestions": [],
             "recap": None, "context": None, "quick": {"handed_to": data.get("handed_to")}}
 
 

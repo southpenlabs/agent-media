@@ -1150,7 +1150,16 @@ def _play_claimed(event: Event, state: StateStore) -> None:
     # The follow-up (what the listener might say next) for the reply box in
     # the player app: one gateway call on its own thread, filed per session.
     followup_raw = event.metadata.pop("followup_raw", None)
-    if followup_raw:
+    followup_replies = event.metadata.pop("followup_replies", None)
+    if followup_replies:
+        try:
+            from ._followup import save_followup
+            save_followup(event.metadata.get("session") or "", followup_replies[0],
+                          event.metadata.get("dedup_key") or "",
+                          replies=followup_replies, source="agent")
+        except Exception:  # noqa: BLE001 — a suggestion, never playback's problem
+            pass
+    elif followup_raw:
         try:
             from ._followup import spawn_followup
             spawn_followup(followup_raw, event.metadata.get("session") or "",
@@ -1444,7 +1453,7 @@ def _handle_stop(payload: dict) -> int:
     # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
     # (strip_markdown already took the marker out of the words), and the
     # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).
-    from ._text import extract_sound, extract_tune, quoted_passages
+    from ._text import extract_replies, extract_sound, extract_tune, quoted_passages
     raw, sound = extract_sound(raw)
     if sound:
         metadata["sound"] = sound
@@ -1452,6 +1461,9 @@ def _handle_stop(payload: dict) -> int:
     raw, tune = extract_tune(raw)
     if tune:
         metadata["tune"] = tune
+    # `[[replies: A | B]]`: the agent's own one-tap answers, filed as the
+    # reply's follow-up in place of the model's (_followup.py).
+    raw, replies = extract_replies(raw)
     quoted = quoted_passages(raw)
     if quoted:
         metadata["quoted"] = quoted
@@ -1477,7 +1489,9 @@ def _handle_stop(payload: dict) -> int:
             if pre and post:
                 metadata["visual_reveal"] = {"pre": pre, "post": post}
     from ._followup import followup_enabled
-    if followup_enabled():
+    if replies:
+        metadata["followup_replies"] = replies
+    elif followup_enabled():
         metadata["followup_raw"] = raw
     from ._summary import summary_enabled, summary_min_chars, describe_enabled
     if "visual_reveal" in metadata:

@@ -369,7 +369,8 @@ class Watcher:
             self._emit("live", live)
         self._live, self._live_read = live, time.time()
         now = {"working": env.get("working"), "approval": env.get("approval"),
-               "suggestion": {"text": env.get("suggestion") or ""},
+               "suggestion": {"text": env.get("suggestion") or "",
+                              "replies": env.get("suggestions") or []},
                "state": st, "pending": {"pending": bool(env.get("pending"))},
                "recap": env.get("recap"), "context": env.get("context"),
                "agents": agent_counts(self.session, st["session_live"]),

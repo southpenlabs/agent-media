@@ -275,3 +275,16 @@ def test_the_stream_keeps_a_list_marker_with_its_item():
         "Send anything once you have heard the first sentences.",
         "1. The first item is the one you heard for sure.",
         "2. The second item is still in your ears."]
+
+
+def test_replies_marker_comes_out_of_the_words_and_its_answers_are_kept():
+    from agent_media_core.intake._text import extract_replies, strip_markdown
+
+    raw = "Done, the tests pass.\n\n[[replies: Commit it | Run them again |  | commit it]]\n"
+    text, replies = extract_replies(raw)
+    assert text == "Done, the tests pass."
+    assert replies == ["Commit it", "Run them again"]
+    assert "replies" not in strip_markdown(raw)
+    assert extract_replies("no marker here") == ("no marker here", [])
+    many = "[[replies: a | b | c | d | e]]"
+    assert extract_replies(many)[1] == ["a", "b", "c", "d"]

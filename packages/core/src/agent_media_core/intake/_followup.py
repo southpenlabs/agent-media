@@ -34,12 +34,17 @@ from ..book_tracks import safe_name
 
 DEFAULT_PROMPT = (
     "You read the latest reply from a coding assistant to the person it works "
-    "with. Write the ONE line that person is most likely to type next: a short "
-    "instruction or question that moves the work along, in their voice, the way "
-    "they would say it — like \"go with projects, do the relabel\" or \"why did "
-    "the second test fail?\". At most twelve words. No quotes, no preamble, no "
-    "explanation, no trailing full stop. Reply with the line only."
+    "with. Write the lines that person is most likely to send next, most likely "
+    "first: up to THREE, one per line, each different in what it asks for — a "
+    "short instruction or question that moves the work along, in their voice, "
+    "the way they would say it, like \"go with projects, do the relabel\" or "
+    "\"why did the second test fail?\". Fewer when fewer fit; one is fine. At "
+    "most twelve words each. No numbering, no quotes, no preamble, no "
+    "explanation, no trailing full stop. Reply with the lines only."
 )
+
+#: How many model lines are kept as chips (the agent's marker may give four).
+MODEL_REPLIES = 3
 
 
 def followup_enabled() -> bool:
@@ -50,29 +55,41 @@ def _path(session: str) -> Path:
     return state_dir() / "followups" / f"{safe_name(session, 80)}.json"
 
 
-def save_followup(session: str, text: str, key: str) -> None:
-    """File `text` as the follow-up to the reply keyed `key`. Atomic; best-effort."""
+def save_followup(session: str, text: str, key: str,
+                  replies: list[str] | None = None, source: str = "model") -> None:
+    """File `text` as the follow-up to the reply keyed `key`, with `replies`
+    (the one-tap chips, `text` first when not given) and their `source`
+    (`agent`: the reply's `[[replies:]]` marker; `model`). Atomic; best-effort."""
     if not session or not text:
         return
     try:
         p = _path(session)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"text": text, "key": key or "", "at": time.time()}))
+        tmp.write_text(json.dumps({"text": text, "replies": list(replies or [text]),
+                                   "source": source, "key": key or "",
+                                   "at": time.time()}))
         tmp.replace(p)
     except OSError:
         pass
 
 
 def load_followup(session: str) -> dict | None:
-    """`{"text", "key", "at"}` for the session's latest reply, or None."""
+    """`{"text", "replies", "source", "key", "at"}` for the session's latest
+    reply, or None. A file from before the chips has no `replies`: its
+    `text` is the one."""
     if not session:
         return None
     try:
         data = json.loads(_path(session).read_text())
     except (OSError, ValueError):
         return None
-    return data if data.get("text") else None
+    if not data.get("text"):
+        return None
+    if not isinstance(data.get("replies"), list) or not data["replies"]:
+        data["replies"] = [data["text"]]
+    data.setdefault("source", "model")
+    return data
 
 
 def _clean(line: str) -> str:
@@ -83,6 +100,20 @@ def _clean(line: str) -> str:
         if line.lower().startswith(label.lower()):
             line = line[len(label):].strip()
     return line.splitlines()[0].strip() if line else ""
+
+
+def _clean_lines(out: str) -> list[str]:
+    """The model's answer as up to MODEL_REPLIES distinct lines: numbering
+    and bullets off, each cleaned as `_clean` does, empty and over-long ones
+    and repeats dropped."""
+    import re
+
+    lines: list[str] = []
+    for raw in (out or "").splitlines():
+        line = _clean(re.sub(r"^\s*(?:\d+[.)]|[-•*])\s*", "", raw))
+        if line and len(line) <= 200 and line.lower() not in {x.lower() for x in lines}:
+            lines.append(line)
+    return lines[:MODEL_REPLIES]
 
 
 def suggest_followup(raw_reply: str, session: str, key: str) -> str | None:
@@ -96,11 +127,11 @@ def suggest_followup(raw_reply: str, session: str, key: str) -> str | None:
     timeout = _int_env("MEDIA_FOLLOWUP_TIMEOUT",
                        _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
     model = os.environ.get("MEDIA_FOLLOWUP_MODEL") or None
-    out = _clean(_chat(prompt, text, timeout, model=model) or "")
-    if not out or len(out) > 200:
+    lines = _clean_lines(_chat(prompt, text, timeout, model=model) or "")
+    if not lines:
         return None
-    save_followup(session, out, key)
-    return out
+    save_followup(session, lines[0], key, replies=lines, source="model")
+    return lines[0]
 
 
 def spawn_followup(raw_reply: str, session: str, key: str) -> None:

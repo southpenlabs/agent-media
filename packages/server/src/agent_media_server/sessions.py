@@ -730,6 +730,26 @@ def suggestion_for(session: str, pane: str, last_key: str | None = None) -> str:
     return str(fu.get("text") or "")
 
 
+def suggestions_for(session: str, pane: str, last_key: str | None = None) -> list[dict]:
+    """The one-tap chips under the latest reply: `[{"text", "source"}]`.
+
+    The agent's own (`[[replies:]]`, source `agent`) as it gave them; else
+    the model's up to three (`model`), the terminal's ghost first when it
+    fits and says something else. Keyed to the reply like `suggestion_for`
+    (docs/proposals/2026-11-06-one-tap-answers.md)."""
+    fu = _followup(session)
+    if fu and last_key is not None and (fu.get("key") or "") != (last_key or ""):
+        fu = None
+    if fu and fu.get("source") == "agent":
+        return [{"text": str(t), "source": "agent"} for t in fu.get("replies") or [] if t]
+    out = [{"text": str(t), "source": "model"} for t in (fu or {}).get("replies") or [] if t]
+    ghost = ghost_prompt(pane) if pane else ""
+    if ghost and not ghost.endswith("…") \
+            and ghost.lower() not in {o["text"].lower() for o in out}:
+        out.insert(0, {"text": ghost, "source": "ghost"})
+    return out[:3]
+
+
 def _registry_dir() -> Path:
     return Path(os.path.expanduser(os.environ.get("MEDIA_PANE_REGISTRY_DIR")
                                    or "~/.claude/tmux-sessions"))

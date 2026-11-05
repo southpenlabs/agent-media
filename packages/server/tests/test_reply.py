@@ -1000,6 +1000,37 @@ def test_no_pane_still_has_the_followup(monkeypatch):
     assert sessions.suggestion_for("sess-1", "", "k1") == ""
 
 
+def test_the_agents_chips_are_offered_as_given(monkeypatch):
+    monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "a ghost")
+    monkeypatch.setattr(sessions, "_followup", lambda s: {
+        "text": "Commit it", "replies": ["Commit it", "Leave it"], "source": "agent", "key": "k1"})
+    assert sessions.suggestions_for("sess-1", "%1", "k1") == [
+        {"text": "Commit it", "source": "agent"}, {"text": "Leave it", "source": "agent"}]
+    # ...and never for a later reply
+    assert sessions.suggestions_for("sess-1", "%1", "k2") == [{"text": "a ghost", "source": "ghost"}]
+
+
+def test_the_models_chips_follow_a_ghost_that_fits(monkeypatch):
+    monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "run it")
+    monkeypatch.setattr(sessions, "_followup", lambda s: {
+        "text": "a", "replies": ["a", "Run it", "b", "c"], "source": "model", "key": "k1"})
+    # the ghost says what a chip says: one of them
+    assert [o["text"] for o in sessions.suggestions_for("sess-1", "%1", "k1")] == ["a", "Run it", "b"]
+    monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "deploy …")
+    monkeypatch.setattr(sessions, "_followup", lambda s: None)
+    assert sessions.suggestions_for("sess-1", "%1", "k1") == []
+
+
+def test_log_carries_the_chips_but_not_under_a_question(monkeypatch, tmp_path):
+    _log_ready(monkeypatch, tmp_path,
+               [{"who": "you", "text": "A question"}, {"who": "agent", "text": "An answer", "key": "k9"}])
+    chips = [{"text": "go", "source": "agent"}]
+    monkeypatch.setattr(sessions, "suggestions_for", lambda *a, **k: chips)
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {})
+    ok, detail = threads.log_for_item("item1", "tok")
+    assert ok and detail["suggestions"] == chips
+
+
 def test_log_carries_no_suggestion_while_pending(monkeypatch, tmp_path):
     _log_ready(monkeypatch, tmp_path,
                [{"who": "agent", "text": "Hi", "key": "k1"}, {"who": "you", "text": "A question"}])
