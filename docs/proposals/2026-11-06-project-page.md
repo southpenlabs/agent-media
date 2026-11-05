@@ -4,8 +4,8 @@ David, 6 Nov 2026: "I'd like to make some changes to the project card
 selectable from the three dash menu"; offered a page of its own: "I'm
 tempted to give it its own page but let's discuss further before
 implementing", then "yeah let's do it". It answers his question of 15 Oct
-2026 ("do we need a per project dashboard"). Status: **proposal, nothing
-decided.**
+2026 ("do we need a per project dashboard"). Status: **first version built**
+(6 Nov 2026).
 
 ## What there is now
 
@@ -58,12 +58,19 @@ it renders one answer and knows nothing of the host.
 - A server without `/project` (a 404): the app keeps today's behaviour,
   the tap opening Chats on the project's space.
 
-## Open questions
+## Decided (David, 6 Nov 2026)
 
-- The order: New chat, chats, documents (above), or the documents
-  first for a project read more than worked in?
-- The repo's state: on the page, later, or not at all?
-- Does ☰ → Projects stay a list of recent projects, or also list
-  every project under the roots?
+- Order: New chat, chats, documents.
+- The repo's state: on the page now (branch, changed files, ahead and
+  behind, the last commit).
+- ☰ → Projects: the recent ones, then an All projects link to every
+  project under the roots (`GET /projects`).
+- Built as: `GET /project` answers only the folder and the git state; the
+  chats come from the app's own thread list and the documents from
+  `/docs`, so no thread rows are served twice. The page is
+  `/project?name=<project>` in the app.
+
+## Still open
+
 - Is the Chats project space still needed once this page exists, or
   does "All chats" become the only way there?

@@ -474,6 +474,7 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
                          "/org/state", "/org/refile", "/org/date",
                          "/org/priority", "/org/ask", "/org/zettel",
                          "/org/listen", "/org/listen/ctl", "/doc/read", "/doc/ask", "/doc/undo", "/docs",
+                         "/project", "/projects",
                          "/calendar"})
 CORS_PATHS = CORS_PATHS | ORG_PATHS
 
@@ -4280,6 +4281,16 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A project's documents (doc_read.py): the project page's list.
         ok, detail = doc_read.project_docs(arg("project"), arg("path"), bearer,
                                               arg("session"))
+    elif method == "GET" and path == "/project":
+        # A project's page: its folder and repo state (project_page.py).
+        from . import project_page
+
+        ok, detail = project_page.page(arg("project"), arg("path"), bearer)
+    elif method == "GET" and path == "/projects":
+        # Every project under the roots, for the menu's All projects.
+        from . import project_page
+
+        ok, detail = project_page.listing(bearer)
     elif method == "GET" and path == "/doc/read":
         # A project's document in the reader (doc_read.py).
         try:

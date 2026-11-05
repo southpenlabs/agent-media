@@ -4177,6 +4177,17 @@ kind, status, date}]}`: the app's project page.
   every thread reads this contract. The app pins them above the list as
   "From this thread" (David, 19 Oct 2026).
 
+**A project's page** (6 Nov 2026). `GET /project?project=<name>` or
+`?path=<folder>` — gated → `{"ok", "project", "root", "git"?}`: the folder
+a project lives in (found as `/docs` finds it, 404 the same) and, when it is
+a git checkout, `git`: `{branch, changed, ahead, behind, last: {sha, at,
+subject}}` (`branch` null on a detached HEAD, `last` null with no commits).
+The app's project page draws the chats from its own thread list and the
+documents from `/docs`. `GET /projects` — gated → `{"ok", "projects":
+[{project, path, group, folder}]}`: every project under the roots and the
+folders of their own, by group then folder, for the menu's All projects
+(project_page.py; docs/proposals/2026-11-06-project-page.md).
+
 `GET /search` answers a `docs` section too, on the first page only:
 `[{path, title, project, kind, snippet}]`, at most 8. These are documents
 under the projects folder holding every term (ripgrep, so `.gitignore` is
