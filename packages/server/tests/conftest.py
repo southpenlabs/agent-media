@@ -67,6 +67,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_TAG_EMBED", "0")
     # Nor tag chats in the background (tags_auto.py).
     monkeypatch.setenv("MEDIA_AUTO_TAG_CHATS", "0")
+    # Nor suggest a space for an Inbox chat with a real model (space_suggest.py).
+    monkeypatch.setenv("MEDIA_SPACE_SUGGEST", "0")
     # Nor send a clip to a real speech-to-text with this machine's keys
     # (agent_media_core.transcribe; voice_clips.py, voice_notes.py). A test
     # that wants one turns it on and replaces the service.
@@ -74,6 +76,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     from agent_media_server import tags_auto
 
     tags_auto._reset_for_tests()
+    from agent_media_server import space_suggest
+
+    space_suggest._reset_for_tests()
     # A model one test made fail is not skipped in the next (intake/fast.py).
     from agent_media_core.intake import fast
 

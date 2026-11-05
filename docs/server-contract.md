@@ -7546,6 +7546,20 @@ in none.
   (`POST /session/tags`, `POST /contacts/tags` for a person); move a person
   between groups by changing their label in Google Contacts.
 
+**An Inbox chat's suggested space** (6 Nov 2026; space_suggest.py,
+docs/proposals/2026-11-06-one-tap-answers.md part 4): a row whose `spaces`
+is `["inbox"]` may carry `space_suggestion: {"space", "name", "tag"}`, one
+of the spaces that exist (a group or a project in use), found in the
+background: the name said in its title or opening, else the fast models'
+pick from the list (a private thread or a chat with a person only to
+MEDIA_PRIVATE_MODELS). `POST /spaces/suggestion {"session", "accept": true}`
+files it there (adds `tag` as `/session/tags {"add", "hold": true}`) →
+`{"ok", "session", "filed", "tags"}`; `{"session", "dismiss": true}` keeps it
+in Inbox and that space is never offered for it again →
+`{"ok", "session", "dismissed"}`. 400 without exactly one of the two, 404 when
+no suggestion is open. Gated like `/session/tags`; in `CORS_PATHS`.
+MEDIA_SPACE_SUGGEST=0 turns it off.
+
 ### 6.29 A room's photos, videos, voice notes and files — gated, owner only (built 28 Oct 2026)
 
 Code: `agent_media_server/room_media.py`, `matrix.Room._media_part`. Pinned

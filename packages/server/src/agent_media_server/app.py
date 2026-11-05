@@ -410,7 +410,7 @@ from . import app_links, web_app
 CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
-    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
+    "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -3706,6 +3706,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = tags.session_suggest(str(body.get("session") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/spaces/suggestion":
+        # An Inbox chat's suggested space, accepted or dismissed with a tap
+        # (space_suggest.py, §6.28).
+        from . import space_suggest
+
+        body = _read_json(h) or {}
+        ok, detail = space_suggest.post(body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/tags":
         # The thread's own tags, in its org-roam node (tags.py). Gated like
