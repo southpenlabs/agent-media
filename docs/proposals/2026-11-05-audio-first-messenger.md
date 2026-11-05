@@ -1,0 +1,83 @@
+# An audio-first, agentic messenger (5 Nov 2026)
+
+David, 5 Nov 2026: "how about an audio focused, agentic version of
+beeper?" On who it is for, busy-handed workers or people with low vision:
+"Maybe both?" Status: **proposal, nothing decided.** It came out of a
+search for a product to take to particular industries; the accommodation
+ideas in `2026-10-19-opening-to-the-public-legally.md` felt like generic
+software in a crowded market, and this goes back to what is unusual here:
+voice, sound and knowing when to speak.
+
+## The idea
+
+One inbox for every messaging service, as Beeper is, but heard rather
+than read, with an agent that does the work:
+
+- **Messages as a briefing**, not a list: "Three things need you. Sam is
+  running late. The rest can wait." Heard while driving, walking or
+  working, instead of scrolled.
+- **Each person sounds like themselves.** Other people's words in a
+  different voice from the agent's (the quoted-voice texture already used
+  for messages), and replies by voice.
+- **The agent acts.** It drafts the reply, books the thing, chases what
+  went unanswered, and asks only when a decision is the user's.
+- **It knows when to speak.** Silent through a call, ducked under music,
+  a catch-up when the user is free again.
+
+## Much of it exists
+
+- Sasonica is a Matrix client with bridges and sign-in from the app
+  (§6.26); `2026-11-04-bridges-on-the-phone.md` is the route for a public
+  build, with bridges on the user's phone as Beeper runs them.
+- Spoken replies, follow-along text, barge-in and replies by voice
+  (`converse`).
+- Holding speech while busy and one spoken catch-up when free
+  (`free.py`, `catchup.py`, `call_guard.py`).
+- The music bed and ducking for dictation; contacts (`media_people.py`).
+
+What is missing is the product layer: a briefing across all services
+ranked by what needs the user, the agent acting on messages from any
+service, and setup for someone who is not David.
+
+## Two first audiences, one core
+
+**People with low vision first.** Design for using it without looking:
+if it works with the screen off, it works for busy hands too, not the
+other way round.
+
+- Every screen works with TalkBack; setup can be done without sight.
+- Tested with people with low vision before any claim is made about
+  accessibility.
+- A route to them: Vision Australia, Guide Dogs, and possibly NDIS
+  funding as assistive technology (to check: what NDIS funds and what it
+  requires of a product).
+
+**Busy-handed workers next**: therapists between clients, tradies,
+carers, drivers.
+
+- Short catch-ups between jobs, earbuds, one-tap or spoken undo for
+  anything the agent sent.
+
+## Risks
+
+- **Bridges.** Unofficial clients breach WhatsApp's, Meta's and Google's
+  terms (`2026-10-19-opening-to-the-public-legally.md`, "What the risk
+  is"). A public build ships none hosted by us: bridges on the user's
+  phone, or official channels only. The lawyer's opinion in that proposal
+  covers this too.
+- **The agent sending for someone.** A wrong message sent in a person's
+  name hurts more than a wrong answer read aloud. Nothing goes out
+  without the user's yes until they choose otherwise for a kind of
+  message, and every send can be undone where the service allows.
+- **Other people's messages through an AI.** Privacy Act, and the
+  services' own terms on processing message content. Say plainly what
+  is sent to a model and let the user keep a contact or chat out of it.
+- **Accessibility claims.** Only after testing with users, and against
+  WCAG and Android's accessibility guidance.
+
+## Open questions for David
+
+1. Which first: low vision, or a busy-handed trade you have contacts in?
+2. Phone-side bridges first, or official channels only (WhatsApp Business,
+   SMS, email) for a first version?
+3. A product of its own, or a mode of Sasonica?
