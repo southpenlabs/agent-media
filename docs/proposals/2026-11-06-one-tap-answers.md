@@ -3,7 +3,7 @@
 David, 6 Nov 2026: "I'd like to add a new feature for one tap answers";
 asked which kinds, he ticked all four offered: suggested replies, answers
 from the player or bubble, spoken then tapped, and the Inbox space
-suggestion. Status: **proposal, open choices below**.
+suggestion. Status: **decided, building** (chips and player first).
 
 ## What there is now
 
@@ -69,11 +69,11 @@ the row shows "File in <label>?" with a tick, one tap tagging it
 (`POST /session/tags`). Dismissing it keeps it in Inbox and is
 remembered per chat.
 
-## Open choices
+## Decided (David, 6 Nov 2026)
 
-1. Source of suggested replies: agent marker plus model fallback
-   (recommended), agent only, or model only.
-2. A tap on a chip: sends at once with a few seconds' undo
-   (recommended), or fills the reply box to edit and send.
-3. Order of building: suggested replies and the player/bubble first
-   (they share the chips), then spoken, then Inbox.
+1. Chips come from the agent's `[[replies:]]` marker, the follow-up
+   model's up to three when there is none.
+2. A tap sends at once, with a few seconds' Undo.
+3. Built in order: suggested replies, then the same chips in the player,
+   bubble and notification, then spoken options, then the Inbox space
+   suggestion.
