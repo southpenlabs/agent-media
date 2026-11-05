@@ -8524,6 +8524,30 @@ repositories too... including forgejo").
   An admin device's only: a member or guest gets 403 `not_admin`
   (docs/proposals/2026-11-05-file-access.md).
 
+### 6.50 The Map page's layers — gated, not a guest (built 6 Nov 2026)
+
+David, 6 Nov 2026: a maps section in Sasonica, its own top-level menu entry
+(docs/proposals/2026-11-06-maps.md, step 1). The server says which layers
+there are and serves each as GeoJSON; the app draws what it is sent. Code:
+`map_layers.py`; tests in `test_map_layers.py`.
+
+- `GET /map/layers` → `{layers: [{id, name, kind, icon?, default_on,
+  refresh_s?, private?}]}`. `kind`: `points` | `lines` | `track` | `route`.
+  `refresh_s`: how often the app re-reads it while the page is open.
+- `GET /map/layer?id=<id>[&bbox=w,s,e,n]` → `{type: "FeatureCollection",
+  layer, at, features}`. Each feature's `properties` has `title`, and may
+  have `detail`, `link`, `at`. Points outside `bbox` are left out (a bbox
+  across 180° works); a bad `bbox` is ignored. 404 for an unknown id, 502
+  when a layer's source fails.
+- Built in: `phone`, every phone's background share (§6.21b) under 2 h old,
+  a Point each with `title` (the device), `at`, `age_s`, `precise`,
+  `accuracy_m?`. Still in memory only; this route reads it, nothing is kept.
+- More layers come from add-ons: the `agent_media.map_layers` entry point
+  names a callable returning `[{"layer": {...}, "features": fn(bbox)}]`.
+  An add-on that fails is logged and left out; the built-in ids win.
+- Any signed-in device or the host; a guest device gets 403 `guest`
+  (location is the owner's).
+
 ### Pairing
 
 1. At the desk: `media-visual-canvas pair --device "Pixel 8a"` (the existing

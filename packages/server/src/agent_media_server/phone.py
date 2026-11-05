@@ -209,18 +209,25 @@ def share(bearer: str, body) -> tuple[bool, dict]:
     return True, {}
 
 
-def shared() -> dict | None:
-    """`GET /device/location`: the freshest shared fix with its `age_s`, or
-    None (no phone shares, or none has for STALE_S)."""
+def shared_all() -> list[dict]:
+    """Every phone's shared fix under STALE_S old, newest first (the Map
+    page's phone layer, map_layers.py)."""
     now = time.time()
     with _COND:
         for k, f in list(_SHARED.items()):
             if f["at"] < now - STALE_S:
                 del _SHARED[k]
-        if not _SHARED:
-            return None
-        f = max(_SHARED.values(), key=lambda f: f["at"])
-        return {**f, "age_s": round(max(0.0, now - f["at"]))}
+        return sorted((dict(f) for f in _SHARED.values()), key=lambda f: -f["at"])
+
+
+def shared() -> dict | None:
+    """`GET /device/location`: the freshest shared fix with its `age_s`, or
+    None (no phone shares, or none has for STALE_S)."""
+    fixes = shared_all()
+    if not fixes:
+        return None
+    f = fixes[0]
+    return {**f, "age_s": round(max(0.0, time.time() - f["at"]))}
 
 
 def ask(kind, why, session=None, params=None) -> tuple[bool, dict]:

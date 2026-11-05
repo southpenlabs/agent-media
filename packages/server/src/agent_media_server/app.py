@@ -344,6 +344,8 @@ device gets its token):
   POST /device/location {lat, lon, accuracy_m?, at?, precise?} | {off: true}
                   (a device, its background share switch) → kept in memory;
                   GET /device/location (host token) → {location: … | null}
+  GET  /map/layers → the Map page's layers; GET /map/layer?id=&bbox=w,s,e,n
+                  → one as GeoJSON (map_layers.py, §6.50; not a guest)
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -477,6 +479,10 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
                          "/project/info", "/project/list",
                          "/calendar"})
 CORS_PATHS = CORS_PATHS | ORG_PATHS
+
+# The Map page's layers (map_layers.py, §6.50). The same arrangement.
+MAP_PATHS = frozenset({"/map/layers", "/map/layer"})
+CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
 ALERT_PATHS = frozenset({"/alerts", "/alerts/ack", "/alerts/action", "/alerts/digests",
@@ -829,7 +835,7 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _practice(h, method)
     if path in MEDIA_LINK_PATHS and method in ("GET", "POST"):
         return _media_links(h, method)
-    if path in ORG_PATHS and method in ("GET", "POST"):
+    if path in (ORG_PATHS | MAP_PATHS) and method in ("GET", "POST"):
         return _org(h, method, path)
     if path in ALERT_PATHS and method in ("GET", "POST"):
         return _alerts(h, method, path)
@@ -4291,6 +4297,15 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import project_page
 
         ok, detail = project_page.listing(bearer)
+    elif method == "GET" and path == "/map/layers":
+        # The Map page's layers (map_layers.py, §6.50).
+        from . import map_layers
+
+        ok, detail = map_layers.layers(bearer)
+    elif method == "GET" and path == "/map/layer":
+        from . import map_layers
+
+        ok, detail = map_layers.layer(arg("id"), arg("bbox"), bearer)
     elif method == "GET" and path == "/doc/read":
         # A project's document in the reader (doc_read.py).
         try:
