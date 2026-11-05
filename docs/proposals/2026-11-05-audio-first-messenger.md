@@ -128,6 +128,18 @@ is never a button to find.
 - **Order: by what needs the user.** Things waiting on their answer
   first, then news from people who matter, then what the agent already
   handled, then the rest summed up in a line.
-- **Length: it depends** (David). Proposed: scaled to how much is waiting
-  and to the moment (a line between clients, longer at a quiet time or
-  after a long gap), always with a swipe for more on any one item.
+- **Length: many factors** (David: "they'll be many factors to dictate
+  length of message"). The agent weighs them each time rather than one
+  setting:
+  - how much is waiting and how urgent it is;
+  - how long since the last briefing;
+  - what the user is doing: between clients, driving, walking, at rest
+    (`free.py`, the calendar, the phone's activity);
+  - the time of day;
+  - who is waiting: a close person's message read more fully;
+  - where it is heard: earbuds, or a speaker others can hear (shorter,
+    and nothing private read aloud);
+  - the user's reading speed;
+  - **what they did last time**: a swipe on before an item ends reads
+    as too long, a swipe for more as too short, so it learns their taste.
+  Always a swipe for more on any one item.
