@@ -23,7 +23,7 @@ def _dirs(tmp_path, monkeypatch):
 def test_a_link_without_its_file_plays_from_the_link():
     got = podcast_links.add("https://www.youtube.com/watch?v=AAAAAAAAAAA&t=3", title="Talk")
     assert got == {"added": "podcast", "id": "podcast-link:AAAAAAAAAAA", "title": "Talk",
-                   "fetching": False}
+                   "show": None, "fetching": False}
     [it] = podcast_links.items()
     assert it["uri"] == "yt:https://www.youtube.com/watch?v=AAAAAAAAAAA"
     assert it["downloaded"] is False
@@ -34,6 +34,33 @@ def test_youtubes_title_wins_over_the_words_shared_with_it(monkeypatch):
     # A share's words are often the sharing app's label ("Share link").
     monkeypatch.setattr(podcast_links, "_title", lambda vid: "Talking Drupal #576")
     assert podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Share link")["title"] == "Talking Drupal #576"
+
+
+def test_a_youtube_links_show_is_its_channel(monkeypatch):
+    # 5 Nov 2026: "it should use the channel details for the show details".
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "1")
+    monkeypatch.setattr(music_recent, "oembed_data", lambda vid: {
+        "title": "Talking Drupal #576", "author_name": "Talking Drupal", "author_url": "https://www.youtube.com/@TalkingDrupal"})
+    got = podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Share link")
+    assert (got["title"], got["show"]) == ("Talking Drupal #576", "Talking Drupal"), "the title without the channel"
+    [it] = podcast_links.items()
+    assert it["author"] == "Talking Drupal"
+    assert podcast_links.channel_for("talking drupal") == "https://www.youtube.com/@TalkingDrupal"
+    assert podcast_links.channel_for("Someone else") is None
+
+
+def test_links_kept_before_are_given_their_channel(monkeypatch):
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "1")
+    podcast_links._save([{"vid": "BBBBBBBBBBB", "url": "https://www.youtube.com/watch?v=BBBBBBBBBBB",
+                          "title": "Episode 9 — The Show", "added": 1}])
+    monkeypatch.setattr(music_recent, "oembed_data", lambda vid: {
+        "title": "Episode 9", "author_name": "The Show", "author_url": "https://www.youtube.com/@TheShow"})
+    started = []
+    monkeypatch.setattr("threading.Thread", lambda target, **kw: type("T", (), {"start": lambda self: started.append(target)})())
+    podcast_links.items()
+    started[0]()
+    [it] = podcast_links.items()
+    assert (it["author"], it["title"]) == ("The Show", "Episode 9")
 
 
 def test_the_file_is_the_uri_while_it_is_there(_dirs):

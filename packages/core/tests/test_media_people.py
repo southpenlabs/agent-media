@@ -122,3 +122,22 @@ def test_a_place_in_a_country_that_is_gone_is_no_place(monkeypatch):
     ents = {"Q2": _ent("Q2", "Londinium", "Q2277"), "Q2277": gone}
     monkeypatch.setattr(P, "_json", lambda url: next(v for k, v in ents.items() if url.endswith(f"/{k}.json")))
     assert P._place("Q2") == {}
+
+
+def test_a_show_saved_from_youtube_is_its_channel(monkeypatch):
+    # 5 Nov 2026: "it should use the channel details for the show details".
+    from agent_media_core import personal_use, podcast_links
+    calls = _fake(monkeypatch, {})
+    monkeypatch.setattr(podcast_links, "channel_for", lambda name: "https://www.youtube.com/@TalkingDrupal" if name == "Talking Drupal" else None)
+    personal_use._load()
+    monkeypatch.delitem(personal_use._PROVIDERS, "youtube-metadata", raising=False)
+    got = P.profile("show", "Talking Drupal")["profile"]
+    assert (got["source"], got["name"], got["links"]) == ("youtube", "Talking Drupal", [{"label": "YouTube", "url": "https://www.youtube.com/@TalkingDrupal"}])
+    assert got["photo"] is None and calls == [], "without the add-on: the name and the link, nothing read"
+    monkeypatch.setenv("MEDIA_YOUTUBE_METADATA", "1")
+    monkeypatch.setitem(personal_use._PROVIDERS, "youtube-metadata", type("YT", (), {"channel": staticmethod(lambda url: {
+        "name": "Talking Drupal", "photo": "s.jpg", "photo_large": "l.jpg", "description": "A weekly chat.",
+        "country": "United States", "subscribers": "5K subscribers", "videos": "600 videos", "url": url})})())
+    got = P.profile("show", "Talking Drupal", fresh=True)["profile"]
+    assert (got["photo_large"], got["description"], got["country"]) == ("l.jpg", "A weekly chat.", "United States")
+    assert got["facts"] == ["YouTube channel", "5K subscribers", "600 videos"]

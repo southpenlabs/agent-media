@@ -311,6 +311,7 @@ def _no_live_jobs_server(monkeypatch):
     # A podcast link saved from the Media tab downloads through the phone
     # (podcast_links.start_fetch): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "0")
 
 
 @pytest.fixture(autouse=True)

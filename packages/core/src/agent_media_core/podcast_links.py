@@ -20,6 +20,15 @@ the file as its uri while the file is there, and ``yt:<url>`` when it is
 not — deleted to save space, or not downloaded yet — so a tap still plays it:
 `media book play yt:…` fetches it again through the phone.
 
+A YouTube link's show is its channel (David, 5 Nov 2026: "when adding a
+podcast from a YouTube link it should use the channel details for the show
+details"): YouTube's public oEmbed names it on adding, kept as ``channel``
+and ``channel_url`` (links kept before are named in the background,
+`_fill_channels`), the row's `author`; `channel_for(name)` gives
+media_people the channel's address for the show's profile.
+MEDIA_PODCAST_LINK_CHANNELS=0 asks oEmbed for none (pinned off in the
+tests' conftests).
+
 MEDIA_PODCAST_LINK_FETCH=0 saves links without downloading (pinned off in
 the tests' conftest).
 
@@ -119,15 +128,62 @@ def add(url: str, title: str = "", fetch: bool = True) -> dict:
     if not vid:
         return _add_episode(url, title)
     # YouTube's own title first: what comes with a share is often the
-    # sharing app's label, not the video's ("Share link", 2 Nov 2026).
-    title = _title(vid) or title.strip() or url
+    # sharing app's label, not the video's ("Share link", 2 Nov 2026). The
+    # channel is the show, so the title goes without it.
+    from . import music_recent
+    o = music_recent.oembed_data(vid) if os.environ.get("MEDIA_PODCAST_LINK_CHANNELS") != "0" else {}
+    channel, channel_url = str(o.get("author_name") or "").strip(), str(o.get("author_url") or "").strip()
+    title = (str(o.get("title") or "").strip() if channel else "") or _title(vid) or title.strip() or url
     links = [x for x in _load() if x.get("vid") != vid]
     links.append({"vid": vid, "url": f"https://www.youtube.com/watch?v={vid}",
-                  "title": title, "added": time.time()})
+                  "title": title, "channel": channel or None, "channel_url": channel_url or None,
+                  "added": time.time()})
     _save(links)
     fetching = fetch and file_for(vid) is None and start_fetch(vid)
     return {"added": "podcast", "id": f"podcast-link:{vid}", "title": title,
-            "fetching": bool(fetching)}
+            "show": channel or None, "fetching": bool(fetching)}
+
+
+_FILLING = [False]
+
+
+def _fill_channels() -> None:
+    """Name the channel of each YouTube link kept before links carried one
+    (oEmbed, once each, in the background); its title loses the channel
+    the older naming put after it."""
+    if _FILLING[0]:
+        return
+    todo = [x["vid"] for x in _load() if x.get("vid") and "channel" not in x]
+    if not todo:
+        return
+    import threading
+    _FILLING[0] = True
+
+    def run():
+        from . import music_recent
+        try:
+            for vid in todo[:40]:
+                o = music_recent.oembed_data(vid)
+                links = _load()
+                for x in links:
+                    if x.get("vid") == vid:
+                        x["channel"] = str(o.get("author_name") or "").strip() or None
+                        x["channel_url"] = str(o.get("author_url") or "").strip() or None
+                        if x["channel"] and o.get("title"):
+                            x["title"] = str(o["title"]).strip()
+                _save(links)
+        finally:
+            _FILLING[0] = False
+
+    threading.Thread(target=run, name="podcast-channels", daemon=True).start()
+
+
+def channel_for(name: str) -> Optional[str]:
+    """The YouTube address of the channel a saved link names `name` as its
+    show, or None."""
+    want = (name or "").strip().lower()
+    return next((x.get("channel_url") for x in _load()
+                 if x.get("channel_url") and (x.get("channel") or "").strip().lower() == want), None)
 
 
 def _add_episode(url: str, text: str) -> dict:
@@ -173,6 +229,8 @@ def items() -> list[dict]:
     from . import music_recent
 
     out = []
+    if os.environ.get("MEDIA_PODCAST_LINK_CHANNELS") != "0":
+        _fill_channels()
     for x in sorted(_load(), key=lambda x: -float(x.get("added") or 0)):
         if x.get("ep"):
             out.append({"id": f"podcast-link:ep-{x['ep']}", "uri": x["audio"], "title": x.get("title") or None,

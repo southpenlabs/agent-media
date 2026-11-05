@@ -8229,8 +8229,8 @@ downloaded version has been removed to save space".
   page's audio, else the iTunes directory searched with the shared words,
   a match only when half the episode's title is among them) and saved as
   `podcast-link:ep-<hash>`, played from that audio, never downloaded; 400
-  when no audio is found. Or a YouTube video, saved (`id` `podcast-link:<video id>`)
-  and downloaded in the background (`fetching`) through the phone, shrunk
+  when no audio is found. Or a YouTube video, saved (`id` `podcast-link:<video id>`,
+  `show` its channel, the show's profile in §6.47) and downloaded in the background (`fetching`) through the phone, shrunk
   to mono Opus (32 kb/s, about 15 MB an hour); listed in
   `GET /music/recent?kind=podcast&list=saved` (§6.9a). `practice`: as
   §6.45's add (`added` `youtube` or `podcast`). `book`: a YouTube video or
@@ -8352,7 +8352,14 @@ podcaster" … "yeah let's do the other profiles too".
   description.
 - **show**: the iTunes directory's podcast of that exact name: artwork,
   `facts` by whom, genre, episode count; the words from its feed; an
-  Apple Podcasts link.
+  Apple Podcasts link. A show that is a saved YouTube link's channel (the
+  Podcasts tab's Saved; its rows' `author`) is that channel instead
+  (`source: "youtube"`, 5 Nov 2026): its name and a YouTube link, and
+  where personal use allows reading the channel's page, its picture
+  (`photo`, `photo_large`), description, `country` and `facts` with its
+  subscribers and videos. A saved YouTube link is kept with its channel
+  (YouTube's oEmbed `author_name`, `author_url`) and its title without
+  it; links kept before are named in the background.
 - Every profile also has `country`, `state`, `city` (1 Nov 2026; David:
   "And can we have the same for podcasters") from Wikidata: an artist's
   birthplace or a group's place of formation (through the item MusicBrainz

@@ -20,7 +20,8 @@ after a week):
   for the author.
 - **show** — the iTunes podcast directory's show of that name: artwork,
   who makes it, genre, episode count, its Apple page; the words from the
-  show's own feed.
+  show's own feed. A show saved from YouTube links is its channel instead
+  (`_youtube_show`).
 
 Each profile also says where they are from — ``country``, ``state``,
 ``city`` — from Wikidata (David, 1 Nov 2026: "And can we have the same for
@@ -294,7 +295,36 @@ def _feed_words(feed: str) -> Optional[str]:
     return None
 
 
+def _youtube_show(name: str) -> Optional[dict]:
+    """A show saved from YouTube links is its channel (David, 5 Nov 2026:
+    "when adding a podcast from a YouTube link it should use the channel
+    details for the show details"): the channel's name and address from
+    YouTube's oEmbed, kept with the link; its picture, words, country and
+    counts where the YouTube add-on reads its page (youtube_addon)."""
+    from . import podcast_links, youtube_addon
+    url = podcast_links.channel_for(name)
+    if not url:
+        return None
+    got: dict = {}
+    addon = youtube_addon.get("youtube-metadata")
+    if addon is not None and hasattr(addon, "channel"):
+        try:
+            got = addon.channel(url) or {}
+        except Exception:  # noqa: BLE001 — the name and the link still stand
+            got = {}
+    country = got.get("country")
+    return {"source": "youtube", "name": got.get("name") or name,
+            "photo": got.get("photo"), "photo_large": got.get("photo_large"),
+            "description": got.get("description"), "region": country,
+            "country": country, "state": None, "city": None,
+            "facts": [x for x in ("YouTube channel", got.get("subscribers"), got.get("videos")) if x],
+            "links": [{"label": "YouTube", "url": got.get("url") or url}]}
+
+
 def _show(name: str) -> Optional[dict]:
+    yt = _youtube_show(name)
+    if yt:
+        return yt
     q = urllib.parse.urlencode({"term": name, "entity": "podcast", "limit": 10, "country": "AU"})
     hits = _json(f"{ITUNES_SEARCH}?{q}").get("results") or []
     hit = next((r for r in hits if _norm(r.get("collectionName", "")) == _norm(name)), None)

@@ -99,6 +99,7 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A podcast link saved from the Media tab downloads through the phone
     # (podcast_links.start_fetch): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "0")
     # A practice's length is looked up with yt-dlp or ffprobe in the
     # background (practice_library._fill_durations): never from a test.
     monkeypatch.setenv("MEDIA_PRACTICE_DURATIONS", "0")

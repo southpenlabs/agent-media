@@ -107,15 +107,25 @@ def _keep_titles(d: dict) -> None:
         pass
 
 
-def _oembed(vid: str) -> str:
-    """YouTube's public name for a video (oEmbed answers a datacenter IP,
-    where the video itself does not)."""
+def oembed_data(vid: str) -> dict:
+    """YouTube's public oEmbed answer for a video (`title`, `author_name`,
+    `author_url` — the channel), {} when it does not answer. oEmbed answers
+    a datacenter IP, where the video itself does not."""
     url = "https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(
         f"https://www.youtube.com/watch?v={vid}", safe="")
     try:
         with urllib.request.urlopen(url, timeout=4) as r:
             d = json.loads(r.read().decode())
     except Exception:  # noqa: BLE001 — a name is a nicety
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _oembed(vid: str) -> str:
+    """YouTube's public name for a video, with its channel after it unless
+    the title already says it."""
+    d = oembed_data(vid)
+    if not d:
         return ""
     title, who = str(d.get("title") or "").strip(), str(d.get("author_name") or "").strip()
     return f"{title} — {who}" if title and who and who.lower() not in title.lower() else title
