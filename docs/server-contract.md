@@ -8547,6 +8547,7 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   An add-on that fails is logged and left out; the built-in ids win.
 - Any signed-in device or the host; a guest device gets 403 `guest`
   (location is the owner's).
+- In `/features`: `map: true` (the app offers the Map entry only then).
 
 ### Pairing
 
