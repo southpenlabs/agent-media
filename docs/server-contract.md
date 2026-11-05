@@ -1429,6 +1429,14 @@ way: its `session` exists at once, with no process yet, and the answer has
 frees. Show "waiting for a free session", not as failed. (Before this a
 reply was refused 503 `code: "busy"`; an older server still does.)
 
+A new chat has no transcript until it starts, so its thread is made from
+the recorded words and its first message is back at once. While sessiond
+still holds a message, the thread marks the listener's copy of it with
+`"held": "busy"` (or `"restart"` while a restart is pending) (5 Nov 2026,
+threads.mark_held): show the waiting note on that message, since the
+waiting send has already retired against it. The mark goes once the host
+hands the message over.
+
 **Held for a restart** (19 Oct 2026): while a restart of the session host
 is pending (`restart_pending`, §6.1, §17 "Restarts"), a reply is not given
 to the agent but kept: the answer adds `"held": true` (with `queued: true`,

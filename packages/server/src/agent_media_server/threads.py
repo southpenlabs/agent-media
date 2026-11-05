@@ -442,10 +442,55 @@ def messages_for(session: str, lines: list, *, working: bool, live: bool,
                                 before=before, around=around, jump=jump)
     replies.mark(session, msgs)
     retract.mark(session, msgs)
+    mark_held(session, msgs)
     reactions.mark(session, msgs)
     # Files a reply names, as chips (file_links.py, §6.18).
     file_links.mark(msgs)
     return msgs, older
+
+
+def _words(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def mark_held(session: str, msgs: list) -> None:
+    """`held: "busy" | "restart"` on each of the listener's messages sessiond
+    is still holding for this headless thread (§6.3 "Held for a free slot",
+    "Held for a restart"), in place.
+
+    A new chat held for a free slot has no transcript yet, so its thread is
+    made from the recorded words (`messages_from_lines`): the listener's
+    message is back at once, the app's waiting send retires against it, and
+    its "queued" mark went with it — the words sat there unmarked for six
+    minutes (David, 5 Nov 2026: "I should at least get a queued response,
+    no?"). Marked here, every device shows it until the host hands it over
+    (its record's `held` empties). A held reply to a running thread is not
+    in its transcript until then, so nothing matches it."""
+    from . import sessiond
+
+    rec = sessiond.read_record(session) if session else None
+    held = [h for h in (rec or {}).get("held") or [] if isinstance(h, dict)]
+    if not held:
+        return
+    why = "restart" if sessiond.restart_view() else "busy"
+    taken: set[int] = set()
+    for h in held:
+        want = _words(h.get("text") or "")
+        if not want:
+            continue
+        # The newest of the listener's messages with these words (the
+        # recorded turn may drop a system block the held text keeps, so the
+        # message's words inside the held text also match).
+        for i in range(len(msgs) - 1, -1, -1):
+            m = msgs[i]
+            if i in taken or m.get("role") != "user" or m.get("peer"):
+                continue
+            got = _words(" ".join(p.get("text") or "" for p in m.get("parts") or []
+                                  if isinstance(p, dict) and p.get("type") == "text"))
+            if got and (got == want or got in want):
+                m["held"] = why
+                taken.add(i)
+                break
 
 
 def _messages_for(session: str, lines: list, *, working: bool, live: bool,
