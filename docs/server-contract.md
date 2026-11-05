@@ -4744,6 +4744,11 @@ data: {}
   n, key}` (§6.4) only when it is not `multiSelect`, `partial` or `several`
   and has options. A new question is a new `key`, which sends the list again
   though the state has not changed. Absent when the dialog could not be read.
+  **A `waiting` row carries its reply's chips** (6 Nov 2026):
+  `suggestions: [{text, source}]` as §6.2.1 has them, from the follow-up file
+  only (no ghost here), so a notification or the small bubble card can offer
+  them; a tap sends the chip's `text` as a message (`/reply`). Absent when
+  there are none; arriving a few seconds after the reply sends the list again.
 - `alerts` (27 Sep 2026; only with `?alerts=`): the alert store's
   **notices** (§6.17) after cursor `n` —
   `{"last": 57, "notices": [{"n", "id", "change", "level", "title", "detail",

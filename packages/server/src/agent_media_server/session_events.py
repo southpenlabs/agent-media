@@ -11,7 +11,9 @@ thread's one word.
                session, state or title changes (the whole list: it is small).
                A row in `approval` carries what it asks, trimmed (`brief`),
                so a notification can offer the answers; a new question is a
-               new `key`, so a change of question sends the list again
+               new `key`, so a change of question sends the list again. A
+               `waiting` row carries its latest reply's one-tap chips,
+               `suggestions` [{text, source}] (§6.2.1), when it has any
     alerts     {"last", "notices": [...]} — only when asked, `?alerts=<n>`:
                the alert store's notices after cursor n (alerts.notices),
                first on connecting, then whenever there are new ones. The
@@ -143,6 +145,27 @@ def with_approvals(rows: list[dict], raw: list[dict]) -> list[dict]:
     return out
 
 
+def with_suggestions(rows: list[dict]) -> list[dict]:
+    """`rows` with each `waiting` row's one-tap chips (§6.2.1;
+    docs/proposals/2026-11-06-one-tap-answers.md), so the notification and
+    the small bubble card can offer them. The follow-up file only, one
+    small read a row: no terminal is captured for the ghost here, and no
+    log is read for the reply's key — a waiting session's latest follow-up
+    is its latest reply's, as on the /conversation route."""
+    out = []
+    for r in rows:
+        if r["state"] == "waiting":
+            try:
+                chips = sessions.suggestions_for(r["session"], "")
+            except Exception:  # noqa: BLE001 — the state still goes out
+                log.exception("session events: suggestions of %s", r["session"])
+                chips = []
+            if chips:
+                r = {**r, "suggestions": chips}
+        out.append(r)
+    return out
+
+
 def reminders_due() -> list[dict]:
     """The `reminders` frame's rows: each due reminder with its thread's
     title, the soonest first."""
@@ -175,7 +198,7 @@ class _Watcher:
     def _read(self) -> None:
         try:
             raw = sessions.cached_states()[0]
-            rows = with_approvals(rows_of(raw), raw)
+            rows = with_suggestions(with_approvals(rows_of(raw), raw))
         except Exception:  # noqa: BLE001 — a failed sweep is not a change
             log.exception("session events: sweep failed")
             return

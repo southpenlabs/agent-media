@@ -123,6 +123,23 @@ def test_brief_marks_what_one_tap_cannot_answer():
     assert b["options"] == []
 
 
+def test_a_waiting_row_carries_its_chips_and_a_working_one_does_not(monkeypatch):
+    from agent_media_server import sessions
+    chips = [{"text": "Commit it", "source": "agent"}]
+    asked = []
+    def fake(session, pane, last_key=None):
+        asked.append((session, pane))
+        return chips if session == "a" else []
+    monkeypatch.setattr(sessions, "suggestions_for", fake)
+    rows = [{"session": "a", "title": "", "state": "waiting"},
+            {"session": "b", "title": "", "state": "working"},
+            {"session": "c", "title": "", "state": "waiting"}]
+    out = session_events.with_suggestions(rows)
+    assert out[0]["suggestions"] == chips
+    assert "suggestions" not in out[1] and "suggestions" not in out[2]
+    assert asked == [("a", ""), ("c", "")]
+
+
 def test_nothing_changed_sends_only_pings(server, screen):
     st = Stream(server, "/sessions/events?ping=0.2", AUTH)
     try:
