@@ -3110,6 +3110,16 @@ Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
   thread's `replay`. The Play on the app's reply notification sends it, so
   a thread is heard without opening the app. A server without it answers
   400 `"unknown action"`; the app then sends `replay` with the session.
+- `keep-reading` (6 Nov 2026), with `session` (the thread; 400 `keep-reading
+  needs a session` without a uuid-shaped one) → `{"ok": true, "lifted":
+  bool}`: Keep reading chosen after a send. The send's end of the read-out
+  (a `read` cut) is taken back, so a reply of the thread still speaking goes
+  on past the sentence it was to end at, with no gap; the prompt hook the
+  same send sets off leaves it be too (a `keep` stamp). `lifted` false: there
+  was no such cut. A reply it had already stopped stays stopped, so the app
+  sends this first and, once that reply has stopped (`spoken.resume`),
+  `replay-id` from there as before. A server without it answers 400
+  `"unknown action"`; the app then replays.
 - `then: "next"` on `replay-id` (3 Nov 2026), with `session` (the thread;
   400 `then "next" needs a session` without a uuid-shaped one, 400 `then
   must be "next"` for any other value): Keep reading after a send. Once

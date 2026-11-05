@@ -1739,6 +1739,27 @@ def session_reply_read(session: str, *, keep: bool = False,
     return request_session_speech_cut(session, "read", at)
 
 
+def lift_session_read_cut(session: str) -> bool:
+    """Keep reading, chosen after the send: take back the `read` cut that send
+    made, so a reply still speaking goes on past the sentence it was to end
+    at instead of stopping and being replayed (David, 6 Nov 2026: "we seem to
+    get a bit of a pause in the speech if the keep reading button is tapped
+    after sending the message"). A `keep` stamp goes in its place, so the
+    prompt hook the same send sets off, which may come later, leaves it be.
+    True when there was a `read` cut to lift; a reply already stopped by it
+    stays stopped (the caller replays it from where it ended)."""
+    session = (session or "").strip()
+    if not session:
+        return False
+    rec = _read_speech_cut(session)
+    had = "read" in rec
+    rec.pop("read", None)
+    rec["session"] = session
+    rec["keep"] = time.time()
+    _write_speech_cut(session, rec)
+    return had
+
+
 def _speech_read(session: str, seq: float) -> bool:
     """True when a reply submitted at `seq` has been read (a `read` cut)."""
     if not session:

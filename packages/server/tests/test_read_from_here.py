@@ -237,3 +237,26 @@ def test_replay_unheard_needs_a_thread(server, shelf, signed_in, replays):
     res, obj = call(server, "POST", "/speech/ctl",
                     {"action": "replay-unheard", "session": "../x"}, AUTH)
     assert res.status == 400 and replays == []
+
+
+def test_keep_reading_lifts_the_sends_end_of_the_reading(server, shelf, signed_in, replays, monkeypatch):
+    """Keep reading tapped after a send (6 Nov 2026): the send's end of the
+    read-out is taken back so the reply still speaking goes on, no replay."""
+    from agent_media_core.intake import submit as S
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(shelf / "kr-state"))
+    sid = "9bce6871-1164-43c7-bb6f-6064758ccae8"
+    S.session_reply_read(sid)
+    assert "read" in S.session_speech_cut(sid)
+    res, obj = call(server, "POST", "/speech/ctl", {"action": "keep-reading", "session": sid}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "lifted": True}
+    assert "read" not in S.session_speech_cut(sid) and replays == []
+    res, obj = call(server, "POST", "/speech/ctl", {"action": "keep-reading", "session": sid}, AUTH)
+    assert res.status == 200 and obj["lifted"] is False
+
+
+def test_keep_reading_needs_a_thread(server, shelf, signed_in, replays):
+    res, obj = call(server, "POST", "/speech/ctl", {"action": "keep-reading"}, AUTH)
+    assert res.status == 400 and obj["error"] == "keep-reading needs a session"
+    res, obj = call(server, "POST", "/speech/ctl", {"action": "keep-reading", "session": "../x"}, AUTH)
+    assert res.status == 400 and replays == []

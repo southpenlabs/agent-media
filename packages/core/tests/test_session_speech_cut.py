@@ -310,6 +310,37 @@ def test_the_reply_a_reply_starts_is_heard():
     assert len(sink.played) == 1 and not _row(state, new)["extras"].get("flushed")
 
 
+def test_keep_reading_after_the_send_lets_the_reply_read_on():
+    # Sent without Keep reading, then Keep reading tapped while the reply is
+    # still on its sentence: the cut is taken back and it reads on, no stop
+    # and replay (David, 6 Nov 2026: "a bit of a pause in the speech").
+    state = StateStore()
+    lifted = []
+
+    def on_play(n):
+        if n == 1:
+            S.session_reply_read(A)
+            lifted.append(S.lift_session_read_cut(A))
+        return False
+
+    sink = _Sink(on_play=on_play)
+    rid = _say("First sentence here. Second sentence here. Third one too.", A, state, sink)
+    whole = _Sink()
+    _say("First sentence here. Second sentence here. Third one too.", B, StateStore(), whole)
+    assert lifted == [True]
+    assert len(sink.played) == len(whole.played) > 1, "the reply stopped though Keep reading was chosen"
+    assert not _row(state, rid)["extras"].get("stopped_at")
+    # The prompt hook that same send sets off leaves it be.
+    assert S.session_reply_read(A) is None
+    assert "read" not in S.session_speech_cut(A)
+
+
+def test_keep_reading_after_the_send_with_nothing_cut():
+    assert S.lift_session_read_cut(A) is False
+    assert S.lift_session_read_cut("") is False
+    assert "read" not in S.session_speech_cut(A)
+
+
 def test_keep_reading_leaves_it_and_holds_off_the_hook_once():
     assert S.session_reply_read(A, keep=True) is None
     assert S.session_speech_cut(A) == {}

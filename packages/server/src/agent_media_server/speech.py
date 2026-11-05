@@ -29,7 +29,7 @@ from . import audio, auth, mic_state, sessions, threads
 _APP_SPEECH_ACTIONS = frozenset({
     "toggle", "skip-", "skip+", "para-", "para+", "jump-end",
     "prev", "replay", "replay-unheard", "replay-id", "again", "speed-", "speed+", "speed0", "vol-", "vol+", "mute",
-    "goto-sentence", "stop",
+    "goto-sentence", "stop", "keep-reading",
 })
 
 #: The highest sentence index a request may name. Far past any reply (the
@@ -189,6 +189,15 @@ def reply_read(session: str, keep: bool = False) -> None:
         session_reply_read(session, keep=keep)
     except Exception as e:  # noqa: BLE001 — the reply goes in either way
         print(f"reply: could not mark the reply read ({e})", file=sys.stderr)
+
+
+def keep_reading(session: str) -> bool:
+    """Keep reading after a send: lift the `read` cut that send made, so the
+    reply still speaking carries on (submit.lift_session_read_cut). True when
+    there was one to lift."""
+    from agent_media_core.intake.submit import lift_session_read_cut
+
+    return lift_session_read_cut(session)
 
 
 def has_cutoff(session: str) -> bool:

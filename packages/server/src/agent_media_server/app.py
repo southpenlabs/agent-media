@@ -3053,6 +3053,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # A key pressed here: on Automatic the speech comes here (speech_frames.used).
         from . import speech_frames as frames_hub
         frames_hub.used(auth.device_id(_bearer(h)) or None)
+        if action == "keep-reading":
+            # Keep reading chosen after the send (§6.5): the send's end of the
+            # read-out is taken back, so a reply still speaking goes on.
+            ks = str(body.get("session") or "")
+            if not sessions._SESSION.fullmatch(ks):
+                _json(h, 400, {"ok": False, "error": "keep-reading needs a session"})
+                return True
+            _json(h, 200, {"ok": True, "lifted": speech.keep_reading(ks)})
+            return True
         # `arg` is the turn index for prev/replay, kept by the app the way
         # the popup keeps hist_idx: 1 is the latest reply.
         # `replay-id` carries a history row id instead, which is not an
