@@ -64,8 +64,8 @@ it renders one answer and knows nothing of the host.
 - The repo's state: on the page now (branch, changed files, ahead and
   behind, the last commit).
 - ☰ → Projects: the recent ones, then an All projects link to every
-  project under the roots (`GET /projects`).
-- Built as: `GET /project` answers only the folder and the git state; the
+  project under the roots (`GET /project/list`).
+- Built as: `GET /project/info` answers only the folder and the git state; the
   chats come from the app's own thread list and the documents from
   `/docs`, so no thread rows are served twice. The page is
   `/project?name=<project>` in the app.

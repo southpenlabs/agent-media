@@ -2,13 +2,13 @@
 2026: a page of its own for a project picked from the menu;
 docs/proposals/2026-11-06-project-page.md).
 
-`GET /project?project=<name>` (or `?path=<folder>`) answers the folder a
+`GET /project/info?project=<name>` (or `?path=<folder>`) answers the folder a
 project lives in and its repo's state: branch, files changed, commits not
 pushed or not pulled, and the last commit. The page's chats come from the
 thread list the app already holds and its documents from `GET /docs`, so
 this answers only what the app cannot know.
 
-`GET /projects` lists every project under the roots (and the folders of
+`GET /project/list` lists every project under the roots (and the folders of
 their own), for the menu's All projects.
 """
 

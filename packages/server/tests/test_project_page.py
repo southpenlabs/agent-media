@@ -1,4 +1,4 @@
-"""`GET /project` and `GET /projects`: a project's page and every project
+"""`GET /project/info` and `GET /project/list`: a project's page and every project
 there is (project_page.py; docs/proposals/2026-11-06-project-page.md)."""
 
 from __future__ import annotations
@@ -30,20 +30,20 @@ def test_a_projects_page_and_the_list(tree, server, tmp_path, monkeypatch):
     from agent_media_server import git_state
     git_state._cache.clear()
 
-    status, got = _call(server, "GET", "/project?project=p-app")
+    status, got = _call(server, "GET", "/project/info?project=p-app")
     assert status == 200 and got["root"] == str(repo) and got["project"] == "p-app"
     g = got["git"]
     assert g["branch"] == "main" and g["changed"] == 1
     assert g["last"]["subject"] == "the first one" and g["last"]["at"] > 0
 
-    status, got = _call(server, "GET", "/project?path=" + str(proj / "plain"))
+    status, got = _call(server, "GET", "/project/info?path=" + str(proj / "plain"))
     assert status == 200 and "git" not in got and got["project"] == "p-plain"
 
-    for bad in ("/project?project=nope", "/project?path=" + str(proj), "/project"):
+    for bad in ("/project/info?project=nope", "/project/info?path=" + str(proj), "/project/info"):
         assert _call(server, "GET", bad)[0] == 404, bad
-    assert _call(server, "GET", "/project?project=p-app", bearer="bad")[0] == 401
+    assert _call(server, "GET", "/project/info?project=p-app", bearer="bad")[0] == 401
 
-    status, got = _call(server, "GET", "/projects")
+    status, got = _call(server, "GET", "/project/list")
     assert status == 200
     assert [(r["project"], r["folder"]) for r in got["projects"]] == [("p-app", "app"), ("p-plain", "plain")]
-    assert _call(server, "GET", "/projects", bearer="bad")[0] == 401
+    assert _call(server, "GET", "/project/list", bearer="bad")[0] == 401
