@@ -120,6 +120,16 @@ is never a button to find.
   custom actions for those who keep TalkBack running. How Android lets an
   app take raw gestures while TalkBack runs is to check; test with
   TalkBack users either way.
+- **Long press: suggestions or your own words.** It reads two or three
+  suggestions one at a time ("Reply yes. Suggest Friday. Remind me
+  tonight."), a swipe to move, a double tap to choose; the user can speak
+  instead at any point.
+- **Two fingers move between people.** Two fingers right or left: the
+  next or previous person or conversation; one finger stays in that
+  stack of messages.
+- **Stop: a palm over the screen, or "stop".** Halts the agent at once
+  and undoes its last send where the service allows (the proximity
+  sensor sees the palm).
 - **Confirming by sound.** Every gesture answers with a short earcon
   (`earcons.py`), so the user knows it landed without looking.
 
@@ -143,3 +153,8 @@ is never a button to find.
   - **what they did last time**: a swipe on before an item ends reads
     as too long, a swipe for more as too short, so it learns their taste.
   Always a swipe for more on any one item.
+- **Starting a briefing.** Any of these, each one the user can turn off:
+  earbuds in or the phone picked up, when anything is waiting; when the
+  user is free again after a call, client or meeting (as `catchup.py`
+  does now); a swipe on the lock screen or a spoken word; and set times
+  (morning, lunchtime, evening).
