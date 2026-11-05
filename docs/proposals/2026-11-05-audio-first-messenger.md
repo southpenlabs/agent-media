@@ -75,9 +75,19 @@ carers, drivers.
 - **Accessibility claims.** Only after testing with users, and against
   WCAG and Android's accessibility guidance.
 
-## Open questions for David
+## Decided (David, 5 Nov 2026)
 
-1. Which first: low vision, or a busy-handed trade you have contacts in?
-2. Phone-side bridges first, or official channels only (WhatsApp Business,
-   SMS, email) for a first version?
-3. A product of its own, or a mode of Sasonica?
+1. **Both audiences from the start**: one core built with low vision and
+   busy hands both in mind, not one after the other.
+2. **Official channels built in, phone-side bridges optional**: SMS,
+   email, Matrix and WhatsApp Business in the box; personal WhatsApp,
+   Messenger and the rest through bridges on the user's own phone, for
+   those who opt in, with the terms risk told plainly at that point.
+3. **A mode of Sasonica**, not a separate app.
+4. **The agent acts on its own** within rules the user sets, and tells
+   them afterwards (not drafts awaiting a yes). That makes the rules the
+   heart of the product: which contacts and kinds of message it may answer,
+   what it may book or spend, a spoken account of what it did in each
+   briefing, undo wherever the service allows, and one word to stop it.
+   The "agent sending for someone" risk above is now the main one to
+   design for.
