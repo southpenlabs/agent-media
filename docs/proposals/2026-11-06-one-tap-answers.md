@@ -69,6 +69,40 @@ the row shows "File in <label>?" with a tick, one tap tagging it
 (`POST /session/tags`). Dismissing it keeps it in Inbox and is
 remembered per chat.
 
+## 5. Actions, not only replies
+
+David, 6 Nov 2026: "let's also add actions rather than just replies"; asked
+which, he ticked all four: open something, listen or play, app controls,
+and server tasks.
+
+A chip can do something instead of sending words. The agent writes them
+beside its replies, each a label and what it does:
+
+`[[actions: Open the PR -> open https://github.com/… | Listen -> listen docs/x.md | New chat here -> new ~/projects/foo | Restart the canvas -> task restart canvas]]`
+
+The server reads the marker (stripped from the words and the speech like
+the others), checks each action, and serves only the ones it accepts, as
+`actions: [{label, kind, target}]` beside `suggestions`. The app renders
+them as chips with a small mark for their kind, and knows nothing more of
+the host than the answer says.
+
+- **open**: a https link, a file the server can serve (`media attach`'s
+  route), a thread (`/t/<id>`), or an app page (`/project?…`, `/map`,
+  `/docs?…`). Anything else is dropped.
+- **listen / play**: a document read aloud (the Documents page's Listen),
+  a clip, or music (`play <query>` goes the music skill's way).
+- **app**: what the app already does from its own keys: new chat in a
+  folder, remind me in…, Quiet for…, compact, rename. Sent to the endpoints
+  those keys use.
+- **task**: only a task named in the server's list (`GET /actions/tasks`:
+  `{name, label, confirm}`, from a server registry and add-ons, never a
+  shell line from the reply). A tap asks "Restart the canvas?" first, then
+  `POST /actions/run {session, task, key}`; the result comes back into the
+  thread as a note. A task the list does not hold is never shown.
+
+A tap on an action never sends a message; the agent hears of it only when
+it was a task (the note).
+
 ## Decided (David, 6 Nov 2026)
 
 1. Chips come from the agent's `[[replies:]]` marker, the follow-up
@@ -76,4 +110,5 @@ remembered per chat.
 2. A tap sends at once, with a few seconds' Undo.
 3. Built in order: suggested replies, then the same chips in the player,
    bubble and notification, then spoken options, then the Inbox space
-   suggestion.
+   suggestion. Actions (part 5) come after the chips are in, since they
+   share the row.
