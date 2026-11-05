@@ -91,3 +91,16 @@ carers, drivers.
    briefing, undo wherever the service allows, and one word to stop it.
    The "agent sending for someone" risk above is now the main one to
    design for.
+5. **Default before any rule: simple replies only.** Acknowledge,
+   confirm a time already agreed, say the user will get back to them.
+   Nothing that books, spends or speaks for the user on anything new
+   until a rule allows it.
+6. **Disclosure per contact.** The agent's messages carry a short tag
+   ("sent by my assistant") by default; the user can turn it off for a
+   contact who knows.
+7. **Testers.** David first, then people with low vision (someone he
+   knows or an organisation such as Vision Australia), therapists or spa
+   staff, and tradies or carers from his contacts.
+8. **Pricing: open.** Options on the table: a monthly subscription
+   (possibly NDIS-claimable), a free core with the acting agent paid, or
+   sold through employers, care providers or vision organisations.
