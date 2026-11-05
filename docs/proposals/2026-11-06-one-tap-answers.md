@@ -96,9 +96,19 @@ the host than the answer says.
   those keys use.
 - **task**: only a task named in the server's list (`GET /actions/tasks`:
   `{name, label, confirm}`, from a server registry and add-ons, never a
-  shell line from the reply). A tap asks "Restart the canvas?" first, then
+  shell line from the reply). A tap on one with `confirm` asks "Restart the canvas?" first, then
   `POST /actions/run {session, task, key}`; the result comes back into the
   thread as a note. A task the list does not hold is never shown.
+
+**Which ask first** (David, 6 Nov 2026: "not all actions should require a
+confirmation and the ones that do should be distinguishable"): each served
+action carries `confirm: true|false`, decided by the server, never by the
+reply. open, listen/play and app controls act at once (each is undone by
+going back, stopping or its own key); a task confirms when its entry in
+the server's list says so (a restart, a deploy, anything shared or hard to
+undo), and acts at once otherwise. A chip that confirms is drawn with a
+trailing "…" on its label and a bold border (David chose it, 6 Nov 2026;
+both survive e-ink), so it is told apart before the tap.
 
 A tap on an action never sends a message; the agent hears of it only when
 it was a task (the note).
