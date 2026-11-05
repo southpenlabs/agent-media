@@ -498,3 +498,15 @@ def test_the_sync_tells_of_rooms_left(tmp_path):
                          on_leave=lambda room, sec: got.append(room))
     s.poll_once()
     assert got == [OLD]
+
+
+def test_a_big_unnamed_group_is_titled_by_a_few_first_names(monkeypatch):
+    monkeypatch.setenv("MATRIX_SAM_ID", SAM)
+    r, _ = _room([], name="")
+    r.members = {ME: "David", SAM: "Sam", "@a:x": "Anna Bell", "@b:x": "Facebook user",
+                 "@c:x": "Cara Day", "@d:x": "Dee Ess", "@e:x": "Eve Fox"}
+    r.messages = [{"sender": {"id": "@e:x"}}, {"sender": {"id": "@b:x"}}]
+    # Eve wrote last; the placeholder is skipped; then the rest in order.
+    assert r.title() == "Eve, Anna, Cara +2"
+    r.members = {ME: "David", "@a:x": "Anna Bell", "@c:x": "Cara Day", "@d:x": "Dee Ess"}
+    assert r.title() == "Anna Bell, Cara Day, Dee Ess"

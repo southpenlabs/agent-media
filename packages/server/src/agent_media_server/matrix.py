@@ -94,6 +94,16 @@ def _q(room_id: str) -> str:
 #: A media message's `media` part (§6.29, room_media.py), by msgtype.
 _MEDIA = {"m.image": "image", "m.video": "video", "m.audio": "audio", "m.file": "file"}
 
+#: An unnamed group with more people than this is titled by this many first
+#: names and "+N" (Room.title).
+_TITLE_NAMES = 3
+
+
+def _placeholder(name: str) -> bool:
+    """A name a bridge gives someone it cannot see ("Facebook user",
+    "Instagram user"), or a bare Matrix id."""
+    return name.startswith("@") or name.casefold().endswith(" user")
+
 _KIND = {"m.image": "sent a photo", "m.video": "sent a video",
          "m.audio": "sent an audio clip", "m.voice": "sent a voice note",
          "m.file": "sent a file", "m.location": "shared a location"}
@@ -686,8 +696,22 @@ class Room:
         if self.name:
             return self.name
         me = (self.owner, os.environ.get("MATRIX_SAM_ID") or "")
-        others = [n for u, n in sorted(self.members.items()) if u not in me]
-        return ", ".join(others) or self.id
+        others = {u: n for u, n in sorted(self.members.items()) if u not in me}
+        if len(others) <= _TITLE_NAMES:
+            return ", ".join(others.values()) or self.id
+        # A big unnamed group (David, 6 Nov 2026: twenty names filled the
+        # row): the first names of whoever wrote last, then how many more.
+        # A bridge's placeholder ("Facebook user") is never one of the few.
+        recent = []
+        for m in reversed(self.messages):
+            u = m["sender"]["id"]
+            if u in others and u not in recent:
+                recent.append(u)
+        order = recent + [u for u in others if u not in recent]
+        picked = [u for u in order if not _placeholder(others[u])][:_TITLE_NAMES] \
+            or order[:_TITLE_NAMES]
+        firsts = [(others[u].split() or [u])[0] for u in picked]
+        return f"{', '.join(firsts)} +{len(others) - len(picked)}"
 
     def page(self, limit: int, before: str = "") -> tuple[list[dict], bool]:
         """The newest `limit` messages, or the `limit` before `before`; and
