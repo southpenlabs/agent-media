@@ -5867,6 +5867,11 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   characters) with `app_at`, written when it changes or an hour has passed;
   `media-visual-canvas devices` shows it, so an agent can tell what a phone
   has installed without adb. An older server answers 404 and the app goes on.
+  A device signed in with an account is also named, with its build, in this
+  server's report to the account's issuer (`{iss}/api/servers`,
+  servers_report.py: `devices: [{name, last_seen, app?, app_at?}]`, no ids or
+  addresses), sent again when its build changes, so sasonica.com's Account
+  page can offer the latest build to a phone that is behind.
 - `POST /device/view {"view": "list"|"page", "path"?}` or `{"view":
   "thread", "session", "path"?}` — what this device shows now, from its app
   as it moves (David, 5 Nov 2026: "it only mirrors the chat window and not

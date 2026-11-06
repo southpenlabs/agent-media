@@ -3415,7 +3415,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not dev:
             _json(h, 401, {"ok": False, "error": "a paired device only"})
             return True
+        before = next((d.get("app") for d in devices.list_devices() if d.get("id") == dev), None)
         got = devices.set_app(dev, _read_json(h) or {})
+        if got is not None and got != before:
+            # A new build: the account's list at sasonica.com hears of it
+            # (servers_report.py), so it can stop offering the update.
+            from . import servers_report
+
+            servers_report.report_soon(dev)
         _json(h, 200 if got is not None else 404, {"ok": got is not None, "app": got or {}})
     elif path == "/device/view":
         # What this device shows now, the chat list or a thread: a device

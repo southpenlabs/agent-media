@@ -14,6 +14,11 @@ else the running quick tunnel, else the address the last sign-in came in on.
 MEDIA_WEB_APP_URL, else `<api>/app` when this server serves the bundle itself
 (web_app.py; it is on the public listener too, so that holds for a tunnel
 address as well as a LAN one). MEDIA_SERVERS_REPORT=0 turns the reports off.
+
+`devices`: that account's devices here and the app build each says it runs
+(POST /device/app), so sasonica.com can offer the latest build to a phone
+that is behind (David, 7 Nov 2026: "see and download the latest build if
+you're not already on it"). A device whose build changes reports again.
 """
 
 from __future__ import annotations
@@ -92,9 +97,37 @@ def addresses() -> dict:
     return {"api": api, "web": web}
 
 
-def describe() -> dict:
-    return {"id": server_id(), "name": os.environ.get("MEDIA_SERVER_NAME", "").strip() or socket.gethostname(),
+#: At most this many of an account's devices go in a report, the latest seen first.
+MAX_DEVICES = 10
+
+
+def account_devices(device_id: str) -> list[dict]:
+    """The devices here of the account that enrolled `device_id`, each with
+    its name, when it was last seen and the app build it said it runs (no
+    ids, tokens or addresses). [] for a device with no account."""
+    rows = devices.list_devices()
+    me = next((d for d in rows if d.get("id") == device_id), None)
+    key = (str((me or {}).get("iss") or ""), str((me or {}).get("sub") or ""))
+    if not all(key):
+        return []
+    mine = [d for d in rows if (str(d.get("iss") or ""), str(d.get("sub") or "")) == key]
+    mine.sort(key=lambda d: float(d.get("last_seen") or 0), reverse=True)
+    out = []
+    for d in mine[:MAX_DEVICES]:
+        row = {"name": str(d.get("name") or "device")[:80], "last_seen": int(float(d.get("last_seen") or 0))}
+        if d.get("app"):
+            row["app"] = {k: v for k, v in d["app"].items() if k in ("build", "sha", "platform", "shell")}
+            row["app_at"] = int(float(d.get("app_at") or 0))
+        out.append(row)
+    return out
+
+
+def describe(device_id: str = "") -> dict:
+    body = {"id": server_id(), "name": os.environ.get("MEDIA_SERVER_NAME", "").strip() or socket.gethostname(),
             **addresses()}
+    if device_id:
+        body["devices"] = account_devices(device_id)
+    return body
 
 
 def _post(iss: str, access: str, body: dict) -> int:
@@ -116,7 +149,7 @@ def report(device_id: str) -> bool:
     iss, rt = devices.refresh_token_of(device_id)
     if not (iss and rt):
         return False
-    body = describe()
+    body = describe(device_id)
     try:
         status = _post(iss, app._account_access(device_id, iss), body)
         if status in (401, 403):

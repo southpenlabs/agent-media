@@ -605,3 +605,17 @@ def test_a_device_says_which_app_build_it_runs(server, device, capsys):
     assert devices.cli_devices([]) == 0
     assert "app build 1943 (f0cd50c) android" in capsys.readouterr().out
     assert call(server, "POST", "/device/app", {"build": "1"}, {})[0].status == 401
+
+
+def test_a_new_app_build_is_reported_to_the_account_and_the_same_one_is_not(server, device, monkeypatch):
+    # sasonica.com offers the latest build to a device that is behind, so it
+    # hears of a new one (servers_report.py; 7 Nov 2026).
+    from agent_media_server import servers_report
+    token, _ = device
+    soon = []
+    monkeypatch.setattr(servers_report, "report_soon", lambda did, base="": soon.append(did))
+    auth = {"Authorization": f"Bearer {token}"}
+    call(server, "POST", "/device/app", {"build": "1868"}, auth)
+    call(server, "POST", "/device/app", {"build": "1868"}, auth)
+    call(server, "POST", "/device/app", {"build": "1870"}, auth)
+    assert len(soon) == 2

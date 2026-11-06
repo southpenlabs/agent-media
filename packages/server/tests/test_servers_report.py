@@ -55,7 +55,7 @@ def test_one_report_per_account_through_its_latest_device(monkeypatch):
     assert servers_report.report_all() == 2
     assert sorted(a for _, a, _ in sent) == ["tok-d_new", "tok-d_two"]
     body = sent[0][2]
-    assert body["name"] == "red5" and body["id"] == servers_report.server_id() and set(body) == {"id", "name", "api", "web"}
+    assert body["name"] == "red5" and body["id"] == servers_report.server_id() and set(body) == {"id", "name", "api", "web", "devices"}
 
 
 def test_a_refused_token_is_refreshed_once(monkeypatch):
@@ -74,3 +74,23 @@ def test_off_means_no_thread(monkeypatch):
     monkeypatch.setattr(servers_report, "report", lambda did: called.append(did))
     servers_report.report_soon("d_1", "http://h:8781")
     assert called == [] and servers_report.addresses()["api"] == "http://h:8781"
+
+
+def test_a_report_names_the_accounts_devices_and_their_builds(monkeypatch):
+    rows = [
+        {"id": "d_phone", "name": "Pixel 8a", "iss": "https://cms.test", "sub": "1", "last_seen": 20.5,
+         "app": {"build": "1868", "sha": "6f61e01", "platform": "android", "web": "x"}, "app_at": 19.2,
+         "sha256": "secret", "rt": "secret", "last_ip": "10.0.0.1"},
+        {"id": "d_web", "name": "Sasonica in a browser", "iss": "https://cms.test", "sub": "1", "last_seen": 30},
+        {"id": "d_other", "name": "Someone else", "iss": "https://cms.test", "sub": "2", "last_seen": 40},
+        {"id": "d_paired", "name": "code pairing", "last_seen": 50},
+    ]
+    monkeypatch.setattr(devices, "list_devices", lambda: rows)
+    assert servers_report.account_devices("d_phone") == [
+        {"name": "Sasonica in a browser", "last_seen": 30},
+        {"name": "Pixel 8a", "last_seen": 20,
+         "app": {"build": "1868", "sha": "6f61e01", "platform": "android"}, "app_at": 19},
+    ]
+    assert servers_report.account_devices("d_paired") == []
+    assert "devices" not in servers_report.describe()
+
