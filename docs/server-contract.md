@@ -292,7 +292,12 @@ Everything a message can be pointed at.
   so the app's Archived filter shows them all.
   Then the conversations only a harness's store knows about (§6.16).
   **`at` is only on rows that are not live.** A session appears once, live
-  if it is live.
+  if it is live. An ended headless row's `at` is its last event, or the
+  newest message held for it (§6.3: a free slot, a restart, the usage
+  limit) when that is later: a thread moves up the list when a message is
+  sent to it, not when it is delivered (7 Nov 2026), and the cap on ended
+  headless rows counts that time too. A held message of the listener's
+  (not agent mail) also counts for `you_at` / `last_from_you` below.
 - `recap` (every row, 22 Sep 2026): the latest "where this thread was"
   summary for that session, `{"text", "at", "source"}`, or `null` — Claude
   Code's own "while you were away" paragraph (`"source": "claude"`), or the

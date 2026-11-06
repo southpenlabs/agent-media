@@ -1383,7 +1383,7 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
              and (driver.headless_enabled() or v.get("agent") == "antigravity")]
     live = [v for v in views if v.get("live")]
     ended = sorted((v for v in views if not v.get("live")),
-                   key=lambda v: -float(v.get("last_event_at") or 0))
+                   key=lambda v: -_headless_at(v))
     kept = {v["session"] for v in [v for v in ended if v["session"] not in flags][:HEADLESS_ENDED_ROWS]}
     ended = [v for v in ended if v["session"] in flags or v["session"] in kept]
     out = []
@@ -1393,7 +1393,14 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
         row = {"session": sid, "title": _headless_title(sid, v), "live": bool(v.get("live")),
                "pane": None}
         if not row["live"]:
-            row["at"] = round(float(v.get("last_event_at") or 0), 3)
+            row["at"] = round(_headless_at(v), 3)
+        # A message of the listener's held for it (a free slot, a restart, the
+        # usage limit) counts as written now, though not in the transcript
+        # yet: Show → Sent and Waiting for reply (merged into `you_at` below).
+        mine = [_held_time(m) for m in v.get("held") or []
+                if isinstance(m, dict) and not m.get("keep_pending")]
+        if any(mine):
+            row["_held_you_at"] = max(mine)
         row.update({"recap": recaps.recap_for(sid), "archived": sid in flags,
                     "rested": None if row["live"] else rest.row_mark(sid, False, marks),
                     "pinned": sid in pinned, "driver": "headless", "drivable": True,
@@ -1402,6 +1409,27 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
                     "_chosen": str(v.get("model") or "")})
         out.append(row)
     return out
+
+
+def _held_time(m) -> float:
+    try:
+        return float(m.get("at") or 0) if isinstance(m, dict) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _headless_at(v: dict) -> float:
+    """A sessiond row's time: its last event, or the newest message held for
+    it when that is later. A message held for a free slot (or a restart, or
+    the usage limit) has not reached the agent, so no event marks it, but it
+    was sent: the thread moves up the list when it is sent, not when it is
+    delivered (David, 7 Nov 2026: "does queueing a message change its
+    position in the chat list? I think it should")."""
+    try:
+        last = float(v.get("last_event_at") or 0)
+    except (TypeError, ValueError):
+        last = 0.0
+    return max([last, *(_held_time(m) for m in v.get("held") or [])])
 
 
 #: How far back the harnesses' own stores are read for the thread list, and
@@ -1649,6 +1677,9 @@ def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
             # (David, 4 Nov 2026).
             row["model"], row["model_label"] = session_model.of_row(row, paths, row.pop("_chosen", ""))
         row.pop("_chosen", None)
+        held_at = row.pop("_held_you_at", None)
+        if held_at and held_at > float(row.get("you_at") or 0):
+            row["you_at"], row["last_from_you"] = round(held_at, 3), True
     # Where each thread is: its directory and the project it is filed under,
     # for the small line under the title and the list's By-project order.
     from agent_media_core.deleted import deleted
