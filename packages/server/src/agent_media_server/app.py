@@ -413,6 +413,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
+    "/session/paths", "/session/file", "/session/file/link",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
@@ -685,7 +686,8 @@ def _byte_range(header: str | None, size: int) -> tuple[int, int] | None | bool:
     return a, min(b, size - 1)
 
 
-def _send_file(h: BaseHTTPRequestHandler, file, size: int, ctype: str) -> None:
+def _send_file(h: BaseHTTPRequestHandler, file, size: int, ctype: str,
+               headers: dict | None = None) -> None:
     """A file as the answer, read and written a chunk at a time — a shared
     video is not held in memory. It never changes once kept, so the caller
     may keep it for a day; `private`, as it came with a bearer. A `Range`
@@ -707,8 +709,11 @@ def _send_file(h: BaseHTTPRequestHandler, file, size: int, ctype: str) -> None:
     h.send_header("Accept-Ranges", "bytes")
     if rng:
         h.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-    h.send_header("Cache-Control", "private, max-age=86400")
+    h.send_header("Cache-Control", (headers or {}).get("Cache-Control", "private, max-age=86400"))
     h.send_header("X-Content-Type-Options", "nosniff")
+    for k, v in (headers or {}).items():
+        if k != "Cache-Control":
+            h.send_header(k, v)
     _cors(h)
     h.end_headers()
     left = length
@@ -2167,6 +2172,40 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, detail.pop("status", 404), {"ok": False, **detail})
             return True
         _send_file(h, detail["file"], detail["size"], detail["type"])
+    elif path == "/session/file":
+        # A file a reply names, opened from the app (session_files.py, §6.18a):
+        # its bytes, or `&text=1` its text for the viewer. A signed link
+        # (POST /session/file/link) stands in for the bearer.
+        from . import session_files
+
+        qs = parse_qs(query)
+        sess = (qs.get("session") or [""])[0]
+        path_q = (qs.get("path") or [""])[0]
+        if qs.get("sig"):
+            if not session_files.signed_ok(sess, path_q, (qs.get("exp") or [""])[0], (qs.get("sig") or [""])[0]):
+                _json(h, 403, {"ok": False, "error": "that link is not good (or no longer)"})
+                return True
+            ok, detail = session_files.open_file(sess, path_q, "", signed=True)
+        elif (qs.get("text") or [""])[0] == "1":
+            ok, detail = session_files.read_text(sess, path_q, _bearer(h))
+            _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+            return True
+        else:
+            ok, detail = session_files.open_file(sess, path_q, _bearer(h))
+        if not ok:
+            _json(h, detail.pop("status", 404), {"ok": False, **detail})
+            return True
+        from urllib.parse import quote as _q
+
+        extra = {"Cache-Control": "private, max-age=60",
+                 "Content-Security-Policy": "sandbox; default-src 'none'"}
+        ctype = detail["type"]
+        if detail["active"]:
+            # A page or script is never run from this origin: a download.
+            ctype = "application/octet-stream"
+        if detail["active"] or (qs.get("download") or [""])[0] == "1":
+            extra["Content-Disposition"] = f"attachment; filename*=UTF-8''{_q(detail['name'])}"
+        _send_file(h, detail["file"], detail["size"], ctype, extra)
     elif path == "/draft":
         # What the app's reply box was left holding for this session.
         ok, detail = drafts.draft_read((parse_qs(query).get("session") or [""])[0], _bearer(h))
@@ -3049,6 +3088,18 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = link_preview.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/paths":
+        # Which paths a reply names are files the thread may open (§6.18a).
+        from . import session_files
+
+        ok, detail = session_files.resolve(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/file/link":
+        # A link to one of them that needs no bearer (session_files.link).
+        from . import session_files
+
+        ok, detail = session_files.link(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
     elif path == "/upload/link":
         # A link to a shared file that needs no bearer, for a <video> (uploads.link).
         body = _read_json(h) or {}

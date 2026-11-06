@@ -5352,6 +5352,85 @@ Authorization: Bearer <device token>
   or a file that is not there is the same 404. 401/403 as `/reply`.
 - Streamed a chunk at a time; open cross-origin like the POST.
 
+#### Opening a shared file from its chip (6 Nov 2026)
+
+David: "Can you make files tappable from there please" — an APK sent with
+`media attach` showed as a chip that did nothing. Nothing changes on the
+wire: a chip that is not a picture, video or sound asks `POST /upload/link`
+for its signed link (any file `GET /upload` gives the caller) and hands it
+on. The Android app downloads it and opens it with Android (an APK goes to
+the package installer, which asks once to allow installs from the app; a
+PDF or anything else to the chooser); a browser opens the link, so the file
+is shown or downloaded as the browser does. `&download=1` on a signed
+`GET /session/file` link (below) answers it as an attachment.
+
+### 6.18a File paths a reply names — gated, not a guest (built 6 Nov 2026)
+
+David, 6 Nov 2026: file paths an agent writes in a reply
+(`docs/proposals/2026-11-06-one-tap-answers.md`,
+`packages/server/src/agent_media_server/space_suggest.py`, relative to the
+chat's folder, or absolute) should open on a tap. The app finds the words
+that look like paths and asks the server which are files the thread may
+open; only those become links, so "a/b" in prose stays words. Code:
+`agent_media_server/session_files.py`; pinned by
+`packages/server/tests/test_session_files.py`.
+
+- `POST /session/paths {"session", "paths": [<as written>, …]}` →
+  `{"ok", "cwd", "paths": {<as written>: {"path", "name", "size", "mtime",
+  "kind", "type", "line"?}}}`. Only the paths that resolve are in `paths`
+  (at most 64 looked at, each up to 1024 characters). `path` is the file's
+  real path; `kind` is how the app opens it: `doc` (md, org or txt that the
+  document reader §6.10 `GET /doc/read` reads), `text` (source, config, a
+  doc outside the reader's roots, an unknown file that reads as text and is
+  under 2 MB), `image`, `video`, `audio`, `pdf`, or `file` (anything else:
+  an APK, an archive). `type` is its Content-Type (an APK
+  `application/vnd.android.package-archive`). `line` is a line number
+  written after it (`app.py:42`, `app.py:42:7`, `app.py#L42`), which is
+  dropped before resolving. `file://`, quotes and backticks are dropped too.
+- **Where a path is read.** A relative path against the thread's folder
+  (`sessions.latest_cwd`), then its checkout's top; `~/` and absolute paths
+  as they are; `~user/` never.
+- **What may be opened.** The file (symlinks resolved) must lie inside the
+  thread's folder or its checkout (unless that folder is `/`, the home
+  folder or above it), a projects root or a project folder of its own, a
+  doc root (all as `doc_read.roots`), or the upload root. Inside it no part
+  of the way may be hidden (a dot name, except `.playwright-mcp` and
+  `.local-previews`), have "secret" in its name, or be a key store (`.ssh`,
+  `.gnupg`, `.password-store`, `.aws`, `.kube`, `.docker`); the file may
+  not be a secret by its name (`.env*`, `*.env`, `*.pem`, `*.key`, `*.p12`,
+  `*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`, `*.gpg`, `*.asc`, `id_rsa*` and
+  the like, `*credentials*`, `auth.json`, `devices.json`, `.netrc`,
+  `.pgpass`); nothing under /proc, /sys, /dev or /run, and no "secret"
+  anywhere in its real path. Only a regular file the server may read.
+  Anything else is left out of the answer, or 404 below.
+- `GET /session/file?session=<id>&path=<path>` → the file's bytes, streamed,
+  with Range, `Cache-Control: private, max-age=60`, `X-Content-Type-Options:
+  nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`. The
+  path is resolved as above (as written or the real path). html, htm,
+  xhtml, svg, xml, js and mjs come back as `application/octet-stream` with
+  `Content-Disposition: attachment`: never run from the server's origin.
+  `&download=1` makes any file an attachment.
+- `GET /session/file?session=<id>&path=<path>&text=1` → `{"ok", "path",
+  "name", "size", "kind", "text", "binary", "truncated"}`: the app's text
+  viewer. UTF-8 (bad bytes replaced), cut at 200 000 bytes (`truncated`),
+  `""` and `binary: true` when a NUL is in its first 8000 bytes.
+- `POST /session/file/link {"session", "path"}` → `{"ok", "url", "expires",
+  "type", "name", "kind"}`: `url` is `/session/file?session=…&path=<real
+  path>&exp=…&sig=…`, which opens that one file with no bearer for 6 hours
+  (an HMAC of the session, path and expiry under the host's signing key, as
+  `/upload/link`), for a browser's download or the phone's own viewer. The
+  file is checked again when the link is used. A wrong, altered or expired
+  link is 403.
+- Refusals: 400 not a session id (or `paths` not a list) · 401 as `/reply` ·
+  403 a guest device (`code: "guest"`) · 404 not a file this thread may
+  open. Open cross-origin like `/upload`.
+- The app: a path in a reply's prose or a table (backticks are dropped from
+  the words as shown, so a path in backticks counts; a code block's do not)
+  or a markdown link's target is asked about once per thread and path, a
+  message's paths in one request. `doc` opens in the document reader,
+  `text` in a text view with line numbers, `image` in the photo viewer,
+  anything else as a shared file's chip does (above).
+
 ### 6.19 Take back your last message — gated (built 27 Sep 2026)
 
 Code: `agent_media_server/retract.py`, the drivers' `interrupt(drop_queued=)`.
