@@ -3159,7 +3159,9 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             if not sessions._SESSION.fullmatch(ks):
                 _json(h, 400, {"ok": False, "error": "keep-reading needs a session"})
                 return True
-            _json(h, 200, {"ok": True, "lifted": speech.keep_reading(ks)})
+            lifted = speech.keep_reading(ks)
+            print(f"speech/ctl: keep-reading {ks[:8]} -> lifted={lifted}", file=sys.stderr)
+            _json(h, 200, {"ok": True, "lifted": lifted})
             return True
         # `arg` is the turn index for prev/replay, kept by the app the way
         # the popup keeps hist_idx: 1 is the latest reply.
