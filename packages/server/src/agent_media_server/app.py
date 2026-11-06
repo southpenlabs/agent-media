@@ -531,6 +531,9 @@ CONTACT_MAIL = re.compile(r"/contacts/([0-9a-f-]{36})/mail")
 ROOM_AVATAR = re.compile(r"/rooms/([0-9a-f-]{36})/avatar")
 # A room's photo, video, voice note or file, fetched when asked (room_media.py, §6.29).
 ROOM_MEDIA = re.compile(r"/rooms/([0-9a-f-]{36})/media/([^/]+)")
+#: A practice video by signed link (§6.45 "Watching"): fetched by the app's
+#: page to keep offline, so it answers another origin too.
+PRACTICE_FILE = re.compile(r"/practice/files/[^/]+")
 # An edit from the card, written back to Google (contacts_edit.py, §6.25).
 CONTACT_EDIT = re.compile(r"/contacts/([0-9a-f-]{36})/edit")
 # The phone's address book read again, back from Google's editor (contacts_edit.py, §6.25).
@@ -560,7 +563,7 @@ def cors_path(path: str) -> bool:
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
-                                                        CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA,
+                                                        CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
                                                         *BRIDGE_ROUTES))
 

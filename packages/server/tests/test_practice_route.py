@@ -144,6 +144,8 @@ def test_a_video_file_is_watched_by_signed_link(server, shelf, signed_in, _folde
     res, body = call(server, "GET", obj["video"])          # no bearer: the link is it
     assert res.status == 200 and res.getheader("Content-Type") == "video/mp4"
     assert body == b"0123456789" * 20
+    # The app's page saves it offline from another origin.
+    assert res.getheader("Access-Control-Allow-Origin") == "*"
     res, body = call(server, "GET", obj["video"], None, {"Range": "bytes=0-9"})
     assert res.status == 206 and body == b"0123456789"
     res, _ = call(server, "GET", obj["video"].split("?")[0] + "?sig=" + "0" * 32)
@@ -165,3 +167,12 @@ def test_play_from_a_point_takes_only_seconds(server, shelf, signed_in):
     audio = next(i for i in obj["items"] if i["source"] == "file")
     res, obj = call(server, "POST", "/practice", {"action": "play", "id": audio["id"], "at": "soon"}, AUTH)
     assert res.status == 400 and "seconds" in obj["error"]
+
+
+def test_keep_takes_only_a_youtube_practice(server, shelf, signed_in):
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    audio = next(i for i in obj["items"] if i["source"] == "file")
+    res, obj = call(server, "POST", "/practice", {"action": "keep", "id": audio["id"]}, AUTH)
+    assert res.status == 400
+    res, obj = call(server, "POST", "/practice", {"action": "unkeep", "id": "yt:AAAAAAAAAAA"}, AUTH)
+    assert res.status == 404

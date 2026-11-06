@@ -24,6 +24,12 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_PRACTICE_DIR", str(tmp_path / "Practice"))
     monkeypatch.setattr(L, "_fetch", lambda url, timeout=15.0: FEED)
     monkeypatch.setattr(L, "_yt_title", lambda url: "")
+    # Never the real YouTube add-on (it downloads on the phone), and a
+    # video's sound got ready inline, so no thread outlives its test.
+    monkeypatch.setattr(L, "_downloads_addon", lambda: None)
+    inline = L.prepare_sound
+    monkeypatch.setattr(L, "prepare_sound", lambda it, background=True: inline(it, background=False))
+    L._fetching.clear()
 
 
 def test_parse_feed_keeps_audio_episodes():
@@ -420,3 +426,54 @@ def test_an_extracted_sound_whose_video_is_gone_is_deleted(tmp_path):
     d.mkdir(parents=True)
     (d / "0123456789ab.m4a").write_bytes(b"x")
     assert [f.name for f in L._keep_within_cap()] == ["0123456789ab.m4a"]
+
+
+def test_a_youtube_practice_kept_small_for_offline(monkeypatch):
+    # David, 6 Nov 2026: "an option for downloading the video too", small.
+    # The add-on is a fake: nothing reaches the phone.
+    asked = []
+
+    class Addon:
+        LOW_AUDIO = "low"
+
+        def fetch_video(self, vid, dest):
+            asked.append(("video", vid))
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"Flow [{vid}].mp4").write_bytes(b"mp4")
+            return dest / f"Flow [{vid}].mp4"
+
+        def fetch_audio(self, vid, dest, fmt="bestaudio"):
+            asked.append(("audio", vid, fmt))
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"Flow [{vid}].webm").write_bytes(b"opus")
+            return dest / f"Flow [{vid}].webm"
+    monkeypatch.setattr(L, "_downloads_addon", lambda: Addon())
+    L.add("https://youtu.be/AAAAAAAAAAA", title="Flow")
+    assert next(i for i in L.items() if i["source"] == "youtube")["kept"] is None
+    assert "video" not in L.watch("yt:AAAAAAAAAAA")
+    L._fetch_small("AAAAAAAAAAA", video=True)            # what keep runs in the background
+    assert next(i for i in L.items() if i["source"] == "youtube")["kept"] == "ready"
+    kept = L.keep("yt:AAAAAAAAAAA")
+    assert kept["kept"] == "ready" and kept["video"].startswith("/practice/files/yt-AAAAAAAAAAA.mp4?sig=")
+    got = L.watch("yt:AAAAAAAAAAA")
+    assert got["youtube_id"] == "AAAAAAAAAAA"
+    name, _, sig = got["video"].removeprefix("/practice/files/").partition("?sig=")
+    assert name == "yt-AAAAAAAAAAA.mp4" and L.served(name, sig)[0].read_bytes() == b"mp4"
+    # Watching got the sound ready, small, in the practice's own folder.
+    assert ("audio", "AAAAAAAAAAA", "low") in asked
+    assert L._yt_sound("AAAAAAAAAAA").read_bytes() == b"opus"
+    # Removed: the kept video and the sound go with it, and the link is dead.
+    assert L.remove("yt:AAAAAAAAAAA")
+    assert L.kept_video("AAAAAAAAAAA") is None and L._yt_sound("AAAAAAAAAAA") is None
+    assert L.served(name, sig) is None
+
+
+def test_only_a_practice_with_a_video_is_kept(tmp_path):
+    assert L.keep("nothing")["status"] == 404
+    (tmp_path / "Practice").mkdir()
+    (tmp_path / "Practice" / "Flow.mp4").write_bytes(b"x")
+    (tmp_path / "Practice" / "Nidra.mp3").write_bytes(b"x")
+    files = {i["title"]: i["id"] for i in L.items() if i["source"] == "file"}
+    assert L.keep(files["Nidra"])["status"] == 400
+    got = L.keep(files["Flow"])                       # a file: ready at once, its link
+    assert got["kept"] == "ready" and L.served(*got["video"].removeprefix("/practice/files/").split("?sig="))

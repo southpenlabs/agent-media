@@ -8295,7 +8295,24 @@ names the first time they are read.
   practices' files in the library (not one a podcast link also keeps) and
   the extracted sounds, the longest unplayed deleted first, never the one
   last played; an extracted sound whose video left the folder is deleted.
-  Removing a YouTube practice deletes its download too. 404 for an id not in the
+  Removing a YouTube practice deletes its download too.
+  A YouTube practice's sound is fetched small (the add-on's `LOW_AUDIO`,
+  about 50 kbps Opus) into `<cache>/practice-sound/yt/`, and `play` takes it
+  from there when it is there (David: "I'd even go lower quality to save
+  space. same for the audio").
+- **Kept offline** (6 Nov 2026; David: "an option for downloading the video
+  too", offline on the phone). `POST /practice {"action": "keep", "id"}`
+  (a practice with a video, else 400; 501 without the add-on) fetches a YouTube practice's
+  video small (`LOW_VIDEO`, 360p mp4, downloaded on the phone, kept in
+  `<cache>/practice-video/` within the same cap) in the background →
+  `{"ok", "id", "kept": "fetching" | "ready", "video"?}` (`video`, the signed
+  link, once ready; a video file in the folder is ready at once); every YouTube item in the
+  list carries `kept` (null, "fetching", "ready"). Once ready, `watch`
+  answers `video` beside `youtube_id`: the copy's signed link
+  (`/practice/files/yt-<id>.mp4?sig=`), which the app saves into its own
+  storage to watch offline. `{"action": "unkeep", "id"}` deletes the
+  server's copy (404 when none). `GET /practice/files/…` answers another
+  origin (`Access-Control-Allow-Origin: *`) so the app's page can fetch it. 404 for an id not in the
   list, 400 for one with no video. `play` on a video still plays only its
   sound on the book channel.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
