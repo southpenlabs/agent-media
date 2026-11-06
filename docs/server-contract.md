@@ -755,6 +755,14 @@ words for older clients. A tap sends the chip's `text` as an ordinary
 message (§6.4). The thread stream's `suggestion` event carries the same
 list as `replies` beside its `text`.
 
+In a chat with people (a Matrix room, §6.25; 7 Nov 2026) the chips are up
+to three short answers to the newest message when it is someone else's,
+`source: "model"`, asked of MEDIA_PRIVATE_MODELS only (none set: none) in
+the background and kept per room for that message (room_replies.py); they
+arrive within a re-read of the newest page. A tap sends the words as any
+message; undone, the message is unsent (§6.39), a room having no
+take-back. MEDIA_ROOM_REPLIES=0 turns them off.
+
 #### `GET /conversation/log?item=<item>` · `?session=<session>` — gated
 
 The conversation — the chat itself — as **messages** read from the agent's

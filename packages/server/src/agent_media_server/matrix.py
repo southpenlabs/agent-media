@@ -1148,8 +1148,16 @@ def envelope(r: Room, *, limit: int, before: str = "", around: str = "",
         if around:
             jump = {"id": around, "found": False, "newer": False}
     _join_speech(r.thread, messages)
+    # One-tap answers to the newest message, when it is someone else's
+    # (room_replies.py): on the newest page only.
+    chips: list[dict] = []
+    if not before and win is None:
+        from . import room_replies
+
+        chips = room_replies.chips(r.thread, messages)
     out = {"session": r.thread, "lines": [], "messages": messages, "older": older,
-           "pending": False, "working": None, "approval": None, "suggestion": "", "suggestions": [],
+           "pending": False, "working": None, "approval": None,
+           "suggestion": chips[0]["text"] if chips else "", "suggestions": chips,
            "recap": None, "context": None,
            "room": r.info()}
     if jump is not None:
