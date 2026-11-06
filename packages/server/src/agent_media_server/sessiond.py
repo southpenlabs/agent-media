@@ -2085,7 +2085,12 @@ class Supervisor:
                 s.result_at = now
                 s.set_state("approval" if s.pending else "waiting")
                 self._drain_cut(s, now)
-                if s.turns == 1 and not s.auto_titled and not obj.get("is_error"):
+                # The first result, however many messages joined that turn
+                # (one sent mid-turn made it 2, and the thread was never
+                # named; David, 7 Nov 2026). `auto_titled` keeps it to once a
+                # process; a resumed unnamed thread is named at its next
+                # result, and `name_unnamed` passes over a named one.
+                if s.turns >= 1 and not s.auto_titled and not obj.get("is_error"):
                     s.auto_titled = True
                     threading.Thread(target=self._auto_title, args=(s,), daemon=True,
                                      name="auto-title").start()

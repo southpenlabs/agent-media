@@ -1006,6 +1006,18 @@ def test_the_first_turn_names_a_thread_nobody_has_named(host, monkeypatch):
     assert host.sup.get(sid)["turns"] == 1
 
 
+def test_a_message_sent_during_the_first_turn_does_not_stop_the_naming(host, monkeypatch):
+    from agent_media_server import threads
+
+    monkeypatch.setattr(threads, "is_named", lambda s: False)
+    asked = _names(monkeypatch)
+    sid = start(host, "slow: 0.6")
+    wait_for(lambda: state(host, sid) == "working")
+    driver.headless_driver().send(sid, "", "reply: and a tip too")
+    wait_for(lambda: asked)
+    assert asked == [sid]
+
+
 def test_a_thread_that_already_has_a_name_keeps_it(host, monkeypatch):
     from agent_media_server import threads
 
