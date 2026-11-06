@@ -4353,7 +4353,8 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # it: its zettels, the to-dos and notes linking it (org_related.py).
         from . import org_related
 
-        ok, detail = org_related.related(arg("session"), bearer)
+        ok, detail = org_related.related(arg("session"), bearer,
+                                         private=arg("private") == "1")
     elif method == "GET" and path == "/org/todos":
         ok, detail = org.todos(arg("q"), bearer)
     elif method == "POST" and path == "/org/link":

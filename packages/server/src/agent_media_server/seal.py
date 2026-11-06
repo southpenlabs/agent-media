@@ -80,8 +80,9 @@ def bundle_path(session: str) -> Path:
 
 
 def _key_file() -> Path:
-    return Path(os.environ.get("MEDIA_SEAL_KEY_FILE") or os.environ.get("SOPS_AGE_KEY_FILE")
-                or Path.home() / ".config" / "sops" / "age" / "keys.txt").expanduser()
+    from agent_media_core import private_cards
+
+    return private_cards.key_file()
 
 
 def _recipient() -> str:
@@ -305,6 +306,11 @@ def seal(session: str) -> dict:
         sealed.unmark(session)
         dest.unlink(missing_ok=True)
         raise
+    # A private thread's card (private_index.py), while its transcript can
+    # still be read: title, keywords and a local embedding, sealed too.
+    from . import private_index
+
+    report["card"] = private_index.card_at_seal(session, index["title"], cwd, project or "")
     # Read back whole: only now does the plaintext go.
     conn = sqlite3.connect(default_db_path(), timeout=10.0)
     try:

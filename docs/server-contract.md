@@ -8856,6 +8856,44 @@ thread's roam id (a to-do's `:SESSION:`).
   for a link to a thread's node (`roam/sessions/`). `path` is still there
   (the node), so an older app opens the node as before; a newer one opens
   the thread.
+- **Private threads, opt-in** (David, 7 Nov 2026, thread a0910dbc).
+  `GET /session/related?session=<sid>&private=1` adds `"private":
+  [{session, private: true, sealed, at, cwd, project, score}]`, the private
+  threads nearest this one, best first, at most 5. Without `private=1` the
+  key is absent and nothing private is opened. Private threads are never in
+  the roam graph (agent-sessions skips them); each sealed one has a card
+  instead, `<state_dir>/sealed/<sid>.card.age`, age-encrypted to the seal
+  key (`MEDIA_SEAL_*` / `SOPS_AGE_*`, as `/session/seal`): JSON `{session,
+  title, keywords, embedding, model, at, cwd, project}`. Code:
+  `agent_media_core/private_cards.py`, `private_index.py`; tests
+  `test_private_cards.py`, `test_private_index.py`.
+  - Written by `seal.seal` for a private-marked thread, before its
+    plaintext goes, and backfilled by each reaper pass (3 a pass) for one
+    sealed without a card: from agent-media's bundle or agent-private's
+    sealed transcript (`~/.claude/projects/*/<sid>.jsonl.age`). One that
+    does not decrypt is tried again only when its file changes
+    (`private-cards-tried.json`).
+  - The embedding is local Ollama only (`MEDIA_PRIVATE_OLLAMA`, default
+    `http://127.0.0.1:11434`; `MEDIA_PRIVATE_EMBED_MODEL`, default
+    `nomic-embed-text`). A non-loopback host is used only when
+    `MEDIA_PRIVATE_MODELS` names the model; with Ollama down a card has
+    keywords alone and matches by keyword overlap (Jaccard >= 0.15);
+    embeddings match at cosine >= 0.70.
+  - The cards are decrypted in memory for that one request, never written
+    in plain, and nothing is cached. The thread is matched by its own card
+    when it has one, else by its title and its person's messages (embedded
+    locally).
+  - A row carries no title, keywords or words: only what a sealed row in
+    the list shows. `sealed` is whether agent-media holds it sealed (an
+    unsealed thread keeps its card); opening a sealed one is
+    `POST /session/seal {"sealed": false}`, which the app asks before.
+  - Deleting a thread (`forget`) deletes its card; unsealing keeps it.
+  - The start-of-chat related note (intake/context.py) may name earlier
+    private threads, with titles, in a private chat only; an ordinary
+    chat's hook never reads the cards.
+  - The app: an "Include private" lock key at the foot of the Related
+    sheet, off each time the sheet opens and never stored; private rows
+    show a lock.
 
 ### Pairing
 

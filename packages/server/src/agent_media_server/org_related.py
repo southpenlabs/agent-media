@@ -15,7 +15,8 @@ The graph, as agent-sessions writes it into the Org tree (org.py's root):
       → {"session", "title",
          "related": [{"session", "title", "score", "why": [{"note", "path", "via"}]}],
          "zettels": [{"path", "title", "draft"?}],
-         "links":   [{"path", "at", "title", "state", "kind": "todo"|"note"}]}
+         "links":   [{"path", "at", "title", "state", "kind": "todo"|"note"}],
+         "private": [...]}   # only with ?private=1 (private_index.rows_for)
 
 `related` walks thread → its zettels → their Related neighbours (and the
 zettels whose Related lists name one of its own) → those zettels' source
@@ -258,12 +259,24 @@ def related_for(sid: str, *, limit: int = RELATED_LIMIT) -> dict:
     }
 
 
-def related(sid: str, bearer: str) -> tuple[bool, dict]:
+def related(sid: str, bearer: str, *, private: bool = False) -> tuple[bool, dict]:
+    """The route. `private` (`?private=1`, the app's "Include private" key)
+    adds `private`: the private threads nearest this one, from their sealed
+    cards (private_index.py), decrypted for this ask only. Without it the
+    cards are never opened."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
     sid = (sid or "").strip()
     if not sid or not re.fullmatch(r"[\w.-]{1,128}", sid):
         return False, {"error": "which session?", "status": 400}
-    return True, related_for(sid)
+    got = related_for(sid)
+    if private:
+        from . import private_index
+
+        try:
+            got["private"] = private_index.rows_for(sid)
+        except Exception:  # noqa: BLE001 — the graph's answer stands without it
+            got["private"] = []
+    return True, got
 

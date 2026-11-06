@@ -870,6 +870,14 @@ def run(mode: str | None = None, *, as_json: bool = False, write_log: bool = Tru
     # Sealing a private thread does not wait on MEDIA_REAP_MODE: privacy is
     # not something a host opts into by letting the reaper close panes.
     lines += seal_private(now, apply=(os.environ.get("MEDIA_PRIVATE_SEAL", "1").strip() != "0"))
+    # A card for each private thread sealed without one (private_index.py).
+    try:
+        from . import private_index
+
+        lines += [f"{datetime.fromtimestamp(now).astimezone().isoformat(timespec='seconds')} {ln}"
+                  for ln in private_index.backfill()]
+    except Exception as e:  # noqa: BLE001 — the reaper's own work is done
+        print(f"reap: private cards failed ({e})", file=sys.stderr)
     try:
         lines += recap_quiet(now)
     except Exception as e:  # noqa: BLE001 — the reaper's own work is done

@@ -13,8 +13,9 @@
    conversations that asked the same question share one).
 4. Its item on each Audiobookshelf the host publishes to
    (`book_tracks._abs_ready_all`), found by folder the way export finds it.
-5. Its search rows (`search.forget`), and its flags: archived, pinned,
-   quiet, rested, moved, draft.
+5. Its search rows (`search.forget`), its private card if it has one
+   (`private_cards`, not backed up: it is only an index), and its flags:
+   archived, pinned, quiet, rested, moved, draft.
 
 Nothing is thrown away blind. Before any of it, the history rows and the
 manifest are written, and the folder is moved, under
@@ -156,6 +157,8 @@ def apply(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
             rest.clear_rested(s)
             moves.forget(s)
             drafts._draft_path(s).unlink(missing_ok=True)
+            from agent_media_core import private_cards
+            got["card"] = private_cards.forget(s)
             got["backup"] = str(keep)
     finally:
         conn.close()

@@ -243,6 +243,12 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     from agent_media_core import antigravity, claude_models
     from agent_media_server import session_settings
 
+    # The private index (private_cards.py): never this machine's Ollama or
+    # its seal key; a test that wants either sets its own.
+    monkeypatch.setenv("MEDIA_PRIVATE_OLLAMA", "http://127.0.0.1:9")
+    for k in ("SOPS_AGE_KEY_FILE", "SOPS_AGE_RECIPIENT"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MEDIA_SEAL_KEY_FILE", str(tmp_path / "no-seal-key.txt"))
     monkeypatch.setattr(claude_models, "models", lambda **_: [])
     monkeypatch.setattr(session_settings, "_models_memo", (0.0, []))
     antigravity.forget()
