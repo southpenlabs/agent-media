@@ -2486,7 +2486,8 @@ ahead.
     music / Show the reply, Full screen, a Now playing key on the speech
     sheet; thinking lines do not take over). Steps 2-4 (a video for what plays, a separate
     video channel, the wall reading the same stage) not started.
-    **Big screens DONE 6 Nov 2026** (David: "assigning now playing to a
+    **Big screens DONE 6 Nov 2026** (agent-media `2d69d0f0`, sasonica-app
+    `cdd93415`; David: "assigning now playing to a
     large screen like a TV or projector", both ways; contract §6.21h,
     `stage.py`; the proposal's "Big screens"): Now playing's Show on… sends
     it to a paired screen, which opens it full screen and stays while the
