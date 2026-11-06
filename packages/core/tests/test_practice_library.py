@@ -339,3 +339,31 @@ def test_only_a_video_can_be_watched(tmp_path):
     assert "video" not in audio
     assert L.watch(audio["id"])["status"] == 400
     assert L.watch("/etc/passwd")["status"] == 404
+
+
+def test_watching_pauses_the_same_practice_heard_aloud(tmp_path, monkeypatch):
+    # David, 6 Nov 2026: "Add the pause too". The book channel is a fake:
+    # nothing here reaches a player.
+    from agent_media_core import mcp_server
+    d = tmp_path / "Practice"
+    d.mkdir()
+    (d / "Flow.mp4").write_bytes(b"x")
+    (d / "Nidra.mp3").write_bytes(b"x")
+    vid = next(i for i in L._files() if i.get("video"))
+    other = next(i for i in L._files() if not i.get("video"))
+    paused = []
+    now = {"uri": vid["_uri"], "target": "phone"}
+
+    class FakeState:
+        def get_now_playing(self, sink):
+            return now
+    monkeypatch.setattr(mcp_server, "_state", lambda: FakeState())
+    monkeypatch.setattr(mcp_server, "book_pause", lambda target="": paused.append(target) or {"ok": True})
+
+    L.mark_playing(other["_uri"])                  # another practice was last played
+    assert "paused" not in L.watch(vid["id"]) and paused == []
+    L.mark_playing(vid["_uri"])
+    now["uri"] = "/books/some-audiobook.m4b"       # the book channel moved on since
+    assert "paused" not in L.watch(vid["id"]) and paused == []
+    now["uri"] = vid["_uri"]                       # this one, heard aloud
+    assert L.watch(vid["id"])["paused"] is True and paused == ["phone"]

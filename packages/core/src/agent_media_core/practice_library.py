@@ -915,21 +915,41 @@ def watch(item_id: str) -> dict:
     a YouTube link's id, for YouTube's own embedded player, or a signed
     link to a video file in the Practice folder (`GET /practice/files/
     <hash><ext>?sig=`, relative to the server, good for that one file).
-    Counted as a play. ``{"ok": False}`` for anything without a video."""
+    Counted as a play. If the book channel is playing this same practice
+    aloud, it is paused first (`paused: true`; David, 6 Nov 2026: "Add the
+    pause too"), so its sound is not heard under the video.
+    ``{"ok": False}`` for anything without a video."""
     it = find(item_id)
     if not it:
         return {"ok": False, "error": f"nothing saved as {item_id!r}", "status": 404}
     kind = it.get("video")
+    if kind not in ("youtube", "file"):
+        return {"ok": False, "error": "that practice has no video", "status": 400}
+    note_play(it["id"])
+    out = {"ok": True, "id": it["id"], "title": it.get("title")}
+    if _pause_if_heard(it):
+        out["paused"] = True
     if kind == "youtube":
-        note_play(it["id"])
-        return {"ok": True, "id": it["id"], "title": it.get("title"),
-                "youtube_id": it["youtube_id"]}
-    if kind == "file":
-        note_play(it["id"])
-        name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
-        return {"ok": True, "id": it["id"], "title": it.get("title"),
-                "video": f"/practice/files/{name}?sig={_video_sig(name)}"}
-    return {"ok": False, "error": "that practice has no video", "status": 400}
+        return {**out, "youtube_id": it["youtube_id"]}
+    name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
+    return {**out, "video": f"/practice/files/{name}?sig={_video_sig(name)}"}
+
+
+def _pause_if_heard(it: dict) -> bool:
+    """Pause the book channel when what it holds is `it`: the practice last
+    played (the mark) is this one and the book's now-playing is still that
+    mark, so an audiobook started since is never touched. Never raises."""
+    try:
+        mark = json.loads(_now_path().read_text())
+        if mark.get("uri") != it["_uri"]:
+            return False
+        from . import mcp_server
+        np = mcp_server._state().get_now_playing("book") or {}
+        if not is_marked(np.get("uri")):
+            return False
+        return bool((mcp_server.book_pause(target=np.get("target") or "") or {}).get("ok"))
+    except Exception:  # noqa: BLE001 — the video is shown either way
+        return False
 
 
 def served(name: str, sig: str) -> Optional[tuple[Path, str]]:

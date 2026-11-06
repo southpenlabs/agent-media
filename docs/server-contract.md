@@ -8278,7 +8278,10 @@ names the first time they are read.
   "id", "title", "video"}` for a file, `video` being a signed link relative
   to the server, `/practice/files/<hash><ext>?sig=` — no bearer, the link is
   the credential, good for that one file while it is in the folder, served
-  with `Range` so it seeks. Counted as a play. 404 for an id not in the
+  with `Range` so it seeks. Counted as a play. When the book channel is
+  playing that same practice aloud (the practice last played, and the book
+  still on it), it is paused first and the answer says `"paused": true`
+  (David: "Add the pause too"); anything else on the book is left alone. 404 for an id not in the
   list, 400 for one with no video. `play` on a video still plays only its
   sound on the book channel.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
