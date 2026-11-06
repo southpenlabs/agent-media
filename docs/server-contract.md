@@ -4801,7 +4801,8 @@ data: {}
 - `follow` (3 Nov 2026; only with `?follow=1`): `{"phone", "name",
   "session", "title", "at"}` — the thread open on the phone this device
   follows, every field null while it follows none (§6.21g). After the first
-  `sessions` frame always, then on each change.
+  `sessions` frame always, then on each change. Its `stage` (6 Nov 2026)
+  is this device's Now playing stage, mirroring or not (§6.21h).
 - `ping`: `{}` after `?ping=` seconds of silence — 15 to 300, default 15,
   clamped. A phone asks for a long one so an idle connection wakes the radio
   only for real changes.
@@ -5800,6 +5801,71 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   stream while its device follows, and asks `GET /device/follow` (every 20 s
   and on coming to the front) to know when to.
 - In `/features`: `follow: true`.
+
+### 6.21h Now playing on a big screen (built 6 Nov 2026)
+
+David, 6 Nov 2026, asked about "assigning now playing to a large screen
+like a TV or projector", and chose both ways (roadmap item 57;
+docs/proposals/2026-11-05-now-playing-canvas.md, "Big screens"):
+
+- **Sent from the phone.** Now playing's "Show on…" key lists the paired
+  screens; the one picked opens Now playing full screen and **stays on
+  it** (it does not follow the phone's own moves), the phone staying the
+  remote. Stopped from the phone, or from the screen itself (a press on
+  its own remote or screen), as mirroring is (§6.21g).
+- **A screen set to always show it.** Settings → Devices, per device:
+  Now playing whenever something plays — a reply live (`/speech/now`
+  `live`, not a thinking line or a notification) or music playing
+  (`GET /music`: a position, not paused) — and dark otherwise; back to Now
+  playing when something plays again.
+
+A device's **stage** is its mode: `"on"` (sent), `"auto"` (always shows
+it) or `"off"`. A sent stage wins while it is on; taken off, the screen
+goes back to `"auto"` if it is set to always show it, else off. Mirroring
+(§6.21g) is set aside by the app while the screen is on stage and picked
+up again after. Kept with the device record (`stage_auto`, `stage_by`,
+`stage_at`). Code: `stage.py`; tests in `test_stage.py`.
+
+- `POST /devices/stage {"id", "stage": "on"|"off"}` — Now playing sent to
+  that screen, or taken off it. **Any paired device of the same person**
+  (the same account: every code-paired device is the owner's), not a
+  guest: the phone is the remote. → `{ok, id, stage}` (`stage` the object
+  below). 400 `bad_stage` for anything else; 404 `no_such_device` for an
+  unknown id; 401 for a bearer that is nobody; 403 `not_a_device` for a
+  login that is not a paired device, `guest` for a guest (it reads and
+  listens), `not_yours` for another person's screen. `"off"` takes a sent
+  stage off and leaves "always" as it was.
+- `POST /devices/stage {"id", "auto": true|false}` (or `"stage": "auto"`,
+  as `auto: true`) — the screen set to show Now playing whenever something
+  plays, or not: Settings → Devices' "Now playing" (Off / Always). **A
+  device that may manage devices**, as `/devices/follow` (403
+  `not_enrolled` otherwise; the rest as above).
+- `GET /devices/stage` — the screens this device may send to: every
+  other paired device of the same person, `{ok, self, screens: [{id,
+  name, role, last_seen, stage, stage_live, auto, by, by_name}]}` (`by` the
+  device that sent it, `by_name` its name). The sheet behind "Show on…"
+  reads this, not `/devices` (which only a device that may manage devices
+  may list). Same 401/403 as sending.
+- `POST /device/stage {"on": false}` — a screen takes a sent Now playing
+  off itself: a press on its own remote or screen. → the stage object. A
+  guest may (the living-room TV often is one). `{"on": true}` is 400
+  `bad_stage`: it is sent from another device. 401 for anything but a
+  paired device. `GET /device/stage` — the stage object, for itself.
+- **The stage object**: `{"mode": "on"|"auto"|"off", "auto": bool,
+  "by", "by_name", "at", "live": bool, "why": "sent"|"reply"|"music"|null}`
+  — `auto` whether it is set to always show it (still true under a sent
+  stage); `by`/`by_name`/`at` who sent it and when (null unless `"on"`);
+  `live` whether it should show Now playing now, and `why`.
+- **Where the screen hears it.** `GET /device/follow` and the `follow`
+  frame on `GET /sessions/events?follow=1` carry `stage`, **whether or not
+  the device mirrors anyone**: sending and taking off wake the stream at
+  once; on `"auto"`, something starting or stopping is noticed within the
+  watcher's tick (3 s; what plays is read only while some device is on
+  `"auto"`). The app holds that stream while its device follows *or* its
+  stage is not `"off"`, and asks `GET /device/follow` otherwise.
+- `/devices` rows carry `stage` (the mode) and, once set, `stage_auto`,
+  `stage_by`, `stage_at`; `GET /devices` adds `stage_live`.
+- In `/features`: `stage: true`.
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 

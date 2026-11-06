@@ -430,7 +430,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/device/view", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -466,7 +466,10 @@ CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
 GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/balance",
                          "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
-                         "/book/state"}) | AUDIO_PATHS | MUSIC_PATHS
+                         "/book/state",
+                         # A screen taking Now playing off itself (stage.py, §6.21h):
+                         # the living-room TV is often a guest.
+                         "/device/stage"}) | AUDIO_PATHS | MUSIC_PATHS
 
 # The Organiser: browsing and capturing in the Org tree (org.py). The same
 # arrangement.
@@ -2144,7 +2147,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, err.get("status", 401),
                   {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
         else:
-            _json(h, 200, {"ok": True, "devices": devices.list_devices(),
+            from . import stage
+
+            # `stage_live`: whether each shows Now playing now (§6.21h).
+            _json(h, 200, {"ok": True, "devices": stage.with_live(devices.list_devices()),
                            "self": user.get("device")})
     elif path == "/sessions/state":
         ok, detail = sessions.session_states(_bearer(h))
@@ -2269,6 +2275,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import follow
 
         ok, detail = follow.get(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
+    elif path in ("/devices/stage", "/device/stage"):
+        # Now playing on a big screen (stage.py, §6.21h): the screens this
+        # device may send it to, or this device's own stage.
+        from . import stage
+
+        ok, detail = (stage.screens if path == "/devices/stage" else stage.get)(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 401), {"ok": ok, **detail})
     elif path == "/screen/now":
         # Should this device pause what is playing on it (screens.py): its
@@ -3345,6 +3358,17 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = follow.stop(_bearer(h), _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path in ("/devices/stage", "/device/stage"):
+        # Now playing sent to a screen or taken off it, a screen set to
+        # always show it, or a screen taking it off itself (stage.py, §6.21h).
+        from . import stage
+
+        fn = stage.send if path == "/devices/stage" else stage.stop
+        ok, detail = fn(_bearer(h), _read_json(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        if ok:
+            print(f"devices: stage {path} {detail.get('id') or auth.device_id(_bearer(h))} "
+                  f"→ {(detail.get('stage') or detail).get('mode')}", file=sys.stderr)
     elif path == "/device/mic":
         # A paired device's mic opened or closed (§6.21e, mic_state.py): hpo's
         # ducker pauses its video while one is open.

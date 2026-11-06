@@ -64,7 +64,10 @@ def test_bad_bodies(server, rig):
 
 def test_the_device_asks_what_it_follows(server, rig):
     off = {"ok": True, "phone": None, "name": None, "session": None, "title": None, "at": None,
-           "view": None, "path": None, "phones": []}
+           "view": None, "path": None, "phones": [],
+           # Now playing on this screen (§6.21h), mirroring or not.
+           "stage": {"mode": "off", "auto": False, "by": None, "by_name": None, "at": None,
+                     "live": False, "why": None}}
     res, body = call(server, "GET", "/device/follow", headers=rig["tv_h"])
     assert res.status == 200 and body == off
     devices.set_follow(rig["tv"], rig["phone"])
