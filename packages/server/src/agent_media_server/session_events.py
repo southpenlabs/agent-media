@@ -45,7 +45,9 @@ thread's one word.
                this device follows, every field null while it follows none.
                After the first `sessions` frame always, then whenever it
                changes (the phone opens another thread, the switch is set or
-               cleared)
+               cleared). Its `stage` is this device's Now playing stage
+               (§6.21h, stage.py): sent there, taken off, or on "auto" and
+               something starting or stopping (noticed within a tick)
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -75,7 +77,7 @@ import logging
 import threading
 import time
 
-from . import alerts, auth, follow, mic, notes, phone, remind, sessions
+from . import alerts, auth, follow, mic, notes, phone, remind, sessions, stage
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -191,6 +193,7 @@ class _Watcher:
         self.phone_head = 0
         self.notes_head = 0
         self.follow_head = 0
+        self.stage_head: tuple = ()
         self.remind_head: tuple = ()
         self.version = 0
         self.thread: threading.Thread | None = None
@@ -208,14 +211,22 @@ class _Watcher:
         phone_head = phone.version()
         notes_head = notes.version()
         follow_head = follow.version()
+        # Something starting or stopping, while a screen shows Now playing
+        # whenever something plays (stage.py, §6.21h): noticed here.
+        try:
+            stage_head = stage.live_key()
+        except Exception:  # noqa: BLE001 — never worth the sweep
+            stage_head = self.stage_head
         # A reminder coming due is a change, noticed here (≤ POLL_S late).
         remind_head = remind.due_key()
         with self.cond:
             if (rows != self.rows or head != self.alerts_head or mic_head != self.mic_head
                     or phone_head != self.phone_head or notes_head != self.notes_head
-                    or remind_head != self.remind_head or follow_head != self.follow_head):
+                    or remind_head != self.remind_head or follow_head != self.follow_head
+                    or stage_head != self.stage_head):
                 self.rows = rows
                 self.follow_head = follow_head
+                self.stage_head = stage_head
                 self.remind_head = remind_head
                 self.alerts_head = head
                 self.mic_head = mic_head

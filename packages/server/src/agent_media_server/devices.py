@@ -298,10 +298,12 @@ def lookup(token: str, ip: str = "") -> dict | None:
 
 def list_devices() -> list[dict]:
     """Every paired device, without its hash, with its role and its enrol bit
-    as they take effect (a member's stored bit is no bit)."""
+    as they take effect (a member's stored bit is no bit), and its Now
+    playing `stage` mode (stage.py, §6.21h)."""
     with _LOCK:
         return [{**{k: v for k, v in d.items() if k not in _PRIVATE},
-                 "role": role_of(d), "enrol": may_enrol(d)} for d in _load()]
+                 "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d)}
+                for d in _load()]
 
 
 def revoke(device_id: str) -> bool:
@@ -398,6 +400,38 @@ def set_follow(device_id: str, phone: str | None, phones: list[str] | None = Non
         if (hit.get("follow") or None) != first or list(hit.get("follow_from") or []) != keep:
             _save([{**d, "follow": first, "follow_from": keep} if d is hit else d for d in rows])
         return True
+
+
+_KEEP = object()
+
+
+def set_stage(device_id: str, by=_KEEP, auto=_KEEP) -> bool:
+    """Now playing on this screen (stage.py, §6.21h): `by`, the device that
+    sent it there (None takes a sent one off), and `auto`, whether it shows
+    Now playing whenever something plays. Either left out is unchanged.
+    `stage_at` is when it was sent. False for an unknown id."""
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        new = dict(hit)
+        if by is not _KEEP:
+            new["stage_by"] = str(by) if by else None
+            new["stage_at"] = round(time.time(), 3) if by else None
+        if auto is not _KEEP:
+            new["stage_auto"] = bool(auto)
+        if new != hit:
+            _save([new if d is hit else d for d in rows])
+        return True
+
+
+def stage_mode(device: dict | None) -> str:
+    """"on" (sent there), "auto" (whenever something plays) or "off"."""
+    d = device or {}
+    if d.get("stage_by"):
+        return "on"
+    return "auto" if d.get("stage_auto") else "off"
 
 
 def may_enrol(device: dict | None) -> bool:

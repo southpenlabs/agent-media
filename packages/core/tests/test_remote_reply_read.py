@@ -117,3 +117,34 @@ def test_the_interrupted_reply_keeps_where_it_stopped(state_env, monkeypatch):  
     # Heard again: no longer interrupted.
     assert state.set_stopped_at(row["id"], None)
     assert "stopped_at" not in state.history_row(row["id"])["extras"]
+
+
+class _LiftedSink(_PhoneSink):
+    """As _PhoneSink, then Keep reading tapped (the cut lifted) while the
+    first sentence still plays; the list runs to its end and goes idle."""
+
+    def snapshot(self, target=None):
+        self.ticks += 1
+        if self.stops or self.ticks > 16:
+            return {"idle-active": True, "pause": False, "playlist-count": 0}
+        if self.ticks == 3:
+            S.session_reply_read(A)
+        if self.ticks == 5:
+            assert S.lift_session_read_cut(A)
+        self.pos = 0 if self.ticks < 8 else 1 if self.ticks < 12 else 2
+        return {"idle-active": False, "pause": False, "playlist-pos": self.pos,
+                "time-pos": self.ticks, "playlist-count": 3}
+
+
+def test_keep_reading_after_the_send_lets_the_phone_read_on(state_env, monkeypatch):  # noqa: F811
+    # David, 6 Nov 2026: the app lifted the cut ("lifted=True" at 22:41:06)
+    # and the reply still stopped a second later, at sentence 4 — the
+    # sentence noted when the cut was seen was kept after the cut was gone.
+    monkeypatch.setattr(S, "render_text", _render)
+    sink = _LiftedSink()
+    S.submit_event(Event(text="First sentence here. Second sentence here. Third one too.",
+                         source=Source.CLAUDE_CODE, target=Target(name="phone"),
+                         metadata={"session": A}),
+                   state=StateStore(), sink=sink, coordinator=_RecordingCoord())
+    assert sink.stops in ([], [2]), f"stopped at sentence {sink.stops[0] + 1} though Keep reading lifted the cut"
+    assert sink.ticks >= 12, "it did not read on to the last sentence"

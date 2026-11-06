@@ -5714,6 +5714,11 @@ def _submit_event(event: Event,
                     # Note the sentence it is on, and stop when it moves past.
                     if read_i is None and _speech_read(source_session, started_at):
                         read_i = max(mark_i, 0)
+                    elif read_i is not None and not _speech_read(source_session, started_at):
+                        # Taken back (Keep reading chosen after the send,
+                        # lift_session_read_cut): it reads on (David, 6 Nov
+                        # 2026: it still stopped though the app lifted it).
+                        read_i = None
                     # Step aside for a higher-priority speaker (e.g. a
                     # notification) waiting on the token, then resume this reply —
                     # the remote counterpart of the per-clip path's yield. The

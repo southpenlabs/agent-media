@@ -109,15 +109,20 @@ def changed() -> None:
 
 def state(device_id: str) -> dict:
     """What `device_id` mirrors: `{"phone", "name", "session", "title", "at",
-    "view", "path", "phones"}`. Of the devices it mirrors (`phones`), the one
+    "view", "path", "phones", "stage"}`. Of the devices it mirrors (`phones`), the one
     used last (`phone`, its `name`): the one whose screen changed latest, the
     first when none has shown anything since a restart. `view` "list",
     "thread" or "page", and `path` the app's route when its app said (null
     until it shows something); `session` the thread it opened last (still
     there on "list" and "page", so going back to a thread is no surprise).
-    Every field null (`phones` []) when the switch is off."""
+    Every field null (`phones` []) when the switch is off. `stage` is this
+    device's Now playing stage (stage.state), whatever the switch."""
+    from . import stage
+
+    # Now playing on this screen (stage.py, §6.21h) rides along, so a screen
+    # holding this stream hears it at once, mirroring or not.
     off = {"phone": None, "name": None, "session": None, "title": None, "at": None,
-           "view": None, "path": None, "phones": []}
+           "view": None, "path": None, "phones": [], "stage": stage.state(device_id)}
     if not device_id:
         return off
     rows = {d.get("id"): d for d in devices.list_devices()}
@@ -143,7 +148,7 @@ def state(device_id: str) -> dict:
             title = None
     return {"phone": phone, "name": rows[phone].get("name") or None, "session": session,
             "title": title, "at": got.get("at"), "view": got.get("view"),
-            "path": got.get("path"), "phones": phones}
+            "path": got.get("path"), "phones": phones, "stage": off["stage"]}
 
 
 def get(bearer: str) -> tuple[bool, dict]:

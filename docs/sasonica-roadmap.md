@@ -2486,6 +2486,14 @@ ahead.
     music / Show the reply, Full screen, a Now playing key on the speech
     sheet; thinking lines do not take over). Steps 2-4 (a video for what plays, a separate
     video channel, the wall reading the same stage) not started.
+    **Big screens DONE 6 Nov 2026** (agent-media `2d69d0f0`, sasonica-app
+    `cdd93415`; David: "assigning now playing to a
+    large screen like a TV or projector", both ways; contract §6.21h,
+    `stage.py`; the proposal's "Big screens"): Now playing's Show on… sends
+    it to a paired screen, which opens it full screen and stays while the
+    phone is the remote (Stop on the phone, Back on the screen); and
+    Settings → Devices' "Now playing: Always" has a screen show it whenever
+    a reply is read or music plays, dark otherwise.
 58. **Files: the git sheet's All files, then a ladder of file access**
     (David, 5 Nov 2026: a directory listing from the thread's header; "let's
     include hidden files with a developer options setting"; "a hierarchy of
