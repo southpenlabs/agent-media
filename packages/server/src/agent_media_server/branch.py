@@ -9,6 +9,11 @@ chose to be offered both, each time, from the long press on a reply:
   --resume-session-at <record>` — so the transcript is never cut by hand;
   sessiond starts it under a new id (sessiond.py `fork_from`), headless,
   in the folder the thread ran in. Claude Code chats only.
+* **from before your message** (`mode: "before"`, 6 Nov 2026): a hold on
+  one of your own messages, then Branch: a new chat that remembers the
+  conversation up to the reply before that message, and the message's words
+  (changed or not) as its first. Your first message has nothing before it:
+  a fresh chat in the same folder.
 * **from its words** (`mode: "quote"`): a fresh chat in the same folder,
   the reply quoted in front of the first message — what `POST /reply`
   `mode: "branch"` has always done, for any agent.
@@ -68,6 +73,33 @@ def fork_point(session: str, mid: str) -> str:
     return last
 
 
+def fork_before(session: str, mid: str) -> tuple[bool, str]:
+    """The record a branch from before your message `mid` resumes at: the
+    last assistant record ahead of it. `(found, record)`; `record` is ""
+    when nothing came before (your first message), `found` False when the
+    transcript or the message is not there."""
+    path = transcript.transcript_path(session)
+    if not path or not mid:
+        return False, ""
+    last = ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("isSidechain"):
+                    continue
+                if rec.get("uuid") == mid:
+                    return True, last
+                if rec.get("type") == "assistant" and rec.get("uuid"):
+                    last = rec["uuid"]
+    except OSError:
+        pass
+    return False, ""
+
+
 def session_branch(session: str, mid: str, text: str, bearer: str, *,
                    mode: str = "history", quote: str = "") -> tuple[bool, dict]:
     """`{"session", "id", "text", "mode", "quote"?}` → `{"session": <the new
@@ -82,17 +114,30 @@ def session_branch(session: str, mid: str, text: str, bearer: str, *,
         return False, {"error": "a branch needs a first message", "status": 400}
     if mode == "quote":
         return send.reply("", text, bearer, quote=quote, mode="branch", session=session)
-    if mode != "history":
-        return False, {"error": "mode is history or quote", "status": 400}
+    if mode not in ("history", "before"):
+        return False, {"error": "mode is history, before or quote", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
     if not transcript.transcript_path(session):
         return False, {"error": "only a Claude Code chat can be branched with its history",
                        "status": 409}
-    at = fork_point(session, (mid or "").strip())
-    if not at:
-        return False, {"error": "that reply is not in this chat's transcript", "status": 404}
+    mid = (mid or "").strip()
+    if mode == "before":
+        found, at = fork_before(session, mid)
+        if not found:
+            return False, {"error": "that message is not in this chat's transcript", "status": 404}
+        if not at:
+            # Your first message: nothing to remember, a fresh chat in its folder.
+            ok, detail = send.reply("", text, bearer, mode="branch", session=session)
+            if ok:
+                detail["branched"] = True
+                detail["from"] = {"session": session, "id": mid}
+            return ok, detail
+    else:
+        at = fork_point(session, mid)
+        if not at:
+            return False, {"error": "that reply is not in this chat's transcript", "status": 404}
     cwd = sessions.transcript_cwd(session)
     if not cwd:
         return False, {"error": "this chat's folder is not known", "status": 409}
