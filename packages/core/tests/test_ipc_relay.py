@@ -88,9 +88,12 @@ def test_each_client_gets_its_own_far_connection_and_spares_are_refilled(relay):
     port = r.server.getsockname()[1]
     for n in range(3):
         assert _call(port, f"p{n}")["data"] == f"p{n}"
-    for _ in range(100):
+    # Wait on the far end's own count: the relay holding its two spares again
+    # can come before the far server's accept thread has counted the last
+    # one (4 >= 5 under a loaded full run, 6 Nov 2026).
+    for _ in range(250):
         with r._lock:
-            if len(r._spares) == 2:
+            if len(r._spares) == 2 and far.connects >= 5:
                 break
         time.sleep(0.02)
     assert far.connects >= 5   # 2 spares, then one more per client taken
