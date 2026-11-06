@@ -589,3 +589,19 @@ def test_links_carry_a_whole_server_when_given():
     assert web_link == "https://red5.example.com/pair?c=abcd1234&device=1"
     plain, _ = devices.links("abcd1234", "100.1.2.3", 8781)
     assert parse_qs(urlsplit(plain).query)["server"] == ["http://100.1.2.3:8781"]
+
+
+# --- the app build a device runs (POST /device/app, 7 Nov 2026) ---------------------
+
+def test_a_device_says_which_app_build_it_runs(server, device, capsys):
+    token, device_id = device
+    res, obj = call(server, "POST", "/device/app",
+                    {"build": "1943", "sha": "f0cd50c", "platform": "android", "junk": "x" * 99},
+                    {"Authorization": f"Bearer {token}"})
+    assert res.status == 200 and obj["app"] == {"build": "1943", "sha": "f0cd50c", "platform": "android"}
+    (row,) = devices.list_devices()
+    assert row["app"]["build"] == "1943" and row["app_at"] > 0
+    assert devices.app_words(row) == "build 1943 (f0cd50c) android"
+    assert devices.cli_devices([]) == 0
+    assert "app build 1943 (f0cd50c) android" in capsys.readouterr().out
+    assert call(server, "POST", "/device/app", {"build": "1"}, {})[0].status == 401

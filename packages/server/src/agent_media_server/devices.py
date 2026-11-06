@@ -364,6 +364,42 @@ def set_role(device_id: str, role: str) -> bool:
         return True
 
 
+#: What a device may say of the app it runs (POST /device/app), each at most 64 chars.
+APP_FIELDS = ("build", "sha", "platform", "shell", "web")
+
+
+def set_app(device_id: str, info: dict) -> dict | None:
+    """The app build a device runs, as it reports it at start and on each
+    return to the front (POST /device/app; David, 7 Nov 2026: "functionality
+    for you to be able to tell what version of the app is installed").
+    Kept on the device row as `app` with `app_at`; written only when it
+    changed. None for an unknown id."""
+    clean = {k: str(info.get(k))[:64] for k in APP_FIELDS if info.get(k) not in (None, "")}
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return None
+        now = round(time.time(), 3)
+        if hit.get("app") != clean or now - float(hit.get("app_at") or 0) >= 3600:
+            _save([{**d, "app": clean, "app_at": now} if d is hit else d for d in rows])
+        return clean
+
+
+def app_words(d: dict) -> str:
+    """A device's app build in a few words: "build 1943 (f0cd50c) android"."""
+    a = d.get("app") or {}
+    if not a:
+        return ""
+    bits = [f"build {a['build']}" if a.get("build") else "web build"]
+    if a.get("sha"):
+        bits.append(f"({a['sha']})")
+    for k in ("platform", "shell"):
+        if a.get(k):
+            bits.append(a[k])
+    return " ".join(bits)
+
+
 def set_pause(device_id: str, on: bool, pause_for: list[str] | None = None) -> bool:
     """Whether this device pauses what is playing on it while someone talks
     to the assistant or a reply is read out (`pause_here`), and for whose
@@ -758,5 +794,6 @@ def cli_devices(argv: list[str]) -> int:
               f"  {role_of(d)}"
               f"{'  [enrols]' if may_enrol(d) else ''}"
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
-              f"{'  account ' + d['account'] if d.get('account') else ''}")
+              f"{'  account ' + d['account'] if d.get('account') else ''}"
+              f"{'  app ' + app_words(d) + ' (said ' + when(d.get('app_at')) + ')' if d.get('app') else ''}")
     return 0

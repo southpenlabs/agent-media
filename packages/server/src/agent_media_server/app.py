@@ -431,7 +431,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -470,7 +470,7 @@ GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/spee
                          "/book/state",
                          # A screen taking Now playing off itself (stage.py, §6.21h):
                          # the living-room TV is often a guest.
-                         "/device/stage"}) | AUDIO_PATHS | MUSIC_PATHS
+                         "/device/stage", "/device/app"}) | AUDIO_PATHS | MUSIC_PATHS
 
 # The Organiser: browsing and capturing in the Org tree (org.py). The same
 # arrangement.
@@ -3408,6 +3408,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = speech_frames.report(dev, _read_json(h),
                                           channel=path.split("/")[1])
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/app":
+        # The app build this device runs, said at start and on each return to
+        # the front (devices.set_app), so `devices` can tell what is installed.
+        dev = auth.device_id(_bearer(h))
+        if not dev:
+            _json(h, 401, {"ok": False, "error": "a paired device only"})
+            return True
+        got = devices.set_app(dev, _read_json(h) or {})
+        _json(h, 200 if got is not None else 404, {"ok": got is not None, "app": got or {}})
     elif path == "/device/view":
         # What this device shows now, the chat list or a thread: a device
         # mirroring it shows the same (follow.py, §6.21g).

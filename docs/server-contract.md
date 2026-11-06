@@ -5859,6 +5859,14 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   changed (`at`, epoch seconds) and that thread's title. Every field null
   and `phones` `[]` while it mirrors nobody.
 - `POST /device/view {"view": "list"|"page", "path"?}` or `{"view":
+- `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?}` — any
+  paired device, a guest too (401 otherwise) → `{ok, app}`: the app build it
+  runs (the CI build number, the commit, `android`/`web`, the Android shell's
+  own version), said at start and on each return to the front (7 Nov 2026).
+  Kept on its `/devices` row as `app` (only those keys, each cut to 64
+  characters) with `app_at`, written when it changes or an hour has passed;
+  `media-visual-canvas devices` shows it, so an agent can tell what a phone
+  has installed without adb. An older server answers 404 and the app goes on.
   "thread", "session", "path"?}` — what this device shows now, from its app
   as it moves (David, 5 Nov 2026: "it only mirrors the chat window and not
   the chat list"; "Can the mirroring also work for all other pages?").
