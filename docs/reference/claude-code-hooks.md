@@ -111,6 +111,25 @@ hook then guesses the window instead. The `restart` row adds the exact
   `MEDIA_PUBLIC_URL` is https, else `sasonica://t/<session>`. It is asked to
   link any session it names the same way. `MEDIA_THREAD_LINK=0` leaves it
   out. See server-contract §19 "Thread links".
+- **Earlier threads close to this one** (`related_threads.py`). On each of
+  a thread's first three prompts, until it finds some, the hook names up
+  to three earlier threads with their links and the zettel that connects
+  each (title and path), so the agent can read them rather than start
+  cold. A thread with zettels of its own (a resumed one) gets the notes
+  graph walk of `GET /session/related` (§6.51), done on
+  `<MEDIA_ORG_DIR or ~/org>/roam/notes` alone. A new one is matched by its
+  prompt against every zettel: by the vectors agent-sessions' zk_related
+  keeps (`MEDIA_RELATED_DB`, default
+  `~/.local/share/agent-sessions/index.sqlite`; the prompt embedded by
+  `ZK_OLLAMA`/`ZK_EMBED_MODEL`, cosine ≥ 0.70) when the model answers
+  within `MEDIA_RELATED_TIMEOUT` (1.5 s), else by a TF-IDF word match
+  (≥ 0.25), scored while the model thinks. Parsed notes are cached by
+  mtime in `<state>/related-notes.json`. Never the current thread, never a
+  private or sealed one; in a private chat, only earlier private chats
+  from their sealed cards (`private_cards.py`), and an ordinary chat never
+  reads those. Silent when nothing scores well, with no roam tree, and
+  after a compaction it may be told again. `MEDIA_RELATED_THREADS=0`
+  leaves it out.
 
 Both always exit 0 and print nothing on anything unexpected: a prompt must
 never be blocked by them.

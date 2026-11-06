@@ -193,6 +193,17 @@ def _no_live_speech_token(monkeypatch, tmp_path):
     # must not put the replays it starts into scopes on the host's user
     # manager (procinfo.outliving_service): they stay plain children.
     monkeypatch.delenv("INVOCATION_ID", raising=False)
+    # The hook's related threads (related_threads.py): never this machine's
+    # roam tree, agent-sessions index or Ollama.
+    monkeypatch.setenv("MEDIA_ORG_DIR", str(tmp_path / "org"))
+    monkeypatch.setenv("MEDIA_RELATED_DB", str(tmp_path / "zk-index.sqlite"))
+    monkeypatch.setenv("ZK_OLLAMA", "http://127.0.0.1:9")
+    # A private chat's cards (private_cards.py): never this host's seal key
+    # or its model.
+    monkeypatch.setenv("MEDIA_PRIVATE_OLLAMA", "http://127.0.0.1:9")
+    monkeypatch.delenv("SOPS_AGE_KEY_FILE", raising=False)
+    monkeypatch.delenv("SOPS_AGE_RECIPIENT", raising=False)
+    monkeypatch.delenv("MEDIA_SEAL_KEY_FILE", raising=False)
 
 
 @pytest.fixture(autouse=True)

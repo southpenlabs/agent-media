@@ -324,7 +324,8 @@ def note_for(hook: dict) -> str:
     load_env_file("hook")  # the switches below may be set in the env files
     d = state_dir()
     note = " ".join(n for n in (_restart_note(hook, d), _band_note(hook, d),
-                                _notes_note(hook, d), _link_note(hook, d)) if n)
+                                _notes_note(hook, d), _link_note(hook, d),
+                                _related_note(hook, d)) if n)
     event = hook.get("hook_event_name")
     if note and event:
         note = json.dumps({"hookSpecificOutput": {
@@ -349,6 +350,7 @@ def _band_note(hook: dict, d: Path) -> str:
             state.write_text("0")
             (d / f"{sid}.link").unlink(missing_ok=True)
             (d / f"{sid}.notes").unlink(missing_ok=True)
+            (d / f"{sid}.related").unlink(missing_ok=True)
         return ""
     for band, msg in BANDS:
         if pct >= band:
@@ -442,6 +444,40 @@ def _link_note(hook: dict, d: Path) -> str:
     marker.write_text("1")
     base = thread_link_base()
     return LINK_NOTE.format(link=base + sid, base=base)
+
+
+#: How many of a thread's first prompts are matched against the notes before
+#: the hook gives up on it (related_threads.py).
+RELATED_PROMPTS = 3
+
+
+def _related_note(hook: dict, d: Path) -> str:
+    """Earlier threads close to this one (related_threads.py): looked for on
+    each of the first `RELATED_PROMPTS` prompts until some are found, told
+    once (again after a compaction). Silent when nothing scores well, with
+    no roam tree, and in a private thread. MEDIA_RELATED_THREADS=0 keeps it
+    out."""
+    sid = hook.get("session_id")
+    prompt = hook.get("prompt")
+    if not sid or not isinstance(prompt, str) or not prompt.strip():
+        return ""
+    if (os.environ.get("MEDIA_RELATED_THREADS") or "").strip() in ("0", "-", "off"):
+        return ""
+    marker = d / f"{sid}.related"
+    try:
+        tries = int(marker.read_text().strip() or 0)
+    except (OSError, ValueError):
+        tries = 0
+    if tries >= RELATED_PROMPTS:
+        return ""
+    try:
+        from .. import related_threads
+
+        found = related_threads.related(sid, prompt)
+    except Exception:  # noqa: BLE001 — a note is never worth failing a hook
+        found = []
+    marker.write_text(str(RELATED_PROMPTS if found else tries + 1))
+    return related_threads.note(found, thread_link_base()) if found else ""
 
 
 #: What a session a drained restart waits on is told (restart_services.py).
