@@ -359,6 +359,8 @@ def test_watching_pauses_the_same_practice_heard_aloud(tmp_path, monkeypatch):
             return now
     monkeypatch.setattr(mcp_server, "_state", lambda: FakeState())
     monkeypatch.setattr(mcp_server, "book_pause", lambda target="": paused.append(target) or {"ok": True})
+    monkeypatch.setattr(L, "_book_seconds", lambda target: 754.6)
+    monkeypatch.setattr(L, "prepare_sound", lambda it, background=True: None)
 
     L.mark_playing(other["_uri"])                  # another practice was last played
     assert "paused" not in L.watch(vid["id"]) and paused == []
@@ -366,4 +368,55 @@ def test_watching_pauses_the_same_practice_heard_aloud(tmp_path, monkeypatch):
     now["uri"] = "/books/some-audiobook.m4b"       # the book channel moved on since
     assert "paused" not in L.watch(vid["id"]) and paused == []
     now["uri"] = vid["_uri"]                       # this one, heard aloud
-    assert L.watch(vid["id"])["paused"] is True and paused == ["phone"]
+    got = L.watch(vid["id"])
+    assert got["paused"] is True and paused == ["phone"]
+    assert got["start_s"] == 754                   # the video starts where the sound was
+
+
+def test_a_video_files_sound_is_extracted_and_played_from_a_point(tmp_path, monkeypatch):
+    # A video handed back to sound (play with start_ms) plays its extracted
+    # sound, marked as this practice. book_play is a fake.
+    from agent_media_core import mcp_server
+    d = tmp_path / "Practice"
+    d.mkdir()
+    (d / "Flow.mp4").write_bytes(b"x")
+    vid = next(i for i in L._files() if i.get("video"))
+    monkeypatch.setattr(L, "_extract", lambda src, dest: dest.parent.mkdir(parents=True, exist_ok=True) or dest.write_bytes(b"m4a") or True)
+    L.prepare_sound(vid, background=False)
+    assert L.sound_for(vid).read_bytes() == b"m4a"
+    sent = []
+    monkeypatch.setattr(mcp_server, "book_play", lambda uri, **kw: sent.append((uri, kw["start_ms"])) or {"ok": True})
+    assert L.play(vid["id"], start_ms=754000)["ok"]
+    assert sent == [(str(L.sound_for(vid)), 754000)]
+    assert L.is_marked(str(L.sound_for(vid)))
+    assert json.loads(L._now_path().read_text())["id"] == vid["id"]
+
+
+def test_downloads_are_kept_within_the_cap_longest_unplayed_first(tmp_path, monkeypatch):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    monkeypatch.setenv("MEDIA_AUDIOBOOK_LIB", str(lib))
+    monkeypatch.setenv("MEDIA_PODCAST_LINK_DIR", str(tmp_path / "links"))
+    monkeypatch.setenv("MEDIA_PRACTICE_KEEP_MB", "0.0025")        # 2.5 KiB
+    for vid in ("AAAAAAAAAAA", "BBBBBBBBBBB", "CCCCCCCCCCC"):
+        L.add(f"https://youtu.be/{vid}", title=vid)
+        (lib / f"{vid} [{vid}].mka").write_bytes(b"x" * 1024)
+    (lib / "An audiobook [DDDDDDDDDDD].mka").write_bytes(b"x" * 4096)   # not the practice's
+    plays = {"yt:AAAAAAAAAAA": {"n": 1, "last": 300}, "yt:BBBBBBBBBBB": {"n": 1, "last": 100},
+             "yt:CCCCCCCCCCC": {"n": 1, "last": 200}}
+    L._plays_path().write_text(json.dumps(plays))
+    L.mark_playing(str(lib / "BBBBBBBBBBB [BBBBBBBBBBB].mka"), "yt:BBBBBBBBBBB")
+    gone = L._keep_within_cap()
+    # B is oldest but is the one last played: C goes instead.
+    assert [f.name for f in gone] == ["CCCCCCCCCCC [CCCCCCCCCCC].mka"]
+    assert (lib / "An audiobook [DDDDDDDDDDD].mka").exists()
+    # Removing a practice deletes its download.
+    assert L.remove("yt:AAAAAAAAAAA") and not (lib / "AAAAAAAAAAA [AAAAAAAAAAA].mka").exists()
+    assert (lib / "BBBBBBBBBBB [BBBBBBBBBBB].mka").exists()
+
+
+def test_an_extracted_sound_whose_video_is_gone_is_deleted(tmp_path):
+    d = L._sound_dir()
+    d.mkdir(parents=True)
+    (d / "0123456789ab.m4a").write_bytes(b"x")
+    assert [f.name for f in L._keep_within_cap()] == ["0123456789ab.m4a"]

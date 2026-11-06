@@ -12,7 +12,7 @@ agent wrote.
                        website, url, followers, free_tracks, courses, source} | null}
   GET  /practice → {"ok", "items": [{id, title, source, …}], "feeds": [{url, title}],
                        "folder"}
-  POST /practice {"action": "play", "id", "target"?, "resume"?}
+  POST /practice {"action": "play", "id", "target"?, "resume"?, "at"?}
                  {"action": "add", "url", "title"?}
                  {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
                  {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
@@ -167,6 +167,13 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             argv += ["--target", str(body["target"])]
         if body.get("resume"):
             argv.append("--resume")
+        # From a point (§6.45 "Watching"): a video handed back to sound where it was.
+        try:
+            at = float(body["at"]) if body.get("at") is not None else None
+        except (TypeError, ValueError):
+            return False, {"error": "at must be seconds"}
+        if at is not None and at >= 0:
+            argv += ["--at", f"{at:g}"]
         try:
             r = subprocess.run([*argv, "--", item_id], capture_output=True, text=True,
                                timeout=_CMD_TIMEOUT_S)

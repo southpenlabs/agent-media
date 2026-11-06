@@ -8281,7 +8281,21 @@ names the first time they are read.
   with `Range` so it seeks. Counted as a play. When the book channel is
   playing that same practice aloud (the practice last played, and the book
   still on it), it is paused first and the answer says `"paused": true`
-  (David: "Add the pause too"); anything else on the book is left alone. 404 for an id not in the
+  (David: "Add the pause too"); anything else on the book is left alone.
+  The answer then also has `start_s`, where the sound was (when the player
+  says), for the video to start there. Watching also gets the practice's
+  sound ready in the background: a YouTube link's download into the library
+  (the add-on's fetch, not played), or a video file's sound extracted to
+  `<cache>/practice-sound/<hash>.m4a`. `POST /practice {"action": "play",
+  "id", "at"}` plays it from `at` seconds — the app's hand-back to sound
+  when the screen goes off mid-video (David, 6 Nov 2026) — a video file
+  from its extracted sound when made (a small copy to the phone, not the
+  video). 400 for an `at` that is not seconds.
+  Downloads are kept within `MEDIA_PRACTICE_KEEP_MB` (2000): the YouTube
+  practices' files in the library (not one a podcast link also keeps) and
+  the extracted sounds, the longest unplayed deleted first, never the one
+  last played; an extracted sound whose video left the folder is deleted.
+  Removing a YouTube practice deletes its download too. 404 for an id not in the
   list, 400 for one with no video. `play` on a video still plays only its
   sound on the book channel.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus

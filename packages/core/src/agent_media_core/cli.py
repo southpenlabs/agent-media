@@ -5742,7 +5742,8 @@ def cmd_practice(a) -> int:
             print(f"media practice: nothing saved as {a.key!r}", file=sys.stderr)
             return 1
         return 0
-    r = lib.play(a.name, target=a.target or "", resume=a.resume)
+    r = lib.play(a.name, target=a.target or "", resume=a.resume,
+                 start_ms=int(a.at * 1000) if a.at is not None else -1)
     if not r.get("ok"):
         print(f"media practice: {r.get('error')}", file=sys.stderr)
         return 1
@@ -10125,6 +10126,8 @@ def _build_parser() -> argparse.ArgumentParser:
     mp.add_argument("--target", default="", help="rooms|local|phone")
     mp.add_argument("--resume", action="store_true",
                     help="carry on where it was left (a long talk)")
+    mp.add_argument("--at", type=float, default=None,
+                    help="start this many seconds in (a video handed back to sound)")
     s.set_defaults(func=cmd_practice)
     s = sub.add_parser("breathe", help="a breathing pacer: the music swells on the "
                                         "in-breath and ebbs on the out-breath")

@@ -157,3 +157,11 @@ def test_watch_takes_only_a_video_from_the_list(server, shelf, signed_in):
     audio = next(i for i in obj["items"] if i["source"] == "file")
     res, obj = call(server, "POST", "/practice", {"action": "watch", "id": audio["id"]}, AUTH)
     assert res.status == 400
+
+
+def test_play_from_a_point_takes_only_seconds(server, shelf, signed_in):
+    # `at` (a video handed back to sound): checked before anything is played.
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    audio = next(i for i in obj["items"] if i["source"] == "file")
+    res, obj = call(server, "POST", "/practice", {"action": "play", "id": audio["id"], "at": "soon"}, AUTH)
+    assert res.status == 400 and "seconds" in obj["error"]

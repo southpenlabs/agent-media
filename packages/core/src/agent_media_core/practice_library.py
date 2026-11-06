@@ -616,6 +616,8 @@ def remove(key: str) -> bool:
     d = _load()
     if key.startswith("yt:"):
         before = len(d["youtube"])
+        if any(f"yt:{v['vid']}" == key for v in d["youtube"]):
+            forget_download(key)          # its sound in the library goes with it
         d["youtube"] = [v for v in d["youtube"] if f"yt:{v['vid']}" != key]
         _save(d)
         return len(d["youtube"]) < before
@@ -836,13 +838,15 @@ def find(item_id: str) -> Optional[dict]:
 
 # ---- playing -------------------------------------------------------------------
 
-def mark_playing(uri: str) -> None:
-    """Remember what the book channel was given, so a reply eases it out."""
+def mark_playing(uri: str, item_id: str = "") -> None:
+    """Remember what the book channel was given, so a reply eases it out,
+    and which practice it is (`id`: a video file's sound is played from its
+    extracted copy, not the file the list names)."""
     vid = youtube_id(uri)
     p = _now_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"uri": uri, "name": Path(uri.split("?")[0]).name,
-                             "vid": vid or "", "at": time.time()}))
+                             "vid": vid or "", "id": item_id, "at": time.time()}))
 
 
 def is_marked(path: Optional[str]) -> bool:
@@ -880,8 +884,11 @@ def match(query: str) -> Optional[dict]:
     return None
 
 
-def play(item_id: str, target: str = "", resume: bool = False) -> dict:
-    """Play a saved practice on the book channel (by id, or a `match`)."""
+def play(item_id: str, target: str = "", resume: bool = False, start_ms: int = -1) -> dict:
+    """Play a saved practice on the book channel (by id, or a `match`), from
+    `start_ms` when given (a video handed back to sound, `watch`). A video
+    file plays from its extracted sound when there is one (`sound_for`):
+    a far smaller copy to the phone than the video."""
     it = match(item_id)
     if not it:
         return {"ok": False, "error": f"nothing saved as {item_id!r}"}
@@ -892,10 +899,14 @@ def play(item_id: str, target: str = "", resume: bool = False) -> dict:
         return {"ok": True, "id": it["id"], "title": it.get("title"),
                 "embed": it["embed"], "page": it.get("page")}
     from . import mcp_server
-    mark_playing(it["_uri"])
+    uri = it["_uri"]
+    if it.get("video") == "file":
+        uri = str(sound_for(it) or uri)
+    mark_playing(uri, it["id"])
     note_play(it["id"])
-    r = mcp_server.book_play(it["_uri"], resume=resume, start_ms=-1,
+    r = mcp_server.book_play(uri, resume=resume, start_ms=start_ms,
                              target=target, title=it.get("title") or "Practice")
+    _keep_within_cap()
     r = r if isinstance(r, dict) else {}
     return {**r, "ok": not r.get("error"), "id": it["id"], "title": it.get("title")}
 
@@ -917,7 +928,10 @@ def watch(item_id: str) -> dict:
     <hash><ext>?sig=`, relative to the server, good for that one file).
     Counted as a play. If the book channel is playing this same practice
     aloud, it is paused first (`paused: true`; David, 6 Nov 2026: "Add the
-    pause too"), so its sound is not heard under the video.
+    pause too"), so its sound is not heard under the video, and the video
+    starts where the sound was (`start_s`, when known). Its sound is got
+    ready meanwhile (`prepare_sound`), for the app to hand back to when the
+    screen goes off (`play` with `start_ms`).
     ``{"ok": False}`` for anything without a video."""
     it = find(item_id)
     if not it:
@@ -927,29 +941,177 @@ def watch(item_id: str) -> dict:
         return {"ok": False, "error": "that practice has no video", "status": 400}
     note_play(it["id"])
     out = {"ok": True, "id": it["id"], "title": it.get("title")}
-    if _pause_if_heard(it):
+    heard = _pause_if_heard(it)
+    if heard is not None:
         out["paused"] = True
+        if heard > 1:
+            out["start_s"] = int(heard)
+    prepare_sound(it)
     if kind == "youtube":
         return {**out, "youtube_id": it["youtube_id"]}
     name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
     return {**out, "video": f"/practice/files/{name}?sig={_video_sig(name)}"}
 
 
-def _pause_if_heard(it: dict) -> bool:
+def _pause_if_heard(it: dict) -> Optional[float]:
     """Pause the book channel when what it holds is `it`: the practice last
     played (the mark) is this one and the book's now-playing is still that
-    mark, so an audiobook started since is never touched. Never raises."""
+    mark, so an audiobook started since is never touched. The seconds it
+    was at (0.0 when not known), or None when nothing was paused. Never
+    raises."""
     try:
         mark = json.loads(_now_path().read_text())
-        if mark.get("uri") != it["_uri"]:
-            return False
+        if mark.get("id") != it["id"] and mark.get("uri") != it["_uri"]:
+            return None
         from . import mcp_server
         np = mcp_server._state().get_now_playing("book") or {}
         if not is_marked(np.get("uri")):
-            return False
-        return bool((mcp_server.book_pause(target=np.get("target") or "") or {}).get("ok"))
+            return None
+        target = np.get("target") or ""
+        at = _book_seconds(target)
+        if not (mcp_server.book_pause(target=target) or {}).get("ok"):
+            return None
+        return at
     except Exception:  # noqa: BLE001 — the video is shown either way
-        return False
+        return None
+
+
+def _book_seconds(target: str) -> float:
+    """Where the book channel is, in seconds: the phone's player when it
+    holds the item, else the book mpv's. 0.0 when neither says."""
+    try:
+        from . import mcp_server, phone_player
+        t = mcp_server._book_target(target)
+        st = phone_player.state(t) if phone_player.enabled() else None
+        if st and st.get("item"):
+            return float(st.get("t") or 0)
+        ms = mcp_server._book().position(t)
+        return (ms or 0) / 1000
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+# ---- a video's sound, and keeping downloads within a cap ------------------------
+
+#: How much the practice's own downloads may hold (MB): YouTube practices'
+#: sound in the audiobook library, and video files' extracted sound. Over it,
+#: the longest unplayed go first; played again, they are fetched again.
+KEEP_MB_DEFAULT = 2000
+
+
+def _sound_dir() -> Path:
+    return cache_dir() / "practice-sound"
+
+
+def sound_for(it: dict) -> Optional[Path]:
+    """A video file's extracted sound, when it has been made."""
+    p = _sound_dir() / (it["id"].split(":", 1)[1] + ".m4a")
+    return p if p.is_file() and p.stat().st_size > 0 else None
+
+
+def _extract(src: Path, dest: Path) -> bool:
+    """The sound of `src` into `dest` (m4a): copied as it is, else as AAC."""
+    import subprocess
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(f".tmp.{os.getpid()}.m4a")
+    for codec in (["-c:a", "copy"], ["-c:a", "aac", "-b:a", "128k"]):
+        try:
+            r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(src),
+                                "-vn", *codec, str(tmp)], capture_output=True, timeout=900)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+            tmp.replace(dest)
+            return True
+    tmp.unlink(missing_ok=True)
+    return False
+
+
+def prepare_sound(it: dict, background: bool = True) -> None:
+    """Get a video practice's sound ready to play: a YouTube link's download
+    into the library (the add-on's fetch, not played), or a video file's
+    sound extracted. Then the downloads are kept within their cap."""
+    def run():
+        try:
+            if it.get("video") == "youtube":
+                from . import library
+                if library.cached_path(it["youtube_id"]) is None:
+                    library.start_fetch(it["_uri"][3:], play=False)
+            elif it.get("video") == "file" and sound_for(it) is None:
+                _extract(Path(it["_uri"]), _sound_dir() / (it["id"].split(":", 1)[1] + ".m4a"))
+            _keep_within_cap()
+        except Exception:  # noqa: BLE001 — played without it, it is fetched then
+            pass
+    if background:
+        import threading
+        threading.Thread(target=run, daemon=True, name="practice-sound").start()
+    else:
+        run()
+
+
+def _owned_downloads() -> list[tuple[str, Path]]:
+    """The downloads the practice list owns, by item id: each saved YouTube
+    link's file in the library (not one also kept as a podcast link, which
+    is that list's), and each extracted sound."""
+    from . import library
+    try:
+        from . import podcast_links
+        shared = {x.get("vid") for x in podcast_links._load()}
+    except Exception:  # noqa: BLE001
+        shared = set()
+    out = []
+    for v in _load()["youtube"]:
+        if v["vid"] in shared:
+            continue
+        f = library.cached_path(v["vid"])
+        if f is not None and f.is_file():
+            out.append((f"yt:{v['vid']}", f))
+    d = _sound_dir()
+    if d.is_dir():
+        out += [(f"file:{f.stem}", f) for f in d.glob("*.m4a") if re.fullmatch(r"[0-9a-f]{12}", f.stem)]
+    return out
+
+
+def _keep_within_cap() -> list[Path]:
+    """Delete the longest-unplayed practice downloads until they are under
+    MEDIA_PRACTICE_KEEP_MB (KEEP_MB_DEFAULT), never the one last played,
+    and an extracted sound whose video is gone. The files deleted."""
+    try:
+        cap = float(os.environ.get("MEDIA_PRACTICE_KEEP_MB") or KEEP_MB_DEFAULT) * 1024 * 1024
+    except ValueError:
+        cap = KEEP_MB_DEFAULT * 1024 * 1024
+    try:
+        mark = json.loads(_now_path().read_text()).get("id", "")
+    except (OSError, ValueError):
+        mark = ""
+    owned = _owned_downloads()
+    files = {i["id"] for i in _files() if i.get("video")}
+    gone = []
+    for iid, f in list(owned):
+        if iid.startswith("file:") and iid not in files:
+            f.unlink(missing_ok=True)
+            gone.append(f)
+            owned.remove((iid, f))
+    plays = _plays()
+    sized = [(iid, f, f.stat().st_size) for iid, f in owned]
+    total = sum(n for _, _, n in sized)
+    for iid, f, n in sorted(sized, key=lambda x: (plays.get(x[0]) or {}).get("last") or 0):
+        if total <= cap:
+            break
+        if iid == mark:
+            continue
+        f.unlink(missing_ok=True)
+        gone.append(f)
+        total -= n
+    return gone
+
+
+def forget_download(item_id: str) -> None:
+    """A removed YouTube practice's download, deleted (unless a podcast link
+    keeps the same video)."""
+    for iid, f in _owned_downloads():
+        if iid == item_id:
+            f.unlink(missing_ok=True)
 
 
 def served(name: str, sig: str) -> Optional[tuple[Path, str]]:
