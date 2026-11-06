@@ -1938,6 +1938,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
                                                  around=qs.get("around", [""])[0])
         else:
             ok, detail = threads.log_for_item(qs.get("item", [""])[0], _bearer(h), **page)
+        if ok and session and qs.get("looking", [""])[0] in ("1", "true", "yes"):
+            # `&looking=1`: the poll of a client showing the thread without
+            # its stream (the phone's light bubble): the thread counts as
+            # open a few seconds more, so a Normal reply plays (watching.look).
+            from agent_media_core import watching
+
+            watching.look(session)
         if ok and qs.get("messages", [""])[0] not in ("1", "true", "yes") \
                 and not qs.get("around", [""])[0]:
             # Messages are opt-in on this route. A client that polls it — the

@@ -763,6 +763,11 @@ speech. The `?session=` form (22 Sep 2026, §10) answers the same envelope
 with the same shapes and wins when both are given; it never asks ABS, so
 `start`/`end` are always `null` on it.
 
+`looking=1` (6 Nov 2026; session form): the poll of a client that shows the
+thread without holding its stream (the phone's light speech bubble). The
+thread counts as open for 12 s after it (watching.look), so a Normal reply
+plays as it would with the thread on screen.
+
 Query (both forms): `limit` — how many messages, newest first page
 (default 60, at most 500); `before` — a message `id`: only messages before
 it (the next page back). Neither touches `lines`.
