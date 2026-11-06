@@ -3995,11 +3995,12 @@ Calendars are read only for now
 
 #### `GET /org/read?path=<rel>[&at=<line>]`
 
-`{"ok", "path", "at", "title", "text", "links": [{label, path, session?}], "chats":
+`{"ok", "path", "at", "title", "text", "links": [{label, path, id, session?}], "chats":
 [{session, title, at}], "state", "states"}`. `state` is the heading's keyword
 (`""` for none, or for a whole note), `states` the file's keywords. `text` is raw Org, capped at 256 KB. With `at`,
 only the subtree under that heading is returned. `links` resolves the text's
-`[[id:…]]` links to paths; a link to a thread's node also carries
+`[[id:…]]` links to paths (`id`: the link's target, to match one written
+without a label); a link to a thread's node also carries
 `"session": <sid>`, and the app opens the thread (7 Nov 2026, §6.51). `chats` lists the chats started about this item
 with `POST /org/ask`, newest first (at most 20). `draft: true` (whole notes
 only, and absent otherwise) marks a zettel waiting for review: a note in
@@ -5858,7 +5859,6 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   it opened last (`session`, still set on `"list"`), when its screen last
   changed (`at`, epoch seconds) and that thread's title. Every field null
   and `phones` `[]` while it mirrors nobody.
-- `POST /device/view {"view": "list"|"page", "path"?}` or `{"view":
 - `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?}` — any
   paired device, a guest too (401 otherwise) → `{ok, app}`: the app build it
   runs (the CI build number, the commit, `android`/`web`, the Android shell's
@@ -5867,6 +5867,7 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   characters) with `app_at`, written when it changes or an hour has passed;
   `media-visual-canvas devices` shows it, so an agent can tell what a phone
   has installed without adb. An older server answers 404 and the app goes on.
+- `POST /device/view {"view": "list"|"page", "path"?}` or `{"view":
   "thread", "session", "path"?}` — what this device shows now, from its app
   as it moves (David, 5 Nov 2026: "it only mirrors the chat window and not
   the chat list"; "Can the mirroring also work for all other pages?").

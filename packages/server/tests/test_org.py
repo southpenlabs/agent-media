@@ -179,7 +179,8 @@ def test_read_a_subtree_and_follow_id_links(tree, server):
     assert "telly" in got["text"] and "Old thing" not in got["text"]
     _, note = _call(server, "GET", "/org/read?path=roam/projects/yoga.org")
     assert note["title"] == "agent-yoga"
-    assert note["links"] == [{"label": "bank", "path": "roam/projects/bank.org"}]
+    assert note["links"] == [{"label": "bank", "path": "roam/projects/bank.org",
+                             "id": "bank-id"}]
 
 
 def test_read_refuses_outside_the_tree(tree, server):

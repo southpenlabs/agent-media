@@ -141,5 +141,6 @@ def test_read_names_the_thread_behind_a_session_link(tree, server):
     status, note = _get(server, "/org/read?path=roam/ideas.org")
     assert status == 200
     assert note["links"] == [
-        {"label": "A", "path": "roam/sessions/agent-media/a.org", "session": A},
-        {"label": "B one", "path": "roam/notes/b1.org"}]
+        {"label": "A", "path": "roam/sessions/agent-media/a.org",
+         "id": f"claude:red5:{A}", "session": A},
+        {"label": "B one", "path": "roam/notes/b1.org", "id": f"zk:{B}:1"}]
