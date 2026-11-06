@@ -43,6 +43,33 @@ def test_the_fork_point_is_the_end_of_that_reply(tmp_path, monkeypatch):
     assert branch.fork_point("s", "a1") == ""
 
 
+def test_the_fork_point_before_your_message(tmp_path, monkeypatch):
+    p = tmp_path / "t.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in TRANSCRIPT) + "\n")
+    monkeypatch.setattr(transcript, "transcript_path", lambda s: str(p))
+    # The reply before it, all of it; a subagent's record is not the chat's.
+    assert branch.fork_before("s", "u2") == (True, "a1c")
+    # Your first message has nothing before it.
+    assert branch.fork_before("s", "u1") == (True, "")
+    assert branch.fork_before("s", "nope") == (False, "")
+
+
+def test_a_branch_from_before_your_message(host, monkeypatch):
+    from agent_media_server import auth
+
+    monkeypatch.setattr(auth, "gate", lambda b: ("david", None))
+    src = start(host, "reply: plum")
+    wait_for(lambda: last_text(host, src) == "plum")
+    msgs, _ = transcript.messages(src)
+    first = msgs[0]["id"]
+    # From your first message: a fresh chat, nothing resumed.
+    ok, d = branch.session_branch(src, first, "reply: pear", "tok", mode="before")
+    assert ok and d["branched"] and d["session"] != src, d
+    run = starts(host)[-1]["argv"]
+    assert "--fork-session" not in run and "--resume" not in run
+    assert branch.session_branch(src, "not-there", "hi", "tok", mode="before")[1]["status"] == 404
+
+
 def test_a_branch_with_history_is_a_fork_started_by_sessiond(host, monkeypatch):
     src = start(host, "reply: plum")
     wait_for(lambda: last_text(host, src) == "plum")

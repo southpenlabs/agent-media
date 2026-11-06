@@ -7866,7 +7866,7 @@ kinds each time, from the long press on a reply.
 
 ```json
 {"session": "<thread>", "id": "<message id>", "text": "<the first message>",
- "mode": "history" | "quote", "quote": "<the reply's words, for quote>"}
+ "mode": "history" | "before" | "quote", "quote": "<the reply's words, for quote>"}
 ```
 
 → `{"ok", "session": "<the new chat>", "branched": true, ...}`. The thread
@@ -7883,6 +7883,13 @@ something to say.
   no Claude Code transcript, and 404 for a message not in it.
 - **`quote`**: a fresh chat in the same folder, `quote` in front of the
   first message: `POST /reply` with `mode: "branch"`, for any agent.
+- **`before`** (6 Nov 2026): from one of your own messages (the app's hold
+  on it, then Branch): a new chat that remembers the conversation up to the
+  reply before that message (`branch.fork_before`, the last assistant
+  record ahead of it), with `text` (the message's words, changed or not) as
+  its first. Your first message has nothing before it: a fresh chat in the
+  same folder, as `quote` with no quote. 404 for a message not in the
+  transcript, 409 as `history` for a chat with none.
 
 400 for a bad session id, an empty `text` or another `mode`. A Matrix room
 cannot be branched.
