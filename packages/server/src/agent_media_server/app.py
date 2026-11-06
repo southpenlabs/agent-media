@@ -862,6 +862,9 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A saved podcast link's download, the same way (podcast_links.served).
         if path.startswith("/podcasts/files/"):
             return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
+        # A practice video file for the app to watch, the same way (practice_library.served).
+        if path.startswith("/practice/files/"):
+            return _signed_practice_video(h, path.removeprefix("/practice/files/"))
         # A cached track for the app's music player, the same way (music_app.served).
         if path.startswith("/music/files/"):
             return _signed_track(h, path.removeprefix("/music/files/"))
@@ -895,6 +898,21 @@ def _signed_podcast(h: BaseHTTPRequestHandler, name: str) -> bool:
 
     sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
     found = podcast_links.served(name, sig)
+    if not found:
+        _json(h, 404, {"ok": False, "error": "no such file"})
+        return True
+    f, ctype = found
+    _send_file(h, f, f.stat().st_size, ctype)
+    return True
+
+
+def _signed_practice_video(h: BaseHTTPRequestHandler, name: str) -> bool:
+    """`GET /practice/files/<hash><ext>?sig=` — a video file in the Practice
+    folder, for the app to watch (§6.45 watch); the link is the credential."""
+    from agent_media_core import practice_library
+
+    sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
+    found = practice_library.served(name, sig)
     if not found:
         _json(h, 404, {"ok": False, "error": "no such file"})
         return True

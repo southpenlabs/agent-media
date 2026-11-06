@@ -131,3 +131,29 @@ def test_embed_play_is_the_widget_unless_the_owner_says_page(server, shelf, sign
     assert call(server, "GET", "/practice", None, AUTH)[1]["embed_play"] == "page"
     monkeypatch.setattr(lib, "items", lambda: [{**embed, "source": "youtube"}])
     assert "embed_play" not in call(server, "GET", "/practice", None, AUTH)[1], "only with embeds in the list"
+
+
+def test_a_video_file_is_watched_by_signed_link(server, shelf, signed_in, _folder):
+    # §6.45 watch (6 Nov 2026): a video file in the folder, for the app to show.
+    (_folder / "Morning_Yoga.mp4").write_bytes(b"0123456789" * 20)
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    vid = next(i for i in obj["items"] if i.get("video") == "file")
+    res, obj = call(server, "POST", "/practice", {"action": "watch", "id": vid["id"]}, AUTH)
+    assert res.status == 200, obj
+    assert obj["video"].startswith("/practice/files/")
+    res, body = call(server, "GET", obj["video"])          # no bearer: the link is it
+    assert res.status == 200 and res.getheader("Content-Type") == "video/mp4"
+    assert body == b"0123456789" * 20
+    res, body = call(server, "GET", obj["video"], None, {"Range": "bytes=0-9"})
+    assert res.status == 206 and body == b"0123456789"
+    res, _ = call(server, "GET", obj["video"].split("?")[0] + "?sig=" + "0" * 32)
+    assert res.status == 404
+
+
+def test_watch_takes_only_a_video_from_the_list(server, shelf, signed_in):
+    res, obj = call(server, "POST", "/practice", {"action": "watch", "id": "/etc/passwd"}, AUTH)
+    assert res.status == 404
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    audio = next(i for i in obj["items"] if i["source"] == "file")
+    res, obj = call(server, "POST", "/practice", {"action": "watch", "id": audio["id"]}, AUTH)
+    assert res.status == 400

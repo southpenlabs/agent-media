@@ -192,7 +192,7 @@ fade after the last words), `MEDIA_MEDITATE_EASE_OUT_S` (5) and
 
 Recorded practice sits beside the written meditations: YouTube links and
 podcast feeds you save (a meditation, a yoga class, breathwork, any
-practice), and audio files in `~/Music/Practice` (or
+practice), and audio or video files in `~/Music/Practice` (or
 `MEDIA_PRACTICE_DIR`). They are the app's Practice tab. Ask in a chat
 ("play the yoga nidra one"), or:
 
@@ -203,6 +203,11 @@ media practice play "yoga nidra"
 ```
 
 They are eased out for a reply too.
+
+A practice with a video can also be watched in the app: a saved YouTube
+link, or a video file (mp4, m4v, webm, mov) in the Practice folder. Each
+such row in the Practice tab has a Watch button. Played without it, you
+hear only the sound.
 
 See also: `packages/core/src/agent_media_core/meditate.py`,
 `practice_library.py`, the `meditate` and `practice_*` MCP tools,

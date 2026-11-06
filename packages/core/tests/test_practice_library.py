@@ -300,3 +300,42 @@ def test_a_report_sends_lengths_signed(monkeypatch):
     assert ok and got == {"accepted": 1}
     assert [(p, b["durations"]) for p, b, _h in sent] == [("/report", {"yt:AAAAAAAAAAA": 60})]
     assert all("X-Sasonica-Signature" in h for _p, _b, h in sent)
+
+
+def test_a_video_file_is_listed_and_watched_by_signed_link(tmp_path):
+    # David, 6 Nov 2026: "Can videos be added to the practise library?"
+    d = tmp_path / "Practice"
+    d.mkdir()
+    (d / "Morning_Yoga.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (d / "Talk.mkv").write_bytes(b"x")          # not one the WebView plays
+    files = [i for i in L.items() if i["source"] == "file"]
+    assert [(i["title"], i.get("video")) for i in files] == [("Morning Yoga", "file")]
+    got = L.watch(files[0]["id"])
+    assert got["ok"] and got["title"] == "Morning Yoga"
+    name, _, sig = got["video"].removeprefix("/practice/files/").partition("?sig=")
+    assert name.endswith(".mp4") and "/" not in name
+    f, ctype = L.served(name, sig)
+    assert f == d / "Morning_Yoga.mp4" and ctype == "video/mp4"
+    assert L.served(name, "0" * len(sig)) is None
+    from agent_media_core import clip_sign
+    assert L.served(name, clip_sign.sign(name)) is None   # another scope's signature
+    assert L.served("../../x.mp4", L._video_sig("../../x.mp4")) is None
+    (d / "Morning_Yoga.mp4").unlink()
+    assert L.served(name, sig) is None
+
+
+def test_a_youtube_link_is_watched_by_its_id():
+    L.add("https://youtu.be/AAAAAAAAAAA", title="Flow")
+    yt = next(i for i in L.items() if i["source"] == "youtube")
+    assert yt["video"] == "youtube" and yt["youtube_id"] == "AAAAAAAAAAA"
+    assert L.watch("yt:AAAAAAAAAAA") == {"ok": True, "id": "yt:AAAAAAAAAAA",
+                                         "title": "Flow", "youtube_id": "AAAAAAAAAAA"}
+
+
+def test_only_a_video_can_be_watched(tmp_path):
+    (tmp_path / "Practice").mkdir()
+    (tmp_path / "Practice" / "Nidra.mp3").write_bytes(b"x")
+    audio = next(i for i in L.items() if i["source"] == "file")
+    assert "video" not in audio
+    assert L.watch(audio["id"])["status"] == 400
+    assert L.watch("/etc/passwd")["status"] == 404

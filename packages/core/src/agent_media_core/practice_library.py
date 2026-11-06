@@ -13,8 +13,9 @@ Four sources, one list (`items`), each item ``{id, title, source, …}``:
 - **youtube** — a link added by hand (`add`), kept in
   ``<state_dir>/practice.json``. Played as `media book play` plays a
   YouTube link: downloaded once into the library and kept.
-- **file** — every audio file under MEDIA_PRACTICE_DIR
-  (``~/Music/Practice``), read each time, never stored.
+- **file** — every audio or video file under MEDIA_PRACTICE_DIR
+  (``~/Music/Practice``), read each time, never stored. A video file
+  (VIDEO_TYPES) also says ``video: "file"``.
 - **podcast** — the newest FEED_EPISODES episodes of each feed added
   (`add` with a feed's URL), read over HTTP and kept for FEED_TTL_S in
   ``<cache>/practice-feeds/``; or one episode saved alone (`add_episode`).
@@ -30,6 +31,10 @@ kept in ``practice-durations.json``) and how often it was played (`plays`,
 `last_played`, kept in ``practice-plays.json`` by `play`), for the
 app's Show ▾ (David, 1 Nov 2026: "Can we have show filters for the
 meditation tab too please?"; groupings after Insight Timer's).
+
+A video, a saved YouTube link (``video: "youtube"``, ``youtube_id``) or a
+video file, can also be watched in the app (`watch`, `served`); playing it
+still plays only its sound on the book channel.
 
 Playing (`play`) takes an id from this list only, never a path or URL, so
 the route is not a way to play anything on the host. It goes to the book
@@ -53,6 +58,10 @@ from typing import Optional
 from ._paths import cache_dir, state_dir
 
 AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+#: Video files the folder also lists, watchable in the app (`watch`): the
+#: kinds Android's WebView plays, as the app's video chips take.
+VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+               ".mov": "video/quicktime"}
 FEED_EPISODES = 20
 FEED_TTL_S = 6 * 3600
 MADE_KEPT = 20
@@ -157,9 +166,13 @@ def _files() -> list[dict]:
         return []
     out = []
     for p in sorted(root.rglob("*")):
-        if p.is_file() and p.suffix.lower() in AUDIO_EXTS and not p.name.startswith("."):
-            out.append({"id": _hid("file", str(p)), "title": _title_from_name(p),
-                        "source": "file", "added": p.stat().st_mtime, "_uri": str(p)})
+        ext = p.suffix.lower()
+        if p.is_file() and (ext in AUDIO_EXTS or ext in VIDEO_TYPES) and not p.name.startswith("."):
+            it = {"id": _hid("file", str(p)), "title": _title_from_name(p),
+                  "source": "file", "added": p.stat().st_mtime, "_uri": str(p)}
+            if ext in VIDEO_TYPES:
+                it["video"] = "file"
+            out.append(it)
     return out
 
 
@@ -247,7 +260,8 @@ def _podcasts(d: dict) -> list[dict]:
 def _all() -> list[dict]:
     d = _load()
     yt = [{"id": f"yt:{v['vid']}", "title": v.get("title") or v["url"],
-           "source": "youtube", "added": v.get("added", 0), "_uri": f"yt:{v['url']}"}
+           "source": "youtube", "added": v.get("added", 0), "_uri": f"yt:{v['url']}",
+           "video": "youtube", "youtube_id": v["vid"]}
           for v in d["youtube"]]
     eps = [{"id": e["id"], "title": e.get("title") or e["audio"], "source": "podcast",
             "show": e.get("show", ""), "added": e.get("added", 0), "_uri": e["audio"]}
@@ -884,6 +898,59 @@ def play(item_id: str, target: str = "", resume: bool = False) -> dict:
                              target=target, title=it.get("title") or "Practice")
     r = r if isinstance(r, dict) else {}
     return {**r, "ok": not r.get("error"), "id": it["id"], "title": it.get("title")}
+
+
+# ---- watching ------------------------------------------------------------------
+
+def _video_sig(name: str) -> str:
+    from . import clip_sign
+
+    # Its own scope, so no other signed link opens a practice video.
+    return clip_sign.sign("practice-video:" + name)
+
+
+def watch(item_id: str) -> dict:
+    """What the app needs to show a saved practice as video (David, 6 Nov
+    2026: "Can videos be added to the practise library?"), by id only:
+    a YouTube link's id, for YouTube's own embedded player, or a signed
+    link to a video file in the Practice folder (`GET /practice/files/
+    <hash><ext>?sig=`, relative to the server, good for that one file).
+    Counted as a play. ``{"ok": False}`` for anything without a video."""
+    it = find(item_id)
+    if not it:
+        return {"ok": False, "error": f"nothing saved as {item_id!r}", "status": 404}
+    kind = it.get("video")
+    if kind == "youtube":
+        note_play(it["id"])
+        return {"ok": True, "id": it["id"], "title": it.get("title"),
+                "youtube_id": it["youtube_id"]}
+    if kind == "file":
+        note_play(it["id"])
+        name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
+        return {"ok": True, "id": it["id"], "title": it.get("title"),
+                "video": f"/practice/files/{name}?sig={_video_sig(name)}"}
+    return {"ok": False, "error": "that practice has no video", "status": 400}
+
+
+def served(name: str, sig: str) -> Optional[tuple[Path, str]]:
+    """A video file and its content type for `GET /practice/files/<name>?sig=`,
+    else None (a bad name, signature, or a file no longer in the folder
+    alike). Only a file the folder lists now can be reached."""
+    import hmac
+
+    stem, _, ext = (name or "").rpartition(".")
+    ctype = VIDEO_TYPES.get("." + ext.lower())
+    if not ctype or not re.fullmatch(r"[0-9a-f]{12}", stem):
+        return None
+    if not sig or not hmac.compare_digest(_video_sig(name), sig):
+        return None
+    it = next((i for i in _files() if i["id"] == f"file:{stem}" and i.get("video")), None)
+    if it is None:
+        return None
+    f = Path(it["_uri"])
+    if f.suffix.lower() != "." + ext.lower() or not f.is_file():
+        return None
+    return f, ctype
 
 
 def uri_for(item_id: str) -> Optional[str]:

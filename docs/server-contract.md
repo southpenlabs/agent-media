@@ -8186,7 +8186,7 @@ names the first time they are read.
 - `GET /practice` → `{"ok": true, "items": [{"id", "title", "source",
   …}], "feeds": [{"url", "title"}], "folder"}`. `source` is `made` (one
   the agent wrote, newest first; `added`), `youtube` (a saved link;
-  `added`), `file` (an audio file in the host's Practice folder (`~/Music/Practice`, MEDIA_PRACTICE_DIR),
+  `added`), `file` (an audio or video file in the host's Practice folder (`~/Music/Practice`, MEDIA_PRACTICE_DIR),
   `folder`; `added` is its mtime) or `podcast` (one of a saved feed's
   newest 20 episodes; `show`, `published`, `duration` as the feed gives
   them). In that order. No paths or URLs are given out.
@@ -8268,6 +8268,19 @@ names the first time they are read.
   owner sets `MEDIA_PRACTICE_EMBED_PLAY=page` for their own personal use
   (David: "I'd like to keep the current functionality for myself but
   yeah, we should probably change the public version to that").
+- **Watching** (6 Nov 2026; David: "Can videos be added to the practise
+  library?", then "also local video files"). The folder also lists video
+  files (mp4, m4v, webm, mov: what Android's WebView plays) as source
+  `file` with `"video": "file"`; a saved YouTube link carries `"video":
+  "youtube"` and `"youtube_id"` (its public id). `POST /practice {"action":
+  "watch", "id"}` → `{"ok", "id", "title", "youtube_id"}` for a YouTube
+  link, which the app shows in YouTube's own embedded player, or `{"ok",
+  "id", "title", "video"}` for a file, `video` being a signed link relative
+  to the server, `/practice/files/<hash><ext>?sig=` — no bearer, the link is
+  the credential, good for that one file while it is in the folder, served
+  with `Range` so it seeks. Counted as a play. 404 for an id not in the
+  list, 400 for one with no video. `play` on a video still plays only its
+  sound on the book channel.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.

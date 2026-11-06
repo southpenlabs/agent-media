@@ -16,6 +16,8 @@ agent wrote.
                  {"action": "add", "url", "title"?}
                  {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
                  {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
+                 {"action": "watch", "id"} → {"youtube_id"} | {"video": signed link}
+  GET  /practice/files/<hash><ext>?sig=   (a video file, the link is the credential; app.py)
 
 Play takes an id from the list only (practice_library.play), and runs
 `media practice play` as the desk would, so the book channel's own
@@ -173,6 +175,13 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if r.returncode != 0:
             return False, {"error": (r.stderr or r.stdout).strip()[-300:], "status": 502}
         return True, {"playing": item_id, "title": r.stdout.strip()}
+    if action == "watch":
+        # Watched in the app (practice_library.watch): YouTube's embed, or a
+        # signed link to a video file in the Practice folder.
+        r = lib.watch(str(body.get("id") or ""))
+        if not r.get("ok"):
+            return False, {"error": r.get("error"), "status": r.get("status", 400)}
+        return True, {k: v for k, v in r.items() if k not in ("ok", "status")}
     if action == "add":
         try:
             got = lib.add(str(body.get("url") or ""), title=str(body.get("title") or ""))
@@ -189,7 +198,7 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not lib.remove(str(body.get("id") or "")):
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
-    return False, {"error": "action must be play, add, remove, share, breathe or sleep"}
+    return False, {"error": "action must be play, watch, add, remove, share, breathe or sleep"}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:
