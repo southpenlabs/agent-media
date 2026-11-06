@@ -624,8 +624,14 @@ def _play_waiting(session: str, device: str = "") -> None:
         with open(state_dir() / "opened-replay.log", "ab") as err:
             # From where it was left off (`--resume`, reply_position): a
             # reply stopped part-way, here or in another copy, picks up there.
-            subprocess.Popen([sys.executable, "-m", "agent_media_core.cli",
-                              "replay", "--id", str(rid), "--resume"],
+            # In a scope of its own (procinfo.outliving_service): a canvas
+            # restart while it pushes the clips, or while its follower reads
+            # along, must not cut it off (6 Nov 2026: one did, and the
+            # reply played with no follow-along).
+            from agent_media_core.procinfo import outliving_service
+
+            subprocess.Popen(outliving_service([sys.executable, "-m", "agent_media_core.cli",
+                                                "replay", "--id", str(rid), "--resume"]),
                              start_new_session=True, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=err)
     except Exception:  # noqa: BLE001 — a missed replay leaves its Play

@@ -4197,7 +4197,12 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
         # stays with this command and is released when it returns.
         lock_fd = (replay_lock.fileno
                    if replay_lock is not None and os.name != "nt" else None)
-        _trk = subprocess.Popen(
+        # In a scope of its own when started from a service (the canvas, for
+        # the app's Replay and a reply played on an open): a restart of that
+        # service must not take the follower, and the follow-along, with it
+        # while the phone reads on (procinfo.outliving_service).
+        from . import procinfo as _procinfo
+        _trk = subprocess.Popen(_procinfo.outliving_service(
             [sys.executable, "-m", "agent_media_core.cli",
              "replay-track",
              "--sentences", json.dumps(clip_sentences) if _hl else "",
@@ -4210,7 +4215,7 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
             + (["--then-next", then_next, "--then-after", str(row["id"])]
                if then_next and then_id is None else [])
             + (["--heard-id", str(held_id)] if held_id is not None else [])
-            + (["--under", under_arg] if under_arg else []),
+            + (["--under", under_arg] if under_arg else [])),
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

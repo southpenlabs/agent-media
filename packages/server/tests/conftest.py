@@ -27,6 +27,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     for k in list(os.environ):
         if k.startswith("MEDIA_"):
             monkeypatch.delenv(k, raising=False)
+    # Inside a systemd unit (sessiond's shells, a CI runner), a replay a test
+    # starts would go into a scope on the host's user manager
+    # (procinfo.outliving_service): never from a test.
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
     # A fresh chat asks whether its agent is installed and signed in *on this
     # machine* (send._agent_unready) — which made the /ask tests pass on a
     # desk with Claude Code signed in and fail everywhere else (CI, a scratch

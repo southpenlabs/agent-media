@@ -166,6 +166,41 @@ def cwd(pid: int) -> str:
     return ""
 
 
+def outliving_service(cmd: list[str]) -> list[str]:
+    """`cmd`, made to outlive the systemd service it is started from.
+
+    A process a service starts lives in that service's cgroup, and a restart
+    of the service kills the whole cgroup (`KillMode=control-group`, the
+    default) — `start_new_session` does not take it out. A replay the canvas
+    starts, and its follower (`replay-track`, the process that keeps the
+    reply's live row and with it the app's follow-along), were killed so by
+    a canvas restart mid-reply: the phone, handed the clips already, read on
+    with nothing following it, and the reply was never marked heard (6 Nov
+    2026, row 25207; David: "No follow along?").
+
+    So, when started from inside a systemd unit (`INVOCATION_ID`) with a user
+    manager to ask, the command is run in a scope of its own
+    (`systemd-run --user --scope`): same pid (systemd-run execs it), same
+    descriptors (`pass_fds` reach it), its own cgroup. Anywhere else — a
+    terminal, a Mac, Windows, no systemd-run, no user bus — `cmd` as it is.
+    `MEDIA_OWN_SCOPE=0` turns it off.
+    """
+    cmd = list(cmd)
+    if os.name == "nt" or not os.environ.get("INVOCATION_ID"):
+        return cmd
+    if os.environ.get("MEDIA_OWN_SCOPE", "").strip() == "0":
+        return cmd
+    import shutil
+
+    run = shutil.which("systemd-run")
+    if not run:
+        return cmd
+    rt = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    if not ((Path(rt) / "systemd" / "private").exists() or (Path(rt) / "bus").exists()):
+        return cmd
+    return [run, "--user", "--scope", "--quiet", "--collect", "--"] + cmd
+
+
 def kill_group(pid: int, sig: Optional[int] = None,
                expect_image: Optional[str] = None) -> None:
     """End a process started with `start_new_session=True` and what it started.

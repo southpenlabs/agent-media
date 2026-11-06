@@ -189,6 +189,10 @@ def _no_live_speech_token(monkeypatch, tmp_path):
     # sessions, sign-in and settings are never this machine's.
     monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok-home"))
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    # A test run from inside a systemd unit (sessiond's shells, a CI runner)
+    # must not put the replays it starts into scopes on the host's user
+    # manager (procinfo.outliving_service): they stay plain children.
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
 
 
 @pytest.fixture(autouse=True)
