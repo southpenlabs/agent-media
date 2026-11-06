@@ -261,7 +261,7 @@ def _all() -> list[dict]:
     d = _load()
     yt = [{"id": f"yt:{v['vid']}", "title": v.get("title") or v["url"],
            "source": "youtube", "added": v.get("added", 0), "_uri": f"yt:{v['url']}",
-           "video": "youtube", "youtube_id": v["vid"]}
+           "video": "youtube", "youtube_id": v["vid"], "kept": _kept_state(v["vid"])}
           for v in d["youtube"]]
     eps = [{"id": e["id"], "title": e.get("title") or e["audio"], "source": "podcast",
             "show": e.get("show", ""), "added": e.get("added", 0), "_uri": e["audio"]}
@@ -902,6 +902,8 @@ def play(item_id: str, target: str = "", resume: bool = False, start_ms: int = -
     uri = it["_uri"]
     if it.get("video") == "file":
         uri = str(sound_for(it) or uri)
+    elif it.get("video") == "youtube":
+        uri = str(_yt_sound(it["youtube_id"]) or uri)
     mark_playing(uri, it["id"])
     note_play(it["id"])
     r = mcp_server.book_play(uri, resume=resume, start_ms=start_ms,
@@ -948,9 +950,12 @@ def watch(item_id: str) -> dict:
             out["start_s"] = int(heard)
     prepare_sound(it)
     if kind == "youtube":
-        return {**out, "youtube_id": it["youtube_id"]}
-    name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
-    return {**out, "video": f"/practice/files/{name}?sig={_video_sig(name)}"}
+        out["youtube_id"] = it["youtube_id"]
+        if kept_video(it["youtube_id"]) is not None:
+            # Kept (`keep`): the copy, for the app to watch or save offline.
+            out["video"] = _yt_link(it["youtube_id"])
+        return out
+    return {**out, "video": _file_link(it)}
 
 
 def _pause_if_heard(it: dict) -> Optional[float]:
@@ -1035,8 +1040,9 @@ def prepare_sound(it: dict, background: bool = True) -> None:
         try:
             if it.get("video") == "youtube":
                 from . import library
-                if library.cached_path(it["youtube_id"]) is None:
-                    library.start_fetch(it["_uri"][3:], play=False)
+                vid = it["youtube_id"]
+                if _yt_sound(vid) is None and library.cached_path(vid) is None:
+                    _fetch_small(vid, video=False)
             elif it.get("video") == "file" and sound_for(it) is None:
                 _extract(Path(it["_uri"]), _sound_dir() / (it["id"].split(":", 1)[1] + ".m4a"))
             _keep_within_cap()
@@ -1047,6 +1053,120 @@ def prepare_sound(it: dict, background: bool = True) -> None:
         threading.Thread(target=run, daemon=True, name="practice-sound").start()
     else:
         run()
+
+
+def _yt_dir(video: bool) -> Path:
+    return cache_dir() / ("practice-video" if video else "practice-sound") / ("" if video else "yt")
+
+
+def _yt_file(vid: str, video: bool) -> Optional[Path]:
+    d = _yt_dir(video)
+    if not d.is_dir():
+        return None
+    hits = sorted(p for p in d.glob(f"*[[]{vid}[]]*") if p.is_file() and p.stat().st_size > 0)
+    return hits[0] if hits else None
+
+
+def _yt_sound(vid: str) -> Optional[Path]:
+    """A YouTube practice's own small sound (`prepare_sound`), when fetched."""
+    return _yt_file(vid, video=False)
+
+
+def kept_video(vid: str) -> Optional[Path]:
+    """A YouTube practice's small video kept by `keep`, when it has arrived."""
+    return _yt_file(vid, video=True)
+
+
+#: The YouTube ids being fetched now, by kind ("sound", "video").
+_fetching: set = set()
+
+
+def _fetch_small(vid: str, video: bool) -> Optional[Path]:
+    """A YouTube practice's sound or video at the add-on's small formats
+    (LOW_AUDIO, LOW_VIDEO: David, 6 Nov 2026, "I'd even go lower quality to
+    save space"), downloaded on the phone into the practice's own folder.
+    None without the add-on, or when it fails."""
+    addon = _downloads_addon()
+    key = (vid, "video" if video else "sound")
+    if addon is None or key in _fetching:
+        return None
+    _fetching.add(key)
+    try:
+        if video:
+            fetch = getattr(addon, "fetch_video", None)
+            return fetch(vid, _yt_dir(True)) if fetch else None
+        fmt = getattr(addon, "LOW_AUDIO", None)
+        return addon.fetch_audio(vid, _yt_dir(False), **({"fmt": fmt} if fmt else {}))
+    finally:
+        _fetching.discard(key)
+
+
+def _downloads_addon():
+    """The personal-use add-on's YouTube downloads, where installed and allowed."""
+    from . import youtube_addon
+    return youtube_addon.get("youtube-downloads")
+
+
+def _kept_state(vid: str) -> Optional[str]:
+    if kept_video(vid) is not None:
+        return "ready"
+    return "fetching" if (vid, "video") in _fetching else None
+
+
+def keep(item_id: str) -> dict:
+    """Keep a YouTube practice's video (small, `_fetch_small`) for the app to
+    save and watch offline (David, 6 Nov 2026: "an option for downloading
+    the video too", offline on the phone). Fetched in the background; the
+    list's `kept` says "fetching", then "ready", and `watch` then answers
+    its signed `video` link, as does `keep` itself once ready. A video file
+    in the folder is ready at once: its link is answered."""
+    it = find(item_id)
+    if not it or not it.get("video"):
+        return {"ok": False, "error": "only a practice with a video can be kept", "status": 404 if not it else 400}
+    if it["video"] == "file":
+        return {"ok": True, "id": it["id"], "kept": "ready", "video": _file_link(it)}
+    vid = it["youtube_id"]
+    state = _kept_state(vid)
+    if state is None:
+        if _downloads_addon() is None:
+            return {"ok": False, "error": "downloading from YouTube isn't available here", "status": 501}
+        import threading
+
+        def run():
+            try:
+                _fetch_small(vid, video=True)
+                _keep_within_cap()
+            except Exception:  # noqa: BLE001 — the list says it is not kept
+                pass
+        _fetching.add((vid, "video"))       # said at once; _fetch_small takes it over
+        def go():
+            _fetching.discard((vid, "video"))
+            run()
+        threading.Thread(target=go, daemon=True, name="practice-keep").start()
+        state = "fetching"
+    out = {"ok": True, "id": it["id"], "kept": state}
+    if state == "ready":
+        out["video"] = _yt_link(vid)
+    return out
+
+
+def _yt_link(vid: str) -> str:
+    name = f"yt-{vid}.mp4"
+    return f"/practice/files/{name}?sig={_video_sig(name)}"
+
+
+def _file_link(it: dict) -> str:
+    name = it["id"].split(":", 1)[1] + Path(it["_uri"]).suffix.lower()
+    return f"/practice/files/{name}?sig={_video_sig(name)}"
+
+
+def unkeep(item_id: str) -> bool:
+    it = find(item_id)
+    f = kept_video(it["youtube_id"]) if it and it.get("video") == "youtube" else None
+    if f is None:
+        return False
+    f.unlink(missing_ok=True)
+    return True
 
 
 def _owned_downloads() -> list[tuple[str, Path]]:
@@ -1066,6 +1186,10 @@ def _owned_downloads() -> list[tuple[str, Path]]:
         f = library.cached_path(v["vid"])
         if f is not None and f.is_file():
             out.append((f"yt:{v['vid']}", f))
+    for v in _load()["youtube"]:
+        for f in (_yt_sound(v["vid"]), kept_video(v["vid"])):
+            if f is not None:
+                out.append((f"yt:{v['vid']}", f))
     d = _sound_dir()
     if d.is_dir():
         out += [(f"file:{f.stem}", f) for f in d.glob("*.m4a") if re.fullmatch(r"[0-9a-f]{12}", f.stem)]
@@ -1122,10 +1246,16 @@ def served(name: str, sig: str) -> Optional[tuple[Path, str]]:
 
     stem, _, ext = (name or "").rpartition(".")
     ctype = VIDEO_TYPES.get("." + ext.lower())
-    if not ctype or not re.fullmatch(r"[0-9a-f]{12}", stem):
+    yt = re.fullmatch(r"yt-([A-Za-z0-9_-]{11})", stem)
+    if not ctype or not (yt or re.fullmatch(r"[0-9a-f]{12}", stem)):
         return None
     if not sig or not hmac.compare_digest(_video_sig(name), sig):
         return None
+    if yt:
+        if not any(v["vid"] == yt.group(1) for v in _load()["youtube"]):
+            return None
+        f = kept_video(yt.group(1))
+        return (f, VIDEO_TYPES.get(f.suffix.lower(), "video/mp4")) if f is not None else None
     it = next((i for i in _files() if i["id"] == f"file:{stem}" and i.get("video")), None)
     if it is None:
         return None

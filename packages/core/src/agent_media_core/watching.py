@@ -160,6 +160,43 @@ def pocket(session: str, on: bool) -> float:
     return until
 
 
+#: A look: a client that shows a thread without holding its stream (the
+#: phone's light speech bubble, which polls the log every few seconds) says
+#: so on each poll, and the thread counts as open until LOOK_S after the last
+#: one (David, 6 Nov 2026: a reply read in the bubble was held unheard,
+#: "It may have been from a notification bubble").
+LOOK_NAME = "thread-looking.json"
+LOOK_S = 12.0
+
+
+def _looks() -> dict[str, float]:
+    try:
+        data = json.loads((state_dir() / LOOK_NAME).read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    now = time.time()
+    return {s: t for s, t in data.items() if isinstance(t, (int, float)) and t > now}
+
+
+def look(session: str) -> None:
+    """`session` is on screen somewhere that does not hold its stream: open
+    for LOOK_S from now. Best-effort."""
+    if not session:
+        return
+    leases = _looks()
+    leases[session] = time.time() + LOOK_S
+    try:
+        path = state_dir() / LOOK_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(leases))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
 def open_sessions() -> list[str]:
     """The threads open in the app: leased as the screen went off, the
     newest lease first (a locked phone is where a headset is pressed), then
@@ -170,6 +207,7 @@ def open_sessions() -> list[str]:
         sessions = data.get("sessions")
         if isinstance(sessions, dict):
             out += [s for s, n in sessions.items() if n and s not in out]
+    out += [s for s in _looks() if s not in out]
     return out
 
 
@@ -179,6 +217,8 @@ def is_open(session: str, pocketed: bool = False) -> bool:
     if not session:
         return False
     if pocketed and session in _pockets():
+        return True
+    if session in _looks():
         return True
     data = _table()
     if data is None:

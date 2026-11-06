@@ -54,3 +54,17 @@ def test_publish_pinned_writes_nothing_unpinned(tmp_path, monkeypatch):
     watching._reset_for_tests()
     watching.publish_pinned({"s1": 1})
     assert not watching._path().exists()
+
+
+def test_a_look_opens_the_thread_for_a_few_seconds(tmp_path, monkeypatch):
+    # The light bubble polls the log with looking=1 and holds no stream
+    # (David, 6 Nov 2026: "It may have been from a notification bubble").
+    import time as _time
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert not watching.is_open("b1")
+    watching.look("b1")
+    assert watching.is_open("b1") and "b1" in watching.open_sessions()
+    later = _time.time() + watching.LOOK_S + 1
+    monkeypatch.setattr(watching.time, "time", lambda: later)
+    assert not watching.is_open("b1") and "b1" not in watching.open_sessions()

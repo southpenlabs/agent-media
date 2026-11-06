@@ -16,7 +16,8 @@ agent wrote.
                  {"action": "add", "url", "title"?}
                  {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
                  {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
-                 {"action": "watch", "id"} → {"youtube_id"} | {"video": signed link}
+                 {"action": "watch", "id"} → {"youtube_id", "video"?} | {"video": signed link}
+                 {"action": "keep" | "unkeep", "id"} → {"kept": "fetching" | "ready" | null}
   GET  /practice/files/<hash><ext>?sig=   (a video file, the link is the credential; app.py)
 
 Play takes an id from the list only (practice_library.play), and runs
@@ -189,6 +190,16 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not r.get("ok"):
             return False, {"error": r.get("error"), "status": r.get("status", 400)}
         return True, {k: v for k, v in r.items() if k not in ("ok", "status")}
+    if action == "keep":
+        # A YouTube practice's small video, for the app to save offline (practice_library.keep).
+        r = lib.keep(str(body.get("id") or ""))
+        if not r.get("ok"):
+            return False, {"error": r.get("error"), "status": r.get("status", 400)}
+        return True, {k: v for k, v in r.items() if k not in ("ok", "status")}
+    if action == "unkeep":
+        if not lib.unkeep(str(body.get("id") or "")):
+            return False, {"error": "nothing kept under that id", "status": 404}
+        return True, {"id": body.get("id"), "kept": None}
     if action == "add":
         try:
             got = lib.add(str(body.get("url") or ""), title=str(body.get("title") or ""))
@@ -205,7 +216,7 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not lib.remove(str(body.get("id") or "")):
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
-    return False, {"error": "action must be play, watch, add, remove, share, breathe or sleep"}
+    return False, {"error": "action must be play, watch, keep, unkeep, add, remove, share, breathe or sleep"}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:
