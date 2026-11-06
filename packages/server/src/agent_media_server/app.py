@@ -481,6 +481,7 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
                          "/org/priority", "/org/ask", "/org/zettel",
                          "/org/listen", "/org/listen/ctl", "/doc/read", "/doc/ask", "/doc/undo", "/docs",
                          "/project/info", "/project/list",
+                         "/session/related",
                          "/calendar"})
 CORS_PATHS = CORS_PATHS | ORG_PATHS
 
@@ -4331,6 +4332,12 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     elif method == "GET" and path == "/org/search":
         ok, detail = org.search(arg("q"), bearer, everything=arg("all") == "1",
                                   memory=arg("memory") != "0")
+    elif method == "GET" and path == "/session/related":
+        # Threads the roam graph connects to this one, and what came out of
+        # it: its zettels, the to-dos and notes linking it (org_related.py).
+        from . import org_related
+
+        ok, detail = org_related.related(arg("session"), bearer)
     elif method == "GET" and path == "/org/todos":
         ok, detail = org.todos(arg("q"), bearer)
     elif method == "POST" and path == "/org/link":

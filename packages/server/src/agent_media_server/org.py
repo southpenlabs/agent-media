@@ -11,6 +11,7 @@ capture only has to land in the capture file.
   GET  /org                  → {"views": [{name, label, kind, count}]}
   GET  /org/view?name=       → {"view", "items": [...]}   (&done=1 keeps DONE)
   GET  /org/read?path=[&at=] → {"path", "title", "text", "links"}
+                                 (a link to a thread's node also has "session": <sid>)
   GET  /org/search?q=        → {"notes": [...], "memories": [...]}
                                  (&all=1 takes in session notes; &memory=0 skips memory)
   GET  /org/todos?q=         → {"items": [{path, at, title, state}]}
@@ -404,9 +405,14 @@ def read(rel: str, at: int, bearer: str) -> tuple[bool, dict]:
         title = m.group(4).strip()
         state = m.group(2) or ""
     ids = _id_index() if "[[id:" in text else {}
-    links = [{"label": label or ids.get(i, i), "path": ids[i]}
+    from . import org_related, org_zettel
+
+    # A link to a thread's roam node also names the thread (`session`), so
+    # the app can open the chat; `path` still opens the node for an older app.
+    links = [{"label": label or ids.get(i, i), "path": ids[i],
+              **({"session": sid} if ids[i].startswith("roam/sessions/")
+                 and (sid := org_related.session_of(i)) else {})}
              for i, label in _ID_LINK.findall(text) if i in ids]
-    from . import org_zettel
 
     return True, {"path": _rel(p), "at": at, "title": title, "text": text,
                   "links": links, "state": state,

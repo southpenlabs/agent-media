@@ -3995,11 +3995,12 @@ Calendars are read only for now
 
 #### `GET /org/read?path=<rel>[&at=<line>]`
 
-`{"ok", "path", "at", "title", "text", "links": [{label, path}], "chats":
+`{"ok", "path", "at", "title", "text", "links": [{label, path, session?}], "chats":
 [{session, title, at}], "state", "states"}`. `state` is the heading's keyword
 (`""` for none, or for a whole note), `states` the file's keywords. `text` is raw Org, capped at 256 KB. With `at`,
 only the subtree under that heading is returned. `links` resolves the text's
-`[[id:…]]` links to paths. `chats` lists the chats started about this item
+`[[id:…]]` links to paths; a link to a thread's node also carries
+`"session": <sid>`, and the app opens the thread (7 Nov 2026, §6.51). `chats` lists the chats started about this item
 with `POST /org/ask`, newest first (at most 20). `draft: true` (whole notes
 only, and absent otherwise) marks a zettel waiting for review: a note in
 `roam/notes/` still tagged `inbox` (`POST /org/zettel`). A folder view's items
@@ -8803,6 +8804,44 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - Any signed-in device or the host; a guest device gets 403 `guest`
   (location is the owner's).
 - In `/features`: `map: true` (the app offers the Map entry only then).
+
+### 6.51 Related threads from the org-roam graph — gated (built 7 Nov 2026)
+
+David, 7 Nov 2026 (planned in thread a0910dbc): use the org-roam links
+agent-sessions exports around each thread. Code: `org_related.py`; tests in
+`test_org_related.py`. The graph: a node per thread under `roam/sessions/`
+(`:ID: <harness>:<host>:<sid>`, `:AGENT_SID:`); zettels in `roam/notes/` with
+`:ZK_SOURCE:` (the thread they came from) and a regenerated `* Related` block
+of `[[id:zk:…]]` neighbours; to-dos and notes anywhere in the tree linking a
+thread's roam id (a to-do's `:SESSION:`).
+
+- `GET /session/related?session=<sid>` → `{"ok", "session", "title",
+  "related": [{session, title, score, why: [{note, path, via}]}],
+  "zettels": [{path, title, draft?}], "links": [{path, at, title, state,
+  kind}]}`.
+- `related`: thread → its zettels → their Related neighbours, and the
+  zettels whose Related block names one of its own → those notes' source
+  threads. Ranked by `score`, the number of distinct (own note, neighbour)
+  pairs reaching each; at most 20, never the thread itself. `why`: up to 3
+  neighbour notes (`note`, `path` for `/org/read`) and the thread's own note
+  they connect through (`via`). `title` is the app's name for the thread
+  (a rename wins), else the roam node's.
+- `zettels`: the notes distilled from this thread, by path; `draft: true`
+  for one still tagged `inbox`.
+- `links`: the headings and notes linking the thread, to-dos first. `at`
+  is the heading's line (0: the note as a whole), `state` its keyword,
+  `kind` `todo` (a heading with a keyword) or `note`. Its own zettels'
+  `Source ::` lines are not counted.
+- Each answer is empty lists for a thread with no notes. 400 without a
+  sane `session`.
+- Every `.org` file is parsed once and kept by (mtime, size); a request
+  within 10 s of the last does not stat the tree again.
+- The app shows it in the thread's info sheet: a related thread opens
+  `/app/t/<sid>`, a note or to-do opens the note reader at `path` / `at`.
+- `GET /org/read`'s `links` gain `"session": <sid>`
+  for a link to a thread's node (`roam/sessions/`). `path` is still there
+  (the node), so an older app opens the node as before; a newer one opens
+  the thread.
 
 ### Pairing
 
