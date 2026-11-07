@@ -122,3 +122,35 @@ it was a task (the note).
    bubble and notification, then spoken options, then the Inbox space
    suggestion. Actions (part 5) come after the chips are in, since they
    share the row.
+
+## 6. Seven more (David, 8 Nov 2026: "I think we can do a lot with these quick replies", then "omg, yes I want all seven of them!")
+
+Built in this order ("reach first"):
+
+1. **Answer from anywhere** (part 2): the chips, and a question card's
+   options, in the notification (at most three actions), the light bubble
+   card and the mini player. The server side is in: `/sessions/events`
+   waiting rows carry `suggestions`.
+2. **Actions** (part 5): `[[actions:]]`, checked and served by the server;
+   a confirming chip marked with a trailing "…" and a bold border.
+3. **Pick by voice** (part 3): on the black screen or with earbuds, "the
+   second one" / "first" / its words picks a chip; a question card's options
+   the same way.
+4. **Saved replies**: the user's own short replies ("On my way", "Call you
+   later"), kept on the server, shown after the suggested chips (behind +N
+   when folded), edited in Settings; a hold on any message you sent offers
+   "Save as quick reply". People chats and agent chats alike.
+5. **Tone keys**, both ways David chose: a hold on a chip offers Edit,
+   Shorter, Warmer, Formal (the last three rewrite it and send); and the
+   Undo bar after a chip's send offers "Warmer instead" / "Shorter instead",
+   which unsends or takes back the message and sends the rewrite. Rewrites
+   by the fast models, a people chat's by the private model only.
+6. **Learning from you**: which chips are tapped or skipped, and your recent
+   sent words, kept on your server only (never a private or sealed
+   thread's), used to rank chips and to give the model examples of how you
+   phrase things. A setting turns it off and a key forgets what is kept.
+7. **Context-aware**: replies that use what the server knows — a travel
+   time from the phone's location to the place named ("Running 10 minutes
+   late") and free slots from the calendar when someone asks to meet —
+   offered as chips with the value filled in; location only when the phone
+   shares it (maps proposal), nothing sent outside but to the private model.

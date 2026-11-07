@@ -2505,6 +2505,15 @@ ahead.
     people): `docs/proposals/2026-11-05-file-access.md`, not started past
     step 0.
 
+59. **Quick replies, seven more** (David, 8 Nov 2026: "omg, yes I want all
+    seven of them!") — answer from anywhere (notification, bubble card,
+    mini player), actions, pick by voice, saved replies, tone keys (on a
+    chip's hold and in the Undo bar), learning from your taps and sent words
+    (on your server only), context-aware replies (travel time, free slots).
+    In that order. `docs/proposals/2026-11-06-one-tap-answers.md` part 6.
+    Built so far: the chips in the thread, people chats, the Inbox space
+    suggestion; the server's chips on waiting rows.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
