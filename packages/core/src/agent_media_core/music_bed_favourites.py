@@ -6,7 +6,7 @@ he chose both of the ways below). The fourth source in Settings → Music
 under long readings, "Your favourites, instrumental".
 
 **His favourites** (`gather`), at most once a day, the best
-MEDIA_MUSIC_BED_FAVOURITES_MAX (30) by a score:
+MEDIA_MUSIC_BED_FAVOURITES_MAX (60; 30 until 7 Nov 2026) by a score:
 
 - the tracks he liked (`media music like`: the state store's `likes`,
   channel music), five points each;
@@ -79,6 +79,11 @@ method (official or separated) and date. The cache is capped
 (MEDIA_MUSIC_BED_FAVOURITES_MAX_MB, 300): when full nothing new is made, and
 the least recently played go first if it is over.
 
+**Slow only, for favourites** (`slowish`): slow by the rule, or slow with
+its tempo and busyness limits widened MEDIA_MUSIC_BED_FAVOURITES_SLOWISH
+(1.4) times more and quiet (energy at most 0.65, about -12 LUFS), so a
+mellow favourite read as busy plays and a loud rocker still does not.
+
 **Playing**: a random ready track (Auto, or only the official or only the
 separated ones) — weighted, when astrotunes' reading is fresh, by how near
 its tempo and energy (its BPM and loudness, measured once as it is made,
@@ -123,7 +128,7 @@ LABELS = {"official": "Official instrumentals only",
 #: The credit's word for each method, shown in brackets after it.
 METHOD_WORDS = {"official": "official", "separated": "separated"}
 
-DEFAULT_MAX = 30
+DEFAULT_MAX = 60
 DEFAULT_MAX_MB = 300.0
 DEFAULT_PER_NIGHT = 3
 DEFAULT_WINDOW = "02:00-05:00"
@@ -386,14 +391,39 @@ def playable(style: Optional[str] = None, data: Optional[dict] = None) -> list[d
     slowish (slow_scale), and every one he suggested — he chose it for
     this, so the slow rule's guess does not overrule him."""
     from . import music_bed
-    from .music_bed_tempo import is_slow
     have = tracks(style, data)
     if not music_bed.slow_on():
         return have
     mine = suggested()
     rated = data_renown(data)
     return [e for e in have if e.get("key") in mine
-            or is_slow(e.get("features"), slow_scale(rated.get(e.get("key"))))]
+            or slowish(e.get("features"), slow_scale(rated.get(e.get("key"))))]
+
+
+#: How far a favourite's tempo and busyness limits widen on top of
+#: slow_scale (David, 7 Nov 2026, more variety: "Loosen slow only a bit").
+DEFAULT_SLOWISH = 1.4
+#: The most energy (0..1, -20 → -8 LUFS) a favourite let in only by that
+#: widening may have: -12.2 LUFS, so a loud rocker (Boston, Free) stays out.
+SLOWISH_MAX_ENERGY = 0.65
+
+
+def slowish_scale() -> float:
+    """MEDIA_MUSIC_BED_FAVOURITES_SLOWISH (1.4); 1 turns the widening off."""
+    return max(1.0, _num_env("MEDIA_MUSIC_BED_FAVOURITES_SLOWISH", DEFAULT_SLOWISH))
+
+
+def slowish(features: Optional[dict], scale: float = 1.0) -> bool:
+    """Slow enough for a favourite: slow by the rule (is_slow at `scale`),
+    or slow at slowish_scale times it and quiet (SLOWISH_MAX_ENERGY)."""
+    from .music_bed_tempo import is_slow
+    if is_slow(features, scale):
+        return True
+    wide = slowish_scale()
+    if wide <= 1.0 or not is_slow(features, scale * wide):
+        return False
+    energy = (features or {}).get("energy")
+    return isinstance(energy, (int, float)) and energy <= SLOWISH_MAX_ENERGY
 
 
 def upkeep_due(data: Optional[dict] = None) -> bool:

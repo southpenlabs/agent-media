@@ -140,6 +140,12 @@ generated style (the values from before there were sources), or
 ``<source>:<style>`` — ``streaming:jazz``, ``library:auto``,
 ``favourites:separated``.
 
+**Mixed in** (`mix_share`; David, 7 Nov 2026: "Mix in other sources"):
+with favourites chosen, MEDIA_MUSIC_BED_MIX_SHARE (a quarter) of the
+readings get a slow library track instead (the moment's genre first; the
+background process keeps that genre topped up), else the generated
+stand-in. 0 turns it off.
+
 **Fallback** (`choose`): the chosen source when it can play on the reading's
 target and has something cached; else the generated style nearest it
 (GENERATED_FOR; Auto's mood for Auto) once rendered; else the tone, as
@@ -1145,6 +1151,10 @@ def warm_needed() -> bool:
         if src == "favourites":
             from . import music_bed_favourites as fav
             from . import music_bed_mix, music_bed_vocal
+            if mix_share() > 0:
+                from . import music_bed_library as lib
+                if any(lib.needs(g) for g in _mix_genres()[:1]):
+                    return True
             return (fav.upkeep_due() or fav.needs()
                     or (music_bed_mix.on("vocal") and music_bed_vocal.due()))
     except Exception as e:  # noqa: BLE001
@@ -1226,6 +1236,13 @@ def warm() -> int:
                 done += fav.fill()
             except Exception as e:  # noqa: BLE001
                 log.warning("music-bed: preparing favourites failed: %s", e)
+            if mix_share() > 0:
+                try:
+                    # Library tracks to mix in (mix_share), the moment's genre.
+                    from . import music_bed_library as lib
+                    done += lib.fill(_mix_genres()[:1])
+                except Exception as e:  # noqa: BLE001
+                    log.warning("music-bed: fetching to mix in failed: %s", e)
             try:
                 # The originals a long reply sings out into (music_bed_vocal).
                 from . import music_bed_mix, music_bed_vocal
@@ -1338,6 +1355,10 @@ def choose(pick, other_audio: Optional[bool], target=None,
                 return Plan("under", "library", pick.style, path=got[0], credit=got[1])
         elif pick.source == "favourites":
             from . import music_bed_favourites as fav
+            if random.random() < mix_share():
+                mixed = _mixed_in(pick)
+                if mixed is not None:
+                    return mixed
             mine = {"topic": topic} if topic and topic_on() else {}
             got = fav.track_for(pick.style, astro_reading(), **mine) if fav.enabled() else None
             if got is not None:
@@ -1355,6 +1376,41 @@ def choose(pick, other_audio: Optional[bool], target=None,
     if p is None:
         return None
     return Plan("under", "generated", pick.fallback, path=p)
+
+
+#: The share of favourites' readings that get something else (David, 7 Nov
+#: 2026, more variety: "Mix in other sources").
+DEFAULT_MIX_SHARE = 0.25
+
+
+def mix_share() -> float:
+    """MEDIA_MUSIC_BED_MIX_SHARE (0.25): how often favourites gives way to a
+    library track or a generated bed; 0 never."""
+    return max(0.0, min(1.0, _num_env("MEDIA_MUSIC_BED_MIX_SHARE", DEFAULT_MIX_SHARE)))
+
+
+def _mix_genres() -> tuple[str, ...]:
+    """The library genres to mix into favourites, the moment's first."""
+    from . import music_bed_library as lib
+    first = auto_now().genre
+    return ((first,) if first in lib.GENRES else ()) + tuple(g for g in lib.GENRES if g != first)
+
+
+def _mixed_in(pick: "Pick") -> Optional["Plan"]:
+    """In place of a favourite: a slow library track (the moment's genre
+    first), else the generated stand-in once rendered; None with neither."""
+    try:
+        from . import music_bed_library as lib
+        if lib.enabled():
+            for g in _mix_genres():
+                if lib.playable(g):
+                    got = lib.track_for(g)
+                    if got is not None:
+                        return Plan("under", "library", g, path=got[0], credit=got[1])
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed: mixing in: %s", e)
+    p = ready(pick.fallback)
+    return Plan("under", "generated", pick.fallback, path=p) if p is not None else None
 
 
 def probe_wait_s() -> float:

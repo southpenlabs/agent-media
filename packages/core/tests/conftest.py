@@ -69,6 +69,10 @@ def _no_inherited_music_level(monkeypatch):
     # (DEFAULT_LEVEL_DB, -20 since 31 Oct 2026) is checked on its own.
     from agent_media_core import music_bed
     monkeypatch.setattr(music_bed, "DEFAULT_LEVEL_DB", music_bed.DEFAULT_GAIN_DB)
+    # Favourites gives way to the library or a generated bed at random
+    # (mix_share): never here unless a test of it sets the share.
+    monkeypatch.setattr(music_bed, "DEFAULT_MIX_SHARE", 0.0)
+    monkeypatch.delenv("MEDIA_MUSIC_BED_MIX_SHARE", raising=False)
     for key in ("BREATHE", "BREATHE_DB", "ATTACK_MS", "RELEASE_MS", "HOLD_MS"):
         monkeypatch.delenv(f"MEDIA_MUSIC_BED_{key}", raising=False)
 

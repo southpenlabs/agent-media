@@ -167,7 +167,11 @@ def test_a_well_known_tune_may_be_slowish(monkeypatch):
     data = F.load()
     data["renown"] = {"famous": 9, "plain": 5, "rocker": 10}
     F.save(data)
+    monkeypatch.setenv("MEDIA_MUSIC_BED_FAVOURITES_SLOWISH", "1")   # renown alone
     assert [e["key"] for e in F.playable()] == ["famous"]
+    # Widened for every favourite (7 Nov 2026), a quiet one gets in; loud never.
+    monkeypatch.delenv("MEDIA_MUSIC_BED_FAVOURITES_SLOWISH")
+    assert [e["key"] for e in F.playable()] == ["famous", "plain"]
     assert F.slow_scale(None) == 1.0 and F.slow_scale(3) == 1.0
     assert F.slow_scale(10) == pytest.approx(1.6)
 

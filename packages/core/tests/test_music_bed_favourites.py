@@ -634,3 +634,30 @@ def test_the_last_played_sit_out(tmp_path, monkeypatch):
     assert F.recently_played()[0] == picks[-1].removeprefix("music-bed-fav-").removesuffix(".mp3")
     monkeypatch.setenv("MEDIA_MUSIC_BED_FAVOURITES_REST", "0")
     assert F.rest_count(10) == 0
+
+
+def test_a_mellow_favourite_is_slowish_and_a_loud_one_is_not():
+    # Read as busy (4.5 onsets a second, over 2.5 x 1.4) but quiet: plays.
+    mellow = {"bpm": 81.0, "onsets": 3.59, "lufs": -12.7, "energy": 0.61}
+    rocker = {"bpm": 75.0, "onsets": 4.11, "lufs": -11.7, "energy": 0.69}
+    from agent_media_core.music_bed_tempo import is_slow
+    assert not is_slow(mellow, 1.12) and F.slowish(mellow, 1.12)
+    assert not F.slowish(rocker, 1.48 / 1.4)
+    os.environ["MEDIA_MUSIC_BED_FAVOURITES_SLOWISH"] = "1"
+    try:
+        assert not F.slowish(mellow, 1.12)
+    finally:
+        del os.environ["MEDIA_MUSIC_BED_FAVOURITES_SLOWISH"]
+
+
+def test_favourites_mix_in_other_beds(tmp_path, monkeypatch):
+    _ready(tmp_path, key="fav")
+    gen = tmp_path / "gen.wav"
+    gen.write_bytes(b"x")
+    monkeypatch.setattr(B, "ready", lambda mood: gen)
+    pick = B.Pick("favourites", "auto", "calm")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_MIX_SHARE", "1")
+    plan = B.choose(pick, other_audio=False)
+    assert plan.source == "generated" and plan.path == gen   # no slow library track
+    monkeypatch.setenv("MEDIA_MUSIC_BED_MIX_SHARE", "0")
+    assert B.choose(pick, other_audio=False).source == "favourites"
