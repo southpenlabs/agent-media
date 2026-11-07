@@ -1850,8 +1850,10 @@ Pinned by `packages/server/tests/test_discard.py`.
 - **Someone writing un-archives a chat** (built 7 Nov 2026, David: "Can new
   messages be unarchived if they're not set with the quiet feature"). A
   message in an archived bridged room from anyone but David or the bridge's
-  bot clears the flag as the sync takes it in (`archive_wake.py`). Reactions,
-  edits, receipts, notices, David's own sends from another device and history
+  bot clears the flag as the sync takes it in (`archive_wake.py`), and so
+  does a reaction from the other end (David, 7 Nov 2026: "a reaction should
+  probably unarchive it too ... if it's from the other end"; it is still not
+  a §6.13 `rooms` notice). David's own reactions, edits, receipts, notices, David's own sends from another device and history
   older than the archiving (a bridge's catch-up) leave it. A room quiet now
   (`POST /session/quiet`) stays archived; when a timed quiet (or one "until I
   turn it off") ends and what came during it is still unread, the chat is

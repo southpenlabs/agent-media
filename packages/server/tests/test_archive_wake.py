@@ -46,7 +46,8 @@ def test_a_message_from_someone_unarchives():
     _ev(sender=BOT, msgtype="m.notice"),                       # the bridge bot
     _ev(msgtype="m.notice"),                                   # a notice
     _ev(**{"m.relates_to": {"rel_type": "m.replace", "event_id": "$y"}}),  # an edit
-    {"type": "m.reaction", "sender": MEL, "content": {}},
+    {"type": "m.reaction", "sender": ME, "content": {}},      # David's own reaction
+    {"type": "m.reaction", "sender": BOT, "content": {}},     # the bridge bot's
     {"type": "m.receipt", "content": {}},
 ])
 def test_what_is_not_someone_writing_leaves_it_archived(ev):
@@ -54,6 +55,14 @@ def test_what_is_not_someone_writing_leaves_it_archived(ev):
     ev = {**ev, "origin_server_ts": int((time.time() + 1) * 1000)}
     assert archive_wake.on_message(T, ev, ME, BRIDGES) is None
     assert archive.is_archived(T)
+
+
+def test_a_reaction_from_the_other_end_unarchives():
+    _archive()
+    ev = {"type": "m.reaction", "sender": MEL, "origin_server_ts": int((time.time() + 1) * 1000),
+          "content": {"m.relates_to": {"rel_type": "m.annotation", "event_id": "$y", "key": "👍"}}}
+    assert archive_wake.on_message(T, ev, ME, BRIDGES) == "woke"
+    assert not archive.is_archived(T)
 
 
 def test_history_older_than_the_archiving_leaves_it_archived():

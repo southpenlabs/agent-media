@@ -5,7 +5,9 @@ be unarchived if they're not set with the quiet feature … what's the best
 way to handle that?" — then "Yes, build it" to this:
 
 * A new message from someone else in an archived bridged chat un-archives
-  it. Not a reaction, an edit, a read receipt, the bridge bot's own notices
+  it, and so does their reaction to a message (David, 7 Nov 2026: "a
+  reaction should probably unarchive it too ... if it's from the other
+  end"). Not David's own reaction, an edit, a read receipt, the bridge bot's own notices
   or what David sent from another device — none of those is someone
   writing to him. Nor a message older than the archiving: a bridge's
   catch-up after a restart replays history, and that is not new.
@@ -50,12 +52,22 @@ def _from_someone(ev: dict, owner: str, bridges: set[str]) -> bool:
     return content.get("msgtype") != "m.notice"
 
 
+def _reacting(ev: dict, owner: str, bridges: set[str]) -> bool:
+    """Whether `ev` is someone else's reaction: an `m.reaction` from neither
+    David nor the bridge's bot. It brings a chat back, but is not a message
+    for the phone's notices (room_notices keeps to `_from_someone`)."""
+    if ev.get("type") != "m.reaction":
+        return False
+    sender = ev.get("sender") or ""
+    return bool(sender) and sender != owner and sender not in bridges
+
+
 def on_message(thread: str, ev: dict, owner: str, bridges: set[str],
                now: float | None = None) -> str | None:
     """A sync event in `thread`'s room. Returns what it did ("woke",
     "waiting") or None. Never raises: a flag is not worth the sync loop."""
     try:
-        if not _from_someone(ev, owner, bridges):
+        if not (_from_someone(ev, owner, bridges) or _reacting(ev, owner, bridges)):
             return None
         flags = archive.archived()
         if thread not in flags:
