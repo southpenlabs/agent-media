@@ -77,6 +77,14 @@ def test_params_carry_every_effect_and_zero_for_one_switched_off(monkeypatch):
     json.dumps(p)                          # what a phone is told
 
 
+def test_the_mix_says_what_the_reading_is():
+    # A phone carries a song singing out on under a reply, never under a kind bed.
+    assert M.params("generated", "calm", B.file_for("calm"))["kind"] == "reply"
+    assert M.params("favourites", "auto", "/x/music-bed-fav-a.mp3")["kind"] == "reply"
+    for kind in ("people", "question", "alert"):
+        assert M.params("generated", kind, B.file_for(kind))["kind"] == kind
+
+
 def test_a_streaming_plan_has_no_mix():
     plan = B.Plan("stream", "streaming", "lofi", tracks=({"uri": "x"},))
     assert M.for_plan(plan) is None

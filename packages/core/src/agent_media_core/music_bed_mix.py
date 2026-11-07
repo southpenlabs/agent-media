@@ -199,6 +199,11 @@ def _stored_level() -> float:
         return 0.0
 
 
+def _kind_of(style: str) -> str:
+    from . import music_bed
+    return style if style in music_bed.KIND_BEDS else "reply"
+
+
 def params(source: str, style: str, path, long: bool = False) -> dict:
     """The mix for one bed, as a phone is told it (JSON) and this host's
     under player uses it: every effect's amount, 0 for one switched off.
@@ -246,6 +251,10 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
         "carry_ms": tunable("CARRY_S") * 1000.0 if on("carry") else 0.0,
         "xfade_ms": tunable("XFADE_MS"),
         "thought_db": tunable("THOUGHT_DB"),
+        # What the reading is: "reply", or one of the kind beds (a person's
+        # message, a question, an alert). A phone carries a song still
+        # singing out on under a new reply as its backing, never under these.
+        "kind": _kind_of(style),
     }
     if after:
         out.update(after=after, outro="", carry_ms=0.0)

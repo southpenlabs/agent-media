@@ -2748,7 +2748,24 @@ plays it at a music level (the original is loudnormed to
 `MEDIA_MUSIC_BED_VOCAL_LUFS`, -16) to the end of the next chorus at least
 `_AHEAD_S` (15) on, else the next boundary that far on, else `_FALLBACK_S`
 (30) on, and fades it over `_FADE_MS` (3000). A new reading's under sound,
-a stop or a cut fades it quickly. The originals: fetched for each kept
+a stop or a cut fades it quickly — except under the next reply's bed
+(8 Nov 2026, David: "if Sing it out is playing when speech starts, can we
+make it continue that song from the backing version?"): every mix also
+carries **`kind`**, `"reply"` or the kind bed's `"people"`, `"question"`,
+`"alert"` (absent from an older server: a reply). A phone whose song is
+still up when a stop or a new reply comes lets it play on a moment (2.5 s,
+15 s once the next reply has started) for that reading's sound: a looping
+bed whose `kind` is `"reply"` (and no `tone-kind` label) is not played;
+the instrumental the song came in from goes on in its place, from the
+song's position mapped back (aligned: the same position; else the same
+fraction of `inst_s`), crossfaded from the song over `xfade_ms`, with the
+new mix's effects and level and the old bed's own offset and `after`, so
+that reading's natural end sings the same song out again from where it
+has got to. Anything else (a tone, a kind bed, a reply with no bed, a
+phone sound picked, the instrumental no longer cached) fades the song
+quickly as before. The phone reports the song ended with `why`
+`"backing"`. The server is not told: the reading's history row still
+names the bed red5 chose (`bed_song`), not the song carried on under it. The originals: fetched for each kept
 favourite by the background process (`_PER_PASS`, 2 a pass), kept private
 in the clip dir as `music-bed-vocal-<key>.mp3` (cap `_MAX_MB`, 300; dropped
 with their favourite), indexed in `music-bed-vocal.json` with their sections
