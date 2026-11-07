@@ -782,7 +782,7 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
                 agents_text=presets.agents_md_of(preset), root_dir=base)
         else:
             source = str(worktree.get("from") or "").strip()
-            if source not in {p["path"] for p in sessions.places(limit=0)}:
+            if not sessions.known_place(source):
                 return False, {"error": f"no session has run in {source!r}", "status": 404}
             made, made_detail = projects_new.worktree(source, str(worktree.get("branch") or ""))
         if not made:
@@ -797,7 +797,7 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
         # A directory named outright. Only somewhere a session has actually
         # run: this opens a shell there, so it is not the phone's to choose
         # freely.
-        if not cwd_trusted and where not in {p["path"] for p in sessions.places(limit=0)}:
+        if not cwd_trusted and not sessions.known_place(where):
             return False, {"error": f"no session has run in {where!r}", "status": 404}
         from agent_media_core import layout
 

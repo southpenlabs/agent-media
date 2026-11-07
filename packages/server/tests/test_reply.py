@@ -1431,6 +1431,23 @@ def test_places_stop_at_the_limit(tmp_path, monkeypatch):
     assert len(sessions.places(limit=0)) == 10
 
 
+def test_a_link_to_a_place_is_the_same_place(tmp_path, monkeypatch):
+    # ~/projects/websites -> ~/spl/projects/spl/websites: the transcript
+    # names the link, the app sent the real path, and the chat was refused.
+    real = tmp_path / "spl" / "websites"
+    real.mkdir(parents=True)
+    link = tmp_path / "websites"
+    link.symlink_to(real)
+    monkeypatch.setattr(sessions, "_manifest_dir", lambda: tmp_path / "none")
+    monkeypatch.setattr(sessions, "_history", lambda: [(100.0, "s-1")])
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {})
+    monkeypatch.setattr(sessions, "transcript_cwd", lambda sid: str(link))
+    assert sessions.known_place(str(real))
+    assert sessions.known_place(str(link))
+    assert not sessions.known_place(str(tmp_path / "elsewhere"))
+    assert not sessions.known_place("")
+
+
 def test_a_directory_no_session_has_run_in_is_refused(tmp_path, monkeypatch):
     # /ask opens a shell where it is told to, so the phone picks from the
     # list the server published, not from anywhere on the disk.

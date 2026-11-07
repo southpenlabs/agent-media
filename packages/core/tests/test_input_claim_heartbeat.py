@@ -65,12 +65,29 @@ def _fast_heartbeat(monkeypatch):
     monkeypatch.setattr(cg, "_CLAIM_MIN_INTERVAL_S", 0.01)
 
 
+# Every heartbeat a test makes, so none outlives its test. A heartbeat left
+# running keeps posting after monkeypatch puts the real urlopen back: on
+# 7 Nov 2026 one did, against a real red5:8675, and held the house's speech
+# as "cece" for the rest of a 30-minute suite. The URL is .invalid too, so a
+# leak that slips past this still reaches nothing.
+_made: list = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_every_heartbeat():
+    yield
+    while _made:
+        _made.pop().stop()
+
+
 def _hb(**kw):
-    kw.setdefault("url", "http://red5:8675/input-claim")
+    kw.setdefault("url", "http://speech-state.invalid:8675/input-claim")
     kw.setdefault("owner", "cece")
     kw.setdefault("ttl_s", 45.0)
     kw.setdefault("interval_s", 15.0)
-    return cg.ClaimHeartbeat(**kw)
+    hb = cg.ClaimHeartbeat(**kw)
+    _made.append(hb)
+    return hb
 
 
 def test_posts_immediately_on_start(rec):
@@ -81,7 +98,7 @@ def test_posts_immediately_on_start(rec):
     assert rec.seen.wait(2.0), "no POST within 2s of start()"
     hb.stop()
     assert rec.calls[0]["method"] == "POST"
-    assert rec.calls[0]["url"] == "http://red5:8675/input-claim"
+    assert rec.calls[0]["url"] == "http://speech-state.invalid:8675/input-claim"
 
 
 def test_the_body_is_what_red5_expects(rec):
@@ -139,7 +156,7 @@ def test_stop_deletes_the_claim(rec):
     assert _wait_for(lambda: any(c["method"] == "DELETE" for c in rec.calls)), \
         "stop() sent no DELETE — the speech hold rides its full TTL"
     delete = [c for c in rec.calls if c["method"] == "DELETE"][0]
-    assert delete["url"] == "http://red5:8675/input-claim?owner=cece", \
+    assert delete["url"] == "http://speech-state.invalid:8675/input-claim?owner=cece", \
         "the DELETE must name its owner, or it lifts nobody's hold"
 
 
@@ -187,6 +204,7 @@ def test_a_release_in_flight_cannot_strand_a_new_claim(monkeypatch):
     assert _wait_for(lambda: any(c["method"] == "DELETE" for c in r.calls))
     assert _wait_for(lambda: r.calls[-1]["method"] == "POST"), \
         "a stale release cleared the live claim and left it cleared"
+    hb.stop()
 
 
 def test_an_interval_at_or_above_the_ttl_is_clamped():

@@ -868,6 +868,22 @@ def _history() -> list[tuple[float, str]]:
     return sorted(out, reverse=True)
 
 
+def known_place(path: str) -> bool:
+    """Has a session run in `path`? Symlinks count as the same place.
+
+    `~/projects/websites` can be a link to `~/spl/projects/spl/websites`:
+    a transcript names one, the app may send the other, and a literal
+    comparison refused a new chat in a folder with months of history."""
+    path = (path or "").strip()
+    if not path:
+        return False
+    real = os.path.realpath(path)
+    for p in places(limit=0):
+        if p["path"] == path or os.path.realpath(p["path"]) == real:
+            return True
+    return False
+
+
 def places(limit: int = 6) -> list[dict]:
     """`[{name, path, at}]` — the directories sessions have actually run in.
 

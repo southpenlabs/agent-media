@@ -187,7 +187,7 @@ def commands_for(item: str, session: str, project: str, bearer: str,
         _name, cwd = sessions.project_target(project)
     # A place from `/targets` names its directory outright — trusted only as
     # far as the list that published it, same as `/ask`.
-    if not cwd and where and where in {p["path"] for p in sessions.places(limit=0)}:
+    if not cwd and where and sessions.known_place(where):
         cwd = where
     cwd = cwd or os.path.expanduser("~")
     return True, {"cwd": cwd, "commands": slash_menu.menu(cwd)}
