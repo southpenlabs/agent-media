@@ -1847,6 +1847,17 @@ Pinned by `packages/server/tests/test_discard.py`.
 - **Talking un-archives.** A reply, or an `/ask` routed into the thread,
   clears the flag once the words are in (`send.deliver`); a send that
   failed leaves it. A `branch` reply does not: it opens a new thread.
+- **Someone writing un-archives a chat** (built 7 Nov 2026, David: "Can new
+  messages be unarchived if they're not set with the quiet feature"). A
+  message in an archived bridged room from anyone but David or the bridge's
+  bot clears the flag as the sync takes it in (`archive_wake.py`). Reactions,
+  edits, receipts, notices, David's own sends from another device and history
+  older than the archiving (a bridge's catch-up) leave it. A room quiet now
+  (`POST /session/quiet`) stays archived; when a timed quiet (or one "until I
+  turn it off") ends and what came during it is still unread, the chat is
+  un-archived then (`<state_dir>/archive-wake.json` holds the waiting ones,
+  settled on the next `/targets`). A standing shifts rule does not wait: a
+  message during a shift wakes the chat, one outside it does not.
 - The row stays in `/targets` and `/conversations` with `archived: true`.
 - 400 `"not a session id"`; 404 `"no such session <first 8>"` for a session
   that is not live, has no transcript and is not on the shelf.
@@ -4594,6 +4605,7 @@ local look, never a network call:
 | `read_page` | `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) — where personal use allows `signed-in-reading` |
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
+| `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -8925,6 +8937,48 @@ thread's roam id (a to-do's `:SESSION:`).
   - The app: an "Include private" lock key at the foot of the Related
     sheet, off each time the sheet opens and never stored; private rows
     show a lock.
+
+### 6.52 The phone app updating itself — admins (built 7 Nov 2026)
+
+David, 7 Nov 2026: "Can we build some sort of auto update feature?", from
+every CI build of main. The sasonica-app repo is private, so the phone
+cannot read its releases; the server reads them with `gh` and answers.
+Code: `app_update.py`; tests in `test_app_update.py`. Admins only
+(`auth.may_admin`): a member or guest device is 403 `not_admin`. Offered
+where `/features` says `app_update` (§6.11a). Both paths are API routes
+although they sit under `/app/`: they are answered before the web app's
+files (web_app.py).
+
+- `GET /app/update?flavor=<personal|release>&current=<versionCode>` →
+  `{"ok": true, "versionCode": 1963, "commit": "<40-hex sha>", "sha256":
+  "<hex>", "size": 8632897, "published": "<iso>", "url":
+  "/app/update/apk?build=1963&flavor=personal"}`, the newest build of that
+  flavor; `{"ok": true, "versionCode": null}` when none is newer than
+  `current` (absent: 0). 400 for a flavor not in the two or a `current`
+  that is not digits; 502 when the releases cannot be read and none were
+  read before.
+  - The source: the repo's newest 30 releases (`gh api
+    repos/<repo>/releases`), each `build-<N>` one (drafts left out) with an
+    asset `sasonica-personal-<N>-<sha7>.apk` (personal) or
+    `sasonica-<N>-<sha7>.apk` (release). Debug and web assets match neither
+    and are never offered. A minimal CI build carries the personal APK only,
+    so the newest release-flavor APK may be an older build, or none.
+  - `sha256` is the asset's GitHub `digest`, else its line in the release
+    notes' `sha256:` block. `commit` is the notes' `commit:` line, else the
+    release's target commit. `size` is the asset's, in bytes.
+  - The list is read at most once per `MEDIA_APP_UPDATE_TTL` seconds (300);
+    a failed read with an older list in hand answers from it.
+  - The repo: `MEDIA_APP_UPDATE_REPO` (`owner/name`, default
+    `southpenlabs/sasonica-app`; `davidj4tech/sasonica-app` redirects there).
+- `GET /app/update/apk?build=<N>&flavor=<personal|release>` → the APK,
+  `Content-Type: application/vnd.android.package-archive` with its
+  `Content-Length` (a `Range` is honoured, as for other files). Fetched
+  once with `gh release download` into `<state_dir>/app-update/`, checked
+  against the release's sha256 (a mismatch is 502 and nothing is kept), and
+  the last two APKs kept. Concurrent requests for one file wait on a single
+  download. 400 unless `build` is digits and `flavor` one of the two; 404
+  when that build has no APK of that flavor; 502 when it cannot be fetched.
+  The app checks the sha256 itself before installing.
 
 ### Pairing
 

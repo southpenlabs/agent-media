@@ -1061,8 +1061,14 @@ def room(thread: str) -> Room | None:
 def rows(flags: set | frozenset = frozenset()) -> list[dict]:
     """`/targets` rows for the allowed rooms (§6.1): never live, never rested
     or pinned; the last message is the preview line."""
-    from . import you_wrote
+    from . import archive_wake, you_wrote
 
+    # A chat that waited out its quiet in the archive comes back now if what
+    # came meanwhile is unread (archive_wake.py, §6.4).
+    woke = archive_wake.due(lambda t: ((_ROOMS[t].read_up_to() or {}).get("at")
+                                       if t in _ROOMS else None))
+    if woke:
+        flags = set(flags) - set(woke)
     out = []
     for r in list(_ROOMS.values()):
         if not r.loaded:
@@ -1210,6 +1216,11 @@ def _on_event(room_id: str, ev: dict) -> None:
     r = _ROOMS.get(thread_of(room_id))
     if r is not None:
         r.on_event(ev)
+        # Someone writing in an archived chat brings it back, unless it is
+        # quiet (archive_wake.py, §6.4).
+        from . import archive_wake
+
+        archive_wake.on_message(r.thread, ev, r.owner, _bridges())
 
 
 def _bridges(env=None) -> set[str]:

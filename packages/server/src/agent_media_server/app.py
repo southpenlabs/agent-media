@@ -14,6 +14,10 @@ device gets its token):
                   a bundle is present (MEDIA_WEB_APP_DIR, else the binary's
                   own copy); no auth, client routes fall back to index.html.
                   See web_app.py
+  GET  /app/update?flavor=&current= → the newest phone-app build newer than
+                  `current`, or versionCode null; GET /app/update/apk?build=&flavor=
+                  → its APK, fetched once from the release and kept. Admins
+                  only; answered before the web app's files (app_update.py, §6.52)
   POST /pair      {"code", "device"} → trade a one-time pairing code (minted
                   by `media-visual-canvas pair --device NAME`) for a device
                   token. No auth; failures rate-limited per source address.
@@ -452,6 +456,11 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
+# The phone app updating itself (app_update.py, §6.52): API routes under
+# /app/, answered before the web app's files.
+APP_UPDATE_PATHS = frozenset({"/app/update", "/app/update/apk"})
+CORS_PATHS = CORS_PATHS | APP_UPDATE_PATHS
+
 # Saved practice: meditations, yoga, any practice (practice.py, §6.45).
 PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
 # Peer to peer: practice shared with the owner over Matrix (shares.py, §6.48).
@@ -860,9 +869,11 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     # before an /app/dl/ download (David, 25 Oct 2026).
     if method == "HEAD":
         return (path == web_app.PREFIX or path.startswith(web_app.PREFIX + "/")) and web_app.serve(h, path)
+    if method == "GET" and path in APP_UPDATE_PATHS:
+        return _app_update(h, path)
     if method == "GET":
         # The web app's own files (web_app.py, roadmap 21): no credential,
-        # and nothing under /app is an API route.
+        # and nothing else under /app is an API route.
         if path == web_app.PREFIX or path.startswith(web_app.PREFIX + "/"):
             return web_app.serve(h, path)
         # Android's check that /app/t/<session> links are the app's (app_links.py).
@@ -886,6 +897,25 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     if method == "OPTIONS":
         return _options(h, path)
     return False
+
+
+def _app_update(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """`GET /app/update` and `GET /app/update/apk` (app_update.py, §6.52)."""
+    from . import app_update
+
+    q = parse_qs(urlsplit(h.path).query)
+    arg = lambda k: (q.get(k) or [""])[0]  # noqa: E731
+    if path == "/app/update":
+        ok, detail = app_update.check(_bearer(h), arg("flavor"), arg("current"))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        return True
+    f, err = app_update.apk(_bearer(h), arg("build"), arg("flavor"))
+    if f is None:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return True
+    _send_file(h, f, f.stat().st_size, app_update.APK_TYPE,
+               {"Content-Disposition": f'attachment; filename="{f.name}"'})
+    return True
 
 
 def _signed_clip(h: BaseHTTPRequestHandler, name: str) -> bool:

@@ -34,6 +34,8 @@ never a network call, so the app can ask on every start.
             follow frame's `stage`; always true here, as quick
   personal  this server answers /settings/personal (personal.py, 30 Oct
             2026): always true here, so an older server leaves it out
+  app_update  this server answers GET /app/update and /app/update/apk
+            (app_update.py, 7 Nov 2026), admins only; always true here
   weather   a place for the weather is set (Settings or MEDIA_MUSIC_BED_WEATHER)
   astro     Astro Tunes can read the moment: astrotunes installed, switched
             on, its birth details there (personal_prefs.astro_why)
@@ -120,7 +122,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 
