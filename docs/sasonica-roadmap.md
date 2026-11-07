@@ -2524,6 +2524,18 @@ ahead.
     play, act in the app or run a registry task (`GET /actions/tasks`), a
     confirming one marked "…" with a bold border (§6.2.1).
 
+60. **Recent replies in the full player** (David, 8 Nov 2026: "Can we get a
+    list of the latest replies read from the full media player?" and "And
+    maybe from a little icon on the replay banner?") — **DONE 8 Nov 2026**
+    (agent-media `53d096a1`, sasonica-app `f4b9243a`). `GET /speech/recent`
+    (§6.5): the replies, questions and room messages read aloud lately,
+    every thread's, newest first, one row per reply, private and sealed
+    threads left out, each with its heard state (`unheard`, `resume`). The
+    voice's full player ends with the list (a pill to it among its pills):
+    a row's tap replays it, from where it was stopped; its arrow opens the
+    thread. The Replay strip has a list key that opens the sheet scrolled to
+    it. Neither shows on a server without `speech_recent` in `/features`.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
