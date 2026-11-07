@@ -620,3 +620,17 @@ def test_youtube_is_not_searched_without_the_add_on(monkeypatch):
     monkeypatch.setattr(F, "_mpd", lambda *a: (_ for _ in ()).throw(AssertionError("Mopidy asked")))
     assert F.search("Portishead Glory Box") == [] and F.lookup("abcdefghijk") is None
 
+
+
+def test_the_last_played_sit_out(tmp_path, monkeypatch):
+    """David, 7 Nov 2026: "We need more variety in the backing music"."""
+    monkeypatch.setattr(B, "slow_on", lambda: False)
+    for i in range(10):
+        _ready(tmp_path, key=f"t{i}", title=f"Song {i}")
+    assert F.rest_count(10) == 4 and F.rest_count(2) == 0 and F.rest_count(40) == 6
+    picks = [F.track_for("auto", None, DAY)[0].name for _ in range(60)]
+    for i in range(len(picks) - 4):
+        assert len(set(picks[i:i + 5])) == 5            # no repeat within five
+    assert F.recently_played()[0] == picks[-1].removeprefix("music-bed-fav-").removesuffix(".mp3")
+    monkeypatch.setenv("MEDIA_MUSIC_BED_FAVOURITES_REST", "0")
+    assert F.rest_count(10) == 0

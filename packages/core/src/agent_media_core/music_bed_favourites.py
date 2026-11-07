@@ -82,7 +82,9 @@ the least recently played go first if it is over.
 **Playing**: a random ready track (Auto, or only the official or only the
 separated ones) — weighted, when astrotunes' reading is fresh, by how near
 its tempo and energy (its BPM and loudness, measured once as it is made,
-`_measure`; held low from 21 to 6) are to the reading's — credited "Instrumental of <title> — <artist> (separated)".
+`_measure`; held low from 21 to 6) are to the reading's, the last few played
+sitting out (`rested`, up to MEDIA_MUSIC_BED_FAVOURITES_REST, 6, never half
+the ready ones) — credited "Instrumental of <title> — <artist> (separated)".
 Nothing ready: the generated bed, as the other sources.
 
 **Only when chosen.** Nothing is gathered, searched or separated unless the
@@ -466,6 +468,62 @@ def features_fit(entry: dict, axes: Optional[dict], late: bool = False) -> float
     return 1.0 / (0.15 + abs(f["tempo"] - want_t) + abs(f["energy"] - want_e))
 
 
+#: How many of the last tracks played sit out the next pick, at most (David,
+#: 7 Nov 2026: "We need more variety in the backing music"). With n
+#: playable, (n - 1) // 2 of them rest, so two still alternate by weight
+#: and ten keep six to choose from.
+DEFAULT_REST = 6
+#: How many keys the played list keeps.
+PLAYED_KEEP = 20
+
+
+def rest_count(n: int) -> int:
+    """How many of the last played rest when `n` are playable:
+    MEDIA_MUSIC_BED_FAVOURITES_REST (6) at most, never half or more."""
+    cap = max(0, int(_num_env("MEDIA_MUSIC_BED_FAVOURITES_REST", DEFAULT_REST)))
+    return max(0, min(cap, (n - 1) // 2))
+
+
+def _played_path() -> Path:
+    from ._paths import state_dir
+    return state_dir() / "music-bed-favourites-played.json"
+
+
+def recently_played() -> list[str]:
+    """The keys last played, newest first; [] on any failure. Kept apart
+    from the file times, which a fresh track also has."""
+    try:
+        got = json.loads(_played_path().read_text())
+        return [k for k in got if isinstance(k, str)] if isinstance(got, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _mark_played(key: Optional[str]) -> None:
+    if not key:
+        return
+    try:
+        keys = [key] + [k for k in recently_played() if k != key]
+        p = _played_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(keys[:PLAYED_KEEP]))
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def rested(have: list[dict]) -> list[dict]:
+    """`have` without the last rest_count of them played, so a favourite
+    does not come round again for a few readings."""
+    n = rest_count(len(have))
+    if not n:
+        return have
+    keys = {e.get("key") for e in have}
+    resting = set([k for k in recently_played() if k in keys][:n])
+    return [e for e in have if e.get("key") not in resting] or have
+
+
 def track_for(style: str = "auto", axes: Optional[dict] = None,
               when: Optional[datetime] = None,
               topic: Optional[str] = None) -> Optional[tuple[Path, dict]]:
@@ -474,10 +532,10 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
     (features_fit), so the nearest come up most but not always, and by how
     distinctive its tune is (pick_weight: his suggestions most), and with
     `topic` (the reply's words) the one a quick model finds suits it
-    TOPIC_BOOST times as often (topic_choice). Marks it played. Never
-    fetches."""
+    TOPIC_BOOST times as often (topic_choice). The last few played sit
+    out (rested). Marks it played. Never fetches."""
     try:
-        have = playable(style)
+        have = rested(playable(style))
         if not have:
             return None
         hour = (when or datetime.now()).hour
@@ -495,6 +553,7 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
             os.utime(p)
         except OSError:
             pass
+        _mark_played(e.get("key"))
         return p, credit(e)
     except Exception as e:  # noqa: BLE001 — a bed must never cost a reply
         log.warning("music-bed favourites: %s", e)
