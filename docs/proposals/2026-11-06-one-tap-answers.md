@@ -154,3 +154,13 @@ Built in this order ("reach first"):
    late") and free slots from the calendar when someone asks to meet —
    offered as chips with the value filled in; location only when the phone
    shares it (maps proposal), nothing sent outside but to the private model.
+8. **Patterns, Fabric-style** (David, 8 Nov 2026: "fabric was the
+   prompting engine I was trying to think of", then item 8): named prompts
+   kept as plain markdown files on the server, in the shape of Daniel
+   Miessler's Fabric (MIT; its pattern library importable, never its code
+   needed). The tone keys (item 5) are patterns (`shorter`, `warmer`,
+   `formal`), so a new tone is a new file. A hold on any message also offers
+   pattern chips — Summarize, Pull out the to-dos, Explain simply — whose
+   result shows (and can be spoken) under it. The user's own folder of
+   patterns shows as chips too. A people chat's text goes only to the private
+   model, as for every model call on it. Built with the tone keys.

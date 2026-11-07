@@ -2510,7 +2510,9 @@ ahead.
     mini player), actions, pick by voice, saved replies, tone keys (on a
     chip's hold and in the Undo bar), learning from your taps and sent words
     (on your server only), context-aware replies (travel time, free slots).
-    In that order. `docs/proposals/2026-11-06-one-tap-answers.md` part 6.
+    In that order, and with the tone keys, Fabric-style patterns (item 8:
+    prompt files on the server, chips on a message's hold, your own folder).
+    `docs/proposals/2026-11-06-one-tap-answers.md` part 6.
     Built so far: the chips in the thread, people chats, the Inbox space
     suggestion; the server's chips on waiting rows.
 
