@@ -5,7 +5,7 @@ thinking about a combination of all three for sasonica ... What do you
 think?" — then "y" to writing it up. Status: **central lengths built** (steps 2 and 3 below, 1 Nov 2026:
 `deploy/facts` live at https://sasonica.com/facts/v1, seeded with red5's 80
 measured lengths; `agent_media_core/central_facts.py`); teachers' places were
-shared for a day (step 4) and taken out again, below; the rest proposed.
+shared for a day (step 4) and taken out again, below; the rest proposed. Shared collections and a public list: proposed 7 Nov 2026 (below).
 
 ## Decided (David, 1 Nov 2026)
 
@@ -182,7 +182,58 @@ share. A group's "what we practised" is opt-in per person, per group.
    bedtime playlist), each Sasonica keeping its copy in step. Receiving
    needs an install signed in to Matrix as its owner, which only red5 is
    (by hand); the transport proposal's sign-in step comes first.
-6. **A person's own homeserver, turnkey** (David, 1 Nov 2026: "Yes,
+   **Back, as shared collections plus a public list** (7 Nov 2026, below).
+6. **A person's own homeserver, turnkey**
+
+## Shared collections and a public list (proposed 7 Nov 2026)
+
+David, 7 Nov 2026: "could we look at getting the peer-to-peer thing going
+here, so that when someone saves a YouTube link it's available for
+everyone?" Asked who "everyone" is, he chose **shared collections between
+people who pick each other, plus a public read-only list he curates**,
+over one pool of every user's saves (that would be central, need
+moderation, and put South Pen Labs back in the hosting role it left on 2
+Nov). The same day he asked for parts of Sasonica to work **without an
+account or a server**: the public list is that part.
+
+**A shared collection** is one Matrix room per collection, on
+matrix.sasonica.com or a member's own homeserver, marked by a state event
+`org.sasonica.collection` `{v, title, kind: "practice" | "links"}`. An item
+is the §6.48 `org.sasonica.share` body sent into the room; removing one is
+a redaction (only its sender or the room's admins). Each member's server
+mirrors the room into its own private layer as a collection in Practice
+(or Media's links), so it plays and saves offline like any other item, and
+an item a member adds in the app is sent to the room. Joining is a Matrix
+invitation, accepted in the app. Members need Matrix sign-in, so this
+waits on the transport proposal's sign-in step: an install signs in to
+matrix.sasonica.com with the owner's Sasonica account (OIDC, as the app's
+pairing sign-in does). Today only red5 is signed in, by hand.
+
+**The public list** ("Picks") is a collection whose curator publishes it.
+It does not need Matrix and comes first.
+
+- A collection in the curator's own Sasonica is marked public; the server
+  then POSTs its items (title, url, `key`, teacher, duration, a note: the
+  share body, nothing else) to `https://sasonica.com/picks/v1`, a Worker
+  beside `deploy/facts`, signed with the install key. Only installs on the
+  Worker's curator list may publish (red5 first). A change re-publishes the
+  whole list; there is no per-user write path, so nothing to moderate but
+  the curator's own picks.
+- `GET /picks/v1` is open: no account, no server, cached at the edge.
+- Read by: the app with no server paired (Welcome's Just look around, and
+  Media opening unpaired on a Picks shelf), sasonica.com (a Picks page),
+  and any paired server (a Picks shelf in Practice, Save copies one into
+  the private list).
+- Unpaired, the app plays a YouTube pick in the embed it already uses.
+  Saving offline needs a server to fetch the file, so unpaired it offers
+  "Save this to your own Sasonica" (pairing) instead.
+- Exposure: a list of links and titles chosen by the curator, the same as
+  a blog post linking videos. No video, thumbnail or description is
+  rehosted; thumbnails come from YouTube to the viewer's browser.
+
+**Order:** (a) Picks: Worker, server publish, the app's unpaired shelf
+and the site's page. (b) Matrix sign-in for any install. (c) Shared
+collections on the §6.48 code. (David, 1 Nov 2026: "Yes,
    after hosted"; below).
 7. **Groups**, if wanted.
 
