@@ -81,3 +81,17 @@ def test_inspecting_missing_cancelled_event_never_recreates_it(monkeypatch):
         return 404, b"", ""
     monkeypatch.setattr(writer, "_request", request)
     assert writer.inspect_event("test@sasonica", "work") == {"uid": "test@sasonica", "exists": False}
+
+
+def test_alarms_relative_and_absolute():
+    _, data = writer._body(event(alarms=["-PT15M", "2026-10-23T09:30:00+11:00"]))
+    alarms = Calendar.from_ical(data).walk("VALARM")
+    assert [a["ACTION"] for a in alarms] == ["DISPLAY", "DISPLAY"]
+    assert alarms[0].decoded("TRIGGER") == dt.timedelta(minutes=-15)
+    assert alarms[1].decoded("TRIGGER") == dt.datetime(2026, 10, 22, 22, 30, tzinfo=dt.timezone.utc)
+
+
+@pytest.mark.parametrize("alarms", [["soon"], ["2026-10-23T09:30:00"], ["-P1D"] * 6])
+def test_bad_alarms_refused(alarms):
+    with pytest.raises(ValueError):
+        writer._body(event(alarms=alarms))

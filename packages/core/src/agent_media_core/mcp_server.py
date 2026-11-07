@@ -88,7 +88,9 @@ def calendar_write(event: dict, calendar: str = "", etag: str = "", delete: bool
     """Write an event when the owner asks; shared across local harnesses.
 
     event: title, start/end (ISO with offsets), timezone (default Melbourne),
-    optional uid, busy, all_day, location, description, rrule. All-day end is
+    optional uid, busy, all_day, location, description, rrule, alarms (list of
+    "-PT15M"-style durations before start, or ISO times with offsets: a
+    notification on the phone at that time). All-day end is
     exclusive. Use a stable uid to avoid duplicates. Existing event returns
     its ETag without changes; supply that ETag to update/delete. Only events
     created by this tool may be edited. Never invent roster hours.

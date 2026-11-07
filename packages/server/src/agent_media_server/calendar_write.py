@@ -82,6 +82,40 @@ def _request(url, auth, method="GET", body=None, headers=None):
         raise CalendarWriteError("Calendar request failed; no credentials or server response logged") from None
 
 
+def _alarms(values, title: str, zone) -> list:
+    """Display alerts: each an ISO duration before the start ("-PT15M",
+    "-P3DT0H") or an absolute ISO time with an offset (a Friday notice for a
+    Monday event). The phone's calendar shows them as notifications."""
+    from icalendar import Alarm, vDuration
+    if not values:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    if len(values) > 5:
+        raise ValueError("At most 5 alarms")
+    out = []
+    for value in values:
+        value = str(value).strip()
+        alarm = Alarm()
+        alarm.add("action", "DISPLAY")
+        alarm.add("description", title)
+        if value.lstrip("+-").startswith("P"):
+            try:
+                alarm.add("trigger", vDuration.from_ical(value))
+            except Exception:
+                raise ValueError(f"Invalid alarm duration: {value}") from None
+        else:
+            try:
+                at = dt.datetime.fromisoformat(value)
+            except ValueError:
+                raise ValueError(f"Invalid alarm time: {value}") from None
+            if at.tzinfo is None:
+                raise ValueError("Alarm times require explicit UTC offsets")
+            alarm.add("trigger", at.astimezone(dt.timezone.utc), parameters={"VALUE": "DATE-TIME"})
+        out.append(alarm)
+    return out
+
+
 def _body(event: dict) -> tuple[str, bytes]:
     from icalendar import Calendar, Event
     uid = str(event.get("uid") or uuid.uuid4().hex + "@sasonica")
@@ -128,6 +162,8 @@ def _body(event: dict) -> tuple[str, bytes]:
         rule = str(event["rrule"]).removeprefix("RRULE:")
         rrulestr(rule, dtstart=start if not all_day else dt.datetime.combine(start, dt.time()))
         ev.add("rrule", vRecur.from_ical(rule))
+    for alarm in _alarms(event.get("alarms"), title, zone):
+        ev.add_component(alarm)
     cal.add_component(ev)
     return uid, cal.to_ical()
 
