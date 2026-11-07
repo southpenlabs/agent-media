@@ -253,3 +253,61 @@ def test_the_cursor_survives_a_restart():
     time.sleep(0.01)
     room_notices._reset_for_tests()
     assert room_notices.last_seq() > old
+
+
+# ── One-tap answers for a told message (answer from anywhere, 8 Nov 2026) ──
+
+CHIPS = [{"text": "On my way", "source": "model"}, {"text": "Running late", "source": "model"}]
+
+
+def test_answers_ready_after_a_message_is_told_come_on_the_same_cursor(state):
+    r = _room()
+    head = room_notices.last_seq()
+    ev = _ev(body="where are you?")
+    _feed(r, ev)
+    told = room_notices.last_seq()
+    assert room_notices.answers_ready(r.thread, ev["event_id"], CHIPS) is True
+    got = room_notices.notices(head)
+    assert "suggestions" not in got["messages"][0]
+    assert got["answers"] == [{"n": told + 1, "thread": r.thread, "id": ev["event_id"],
+                               "suggestions": CHIPS}]
+    assert got["last"] == told + 1
+    # A phone past the message gets only the answers; one past both, nothing.
+    assert [m["n"] for m in room_notices.notices(told)["messages"]] == []
+    assert len(room_notices.notices(told)["answers"]) == 1
+    assert room_notices.notices(told + 1) == {"last": told + 1, "messages": []}
+    assert len(state) == 2                    # the message, then its answers
+
+
+def test_answers_for_a_message_never_told_are_not_kept():
+    r = _room()
+    head = room_notices.last_seq()
+    assert room_notices.answers_ready(r.thread, "$never", CHIPS) is False
+    assert room_notices.answers_ready(r.thread, "$x", []) is False
+    assert room_notices.notices(head) == {"last": head, "messages": []}
+
+
+def test_answers_already_kept_ride_on_the_message(monkeypatch):
+    from agent_media_server import room_replies
+
+    r = _room()
+    head = room_notices.last_seq()
+    ev = _ev(body="dinner?")
+    monkeypatch.setattr(room_replies, "ready", lambda t, k: CHIPS if k == ev["event_id"] else [])
+    _feed(r, ev)
+    [m] = room_notices.notices(head)["messages"]
+    assert m["suggestions"] == CHIPS
+
+
+def test_answers_for_a_message_held_while_quiet_ride_on_it_when_told():
+    r = _room()
+    quiet.set_quiet(r.thread, time.time() + 3600)
+    head = room_notices.last_seq()
+    ev = _ev(body="free tonight?")
+    _feed(r, ev)
+    assert room_notices.answers_ready(r.thread, ev["event_id"], CHIPS) is True
+    assert room_notices.last_seq() == head            # nothing told meanwhile
+    quiet.set_quiet(r.thread, False)
+    assert room_notices.release_held() == 1
+    got = room_notices.notices(head)
+    assert got["messages"][0]["suggestions"] == CHIPS and "answers" not in got

@@ -315,6 +315,27 @@ def test_rooms_first_connection_then_a_message(server, screen):
         room_notices._reset_for_tests()
 
 
+def test_rooms_answers_after_their_message_send_a_frame(server, screen):
+    """One-tap answers ready after the message was told (answer from
+    anywhere, 8 Nov 2026): a `rooms` frame with no messages, `answers` only."""
+    from agent_media_server import room_notices
+
+    room_notices._reset_for_tests()
+    st = Stream(server, "/sessions/events?ping=0.3&rooms=", AUTH)
+    try:
+        st.next("rooms")
+        m = _someone_wrote()
+        assert st.next("rooms")["messages"] == [m]
+        chips = [{"text": "On my way", "source": "model"}]
+        assert room_notices.answers_ready("t", m["id"], chips)
+        got = st.next("rooms")
+        assert got["messages"] == [] and got["answers"] == [
+            {"n": m["n"] + 1, "thread": "t", "id": m["id"], "suggestions": chips}]
+    finally:
+        st.close()
+        room_notices._reset_for_tests()
+
+
 def test_rooms_reconnect_catches_up_and_none_unless_asked(server, screen):
     from agent_media_server import room_notices
 

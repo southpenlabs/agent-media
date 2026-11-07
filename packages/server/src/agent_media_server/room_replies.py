@@ -83,12 +83,28 @@ def _ask(thread: str, key: str, chat: str) -> None:
         from agent_media_core.intake import fast
 
         out = fast.chat(PROMPT, chat, 20, purpose_env=None, private=True) or ""
-        _jsonmap().put(thread, {"key": key, "replies": _lines(out), "at": round(time.time(), 3)})
+        replies = _lines(out)
+        _jsonmap().put(thread, {"key": key, "replies": replies, "at": round(time.time(), 3)})
+        # The phone's notice of that message gains them (room_notices `answers`).
+        from . import room_notices
+
+        room_notices.answers_ready(thread, key, [{"text": t, "source": "model"} for t in replies])
     except Exception as e:  # noqa: BLE001 — no chips is the cost
         log.warning("room replies %s: %s", thread[:8], e)
     finally:
         with _lock:
             _busy.discard(thread)
+
+
+def ready(thread: str, key: str) -> list[dict]:
+    """The chips already kept for message `key` of `thread`, asking for
+    none: `[{"text", "source": "model"}]`, or []."""
+    if not enabled() or not thread or not key:
+        return []
+    have = _jsonmap().all().get(thread)
+    if isinstance(have, dict) and have.get("key") == key:
+        return [{"text": str(t), "source": "model"} for t in have.get("replies") or [] if t]
+    return []
 
 
 def chips(thread: str, messages: list[dict]) -> list[dict]:

@@ -4857,8 +4857,16 @@ data: {}
   The owner's only (the chats are; §6.1 rooms): another account's device
   asking `?rooms=` gets no `rooms` frame. Held in memory, the newest 100; `n` counts from the canvas's start in
   epoch ms, so a cursor from before a restart is behind the new head and is
-  handed what came since. Code: `room_notices.py`; pinned by
-  `test_room_notices.py`.
+  handed what came since. **One-tap answers** (8 Nov 2026, answer from
+  anywhere; room_replies.py): a message whose chips are ready as it is
+  told (mostly one held through a quiet) carries `suggestions` [{text,
+  source}]; chips that come after it (the private model's few seconds)
+  come as `answers: [{"n", "thread", "id", "suggestions"}]` on the same
+  cursor, in a `rooms` frame of their own (its `messages` may be empty),
+  so the phone's notice of message `id` gains them as actions; a tap sends
+  with `/reply` and its Undo is `/session/unsend` with the answer's
+  `event_id`. A client that does not read `answers` skips them. Code:
+  `room_notices.py`; pinned by `test_room_notices.py`.
 - `mic` (30 Sep 2026; only with `?mic=1`): `{"asks": [ask, …]}` — every
   open, unexpired ask to speak for another device (§6.20), oldest first,
   **leaving out the connecting device's own** (a phone that has a mic asks;

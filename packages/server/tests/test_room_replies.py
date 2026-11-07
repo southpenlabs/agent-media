@@ -83,3 +83,17 @@ def test_prefetch_never_raises(on):
         def page(self, limit, before=""):
             raise RuntimeError("gone")
     room_replies.prefetch(Broken())
+
+
+def test_ready_answers_go_to_the_notices_and_ready_reads_them(on, monkeypatch):
+    from agent_media_server import room_notices
+
+    told = []
+    monkeypatch.setattr(room_notices, "answers_ready", lambda t, k, c: told.append((t, k, c)) or True)
+    page = [_m("e1", "assistant", "Lunch?")]
+    assert room_replies.ready("!r:q", "e1") == []
+    room_replies.chips("!r:q", page)
+    [(thread, key, chips)] = told
+    assert (thread, key) == ("!r:q", "e1") and chips[0] == {"text": "Sounds good!", "source": "model"}
+    assert [c["text"] for c in room_replies.ready("!r:q", "e1")] == [c["text"] for c in chips]
+    assert room_replies.ready("!r:q", "e0") == []

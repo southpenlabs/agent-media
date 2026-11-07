@@ -56,7 +56,9 @@ thread's one word.
                edits, reactions or history, nor in a chat that is quiet or
                archived. Like `alerts`: first on connecting, then whenever
                there are new ones; `?rooms=` empty is a first connection,
-               just the head
+               just the head. One-tap answers ready after their message was
+               told come as `answers` [{"n", "thread", "id", "suggestions"}]
+               on the same cursor (room_notices.answers_ready)
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -475,7 +477,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                 if rooms_cursor is not None:
                     got = room_notices.notices(
                         None if rooms_cursor == FIRST else rooms_cursor)
-                    if first or got["messages"]:
+                    if first or got["messages"] or got.get("answers"):
                         send("rooms", got)
                         last_sent = time.monotonic()
                     rooms_cursor = got["last"]

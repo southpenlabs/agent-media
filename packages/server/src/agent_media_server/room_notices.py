@@ -26,10 +26,18 @@ here. On top of that:
   restart, the first sync's page) or one already told.
 
 Each is `{"n", "thread", "room", "title", "group", "id", "sender": {"id",
-"name"}, "avatar"?: {"url", "etag"}, "text", "at"}`, `n` the cursor. Kept in
-memory, the newest `KEEP`; `n` counts from the process's start in epoch ms,
-so a phone's cursor from before a restart is behind the new head and it is
-handed what came since rather than nothing.
+"name"}, "avatar"?: {"url", "etag"}, "text", "at", "suggestions"?}`, `n` the
+cursor. Kept in memory, the newest `KEEP`; `n` counts from the process's
+start in epoch ms, so a phone's cursor from before a restart is behind the
+new head and it is handed what came since rather than nothing.
+
+One-tap answers (room_replies.py) for a message told here: on it as
+`suggestions` [{text, source}] when they are ready as it is told (a held
+message released after a quiet, mostly), else they come after it as an
+`answers` entry of their own, `{"n", "thread", "id", "suggestions"}`, on the
+same cursor, so the phone's notice gains them as actions (David, 8 Nov 2026:
+answer from anywhere, docs/proposals/2026-11-06-one-tap-answers.md part 6).
+A phone that does not read `answers` skips them.
 """
 
 from __future__ import annotations
@@ -55,6 +63,8 @@ _SEQ = [int(time.time() * 1000)]
 _TOLD: deque[str] = deque(maxlen=KEEP * 4)
 #: thread → the newest message that came while it was quiet, and `held`.
 _QUIET: dict[str, dict] = {}
+#: One-tap answers that came after their message was told (answers_ready).
+_ANSWERS: deque[dict] = deque(maxlen=KEEP)
 
 
 def last_seq() -> int:
@@ -65,12 +75,17 @@ def last_seq() -> int:
 
 def notices(after: int | None) -> dict:
     """`{"last", "messages": [...]}`: those after the cursor, oldest first;
-    `after` None (a first connection) is only the head, no backlog."""
+    `after` None (a first connection) is only the head, no backlog. With
+    one-tap answers that came since, `answers` too (answers_ready)."""
     with _LOCK:
         head = _SEQ[0]
         if after is None or after >= head:
             return {"last": head, "messages": []}
-        return {"last": head, "messages": [dict(m) for m in _HELD if m["n"] > after]}
+        out: dict = {"last": head, "messages": [dict(m) for m in _HELD if m["n"] > after]}
+        answers = [dict(a) for a in _ANSWERS if a["n"] > after]
+        if answers:
+            out["answers"] = answers
+        return out
 
 
 def _text(parts: list[dict]) -> str:
@@ -141,6 +156,9 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
                "text": text, "at": round(at, 3)}
         if reaction:
             out["reaction"] = {"key": key, "to": to}
+        chips = _ready(r.thread, ev_id)
+        if chips:
+            out["suggestions"] = chips
         if mxc:
             # The sender's picture (matrix.Room._sender_extra's): their
             # profile photo through the bridge.
@@ -174,6 +192,43 @@ def _keep(m: dict) -> dict:
     return m
 
 
+def _ready(thread: str, key: str) -> list[dict]:
+    """The one-tap answers room_replies already has for message `key`."""
+    try:
+        from . import room_replies
+
+        return room_replies.ready(thread, key)
+    except Exception:  # noqa: BLE001 — a notice without chips still goes
+        return []
+
+
+def answers_ready(thread: str, key: str, chips: list[dict]) -> bool:
+    """room_replies has `chips` for message `key` of `thread`: when that
+    message was told, they go to the phones as an `answers` entry; when it
+    is held while the chat is quiet, they ride on it when it is told.
+    Returns whether anything was kept. Never raises."""
+    if not chips or not thread or not key:
+        return False
+    try:
+        with _LOCK:
+            held = _QUIET.get(thread)
+            if held is not None and held.get("id") == key:
+                held["suggestions"] = list(chips)
+                return True
+            if not any(m["thread"] == thread and m["id"] == key for m in _HELD):
+                return False
+            _SEQ[0] += 1
+            _ANSWERS.append({"n": _SEQ[0], "thread": thread, "id": key,
+                             "suggestions": list(chips)})
+        from . import session_events
+
+        session_events.poke()
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("room notices: answers for %s not kept: %s", thread[:8], e)
+        return False
+
+
 def release_held(now: float | None = None) -> int:
     """Tell what came while a chat was quiet, now that it is not: its
     newest message, `held` the count, unless the chat is archived by then.
@@ -195,6 +250,10 @@ def release_held(now: float | None = None) -> int:
             for t in done:
                 m = _QUIET.pop(t, None)
                 if m is not None and t not in shelved:
+                    if not m.get("suggestions"):
+                        chips = _ready(t, m.get("id") or "")
+                        if chips:
+                            m["suggestions"] = chips
                     _keep(m)
                     told += 1
         return told
@@ -207,5 +266,6 @@ def _reset_for_tests() -> None:
     with _LOCK:
         _QUIET.clear()
         _HELD.clear()
+        _ANSWERS.clear()
         _TOLD.clear()
         _SEQ[0] = int(time.time() * 1000)
