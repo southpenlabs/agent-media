@@ -419,7 +419,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -2375,6 +2375,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import screens
 
         ok, detail = screens.now(_bearer(h), speech.current_state())
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/recent":
+        # The full player's Recent replies: every thread's, newest first (speech.speech_recent).
+        ok, detail = speech.speech_recent(_bearer(h), (parse_qs(query).get("limit") or [None])[0])
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/now":
         # The app's speech bar: /speech's live bit, named — the session's

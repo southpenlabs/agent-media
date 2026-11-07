@@ -416,3 +416,109 @@ def clip(bearer: str, text: str, voice: str = "") -> tuple[bool, dict]:
         part.replace(out)
         _prune_clips(folder)
     return True, {"file": str(out), "size": out.stat().st_size, "type": "audio/mpeg"}
+
+
+#: `GET /speech/recent`'s default and largest `limit`.
+RECENT_DEFAULT = 20
+RECENT_MAX = 50
+#: A row's opening words, as the list shows them.
+RECENT_TEXT = 140
+
+
+def _recent_kind(row: dict, ex: dict) -> str:
+    """What a speech-history row is to Recent replies: "reply" (an agent's
+    reply), "question" (an agent asking), "message" (someone's words in a
+    chat room), else "" — the listener's own turns, alerts and
+    notifications, `media say` announcements and catch-up digests, which
+    are not replies and have no thread to open."""
+    if row.get("source") == "listener" or ex.get("listener"):
+        return ""
+    kind = ex.get("kind")
+    if kind == "stop":
+        return "reply"
+    if kind == "notif":
+        return "question" if isinstance(ex.get("ask"), list) else ""
+    if row.get("source") == "matrix" and not kind:
+        return "message"
+    return ""
+
+
+def speech_recent(bearer: str, limit=None) -> tuple[bool, dict]:
+    """`GET /speech/recent`: the replies read aloud lately, every thread's,
+    newest first — the full player's Recent replies (David, 8 Nov 2026:
+    "Can we get a list of the latest replies read from the full media
+    player?"). One row per reply (a reply's held copy beside its spoken one
+    is one row); private and sealed threads are left out, and so is what
+    is not a reply (`_recent_kind`). Each row's heard state is the one its
+    message carries in the log (§6.2 `spoken`): `unheard` for a reply held
+    and never played, `resume` for one stopped part-way. Gated like
+    `/speech/now`: titles and words are the conversations'."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    try:
+        n = int(limit) if limit not in (None, "") else RECENT_DEFAULT
+    except (TypeError, ValueError):
+        return False, {"status": 400, "error": "limit is a number"}
+    n = max(1, min(RECENT_MAX, n))
+    from agent_media_core import reply_position
+    from agent_media_core.private import hidden
+    from agent_media_core.session_feed import _resume_of
+    from agent_media_core.state import StateStore
+
+    from . import transcript
+
+    try:
+        rows = StateStore().recent_history(sink="speech", limit=max(400, n * 20))
+    except Exception as e:  # noqa: BLE001 — an empty list, not a 500
+        print(f"speech/recent: {e}", file=sys.stderr)
+        rows = []
+    items: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    titles: dict[str, str] = {}
+    secret: dict[str, bool] = {}
+    for row in rows:    # newest first
+        ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
+        kind = _recent_kind(row, ex)
+        if not kind:
+            continue
+        session = str(ex.get("source_session") or ex.get("session") or "")
+        if not sessions._SESSION.fullmatch(session):
+            continue
+        if session not in secret:
+            secret[session] = hidden(session)
+        if secret[session]:
+            continue
+        key = str(ex.get("dedup_key") or "")
+        if key:
+            if (session, key) in seen:
+                continue
+            seen.add((session, key))
+        text = transcript.reply_preview(str(row.get("text") or ""))
+        if not text:
+            continue
+        if session not in titles:
+            try:
+                titles[session] = _session_title(session)
+            except Exception:  # noqa: BLE001 — a name, never a reason to fail
+                titles[session] = ""
+        title = titles[session] or str(ex.get("title") or ex.get("source_title") or "")
+        heard_to = reply_position.heard_to_any(row, rows)
+        resume = _resume_of(ex)
+        durs = ex.get("clip_durations_s") or []
+        try:
+            dur = round(sum(float(d or 0) for d in durs), 1) or None
+        except (TypeError, ValueError):
+            dur = None
+        item = {"id": int(row.get("id") or 0), "session": session, "title": title,
+                "kind": kind, "text": text[:RECENT_TEXT],
+                "at": round(float(row.get("started_at") or 0), 3),
+                "dur_s": dur, "heard": heard_to is None}
+        if heard_to == 0 and not resume:
+            item["unheard"] = True
+        if resume and heard_to is not None:
+            item["resume"] = resume
+        items.append(item)
+        if len(items) >= n:
+            break
+    return True, {"items": items}

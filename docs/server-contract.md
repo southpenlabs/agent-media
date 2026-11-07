@@ -3194,6 +3194,50 @@ Clients: S (`SpeechBar.vue`). **Polled 1.5 s while speaking, 5 s idle, 15 s
 after failures.** The server logs one line per device on the first answer
 and on every refusal.
 
+#### `GET /speech/recent` — gated (like `/speech/now`) (8 Nov 2026)
+
+The full player's Recent replies (David, 8 Nov 2026: "Can we get a list of
+the latest replies read from the full media player?"): the replies read
+aloud lately, every thread's, newest first.
+
+```json
+{"ok": true, "items": [
+  {"id": 25758, "session": "66d8…", "title": "Recent replies in media player",
+   "kind": "reply", "text": "Yes, both. A background agent is…",
+   "at": 1794085168.958, "dur_s": 61.9, "heard": true},
+  {"id": 25755, "session": "f8fc…", "title": "One tap answers", "kind": "question",
+   "text": "Which one?", "at": 1794084998.542, "dur_s": 4.1, "heard": false, "unheard": true},
+  {"id": 25740, "session": "f8fc…", "title": "One tap answers", "kind": "reply",
+   "text": "…", "at": 1794080000.1, "dur_s": 40.0, "heard": false,
+   "resume": {"sentence": 3, "at_s": 12.4, "dur_s": 40.0}}]}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | the speech-history row, for `POST /speech/ctl` `replay-id` (with `sentence` from `resume` to pick up there) |
+| `session` | the thread (`/t/<session>` in the app) |
+| `title` | the thread's name as the list gives it (`sessions.title_of`), else the one the row was spoken under; may be `""` |
+| `kind` | `reply` (an agent's reply), `question` (an agent asking, §6.5) or `message` (someone's words in a chat room) |
+| `text` | the reply's opening, one line of plain words (`transcript.reply_preview`), at most 140 characters |
+| `at` | epoch seconds, 3 dp, when it was spoken (or held) |
+| `dur_s` | its length in seconds, from its clips; `null` when unknown |
+| `heard` | heard to its end, in any copy (`reply_position.heard_to_any`) |
+| `unheard` | only when true: held (or muted, flushed) and never played, as §6.2 `spoken.unheard` |
+| `resume` | only on a reply stopped part-way and not heard again: `{sentence, at_s, dur_s}`, as §6.2 `spoken.resume` |
+
+`?limit=` (default 20, at most 50; 400 for one that is not a number). Left
+out: the listener's own turns, alerts and notifications that are not a
+question, `media say` announcements and catch-up digests (none is a reply,
+and most have no thread), rows with no thread, and private or sealed
+threads (`agent_media_core.private.hidden`). A private reading (`media say
+--private`, `/mail/say`) has no history row, so it is never listed either.
+One row per reply: a held copy beside the one spoken (the same
+`dedup_key` in the same thread) is the newest copy only. Code:
+`speech.speech_recent`; pinned by `packages/server/tests/test_speech_recent.py`.
+An older server answers 404, and `GET /features` says `speech_recent` on
+one that has it: the app shows the list, and the Replay strip's key to it,
+only then.
+
 #### `POST /speech/ctl` — gated
 
 `{"action", "arg"?, "sentence"?, "session"?, "then"?}` → `{"ok": true, "out": "<what media printed>"}`.
@@ -4662,6 +4706,7 @@ local look, never a network call:
 | `read_page` | `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) — where personal use allows `signed-in-reading` |
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
+| `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |

@@ -32,6 +32,8 @@ never a network call, so the app can ask on every start.
   stage     Now playing on a big screen (stage.py, §6.21h, 6 Nov 2026):
             `GET|POST /devices/stage`, `GET|POST /device/stage` and the
             follow frame's `stage`; always true here, as quick
+  speech_recent  this server answers GET /speech/recent (speech.py, 8 Nov
+            2026): the full player's Recent replies; always true here, as quick
   personal  this server answers /settings/personal (personal.py, 30 Oct
             2026): always true here, so an older server leaves it out
   app_update  this server answers GET /app/update and /app/update/apk
@@ -122,7 +124,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 
