@@ -156,6 +156,32 @@ def test_a_quiet_chat_is_not_told():
     assert room_notices.notices(head)["messages"] == []
 
 
+def test_what_came_while_quiet_is_told_once_when_the_quiet_ends():
+    r = _room()
+    quiet.set_quiet(r.thread, time.time() + 3600)
+    head = room_notices.last_seq()
+    _feed(r, _ev(body="first"))
+    _feed(r, _ev(body="second"))
+    assert room_notices.release_held() == 0           # still quiet
+    assert room_notices.notices(head)["messages"] == []
+    quiet.set_quiet(r.thread, False)
+    assert room_notices.release_held() == 1
+    [m] = room_notices.notices(head)["messages"]
+    assert m["text"] == "second" and m["held"] == 2 and m["n"] == head + 1
+    assert room_notices.release_held() == 0           # told once
+
+
+def test_what_came_while_quiet_is_not_told_if_the_chat_is_archived_by_then():
+    r = _room()
+    quiet.set_quiet(r.thread, time.time() + 3600)
+    head = room_notices.last_seq()
+    _feed(r, _ev())
+    quiet.set_quiet(r.thread, False)
+    archive.set_archived(r.thread, True)
+    assert room_notices.release_held() == 0
+    assert room_notices.notices(head)["messages"] == []
+
+
 def test_an_archived_chat_is_told_only_when_the_message_wakes_it():
     r = _room()
     archive.set_archived(r.thread, True)

@@ -217,6 +217,17 @@ def test_rows_carry_three_fields_in_a_stable_order():
         {"session": "b", "title": "B", "state": "working"}]
 
 
+def test_a_quiet_thread_says_so(monkeypatch):
+    from agent_media_server import quiet
+
+    monkeypatch.setattr(quiet, "quieted", lambda now=None: {"b": {"until": None, "at": 1.0}})
+    rows = [{"session": "a", "title": "", "state": "waiting"},
+            {"session": "b", "title": "B", "state": "working"}]
+    assert session_events.with_quiet(rows) == [
+        {"session": "a", "title": "", "state": "waiting"},
+        {"session": "b", "title": "B", "state": "working", "quiet": True}]
+
+
 # --- alerts ---------------------------------------------------------------------------
 
 def _raise(title="red5: / at 91% (7G free)", level="warn", step=90):

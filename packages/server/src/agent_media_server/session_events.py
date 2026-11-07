@@ -116,6 +116,22 @@ def rows_of(rows: list[dict]) -> list[dict]:
     return sorted(out, key=lambda r: r["session"])
 
 
+def with_quiet(rows: list[dict], now: float | None = None) -> list[dict]:
+    """`rows` with `quiet: true` on each thread quiet now (§6.4 "Quiet
+    for…", a rule outside its shifts included), so the phone holds its "New
+    reply" and posts one when the quiet ends — read every sweep, so the end
+    is a change of the list (≤ POLL_S late). David, 7 Nov 2026: hold
+    options on the notice."""
+    from . import quiet
+
+    try:
+        hushed = quiet.quieted(now)
+    except Exception:  # noqa: BLE001 — the state still goes out
+        log.exception("session events: quiet")
+        return rows
+    return [{**r, "quiet": True} if r["session"] in hushed else r for r in rows]
+
+
 def brief(ap: dict) -> dict:
     """The part of an `approval` (§6.2.1) a notification answers from: the
     question, its numbered options and the `key` an answer echoes. `kind` is
@@ -212,11 +228,13 @@ class _Watcher:
     def _read(self) -> None:
         try:
             raw = sessions.cached_states()[0]
-            rows = with_suggestions(with_approvals(rows_of(raw), raw))
+            rows = with_quiet(with_suggestions(with_approvals(rows_of(raw), raw)))
         except Exception:  # noqa: BLE001 — a failed sweep is not a change
             log.exception("session events: sweep failed")
             return
         head = alerts.last_seq()
+        # A chat's quiet ending tells what came meanwhile (room_notices).
+        room_notices.release_held()
         rooms_head = room_notices.last_seq()
         # Read every tick: an ask expiring is a change, noticed here (≤ POLL_S late).
         mic_head = mic.version()

@@ -12,7 +12,11 @@ bot, not an edit or a notice; reactions, receipts and redactions are other
 event types and never get here. On top of that:
 
 * not while the chat is quiet (quiet.py, "Quiet for…", a standing rule
-  included): what comes then stays unread for later, as in the app;
+  included): what comes then stays unread, as in the app, and the newest
+  of it is kept aside, one a chat, and told when the quiet ends, with
+  `held` saying how many came meanwhile (release_held, each sweep of
+  session_events; David, 7 Nov 2026: hold options on the notice — "anything
+  you missed shows as one notice"). Kept in memory: a restart forgets it;
 * not while it is archived, after archive_wake has had its say (a message
   that wakes the chat is told; one that leaves it archived is not);
 * not history: a message older than `FRESH_S` (a bridge's catch-up after a
@@ -46,6 +50,8 @@ _LOCK = threading.Lock()
 _HELD: deque[dict] = deque(maxlen=KEEP)
 _SEQ = [int(time.time() * 1000)]
 _TOLD: deque[str] = deque(maxlen=KEEP * 4)
+#: thread → the newest message that came while it was quiet, and `held`.
+_QUIET: dict[str, dict] = {}
 
 
 def last_seq() -> int:
@@ -91,9 +97,8 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
         with _LOCK:
             if ev_id in _TOLD:
                 return None
-        if quiet.quiet_of(r.thread, now) is not None:
-            return None
-        if r.thread in archive.archived():
+        hush = quiet.quiet_of(r.thread, now) is not None
+        if not hush and r.thread in archive.archived():
             return None
         sender = str(ev.get("sender") or "")
         with r.lock:
@@ -119,9 +124,11 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
             if ev_id in _TOLD:
                 return None
             _TOLD.append(ev_id)
-            _SEQ[0] += 1
-            out = {"n": _SEQ[0], **out}
-            _HELD.append(out)
+            if hush:
+                before = _QUIET.get(r.thread)
+                _QUIET[r.thread] = {**out, "held": (before or {}).get("held", 0) + 1}
+                return None
+            out = _keep(out)
         from . import session_events
 
         session_events.poke()
@@ -131,8 +138,46 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
         return None
 
 
+def _keep(m: dict) -> dict:
+    """Number `m` and keep it. Under _LOCK."""
+    _SEQ[0] += 1
+    m = {"n": _SEQ[0], **m}
+    _HELD.append(m)
+    return m
+
+
+def release_held(now: float | None = None) -> int:
+    """Tell what came while a chat was quiet, now that it is not: its
+    newest message, `held` the count, unless the chat is archived by then.
+    Returns how many were told. Never raises."""
+    if not _QUIET:
+        return 0
+    try:
+        from . import archive, quiet
+
+        now = time.time() if now is None else now
+        with _LOCK:
+            waiting = list(_QUIET)
+        done = [t for t in waiting if quiet.quiet_of(t, now) is None]
+        if not done:
+            return 0
+        shelved = archive.archived()
+        told = 0
+        with _LOCK:
+            for t in done:
+                m = _QUIET.pop(t, None)
+                if m is not None and t not in shelved:
+                    _keep(m)
+                    told += 1
+        return told
+    except Exception as e:  # noqa: BLE001
+        log.warning("room notices: held messages not released: %s", e)
+        return 0
+
+
 def _reset_for_tests() -> None:
     with _LOCK:
+        _QUIET.clear()
         _HELD.clear()
         _TOLD.clear()
         _SEQ[0] = int(time.time() * 1000)

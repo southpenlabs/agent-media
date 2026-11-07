@@ -4801,6 +4801,13 @@ data: {}
   only (no ghost here), so a notification or the small bubble card can offer
   them; a tap sends the chip's `text` as a message (`/reply`). Absent when
   there are none; arriving a few seconds after the reply sends the list again.
+  **A quiet row says so** (7 Nov 2026): `quiet: true` while the thread is
+  quiet (§6.4 Quiet for…, a standing rule outside its shifts included),
+  absent otherwise; read every sweep, so a quiet ending sends the list
+  (≤ `POLL_S` late). The phone holds a quiet thread's "New reply" and posts
+  one when `quiet` goes; a "Needs you" still comes. Its notice's Hold 1
+  hour / Until morning buttons set the quiet (David, 7 Nov 2026: hold
+  options on the banner).
 - `alerts` (27 Sep 2026; only with `?alerts=`): the alert store's
   **notices** (§6.17) after cursor `n` —
   `{"last": 57, "notices": [{"n", "id", "change", "level", "title", "detail",
@@ -4834,7 +4841,10 @@ data: {}
   each once, and **not while the chat is quiet** (§6.4 Quiet for…, a
   standing rule included) **or archived** after §6.4's archive wake has had
   its say (a message that brings the chat back is told; one that leaves it
-  archived is not). Like `alerts`: sent after the first `sessions` frame,
+  archived is not). What comes while the chat is quiet is kept aside, the
+  newest one a chat, and told when the quiet ends with `held: <how many
+  came meanwhile>` (unless the chat is archived by then; in memory, so a
+  restart forgets it). Like `alerts`: sent after the first `sessions` frame,
   then whenever there are new ones; the client keeps `last` and sends it
   next time; `?rooms=` empty (a first connection) is handed only `last`.
   The owner's only (the chats are; §6.1 rooms): another account's device
