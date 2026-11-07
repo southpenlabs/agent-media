@@ -4753,7 +4753,7 @@ transcript. `text` is whitespace-collapsed, 1–4000 characters (else 400).
 would be typed into its dialog).
 ### 6.13 The session list as a stream — gated (built 22 Sep 2026)
 
-#### `GET /sessions/events[?ping=<s>][&alerts=<n>][&mic=1][&phone=<kinds>]` — gated (`auth.may_control_speech`, like `/sessions/state`)
+#### `GET /sessions/events[?ping=<s>][&alerts=<n>][&rooms=<n>][&mic=1][&phone=<kinds>]` — gated (`auth.may_control_speech`, like `/sessions/state`)
 
 What a phone's background notifier holds open while the app is closed
 (Sasonica's `NotifyService`): one connection that says when any live
@@ -4814,6 +4814,34 @@ data: {}
   (the log was emptied) is answered with `last`. Sasonica posts each notice
   as an "Alerts" notification — how a disk warning reaches a phone whose
   ringer is holding the spoken one.
+- `rooms` (7 Nov 2026; only with `?rooms=`): **people's new messages in
+  bridged chats** (Matrix rooms, §6.29) after cursor `n`, for the phone to
+  post as conversation notices and bubbles with the sender's picture (David,
+  7 Nov 2026: "can we also get people's messages in these bubbles too? ...
+  for them, their profile photo would be ideal") —
+  `{"last": 1794046800123, "messages": [{"n", "thread", "room", "title",
+  "group", "id", "sender": {"id", "name"}, "avatar"?: {"url", "etag"},
+  "text", "at"}]}`. `thread` is the room's thread id (`/targets`,
+  `/conversation/log?session=`), `title` the chat's name, `group` whether
+  more than one other person is in it, `id` the Matrix event id, `text` the
+  message's words as the light card reads them (a photo is its kind,
+  "Photo"), cut to 300 characters, `at` epoch seconds. `avatar.url` is
+  `/rooms/<thread>/avatar?user=<sender>` (§6.1, gated),
+  absent when the sender has no picture; `etag` changes with the picture.
+  Kept: a message or sticker from someone — not David's own (another
+  device), the bridge's bot, a notice, an edit, a reaction, a receipt — no
+  older than 5 min when it arrives (a bridge's catch-up replays history),
+  each once, and **not while the chat is quiet** (§6.4 Quiet for…, a
+  standing rule included) **or archived** after §6.4's archive wake has had
+  its say (a message that brings the chat back is told; one that leaves it
+  archived is not). Like `alerts`: sent after the first `sessions` frame,
+  then whenever there are new ones; the client keeps `last` and sends it
+  next time; `?rooms=` empty (a first connection) is handed only `last`.
+  The owner's only (the chats are; §6.1 rooms): another account's device
+  asking `?rooms=` gets no `rooms` frame. Held in memory, the newest 100; `n` counts from the canvas's start in
+  epoch ms, so a cursor from before a restart is behind the new head and is
+  handed what came since. Code: `room_notices.py`; pinned by
+  `test_room_notices.py`.
 - `mic` (30 Sep 2026; only with `?mic=1`): `{"asks": [ask, …]}` — every
   open, unexpired ask to speak for another device (§6.20), oldest first,
   **leaving out the connecting device's own** (a phone that has a mic asks;

@@ -1,0 +1,138 @@
+"""People's messages in bridged chats, for the phone's notices (§6.13 `rooms`).
+
+David, 7 Nov 2026: "can we also get people's messages in these bubbles too?
+... for them, their profile photo would be ideal". Agent threads notify
+from the `sessions` frame (a turn ending); a bridged chat has no turn, so a
+new message from someone is kept here and handed to the phones that hold
+`GET /sessions/events?rooms=<cursor>` as a `rooms` frame.
+
+What counts is what brings an archived chat back (archive_wake.py): a
+message or sticker from neither David (another device) nor the bridge's
+bot, not an edit or a notice; reactions, receipts and redactions are other
+event types and never get here. On top of that:
+
+* not while the chat is quiet (quiet.py, "Quiet for…", a standing rule
+  included): what comes then stays unread for later, as in the app;
+* not while it is archived, after archive_wake has had its say (a message
+  that wakes the chat is told; one that leaves it archived is not);
+* not history: a message older than `FRESH_S` (a bridge's catch-up after a
+  restart, the first sync's page) or one already told.
+
+Each is `{"n", "thread", "room", "title", "group", "id", "sender": {"id",
+"name"}, "avatar"?: {"url", "etag"}, "text", "at"}`, `n` the cursor. Kept in
+memory, the newest `KEEP`; `n` counts from the process's start in epoch ms,
+so a phone's cursor from before a restart is behind the new head and it is
+handed what came since rather than nothing.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+from collections import deque
+
+log = logging.getLogger(__name__)
+
+#: A message older than this when it arrives is history, not news.
+FRESH_S = 300.0
+#: The most kept.
+KEEP = 100
+#: Words of a message carried in the frame.
+TEXT_MAX = 300
+
+_LOCK = threading.Lock()
+_HELD: deque[dict] = deque(maxlen=KEEP)
+_SEQ = [int(time.time() * 1000)]
+_TOLD: deque[str] = deque(maxlen=KEEP * 4)
+
+
+def last_seq() -> int:
+    """The cursor's head: the newest message's `n`, or where they start."""
+    with _LOCK:
+        return _SEQ[0]
+
+
+def notices(after: int | None) -> dict:
+    """`{"last", "messages": [...]}`: those after the cursor, oldest first;
+    `after` None (a first connection) is only the head, no backlog."""
+    with _LOCK:
+        head = _SEQ[0]
+        if after is None or after >= head:
+            return {"last": head, "messages": []}
+        return {"last": head, "messages": [dict(m) for m in _HELD if m["n"] > after]}
+
+
+def _text(parts: list[dict]) -> str:
+    words = " ".join(str(p.get("text") or "") for p in parts or []
+                     if p.get("type") in ("text", "media")).strip()
+    if len(words) > 2 and words.startswith("_") and words.endswith("_"):
+        words = words[1:-1]               # "_Photo_": a kind, not emphasis
+    if len(words) > TEXT_MAX:
+        words = words[:TEXT_MAX - 1].rstrip() + "…"
+    return words
+
+
+def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict | None:
+    """A sync event in room `r` (matrix.Room), after the room and
+    archive_wake have taken it. Returns the notice kept, or None. Never
+    raises: a notice is not worth the sync loop."""
+    try:
+        from . import archive, archive_wake, quiet
+
+        if not archive_wake._from_someone(ev, r.owner, bridges):
+            return None
+        ev_id = str(ev.get("event_id") or "")
+        now = time.time() if now is None else now
+        at = (ev.get("origin_server_ts") or 0) / 1000
+        if not ev_id or not at or at < now - FRESH_S:
+            return None
+        with _LOCK:
+            if ev_id in _TOLD:
+                return None
+        if quiet.quiet_of(r.thread, now) is not None:
+            return None
+        if r.thread in archive.archived():
+            return None
+        sender = str(ev.get("sender") or "")
+        with r.lock:
+            m = r._by_id.get(ev_id)
+            text = _text(m["parts"]) if m else str((ev.get("content") or {}).get("body") or "")[:TEXT_MAX]
+            name = r.members.get(sender) or sender
+            mxc = r.avatars.get(sender) or ""
+            title = r.title()
+            me = {r.owner, os.environ.get("MATRIX_SAM_ID") or ""}
+            others = [u for u in r.members if u not in me and u not in bridges]
+        out = {"thread": r.thread, "room": r.id, "title": title,
+               "group": len(others) > 1, "id": ev_id,
+               "sender": {"id": sender, "name": name},
+               "text": text, "at": round(at, 3)}
+        if mxc:
+            # The sender's picture (matrix.Room._sender_extra's): their
+            # profile photo through the bridge.
+            from . import matrix
+
+            out["avatar"] = {"url": f"/rooms/{r.thread}/avatar?user={matrix._q(sender)}",
+                             "etag": matrix._etag(mxc)}
+        with _LOCK:
+            if ev_id in _TOLD:
+                return None
+            _TOLD.append(ev_id)
+            _SEQ[0] += 1
+            out = {"n": _SEQ[0], **out}
+            _HELD.append(out)
+        from . import session_events
+
+        session_events.poke()
+        return out
+    except Exception as e:  # noqa: BLE001
+        log.warning("room notices: %s not kept: %s", getattr(r, "thread", "?"), e)
+        return None
+
+
+def _reset_for_tests() -> None:
+    with _LOCK:
+        _HELD.clear()
+        _TOLD.clear()
+        _SEQ[0] = int(time.time() * 1000)

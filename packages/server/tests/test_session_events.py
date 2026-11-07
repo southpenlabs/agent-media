@@ -271,6 +271,59 @@ def test_a_reconnect_catches_up_from_its_cursor(server, screen):
         st.close()
 
 
+# --- rooms (room_notices.py) ------------------------------------------------------------
+
+def _someone_wrote(text="see you at 6"):
+    """A message kept as room_notices.on_event keeps one (its rules are
+    test_room_notices'), and the streams woken."""
+    from agent_media_server import room_notices
+
+    with room_notices._LOCK:
+        room_notices._SEQ[0] += 1
+        m = {"n": room_notices._SEQ[0], "thread": "t", "room": "!r:x", "title": "Mel",
+             "group": False, "id": f"$e{room_notices._SEQ[0]}",
+             "sender": {"id": "@m:x", "name": "Mel"}, "text": text, "at": time.time()}
+        room_notices._HELD.append(m)
+    session_events.poke()
+    return m
+
+
+def test_rooms_first_connection_then_a_message(server, screen):
+    from agent_media_server import room_notices
+
+    room_notices._reset_for_tests()
+    _someone_wrote("before")                   # backlog: not handed over
+    st = Stream(server, "/sessions/events?ping=0.3&rooms=", AUTH)
+    try:
+        assert st.next("rooms") == {"last": room_notices.last_seq(), "messages": []}
+        m = _someone_wrote()
+        got = st.next("rooms")
+        assert got == {"last": m["n"], "messages": [m]}
+    finally:
+        st.close()
+        room_notices._reset_for_tests()
+
+
+def test_rooms_reconnect_catches_up_and_none_unless_asked(server, screen):
+    from agent_media_server import room_notices
+
+    room_notices._reset_for_tests()
+    cursor = room_notices.last_seq()
+    m = _someone_wrote()
+    st = Stream(server, "/sessions/events?ping=0.3&rooms=%d" % cursor, AUTH)
+    try:
+        assert st.next("rooms")["messages"] == [m]
+    finally:
+        st.close()
+    st = Stream(server, "/sessions/events?ping=0.2", AUTH)
+    try:
+        assert st.event()[0] == "sessions"
+        assert st.event(2.0) == ("ping", {})
+    finally:
+        st.close()
+        room_notices._reset_for_tests()
+
+
 def test_alerts_cursor_parsing():
     assert session_events.alerts_of(None) is None
     assert session_events.alerts_of("") == session_events.FIRST

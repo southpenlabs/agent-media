@@ -48,6 +48,15 @@ thread's one word.
                cleared). Its `stage` is this device's Now playing stage
                (§6.21h, stage.py): sent there, taken off, or on "auto" and
                something starting or stopping (noticed within a tick)
+    rooms      {"last", "messages": [...]} — only when asked, `?rooms=<n>`
+               (room_notices.py): people's new messages in bridged chats
+               after cursor n, each `{"n", "thread", "room", "title",
+               "group", "id", "sender": {"id", "name"}, "avatar"?: {"url",
+               "etag"}, "text", "at"}` — not David's own, the bridge bot's,
+               edits, reactions or history, nor in a chat that is quiet or
+               archived. Like `alerts`: first on connecting, then whenever
+               there are new ones; `?rooms=` empty is a first connection,
+               just the head
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -77,7 +86,8 @@ import logging
 import threading
 import time
 
-from . import alerts, auth, follow, mic, notes, phone, remind, sessions, stage
+from . import (alerts, auth, follow, mic, notes, phone, remind, room_notices, sessions,
+               stage)
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -189,6 +199,7 @@ class _Watcher:
         self.subs = 0
         self.rows: list[dict] | None = None
         self.alerts_head = 0
+        self.rooms_head = 0
         self.mic_head = 0
         self.phone_head = 0
         self.notes_head = 0
@@ -206,6 +217,7 @@ class _Watcher:
             log.exception("session events: sweep failed")
             return
         head = alerts.last_seq()
+        rooms_head = room_notices.last_seq()
         # Read every tick: an ask expiring is a change, noticed here (≤ POLL_S late).
         mic_head = mic.version()
         phone_head = phone.version()
@@ -221,6 +233,7 @@ class _Watcher:
         remind_head = remind.due_key()
         with self.cond:
             if (rows != self.rows or head != self.alerts_head or mic_head != self.mic_head
+                    or rooms_head != self.rooms_head
                     or phone_head != self.phone_head or notes_head != self.notes_head
                     or remind_head != self.remind_head or follow_head != self.follow_head
                     or stage_head != self.stage_head):
@@ -229,6 +242,7 @@ class _Watcher:
                 self.stage_head = stage_head
                 self.remind_head = remind_head
                 self.alerts_head = head
+                self.rooms_head = rooms_head
                 self.mic_head = mic_head
                 self.phone_head = phone_head
                 self.notes_head = notes_head
@@ -275,7 +289,8 @@ _W = _Watcher()
 
 
 def poke() -> None:
-    """The asks or notes changed (mic.py, phone.py, notes.py): wake every stream now rather than
+    """The asks or notes changed (mic.py, phone.py, notes.py), or someone
+    wrote in a bridged chat (room_notices.py): wake every stream now rather than
     at the watcher's next tick, so the phone hears the TV's ask at once.
     Nothing to do with no stream open — the first subscriber reads afresh."""
     w = _W
@@ -283,9 +298,11 @@ def poke() -> None:
     phone_head = phone.version()
     notes_head = notes.version()
     follow_head = follow.version()
+    rooms_head = room_notices.last_seq()
     with w.cond:
         if w.rows is None:
             return
+        w.rooms_head = rooms_head
         w.mic_head = head
         w.phone_head = phone_head
         w.notes_head = notes_head
@@ -329,7 +346,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
           music_after: int | None = None, handoff_device: str | None = None,
           handoff_after: int | None = None, book_device: str | None = None,
           book_after: int | None = None, want_notes: bool = False,
-          want_remind: bool = False, follow_device: str | None = None) -> bool:
+          want_remind: bool = False, follow_device: str | None = None,
+          rooms_after: int | None = None) -> bool:
     """Hold the connection and stream the session list until it goes. Auth
     is the caller's (app.py), done before this. `mic_for` is None when the
     client did not ask for `mic` frames, else the connecting device's id
@@ -354,6 +372,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     that have come due, for the phone to post "Back · <title>".
     `follow_device`: `follow` frames (follow.py) — the thread open on the
     phone this device follows.
+    `rooms_after`: `rooms` frames (room_notices.py) after this cursor
+    (alerts_of's: None not asked, FIRST a first connection).
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
@@ -401,6 +421,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         seen = -1
         seen_rows = None
         cursor = alerts_after
+        rooms_cursor = rooms_after
         # An empty set on connecting is not sent: the phone has nothing to show.
         seen_asks: list[dict] = []
         seen_phone: list[dict] = []
@@ -433,6 +454,13 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                         send("alerts", got)
                         last_sent = time.monotonic()
                     cursor = got["last"]
+                if rooms_cursor is not None:
+                    got = room_notices.notices(
+                        None if rooms_cursor == FIRST else rooms_cursor)
+                    if first or got["messages"]:
+                        send("rooms", got)
+                        last_sent = time.monotonic()
+                    rooms_cursor = got["last"]
                 if mic_for is not None:
                     asks = mic.open_asks(mic_for)
                     if asks != seen_asks:

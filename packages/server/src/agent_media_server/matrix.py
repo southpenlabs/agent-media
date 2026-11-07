@@ -1218,9 +1218,12 @@ def _on_event(room_id: str, ev: dict) -> None:
         r.on_event(ev)
         # Someone writing in an archived chat brings it back, unless it is
         # quiet (archive_wake.py, §6.4).
-        from . import archive_wake
+        from . import archive_wake, room_notices
 
-        archive_wake.on_message(r.thread, ev, r.owner, _bridges())
+        bridges = _bridges()
+        archive_wake.on_message(r.thread, ev, r.owner, bridges)
+        # Someone's new message, for the phone's notices (§6.13 `rooms`).
+        room_notices.on_event(r, ev, bridges)
 
 
 def _bridges(env=None) -> set[str]:

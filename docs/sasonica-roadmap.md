@@ -2550,6 +2550,21 @@ ahead.
     Android allows and back), and a handle on its bottom edge that drags
     the height (the notice posted again with only the desired height
     changed; the height kept per mode). Android alone sets a bubble's width.
+    **People's messages too** (David, 7 Nov 2026: "can we also get people's
+    messages in these bubbles too? ... for them, their profile photo would
+    be ideal"): until then a bridged chat never notified. The server keeps
+    each new message from someone (not David's own, the bridge bot's, an
+    edit, reaction, receipt or replayed history; not in a quiet chat, nor
+    an archived one the message does not wake) and hands it to the notifier
+    as a `rooms` frame on `/sessions/events?rooms=<cursor>` (§6.13,
+    `room_notices.py`); the app posts it as that chat's conversation
+    (`RoomBubbles`, `RoomText`): one shortcut and bubble per chat, a Person
+    per sender with their picture (`/rooms/<thread>/avatar?user=`, fetched
+    once with the device token and cached by URL and etag; their initial
+    when none), each new message added to the one notice, and the light
+    card naming who wrote each line. Not while the app is on screen; only
+    the current server's chats (a sibling server's `rooms` are not asked
+    for yet).
     **Next, Sasonica's own floating window** (David, 7 Nov 2026: "draggable
     links on all four sides of the window to resize it" — chose both the
     tall maximise now and this later): an overlay window

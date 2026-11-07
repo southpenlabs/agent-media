@@ -2442,7 +2442,7 @@ def _opener(user: dict) -> str:
 
 
 def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
-    """`GET /sessions/events[?ping=][&alerts=][&mic=1]` — the session list as a stream (§6.13,
+    """`GET /sessions/events[?ping=][&alerts=][&rooms=][&mic=1]` — the session list as a stream (§6.13,
     session_events.py). Gated like `/sessions/state`; `?access_token=` is
     accepted for a plain `EventSource` and, like the thread stream's, never
     logged."""
@@ -2507,7 +2507,14 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
                          handoff_after=_after("handoff_after"),
                          book_device=book_dev, book_after=_after("book_after"),
                          want_notes=wants_notes, want_remind=wants_remind,
-                         follow_device=follow_dev)
+                         follow_device=follow_dev,
+                         # `?rooms=<n>`: people's new messages in bridged
+                         # chats after cursor n (room_notices.py) — the
+                         # owner's chats, so the owner's book only.
+                         rooms_after=session_events.alerts_of(
+                             qs["rooms"][0] if "rooms" in qs
+                             and auth.account_key(auth.identity(bearer)[0]) == ""
+                             else None))
 
 
 def _thread_agents(h: BaseHTTPRequestHandler, session: str, agent_id: str | None,
