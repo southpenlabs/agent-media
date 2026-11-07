@@ -865,6 +865,19 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
                 send("ping", {})
                 continue
             send(event, data)
+        # Replaced by the same page's new stream while the loop was awake
+        # (sending a `watching`, say): `dropped` ended it before the queued
+        # `replaced` was read, and the page never heard why (the full suite,
+        # 8 Nov 2026: test_a_page_reopening_its_stream_ends_the_old_one read
+        # EOF). Said now; a slow consumer's backlog is not sent.
+        while True:
+            try:
+                event, data = sub.q.get_nowait()
+            except queue.Empty:
+                break
+            if event == "replaced":
+                send(event, data)
+                break
     except (BrokenPipeError, ConnectionResetError, OSError):
         pass
     except Exception:  # noqa: BLE001 — the headers are out; nothing else may be
