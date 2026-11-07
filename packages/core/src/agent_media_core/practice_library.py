@@ -276,15 +276,19 @@ def _all() -> list[dict]:
 
 def items() -> list[dict]:
     """Everything saved, for the app's list (no paths or URLs), with
-    `teacher`, `style`, `benefit`, `duration_s`, `plays` and `last_played`."""
+    `teacher`, `style` (and `style_path`, `style_custom`), `benefit`,
+    `duration_s`, `plays` and `last_played`."""
     every = _all()
     plays = _plays()
+    custom = _custom_styles()
     lengths = _durations()
     out = []
     for i in every:
         d = {k: v for k, v in i.items() if not k.startswith("_")}
         p = plays.get(i["id"]) or {}
-        d.update(teacher=teacher_of(i), style=style_of(i["title"]), benefit=benefit_of(i["title"]),
+        path = custom.get(i["id"]) or style_path_of(i["title"])
+        d.update(teacher=teacher_of(i), style=style_name(path), style_path=list(path),
+                 style_custom=i["id"] in custom, benefit=benefit_of(i["title"]),
                  duration_s=_seconds(i.get("duration")) or lengths.get(i["id"]),
                  plays=int(p.get("n") or 0), last_played=p.get("last") or None)
         out.append(d)
@@ -296,25 +300,50 @@ def items() -> list[dict]:
 
 _BY = re.compile(r"\s+[—–]\s+([^—–]{2,60})$")
 
-#: What kind of practice a title says it is, first match wins (Insight Timer's
-#: "Practice"; "Style" here, the app's tab being Practice).
-STYLES = (
-    ("Yoga Nidra", r"yoga\s*nidr[aä]|\bnidr[aä]\b"),
-    ("Body scan", r"body\s*scan"),
-    ("Breathwork", r"breath|pranayama"),
-    ("Journey", r"journey|astral|shaman|lucid|out of body|travel|visuali[sz]"),
-    ("Sound & mantra", r"\bsound\b|\bhz\b|\bbowls?\b|chant|mantra|asatoma|\bom\b"),
-    ("Affirmations", r"affirmation|manifest|abundance|dream life|confiden"),
+#: What kind of practice a title says it is, as a path from the top level
+#: down (Insight Timer's "Practice"; "Style" here, the app's tab being
+#: Practice). First match wins, so a sub-style comes before its parent and
+#: an exception before the rule it escapes. David, 7 Nov 2026: "I think we
+#: need to be able to embed styles within styles"
+#: (docs/proposals/practice-style-tree.md).
+STYLE_RULES = (
+    (("Meditation", "Yoga Nidra", "For sleep"), r"nidr[aä].*sleep|sleep.*nidr[aä]"),
+    (("Meditation", "Yoga Nidra"), r"yoga\s*nidr[aä]|\bnidr[aä]\b"),
+    (("Meditation", "Body scan"), r"body\s*scan"),
+    (("Breathwork",), r"breath|pranayama"),
+    (("Spirit & energy", "Journey", "Shamanic"), r"shaman|\bdrum"),
+    (("Spirit & energy", "Journey", "Astral & lucid"), r"astral|lucid|out of body"),
+    (("Spirit & energy", "Journey"), r"journey|travel"),
+    (("Sound", "Frequencies"), r"\bhz\b|binaural|solfeggio"),
+    (("Sound", "Bowls & sound baths"), r"\bbowls?\b|\bgong|sound bath"),
+    (("Sound", "Mantra & chant"), r"chant|mantra|asatoma|\bom\b"),
+    (("Sound",), r"\bsound\b"),
+    (("Mind", "Manifesting"), r"manifest|abundance|dream life"),
+    (("Mind", "Affirmations"), r"affirmation|confiden"),
     # Music made for a class, or a talk on yoga's limbs, is not one.
-    ("Yoga", r"^(?!music\b)(?!.*limb of yoga).*(?:\byoga\b(?!\s*nidr)|vinyasa|\byin\b|hatha|ashtanga|asana\b|sun salutation)"),
-    ("Stretching", r"stretch|mobility|flexib|limber|loosen|pilates"),
-    ("Movement", r"qigong|tai chi|\bdance|walking meditation|mindful walk|shaking|\bmovement"),
-    ("Energy & chakra", r"chakra|reiki|cleans|cutting cords|energy wash|wash meditation"),
-    ("Talk", r"explained|wisdom|karma|lecture|\btalk\b|\[part \d"),
-    ("Music", r"music|piano|prayer|devi\b|lokah|instrumental"),
+    (("Sound", "Music"), r"^music\b"),
+    (("Mind", "Talks"), r"limb of yoga"),
+    (("Movement", "Yoga", "Yin"), r"\byin\b"),
+    (("Movement", "Yoga", "Vinyasa & flow"), r"vinyasa|power flow|yoga flow|sun salutation"),
+    (("Movement", "Yoga", "Restorative & gentle"), r"restorative|gentle.*yoga|yoga.*gentle"),
+    (("Movement", "Yoga", "Kundalini"), r"kundalini yoga"),
+    (("Movement", "Yoga"), r"\byoga\b|hatha|ashtanga|asana\b"),
+    (("Movement", "Stretching"), r"stretch|mobility|flexib|limber|loosen|pilates"),
+    (("Movement", "Qigong, tai chi & somatic"), r"qigong|tai chi|somatic|shaking"),
+    (("Movement",), r"\bdance|walking meditation|mindful walk|\bmovement"),
+    (("Spirit & energy", "Chakra & energy"), r"chakra|reiki|cleans|cutting cords|energy wash|wash meditation"),
+    (("Spirit & energy", "Spirit guides"), r"spirit guide|\bguides\b|upper world|lower world|power animal"),
+    (("Mind", "Talks"), r"explained|wisdom|karma|lecture|\btalk\b|\[part \d"),
+    (("Sound", "Music"), r"music|piano|prayer|devi\b|lokah|instrumental"),
+    (("Meditation", "Heart"), r"gratitude|self.?love|loving|metta|kindness|compassion|forgiv"),
+    (("Meditation", "Mindfulness & awareness"), r"mindful|awareness|presence|stillness|silent"),
+    (("Meditation", "Visualisation"), r"visuali[sz]"),
 )
-#: A practice no rule names is a guided one.
-STYLE_DEFAULT = "Guided"
+#: A practice no rule names is a guided meditation.
+STYLE_DEFAULT_PATH = ("Meditation", "Guided")
+STYLE_DEFAULT = STYLE_DEFAULT_PATH[-1]
+#: The top levels in the order the app shows them.
+STYLE_TOP = ("Meditation", "Movement", "Breathwork", "Sound", "Spirit & energy", "Mind")
 #: What a title says it is for, first match wins (Insight Timer's "Benefit").
 BENEFITS = (
     ("Sleep", r"sleep|insomnia|bed\s*time|middle of the night|night sky|stargaz"),
@@ -341,11 +370,89 @@ def _first(rules: tuple, title: str) -> Optional[str]:
     return next((name for name, rx in rules if re.search(rx, t)), None)
 
 
-def style_of(title: str) -> str:
-    """The style the title names, read without the " — teacher" after it
+def style_path_of(title: str) -> tuple:
+    """The style the title names, as a path from the top level down
+    (("Movement", "Yoga", "Yin")), read without the " — teacher" after it
     (a teacher called "Yoga Wild" or "Jaw Yoga by …" does not make a
     savasana or a jaw meditation a yoga class)."""
-    return _first(STYLES, _BY.sub("", title or "")) or STYLE_DEFAULT
+    t = _BY.sub("", title or "").lower()
+    return next((path for path, rx in STYLE_RULES if re.search(rx, t)), STYLE_DEFAULT_PATH)
+
+
+def style_name(path) -> str:
+    """The one name an older app groups by: the level under the top
+    ("Yoga", "Yoga Nidra", "Journey"), or the top when it has none
+    ("Breathwork")."""
+    return path[1] if len(path) > 1 else path[0]
+
+
+def style_of(title: str) -> str:
+    return style_name(style_path_of(title))
+
+
+# ---- styles set by hand -------------------------------------------------------------
+
+#: How deep, and how long a name, a style set by hand may be.
+STYLE_DEPTH, STYLE_NAME_MAX = 3, 40
+
+
+def _styles_path() -> Path:
+    return state_dir() / "practice-styles.json"
+
+
+def _custom_styles() -> dict:
+    try:
+        d = json.loads(_styles_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: tuple(v) for k, v in d.items() if isinstance(v, list) and v} if isinstance(d, dict) else {}
+
+
+def clean_style_path(path) -> Optional[tuple]:
+    """A style path given by hand, tidied (each name trimmed, empty ones
+    dropped), or None when it is not a list of 1–3 short names."""
+    if not isinstance(path, (list, tuple)):
+        return None
+    names = tuple(" ".join(str(n).split()) for n in path if isinstance(n, str) and n.strip())
+    if not names or len(names) > STYLE_DEPTH or any(len(n) > STYLE_NAME_MAX for n in names):
+        return None
+    return names
+
+
+def set_style(item_id: str, path) -> bool:
+    """Set `item_id`'s style by hand (a path, as clean_style_path takes),
+    or with `path` None go back to what its title says. False for an id
+    not in the list."""
+    if not any(i["id"] == item_id for i in _all()):
+        return False
+    d = {k: list(v) for k, v in _custom_styles().items()}
+    if path is None:
+        d.pop(item_id, None)
+    else:
+        d[item_id] = list(path)
+    p = _styles_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(d, ensure_ascii=False))
+    tmp.replace(p)
+    return True
+
+
+def style_tree(extra=()) -> list:
+    """Every style as a tree, for the app's drill-down and its picker:
+    [{"name", "children": [...]}], the rules' paths in STYLE_TOP's order,
+    then any path set by hand (`extra`) that the rules don't have."""
+    root: dict = {}
+    for path in [p for p, _ in STYLE_RULES] + [STYLE_DEFAULT_PATH] + list(extra):
+        node = root
+        for name in path:
+            node = node.setdefault(name, {})
+
+    def out(node: dict) -> list:
+        return [{"name": k, "children": out(v)} for k, v in node.items()]
+
+    top = sorted(root, key=lambda k: (STYLE_TOP.index(k) if k in STYLE_TOP else len(STYLE_TOP)))
+    return out({k: root[k] for k in top})
 
 
 def benefit_of(title: str) -> Optional[str]:

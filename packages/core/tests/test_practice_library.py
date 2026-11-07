@@ -126,12 +126,30 @@ def test_yoga_and_stretching_are_their_own_styles():
     assert L.style_of("Toppling Tree - Slow and Strong Vinyasa Practice") == "Yoga"
     assert L.style_of("Full Body Stretch & Relax — LuChin Mischke") == "Stretching"
     assert L.style_of("Yoga Nidrä For Pelvic Health") == "Yoga Nidra"
-    assert L.style_of("Qigong for Tinnitus Relief") == "Movement"
+    assert L.style_of("Qigong for Tinnitus Relief") == "Qigong, tai chi & somatic"
     assert L.style_of("Music For Vinyasa or Power Flow") == "Music"
-    assert L.style_of("Samadhi - 8th Limb Of Yoga (8/8)") == "Guided"
+    assert L.style_of("Samadhi - 8th Limb Of Yoga (8/8)") == "Talks"
     assert L.style_of("Embracing Flow — Nicole Bayliss") == "Guided", "flow alone is not a class"
     assert L.style_of("Jaw Harmony Meditation — Jaw Yoga by Kieferfreund") == "Guided", \
         "the teacher's name does not set the style"
+
+
+def test_a_style_is_a_path_down_the_tree():
+    assert L.style_path_of("Yin Yoga For Tight Hips") == ("Movement", "Yoga", "Yin")
+    assert L.style_of("Yin Yoga For Tight Hips") == "Yoga", "an older app groups by the level under the top"
+    assert L.style_path_of("Yoga Nidra For Deep Sleep") == ("Meditation", "Yoga Nidra", "For sleep")
+    assert L.style_path_of("Box breathing") == ("Breathwork",) and L.style_of("Box breathing") == "Breathwork"
+    assert L.style_path_of("Dialectic") == ("Meditation", "Guided")
+    tree = L.style_tree([("Movement", "Dance", "Ecstatic")])
+    assert [t["name"] for t in tree] == list(L.STYLE_TOP)
+    move = next(t for t in tree if t["name"] == "Movement")
+    assert {"name": "Dance", "children": [{"name": "Ecstatic", "children": []}]} in move["children"]
+
+
+def test_a_style_set_by_hand_is_tidied_or_refused():
+    assert L.clean_style_path([" Movement ", "", "Slow  hatha"]) == ("Movement", "Slow hatha")
+    assert L.clean_style_path([]) is None and L.clean_style_path("Yoga") is None
+    assert L.clean_style_path(["a", "b", "c", "d"]) is None and L.clean_style_path(["x" * 41]) is None
 
 
 def test_a_feeds_duration_in_seconds():

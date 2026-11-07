@@ -18,6 +18,7 @@ agent wrote.
                  {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
                  {"action": "watch", "id"} → {"youtube_id", "video"?} | {"video": signed link}
                  {"action": "keep" | "unkeep", "id"} → {"kept": "fetching" | "ready" | null}
+{"action": "style", "id", "path": [top, style?, sub?] | null}   (set by hand; null: by title)
   GET  /practice/files/<hash><ext>?sig=   (a video file, the link is the credential; app.py)
 
 Play takes an id from the list only (practice_library.play), and runs
@@ -94,7 +95,8 @@ def listing(bearer: str) -> tuple[bool, dict]:
     _report_lengths()
     from agent_media_core import breathe, sleep_timer
     out = {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places,
-           "breathe": breathe.offer(), "sleep": sleep_timer.offer()}
+           "breathe": breathe.offer(), "sleep": sleep_timer.offer(),
+           "styles": lib.style_tree([tuple(i["style_path"]) for i in items if i.get("style_custom")])}
     if any(i.get("source") == "embed" for i in items):
         out["embed_play"] = embed_play()
     return True, out
@@ -212,11 +214,19 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         from . import shares
         return shares.send(str(body.get("id") or ""), str(body.get("to") or ""),
                            str(body.get("note") or ""))
+    if action == "style":
+        raw = body.get("path")
+        path = None if raw is None else lib.clean_style_path(raw)
+        if raw is not None and path is None:
+            return False, {"error": f"path must be 1 to {lib.STYLE_DEPTH} names of up to {lib.STYLE_NAME_MAX} characters, or null"}
+        if not lib.set_style(str(body.get("id") or ""), path):
+            return False, {"error": "nothing saved under that id", "status": 404}
+        return listing(bearer)
     if action == "remove":
         if not lib.remove(str(body.get("id") or "")):
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
-    return False, {"error": "action must be play, watch, keep, unkeep, add, remove, share, breathe or sleep"}
+    return False, {"error": "action must be play, watch, keep, unkeep, add, remove, share, style, breathe or sleep"}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:

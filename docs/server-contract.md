@@ -8383,7 +8383,22 @@ names the first time they are read.
   Yoga, Stretching, Movement, Energy & chakra, Talk, Music, else Guided;
   read from the title without its " — teacher". Yoga and Stretching were
   one Movement until 7 Nov 2026; David: "I'd like to add a stretching
-  section to the practise tab ... also yoga"), `benefit` (what it
+  section to the practise tab ... also yoga"), `style_path` (the
+  same style as a path from the top level down, 1–3 names:
+  ["Movement", "Yoga", "Yin"], ["Meditation", "Guided"], ["Breathwork"];
+  `style` is its second name, or its only one, so an app that groups flat
+  keeps the groups it had) and `style_custom` (true when set by hand,
+  below). The answer carries `styles`, the whole tree as
+  `[{"name", "children": [...]}]`, top levels in the order Meditation,
+  Movement, Breathwork, Sound, Spirit & energy, Mind, then any made by
+  hand; for the app's drill-down and its style picker (7 Nov 2026; David:
+  "I think we need to be able to embed styles within styles", "Yes to
+  custom style selection"; docs/proposals/practice-style-tree.md).
+  `POST /practice {"action": "style", "id", "path": [names] | null}` sets
+  an item's style by hand (1–3 names of up to 40 characters, trimmed; a new
+  name makes a new style), null goes back to what its title says; kept in
+  `practice-styles.json`; → the listing; 400 for a bad path, 404 for an id
+  not in the list, `benefit` (what it
   is for: Sleep, Morning & energy, Healing, Heart & love, Confidence &
   strength, Intuition & spirit, Calm & grounding, or null), `duration_s`
   (a feed's duration, else looked up in the background — a YouTube link's

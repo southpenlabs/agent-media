@@ -176,3 +176,28 @@ def test_keep_takes_only_a_youtube_practice(server, shelf, signed_in):
     assert res.status == 400
     res, obj = call(server, "POST", "/practice", {"action": "unkeep", "id": "yt:AAAAAAAAAAA"}, AUTH)
     assert res.status == 404
+
+
+def test_a_style_is_a_path_and_can_be_set_by_hand(server, shelf, signed_in):
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    nidra = next(i for i in obj["items"] if i["source"] == "file")
+    assert nidra["style_path"] == ["Meditation", "Yoga Nidra"] and nidra["style"] == "Yoga Nidra"
+    assert nidra["style_custom"] is False
+    assert [t["name"] for t in obj["styles"]][:2] == ["Meditation", "Movement"]
+    res, obj = call(server, "POST", "/practice",
+                    {"action": "style", "id": nidra["id"], "path": ["Movement", " Yoga ", "Slow  hatha"]}, AUTH)
+    assert res.status == 200, obj
+    got = next(i for i in obj["items"] if i["id"] == nidra["id"])
+    assert got["style_path"] == ["Movement", "Yoga", "Slow hatha"] and got["style_custom"] is True
+    yoga = next(c for c in next(t for t in obj["styles"] if t["name"] == "Movement")["children"] if c["name"] == "Yoga")
+    assert "Slow hatha" in [c["name"] for c in yoga["children"]], "a style made by hand joins the tree"
+    res, obj = call(server, "POST", "/practice", {"action": "style", "id": nidra["id"], "path": None}, AUTH)
+    assert next(i for i in obj["items"] if i["id"] == nidra["id"])["style_path"] == ["Meditation", "Yoga Nidra"]
+
+
+def test_a_bad_style_or_id_is_refused(server, shelf, signed_in):
+    res, obj = call(server, "GET", "/practice", None, AUTH)
+    iid = obj["items"][0]["id"]
+    for bad in ([], ["a", "b", "c", "d"], ["x" * 41], "Yoga"):
+        assert call(server, "POST", "/practice", {"action": "style", "id": iid, "path": bad}, AUTH)[0].status == 400
+    assert call(server, "POST", "/practice", {"action": "style", "id": "yt:nope", "path": ["Sound"]}, AUTH)[0].status == 404
