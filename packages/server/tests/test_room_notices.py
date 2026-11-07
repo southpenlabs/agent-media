@@ -119,7 +119,7 @@ def test_a_sender_without_a_picture_has_no_avatar_and_a_group_says_so():
     _ev(sender=BOT, msgtype="m.notice"),                       # the bridge bot
     _ev(msgtype="m.notice"),                                   # a notice
     _ev(**{"m.relates_to": {"rel_type": "m.replace", "event_id": "$y"}}),  # an edit
-    {"type": "m.reaction", "event_id": "$r", "sender": MEL,
+    {"type": "m.reaction", "event_id": "$r", "sender": ME,       # David's own reaction
      "content": {"m.relates_to": {"rel_type": "m.annotation", "event_id": "$y", "key": "x"}}},
     {"type": "m.receipt", "content": {}},
 ])
@@ -129,6 +129,46 @@ def test_what_is_not_someone_writing_is_not_kept(ev, monkeypatch):
     head = room_notices.last_seq()
     ev = {**ev, "origin_server_ts": int(time.time() * 1000)}
     _feed(r, ev)
+    assert room_notices.notices(head)["messages"] == []
+
+
+def _react(to, sender=MEL, key="\U0001F44D"):
+    _N[0] += 1
+    return {"type": "m.reaction", "event_id": f"$r{_N[0]}", "sender": sender,
+            "origin_server_ts": int(time.time() * 1000),
+            "content": {"m.relates_to": {"rel_type": "m.annotation", "event_id": to, "key": key}}}
+
+
+def test_a_reaction_to_davids_message_is_told(monkeypatch):
+    monkeypatch.setenv("MATRIX_OWNER_BRIDGES", BOT)
+    r = _room()
+    mine = _ev(sender=ME, body="see you at 6")
+    _feed(r, mine)
+    head = room_notices.last_seq()
+    ev = _react(mine["event_id"])
+    _feed(r, ev)
+    [m] = room_notices.notices(head)["messages"]
+    assert m["text"] == "Reacted \U0001F44D to \u201csee you at 6\u201d"
+    assert m["reaction"] == {"key": "\U0001F44D", "to": mine["event_id"]}
+    assert m["sender"]["name"] == "Mel" and m["id"] == ev["event_id"]
+
+
+def test_a_reaction_to_a_message_not_held_is_told_bare(monkeypatch):
+    monkeypatch.setenv("MATRIX_OWNER_BRIDGES", BOT)
+    r = _room()
+    head = room_notices.last_seq()
+    _feed(r, _react("$gone"))
+    [m] = room_notices.notices(head)["messages"]
+    assert m["text"] == "Reacted \U0001F44D"
+
+
+def test_a_reaction_to_someone_elses_message_is_not_told(monkeypatch):
+    monkeypatch.setenv("MATRIX_OWNER_BRIDGES", BOT)
+    r = _room(group=True)
+    theirs = _ev(sender=ZED, body="pizza?")
+    _feed(r, theirs)
+    head = room_notices.last_seq()
+    _feed(r, _react(theirs["event_id"]))
     assert room_notices.notices(head)["messages"] == []
 
 

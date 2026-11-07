@@ -8,8 +8,11 @@ new message from someone is kept here and handed to the phones that hold
 
 What counts is what brings an archived chat back (archive_wake.py): a
 message or sticker from neither David (another device) nor the bridge's
-bot, not an edit or a notice; reactions, receipts and redactions are other
-event types and never get here. On top of that:
+bot, not an edit or a notice — and someone's reaction to one of David's
+messages (David, 7 Nov 2026: "a reaction should give a bubble pop up too"),
+told as `Reacted 👍 to "…"` with `reaction: {"key", "to"}`; a reaction to
+someone else's message (a group) is not. Receipts and redactions never get
+here. On top of that:
 
 * not while the chat is quiet (quiet.py, "Quiet for…", a standing rule
   included): what comes then stays unread, as in the app, and the newest
@@ -80,6 +83,20 @@ def _text(parts: list[dict]) -> str:
     return words
 
 
+#: Words of the message reacted to, quoted in a reaction's text.
+QUOTE_MAX = 80
+
+
+def _reacted(key: str, target: dict | None) -> str:
+    """A reaction's words: `Reacted 👍 to "see you at 6"`, or just
+    `Reacted 👍` when the message is not held."""
+    head = f"Reacted {key}".rstrip() if key else "Reacted"
+    words = _text(target["parts"]) if target else ""
+    if len(words) > QUOTE_MAX:
+        words = words[:QUOTE_MAX - 1].rstrip() + "…"
+    return f"{head} to \u201c{words}\u201d" if words else head
+
+
 def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict | None:
     """A sync event in room `r` (matrix.Room), after the room and
     archive_wake have taken it. Returns the notice kept, or None. Never
@@ -87,7 +104,8 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
     try:
         from . import archive, archive_wake, quiet
 
-        if not archive_wake._from_someone(ev, r.owner, bridges):
+        reaction = archive_wake._reacting(ev, r.owner, bridges)
+        if not reaction and not archive_wake._from_someone(ev, r.owner, bridges):
             return None
         ev_id = str(ev.get("event_id") or "")
         now = time.time() if now is None else now
@@ -102,8 +120,16 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
             return None
         sender = str(ev.get("sender") or "")
         with r.lock:
-            m = r._by_id.get(ev_id)
-            text = _text(m["parts"]) if m else str((ev.get("content") or {}).get("body") or "")[:TEXT_MAX]
+            if reaction:
+                rel = (ev.get("content") or {}).get("m.relates_to") or {}
+                key, to = str(rel.get("key") or ""), str(rel.get("event_id") or "")
+                target = r._by_id.get(to)
+                if target is not None and target.get("role") != "user":
+                    return None            # someone else's message reacted to
+                text = _reacted(key, target)
+            else:
+                m = r._by_id.get(ev_id)
+                text = _text(m["parts"]) if m else str((ev.get("content") or {}).get("body") or "")[:TEXT_MAX]
             name = r.members.get(sender) or sender
             mxc = r.avatars.get(sender) or ""
             title = r.title()
@@ -113,6 +139,8 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
                "group": len(others) > 1, "id": ev_id,
                "sender": {"id": sender, "name": name},
                "text": text, "at": round(at, 3)}
+        if reaction:
+            out["reaction"] = {"key": key, "to": to}
         if mxc:
             # The sender's picture (matrix.Room._sender_extra's): their
             # profile photo through the bridge.

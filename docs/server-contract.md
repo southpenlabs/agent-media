@@ -1852,8 +1852,8 @@ Pinned by `packages/server/tests/test_discard.py`.
   message in an archived bridged room from anyone but David or the bridge's
   bot clears the flag as the sync takes it in (`archive_wake.py`), and so
   does a reaction from the other end (David, 7 Nov 2026: "a reaction should
-  probably unarchive it too ... if it's from the other end"; it is still not
-  a §6.13 `rooms` notice). David's own reactions, edits, receipts, notices, David's own sends from another device and history
+  probably unarchive it too ... if it's from the other end"; a §6.13 `rooms`
+  notice too when it is to one of David's messages). David's own reactions, edits, receipts, notices, David's own sends from another device and history
   older than the archiving (a bridge's catch-up) leave it. A room quiet now
   (`POST /session/quiet`) stays archived; when a timed quiet (or one "until I
   turn it off") ends and what came during it is still unread, the chat is
@@ -4838,7 +4838,12 @@ data: {}
   `/rooms/<thread>/avatar?user=<sender>` (§6.1, gated),
   absent when the sender has no picture; `etag` changes with the picture.
   Kept: a message or sticker from someone — not David's own (another
-  device), the bridge's bot, a notice, an edit, a reaction, a receipt — no
+  device), the bridge's bot, a notice, an edit, a receipt — and their
+  reaction to one of David's messages (David, 7 Nov 2026: "a reaction should
+  give a bubble pop up too"), its `text` `Reacted 👍 to “…”` (the message's
+  words cut to 80, or just `Reacted 👍` when it is not held) with
+  `"reaction": {"key", "to"}` (the emoji, the message's id); a reaction to
+  someone else's message is not kept. No
   older than 5 min when it arrives (a bridge's catch-up replays history),
   each once, and **not while the chat is quiet** (§6.4 Quiet for…, a
   standing rule included) **or archived** after §6.4's archive wake has had
