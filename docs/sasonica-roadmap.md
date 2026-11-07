@@ -2542,6 +2542,22 @@ ahead.
     hide its nav and open compact (`?bubble=1`); a Person avatar of the
     agent's own instead of the app icon; the second WebView's cost on a
     phone with little memory.
+    **Since (5–7 Nov):** a bubble opened from the thread no longer closes
+    at once (a bubbled notice is posted again suppressed, not cancelled);
+    the light card reads `role`/`parts` (a question card as its question
+    and options), shows links that tap, pinches its text 11–34 sp, has a
+    mic and a play icon, −/□/× in its top right (□ the bubble as tall as
+    Android allows and back), and a handle on its bottom edge that drags
+    the height (the notice posted again with only the desired height
+    changed; the height kept per mode). Android alone sets a bubble's width.
+    **Next, Sasonica's own floating window** (David, 7 Nov 2026: "draggable
+    links on all four sides of the window to resize it" — chose both the
+    tall maximise now and this later): an overlay window
+    (`TYPE_APPLICATION_OVERLAY`, the "Display over other apps" permission)
+    in place of the system bubble for those who want it — dragged by its
+    title, resized from every edge and corner, minimised to a floating
+    head, its size and place kept; the light card's views inside it. Its
+    own setting beside Speech bubbles, since the permission is a big ask.
 37. **Sasonica in Android Auto** (David, 20 Oct 2026: "would this app work
     on Android auto?" — "y"). Today it doesn't show in the car: speech and
     music come through the car's speakers, but the app declares no
