@@ -62,3 +62,24 @@ def test_off_by_default_in_tests(monkeypatch):
     monkeypatch.delenv("MEDIA_ROOM_REPLIES", raising=False)
     monkeypatch.setenv("MEDIA_ROOM_REPLIES", "0")
     assert room_replies.chips("!r:x", [_m("e1", "assistant", "hi")]) == []
+
+
+def test_a_new_message_asks_at_once(on):
+    page = [_m("e1", "assistant", "Lol")]
+
+    class Room:
+        thread = "!r:z"
+        def page(self, limit, before=""):
+            return page, False
+    room_replies.prefetch(Room())
+    assert len(on) == 1
+    assert [c["text"] for c in room_replies.chips("!r:z", page)][:1] == ["Sounds good!"]
+    assert len(on) == 1
+
+
+def test_prefetch_never_raises(on):
+    class Broken:
+        thread = "!r:b"
+        def page(self, limit, before=""):
+            raise RuntimeError("gone")
+    room_replies.prefetch(Broken())

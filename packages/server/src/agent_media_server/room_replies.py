@@ -126,6 +126,21 @@ def chips(thread: str, messages: list[dict]) -> list[dict]:
     return []
 
 
+def prefetch(r) -> None:
+    """Someone's new message just came into room `r` (matrix.Room): ask for
+    its answers now, in the background, so they are there when the chat is
+    opened. Opened first, the chat drew its saved copy's chips for the
+    message before, the first fresh read dropped them, and the new ones were
+    ready ~20 s later — after David had looked away (7 Nov 2026: "why do
+    those quick reply answers disappear?", in a chat with Steven). Never
+    raises: the sync loop calls it."""
+    try:
+        messages, _older = r.page(CONTEXT, "")
+        chips(r.thread, messages)
+    except Exception as e:  # noqa: BLE001
+        log.warning("room replies %s: prefetch: %s", getattr(r, "thread", "?")[:8], e)
+
+
 def _reset_for_tests() -> None:
     global _map
     _map = None

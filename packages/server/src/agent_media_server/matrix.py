@@ -1223,7 +1223,13 @@ def _on_event(room_id: str, ev: dict) -> None:
         bridges = _bridges()
         archive_wake.on_message(r.thread, ev, r.owner, bridges)
         # Someone's new message, for the phone's notices (§6.13 `rooms`).
-        room_notices.on_event(r, ev, bridges)
+        notice = room_notices.on_event(r, ev, bridges)
+        if notice is not None and not notice.get("reaction"):
+            # Its one-tap answers asked for now, so they are there when the
+            # chat is opened rather than ~20 s after (room_replies.prefetch).
+            from . import room_replies
+
+            room_replies.prefetch(r)
 
 
 def _bridges(env=None) -> set[str]:
