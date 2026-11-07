@@ -7972,7 +7972,8 @@ not it.
 Marking read is the owner's `m.read` receipt (`MATRIX_OWNER_TOKEN`), which
 the bridge carries to the network. A reply in a room (§6.3) marks it read
 before it is sent, whatever the mode, so the server does that without the
-app asking. 409 with no owner token, 404 for a message the room does not
+app asking; so does a reaction (§6.27) once it is sent (7 Nov 2026), and
+taking one off tells nothing. 409 with no owner token, 404 for a message the room does not
 hold, 502 when the homeserver refuses it or cannot be reached; 400 for a
 bad session id, mode or why. An agent's chat has no network:
 `{"mode": null, "read": null}`, nothing done. The mode is kept in

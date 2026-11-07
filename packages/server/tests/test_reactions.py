@@ -122,8 +122,12 @@ def test_reacting_in_a_room_sends_and_replaces_as_the_owner(monkeypatch):
 
     monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
     monkeypatch.setattr(matrix, "_put", put)
+    receipts = []
+    monkeypatch.setattr(matrix, "_post", lambda config, path, body, token=None, **kw: receipts.append(path) or {})
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
     ok, d = reactions.session_react(r.thread, "$1", "👍", "tok")
+    # Reacting is reading (§6.32): the room is marked read up to its newest, once.
+    assert receipts == [f"/rooms/{matrix._q(r.id)}/receipt/m.read/%241"]
     assert ok and d["reactions"] == [{"key": "👍", "count": 1, "mine": True, "by": ["David"]}]
     (path, body, token), = sent
     assert "/send/m.reaction/" in path and token == "owner-tok"
@@ -140,5 +144,6 @@ def test_reacting_in_a_room_sends_and_replaces_as_the_owner(monkeypatch):
     assert ok and len(sent) == 3 and d["reactions"][0]["key"] == "❤️"
     ok, d = reactions.session_react(r.thread, "$1", "", "tok")
     assert ok and d["reactions"] == [] and len(sent) == 4 and "/redact/" in sent[3][0]
+    assert len(receipts) == 1   # already told; taking one off tells nothing
     ok, err = reactions.session_react(r.thread, "$nope", "👍", "tok")
     assert not ok and err["status"] == 404

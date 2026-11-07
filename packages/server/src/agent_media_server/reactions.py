@@ -24,10 +24,13 @@ Stored in `<state_dir>/reactions.json` as `{"<session>": {"items":
 
 from __future__ import annotations
 
+import logging
 import re
 
 from . import auth, driver, sessions
 from ._jsonmap import JsonMap
+
+log = logging.getLogger("agent-media.server.reactions")
 
 STORE = JsonMap("reactions.json")
 KEEP = 200
@@ -159,6 +162,13 @@ def session_react(session: str, mid: str, key: str, bearer: str, *,
         ok, detail = room.react(mid, key)
         if not ok:
             return False, detail
+        if key:
+            # Reacting is reading, like a reply (§6.32), in either mode
+            # (David, 7 Nov 2026); taking one off tells nothing.
+            got, why = room.read()
+            if not got:
+                log.info("react: read receipt for %s not sent: %s", session[:8],
+                         why.get("error"))
         return True, {"session": session, "id": mid, "reactions": detail["reactions"]}
     if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
             or driver.owned_headless(session)):
