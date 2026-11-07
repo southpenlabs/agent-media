@@ -277,6 +277,28 @@ def test_the_stream_keeps_a_list_marker_with_its_item():
         "2. The second item is still in your ears."]
 
 
+def test_actions_marker_comes_out_of_the_words_and_its_parts_are_kept():
+    from agent_media_core.intake._text import extract_actions, strip_markdown
+
+    raw = ("Pushed.\n\n[[replies: Thanks]]\n"
+           "[[actions: Open the PR -> open https://github.com/a/b/pull/1 | Listen -> LISTEN docs/x.md"
+           " | no arrow here | -> open x | Restart  the canvas -> task restart canvas"
+           " | listen -> open y]]\n")
+    text, actions = extract_actions(raw)
+    assert text == "Pushed.\n\n[[replies: Thanks]]"
+    assert actions == [
+        {"label": "Open the PR", "verb": "open", "target": "https://github.com/a/b/pull/1"},
+        {"label": "Listen", "verb": "listen", "target": "docs/x.md"},
+        {"label": "Restart the canvas", "verb": "task", "target": "restart canvas"},
+    ]
+    spoken = strip_markdown(raw)
+    assert "actions" not in spoken and "Open the PR" not in spoken and "replies" not in spoken
+    assert extract_actions("no marker") == ("no marker", [])
+    assert extract_actions("Mid [[actions: Go -> compact]] line.")[0] == "Mid line."
+    many = "[[actions: a -> compact | b -> compact | c -> compact | d -> compact | e -> compact]]"
+    assert [a["label"] for a in extract_actions(many)[1]] == ["a", "b", "c", "d"]
+
+
 def test_replies_marker_comes_out_of_the_words_and_its_answers_are_kept():
     from agent_media_core.intake._text import extract_replies, strip_markdown
 

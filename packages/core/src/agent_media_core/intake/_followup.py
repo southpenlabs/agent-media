@@ -92,6 +92,42 @@ def load_followup(session: str) -> dict | None:
     return data
 
 
+def _actions_path(session: str) -> Path:
+    return state_dir() / "followups" / f"{safe_name(session, 80)}.actions.json"
+
+
+def save_actions(session: str, actions: list[dict], key: str) -> None:
+    """File the reply's `[[actions:]]` (`{"label", "verb", "target"}`, as
+    written) under the session, keyed to the reply like the follow-up. A file
+    of its own: the follow-up model writes its file after the reply, and an
+    agent may give actions with no replies. Atomic; best-effort."""
+    if not session:
+        return
+    try:
+        p = _actions_path(session)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"actions": list(actions or []), "key": key or "",
+                                   "at": time.time()}))
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
+def load_actions(session: str) -> dict | None:
+    """`{"actions", "key", "at"}` for the session's latest reply that had
+    actions, or None."""
+    if not session:
+        return None
+    try:
+        data = json.loads(_actions_path(session).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("actions"), list):
+        return None
+    return data
+
+
 def _clean(line: str) -> str:
     line = " ".join((line or "").split())
     # Small models decorate: quotes, a leading dash, a label. Keep the line.

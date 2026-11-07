@@ -417,7 +417,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
-    "/session/paths", "/session/file", "/session/file/link",
+    "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
@@ -1927,6 +1927,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
                                          tree=tree, blob=qs.get("blob", [""])[0],
                                          ignored=qs.get("ignored", [""])[0] == "1")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/actions/tasks":
+        # The tasks an action chip may run here (reply_actions.py, §6.2.1).
+        from . import reply_actions
+
+        ok, detail = reply_actions.listing(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/commands":
         # The slash menu for the reply box: what this session's terminal
         # would offer. `?item=`, `?session=`, `?project=` or `?cwd=` (a
@@ -3145,6 +3151,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import link_preview
 
         ok, detail = link_preview.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/actions/run":
+        # A registry task from an action chip under a reply (§6.2.1,
+        # reply_actions.py); its result comes back into the thread as a note.
+        from . import reply_actions
+
+        ok, detail = reply_actions.run(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/paths":
         # Which paths a reply names are files the thread may open (§6.18a).

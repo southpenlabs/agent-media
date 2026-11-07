@@ -760,6 +760,34 @@ words for older clients. A tap sends the chip's `text` as an ordinary
 message (§6.4). The thread stream's `suggestion` event carries the same
 list as `replies` beside its `text`.
 
+`actions` (8 Nov 2026; the proposal's part 5, David, 6 Nov 2026: "let's
+also add actions rather than just replies"): chips beside them that do
+something instead of sending words, `[{"label", "kind", "verb", "target",
+"confirm", "file"?, "seconds"?}]`, at most four, after the reply chips. The
+agent writes `[[actions: Open the PR -> open https://… | Listen -> listen
+docs/x.md | Restart the canvas -> task restart canvas]]` (stripped from
+words and speech like `[[replies:]]`, filed by the Stop hook beside the
+follow-up, keyed to the reply); the server checks each and serves only those
+it accepts (`reply_actions.py`):
+
+| kind | verb | target | the app |
+|---|---|---|---|
+| `open` | `open` | a `https://` link; `/t/<id>`; an app page (`/project?…`, `/map`, `/docs?…`, …); or a file the thread may open (§6.18a's rules), `file` its §6.18a description | opens the link, the page, or the file as a path link does |
+| `listen` | `listen` | a document the reader may read (`file.kind` `doc`) or a clip (`audio`) | reads the document aloud as the Documents page's Listen does (`POST /org/listen {doc}`) and opens it; plays the clip |
+| `play` | `play` | a music query | `POST /music {action: "play", play}` |
+| `app` | `new` | an existing folder | a new chat there |
+| `app` | `remind` / `quiet` | as written; `seconds` (null: quiet until turned off) | `POST /session/remind` / `/session/quiet` for now + `seconds` |
+| `app` | `compact` / `rename` | — / the title | the app's own Compact (`/compact`) and Rename |
+| `task` | `task` | a name from `GET /actions/tasks` | `POST /actions/run` |
+
+`confirm` is the server's, never the reply's: open, listen, play and app act
+at once; a task as its registry entry says. A confirming chip is drawn with
+a trailing "…" and a bold border, and asks ("Restart canvas?") before it
+runs. A tap on an action never sends a message (Compact sends the harness's
+`/compact`, as its own key does). `[]` while pending or under a question
+card, and for another reply. The thread stream's `suggestion` event carries
+them as `actions`.
+
 In a chat with people (a Matrix room, §6.25; 7 Nov 2026) the chips are up
 to three short answers to the newest message when it is someone else's,
 `source: "model"`, asked of MEDIA_PRIVATE_MODELS only (none set: none) in
@@ -767,6 +795,24 @@ the background and kept per room for that message (room_replies.py); they
 arrive within a re-read of the newest page. A tap sends the words as any
 message; undone, the message is unsent (§6.39), a room having no
 take-back. MEDIA_ROOM_REPLIES=0 turns them off.
+
+#### `GET /actions/tasks` · `POST /actions/run` — gated (8 Nov 2026)
+
+`GET /actions/tasks` → `{"ok", "tasks": [{"name", "label", "confirm"}]}`:
+what a `task` action may name. Built in, `restart <service>` for each of
+this host's services but sessiond (`media restart-services --only <name>
+--after 10`, run in-process; confirm), then what add-ons offer through the
+`agent_media.action_tasks` entry point group (a list, or a callable giving
+one, of `{name, label, confirm, run}`, `run(session)` answering the note's
+words or `(ok, words)`).
+
+`POST /actions/run {"session", "task", "key"}` → `{"ok", "task", "label",
+"started": true}`; gated by `auth.may_admin` (403 otherwise), 404 `unknown`
+a task the registry has not, 409 `again` the same task for the same reply
+(`key`) within a minute. It runs on its own thread; the result comes back
+into the thread as a message to its agent, `[From actions] <label>:
+<result>` (a headless session through sessiond, never over a card; a pane
+typed into). A task should be short or detach itself, as a restart does.
 
 #### `GET /conversation/log?item=<item>` · `?session=<session>` — gated
 
@@ -827,6 +873,7 @@ newest page, as without it. Other harnesses' threads find their line ids
   `steps` holds the latest few (`MAX_STEPS`), newest last.
 - `approval`: `null`, or the dialog the session is stopped on (see below).
 - `suggestion`: §6.2.1, `""` while pending.
+- `suggestions`, `actions`: §6.2.1, `[]` while pending or under a card.
 - `recap` (22 Sep 2026, both forms): the session's latest recap,
   `{"text", "at", "source"}`, or `null` — the same object as on the
   session's `/targets` row ([Recaps](#recaps)); `source` is `"claude"` or

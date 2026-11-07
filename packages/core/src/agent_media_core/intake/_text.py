@@ -524,6 +524,51 @@ def extract_replies(text: str) -> tuple[str, list[str]]:
     return out.strip(), replies[:REPLIES_MAX]
 
 
+#: `[[actions: Open the PR -> open https://… | Listen -> listen docs/x.md]]`:
+#: chips that do something instead of sending words (one-tap answers, part
+#: 5). Each is `label -> verb target`; the server checks every one and serves
+#: only those it accepts (agent_media_server/reply_actions.py). Stripped from
+#: speech and the thread like `[[replies:]]`.
+_ACTIONS_RE = re.compile(r"\[\[\s*actions\s*:\s*([^\]\n]+?)\s*\]\]", re.IGNORECASE)
+_ACTIONS_LINE_RE = re.compile(r"(?m)^[ \t]*\[\[\s*actions\s*:[^\]\n]*\]\][ \t]*(?:\n|$)",
+                              re.IGNORECASE)
+_ACTIONS_INLINE_RE = re.compile(r"[ \t]*\[\[\s*actions\s*:[^\]\n]*\]\]", re.IGNORECASE)
+#: At most this many actions, each label at most REPLY_CHARS, each target at
+#: most ACTION_TARGET_CHARS.
+ACTIONS_MAX = 4
+ACTION_TARGET_CHARS = 1000
+
+
+def extract_actions(text: str) -> tuple[str, list[dict]]:
+    """(`text` without its `[[actions:]]` markers, the first one's actions as
+    `{"label", "verb", "target"}`).
+
+    Split on `|`, each part on its first `->`; a part with no `->`, no label
+    or no verb is dropped, as is a repeated label. The verb is lowercased;
+    what follows it is the target, as written. At most ACTIONS_MAX. Nothing
+    is checked here: the server decides what may be offered."""
+    if not text or "[[" not in text:
+        return text, []
+    m = _ACTIONS_RE.search(text)
+    if not m:
+        return text, []
+    out = _ACTIONS_LINE_RE.sub("", text)
+    out = _ACTIONS_INLINE_RE.sub("", out)
+    seen: set[str] = set()
+    actions: list[dict] = []
+    for part in m.group(1).split("|"):
+        label, arrow, what = part.partition("->")
+        label = " ".join(label.split())[:REPLY_CHARS].strip()
+        what = " ".join(what.split())
+        if not arrow or not label or not what or label.lower() in seen:
+            continue
+        verb, _, target = what.partition(" ")
+        seen.add(label.lower())
+        actions.append({"label": label, "verb": verb.lower(),
+                        "target": target.strip()[:ACTION_TARGET_CHARS]})
+    return out.strip(), actions[:ACTIONS_MAX]
+
+
 _QUOTE_BLOCK_LINE = re.compile(r"^[ \t]{0,3}>[ \t]?(.*)$")
 
 
@@ -577,7 +622,7 @@ def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -
         return ""
     out = _SHARED_FILE_RE.sub("", text) if "Shared file: " in text else text
     if "[[" in out:
-        out = extract_replies(extract_tune(extract_sound(out)[0])[0])[0]
+        out = extract_actions(extract_replies(extract_tune(extract_sound(out)[0])[0])[0])[0]
     out = suppress_code_blocks(out, describe, paragraphs)
     out = suppress_tables(out, describe, paragraphs)
     if paragraphs:
