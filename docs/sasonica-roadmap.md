@@ -2533,8 +2533,12 @@ ahead.
     threads left out, each with its heard state (`unheard`, `resume`). The
     voice's full player ends with the list (a pill to it among its pills):
     a row's tap replays it, from where it was stopped; its arrow opens the
-    thread. The Replay strip has a list key that opens the sheet scrolled to
-    it. Neither shows on a server without `speech_recent` in `/features`.
+    thread. Neither shows on a server without `speech_recent` in `/features`.
+    **Changed 8 Nov 2026** (sasonica-app `ae081adb`; David: "leave it off the
+    replay banner. I'd rather show more of the title. Can we replace the word
+    replay with a replay icon", "should we call it Recently played?"): the
+    list is "Recently played"; the Replay strip lost its list key, and its
+    word Replay is now the replay icon, leaving the title more room.
 
 ## Loose ends
 
