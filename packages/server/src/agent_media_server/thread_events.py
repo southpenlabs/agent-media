@@ -113,7 +113,8 @@ _TICKING = ("sentence", "elapsed", "server_time", "paused", "delay")
 class Subscriber:
     """One connection's end of a watcher: a queue of `(event, data)`."""
 
-    def __init__(self, device: str = "", held: bool = False, client: str = "") -> None:
+    def __init__(self, device: str = "", held: bool = False, client: str = "",
+                 after: bool = False) -> None:
         self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self.dropped = False
         self.device = device
@@ -124,6 +125,9 @@ class Subscriber:
         # app's What's new): streamed as usual, but not on screen — nothing
         # plays for it until `release`.
         self.held = held
+        # Opened with `?after=1` (§11): a waiting reply it would play goes
+        # behind the reply being heard (up_next.py) rather than over it.
+        self.after = after
         # Whether the client has hung up, asked without writing (the stream
         # handler sets it): a closed stream is otherwise noticed only at its
         # next write, up to PING_S later.
@@ -442,11 +446,13 @@ def renamed(session: str, title: str) -> None:
 
 
 def subscribe(session: str, device: str = "", held: bool = False,
-              client: str = "") -> tuple[Watcher, Subscriber] | None:
+              client: str = "", after: bool = False) -> tuple[Watcher, Subscriber] | None:
     """A new subscriber to `session`'s watcher (started if it is the first),
     or None when a cap is reached. `device`: who opened it, for the row a
     waiting reply is played from (`_play_waiting`). `held`: opened under a
     sheet (`Subscriber.held`): its waiting replies wait for `release`.
+    `after`: a waiting reply it plays waits for the reply being heard
+    (`Subscriber.after`, up_next.py).
 
     `client`: the page that opened it (`?client=`). A stream that page
     already has to this thread is a dead one it gave up on: its watchdog
@@ -469,7 +475,7 @@ def subscribe(session: str, device: str = "", held: bool = False,
         total = sum(len(w.subs) for w in _WATCHERS.values())
         if total >= MAX_TOTAL or (w and len(w.subs) >= MAX_PER_SESSION):
             return None
-        sub = Subscriber(device, held, client)
+        sub = Subscriber(device, held, client, after)
         if held and device:
             _hold(device)
         # A watcher in the table always has subscribers: the last one out
@@ -568,7 +574,10 @@ def _play_if_stayed(session: str, device: str, sub: Subscriber) -> None:
     if not stayed:
         log.info("thread %s left within %.1f s: its waiting replies wait", session[:8], OPEN_DWELL_S)
         return
-    _play_waiting(session, device)
+    if sub.after:
+        _play_waiting(session, device, after=True)
+    else:
+        _play_waiting(session, device)
 
 
 def _peer_closed(sock) -> bool:
@@ -588,7 +597,7 @@ def _peer_closed(sock) -> bool:
         return True
 
 
-def _play_waiting(session: str, device: str = "") -> None:
+def _play_waiting(session: str, device: str = "", after: bool = False) -> None:
     """The thread was opened: play its held Normal replies that have never
     been played, oldest first (core's toast.take_for_opened gives the first;
     its replay chains the rest). Off the request thread:
@@ -601,7 +610,12 @@ def _play_waiting(session: str, device: str = "") -> None:
     bar, the follow-along) ever starts.
 
     The row keeps that it was played on an open, when and by which device
-    (`extras.opened_play`): "why did that play?" is answered by the row."""
+    (`extras.opened_play`): "why did that play?" is answered by the row.
+
+    `after` (the stream's `?after=1`): while another reply is being heard,
+    the reply goes on Up next (up_next.py) instead, and plays once that one
+    ends (David, 8 Nov 2026: "So that it finishes what you're listening to
+    before the new one starts playing")."""
     try:
         import subprocess
         import sys
@@ -612,6 +626,12 @@ def _play_waiting(session: str, device: str = "") -> None:
         rid = toast.take_for_opened(session)
         if rid is None:
             return
+        if after:
+            from . import up_next
+
+            if up_next.reply_live() and up_next.add(session, int(rid), device) is not None:
+                log.info("thread %s opened: its waiting reply %s is up next", session[:8], rid)
+                return
         log.info("thread %s opened: playing its waiting reply %s", session[:8], rid)
         try:
             from agent_media_core.state import StateStore
@@ -808,7 +828,8 @@ class _Out:
 
 
 def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
-          device: str = "", held: bool = False, client: str = "") -> bool:
+          device: str = "", held: bool = False, client: str = "",
+          after: bool = False) -> bool:
     """Hold the connection open and stream `session` to it until it goes.
 
     Runs on the handler's own thread. Auth and the session check are the
@@ -820,7 +841,7 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
     client went, it fell too far behind, the snapshot failed, or a bug): a
     caller must never write a second answer onto this socket.
     """
-    got = subscribe(session, device, held, client)
+    got = subscribe(session, device, held, client, after)
     if got is None:
         from .app import _json
 

@@ -3156,6 +3156,29 @@ The speech bar.
   (the stop is cleared) or the session says something newer. Only the last
   24 hours; never the live session. Always present; `[]` when none
   (`StateStore.left_paused`, 14 Oct 2026).
+- `up_next` (8 Nov 2026) lists the held replies waiting for the reply being
+  heard to end, in play order: `[{"session", "title", "id", "at"}]` (`id`
+  the history row that will play, `at` when it was queued). A thread opened
+  with `?after=1` (§11) whose held reply would play on the open while
+  another reply is heard (speaking or paused; not a thinking line or a
+  notification) goes on the end instead of cutting in; a thread already
+  waiting keeps its place. Once no reply has been heard and none waits for
+  the voice for 2.5 s, the first plays from where it was left (`media
+  replay --id ID --resume`, which goes on through that thread's other
+  unheard replies, as on an open) and the next waits for it to end in
+  turn. A reply heard to its end meanwhile (its ▶, a notice's Play) is
+  skipped. At most 50; an open past that plays at once. The queue is the
+  server's, so every device shows the same one, and it is kept in
+  `up-next.json` over a restart. Always present on a server that has it
+  (`GET /features` `up_next`); `[]` when nothing waits (`up_next.py`). The
+  app's full player lists it as Up next, under Recently played, and a
+  thread opened while it is queued shows the Keep reading pop-up.
+  `POST /speech/up-next` (gated like `/speech/ctl`, guests too) `{"session",
+  "action": "play" | "remove"}` → `{"ok": true, "up_next": [...]}` (the queue
+  after): `play` takes it off and plays it now, over what is heard (what an
+  open did before); `remove` takes it off and plays nothing (the reply keeps
+  its Play). 400 `"not a session id"` or `'action must be "play" or
+  "remove"'`; 404 `"that thread is not up next"`.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
@@ -4712,6 +4735,7 @@ local look, never a network call:
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
+| `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
@@ -9692,6 +9716,14 @@ screen from then, and its waiting replies play as on an open. `N` is how
 many of the caller's streams were released; at 0 nothing plays (the next
 open does). A server without it ignores `hold` and plays on the open, as
 before.
+
+**After (8 Nov 2026).** `?after=1`: a held reply this open would play
+waits for the reply being heard to end, on Up next (§6.5 `/speech/now`
+`up_next`), rather than cutting in over it. Nothing else changes: with no
+reply heard it plays on the open as before. The app sends it on every
+open; a server without it ignores it and plays on the open (David, 8 Nov
+2026: "So that it finishes what you're listening to before the new one
+starts playing").
 
 The whole device too (31 Oct 2026; a stream the server still held from
 before an update let a reply through the sheet): `POST /threads/hold`

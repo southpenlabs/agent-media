@@ -419,7 +419,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -478,7 +478,7 @@ CORS_PATHS = CORS_PATHS | ROOM_DELEGATE_PATHS
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
-GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/balance",
+GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/balance",
                          "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
                          "/book/state",
@@ -2429,6 +2429,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             from . import session_events
 
             detail["answers"] = session_events.answers_for(str(detail["session"]))
+        if ok:
+            # Held replies waiting for the one heard to end (up_next.py).
+            from . import up_next
+
+            detail["up_next"] = up_next.listing()
         # Polled every few seconds, so not every request: a refusal, and
         # the first answer each device gets, are what tell "the bar is
         # asking and being turned away" from "the bar never asked".
@@ -2478,6 +2483,9 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
     # else the login — what a waiting reply played on the open is noted with.
     who = _opener(user)
     held = (qs.get("hold") or [""])[0] == "1"
+    # `?after=1`: a waiting reply this open plays waits behind the reply
+    # being heard, on Up next (up_next.py), rather than cutting in.
+    after = (qs.get("after") or [""])[0] == "1"
     # The page that opened it: its reconnect replaces a stream it gave up on.
     client = (qs.get("client") or [""])[0].strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", client):
@@ -2488,7 +2496,7 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
 
     follow.opened(auth.device_id(bearer), session)
     return thread_events.serve(h, session, limit=limit, gzip=thread_events.accepts_gzip(h),
-                               device=who, held=held, client=client)
+                               device=who, held=held, client=client, after=after)
 
 
 def _opener(user: dict) -> str:
@@ -3237,6 +3245,31 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             # connection cannot carry another request.
             h.close_connection = True
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/up-next":
+        # Up next (§6.5, up_next.py): a waiting reply played now, over what
+        # is heard, or taken off the queue (it keeps its Play). Gated as the
+        # speech bar's keys are.
+        ok, detail = auth.may_control_speech(_bearer(h))
+        if not ok:
+            _json(h, detail.pop("status", 403), {"ok": False, **detail})
+            return True
+        from . import up_next
+
+        body = _read_json(h) or {}
+        us = str(body.get("session") or "")
+        action = body.get("action")
+        if not sessions._SESSION.fullmatch(us):
+            _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        if action not in ("play", "remove"):
+            _json(h, 400, {"ok": False, "error": 'action must be "play" or "remove"'})
+            return True
+        got = up_next.play_now(us) if action == "play" else up_next.remove(us)
+        if got is None:
+            _json(h, 404, {"ok": False, "error": "that thread is not up next"})
+            return True
+        print(f"speech/up-next: {action} {us[:8]}", file=sys.stderr)
+        _json(h, 200, {"ok": True, "up_next": up_next.listing()})
     elif path == "/speech/ctl":
         # The app's speech bar buttons. The caller's ABS bearer, like
         # /reply, and only the listener's verbs (_APP_SPEECH_ACTIONS).

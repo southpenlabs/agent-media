@@ -34,6 +34,9 @@ never a network call, so the app can ask on every start.
             follow frame's `stage`; always true here, as quick
   speech_recent  this server answers GET /speech/recent (speech.py, 8 Nov
             2026): the full player's Recent replies; always true here, as quick
+  up_next   held replies opened (`?after=1`) while another is heard wait on
+            Up next (up_next.py, 8 Nov 2026): /speech/now `up_next`, POST
+            /speech/up-next; always true here
   room_delegate  a chat with people can be handed to an agent (room_delegate.py,
             §6.53, 8 Nov 2026): /room/delegate, `delegate` on a room's log
             and /targets row, agent chips; true where there are agent
@@ -136,7 +139,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 
