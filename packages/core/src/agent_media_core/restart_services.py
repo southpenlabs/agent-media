@@ -289,6 +289,42 @@ def speech_in_flight() -> bool:
     return cli._speech_in_flight()
 
 
+#: A reply paused this long no longer holds off a canvas restart.
+PAUSED_GRACE_S = 300.0
+
+
+def speech_paused_long(now: float | None = None) -> bool:
+    """Whether the reply in flight has been paused for PAUSED_GRACE_S
+    (MEDIA_RESTART_PAUSED_S) or more, and its player does not run inside the
+    canvas (which a canvas restart would kill). Read from the now-playing
+    row's `paused_at` (submit.py writes every pause down there). Unsure:
+    False, so the check stays as it was."""
+    try:
+        from . import cli
+
+        np = cli._now_speaking()
+        if not np:
+            return False
+        ex = np.get("extras") or {}
+        at = ex.get("paused_at")
+        if not isinstance(at, (int, float)) or not at:
+            return False
+        grace = float(os.environ.get("MEDIA_RESTART_PAUSED_S") or PAUSED_GRACE_S)
+        if (time.time() if now is None else now) - at < grace:
+            return False
+        wp = ex.get("writer_pid")
+        if wp:
+            try:
+                with open(f"/proc/{int(wp)}/cgroup") as f:
+                    if "canvas" in f.read():
+                        return False
+            except (OSError, ValueError):
+                pass
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def speech_waiting() -> int:
     """How many replies are waiting for the voice (intake/submit.py
     `speech_queue`): said, not yet heard. A restart in the gap between
@@ -372,6 +408,14 @@ def waiting_on(selected: list[Service], caller: str = "", *, now: bool = False,
                         "why": "restarting it now would end this chat (you run inside "
                                "one of its sessions). Use --after 10"})
     speech = [s.short for s in selected if is_speech(s)]
+    if speech and all(is_canvas(s) for s in selected if is_speech(s)) \
+            and speech_paused_long():
+        # Only the canvas, and the reply has sat paused for minutes: it is not
+        # being spoken, nothing follows along until it resumes, and a replay
+        # outlives the canvas (procinfo.outliving_service). A paused reply
+        # held a restart off for an hour (David, 8 Nov 2026: "Teach the
+        # check, then restart").
+        speech = []
     if speech:
         if speech_in_flight():
             out.append({"session": "", "kind": "speech", "label": "a reply is being spoken",

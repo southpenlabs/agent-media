@@ -209,6 +209,24 @@ def test_canvas_refused_while_speaking(host, monkeypatch, capsys):
     assert _run("--only", "canvas") == 0
 
 
+def test_a_long_paused_reply_does_not_hold_off_the_canvas(host, monkeypatch, capsys):
+    """A reply paused for minutes is not being spoken: it held a canvas
+    restart off for an hour (David, 8 Nov 2026: "Teach the check, then
+    restart"). The speech services proper still wait, and a short pause or
+    a player inside the canvas still counts."""
+    import time as _t
+
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
+    row = {"extras": {"paused_at": _t.time() - 1200}}
+    monkeypatch.setattr(cli, "_now_speaking", lambda: row)
+    assert _run("--only", "canvas") == 0
+    assert _run("--only", "tts-shim") == 3
+    row["extras"]["paused_at"] = _t.time() - 30
+    assert _run("--only", "canvas") == 3
+    row["extras"].pop("paused_at")
+    assert _run("--only", "canvas") == 3
+
+
 def test_speech_services_refused_while_a_reply_waits(host, monkeypatch, capsys):
     """Nothing speaking, but a reply is waiting for the voice: a restart in
     that gap cuts the next reply (the canvas restart of 4 Nov 2026 went
