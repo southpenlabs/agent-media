@@ -80,6 +80,7 @@ python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/se
 |---|---|---|---|---|
 | `heard` | `UserPromptSubmit` | `media-hook-heard` | 5 s | no |
 | `context` | `UserPromptSubmit` | `media-hook-context` | 5 s | no |
+| `shared` | `Stop` | `media-hook-shared-check` (behind a shell guard) | 10 s | no |
 | `statusline` | `statusLine` | `media-statusline` | — | — |
 | `mail` (extra) | `UserPromptSubmit` | `agent-mail-inbox-hook --new` | 5 s | no |
 | `catchup` (extra) | `UserPromptSubmit` | `agent-repo-catchup` | 10 s | no |
@@ -88,6 +89,13 @@ python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/se
 the prompt, and only a hook that holds the prompt can do that. They have
 their own command names so the speech hook's merge, which matches on
 `media-hook-claude-code`, never mistakes them for its own.
+
+`shared` holds the stop for the same reason. It reads the reply's
+`Shared file:` lines. A file outside the upload root gets copied in now, so
+the chip still opens if the file is deleted later. A file that is already
+gone blocks the stop once, with a reason that sends the agent back to re-share
+it. The shell guard starts Python only when the reply has such a line
+(intake/shared_check.py).
 
 An `extra` row is skipped, with a reason, when its tool is not on the
 machine. A status line someone set themselves is left alone, and the context

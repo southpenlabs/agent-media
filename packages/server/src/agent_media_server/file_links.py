@@ -34,35 +34,27 @@ csv (replies name READMEs and notes all the time; a chip under each would
 bury the ones that matter). `media attach` still shares any file on purpose.
 
 Copies are remembered by source path, mtime and size
-(`state_dir()/shared-links.json`), so re-reading a thread does not copy again;
-a changed file is copied anew.
+(`state_dir()/shared-links.json`, agent_media_core.shared_files.copy_once),
+so re-reading a thread does not copy again; a changed file is copied anew. A
+`Shared file:` line whose file is gone points at its newest remembered copy
+(`last_copy`): the Claude Code Stop hook copies a reply's shared files as the
+turn ends (intake/shared_check.py), so a temp folder deleted later does not
+break the chip.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-import stat
-import threading
 from pathlib import Path
-from urllib.parse import unquote
+
+from agent_media_core.shared_files import (  # noqa: F401 - the rules live in core
+    ALLOWED_HIDDEN, AUDIO, DENIED_PARTS, DENIED_ROOTS, EXTS, IMAGE, VIDEO,
+    _denied_parts, eligible, max_bytes)
 
 log = logging.getLogger("agent-media.server.file_links")
 
-IMAGE = {"png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp"}
-VIDEO = {"mp4", "m4v", "webm", "mov"}
-AUDIO = {"mp3", "wav", "ogg", "opus", "m4a", "aac", "flac"}
-#: The kinds a bare path is linked for.
-EXTS = IMAGE | VIDEO | AUDIO | {"pdf"}
-
-#: Hidden folders whose files are safe to show: where browser tools
-#: (Playwright MCP) and preview scripts drop their screenshots.
-ALLOWED_HIDDEN = {".playwright-mcp", ".local-previews"}
-#: Never, even if ALLOWED_HIDDEN grows (a name with "secret" in it neither).
-DENIED_PARTS = {".ssh", ".gnupg", ".password-store", ".aws", ".kube", ".docker"}
-DENIED_ROOTS = (Path("/proc"), Path("/sys"), Path("/dev"), Path("/run"))
 #: At most this many chips added to one reply.
 MAX_PER_MESSAGE = 8
 
@@ -77,133 +69,21 @@ _TICKED = re.compile(r"`((?:file://)?(?:~/|/)[^`\n]*?\.(?:" + _EXT_ALT + r"))`",
 _LINE = re.compile(r"^Shared file: (\S.*?)\s*$")
 
 
-def max_bytes() -> int:
-    def mb(name: str, default: int) -> int:
-        try:
-            return max(1, int(os.environ.get(name) or default))
-        except ValueError:
-            return default
-    return min(mb("MEDIA_SHARED_LINK_MAX_MB", 100), mb("MEDIA_UPLOAD_MAX_MB", 512)) << 20
-
-
-def _denied_parts(p: Path) -> bool:
-    for part in p.parts[1:]:
-        low = part.lower()
-        if "secret" in low or low in DENIED_PARTS:
-            return True
-        if part.startswith(".") and part not in ALLOWED_HIDDEN:
-            return True
-    return False
-
-
-def eligible(raw: str, any_kind: bool = False) -> Path | None:
-    """The real file `raw` names when it may be shown, else None.
-    `any_kind`: a `Shared file:` line, which shares on purpose, so any
-    extension; a bare path must be one of `EXTS`."""
-    raw = raw.strip()
-    if raw.startswith("file://"):
-        raw = raw[len("file://"):]
-    if not raw or "\x00" in raw:
-        return None
-    p = Path(os.path.expanduser(raw))
-    if not p.is_absolute():
-        return None
-    if not p.exists() and "%" in raw:
-        p = Path(os.path.expanduser(unquote(raw)))
-    if not any_kind and p.suffix.lower().lstrip(".") not in EXTS:
-        return None
-    try:
-        real = p.resolve(strict=True)
-        st = os.stat(real)
-    except (OSError, RuntimeError, ValueError):
-        return None
-    if _denied_parts(p) or _denied_parts(real):
-        return None
-    if any(real.is_relative_to(d) for d in DENIED_ROOTS):
-        return None
-    if not stat.S_ISREG(st.st_mode) or st.st_size <= 0 or st.st_size > max_bytes():
-        return None
-    if not os.access(real, os.R_OK):
-        return None
-    return real
-
-
-# ---- the copies, remembered ----------------------------------------------
-
-_LOCK = threading.Lock()
-_cache: dict[str, str] | None = None
-CACHE_MAX = 2000
-
-
-def _cache_path() -> Path:
-    from agent_media_core import _paths
-
-    return _paths.state_dir() / "shared-links.json"
-
-
-def _load() -> dict[str, str]:
-    global _cache
-    if _cache is None:
-        try:
-            got = json.loads(_cache_path().read_text())
-            _cache = got if isinstance(got, dict) else {}
-        except (OSError, ValueError):
-            _cache = {}
-    return _cache
-
-
-def _save(cache: dict[str, str]) -> None:
-    path = _cache_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if len(cache) > CACHE_MAX:
-            for k in list(cache)[: len(cache) - CACHE_MAX]:
-                del cache[k]
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(cache))
-        os.replace(tmp, path)
-    except OSError as e:
-        log.warning("shared links: could not save %s: %s", path, e)
-
+# ---- the copies, remembered (agent_media_core.shared_files) ---------------
 
 def shared_copy(real: Path) -> Path | None:
     """Where the app can fetch `real` (an `eligible` file): itself under the
     upload root, else its copy there, made once per version of the file."""
     from agent_media_core import shared_files
 
-    if shared_files.inside(real):
-        return real
-    try:
-        st = real.stat()
-    except OSError:
-        return None
-    key = f"{real}|{st.st_mtime_ns}|{st.st_size}"
-    with _LOCK:
-        cache = _load()
-        done = cache.get(key)
-        if done:
-            d = Path(done)
-            try:
-                if d.is_file() and d.stat().st_size == st.st_size and shared_files.inside(d):
-                    return d
-            except OSError:
-                pass
-        try:
-            dest = shared_files.share(real)
-        except OSError as e:
-            log.warning("shared links: could not copy %s: %s", real, e)
-            return None
-        cache.pop(key, None)
-        cache[key] = str(dest)
-        _save(cache)
-        return dest
+    return shared_files.copy_once(real)
 
 
 def reset_cache() -> None:
     """Forget the copies read so far (tests)."""
-    global _cache
-    with _LOCK:
-        _cache = None
+    from agent_media_core import shared_files
+
+    shared_files.reset_cache()
 
 
 # ---- the replies ----------------------------------------------------------
@@ -237,6 +117,9 @@ def link_text(text: str) -> str:
         if not shared_files.inside(p):
             real = eligible(path, any_kind=True)
             dest = shared_copy(real) if real else None
+            if dest is None and not p.exists():
+                # Gone since it was copied (a temp folder removed): its copy.
+                dest = shared_files.last_copy(path)
             if dest is None:
                 shared.add(path)
                 continue

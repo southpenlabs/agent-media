@@ -181,3 +181,18 @@ def test_a_copy_that_cannot_be_made_leaves_the_words(tmp_path, root, monkeypatch
 
     monkeypatch.setattr(shutil, "copy2", boom)
     assert file_links.link_text(f"see {shot}") == f"see {shot}"
+
+
+def test_a_shared_file_line_whose_file_is_gone_points_at_its_earlier_copy(tmp_path, root):
+    # David, 8 Nov 2026: a worktree removed after its screenshot was shared.
+    shot = _file(tmp_path / "wt" / "shot.png")
+    text = f"Done.\n\nShared file: {shot}"
+    first = _lines(file_links.link_text(text))
+    shot.unlink()
+    file_links.reset_cache()
+    assert _lines(file_links.link_text(text)) == first
+
+
+def test_a_gone_file_never_copied_keeps_its_line(tmp_path, root):
+    text = f"Shared file: {tmp_path / 'never.png'}"
+    assert file_links.link_text(text) == text

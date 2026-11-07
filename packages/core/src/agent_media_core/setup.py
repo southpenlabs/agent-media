@@ -1591,6 +1591,31 @@ def _row_statusline(args, *, check_only: bool):
     return "installed", str(path)
 
 
+#: A reply's shared files kept as the turn ends (intake/shared_check.py): a
+#: Stop hook, not async (only a hook that holds the stop can send the agent
+#: back to re-share a file that is gone). Python starts only when the reply
+#: has a `Shared file:` line; otherwise the shell reads the payload, nothing more.
+SHARED_CHECK_COMMAND = "media-hook-shared-check"
+
+
+def shared_check_command() -> str:
+    return ('p=$(cat); case "$p" in *"Shared file: "*) printf %s "$p" | '
+            f'{hook_command(SHARED_CHECK_COMMAND)} ;; esac; true')
+
+
+def _row_shared(args, *, check_only: bool):
+    """The shared-file check: a reply's files copied where the app keeps them."""
+    path = _settings_path(args)
+    if check_only:
+        return ("ok" if _hook_installed(path, SHARED_CHECK_COMMAND)
+                else "missing"), str(path)
+    merged, changed = _merge_hook_entry(
+        _load_json(path), "Stop", shared_check_command(), SHARED_CHECK_COMMAND, 10, False)
+    if changed:
+        _write_settings(path, merged, dry_run=args.dry_run)
+    return ("installed" if changed else "ok"), str(path)
+
+
 #: The restarts an agent may run without a prompt (David, 18 Oct 2026; see
 #: AGENTS.md and restart_services.py). Exact commands, not prefixes: a
 #: `media restart-services:*` rule would also allow `--force`, which skips
@@ -2025,6 +2050,8 @@ PROFILE_ROWS = (
      "core", _row_heard),
     ("context", "how full the context is, told to the session near the limit",
      "core", _row_context),
+    ("shared", "a reply's shared files kept, and a gone one sent back to the agent",
+     "core", _row_shared),
     ("statusline", "the status line: context used of the model's window", "core",
      _row_statusline),
     ("restart", "the safe delayed service restarts allowed without a prompt",
