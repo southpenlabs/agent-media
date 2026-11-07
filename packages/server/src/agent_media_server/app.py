@@ -4070,10 +4070,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = stt_settings.stt(_bearer(h), _read_json(h) or {})
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/music-bed/song":
-        # Like or dislike the favourite a long reply sang out.
+        # Like, dislike or keep the favourite a long reply sang out, or its
+        # start reported (music_sung).
         body = _read_json(h) or {}
         ok, detail = pins.speech_music_bed_song(_bearer(h), key=body.get("key"),
-                                                verdict=body.get("verdict"))
+                                                verdict=body.get("verdict"),
+                                                event=body.get("event"),
+                                                title=body.get("title"),
+                                                artist=body.get("artist"),
+                                                video_id=body.get("video_id"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # Settings' Voice: this phone's or the server's.

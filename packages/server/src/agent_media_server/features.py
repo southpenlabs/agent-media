@@ -37,6 +37,10 @@ never a network call, so the app can ask on every start.
   up_next   held replies opened (`?after=1`) while another is heard wait on
             Up next (up_next.py, 8 Nov 2026): /speech/now `up_next`, POST
             /speech/up-next; always true here
+  music_sung  the songs sung out after long replies are kept (music_sung.py,
+            8 Nov 2026): POST /speech/music-bed/song takes `event: started`
+            and `verdict: kept`, and GET /music/recent has `list=sung`
+            ("Sung out"); always true here
   room_delegate  a chat with people can be handed to an agent (room_delegate.py,
             §6.53, 8 Nov 2026): /room/delegate, `delegate` on a room's log
             and /targets row, agent chips; true where there are agent
@@ -139,7 +143,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "music_sung": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 

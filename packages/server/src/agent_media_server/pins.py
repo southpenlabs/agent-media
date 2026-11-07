@@ -11,6 +11,7 @@ Stored in `<state_dir>/pinned.json` as `{"<session>": <pinned at, epoch>}`
 
 from __future__ import annotations
 
+import sys
 import time
 
 from . import auth, sessions
@@ -316,24 +317,50 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
     return True, music_bed.status()
 
 
-def speech_music_bed_song(bearer: str, key=None, verdict=None) -> tuple[bool, dict]:
+def speech_music_bed_song(bearer: str, key=None, verdict=None, event=None,
+                          title=None, artist=None, video_id=None) -> tuple[bool, dict]:
     """`POST /speech/music-bed/song {"key", "verdict"}`: his word on a
     favourite sung out after a long reply (David, 31 Oct 2026: "The new
     singing it out feature is awesome!"). `like` records a like, so it ranks
     higher at the next gather; `dislike` drops it from the favourites for
     good, its files with it (music_bed_favourites.verdict). 400 for an
-    unknown key or verdict."""
-    from agent_media_core import music_bed_favourites as fav
+    unknown key or verdict.
 
-    if verdict not in fav.VERDICTS:
-        return False, {"error": "verdict must be like or dislike", "status": 400}
+    Since 8 Nov 2026 (David: "add it to the music history when you engage"
+    — "maybe you can have its own recently played"; music_sung): `kept` is
+    Keep playing, told by the app; it and `like` (and Start radio, POST
+    /music/radio) put the song in the music history once, with its thread.
+    `{"key", "event": "started"}` is the app's report that the song began
+    singing out, for the Sung out list. `title`, `artist` and `video_id`
+    may come with either, for a key the favourites no longer know."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_sung
+
+    if event is not None and event != "started":
+        return False, {"error": "event must be started", "status": 400}
+    if event is None and verdict not in fav.VERDICTS + ("kept",):
+        return False, {"error": "verdict must be like, dislike or kept", "status": 400}
     if not isinstance(key, str) or not key:
         return False, {"error": "key must be a favourite's key", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    said = {k: v for k, v in (("title", title), ("artist", artist), ("video_id", video_id))
+            if isinstance(v, str) and v}
     try:
-        return True, fav.verdict(key, verdict)
+        if event == "started":
+            e = music_sung.started(key, **said)
+            return True, {"key": key, "event": event, "session": e.get("session")}
+        if verdict == "kept":
+            music_sung.engaged(key, "kept", **said)
+            return True, {"key": key, "verdict": verdict}
+        out = fav.verdict(key, verdict)
+        if verdict == "like":
+            try:
+                music_sung.engaged(key, "like", **said)
+            except Exception as e:  # noqa: BLE001 — the like is what was asked
+                print(f"pins: sung-out like not noted: {e}", file=sys.stderr)
+        return True, out
     except ValueError as e:
         return False, {"error": str(e), "status": 400}
     except OSError as e:

@@ -56,3 +56,45 @@ def test_needs_a_credential(server, favourites):
     res, _ = call(server, "POST", "/speech/music-bed/song", {"key": "k1", "verdict": "like"})
     assert res.status in (401, 403)
     assert "k1" not in favourites.excluded()
+
+
+# --- the songs sung out, kept (music_sung; 8 Nov 2026) --------------------------
+
+def _reply_with(vid):
+    from agent_media_core.state import StateStore
+
+    StateStore().add_history(sink="speech", uri="/r.mp3", started_at=1.0, text="long",
+                             extras={"source_session": "thread-a",
+                                     "bed_song": {"source": "favourites", "video_id": vid}})
+
+
+def test_a_start_is_listed_in_sung_out_and_keep_playing_in_the_history(server, signed_in, favourites):
+    _reply_with("66A_3uwuZ_I")
+    res, obj = call(server, "POST", "/speech/music-bed/song", {"key": "k1", "event": "started"}, AUTH)
+    assert res.status == 200 and obj["session"] == "thread-a"
+    res, obj = call(server, "GET", "/music/recent?list=sung", None, AUTH)
+    assert res.status == 200 and "sung" in obj["lists"]
+    assert [(i["title"], i["session"], i["engaged"]) for i in obj["items"]] == [
+        ("Angel — Massive Attack", "thread-a", [])]
+    _, obj = call(server, "GET", "/music/recent", None, AUTH)
+    assert obj["items"] == []
+    res, obj = call(server, "POST", "/speech/music-bed/song", {"key": "k1", "verdict": "kept"}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "key": "k1", "verdict": "kept"}
+    call(server, "POST", "/speech/music-bed/song", {"key": "k1", "verdict": "like"}, AUTH)
+    _, obj = call(server, "GET", "/music/recent", None, AUTH)
+    assert [(i["uri"][-11:], i["session"]) for i in obj["items"]] == [("66A_3uwuZ_I", "thread-a")]
+    _, obj = call(server, "GET", "/music/recent?list=sung", None, AUTH)
+    assert obj["items"][0]["engaged"] == ["kept", "like"]
+
+
+def test_a_dislike_stays_out_of_the_history(server, signed_in, favourites):
+    call(server, "POST", "/speech/music-bed/song", {"key": "k1", "event": "started"}, AUTH)
+    call(server, "POST", "/speech/music-bed/song", {"key": "k1", "verdict": "dislike"}, AUTH)
+    _, obj = call(server, "GET", "/music/recent", None, AUTH)
+    assert obj["items"] == []
+
+
+@pytest.mark.parametrize("body", [{"key": "k1", "event": "ended"}, {"event": "started"}])
+def test_an_unknown_event_is_400(server, signed_in, favourites, body):
+    res, obj = call(server, "POST", "/speech/music-bed/song", body, AUTH)
+    assert res.status == 400 and obj["ok"] is False

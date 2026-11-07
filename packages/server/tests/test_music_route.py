@@ -214,7 +214,7 @@ def test_recent_is_the_played_list(server, signed_in, audio_host, monkeypatch):
     monkeypatch.setattr(music_recent, "_liked", lambda store, limit: items[:1])
     res, obj = call(server, "GET", "/music/recent", headers=AUTH)
     assert res.status == 200 and obj == {"ok": True, "kind": "music", "list": "recent",
-                                         "lists": ["recent", "liked", "most", "stations", "albums"], "items": items}
+                                         "lists": ["recent", "liked", "most", "stations", "albums", "sung"], "items": items}
     res, obj = call(server, "GET", "/music/recent?kind=book", headers=AUTH)
     assert res.status == 200 and obj["kind"] == "book" and obj["items"] == []
     assert obj["lists"] == ["recent", "progress", "finished", "all", "most"]
@@ -385,6 +385,11 @@ def test_radio_from_a_sung_out_song(server, signed_in, audio_host, player, youtu
     # The same through POST /music.
     res, obj = call(server, "POST", "/music", {"action": "radio", "from_song": "k1"}, AUTH)
     assert res.status == 200, obj
+    # Taken up: in the music history once, and in Sung out (music_sung).
+    res, obj = call(server, "GET", "/music/recent", None, AUTH)
+    assert [i["uri"][-11:] for i in obj["items"]] == ["66A_3uwuZ_I"]
+    res, obj = call(server, "GET", "/music/recent?list=sung", None, AUTH)
+    assert [i["engaged"] for i in obj["items"]] == [["radio"]]
 
 
 def test_radio_from_a_song_without_an_original(server, signed_in, audio_host, player, youtube):

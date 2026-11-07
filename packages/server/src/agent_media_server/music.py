@@ -699,6 +699,15 @@ def _radio_from_song(body: dict) -> tuple[bool, dict]:
     vid = ((song or {}).get("original_id") or (song or {}).get("id") or given)
     if not vid:
         return False, {"error": "this song has no YouTube original", "status": 400}
+    # Taken up: the phone already plays it in its music player, so it is in
+    # the music history with its thread whether or not a station follows
+    # (music_sung; David, 8 Nov 2026).
+    try:
+        from agent_media_core import music_sung
+
+        music_sung.engaged(key, "radio", video_id=vid)
+    except Exception as e:  # noqa: BLE001 — the station is what was asked
+        print(f"music: sung-out radio not noted: {e}", file=sys.stderr)
     if not radio.available():
         return False, {"error": radio.OFF_HERE, "status": 409, **_answer()}
     try:
