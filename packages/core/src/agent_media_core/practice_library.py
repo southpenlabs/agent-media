@@ -299,13 +299,16 @@ _BY = re.compile(r"\s+[—–]\s+([^—–]{2,60})$")
 #: What kind of practice a title says it is, first match wins (Insight Timer's
 #: "Practice"; "Style" here, the app's tab being Practice).
 STYLES = (
-    ("Yoga Nidra", r"yoga\s*nidra|\bnidra\b"),
+    ("Yoga Nidra", r"yoga\s*nidr[aä]|\bnidr[aä]\b"),
     ("Body scan", r"body\s*scan"),
     ("Breathwork", r"breath|pranayama"),
     ("Journey", r"journey|astral|shaman|lucid|out of body|travel|visuali[sz]"),
     ("Sound & mantra", r"\bsound\b|\bhz\b|\bbowls?\b|chant|mantra|asatoma|\bom\b"),
     ("Affirmations", r"affirmation|manifest|abundance|dream life|confiden"),
-    ("Movement", r"\byoga\b(?!\s*nidra)|stretch|qigong|tai chi|vinyasa|flow\b"),
+    # Music made for a class, or a talk on yoga's limbs, is not one.
+    ("Yoga", r"^(?!music\b)(?!.*limb of yoga).*(?:\byoga\b(?!\s*nidr)|vinyasa|\byin\b|hatha|ashtanga|asana\b|sun salutation)"),
+    ("Stretching", r"stretch|mobility|flexib|limber|loosen|pilates"),
+    ("Movement", r"qigong|tai chi|\bdance|walking meditation|mindful walk|shaking|\bmovement"),
     ("Energy & chakra", r"chakra|reiki|cleans|cutting cords|energy wash|wash meditation"),
     ("Talk", r"explained|wisdom|karma|lecture|\btalk\b|\[part \d"),
     ("Music", r"music|piano|prayer|devi\b|lokah|instrumental"),
@@ -339,7 +342,10 @@ def _first(rules: tuple, title: str) -> Optional[str]:
 
 
 def style_of(title: str) -> str:
-    return _first(STYLES, title) or STYLE_DEFAULT
+    """The style the title names, read without the " — teacher" after it
+    (a teacher called "Yoga Wild" or "Jaw Yoga by …" does not make a
+    savasana or a jaw meditation a yoga class)."""
+    return _first(STYLES, _BY.sub("", title or "")) or STYLE_DEFAULT
 
 
 def benefit_of(title: str) -> Optional[str]:

@@ -8380,7 +8380,10 @@ names the first time they are read.
   name after the title's " — ", else a podcast's `show`; null for the
   agent's own), `style` (what kind of practice the title says: Yoga
   Nidra, Body scan, Breathwork, Journey, Sound & mantra, Affirmations,
-  Movement, Energy & chakra, Talk, Music, else Guided), `benefit` (what it
+  Yoga, Stretching, Movement, Energy & chakra, Talk, Music, else Guided;
+  read from the title without its " — teacher". Yoga and Stretching were
+  one Movement until 7 Nov 2026; David: "I'd like to add a stretching
+  section to the practise tab ... also yoga"), `benefit` (what it
   is for: Sleep, Morning & energy, Healing, Heart & love, Confidence &
   strength, Intuition & spirit, Calm & grounding, or null), `duration_s`
   (a feed's duration, else looked up in the background — a YouTube link's

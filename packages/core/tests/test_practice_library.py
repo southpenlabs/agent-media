@@ -121,6 +121,19 @@ def test_who_what_and_for_what():
     assert L.style_of("Heart Opening Yoga Nidra 528 Hz") == "Yoga Nidra", "the first rule wins"
 
 
+def test_yoga_and_stretching_are_their_own_styles():
+    assert L.style_of("Yin Yoga For Tight Hips — Ali Temple") == "Yoga"
+    assert L.style_of("Toppling Tree - Slow and Strong Vinyasa Practice") == "Yoga"
+    assert L.style_of("Full Body Stretch & Relax — LuChin Mischke") == "Stretching"
+    assert L.style_of("Yoga Nidrä For Pelvic Health") == "Yoga Nidra"
+    assert L.style_of("Qigong for Tinnitus Relief") == "Movement"
+    assert L.style_of("Music For Vinyasa or Power Flow") == "Music"
+    assert L.style_of("Samadhi - 8th Limb Of Yoga (8/8)") == "Guided"
+    assert L.style_of("Embracing Flow — Nicole Bayliss") == "Guided", "flow alone is not a class"
+    assert L.style_of("Jaw Harmony Meditation — Jaw Yoga by Kieferfreund") == "Guided", \
+        "the teacher's name does not set the style"
+
+
 def test_a_feeds_duration_in_seconds():
     assert [L._seconds(x) for x in ("754", "12:34", "1:02:03", "", "soon", None)] == [754, 754, 3723, None, None, None]
 
