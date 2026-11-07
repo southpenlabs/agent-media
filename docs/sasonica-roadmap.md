@@ -2514,7 +2514,12 @@ ahead.
     prompt files on the server, chips on a message's hold, your own folder).
     `docs/proposals/2026-11-06-one-tap-answers.md` part 6.
     Built so far: the chips in the thread, people chats, the Inbox space
-    suggestion; the server's chips on waiting rows.
+    suggestion; the server's chips on waiting rows. Answer from anywhere
+    DONE (8 Nov 2026; agent-media `848944c2`, `3dfed1a0`, sasonica-app
+    `81190b34`, `d7be5b59`): two chips on a "New reply" beside Play and on a
+    person's message beside Hold 1 hour (the rooms frame's `answers`), Sent
+    with Undo; the light bubble card's chips and a simple question's
+    options; the mini player's slim line (/speech/now `answers`).
     **Actions built 8 Nov 2026**: `[[actions:]]` chips that open, listen,
     play, act in the app or run a registry task (`GET /actions/tasks`), a
     confirming one marked "…" with a bold border (§6.2.1).
