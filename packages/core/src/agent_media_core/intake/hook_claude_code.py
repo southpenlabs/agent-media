@@ -1151,6 +1151,14 @@ def _play_claimed(event: Event, state: StateStore) -> None:
     # the player app: one gateway call on its own thread, filed per session.
     followup_raw = event.metadata.pop("followup_raw", None)
     followup_replies = event.metadata.pop("followup_replies", None)
+    followup_actions = event.metadata.pop("followup_actions", None)
+    if followup_actions:
+        try:
+            from ._followup import save_actions
+            save_actions(event.metadata.get("session") or "", followup_actions,
+                         event.metadata.get("dedup_key") or "")
+        except Exception:  # noqa: BLE001 — a suggestion, never playback's problem
+            pass
     if followup_replies:
         try:
             from ._followup import save_followup
@@ -1453,7 +1461,8 @@ def _handle_stop(payload: dict) -> int:
     # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
     # (strip_markdown already took the marker out of the words), and the
     # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).
-    from ._text import extract_replies, extract_sound, extract_tune, quoted_passages
+    from ._text import (extract_actions, extract_replies, extract_sound, extract_tune,
+                        quoted_passages)
     raw, sound = extract_sound(raw)
     if sound:
         metadata["sound"] = sound
@@ -1464,6 +1473,11 @@ def _handle_stop(payload: dict) -> int:
     # `[[replies: A | B]]`: the agent's own one-tap answers, filed as the
     # reply's follow-up in place of the model's (_followup.py).
     raw, replies = extract_replies(raw)
+    # `[[actions: Label -> verb target | …]]`: chips that do something,
+    # filed beside the follow-up and checked by the server (reply_actions.py).
+    raw, actions = extract_actions(raw)
+    if actions:
+        metadata["followup_actions"] = actions
     quoted = quoted_passages(raw)
     if quoted:
         metadata["quoted"] = quoted

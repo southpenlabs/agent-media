@@ -8,7 +8,7 @@ sends only what changed:
     live        the follow-along clock of the message being spoken, or null
     working     the running turn's steps, or null
     approval    the dialog the session is stopped on, or null
-    suggestion  {"text"}
+    suggestion  {"text", "replies", "actions"}
     state       {"state": "working" | "waiting" | "approval" | "ended",
                  "session_live": bool, "live": bool (deprecated alias), "pane",
                  "background": {"agents", "commands"} | null — work still
@@ -370,7 +370,8 @@ class Watcher:
         self._live, self._live_read = live, time.time()
         now = {"working": env.get("working"), "approval": env.get("approval"),
                "suggestion": {"text": env.get("suggestion") or "",
-                              "replies": env.get("suggestions") or []},
+                              "replies": env.get("suggestions") or [],
+                              "actions": env.get("actions") or []},
                "state": st, "pending": {"pending": bool(env.get("pending"))},
                "recap": env.get("recap"), "context": env.get("context"),
                "agents": agent_counts(self.session, st["session_live"]),

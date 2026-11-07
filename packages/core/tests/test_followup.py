@@ -81,3 +81,16 @@ def test_a_file_from_before_the_chips_reads_as_one(tmp_path, monkeypatch):
     p.write_text('{"text": "old line", "key": "k0", "at": 1}')
     got = fu.load_followup("sess-1")
     assert got["replies"] == ["old line"] and got["source"] == "model"
+
+
+def test_the_agents_actions_are_filed_beside_the_follow_up(monkeypatch, tmp_path):
+    _state(monkeypatch, tmp_path)
+    acts = [{"label": "Listen", "verb": "listen", "target": "docs/x.md"}]
+    fu.save_actions("sess-1", acts, "k3")
+    # the model's follow-up written after it leaves the actions alone
+    fu.save_followup("sess-1", "next", "k3")
+    got = fu.load_actions("sess-1")
+    assert (got["actions"], got["key"]) == (acts, "k3")
+    assert fu.load_actions("other") is None
+    fu.save_actions("", acts, "k")
+    assert fu.load_actions("") is None

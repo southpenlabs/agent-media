@@ -2515,6 +2515,9 @@ ahead.
     `docs/proposals/2026-11-06-one-tap-answers.md` part 6.
     Built so far: the chips in the thread, people chats, the Inbox space
     suggestion; the server's chips on waiting rows.
+    **Actions built 8 Nov 2026**: `[[actions:]]` chips that open, listen,
+    play, act in the app or run a registry task (`GET /actions/tasks`), a
+    confirming one marked "…" with a bold border (§6.2.1).
 
 ## Loose ends
 

@@ -208,7 +208,8 @@ def test_state_and_suggestion_events(server, signed_in, convo, monkeypatch):
     monkeypatch.setattr(sessions, "_followup", lambda s: {"text": "Ship it?", "replies": ["Ship it?"],
                                                         "source": "model", "key": ""})
     assert st.next("suggestion") == {"text": "Ship it?",
-                                     "replies": [{"text": "Ship it?", "source": "model"}]}
+                                     "replies": [{"text": "Ship it?", "source": "model"}],
+                                     "actions": []}
     live.pop(SID)
     assert st.next("state") == {"state": "ended", "session_live": False, "live": False,
                                 "pane": None, "background": None}
