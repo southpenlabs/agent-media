@@ -196,6 +196,30 @@ def with_suggestions(rows: list[dict]) -> list[dict]:
     return out
 
 
+def answers_for(session: str) -> dict:
+    """What the reply being read can be answered with from the app's mini
+    player (`/speech/now` `answers`; David, 8 Nov 2026: answer from
+    anywhere): `{"suggestions": [...]}` while the session waits, its
+    `approval` (brief) while it asks; `{}` otherwise. The sweep's cached
+    rows, one session's follow-up file or dialog: cheap enough for a poll,
+    and the app asks no other thread's log for it."""
+    if not session:
+        return {}
+    try:
+        raw = [r for r in sessions.cached_states()[0] if str(r.get("session") or "") == session]
+        rows = with_suggestions(with_approvals(rows_of(raw), raw))
+    except Exception:  # noqa: BLE001 — the bar still goes out
+        log.exception("session events: answers of %s", session[:8])
+        return {}
+    out: dict = {}
+    for r in rows:
+        if r.get("suggestions"):
+            out["suggestions"] = r["suggestions"]
+        if r.get("approval"):
+            out["approval"] = r["approval"]
+    return out
+
+
 def reminders_due() -> list[dict]:
     """The `reminders` frame's rows: each due reminder with its thread's
     title, the soonest first."""

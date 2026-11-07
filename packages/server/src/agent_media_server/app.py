@@ -2380,6 +2380,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The app's speech bar: /speech's live bit, named — the session's
         # title and library item — and gated by the caller's ABS bearer.
         ok, detail = speech.speech_now(_bearer(h), speech.current_state())
+        if ok and detail.get("live") and detail.get("session"):
+            # The reply's one-tap answers, for the mini player (session_events.answers_for).
+            from . import session_events
+
+            detail["answers"] = session_events.answers_for(str(detail["session"]))
         # Polled every few seconds, so not every request: a refusal, and
         # the first answer each device gets, are what tell "the bar is
         # asking and being turned away" from "the bar never asked".

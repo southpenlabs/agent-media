@@ -3120,6 +3120,14 @@ The speech bar.
   reply or a replay is playing) is not `live`, does not change `session`,
   `sentence` or `pos`, and is listed in `queued` instead.
 - `live` = speaking or paused.
+- `answers` (8 Nov 2026, answer from anywhere; only while `live` with a
+  `session`): what that thread can be answered with from the app's mini
+  player — `{"suggestions": [{text, source}]}` while it waits (§6.2.1, the
+  follow-up file only), `{"approval": {…}}` while it asks (§6.13's trimmed
+  approval: one tap answers it with `POST /session/answer` unless
+  `multiSelect`, `partial` or `several`), `{}` otherwise. Read from the
+  `/sessions/state` sweep's cached rows (`session_events.answers_for`), so
+  the bar asks no other thread's log for it.
 - `replay` is true while what is heard is a recorded reply played again (the
   bar's `replay`/`prev`, `replay-id` from a bubble, the desk popup). Its
   `session`, `title` and `sentence` are the replayed reply's. False when not

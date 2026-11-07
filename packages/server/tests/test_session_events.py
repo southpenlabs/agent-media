@@ -140,6 +140,25 @@ def test_a_waiting_row_carries_its_chips_and_a_working_one_does_not(monkeypatch)
     assert asked == [("a", ""), ("c", "")]
 
 
+def test_answers_for_one_session_its_chips_or_its_question(monkeypatch):
+    """/speech/now's `answers` (the mini player, 8 Nov 2026): the reply
+    being read's chips while it waits, its question while it asks."""
+    from agent_media_server import sessions
+    chips = [{"text": "Commit it", "source": "agent"}]
+    raw = [{"session": "a", "state": "waiting"}, {"session": "q", "state": "approval"},
+           {"session": "w", "state": "working"}]
+    monkeypatch.setattr(sessions, "cached_states", lambda: (raw, {}))
+    monkeypatch.setattr(sessions, "suggestions_for", lambda s, p, last_key=None: chips if s == "a" else [])
+    ap = {"key": "k1", "kind": "question", "question": "Which?", "options": [{"n": 1, "label": "A"}]}
+    monkeypatch.setattr(session_events, "with_approvals",
+                        lambda rows, raw: [{**r, "approval": session_events.brief(ap)} if r["state"] == "approval" else r for r in rows])
+    assert session_events.answers_for("a") == {"suggestions": chips}
+    assert session_events.answers_for("q")["approval"]["options"] == [{"n": 1, "label": "A"}]
+    assert session_events.answers_for("w") == {} and session_events.answers_for("") == {}
+    monkeypatch.setattr(sessions, "cached_states", lambda: 1 / 0)
+    assert session_events.answers_for("a") == {}
+
+
 def test_nothing_changed_sends_only_pings(server, screen):
     st = Stream(server, "/sessions/events?ping=0.2", AUTH)
     try:
