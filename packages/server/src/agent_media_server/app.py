@@ -470,6 +470,11 @@ CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
 MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
 
+# A chat with people handed to an agent (room_delegate.py, §6.53).
+ROOM_DELEGATE_PATHS = frozenset({"/room/delegate", "/room/delegate/end",
+                                 "/room/delegate/reply"})
+CORS_PATHS = CORS_PATHS | ROOM_DELEGATE_PATHS
+
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
@@ -816,6 +821,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return spotify_auth.handle(h, method, path, _bearer(h), _json)
     if path in AUDIO_PATHS and method in ("GET", "POST"):
         return _audio(h, method, path)
+    if path in ROOM_DELEGATE_PATHS and method in ("GET", "POST"):
+        return _room_delegate(h, method, path)
     if path in MUSIC_PATHS and method in ("GET", "POST"):
         return _music(h, method, path)
     if path == "/media/people" and method == "GET":
@@ -975,6 +982,39 @@ def _signed_track(h: BaseHTTPRequestHandler, name: str) -> bool:
         return True
     f, ctype = found
     _send_file(h, f, f.stat().st_size, ctype)
+    return True
+
+
+def _room_delegate(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
+    """A chat with people handed to an agent (server-contract.md §6.53,
+    room_delegate.py), gated: `GET /room/delegate?session=` the hand-over
+    and the agents it could go to; `POST /room/delegate {session, agent,
+    mode, hours}` hands it; `POST /room/delegate/end {session}` takes it
+    back; `POST /room/delegate/reply {session, text}` is the agent's answer
+    (`media room reply`)."""
+    from . import room_delegate
+
+    user, err = auth.gate(_bearer(h))
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return True
+    if method == "GET":
+        if path != "/room/delegate":
+            return False
+        session = (parse_qs(h.path.partition("?")[2]).get("session") or [""])[0]
+        ok, detail = room_delegate.status(session)
+    else:
+        body = _read_json(h) or {}
+        body = body if isinstance(body, dict) else {}
+        session = str(body.get("session") or "")
+        if path == "/room/delegate":
+            ok, detail = room_delegate.hand(session, str(body.get("agent") or ""),
+                                            str(body.get("mode") or "draft"), body.get("hours"))
+        elif path == "/room/delegate/end":
+            ok, detail = room_delegate.take_back(session)
+        else:
+            ok, detail = room_delegate.reply(session, str(body.get("text") or ""))
+    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 
 
@@ -3315,7 +3355,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             keep_reading=bool(body.get("keep_reading")),
             voice=bool(body.get("voice")),
             nudge=body.get("nudge") is True,
-            reply_to=str(body.get("reply_to") or ""))
+            reply_to=str(body.get("reply_to") or ""),
+            from_chip=str(body.get("from_chip") or ""))
         status = detail.pop("status", 400)
         if not ok:
             # Which thread too: a refusal that names only the reason

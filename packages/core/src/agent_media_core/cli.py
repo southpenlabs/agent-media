@@ -9294,6 +9294,37 @@ def cmd_room_log(a) -> int:
     return 0
 
 
+def cmd_room(a) -> int:
+    """`media room reply <thread> <text>`: an agent's answer in a chat with
+    people handed to it (agent_media_server.room_delegate, server-contract
+    §6.53), through the server with this host's own token. The server
+    sends it or keeps it as a one-tap draft, as the hand-over allows."""
+    from .phone_ask import _call
+
+    text = " ".join(a.text).strip()
+    if not text or text == "-":
+        text = sys.stdin.read().strip()
+    if not text:
+        print("media room reply: nothing to say", file=sys.stderr)
+        return 2
+    code, obj = _call("POST", "/room/delegate/reply", {"session": a.session, "text": text},
+                      timeout=30.0)
+    if code != 200 or not obj.get("ok"):
+        print(f"media room reply: {obj.get('error') or f'HTTP {code}'}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(obj))
+    elif obj.get("sent"):
+        print("sent")
+    else:
+        n = len(obj.get("drafts") or [])
+        print(f"drafted ({n} suggestion{'s' if n != 1 else ''} on David's phone; "
+              f"nothing is sent until he taps one)")
+    if obj.get("why"):
+        print(obj["why"], file=sys.stderr)
+    return 0
+
+
 def cmd_session_seal(a) -> int:
     """Seal or unseal a thread (agent_media_server.seal)."""
     seal = _server_module("seal")
@@ -10575,6 +10606,16 @@ def _build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--before", default="", metavar="ID", help="only messages before this one")
     rl.add_argument("--limit", type=int, default=60, help="how many (default 60, at most 500)")
     rl.set_defaults(func=cmd_room_log)
+
+    room = sub.add_parser("room", help="a chat with people handed to you: reply <thread> "
+                                       "<text> (sent or drafted, as the hand-over allows)")
+    room_sub = room.add_subparsers(dest="room_cmd", required=True)
+    rr = room_sub.add_parser("reply", help="answer in a chat handed to you; the server "
+                                           "puts your name in front")
+    rr.add_argument("session", metavar="THREAD")
+    rr.add_argument("text", nargs="*", help="the words; '-' or nothing reads stdin")
+    rr.add_argument("--json", action="store_true")
+    rr.set_defaults(func=cmd_room)
 
     sc = sub.add_parser("selfcheck",
                         help="report this host's install health (key=value lines)")

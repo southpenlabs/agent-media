@@ -3,7 +3,8 @@
 David, 7 Nov 2026: "I'd like an easy way from Matrix messages to allow me
 to let Kit introduce herself to answer messages for me. probably other
 agents too." On the design below: "that sounds awesome!" (8 Nov 2026,
-thread e76c619a). Status: **decided, building**.
+thread e76c619a). Status: **decided; the server side built 8 Nov 2026**
+(server-contract.md §6.53, room_delegate.py; the app's sheet to come).
 
 ## What it is
 
@@ -18,7 +19,8 @@ it back.
 1. **Handing over.** `POST /room/delegate {session, agent, mode, hours}`
    (`session` the room's thread, `agent` an agent workspace id, `mode`
    `draft` (default) or `send`, `hours` optional, default 24, 0 = until
-   taken back). `DELETE /room/delegate {session}` takes it back. Kept in
+   taken back). `DELETE /room/delegate {session}` takes it back (built as `POST
+   /room/delegate/end {session}`: the server answers GET and POST only). Kept in
    `<state_dir>/room-delegates.json`: `{thread: {agent, session, mode,
    until, at, introduced}}`. The room's envelope and its `/targets` row
    carry `delegate: {agent, name, mode, until, session}` while it holds.

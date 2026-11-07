@@ -1061,7 +1061,7 @@ def room(thread: str) -> Room | None:
 def rows(flags: set | frozenset = frozenset()) -> list[dict]:
     """`/targets` rows for the allowed rooms (§6.1): never live, never rested
     or pinned; the last message is the preview line."""
-    from . import archive_wake, you_wrote
+    from . import archive_wake, room_delegate, you_wrote
 
     # A chat that waited out its quiet in the archive comes back now if what
     # came meanwhile is unread (archive_wake.py, §6.4).
@@ -1105,6 +1105,10 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
             if contact:
                 # The person the room is with (contacts.py): absent when none.
                 out[-1]["contact"] = contact
+            delegate = room_delegate.view_of(r.thread)
+            if delegate is not None:
+                # Handed to an agent (room_delegate.py, §6.53): absent when not.
+                out[-1]["delegate"] = delegate
     return out
 
 
@@ -1166,6 +1170,12 @@ def envelope(r: Room, *, limit: int, before: str = "", around: str = "",
            "suggestion": chips[0]["text"] if chips else "", "suggestions": chips,
            "recap": None, "context": None,
            "room": r.info()}
+    # Handed to an agent (room_delegate.py, §6.53): who, how, until when.
+    from . import room_delegate
+
+    delegate = room_delegate.view_of(r.thread)
+    if delegate is not None:
+        out["delegate"] = delegate
     if jump is not None:
         out["around"], out["newer"] = jump, jump["newer"]
     return out
@@ -1230,6 +1240,12 @@ def _on_event(room_id: str, ev: dict) -> None:
             from . import room_replies
 
             room_replies.prefetch(r)
+        # A room handed to an agent (room_delegate.py, §6.53): someone's new
+        # message goes to the agent's session; David's own, not in the
+        # agent's name, takes the chat back.
+        from . import room_delegate
+
+        room_delegate.on_event(r, ev, bridges)
 
 
 def _bridges(env=None) -> set[str]:

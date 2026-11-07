@@ -1378,6 +1378,11 @@ Type into the session behind a conversation, reviving it if it has ended.
 
 Request: `{"session": "<session>" | "item": "<item>", "text": "…", "quote"?: "…", "mode"?: "continue" | "branch", "refs"?: {"<title>": "<session>"}, "keep_reading"?: bool, "voice"?: bool, "nudge"?: bool}`
 
+`from_chip` (8 Nov 2026, §6.53): `"agent"` when the words are a tapped
+chip with `source: "agent"` in a room handed to an agent; the room is sent
+`<Name>: <text>` and the hand-over holds. Without it, a message into a
+handed room takes the room back.
+
 `voice` is the app's hands-free loop (David, 29 Sep 2026): the session is
 marked for 15 minutes (`agent_media_core.voice_mode`) and the prompt hook the
 words set off (`intake/heard.py`) adds a note asking for one to three short
@@ -4707,6 +4712,7 @@ local look, never a network call:
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
+| `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
@@ -8397,6 +8403,93 @@ on a message's `sender` (§6.1).
 
 Groups only: 409 for a chat with one person, an agent's chat, or no owner
 token; 400 for a bad session id or name; 502 when the homeserver refuses.
+
+### 6.53 A chat handed to an agent — gated (BUILT 8 Nov 2026)
+
+Code: `agent_media_server/room_delegate.py`, hooked into `matrix.envelope`,
+`matrix.rows`, `matrix._on_event`, `room_replies.chips`/`ready` and
+`send.reply`; `media room reply` in core's cli. Pinned by
+`packages/server/tests/test_room_delegate.py`. David, 7 Nov 2026: "let Kit
+introduce herself to answer messages for me. probably other agents too";
+8 Nov 2026 on the design, "that sounds awesome!" (thread e76c619a,
+docs/proposals/2026-11-08-hand-a-chat-to-an-agent.md). Offered where
+`/features` says `room_delegate` (§6.11a): Matrix rooms are read here and
+there is at least one agent workspace (§6.1 `agent_workspaces`).
+
+A room (§6.25 rooms, `source: "matrix"`) is handed to one agent workspace
+for a time. The server starts one headless session in the agent's folder,
+as its persona, told who it answers for, the room's name and last 20
+messages, its mode, and how to answer; each new message from the other side
+is put into that session (sessiond's `send`, queued behind a turn, never
+over a card), signed `[From <room name>]`. The agent answers only with
+`media room reply`; the **server** enforces the mode.
+
+- `GET /room/delegate?session=<thread>` → `{"ok", "session", "delegate":
+  {…} | null, "agents": [{"id", "name", "role", "send"}]}`: the hand-over
+  holding, and the agents the sheet lists. `role` is the agent's CLAUDE.md
+  heading after its name ("# Kit: operations" → "operations"); `send`
+  whether it may be handed the chat in send mode (below). `session` may be
+  left out for the list alone.
+- `POST /room/delegate {"session", "agent", "mode"?, "hours"?}` →
+  `{"ok", "session", "delegate", "link"?, "asked"?, "why"?}`. `agent` an
+  agent workspace id; `mode` `draft` (default) or `send`; `hours` default
+  24, `0` until taken back, at most 720. `link` the agent session's thread
+  link. Handed again to the same agent, the mode and time change and its
+  session stays (and is told); to another agent, the first is ended and
+  told. 400 bad session, mode or hours; 404 no such agent; 409 not a room;
+  503 the agent's session could not be started (sessiond down, a restart
+  pending, a usage limit), `code` sessiond's.
+- `POST /room/delegate/end {"session"}` → `{"ok", "session", "ended",
+  "delegate": null}`: taken back; `ended` false when none held.
+- `POST /room/delegate/reply {"session", "text"}` → in send mode `{"ok",
+  "session", "sent": true, "mode": "send", "event_id"}`; in draft mode
+  `{"ok", "session", "sent": false, "mode": "draft", "drafts": [text, …],
+  "why"?}`. The agent's own call (`media room reply`), with the host's
+  token. 409 `code: "not_handed"` when the room is not handed or the
+  hand-over has ended (`error` says which); 400 empty or over 2000
+  characters. A leading `<Name>: ` in `text` is dropped, never doubled.
+
+**`delegate`** — on the room's `/conversation/log` envelope and its
+`/targets` row while a hand-over holds, absent otherwise: `{"agent",
+"name", "mode", "until", "session", "at", "introduced"}`. `until` epoch
+seconds or null (until taken back); `session` the agent's headless session
+id (the app's "Open Kit's thread"); `introduced` whether a message in its
+name has gone out.
+
+**Modes.** `draft`: each answer becomes a one-tap chip for the room's
+newest message (whoever wrote it, so the introduction can follow David's
+own message), at most three, the newest kept, in `suggestions` as
+`{"text", "source": "agent", "agent": "<Name>", "agent_id": "<id>"}`
+(§6.2.1), in place of the private model's chips for that message; the
+model's still come while the agent has drafted none. They go to the phone's
+notice too (§6.13 `answers`). A newer message drops them. Nothing is sent
+until David taps one. `send`: sent at once as the owner, only while the
+agent's `LIMITS.md` (in its folder) has a table row whose action names chat
+or room replies with a state starting `on`, and does not say `Mode:
+shadow`; otherwise it is a draft, said in `why` (asked for at hand-over,
+`mode` comes back `draft` with `asked: "send"`; at reply, checked again).
+
+**The name.** Every message carrying the agent's words goes out as
+`<Name>: <words>`: a bridged chat has only David's account in it.
+
+**The chip-tap marker.** The app sends a tapped agent chip as an ordinary
+reply (§6.3 `POST /reply`) with `"from_chip": "agent"`, from the room, the
+bubble card, the notification's actions or anywhere else a chip with
+`source: "agent"` is offered. The server sends it as `<Name>: <text>` and
+the hand-over holds. **Taking back:** any other message David sends in a
+handed room (`/reply` without the marker, a file, a model chip) ends it, as
+does his own message from another device seen on the sync (one not starting
+`<Name>:`), `until` passing, or `/room/delegate/end`. The agent's session
+is told the hand-over has ended and why, and is left to finish; nothing
+more it replies is accepted for that room.
+
+**Privacy.** The room's private-model rule (room_replies.py) is lifted for a
+handed room only, because David chose it: the agent reads the chat on its
+own harness and model. The app's sheet says so ("Kit will read this chat").
+
+Kept in `<state_dir>/room-delegates.json`, `{thread: {agent, name, path,
+session, mode, asked, until, at, introduced, drafts: {key, texts, at},
+ended_at?, ended_why?}}`; an ended row stays until the room is handed again.
 
 ### 6.42 Personal settings: place, Astro Tunes, music accounts — admins (built 30 Oct 2026)
 

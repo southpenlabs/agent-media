@@ -34,6 +34,10 @@ never a network call, so the app can ask on every start.
             follow frame's `stage`; always true here, as quick
   speech_recent  this server answers GET /speech/recent (speech.py, 8 Nov
             2026): the full player's Recent replies; always true here, as quick
+  room_delegate  a chat with people can be handed to an agent (room_delegate.py,
+            §6.53, 8 Nov 2026): /room/delegate, `delegate` on a room's log
+            and /targets row, agent chips; true where there are agent
+            workspaces and Matrix rooms are read (the sync loop runs)
   personal  this server answers /settings/personal (personal.py, 30 Oct
             2026): always true here, so an older server leaves it out
   app_update  this server answers GET /app/update and /app/update/apk
@@ -113,6 +117,14 @@ def _personas() -> bool:
     return personas.repo_dir().is_dir()
 
 
+def _room_delegate() -> bool:
+    from . import agent_workspaces, matrix
+
+    return matrix.sync() is not None and any(
+        r.is_dir() and any((d / "CLAUDE.md").is_file() for d in r.iterdir() if d.is_dir())
+        for r in agent_workspaces.roots() if r.is_dir())
+
+
 def _personal(name: str):
     def check() -> bool:
         from agent_media_core import personal_prefs
@@ -124,7 +136,7 @@ def _personal(name: str):
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube")}
 

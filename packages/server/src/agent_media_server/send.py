@@ -1095,7 +1095,8 @@ def _record_turn(session: str, text: str, pane: str = "") -> None:
 def reply(item: str, text: str, bearer: str, *, quote: str = "",
           mode: str = "continue", session: str = "",
           keep_reading: bool = False, voice: bool = False,
-          nudge: bool = False, reply_to: str = "") -> tuple[bool, dict]:
+          nudge: bool = False, reply_to: str = "",
+          from_chip: str = "") -> tuple[bool, dict]:
     """Put `text` into `session`, or into the session behind ABS item `item`.
 
     `session` is the v1 form (server-contract.md §10) and wins when both are
@@ -1126,6 +1127,10 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
     (replies.py, server-contract.md §6.31): a room sends a real reply, an
     agent session gets the quote as before, kept so that it is shown as
     `reply_to` when the thread is read.
+
+    `from_chip` is `"agent"` when the words are a tapped chip an agent
+    drafted in a room handed to it (room_delegate.py, §6.53): they go out
+    as `<Name>: …`. Anything else sent into a handed room takes it back.
     """
     if nudge:
         if mode == "branch":
@@ -1171,8 +1176,13 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
             if not got:
                 log.info("reply: read receipt for %s not sent: %s", session[:8],
                          detail.get("error"))
-            from . import room_send
+            from . import room_delegate, room_send
 
+            # A room handed to an agent (§6.53): a tapped agent chip goes out
+            # in the agent's name; David's own words take the chat back.
+            named = room_delegate.outgoing(session, drawn, from_chip)
+            if named != drawn:
+                drawn = text = named
             # Attached files go as themselves, never as a path on this host
             # (room_send.py, §6.33); a room with none is sent as before.
             if reply_to.strip():

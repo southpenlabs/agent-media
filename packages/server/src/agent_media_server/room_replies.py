@@ -98,7 +98,14 @@ def _ask(thread: str, key: str, chat: str) -> None:
 
 def ready(thread: str, key: str) -> list[dict]:
     """The chips already kept for message `key` of `thread`, asking for
-    none: `[{"text", "source": "model"}]`, or []."""
+    none: `[{"text", "source": "model"}]`, or []. A handed room's agent
+    drafts for it come instead when there are any (room_delegate.py)."""
+    if thread and key:
+        from . import room_delegate
+
+        drafts = room_delegate.ready(thread, key)
+        if drafts:
+            return drafts
     if not enabled() or not thread or not key:
         return []
     have = _jsonmap().all().get(thread)
@@ -111,7 +118,18 @@ def chips(thread: str, messages: list[dict]) -> list[dict]:
     """The chips for a room's newest page (`messages`, oldest first):
     `[{"text", "source": "model"}]` when its newest message with words is
     someone else's and its answers are ready; otherwise [] (and, when none
-    were asked for it yet, they are asked for now, in the background)."""
+    were asked for it yet, they are asked for now, in the background).
+
+    In a room handed to an agent (room_delegate.py), the agent's drafts for
+    the newest message come instead, `[{"text", "source": "agent", "agent",
+    "agent_id"}]`, whoever wrote it (its introduction may follow David's
+    own message); the model's only while the agent has none for it."""
+    if thread:
+        from . import room_delegate
+
+        drafts = room_delegate.chips(thread, messages)
+        if drafts:
+            return drafts
     if not enabled() or not thread:
         return []
     said = [m for m in messages if _text(m)]
