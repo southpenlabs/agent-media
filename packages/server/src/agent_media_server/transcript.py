@@ -1831,9 +1831,10 @@ def join_speech(msgs: list[dict], lines: list[dict]) -> None:
 #: `[[tune: Artist - Title]]` one (a song after the reply, reply_tune.py),
 #: or a `[[replies: A | B]]` one (the reply's one-tap chips, served as the
 #: envelope's `suggestions`), or a `[[actions: Label -> verb target]]` one
-#: (chips that do something, served as `actions`, reply_actions.py), with
+#: (chips that do something, served as `actions`, reply_actions.py), or a
+#: `[[map: …]]` / `[[route: …]]` one (the message's `places`, §6.50), with
 #: the spaces around it.
-_MARKER = re.compile(r"[ \t]*\[\[\s*(?:visual|reveal|sound|tune|replies|actions)\s*:\s*.+?\s*\]\][ \t]*",
+_MARKER = re.compile(r"[ \t]*\[\[\s*(?:visual|reveal|sound|tune|replies|actions|map|route)\s*:\s*.+?\s*\]\][ \t]*",
                      re.IGNORECASE | re.DOTALL)
 
 
@@ -1857,6 +1858,7 @@ def strip_markers(msgs: list[dict]) -> None:
     by its halves). A part that is only voice_mode.QUIET goes, and with it a
     message left with nothing in it."""
     from agent_media_core import voice_mode
+    from agent_media_core.intake._text import extract_places
 
     quiet = False
     for m in msgs:
@@ -1870,6 +1872,11 @@ def strip_markers(msgs: list[dict]) -> None:
                     p["text"] = ""
                     quiet = True
                     continue
+                # `[[map:]]` / `[[route:]]`: the message's places, drawn under
+                # it and on the Map (§6.50, maps proposal step 2).
+                _text_now, places = extract_places(p["text"])
+                if places:
+                    m["places"] = [*(m.get("places") or []), *places]
                 p["text"] = display_text(p["text"])
         if quiet:
             m["parts"] = [p for p in m.get("parts") or []

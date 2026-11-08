@@ -4604,7 +4604,7 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # The Map page's layers (map_layers.py, §6.50).
         from . import map_layers
 
-        ok, detail = map_layers.layers(bearer)
+        ok, detail = map_layers.layers(bearer, arg("thread"))
     elif method == "GET" and path == "/map/layer":
         from . import map_layers
 

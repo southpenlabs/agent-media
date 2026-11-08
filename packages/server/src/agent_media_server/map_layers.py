@@ -6,7 +6,9 @@ answers one as a GeoJSON FeatureCollection. The app draws what it is sent
 and knows nothing of where a layer comes from (the app stays generic).
 
 Built in: `phone`, the phone's shared location (§6.21b), the freshest fix
-per phone with its accuracy and age. More layers come from add-ons through
+per phone with its accuracy and age; and `thread:<session>`, the places a
+chat's replies pinned with `[[map:]]` / `[[route:]]` (maps proposal step 2),
+listed by `GET /map/layers?thread=<session>` and read like any other. More layers come from add-ons through
 the `agent_media.map_layers` entry point: each names a callable returning
 `[{"layer": {...}, "features": callable(bbox) -> [feature, ...]}]`, so a
 region's cameras or a house's rooms live outside this repo.
@@ -42,6 +44,56 @@ def _phone_features(_bbox) -> list[dict]:
         out.append({"type": "Feature", "properties": props,
                     "geometry": {"type": "Point", "coordinates": [f["lon"], f["lat"]]}})
     return out
+
+
+#: The newest this many messages of a chat are searched for its places.
+THREAD_MESSAGES = 2000
+
+
+def _thread_id(layer_id: str) -> str:
+    """The session id in `thread:<session>`, or ""."""
+    from . import sessions
+
+    sid = layer_id.removeprefix("thread:") if layer_id.startswith("thread:") else ""
+    return sid if sessions._SESSION.fullmatch(sid) else ""
+
+
+def thread_places(session: str) -> list[dict]:
+    """Every place a chat's replies pinned, oldest first: GeoJSON features, a
+    Point per place (`title`, `msg`, `link`, `group`) and a LineString per
+    route."""
+    from . import transcript
+
+    got = transcript.messages(session, limit=THREAD_MESSAGES)
+    if not got:
+        return []
+    msgs = got[0]
+    transcript.strip_markers(msgs)
+    out: list[dict] = []
+    n = 0
+    for m in msgs:
+        for g in m.get("places") or []:
+            n += 1
+            pts = g.get("points") or []
+            if g.get("kind") == "route" and len(pts) > 1:
+                out.append({"type": "Feature",
+                            "properties": {"title": " → ".join(p["name"] for p in pts if p["name"]),
+                                           "msg": m.get("id"), "link": f"/t/{session}", "group": n,
+                                           "route": True},
+                            "geometry": {"type": "LineString",
+                                         "coordinates": [[p["lon"], p["lat"]] for p in pts]}})
+            for p in pts:
+                out.append({"type": "Feature",
+                            "properties": {"title": p["name"], "msg": m.get("id"),
+                                           "link": f"/t/{session}", "group": n},
+                            "geometry": {"type": "Point", "coordinates": [p["lon"], p["lat"]]}})
+    return out
+
+
+def _thread_layer(session: str) -> dict:
+    return {"layer": {"id": f"thread:{session}", "name": "Places in this chat", "kind": "points",
+                      "icon": "pin", "default_on": True},
+            "features": lambda _bbox: thread_places(session)}
 
 
 def _addons() -> list[dict]:
@@ -100,18 +152,26 @@ def _inside(feature: dict, bbox) -> bool:
     return in_lon and s <= lat <= n
 
 
-def layers(bearer: str) -> tuple[bool, dict]:
+def layers(bearer: str, thread: str = "") -> tuple[bool, dict]:
     ok, err = _gate(bearer)
     if not ok:
         return False, err
-    return True, {"layers": [dict(i["layer"]) for i in _all()]}
+    items = _all()
+    if thread:
+        sid = _thread_id(f"thread:{thread}")
+        if not sid:
+            return False, {"status": 400, "error": "not a session id"}
+        items = [_thread_layer(sid), *items]
+    return True, {"layers": [dict(i["layer"]) for i in items]}
 
 
 def layer(layer_id: str, bbox_raw: str, bearer: str) -> tuple[bool, dict]:
     ok, err = _gate(bearer)
     if not ok:
         return False, err
-    item = next((i for i in _all() if i["layer"]["id"] == layer_id), None)
+    sid = _thread_id(layer_id)
+    item = (_thread_layer(sid) if sid else
+            next((i for i in _all() if i["layer"]["id"] == layer_id), None))
     if item is None:
         return False, {"status": 404, "error": "no such layer"}
     bbox = _bbox(bbox_raw)

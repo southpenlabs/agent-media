@@ -569,6 +569,59 @@ def extract_actions(text: str) -> tuple[str, list[dict]]:
     return out.strip(), actions[:ACTIONS_MAX]
 
 
+
+#: `[[map: Brunetti, Carlton @ -37.7987,144.9668 | Lygon St @ -37.80,144.967]]`
+#: pins a reply's places; `[[route: A @ lat,lon | B @ lat,lon]]` a line through
+#: them in order (maps proposal step 2; agent-media server-contract §6.50).
+#: Coordinates are required: an agent finds them with `media place find`, never
+#: guesses. Stripped from speech and the thread like `[[replies:]]`; the
+#: server serves each as the message's `places`.
+_PLACES_RE = re.compile(r"\[\[\s*(map|route)\s*:\s*([^\]\n]+?)\s*\]\]", re.IGNORECASE)
+_PLACES_LINE_RE = re.compile(r"(?m)^[ \t]*\[\[\s*(?:map|route)\s*:[^\]\n]*\]\][ \t]*(?:\n|$)",
+                             re.IGNORECASE)
+_PLACES_INLINE_RE = re.compile(r"[ \t]*\[\[\s*(?:map|route)\s*:[^\]\n]*\]\]", re.IGNORECASE)
+_POINT_RE = re.compile(r"^(.*?)\s*@\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
+#: At most this many places in one marker, each name at most PLACE_NAME_CHARS.
+PLACES_MAX = 20
+PLACE_NAME_CHARS = 80
+
+
+def extract_places(text: str) -> tuple[str, list[dict]]:
+    """(`text` without its `[[map:]]` / `[[route:]]` markers, one group per
+    marker: `{"kind": "pins" | "route", "points": [{"name", "lat", "lon"}]}`).
+
+    Each part is `name @ lat,lon` (the name may be empty); a part without
+    coordinates, or with them out of range, is dropped. A route needs two
+    points, so a route of one is a pin. A marker with no good point is
+    dropped. Coordinates are kept to 6 decimals."""
+    if not text or "[[" not in text:
+        return text, []
+    found = list(_PLACES_RE.finditer(text))
+    if not found:
+        return text, []
+    out = _PLACES_LINE_RE.sub("", text)
+    out = _PLACES_INLINE_RE.sub("", out)
+    groups: list[dict] = []
+    for m in found:
+        points = []
+        for part in m.group(2).split("|"):
+            pm = _POINT_RE.match(part.strip())
+            if not pm:
+                continue
+            lat, lon = float(pm.group(2)), float(pm.group(3))
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                continue
+            name = " ".join(pm.group(1).split())[:PLACE_NAME_CHARS].strip()
+            points.append({"name": name, "lat": round(lat, 6), "lon": round(lon, 6)})
+            if len(points) >= PLACES_MAX:
+                break
+        if not points:
+            continue
+        kind = "route" if m.group(1).lower() == "route" and len(points) > 1 else "pins"
+        groups.append({"kind": kind, "points": points})
+    return out.strip(), groups
+
+
 _QUOTE_BLOCK_LINE = re.compile(r"^[ \t]{0,3}>[ \t]?(.*)$")
 
 
@@ -622,7 +675,7 @@ def strip_markdown(text: str, describe: bool = False, paragraphs: bool = True) -
         return ""
     out = _SHARED_FILE_RE.sub("", text) if "Shared file: " in text else text
     if "[[" in out:
-        out = extract_actions(extract_replies(extract_tune(extract_sound(out)[0])[0])[0])[0]
+        out = extract_places(extract_actions(extract_replies(extract_tune(extract_sound(out)[0])[0])[0])[0])[0]
     out = suppress_code_blocks(out, describe, paragraphs)
     out = suppress_tables(out, describe, paragraphs)
     if paragraphs:

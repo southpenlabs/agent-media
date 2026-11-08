@@ -310,3 +310,19 @@ def test_replies_marker_comes_out_of_the_words_and_its_answers_are_kept():
     assert extract_replies("no marker here") == ("no marker here", [])
     many = "[[replies: a | b | c | d | e]]"
     assert extract_replies(many)[1] == ["a", "b", "c", "d"]
+
+
+def test_places_marker_parsed_and_out_of_the_words():
+    from agent_media_core.intake._text import extract_places, strip_markdown
+
+    t = ("Two cafés.\n[[map: Brunetti @ -37.7981,144.9687 | no coords | Far @ 95,10 | @ -37.8, 144.96]]\n"
+         "[[route: Only @ -37.8,144.9]]")
+    text, groups = extract_places(t)
+    assert text == "Two cafés."
+    assert groups == [
+        {"kind": "pins", "points": [{"name": "Brunetti", "lat": -37.7981, "lon": 144.9687},
+                                    {"name": "", "lat": -37.8, "lon": 144.96}]},
+        {"kind": "pins", "points": [{"name": "Only", "lat": -37.8, "lon": 144.9}]},  # a route of one
+    ]
+    assert strip_markdown(t) == "Two cafés."
+    assert extract_places("no marker") == ("no marker", [])
