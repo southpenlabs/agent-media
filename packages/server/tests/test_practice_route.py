@@ -184,6 +184,7 @@ def test_a_style_is_a_path_and_can_be_set_by_hand(server, shelf, signed_in):
     assert nidra["style_path"] == ["Meditation", "Yoga Nidra"] and nidra["style"] == "Yoga Nidra"
     assert nidra["style_custom"] is False
     assert [t["name"] for t in obj["styles"]][:2] == ["Meditation", "Movement"]
+    assert obj["body_areas"][0] == "Head" and "Whole body" in obj["body_areas"] and nidra["body"] == []
     res, obj = call(server, "POST", "/practice",
                     {"action": "style", "id": nidra["id"], "path": ["Movement", " Yoga ", "Slow  hatha"]}, AUTH)
     assert res.status == 200, obj

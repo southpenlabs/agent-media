@@ -146,6 +146,15 @@ def test_a_style_is_a_path_down_the_tree():
     assert {"name": "Dance", "children": [{"name": "Ecstatic", "children": []}]} in move["children"]
 
 
+def test_the_body_areas_a_title_names():
+    assert L.body_of("15 Minute Yoga For Neck And Shoulders — Samantha Attard") == ["Neck & shoulders"]
+    assert L.body_of("Morning Bed Stretch For Low Back Pain and tight hips") == ["Back & spine", "Hips & pelvis"], "head to toe, several"
+    assert L.body_of("Grounding Body Scan") == ["Whole body"]
+    assert L.body_of("Sacral Chakra Singing Bowls") == [] and L.body_of("Third Eye Awakening") == []
+    assert L.body_of("Come back to yourself") == [], "back only as the body's"
+    assert L.body_of("Savasana — Jaw Yoga by Kieferfreund") == [], "the teacher's name does not count"
+
+
 def test_a_style_set_by_hand_is_tidied_or_refused():
     assert L.clean_style_path([" Movement ", "", "Slow  hatha"]) == ("Movement", "Slow hatha")
     assert L.clean_style_path([]) is None and L.clean_style_path("Yoga") is None

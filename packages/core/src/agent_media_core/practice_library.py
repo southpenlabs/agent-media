@@ -288,7 +288,7 @@ def items() -> list[dict]:
         p = plays.get(i["id"]) or {}
         path = custom.get(i["id"]) or style_path_of(i["title"])
         d.update(teacher=teacher_of(i), style=style_name(path), style_path=list(path),
-                 style_custom=i["id"] in custom, benefit=benefit_of(i["title"]),
+                 style_custom=i["id"] in custom, body=body_of(i["title"]), benefit=benefit_of(i["title"]),
                  duration_s=_seconds(i.get("duration")) or lengths.get(i["id"]),
                  plays=int(p.get("n") or 0), last_played=p.get("last") or None)
         out.append(d)
@@ -344,6 +344,32 @@ STYLE_DEFAULT_PATH = ("Meditation", "Guided")
 STYLE_DEFAULT = STYLE_DEFAULT_PATH[-1]
 #: The top levels in the order the app shows them.
 STYLE_TOP = ("Meditation", "Movement", "Breathwork", "Sound", "Spirit & energy", "Mind")
+#: The parts of the body a title says it works with, head to toe; a title
+#: can name several (David, 9 Nov 2026: "Can we also have a tab under
+#: practise for Body area"; the tab is Body focus). Every rule counts, not
+#: just the first. A chakra's name ("sacral") or the third eye is not one.
+BODY_AREAS = (
+    ("Head", r"headache|migraine"),
+    ("Jaw & face", r"\bjaw\b|\bface\b|facial|\btmj\b"),
+    ("Neck & shoulders", r"\bneck\b|shoulder"),
+    ("Arms & hands", r"\bhands?\b|\barms?\b|wrist"),
+    ("Chest & lungs", r"\bchest\b|\blungs?\b"),
+    ("Back & spine", r"(?:low|lower|upper|mid|sore|healthy|the|your) back\b|back pain|\bspin(?:e|al)\b|lumbar"),
+    ("Belly & gut", r"belly|\bgut\b|digest|stomach|abdom"),
+    ("Hips & pelvis", r"\bhips?\b|pelvi"),
+    ("Legs & feet", r"\blegs?\b|\bfeet\b|\bfoot\b|hamstring|\bknees?\b|ankle"),
+    ("Whole body", r"full body|whole body|body\s*scan"),
+    ("Nervous system", r"nervous system|\bvag(?:us|al)\b"),
+)
+
+
+def body_of(title: str) -> list:
+    """The body areas a title names, head to toe (BODY_AREAS), read without
+    its " — teacher"; [] for none."""
+    t = _BY.sub("", title or "").lower()
+    return [name for name, rx in BODY_AREAS if re.search(rx, t)]
+
+
 #: What a title says it is for, first match wins (Insight Timer's "Benefit").
 BENEFITS = (
     ("Sleep", r"sleep|insomnia|bed\s*time|middle of the night|night sky|stargaz"),

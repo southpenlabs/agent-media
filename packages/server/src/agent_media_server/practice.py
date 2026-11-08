@@ -96,6 +96,7 @@ def listing(bearer: str) -> tuple[bool, dict]:
     from agent_media_core import breathe, sleep_timer
     out = {"items": items, "feeds": lib.feeds(), "folder": str(lib.folder()), "teachers": places,
            "breathe": breathe.offer(), "sleep": sleep_timer.offer(),
+           "body_areas": [name for name, _ in lib.BODY_AREAS],
            "styles": lib.style_tree([tuple(i["style_path"]) for i in items if i.get("style_custom")])}
     if any(i.get("source") == "embed" for i in items):
         out["embed_play"] = embed_play()
