@@ -152,6 +152,10 @@ device gets its token):
   POST /session/tags {"session", "add"?, "remove"?, "tags"?} → the
                   thread's own tags, kept in its org-roam node's #+filetags
                   (tags.py); GET /tags lists every tag in use with its count
+  GET  /patterns → the named prompts (tone, answers, message) for the
+                  chips' hold menu and a message's; POST /patterns/run
+                  {"session", "pattern", "text", "context"?} → {text} or
+                  {replies} (patterns.py)
   POST /session/tags/suggest {"session"} → a few tags for it from the
                   quick model, preferring ones in use; nothing saved (tags.py)
   POST /contacts/tags {"contact", "add"?, "remove"?, "tags"?} → a person's
@@ -417,7 +421,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
-    "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run",
+    "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
@@ -1975,6 +1979,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
                                          qs.get("path", [""])[0], qs.get("commit", [""])[0],
                                          tree=tree, blob=qs.get("blob", [""])[0],
                                          ignored=qs.get("ignored", [""])[0] == "1")
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/patterns":
+        # Named prompts for the chips' hold menu and a message's (patterns.py, §6.2.1).
+        from . import patterns
+
+        ok, detail = patterns.listing(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/actions/tasks":
         # The tasks an action chip may run here (reply_actions.py, §6.2.1).
@@ -3982,6 +3992,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = tags.contact_tags(str(body.get("contact") or ""), body, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/patterns/run":
+        # A pattern run on a chip's words or a message (patterns.py, §6.2.1); a
+        # chat with people or a private thread only to the private models.
+        from . import patterns
+
+        ok, detail = patterns.run(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/tags/suggest":
         # Auto in the tags sheet: suggestions only, nothing saved (tags.py).
