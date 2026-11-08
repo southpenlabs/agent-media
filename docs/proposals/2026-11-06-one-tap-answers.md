@@ -135,7 +135,11 @@ Built in this order ("reach first"):
    a confirming chip marked with a trailing "…" and a bold border.
 3. **Pick by voice** (part 3): on the black screen or with earbuds, "the
    second one" / "first" / its words picks a chip; a question card's options
-   the same way.
+   the same way. **Built 9 Nov 2026** (sasonica-app `a8959a05`): in
+   hands-free and from the mic key's countdown, sent as the chip's tap;
+   stricter than a card (a bare "two", or more said than the chip, goes as
+   words); the black screen shows the chips, or a one-question card's
+   options, as large buttons once the reply has been read (Screen.choices).
 4. **Saved replies**: the user's own short replies ("On my way", "Call you
    later"), kept on the server, shown after the suggested chips (behind +N
    when folded), edited in Settings; a hold on any message you sent offers
