@@ -196,3 +196,20 @@ def test_a_play_reading_a_files_chapters_keeps_them(tmp_path, monkeypatch):
     monkeypatch.setattr(music_chapters, "state_dir", lambda: tmp_path)
     music_chapters.remember_file(f"$HOME/.cache/music-offline/{MIX}.mka", [{"title": "A", "start": 0, "end": 5}])
     assert music_chapters.known(MIX) == [{"title": "A", "start": 0.0, "end": 5.0}]
+
+
+@pytest.mark.parametrize("side,want", [
+    ("@aylaschafermusic@BenjaminHarrisyemanjo", "aylaschafer, Benjamin Harrisyemanjo"),
+    ("@HangMassive , Temple Step Project", "Hang Massive, Temple Step Project"),
+    ('"@RisingAppalachiaMusic', "Rising Appalachia"),
+    ("@maryastarkmusic ft. Sasha Rose", "maryastark ft. Sasha Rose"),
+    ("@SamGarrettMusic", "Sam Garrett"),
+    ("@rodrigogallardoofficial5500", "rodrigogallardo"),
+    ("@APECHIMBA", "APECHIMBA"),
+    ("The Shins @theshins", "The Shins"),
+    ("L’Entourloop ft. Guts & Patrice", "L’Entourloop ft. Guts & Patrice"),
+])
+def test_a_credit_reads_its_handles_as_names(side, want):
+    # David's VaniBorn mix (o92mangQoKI), 8 Nov 2026.
+    from agent_media_core.media_meta import credit
+    assert credit(side) == want

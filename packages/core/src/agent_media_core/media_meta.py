@@ -151,7 +151,7 @@ def parse_chapter(title: str) -> dict:
     t = chapter_name(title)
     m = re.match(r"^(.+?)\s+by\s+(.+)$", t, re.I)
     if m and not any(sep in t for sep in _SEPS):
-        return {"artist": _HANDLE.sub("", m.group(2)).strip() or m.group(2).strip(),
+        return {"artist": credit(m.group(2)),
                 "song": _clean(m.group(1))}
     for sep in _SEPS:
         if sep in t:
@@ -162,11 +162,41 @@ def parse_chapter(title: str) -> dict:
             lean += bool(_ARTISTY.search(b)) - bool(_ARTISTY.search(a))
             lean += bool(_SONGY.search(a)) - bool(_SONGY.search(b))
 
-            def bare(x: str) -> str:
-                # A side that was only a handle keeps it, without its @.
-                return _HANDLE.sub("", x).strip(" ,") or x.lstrip("@")
-            return {"a": bare(a), "b": bare(b), "lean": lean}
+            return {"a": credit(a), "b": credit(b), "lean": lean}
     return {"song": _clean(_HANDLE.sub("", t).strip() or t)}
+
+
+#: What a channel handle adds to the name it is made of: "@SamGarrettMusic",
+#: "@rodrigogallardoofficial5500", "@RisingAppalachiaMusic".
+_HANDLE_TAIL = re.compile(r"(?:official|music|band|tv|yt|vevo|channel|\d+)$", re.I)
+
+
+def handle_name(handle: str) -> str:
+    """The name in a channel handle: "@SamGarrettMusic" is "Sam Garrett",
+    "@rodrigogallardoofficial5500" is "rodrigogallardo" (one case, no word
+    breaks to find), "@APECHIMBA" stays as it is."""
+    h = handle.lstrip("@").strip("._-")
+    while True:
+        cut = _HANDLE_TAIL.sub("", h).rstrip("._-")
+        if cut == h or not cut:
+            break
+        h = cut
+    h = re.sub(r"[._]+", " ", h)
+    if not h.isupper():
+        h = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", h)
+    return h.strip() or handle.lstrip("@")
+
+
+def credit(side: str) -> str:
+    """A chapter's credit as names: each handle turned into its name, handles
+    run together ("@a@b") or listed with stray spaces (" , ") as a list, and
+    stray quotes dropped (David's VaniBorn mix, 8 Nov 2026)."""
+    # A name's own handle after it ("The Shins @theshins") says it twice.
+    x = re.sub(r"(?<=\w)\s+@[\w.\-]+", "", side)
+    x = re.sub(r"(?<=\w)(?=@)", ", ", x)
+    x = _HANDLE.sub(lambda m: handle_name(m.group(0)), x)
+    x = re.sub(r"\s+,", ",", x.replace('"', "").replace("\u201c", "").replace("\u201d", ""))
+    return re.sub(r"\s{2,}", " ", x).strip(" ,") or side.strip()
 
 
 def _norm(x: str) -> str:
