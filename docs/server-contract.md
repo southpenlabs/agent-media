@@ -4894,6 +4894,8 @@ local look, never a network call:
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
+| `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
+| `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -9412,6 +9414,123 @@ files (web_app.py).
   download. 400 unless `build` is digits and `flavor` one of the two; 404
   when that build has no APK of that flavor; 502 when it cannot be fetched.
   The app checks the sha256 itself before installing.
+
+### 6.54 Movies and Shows from Trakt — gated; its sign-in admins (built 9 Nov 2026)
+
+Code: `agent_media_server/watch.py`, Trakt in `agent_media_core/trakt.py`,
+TMDb in `agent_media_core/tmdb.py`. Pinned by
+`packages/server/tests/test_watch.py` and `packages/core/tests/test_trakt.py`
+(Trakt and TMDb stubbed; neither is ever called by a test). David, 9 Nov
+2026: "let's add Movies and TV series tabs to the media tab", sourced from
+Trakt; the app's tabs are **Movies** and **Shows**. Trakt is reached
+outbound over HTTPS from the server; the app never talks to Trakt or TMDb
+except to open a link or a picture.
+
+Switched on by the install owner's own Trakt API app
+(https://trakt.tv/oauth/applications or developer.trakt.tv):
+`MEDIA_TRAKT_CLIENT_ID` in the server's environment, and
+`MEDIA_TRAKT_CLIENT_SECRET` only where Trakt issued one (its new apps get
+none: they sign in with PKCE, and a development app may only redirect to
+localhost — `MEDIA_TRAKT_REDIRECT`, default `http://localhost`, must be the
+redirect URI set at Trakt), then signing in from Settings (below). `GET /features` (§6.11a) says `trakt: true` (this
+server has these routes: Settings shows the Trakt card) and `watch` (the
+API app is set and a Trakt token is kept: the app shows the Movies and
+Shows tabs). An older server says neither: no card, no tabs.
+
+**The lists.**
+
+- `GET /watch?kind=movie|tv&list=<list>` → `{"ok", "kind", "list",
+  "lists", "set_up", "signed_in", "items", "genres", "tmdb", "reason"?}`.
+  `lists` is what `kind` offers, in the funnel's order: movie `recent`,
+  `watchlist`; tv `recent`, `next`, `watchlist`. `list` defaults to
+  `recent`; one not in `lists`, or another kind, is 400. Not set up
+  (`set_up: false`) or not signed in (`signed_in: false`): 200 with no
+  items and a plain `reason` (what to set, or "connect it in Settings").
+  Trakt failing is 502 `{"ok": false, "error"}`. Read from Trakt and kept
+  five minutes in memory (`trakt.TTL_S`), so the app may ask on every
+  visit.
+  - `recent`: movie `GET /sync/history/movies?extended=full&limit=100`,
+    tv `GET /sync/history/episodes?extended=full&limit=200`, latest watch
+    first, one item per movie or episode however often it was watched
+    (`plays`; `watched_at` the latest).
+  - `watchlist`: `GET /sync/watchlist/movies|shows?extended=full`, in
+    Trakt's order, with `listed_at`. A Shows watchlist item is a `show`.
+  - `next` (Up next): the next episode to watch of each of the
+    `UP_NEXT_SHOWS` (8) shows most recently watched, from
+    `GET /shows/{id}/progress/watched` (kept as the lists are); a show with
+    nothing left is not listed. `watched_at` is the show's last watch,
+    `left` the aired episodes not yet seen.
+- An item: `{"id", "kind": "movie"|"episode"|"show", "title", "year",
+  "runtime" (minutes) | null, "genres" (words: "Science Fiction"),
+  "overview" (≤ 600 characters), "url" (its Trakt page:
+  `https://trakt.tv/movies/<slug>`, `/shows/<slug>`,
+  `/shows/<slug>/seasons/<s>/episodes/<n>`), "ids": {trakt, slug, tmdb,
+  imdb}, "poster"?}`. An episode adds `show` (the show's title; `title` is
+  the episode's own), `season`, `number` and `show_ids`; `year` is the
+  show's. `genres` at the top is every item's, sorted.
+
+**TMDb, optional.** With `MEDIA_TMDB_TOKEN` (TMDb's v4 read access token,
+sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
+`tmdb` is true and:
+
+- each item carries `poster` (`https://image.tmdb.org/t/p/w342/…`; an
+  episode its show's), from `GET /movie/{id}` or `/tv/{id}`, kept a month in
+  `<state_dir>/tmdb-posters.json`; at most 40 new ones per listing, the rest
+  at the next;
+- `GET /watch/item?kind=movie|tv&tmdb=<id>` (an episode asks with its
+  show's id and `tv`) → `{"ok", "trailer", "where", "poster", "tagline",
+  "region", "attribution"}`: `trailer` a YouTube link (official Trailer >
+  Trailer > official Teaser > Teaser) or null; `where` the region's
+  services `{"region", "link", "stream", "free", "ads", "rent", "buy"}`,
+  each a list of `{"name", "logo"}`, or null when TMDb lists none there.
+  One `GET /{movie|tv}/{id}?append_to_response=videos,watch/providers`,
+  kept a day. The region is `MEDIA_TMDB_REGION` (ISO 3166-1, default AU).
+  `attribution` is the credit to show beside them (TMDB; services by
+  JustWatch). 404 without a TMDb credential, 400 for a bad kind or id, 502
+  when TMDb fails.
+
+**Signing in** (admins, `auth.may_admin`). Two ways, by whether the
+server has a client secret (`flow`): `device` (Trakt's device code: a code
+typed at Trakt's address) with one, `pkce` (authorization code with PKCE,
+S256: Trakt's sign-in page, then the address it lands on pasted back)
+without. Trakt's PKCE guide: "Do not send a client_secret"; whether its
+device flow works without a secret is not documented, so it is used only
+with one.
+
+- `GET /accounts/trakt` → `{"ok", "set_up", "signed_in", "user", "flow",
+  "pending", "reason"?}`. `pending` is the sign-in under way, or null:
+  device `{"flow", "user_code", "verification_url", "expires_in",
+  "interval"}`, pkce `{"flow", "url", "redirect_uri", "expires_in"}`.
+  `reason` (not set up) names what the server needs: a Trakt API app and
+  `MEDIA_TRAKT_CLIENT_ID`.
+- `POST /accounts/trakt/start` → `{"ok", …pending}` as above. Device:
+  Trakt's `POST /oauth/device/code` (the device code stays on the server);
+  the app shows the code large and the address as a button. PKCE: `url` is
+  `https://auth.trakt.tv/oauth/authorize` with `response_type=code`,
+  `client_id`, `redirect_uri`, `state` and the S256 `code_challenge`; the
+  verifier and state stay on the server fifteen minutes. The app opens
+  `url` in the phone's browser. 409 `{"ok": false, "error", "set_up":
+  false}` when not set up.
+- `POST /accounts/trakt/finish {"address"?}`. Device: polls Trakt once
+  (`POST /oauth/device/token`): `{"ok", "signed_in": true, "user"}`, or
+  `{"ok", "signed_in": false, "pending": true, "interval"}` while the code
+  waits (a 429 slow-down adds a second to `interval`); the app calls it
+  every `interval` seconds. PKCE: `address` is where the browser landed
+  after signing in (`http://localhost/?code=…&state=…`, a page that does
+  not load on a phone) or the code alone; its state must be this sign-in's;
+  the code is swapped at `POST /oauth/token` (`authorization_code`,
+  `code_verifier`, no secret) → `{"ok", "signed_in": true, "user"}`. 400
+  with an `error` when no sign-in is waiting, the address is another
+  sign-in's or has no code, or Trakt refuses the code (unknown, used,
+  ran out, declined).
+- `POST /accounts/trakt/signout` → the status above, signed out (the
+  token revoked at Trakt if it answers, and forgotten).
+
+The tokens are kept 0600 in `<state_dir>/trakt-token.json`. An access
+token lasts a week and is refreshed an hour before it ends (`POST
+/oauth/token`, `refresh_token`, the secret only where there is one; Trakt's
+refresh tokens are single use: the new one is kept at once); a refused
+refresh signs the server out, and the listing says so in `reason`.
 
 ### Pairing
 

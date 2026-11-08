@@ -72,6 +72,17 @@ def _no_inherited_dj_duck(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_trakt_or_tmdb(monkeypatch):
+    """The env file may name a Trakt API app (MEDIA_TRAKT_CLIENT_ID/_SECRET)
+    and a TMDb credential (MEDIA_TMDB_TOKEN/_API_KEY/_REGION): inherited, a
+    Movies/TV listing would call them for real with the user's signed-in
+    token. Scrubbed by prefix; a test that wants them sets its own and
+    stubs the HTTP (trakt._request, tmdb._request)."""
+    for key in [k for k in os.environ if k.startswith(("MEDIA_TRAKT_", "MEDIA_TMDB_"))]:
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_music_level(monkeypatch):
     """The env file may set the backing music level (MEDIA_MUSIC_BED_GAIN_DB),
     and every duck level follows it (route/dj.py `scaled`):

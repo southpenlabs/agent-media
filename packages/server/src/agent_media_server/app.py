@@ -466,6 +466,10 @@ PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
 # Peer to peer: practice shared with the owner over Matrix (shares.py, §6.48).
 SHARES_PATHS = frozenset({"/shares"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
+# Movies and TV from Trakt, and its sign-in (watch.py, §6.54).
+WATCH_PATHS = frozenset({"/watch", "/watch/item", "/accounts/trakt", "/accounts/trakt/start",
+                         "/accounts/trakt/finish", "/accounts/trakt/signout"})
+CORS_PATHS = CORS_PATHS | WATCH_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
 MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
@@ -819,6 +823,11 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import spotify_auth
 
         return spotify_auth.handle(h, method, path, _bearer(h), _json)
+    if path in WATCH_PATHS:
+        # Movies and TV from Trakt, and signing in to it (watch.py, §6.54).
+        from . import watch
+
+        return watch.handle(h, method, path, _bearer(h), _json)
     if path in AUDIO_PATHS and method in ("GET", "POST"):
         return _audio(h, method, path)
     if path in ROOM_DELEGATE_PATHS and method in ("GET", "POST"):

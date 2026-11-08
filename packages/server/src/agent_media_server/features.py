@@ -49,6 +49,11 @@ never a network call, so the app can ask on every start.
             §6.53, 8 Nov 2026): /room/delegate, `delegate` on a room's log
             and /targets row, agent chips; true where there are agent
             workspaces and Matrix rooms are read (the sync loop runs)
+  trakt     this server answers /accounts/trakt and GET /watch (watch.py,
+            §6.54, 9 Nov 2026): Settings shows the Trakt card; always true
+            here, so an older server leaves it out
+  watch     the Movies and Shows tabs: a Trakt API app is set
+            (MEDIA_TRAKT_CLIENT_ID) and this server is signed in to Trakt (a token kept)
   personal  this server answers /settings/personal (personal.py, 30 Oct
             2026): always true here, so an older server leaves it out
   app_update  this server answers GET /app/update and /app/update/apk
@@ -140,6 +145,12 @@ def _room_delegate() -> bool:
         for r in agent_workspaces.roots() if r.is_dir())
 
 
+def _watch() -> bool:
+    from agent_media_core import trakt
+
+    return trakt.signed_in()
+
+
 def _personal(name: str):
     def check() -> bool:
         from agent_media_core import personal_prefs
@@ -159,7 +170,8 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
           "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "music_sung": lambda: True, "music_chapters": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
-          "youtube": _personal("youtube"), "play_gate": _play_gate}
+          "youtube": _personal("youtube"), "play_gate": _play_gate,
+          "trakt": lambda: True, "watch": _watch}
 
 
 def detect() -> dict[str, bool]:
