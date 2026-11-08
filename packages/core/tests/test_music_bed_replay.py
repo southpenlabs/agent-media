@@ -277,10 +277,33 @@ def test_other_audio_means_no_bed(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_socket_for", lambda t: "/tmp/mpv-test.sock")
     monkeypatch.setenv("MEDIA_MUSIC_BED", "dusk")
     ex = _spoken_row()["extras"]
-    for found in (True, None):        # playing, or the probe did not answer
-        monkeypatch.setattr(R, "other_audio_now", lambda found=found: found)
-        unders = _follow(monkeypatch, ex).unders()
-        assert len(unders) == 1 and unders[0].startswith("earcon-reply-")
+    # The probe did not answer: no bed, and the tone as before.
+    monkeypatch.setattr(R, "other_audio_now", lambda: None)
+    unders = _follow(monkeypatch, ex).unders()
+    assert len(unders) == 1 and unders[0].startswith("earcon-reply-")
+    # Playing: that music is the backing, so no tone either (8 Nov 2026).
+    monkeypatch.setattr(R, "other_audio_now", lambda: True)
+    assert _follow(monkeypatch, ex).unders() == []
+
+
+def test_a_tone_is_left_out_over_other_audio(monkeypatch, tmp_path):
+    """David, 8 Nov 2026: "Drop it while ducked. Ducked music is the
+    backing, so no looping tone." A replay pauses nothing, so music playing
+    goes on under it; a thought keeps its think tone, and the probe is
+    asked once."""
+    asked = []
+
+    def probe(v):
+        return lambda: asked.append(v) or v
+    for tone in ("reply-E", "people"):
+        assert R.resolve({"under_tone": tone}, Target("local"), probe(True)) is None
+        assert R.resolve({"under_tone": tone}, Target("local"), probe(False)) == {"tone": tone}
+        assert R.resolve({"under_tone": tone}, Target("local"), probe(None)) == {"tone": tone}
+    assert len(asked) == 6
+    assert R.resolve({"thinking": True}, Target("local"), probe(True)) == {"tone": "think"}
+    monkeypatch.setattr(cli, "_socket_for", lambda t: "/tmp/mpv-test.sock")
+    monkeypatch.setattr(R, "other_audio_now", lambda: True)
+    assert _follow(monkeypatch, {"under_tone": "reply-E"}).unders() == []
 
 
 def test_a_thought_replays_with_its_harp_never_a_bed(monkeypatch, tmp_path):
@@ -343,8 +366,10 @@ def test_a_held_reply_with_nothing_recorded_gets_a_bed_chosen_now(monkeypatch):
           "clip_durations_s": [3.0, 4.0], "clip_sentences": ["a", "b"]}
     out = R.resolve(ex, None, other_audio=lambda: False)
     assert out["plan"] is plan and out["tone"].startswith("reply-")
-    # Something else playing: the reply's tone instead.
-    out = R.resolve(ex, None, other_audio=lambda: True)
+    # Something else playing: no bed, and no tone over that music either
+    # (8 Nov 2026); the probe not answering: the reply's tone instead.
+    assert R.resolve(ex, None, other_audio=lambda: True) is None
+    out = R.resolve(ex, None, other_audio=lambda: None)
     assert "plan" not in out and out["tone"].startswith("reply-")
     # The listener's own words get nothing.
     assert R.resolve({"listener": True}, None, other_audio=lambda: False) is None

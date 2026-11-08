@@ -2654,7 +2654,9 @@ held-reply toast's Play, `media replay` / `replay-prev` / `replay-at-cursor`
 choice is off (or the kind's bed is off), when anything else is playing
 (music, book or a player on the server, asked without pausing anything,
 within `MEDIA_MUSIC_BED_PROBE_S`), or under a thinking readout (which gets
-`think`, as when first read); then the reading's tone instead. The same
+`think`, as when first read); then the reading's tone instead — except a
+`reply-*` or `people` tone while something else plays (that music is the
+backing; a replay pauses nothing), unsure keeping the tone. The same
 track when its file is still there; a generated mood plays the current
 level's file of the same mood; a file pruned since is chosen afresh. A phone
 is told it as any under sound (`tone-kind`, `under-loop`, `under`) before
@@ -2969,7 +2971,18 @@ main checkout), else a `p-<project>` workspace; agent-media is E, others by a
 stable hash of the name, `MEDIA_REPLY_TONE_KEYS="folder=G,other=C"` pins
 them and `=off` plays every reply in E. **people** (a harp) under a person's
 message: a Matrix room's text from anyone but the owner (Source.MATRIX; the
-owner's own sends are never spoken). Before the voice, waited out:
+owner's own sends are never spoken). **Not over ducked music** (8 Nov 2026,
+David: "Ducked music is the backing, so no looping tone"): when the
+listener's own music goes on ducked under the reading — `before_speech`
+found it playing and its cue (route/dj.py) or policy is a duck, not a pause
+(`Coordinator.music_ducked`; past `MEDIA_MUSIC_BED_PROBE_S` the same question
+asked of the server without pausing anything, `Coordinator.audio_state`) —
+neither `reply` nor `people` plays (`clear_under` instead). A long reply or
+a question pauses the music and keeps its tone; nothing playing keeps the
+tone or the bed; unsure keeps the tone; `think` and the done/fail/question
+earcons before a reply are unchanged. Decided in the per-reply hook process
+(intake/submit.py). Pinned by `packages/core/tests/test_under_tone_ducked.py`.
+Before the voice, waited out:
 **alert** (a wind chime) before alert-class speech — `metadata.alert`
 (`media say --alert`: agenda alarms, digest-pane reminders and timers,
 watchers) or a Home Assistant announcement (Source.HA_SSE); **mail** (a

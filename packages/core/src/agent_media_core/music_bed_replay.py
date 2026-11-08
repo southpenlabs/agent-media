@@ -26,7 +26,8 @@ anything else is playing (`other_audio_now`, bounded by
 there; a generated mood's file is named for the music level it was rendered
 at, so the replay plays the CURRENT level's file of the same mood. A file
 pruned since: chosen afresh, as submit would choose now. No bed: the tone the
-reading had, as submit falls back to it.
+reading had, as submit falls back to it — but not over other audio playing
+now (David, 8 Nov 2026: ducked music is the backing, so no looping tone).
 
 `start` plays the answer through the same `music_bed.start` /
 `earcons.play_under` path as submit (`SinkSpeech.play_under`): a phone is told
@@ -201,6 +202,29 @@ def resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]
 
 def _resolve(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]] = None
              ) -> Optional[dict]:
+    """`_resolve_bed`, with a reply's or a person's tone left out when other
+    audio is playing (David, 8 Nov 2026: "Ducked music is the backing, so no
+    looping tone"): a replay pauses nothing (it has no before_speech), so
+    music playing now goes on under it, ducked by the phone's audio focus.
+    Unsure (the probe not answering in time) keeps the tone, as before. The
+    ``think`` tone under a thought is not this. Asked once."""
+    asked: list = []
+
+    def probe() -> Optional[bool]:
+        if not asked:
+            asked.append((other_audio or other_audio_now)())
+        return asked[0]
+    spec = _resolve_bed(ex, target, probe)
+    if (spec and spec.get("plan") is None and spec.get("tone")
+            and spec["tone"] != "think" and probe() is True):
+        log.info("music-bed replay: no under tone %s: other audio plays under it",
+                 spec["tone"])
+        return None
+    return spec
+
+
+def _resolve_bed(ex: dict, target, other_audio: Optional[Callable[[], Optional[bool]]] = None
+                 ) -> Optional[dict]:
     """What to play under a replay of the row whose extras are `ex` on
     `target`: ``{"plan": music_bed.Plan}``, ``{"tone": <earcon name>}``, or
     None (nothing, as before). `other_audio` asks whether anything else is

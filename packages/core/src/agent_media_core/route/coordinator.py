@@ -138,6 +138,10 @@ class Coordinator:
         self._book_eased: Optional[float] = None
         self.other_audio: Optional[bool] = None
         self._music_found = False
+        # Whether the music goes on DUCKED under this reading (not paused,
+        # not stopped): set by before_speech, None until it has looked. A
+        # reply's under tone is left out over ducked music (submit).
+        self.music_ducked: Optional[bool] = None
         # A duck this coordinator decided on but has not applied yet — see
         # before_speech(defer_music=True) and duck_music_now(). The lock makes
         # the hand-off single-shot: two callers race to apply it (the far
@@ -556,6 +560,37 @@ class Coordinator:
             return True
         return False
 
+    def _music_strategy(self, uri: str) -> InterruptionStrategy:
+        """What `_interrupt_music` does to the music `uri` names for this
+        reading: the DJ cue's strategy (route/dj.py: a question or a long
+        reply stops it, anything else ducks), longform always paused, else
+        the plain policy's."""
+        content_type = self._content_type_for(uri)
+        if dj.enabled():
+            cue = self._cue(content_type)
+            if cue.reason != "longform":
+                return cue.strategy
+        return policy_for(content_type).strategy
+
+    def audio_state(self) -> tuple[bool, bool]:
+        """(anything else playing, the music would go on DUCKED under this
+        reading): `audio_playing` with the second answer beside it, asked the
+        same way, without pausing or ducking anything — for a reading whose
+        before_speech has not answered in time (submit). Unsure means
+        playing, not ducked. Never raises."""
+        try:
+            if self._probe_book_active():
+                return True, False
+            uri = self._probe_music_uri()
+            if uri and self._music_audible():
+                ducked = self._music_strategy(uri) == InterruptionStrategy.DUCK
+                return True, bool(ducked)
+            if audio_backend.pause_enabled() and audio_backend.backend().playing_players():
+                return True, False
+        except Exception:  # noqa: BLE001
+            return True, False
+        return False, False
+
     def before_speech(self, title: str = "", priority: str = "",
                       defer_music: bool = False, text: str = "",
                       ask: bool = False,
@@ -599,6 +634,7 @@ class Coordinator:
         # None until this call has finished looking; it stays None if it fails.
         self.other_audio = None
         self._music_found = False
+        self.music_ducked = None
         # Every music call below re-resolves which backend is live — two
         # probes across the tailnet each time — so the probe, the position
         # and the pause are asked to agree on one answer (see
@@ -611,6 +647,8 @@ class Coordinator:
         self.other_audio = bool(
             self._music_found or self._book_paused or self._mpris_paused
             or any(self._mpris_remote_paused.values()) or self._android_paused)
+        if self.music_ducked is None:
+            self.music_ducked = False
 
     def _before_speech(self, *, title: str, priority: str,
                        defer_music: bool, text: str) -> None:
@@ -714,6 +752,12 @@ class Coordinator:
         if not uri:
             return  # nothing to interrupt via Mopidy
         self._music_found = self._music_audible()
+        if self._music_found:
+            try:
+                self.music_ducked = (self._music_strategy(uri)
+                                     == InterruptionStrategy.DUCK)
+            except Exception:  # noqa: BLE001 — unsure: not ducked
+                self.music_ducked = False
 
         if defer_music:
             # Decided, not yet done. The probe above has already been paid for,

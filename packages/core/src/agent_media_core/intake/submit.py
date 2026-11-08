@@ -79,6 +79,33 @@ def _reply_folder(metadata) -> str:
     return tmux[2:] if tmux.startswith("p-") else ""
 
 
+def _bed_probe_wait_s() -> float:
+    from .. import music_bed
+    return music_bed.probe_wait_s()
+
+
+def _music_ducked_under(coordinator, before_thread, wait_s: float) -> bool:
+    """Whether the listener's own music goes on DUCKED under this reading
+    (not paused, not stopped, not absent), which a reply's under tone is
+    left out over (David, 8 Nov 2026: "Ducked music is the backing, so no
+    looping tone"). Waits on before_speech (`before_thread`) up to `wait_s`
+    (music_bed.probe_wait_s) and reads what it decided
+    (`Coordinator.music_ducked`); past that, asks this host the same
+    question without pausing anything (`Coordinator.audio_state`). Unsure
+    means not ducked, so the tone plays as before. Never raises."""
+    try:
+        if before_thread is not None:
+            before_thread.join(timeout=wait_s)
+        if before_thread is None or not before_thread.is_alive():
+            return bool(getattr(coordinator, "music_ducked", None))
+        probe = getattr(coordinator, "audio_state", None)
+        if probe is None:
+            return False
+        return bool(probe()[1])
+    except Exception:  # noqa: BLE001
+        return False
+
+
 _DEFAULT_ENGINE = "edge"
 _DEFAULT_VOICE: Optional[str] = None
 
@@ -5283,6 +5310,11 @@ def _submit_event(event: Event,
             # A reply's source (generated, his streaming music, the online
             # library) is Settings'; `choose` falls back to generated.
             bed_plan = None
+            # Whether his own music goes on ducked under this reading
+            # (_music_ducked_under): None until asked. Ducked music is the
+            # backing, so no under tone over it (David, 8 Nov 2026); a long
+            # reply or a question pauses the music and keeps its tone or bed.
+            _ducked: Optional[bool] = None
             if reply_tone or people_tone:
                 from .. import earcons
                 under_tone = (earcons.reply_name(_reply_folder(event.metadata))
@@ -5300,19 +5332,29 @@ def _submit_event(event: Event,
                     _before_thread.join(timeout=music_bed.probe_wait_s())
                     _other = (None if _before_thread.is_alive()
                               else getattr(coordinator, "other_audio", None))
-                    if _other is None:
+                    if _other is not None:
+                        _ducked = bool(getattr(coordinator, "music_ducked", None))
+                    elif not _before_thread.is_alive():
+                        # before_speech failed: unsure, so no bed and the tone.
+                        _ducked = False
+                    else:
                         # The duck still asking (a phone's two ~2 s probes
                         # outlast the wait) used to count as playing, so
                         # nearly every reply on the phone went without its
                         # bed (David, 31 Oct 2026: "I didn't get any backing
                         # music for that one"). Ask this host instead,
-                        # without pausing anything.
+                        # without pausing anything — with whether the music
+                        # would be ducked beside it, for the tone.
+                        _state = getattr(coordinator, "audio_state", None)
                         _probe = getattr(coordinator, "audio_playing", None)
-                        if _probe is not None:
-                            try:
+                        try:
+                            if _state is not None:
+                                _other, _ducked = (bool(x) for x in _state())
+                            elif _probe is not None:
                                 _other = bool(_probe())
-                            except Exception:  # noqa: BLE001
-                                _other = None
+                                _ducked = False
+                        except Exception:  # noqa: BLE001
+                            _other, _ducked = None, False
                     bed_plan = music_bed.choose(
                         _bed_pick, _other, target,
                         topic=None if _private(event) else text)
@@ -5335,10 +5377,29 @@ def _submit_event(event: Event,
                 bed_rec = music_bed_replay.record(bed_plan, bed_tone, bed_stop,
                                                   _bed_kind)
                 if not bed_tone and bed_stop is None and (reply_tone or people_tone):
-                    from .. import earcons
-                    earcons.play_under(
-                        earcons.reply_name(_reply_folder(event.metadata))
-                        if reply_tone else "people", target, sink, loop=True)
+                    if _ducked is None:
+                        from .. import music_bed
+                        _ducked = _music_ducked_under(coordinator, _before_thread,
+                                                      music_bed.probe_wait_s())
+                    if _ducked:
+                        log.info("intake: no under tone: the music is ducked under this reply")
+                    else:
+                        from .. import earcons
+                        earcons.play_under(
+                            earcons.reply_name(_reply_folder(event.metadata))
+                            if reply_tone else "people", target, sink, loop=True)
+            elif (reply_tone or people_tone) and (
+                    _ducked if _ducked is not None else _music_ducked_under(
+                        coordinator, _before_thread, _bed_probe_wait_s())):
+                # His own music goes on ducked under this reply: it is the
+                # backing, so no "Air" or harp looped over it (David, 8 Nov
+                # 2026: "Drop it while ducked"). A long reply or a question
+                # pauses the music, so it keeps its tone below. The one-shot
+                # done/fail earcons before a reply are not this.
+                log.info("intake: no under tone: the music is ducked under this reply")
+                clear = getattr(sink, "clear_under", None)
+                if clear is not None:
+                    clear(target)
             elif thinking and not _thinking_done():
                 # The `think` earcon: a thinking readout is in the reply
                 # voice, and this is what tells it from a reply (David,
