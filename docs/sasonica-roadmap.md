@@ -2540,6 +2540,18 @@ ahead.
     list is "Recently played"; the Replay strip lost its list key, and its
     word Replay is now the replay icon, leaving the title more room.
 
+61. **Recently played on Media's Now playing** (David, 8 Nov 2026: "Can we
+    have the same kind of recently played for the media tabs") — **DONE 8
+    Nov 2026** (sasonica-app `51b040e9`, no server change). Media's full
+    player ends with Recently played of the kind playing — songs for music,
+    books for a book, episodes for a podcast — as item 60's list does for
+    replies: a pill under the player to it, eight rows then More, a row's
+    tap plays it again, its arrow opens its thread. The tab's own
+    `GET /music/recent?kind=…&list=recent` fetch and row, no Show ▾. `/music`
+    does not say the kind, so the app reads it off the track (YouTube is
+    music, else the book or episode whose file it is). Now playing and the
+    kind's tab are separate tabs, so the two lists never show together.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
