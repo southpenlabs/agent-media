@@ -767,6 +767,20 @@ def _speech_display_state(allow_remote: bool = True,
             if local is not None:
                 return local
 
+        # No reply behind it, nothing to read. The far player is not ours
+        # alone: the phone's Sasonica app has ONE player for spoken replies
+        # and music, reached over both relays (speech 16624, music 16625), so
+        # a song loaded in it answers `idle-active: false` on the speech
+        # socket too. Read raw, that made /speech/now say "speaking" with no
+        # session, no title, no sentence and no times for as long as music
+        # played (8 Nov 2026, worked around app-side in sasonica-app
+        # c3ce079f). Every reply this host plays — the remote-say lane, a
+        # replay, a ducked reply over music — writes its speech row first, so
+        # the row is what says a reply is live; the player only says where it
+        # has got to. Asked first, it also saves an idle redraw the round trip.
+        if not _speech_in_flight():
+            return (True, None, None, False, False, None, False)
+
         snap = _remote_snapshot() if allow_remote else None
         if snap is not None:
             # Ground truth, in one round trip. Every field the popup shows comes
