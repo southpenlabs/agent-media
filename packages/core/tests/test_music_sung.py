@@ -26,6 +26,9 @@ def st(tmp_path, monkeypatch):
     monkeypatch.setattr(music_recent, "_cached_title", lambda vid: "")
     monkeypatch.setattr(media_meta, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(media_meta, "fill", lambda wanted: None)
+    from agent_media_core import music_chapters
+    monkeypatch.setattr(music_chapters, "state_dir", lambda: tmp_path)
+    monkeypatch.setattr(music_chapters, "fill", lambda vids: None)
     store = StateStore(tmp_path / "state.db")
     # The reply it followed, and a later one with another bed.
     store.add_history(sink="speech", uri="/a.mp3", started_at=100, text="long",

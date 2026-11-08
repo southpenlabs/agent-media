@@ -7034,57 +7034,7 @@ def cmd_music(a) -> int:
     if a.action == "held":
         return _cmd_music_held(a)
     if a.action == "play":
-        if not a.uri:
-            print("media music play: a URI is required", file=sys.stderr)
-            return 2
-        if getattr(a, "where", "") == "handoff":
-            print("media music play: --where handoff is for 'radio dj'", file=sys.stderr)
-            return 2
-        if not a.add:
-            # Something else put on is the end of a radio station.
-            from . import radio
-            radio.stop()
-        where = _resolve_music_where(getattr(a, "where", "auto"))
-        ct = coerce_content_type(getattr(a, "as_type", None)) or detect_content_type(a.uri)
-        from .play_gate import PlayHeld
-        if where in ("abs", "sasonica"):
-            try:
-                m.play(a.uri, Target(name=where), replace=not a.add,
-                       title=getattr(a, "title", "") or "")
-            except PlayHeld:
-                raise              # said by main(), exit EXIT_HELD
-            except Exception as e:  # noqa: BLE001
-                print(f"media music play ({where}) failed: {e}", file=sys.stderr)
-                return 1
-            StateStore().set_music_intent(a.uri, ct.value,
-                                          getattr(a, "title", "") or None)
-            _note_music_where(where, a.uri)
-            print(f"playing on phone ({ct.value}): {a.uri}")
-            return 0
-        if where == "phone":
-            from .sinks.music_local import SinkMusicLocal, configured
-            if not configured():
-                print("media music play --where phone: MEDIA_MUSIC_LOCAL_ENDPOINT "
-                      "is unset (phone backend not configured)", file=sys.stderr)
-                return 2
-            try:
-                SinkMusicLocal().play(a.uri, replace=not a.add)
-            except PlayHeld:
-                raise
-            except Exception as e:  # noqa: BLE001
-                print(f"media music play (phone) failed: {e}", file=sys.stderr)
-                return 1
-            StateStore().set_music_intent(a.uri, ct.value,
-                                          getattr(a, "title", "") or None)
-            _note_music_where("phone", a.uri)
-            print(f"playing on phone ({ct.value}): {a.uri}")
-            return 0
-        m.play(a.uri, replace=not a.add)
-        StateStore().set_music_intent(a.uri, ct.value,
-                                      getattr(a, "title", "") or None)
-        _note_music_where("rooms", a.uri)
-        print(f"playing ({ct.value}): {a.uri}")
-        return 0
+        return _cmd_music_play(m, a)
     # Everything below is transport — route to the live backend so the keys
     # control what's actually audible (phone mpv or Mopidy).
     b = _music_live_backend(m)
@@ -7178,6 +7128,99 @@ def cmd_music(a) -> int:
         "toggle": b.toggle, "next": b.next, "prev": b.previous,
     }[a.action]()
     return 0
+
+
+def _cmd_music_play_once(m, a) -> int:
+    from .route import coerce_content_type, detect_content_type
+
+    if not a.uri:
+        print("media music play: a URI is required", file=sys.stderr)
+        return 2
+    if getattr(a, "where", "") == "handoff":
+        print("media music play: --where handoff is for 'radio dj'", file=sys.stderr)
+        return 2
+    if not a.add:
+        # Something else put on is the end of a radio station.
+        from . import radio
+        radio.stop()
+    where = _resolve_music_where(getattr(a, "where", "auto"))
+    ct = coerce_content_type(getattr(a, "as_type", None)) or detect_content_type(a.uri)
+    from .play_gate import PlayHeld
+    if where in ("abs", "sasonica"):
+        try:
+            m.play(a.uri, Target(name=where), replace=not a.add,
+                   title=getattr(a, "title", "") or "")
+        except PlayHeld:
+            raise              # said by main(), exit EXIT_HELD
+        except Exception as e:  # noqa: BLE001
+            print(f"media music play ({where}) failed: {e}", file=sys.stderr)
+            return 1
+        StateStore().set_music_intent(a.uri, ct.value,
+                                      getattr(a, "title", "") or None)
+        _note_music_where(where, a.uri)
+        print(f"playing on phone ({ct.value}): {a.uri}")
+        return 0
+    if where == "phone":
+        from .sinks.music_local import SinkMusicLocal, configured
+        if not configured():
+            print("media music play --where phone: MEDIA_MUSIC_LOCAL_ENDPOINT "
+                  "is unset (phone backend not configured)", file=sys.stderr)
+            return 2
+        try:
+            SinkMusicLocal().play(a.uri, replace=not a.add)
+        except PlayHeld:
+            raise
+        except Exception as e:  # noqa: BLE001
+            print(f"media music play (phone) failed: {e}", file=sys.stderr)
+            return 1
+        StateStore().set_music_intent(a.uri, ct.value,
+                                      getattr(a, "title", "") or None)
+        _note_music_where("phone", a.uri)
+        print(f"playing on phone ({ct.value}): {a.uri}")
+        return 0
+    m.play(a.uri, replace=not a.add)
+    StateStore().set_music_intent(a.uri, ct.value,
+                                  getattr(a, "title", "") or None)
+    _note_music_where("rooms", a.uri)
+    print(f"playing ({ct.value}): {a.uri}")
+    return 0
+
+
+def _cmd_music_play(m, a) -> int:
+    """`media music play`, and with `--start` from that many seconds in (a
+    mix's chapter, from the Media tab's songs of a mix): the start is kept
+    with a hold (play_gate), and once the track is playing it is seeked to."""
+    start = max(0.0, float(getattr(a, "start", 0) or 0))
+    if not start:
+        return _cmd_music_play_once(m, a)
+    from . import play_gate
+    with play_gate.request(start=start):
+        rc = _cmd_music_play_once(m, a)
+    if rc == 0 and not a.add:
+        if not _music_start_at(m, start):
+            print(f"media music play: could not start at {start:g}s", file=sys.stderr)
+    return rc
+
+
+def _music_start_at(m, seconds: float, timeout_s: float = 12.0) -> bool:
+    """Seek what was just put on to `seconds` once its player has it: a
+    player that is still loading (the phone's mpv, Mopidy) refuses a seek,
+    so it is tried until the position says it took. A seek is not a start,
+    so the play gate has nothing to say about it."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            b = _music_live_backend(m)
+            b.seek_cur(position_ms=int(seconds * 1000))
+            time.sleep(0.5)
+            pos = b.position()
+            if pos is not None and pos / 1000.0 >= seconds - 5:
+                return True
+        except Exception:  # noqa: BLE001 — not loaded yet; try again
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 def _music_idle(backend) -> bool:
@@ -10342,6 +10385,8 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--in-treatment", action="store_true",
                    help="for 'play': play even while the play gate holds starts "
                         "(MEDIA_PLAY_GATE_CMD: a treatment under way)")
+    s.add_argument("--start", type=float, default=0.0, metavar="SECONDS",
+                   help="for 'play': start that many seconds in (a mix's chapter)")
     s.add_argument("--play", action="store_true",
                    help="for 'held': play the held start (the id given, else the newest) now")
     s.add_argument("--dismiss", action="store_true",

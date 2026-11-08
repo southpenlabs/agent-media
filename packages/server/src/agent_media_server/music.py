@@ -955,6 +955,14 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
         argv.append(uri.strip())
         if action == "add":
             argv.append("--add")
+        start = body.get("start")
+        if start is not None:
+            # A mix's chapter from the Media tab's songs (music_chapters): the
+            # clip from that many seconds in, through the play gate as any play.
+            if isinstance(start, bool) or not isinstance(start, (int, float)) or start < 0:
+                return False, {"error": "start must be a number of seconds", "status": 400}
+            if start > 0 and action == "play":
+                argv.append(f"--start={float(start):g}")
         if force:
             argv.append("--in-treatment")
     done, said = _run(argv)

@@ -16,6 +16,9 @@ def st(tmp_path, monkeypatch):
     monkeypatch.setattr(music_recent, "_cached_title", lambda vid: "")
     monkeypatch.setattr(media_meta, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(media_meta, "fill", lambda wanted: None)
+    from agent_media_core import music_chapters
+    monkeypatch.setattr(music_chapters, "state_dir", lambda: tmp_path)
+    monkeypatch.setattr(music_chapters, "fill", lambda vids: None)
     monkeypatch.setattr(music_recent, "_abs_by_file", lambda: {})
     for k in ("MEDIA_SOURCE_SESSION", "CLAUDE_CODE_SESSION_ID", "MEDIA_SESSIOND_SESSION"):
         monkeypatch.delenv(k, raising=False)

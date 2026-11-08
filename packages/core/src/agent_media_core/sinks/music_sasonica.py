@@ -108,6 +108,9 @@ def chapters(url: str) -> list[dict]:
             continue
     if r.returncode == 0:
         _CHAPTERS[url] = out
+        # Kept by video id too, for the Media tab's songs of a mix.
+        from .. import music_chapters
+        music_chapters.remember_file(path, out)
     return out
 
 

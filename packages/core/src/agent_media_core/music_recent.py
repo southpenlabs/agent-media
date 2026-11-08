@@ -177,7 +177,10 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
     """``[{"id", "uri", "title", "art", "at", "session", "inferred", "kind",
     …}]``, newest first, one row per URI (its latest play). Music rows carry
     `artist`, `album`, `song`, `genre`; books and podcasts `author`, `series`,
-    `narrator`, `genre` (media_meta: null until looked up)."""
+    `narrator`, `genre` (media_meta: null until looked up). A YouTube row
+    whose chapters are known adds `chapters` (each a song: `index`, `title`,
+    `start`, `end`, `artist`, `song`, `album`, `genre`) and `mix`
+    (music_chapters)."""
     store = store or StateStore()
     # How far back plays are counted (`plays`): further for a long list.
     window = min(4000, max(400, limit * 10))
@@ -238,8 +241,31 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
                     "kind": "music", **_music_meta(r["uri"], named.get(_key(r["uri"])) or "")})
     wanted = [(f"yt:{_vid(r['uri'])}", "music", {"vid": _vid(r["uri"]), "title": named.get(_key(r["uri"])) or ""})
               for r in picked if _vid(r["uri"])]
+    wanted += _with_chapters(out)
     media_meta.fill(wanted)
     return out
+
+
+def _with_chapters(rows: list[dict]) -> list:
+    """Give each YouTube row its chapters as songs (`chapters`) and say
+    whether it is a mix (`mix`), music_chapters; start reading the ones not
+    known. The lookups the chapters still need, for media_meta.fill."""
+    from . import music_chapters
+
+    wanted: list = []
+    vids = []
+    for row in rows:
+        vid = _vid(row.get("uri") or "")
+        if not vid:
+            continue
+        vids.append(vid)
+        chs, want = music_chapters.songs(vid, row.get("artist"))
+        wanted += want
+        if chs:
+            row["chapters"] = chs
+            row["mix"] = music_chapters.is_mix(chs)
+    music_chapters.fill(vids)
+    return wanted
 
 
 def _music_meta(uri: str, title: str) -> dict:
@@ -476,6 +502,7 @@ def _liked(store: StateStore, limit: int) -> list[dict]:
                     "inferred": False, "kind": "music", **_music_meta(uri, title or "")})
         if len(out) >= limit:
             break
+    media_meta.fill(_with_chapters(out))
     return out
 
 

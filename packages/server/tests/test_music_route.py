@@ -28,6 +28,8 @@ def _no_phone(monkeypatch):
     from agent_media_core import media_meta
     monkeypatch.setattr(media_meta, "known", lambda key: None)
     monkeypatch.setattr(media_meta, "fill", lambda wanted: None)
+    from agent_media_core import music_chapters
+    monkeypatch.setattr(music_chapters, "fill", lambda vids: None)
 
 
 @pytest.fixture()
@@ -129,6 +131,11 @@ def test_now_names_the_artist(server, signed_in, audio_host, player, monkeypatch
      ["play", "yt:https://www.youtube.com/watch?v=Gkl8blLusFc"]),
     ({"action": "add", "uri": "https://www.youtube.com/watch?v=Gkl8blLusFc"},
      ["play", "https://www.youtube.com/watch?v=Gkl8blLusFc", "--add"]),
+    # A mix's chapter (music_chapters): the clip from its start.
+    ({"action": "play", "uri": "yt:https://www.youtube.com/watch?v=Gkl8blLusFc", "start": 424},
+     ["play", "yt:https://www.youtube.com/watch?v=Gkl8blLusFc", "--start=424"]),
+    ({"action": "play", "uri": "yt:https://www.youtube.com/watch?v=Gkl8blLusFc", "start": 0},
+     ["play", "yt:https://www.youtube.com/watch?v=Gkl8blLusFc"]),
 ])
 def test_controls_are_the_cli_verbs(server, signed_in, audio_host, player, body, argv):
     res, obj = call(server, "POST", "/music", body, AUTH)
@@ -140,7 +147,9 @@ def test_controls_are_the_cli_verbs(server, signed_in, audio_host, player, body,
 @pytest.mark.parametrize("body", [{}, {"action": "quit"}, {"action": "seek"},
                                   {"action": "play"}, {"action": "play", "uri": "--where rooms"},
                                   {"action": "add", "uri": "/etc/passwd"},
-                                  {"action": "seek", "to": "10:00"}, {"action": "seek-by", "by": True}])
+                                  {"action": "seek", "to": "10:00"}, {"action": "seek-by", "by": True},
+                                  {"action": "play", "uri": "yt:Gkl8blLusFc", "start": -1},
+                                  {"action": "play", "uri": "yt:Gkl8blLusFc", "start": "424"}])
 def test_a_bad_control_is_400_and_runs_nothing(server, signed_in, audio_host, player, body):
     res, obj = call(server, "POST", "/music", body, AUTH)
     assert res.status == 400 and obj["ok"] is False and isinstance(obj["error"], str)

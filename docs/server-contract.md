@@ -4026,6 +4026,35 @@ Audiobookshelf item's (a string), a liked song's a negative number. A
 server before this ignores `list` and answers without `"list"`: the
 client then has only what was played.
 
+**A mix's chapters as songs (8 Nov 2026)** (`agent_media_core.music_chapters`;
+David: "YouTube uploads are often mixes/playlists of various artists,
+segmented into chapters" — a thirty-artist mix sat under its uploader). A
+YouTube music row whose chapters are known adds `"chapters": [{"index",
+"title", "start", "end", "artist", "song", "album", "genre"}]` (seconds;
+only with two or more) and `"mix"`: true for at least three chapters
+naming at least two artists (a full album's chapters, one artist, are not
+a mix). Each chapter's title is read as a clip's is — "Artist - Song", as
+often "Song – Artist", "Song by Artist", or the song alone (a full album's,
+which then takes the clip's artist), numbers like "01." and timestamps
+dropped — and looked up in the iTunes catalogue in the background, both
+ways round, the one it knows standing (`media-meta.json`, keys `trk:…`);
+until then the way round the mix's other chapters were found, else the
+clues in the titles (an @handle, "&", "feat." on the artist's side, a
+"(… Remix)" on the song's), else "Artist - Song". The chapters themselves
+are read from the copies the players have (ffprobe on the rooms cache, then
+the phone's, a few videos a background pass; Sasonica's player reading a
+file's chapters on a play keeps them too), in `music-chapters.json`: a
+video on neither is asked about again a day later, so a row gains its
+chapters on a later visit, as names fill in. The app shows each chapter
+under its artist, album or genre, and a mix's clip under a "Mixes" group.
+
+`POST /music {"action": "play", "uri", "start"}` (8 Nov 2026) plays the clip
+from `start` seconds in (a chapter's `start`): `media music play <uri>
+--start <s>`, through the play gate like any play — a held one keeps its
+`start` (`play-held.json`), and playing it later starts there. The seek is
+made once the player has the track (up to 12 s). 400 for a `start` that is
+not a non-negative number; ignored for `add`.
+
 `POST /music {"action": "book", "uri"}` (29 Sep 2026) plays a book or
 podcast again (`media book play`, resumed where it was left). Only a `uri`
 one of the book or podcast lists holds is accepted (400 otherwise), so
@@ -4848,6 +4877,7 @@ local look, never a network call:
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
+| `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |

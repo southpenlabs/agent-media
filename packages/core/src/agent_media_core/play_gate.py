@@ -100,6 +100,8 @@ class Request:
     session: str = ""
     title: str = ""
     source: str = ""
+    #: Seconds into the track it starts at (a mix's chapter), kept with a hold.
+    start: float = 0.0
     extra: dict = field(default_factory=dict)
 
 
@@ -165,7 +167,7 @@ def current() -> Request:
 @contextlib.contextmanager
 def request(*, requested_at: Optional[float] = None, force: bool = False,
             continuing: bool = False, session: str = "", title: str = "",
-            source: str = "") -> Iterator[Request]:
+            source: str = "", start: float = 0.0) -> Iterator[Request]:
     """Say what is known about the play inside: when it was asked for, that
     it is forced or a continuation, its thread and name. Nested, the outer
     one's time stands (the inner is part of the same play) and the rest is
@@ -182,6 +184,7 @@ def request(*, requested_at: Optional[float] = None, force: bool = False,
         session=(base.session or session) if outer is not None else (session or base.session),
         title=base.title or title,
         source=base.source or source,
+        start=base.start or start,
     )
     token = _REQ.set(r)
     try:
@@ -323,7 +326,7 @@ def _entry(uri: str, *, target: str, kind: str, title: str, reason: str,
             "uri": uri or "", "title": title or "", "kind": kind or "music",
             "target": target or "", "session": r.session or "",
             "source": r.source or "", "reason": reason, "stage": stage,
-            "noted": False}
+            "noted": False, **({"start": r.start} if r.start else {})}
 
 
 def _record(entry: dict) -> dict:
@@ -335,6 +338,10 @@ def _record(entry: dict) -> dict:
                 e.update(at=entry["at"], reason=entry["reason"], stage=entry["stage"],
                          title=e.get("title") or entry["title"],
                          session=e.get("session") or entry["session"])
+                # The newest ask's place in the track stands.
+                e.pop("start", None)
+                if entry.get("start"):
+                    e["start"] = entry["start"]
                 rows.remove(e)
                 rows.append(e)
                 try:
@@ -423,6 +430,9 @@ def play_now(hid: str = "", session: str = "") -> dict:
             argv.append(f"--title={e['title']}")
         if e.get("target") and e["target"] in ("rooms", "local", "phone", "abs", "sasonica"):
             argv += ["--where", str(e["target"])]
+        if e.get("start"):
+            # A mix's chapter: from where it was asked to start.
+            argv.append(f"--start={float(e['start']):g}")
         argv += ["--", uri]
     env = dict(os.environ)
     env["MEDIA_PLAY_FORCE"] = "1"

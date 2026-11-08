@@ -19,6 +19,9 @@ Books and podcasts are Audiobookshelf items, matched to the play by file
 name. Their genres there are "Audiobook" or YouTube's category, so a book's
 comes from the iTunes audiobook of the same title and author.
 
+A mix's chapters are each looked up the same way (music_chapters.py), the
+song's artist from the chapter's title, either way round.
+
 Lookups are slow and rate-limited, so they never hold up a request: what is
 known is answered now, and a background thread fills in a few more for the
 next visit. Everything learned is kept in `media-meta.json`.
@@ -103,6 +106,89 @@ def split_title(title: str, channel: str) -> tuple[Optional[str], str, bool]:
             if a.strip() and s.strip() and len(a) <= 60:
                 return a.strip(), _clean(s), True
     return (channel or None), _clean(title), False
+
+
+# --- a mix's chapters -------------------------------------------------------------
+#
+# A YouTube mix is one video of many songs, chaptered (David, 8 Nov 2026:
+# "YouTube uploads are often mixes/playlists of various artists, segmented
+# into chapters"). Each chapter's title names its song, in one of a few
+# shapes: "Artist - Song", as often "Song – Artist" (the curated mixes put the
+# song first), "Song by Artist", or only the song (a full album's chapters,
+# "1. Murmuration"), usually numbered or timestamped. Which side is the artist
+# is not written down; the catalogue answers it (both ways are tried), and
+# until it has, the clues in the titles do: an @handle, "&" or "feat." mark
+# an artist's side, a "(… Remix)" a song's.
+
+#: "01. ", "3) ", "#4 ", "12:34 ", "1:02:03 - " before a chapter's name.
+_LEAD = re.compile(r"^\s*(?:(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[-–—:|.)]?\s*|(?:#|no\.?\s*)?\d{1,3}\s*[.):]\s+)", re.I)
+#: "07 - " before a name that still has its own separator after it.
+_LEAD_DASH = re.compile(r"^\s*\d{1,3}\s+[-–—]\s+")
+#: A timestamp after it: "Song - Artist (12:34)".
+_TRAIL = re.compile(r"\s*[\[(]?\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b[\])]?\s*$")
+_HANDLE = re.compile(r"(?<!\w)@[\w.\-]+")
+_SEPS = (" - ", " – ", " — ", " | ", " ~ ")
+#: What says a side is an artist's (several of them, a guest, a handle).
+_ARTISTY = re.compile(r" & |, | x | and the |\bfeat\.?\s|\bft\.?\s|\bfeaturing\b|@", re.I)
+#: What says a side is a song's (a version of it in brackets).
+_SONGY = re.compile(r"[\(\[][^)\]]*(remix|rework|edit|mix|version|cover|live|acoustic|instrumental|interlude)[^)\]]*[\)\]]", re.I)
+
+
+def chapter_name(title: str) -> str:
+    """A chapter's title without its number or timestamp."""
+    t = _TRAIL.sub("", _LEAD.sub("", (title or "").strip())).strip()
+    m = _LEAD_DASH.match(t)
+    if m and any(sep in t[m.end():] for sep in _SEPS):
+        t = t[m.end():]
+    return t.strip(" -–—|") or (title or "").strip()
+
+
+def parse_chapter(title: str) -> dict:
+    """What a chapter's title says: `{"a", "b", "lean"}` for two names either
+    of which may be the artist (`lean` > 0 when the clues say `b` is,
+    < 0 when `a` is), `{"artist", "song"}` for "Song by Artist", or
+    `{"song"}` alone."""
+    t = chapter_name(title)
+    m = re.match(r"^(.+?)\s+by\s+(.+)$", t, re.I)
+    if m and not any(sep in t for sep in _SEPS):
+        return {"artist": _HANDLE.sub("", m.group(2)).strip() or m.group(2).strip(),
+                "song": _clean(m.group(1))}
+    for sep in _SEPS:
+        if sep in t:
+            a, b = (x.strip() for x in t.split(sep, 1))
+            if not a or not b:
+                break
+            lean = 0
+            lean += bool(_ARTISTY.search(b)) - bool(_ARTISTY.search(a))
+            lean += bool(_SONGY.search(a)) - bool(_SONGY.search(b))
+
+            def bare(x: str) -> str:
+                # A side that was only a handle keeps it, without its @.
+                return _HANDLE.sub("", x).strip(" ,") or x.lstrip("@")
+            return {"a": bare(a), "b": bare(b), "lean": lean}
+    return {"song": _clean(_HANDLE.sub("", t).strip() or t)}
+
+
+def _norm(x: str) -> str:
+    return re.sub(r"[^\w]", "", (x or "").lower())
+
+
+def track_key(a: str, b: str, fixed: bool = False) -> str:
+    """The cache key for a chapter's two names (`fixed`: `a` is the artist)."""
+    return f"trk:{_norm(a)}|{_norm(b)}" + ("|fixed" if fixed else "")
+
+
+def _track_lookup(a: str, b: str, fixed: bool, lean: int = 0) -> dict:
+    """`{artist, song, album, genre}` for a chapter's two names: the way
+    round the catalogue knows, the one the clues favour tried first."""
+    ways = [(a, b)] if fixed else ([(b, a), (a, b)] if lean > 0 else [(a, b), (b, a)])
+    for n, (artist, song) in enumerate(ways):
+        if n:
+            time.sleep(_GAP_S)
+        album, genre = _song_lookup(artist, _clean(song))
+        if album or genre:
+            return {"artist": artist, "song": _clean(song), "album": album, "genre": genre}
+    return {"artist": None, "song": None, "album": None, "genre": None}
 
 
 #: Albums that are not where a song belongs.
@@ -195,8 +281,9 @@ def known(key: str) -> Optional[dict]:
 def fill(wanted: list[tuple[str, str, dict]]) -> None:
     """Look up, in the background, the keys in `wanted` not yet known (or
     tried long enough ago). Each is `(key, kind, args)`: kind "music" with
-    `vid` (and `title` for a video YouTube will not name), or "book" with
-    `title`/`author`."""
+    `vid` (and `title` for a video YouTube will not name), "track" with a
+    chapter's two names `a`, `b` (`fixed`: `a` is the artist; `lean`, see
+    parse_chapter), or "book" with `title`/`author`."""
     if _BUSY.is_set():
         return
     with _LOCK:
@@ -216,6 +303,9 @@ def _fill(todo: list[tuple[str, str, dict]]) -> None:
         for key, kind, a in todo:
             if kind == "music":
                 got = _music_lookup(a.get("vid") or "", a.get("title") or "")
+            elif kind == "track":
+                got = _track_lookup(a.get("a") or "", a.get("b") or "",
+                                    bool(a.get("fixed")), int(a.get("lean") or 0))
             else:
                 got = {"genre": _book_genre(a.get("title") or "", a.get("author") or "")}
             got["found"] = bool(got.get("album") or got.get("genre"))

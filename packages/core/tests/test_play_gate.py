@@ -335,3 +335,50 @@ def test_cli_play_exits_held_and_in_treatment_goes_through(gate, monkeypatch, ca
     assert json.loads(capsys.readouterr().out)["held"][0]["uri"] == YT
     assert cli.main(["music", "play", "--in-treatment", YT]) == 0
     assert any(c.startswith("add ") for c in sent)
+
+
+def test_a_held_chapter_keeps_its_start_and_plays_from_it(gate, monkeypatch):
+    """A tap on a mix's chapter (music_chapters) held in a treatment is
+    played later from that chapter, not the top of the mix."""
+    gate(IN_TREATMENT)
+    with contextlib.suppress(play_gate.PlayHeld), play_gate.request(start=424.0):
+        play_gate.check(YT, target="sasonica")
+    assert play_gate.held()[0]["start"] == 424.0
+    ran = {}
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+    monkeypatch.setattr(play_gate.subprocess, "run", lambda argv, **kw: (ran.update(argv=argv), R())[1])
+    assert play_gate.play_now()["ok"]
+    assert ran["argv"][-5:] == ["--where", "sasonica", "--start=424", "--", YT]
+
+
+def test_cli_play_with_start_seeks_once_it_plays(monkeypatch):
+    """`media music play --start`: the play goes through the gate as any
+    does (the start held with it), then the player is seeked once it has
+    the track — tried again while it is still loading."""
+    from agent_media_core import cli
+    starts, seeks = [], []
+    monkeypatch.setattr(cli, "_cmd_music_play_once",
+                        lambda m, a: starts.append(play_gate.current().start) or 0)
+
+    class B:
+        pos = None
+
+        def seek_cur(self, position_ms=0):
+            seeks.append(position_ms)
+            if len(seeks) > 1:
+                self.pos = position_ms
+
+        def position(self):
+            return self.pos
+    b = B()
+    monkeypatch.setattr(cli, "_music_live_backend", lambda m: b)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    a = type("A", (), {"start": 424.0, "add": False})()
+    assert cli._cmd_music_play(object(), a) == 0
+    assert starts == [424.0] and seeks == [424000, 424000]
+    # No start: a plain play, no seek.
+    seeks.clear()
+    a.start = 0
+    assert cli._cmd_music_play(object(), a) == 0 and seeks == []
