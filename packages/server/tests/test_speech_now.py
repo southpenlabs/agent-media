@@ -197,3 +197,22 @@ def test_notif_marker_is_live_only(monkeypatch):
     assert current["notif"] is True
     assert stopped["notif"] is False
     assert reply["notif"] is False
+
+
+def test_a_room_is_named_by_its_room(monkeypatch):
+    """A room's thread has no pane or shelf name: the bar gets the room's own
+    (the chat list's), not "" and so "Speaking" away from the thread."""
+    from agent_media_server import matrix
+
+    class _Room:
+        def title(self):
+            return "Office 3 team"
+
+    _as(monkeypatch)
+    monkeypatch.setattr(sessions, "title_of", lambda s: "")
+    monkeypatch.setattr(matrix, "room", lambda s: _Room() if s == SID else None)
+    monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
+    ok, out = speech.speech_now("tok", {"speaking": True, "session": SID})
+    assert ok and out["title"] == "Office 3 team"
+    speech._TITLE_CACHE.clear()
+    assert speech._queued_row({"session": SID})["title"] == "Office 3 team"

@@ -238,7 +238,20 @@ def _session_title(session: str) -> str:
     # whole thread list: building that took 7–12 s, and the first live
     # answer waited on it, so the bar came up that long after the voice
     # (David, 29 Oct 2026: "still takes quite a while to come up").
-    return sessions.title_of(session)
+    # A room (Matrix, a bridged Teams/WhatsApp chat) has no pane or shelf:
+    # its name is the room's, as the chat list gives it — the group's, else
+    # the people's — so away from the thread the mini player names it rather
+    # than saying "Speaking" (David, 8 Nov 2026: "shouldn't it display the
+    # group name or person's name?").
+    title = sessions.title_of(session)
+    if not title:
+        from . import matrix
+        try:
+            r = matrix.room(session)
+            title = r.title() if r is not None else ""
+        except Exception:  # noqa: BLE001 — a name is a nicety; the bar still plays
+            title = ""
+    return title
 
 
 #: `{session: (title, at)}` for the waiting replies: same TTL, no ABS call.
