@@ -164,3 +164,17 @@ Built in this order ("reach first"):
    result shows (and can be spoken) under it. The user's own folder of
    patterns shows as chips too. A people chat's text goes only to the private
    model, as for every model call on it. Built with the tone keys.
+
+## 7. More like this, and tips (David, 9 Nov 2026)
+
+- **More like this** ("It would be nice to have an option to get a fresh
+  batch of quick replies based on the one selected"): on a chip's hold, with
+  Edit, Shorter, Warmer and Formal — a fresh set of answers in the direction
+  of the one held, from the same model the chips came from (a people chat's
+  from the private model only). Built with the tone keys and patterns.
+- **Tips** ("do we have hints for all of this?"): counted tips, the first
+  three times each, with a key to stop them — the first chips (tap sends,
+  hold for more), the first send (Undo and Edit), the first action chip
+  (↗ ▶ ⚙, "…" asks first), the first folded row with +N.
+- Done the same day: Edit beside Undo, both in the chips' look; a chip's
+  leftover click no longer replays the last reply (sasonica-app dd6e42e9).
