@@ -346,7 +346,7 @@ STYLE_DEFAULT = STYLE_DEFAULT_PATH[-1]
 STYLE_TOP = ("Meditation", "Movement", "Breathwork", "Sound", "Spirit & energy", "Mind")
 #: The parts of the body a title says it works with, head to toe; a title
 #: can name several (David, 9 Nov 2026: "Can we also have a tab under
-#: practise for Body area"; the tab is Body focus). Every rule counts, not
+#: practise for Body area"; the tab is Body area). Every rule counts, not
 #: just the first. A chakra's name ("sacral") or the third eye is not one.
 BODY_AREAS = (
     ("Head", r"headache|migraine"),

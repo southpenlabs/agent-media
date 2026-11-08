@@ -8838,7 +8838,7 @@ names the first time they are read.
   name makes a new style), null goes back to what its title says; kept in
   `practice-styles.json`; → the listing; 400 for a bad path, 404 for an id
   not in the list. Every item also has `body` (9 Nov 2026; David: "Can we
-  also have a tab under practise for Body area"; the app's Body focus tab):
+  also have a tab under practise for Body area"; the app's Body area tab):
   the parts of the body its title names, head to toe, several or none
   (Head, Jaw & face, Neck & shoulders, Arms & hands, Chest & lungs, Back &
   spine, Belly & gut, Hips & pelvis, Legs & feet, Whole body, Nervous
