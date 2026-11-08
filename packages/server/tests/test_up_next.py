@@ -128,6 +128,28 @@ def test_a_reply_heard_meanwhile_is_skipped(voice):
     assert ran == []
 
 
+def test_a_question_answered_meanwhile_is_skipped(voice):
+    """A held question waiting on Up next, answered on its card before its
+    turn: it is not read out after the answer (9 Nov 2026)."""
+    from agent_media_core.intake.submit import request_session_speech_cut
+    from agent_media_core.state import StateStore
+
+    state, ran = voice
+    rid = StateStore().add_history(sink="speech", uri="/x.mp3", started_at=time.time() - 60,
+                                   target="sasonica", source="claude-code", text="Which one?",
+                                   extras={"held": True, "session": SID, "ask": True})
+    other = _row(session=SID_B)
+    state.update(speaking=True)
+    up_next.add(SID, rid)
+    up_next.add(SID_B, other)
+    request_session_speech_cut(SID, "ask")
+    state.update(speaking=False)
+    assert _wait(lambda: len(ran) == 1)
+    time.sleep(0.2)
+    assert [a[a.index("--id") + 1] for a in ran] == [str(other)]
+    assert (StateStore().history_row(rid)["extras"] or {}).get("heard")
+
+
 def test_the_queue_outlives_a_restart(voice):
     state, _ran = voice
     state.update(speaking=True)

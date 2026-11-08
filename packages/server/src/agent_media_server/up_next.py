@@ -15,8 +15,8 @@ has been heard for IDLE_S, the first is played (`media replay --id ID
 an open), and the next waits for that to end in turn. The queue is the
 server's, so every device shows the same one (`/speech/now` `up_next`); a row
 can be played now or taken off (`POST /speech/up-next`). A reply heard by
-other means meanwhile (its ▶, a Play on the notice) is skipped when its turn
-comes. Kept in up-next.json, so a restart of the session host keeps it.
+other means meanwhile (its ▶, a Play on the notice), or a question answered
+meanwhile, is skipped when its turn comes. Kept in up-next.json, so a restart of the session host keeps it.
 """
 
 from __future__ import annotations
@@ -175,9 +175,30 @@ def _heard(rid: int) -> bool:
             return True
         if (row.get("extras") or {}).get("heard"):
             return True
+        if _answered(row):
+            # A question answered while it waited has nothing left to ask
+            # (David, 9 Nov 2026: "why is this ask question being read out
+            # when I've already answered the question?"): heard, as a replay
+            # answered part way is (cli replay-track `_answered_now`).
+            st.mark_heard(int(rid))
+            return True
         return reply_position.heard_to_any(row, store=st) is None
     except Exception:  # noqa: BLE001 — unsure: play it
         return False
+
+
+def _answered(row: dict) -> bool:
+    """Is `row` a question's read-out answered since it was said (the
+    session's `ask` cut, set by the answer, at or after the row)?"""
+    extras = row.get("extras") or {}
+    session = str(extras.get("session") or extras.get("source_session") or "")
+    if not (extras.get("ask") and session):
+        return False
+    from agent_media_core.intake.submit import _read_speech_cut
+
+    at = _read_speech_cut(session).get("ask")
+    began = row.get("started_at")
+    return isinstance(at, (int, float)) and isinstance(began, (int, float)) and at >= began
 
 
 def _play(x: dict) -> None:
