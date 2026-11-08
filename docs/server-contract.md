@@ -6075,8 +6075,12 @@ posts where it is now and then, and an agent reads it without asking. Code:
 - `GET /device/location` — **the host's own token only**. → `{location:
   {lat, lon, accuracy_m?, at, precise, device, age_s} | null}`: the freshest
   phone's, null when none shares or the newest is over 2 h old.
-- Kept in memory only, the newest per phone: never written to disk or
-  logged, gone on a restart until the next post.
+- The newest per phone only, never logged. Since 9 Nov 2026 that one point
+  per phone is also kept in `shared-location.json` in the state dir (0600),
+  so a restart of the server does not lose it (the phone posts only every
+  ~15 min); the file is rewritten on each post, the point leaves it on `off`
+  or when it is over 2 h old, and with no point left the file goes (David,
+  9 Nov 2026: "Both", after the Map said "not sharing" with sharing on).
 - `phone_ask(kind="location")` (core `phone_ask.py`) answers from this when
   it is under 30 min old (`shared: true`, nothing asked), else asks (§6.21).
 
@@ -9327,7 +9331,7 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   when a layer's source fails.
 - Built in: `phone`, every phone's background share (§6.21b) under 2 h old,
   a Point each with `title` (the device), `at`, `age_s`, `precise`,
-  `accuracy_m?`. Still in memory only; this route reads it, nothing is kept.
+  `accuracy_m?`. This route only reads it.
 - More layers come from add-ons: the `agent_media.map_layers` entry point
   names a callable returning `[{"layer": {...}, "features": fn(bbox)}]`.
   An add-on that fails is logged and left out; the built-in ids win.

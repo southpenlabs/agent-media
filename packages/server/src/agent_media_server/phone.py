@@ -13,8 +13,12 @@ the outcome. Every ask needs a yes; nothing is standing. David, 1 Oct 2026
 The one standing thing is the phone's own choice: with "Share my location
 in the background" on in the app's Settings (off by default; David, 20 Oct
 2026), it posts `POST /device/location` now and then, and an agent reads the
-latest with `GET /device/location` instead of asking. Kept in memory only,
-the newest per phone, gone after STALE_S or when the phone says `off`.
+latest with `GET /device/location` instead of asking. Only the newest per
+phone is kept, gone after STALE_S or when the phone says `off`. Since 9 Nov
+2026 that one point per phone is also in `shared-location.json` (0600, the
+state dir), so a restart of the server does not forget it until the phone's
+next post a quarter of an hour later (David: "Both", after the Map said "not
+sharing" with sharing on); the file goes with the last point in it.
 
     ask(kind, why, session, params) → an open ask, or `no_phone` at once when no
                                phone that can do it is listening
@@ -69,8 +73,53 @@ _ASKS: dict[str, dict] = {}
 #: kind → connected streams that can do it.
 _LISTENING: dict[str, int] = {}
 _VERSION = 0
-#: device id → its latest background fix (share).
+#: device id → its latest background fix (share). Read from SHARED_FILE on
+#: first use, written back on every change.
 _SHARED: dict[str, dict] = {}
+_SHARED_READ = False
+SHARED_FILE = "shared-location.json"
+
+
+def _state_dir() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    d = root / "agent-media"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _shared_load() -> None:
+    """The kept points, once (under _COND), stale ones dropped."""
+    global _SHARED_READ
+    if _SHARED_READ:
+        return
+    _SHARED_READ = True
+    try:
+        got = json.loads((_state_dir() / SHARED_FILE).read_text())
+    except (OSError, ValueError):
+        return
+    now = time.time()
+    for k, f in (got if isinstance(got, dict) else {}).items():
+        fix = _location(f, now) if isinstance(f, dict) else None
+        if fix and fix["at"] >= now - STALE_S:
+            fix["device"] = str(f.get("device") or "a device")
+            _SHARED.setdefault(str(k), fix)
+
+
+def _shared_save() -> None:
+    """The points as they stand now (under _COND): none, no file."""
+    path = _state_dir() / SHARED_FILE
+    try:
+        if not _SHARED:
+            path.unlink(missing_ok=True)
+            return
+        tmp = path.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(_SHARED, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # memory still has it
 
 
 def _audit_path() -> Path:
@@ -195,8 +244,10 @@ def share(bearer: str, body) -> tuple[bool, dict]:
     if not isinstance(body, dict):
         return False, {"status": 400, "error": "not JSON"}
     with _COND:
+        _shared_load()
         if body.get("off") is True:
             _SHARED.pop(dev_id, None)
+            _shared_save()
             return True, {}
         now = time.time()
         fix = _location(body, now)
@@ -206,6 +257,7 @@ def share(bearer: str, body) -> tuple[bool, dict]:
             return False, {"status": 400, "error": "at is not recent"}
         fix["device"] = str(user.get("username") or "").removeprefix("device:") or "a device"
         _SHARED[dev_id] = fix
+        _shared_save()
     return True, {}
 
 
@@ -214,9 +266,12 @@ def shared_all() -> list[dict]:
     page's phone layer, map_layers.py)."""
     now = time.time()
     with _COND:
-        for k, f in list(_SHARED.items()):
-            if f["at"] < now - STALE_S:
-                del _SHARED[k]
+        _shared_load()
+        gone = [k for k, f in _SHARED.items() if f["at"] < now - STALE_S]
+        for k in gone:
+            del _SHARED[k]
+        if gone:
+            _shared_save()
         return sorted((dict(f) for f in _SHARED.values()), key=lambda f: -f["at"])
 
 
@@ -377,9 +432,10 @@ def version() -> int:
 
 
 def _reset_for_tests() -> None:
-    global _VERSION
+    global _VERSION, _SHARED_READ
     with _COND:
         _ASKS.clear()
         _LISTENING.clear()
         _SHARED.clear()
+        _SHARED_READ = False
         _VERSION = 0

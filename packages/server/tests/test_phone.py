@@ -352,3 +352,33 @@ def test_the_tool_takes_a_fresh_share_without_asking(server, host, pixel, where_
     # An old share is not enough: David is asked.
     monkeypatch.setattr(phone_ask, "SHARED_FRESH_S", 60)
     assert phone_ask.ask("location", "the weather", timeout_s=1) == {"status": "timeout"}
+
+
+def test_the_share_outlives_a_restart_and_off_removes_it(server, host, pixel, tmp_path):
+    fix = {"lat": -37.8136, "lon": 144.9631, "accuracy_m": 12, "at": time.time() - 60}
+    assert call(server, "POST", "/device/location", fix, pixel)[0].status == 200
+    kept = tmp_path / "state" / "agent-media" / phone.SHARED_FILE
+    assert kept.exists() and oct(kept.stat().st_mode & 0o777) == "0o600"
+    # A restart: memory gone, the file read back.
+    with phone._COND:
+        phone._SHARED.clear()
+        phone._SHARED_READ = False
+    loc = call(server, "GET", "/device/location", headers=host)[1]["location"]
+    assert loc["lat"] == -37.8136 and loc["device"] == "Pixel 8a"
+    # Off: gone from memory and from disk.
+    assert call(server, "POST", "/device/location", {"off": True}, pixel)[0].status == 200
+    assert not kept.exists()
+    with phone._COND:
+        phone._SHARED_READ = False
+    assert call(server, "GET", "/device/location", headers=host)[1]["location"] is None
+
+
+def test_a_stale_kept_point_is_not_read_back(server, host, tmp_path):
+    kept = tmp_path / "state" / "agent-media" / phone.SHARED_FILE
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(json.dumps({"d1": {"lat": 1, "lon": 2, "at": time.time() - phone.STALE_S - 10,
+                                       "precise": True, "device": "Old"}}))
+    with phone._COND:
+        phone._SHARED.clear()
+        phone._SHARED_READ = False
+    assert call(server, "GET", "/device/location", headers=host)[1]["location"] is None
