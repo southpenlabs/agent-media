@@ -2523,6 +2523,13 @@ ahead.
     **Actions built 8 Nov 2026**: `[[actions:]]` chips that open, listen,
     play, act in the app or run a registry task (`GET /actions/tasks`), a
     confirming one marked "…" with a bold border (§6.2.1).
+    **Pick by voice built 9 Nov 2026** (sasonica-app `a8959a05`): with
+    chips on offer, "the second one", "number three", "the last one" or
+    most of a chip's words pick it, in hands-free and from the mic key's
+    countdown, sent as its tap sends it; anything else goes as words (one
+    matcher with the question cards', voiceAnswer.ts, ordinals in all eight
+    languages). On the black screen the chips, or a one-question card's
+    options, as large buttons once the reply has been read. App only.
 
 60. **Recent replies in the full player** (David, 8 Nov 2026: "Can we get a
     list of the latest replies read from the full media player?" and "And
