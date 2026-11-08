@@ -816,6 +816,44 @@ into the thread as a message to its agent, `[From actions] <label>:
 <result>` (a headless session through sessiond, never over a card; a pane
 typed into). A task should be short or detach itself, as a restart does.
 
+#### `GET /patterns` · `POST /patterns/run` — gated (9 Nov 2026)
+
+Patterns (the one-tap proposal's part 6 items 5 and 8, part 7; David, 8 Nov
+2026: "fabric was the prompting engine I was trying to think of"): named
+prompts kept as plain markdown files, one folder per pattern with a
+`system.md` in it, the shape of Daniel Miessler's Fabric (MIT; the idea and
+the file shape only, no code). `patterns.py`.
+
+`GET /patterns` → `{"ok", "patterns": [{"name", "label", "kind",
+"source"}]}`, built-ins first, then the user's, then Fabric's. `kind`:
+
+| kind | built in | the app | `POST /patterns/run` answers |
+|---|---|---|---|
+| `tone` | `shorter`, `warmer`, `formal` | a chip's hold menu (rewrite, then send) and the Undo bar's "… instead" | `{"text"}`: the rewrite, plain text |
+| `answers` | `more_like_this` | a chip's hold: a fresh chip row in the direction of the one held | `{"replies": [..]}`, at most three, none the held words |
+| `message` | `summarize`, `todos`, `explain` | a message's hold: the result under it, never sent | `{"text"}`, as the model wrote it |
+
+`source` is `builtin`, `user` (`MEDIA_PATTERNS_DIR`, default
+`<config_dir>/patterns/<name>/system.md`) or `fabric` (a Fabric
+`data/patterns` folder named by `MEDIA_PATTERNS_FABRIC`, imported as is,
+`MEDIA_PATTERNS_FABRIC_ONLY` a comma list to take only some); a later source
+overrides an earlier by name. A folder may hold `meta.json` `{"label",
+"kind"}`; without one the label is the name in words and the kind is the
+built-in's of that name, else `message`.
+
+`POST /patterns/run {"session", "pattern", "text", "context"?}` →
+`{"ok", "pattern", "kind", "text" | "replies"}`. `context` is what `text`
+answers (the reply a chip answers), for tone and direction. A tone pattern is
+style guidance inside fixed rules (meaning, facts and language kept, the
+message only); a message pattern is the system prompt as it is, the text its
+input. Read by the fast-model chain (`MEDIA_PATTERN_MODEL`, then
+`MEDIA_FAST_MODELS`, then the follow-up's: the chips' own models), except a
+chat with people (a Matrix room) or a private or sealed thread: only
+`MEDIA_PRIVATE_MODELS`, and with none set 503 `reason: "no_private_model"`
+with an error saying so. 400 a bad session or no text, 413 text over 20000
+characters, 404 an unknown pattern, 503 `reason: "no_answer"` when no model
+answered. The text is never logged.
+
 #### `GET /conversation/log?item=<item>` · `?session=<session>` — gated
 
 The conversation — the chat itself — as **messages** read from the agent's
