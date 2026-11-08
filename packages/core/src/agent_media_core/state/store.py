@@ -1141,6 +1141,35 @@ class StateStore:
                         (json.dumps(ex), int(row_id)))
         return True
 
+    def mark_thread_heard(self, session: str) -> list[int]:
+        """Mark read (David, 8 Nov 2026: "when we Mark something as read,
+        should we also mark it as heard?"): every held reply of a thread not
+        yet heard is marked heard, so it no longer plays on the open, chains
+        from a Play, waits up next or shows as unheard. Its ▶ stays. A thread
+        is an agent session (`extras.source_session`) or a room
+        (`extras.session`). Returns the row ids it marked."""
+        if not session:
+            return []
+        with self._cursor() as cur:
+            cur.execute("SELECT id, extras FROM history WHERE sink = 'speech' "
+                        "AND (json_extract(extras, '$.source_session') = ? "
+                        "OR json_extract(extras, '$.session') = ?) "
+                        "AND json_extract(extras, '$.held') "
+                        "AND NOT coalesce(json_extract(extras, '$.heard'), 0)",
+                        (session, session))
+            rows = cur.fetchall()
+            marked = []
+            for rid, raw in rows:
+                try:
+                    ex = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                ex["heard"] = True
+                cur.execute("UPDATE history SET extras = ? WHERE id = ?",
+                            (json.dumps(ex), int(rid)))
+                marked.append(int(rid))
+        return marked
+
     def set_stopped_at(self, row_id: int, sentence: Optional[int]) -> bool:
         """Where a reply was interrupted (`extras.stopped_at`), or None to
         clear it: the first sentence not heard, so the app's ▶ on that

@@ -29,6 +29,10 @@ def voice(monkeypatch):
     monkeypatch.setattr(canvas, "speech_state", lambda: dict(state))
     ran: list = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: ran.append(argv))
+    # The listing's titles would ask tmux through subprocess.run, which the
+    # fake Popen above breaks (a TypeError on a host with a cold cache).
+    from agent_media_server import sessions
+    monkeypatch.setattr(sessions, "title_of", lambda s: "")
     monkeypatch.setattr(up_next, "IDLE_S", 0.2)
     monkeypatch.setattr(up_next, "POLL_S", 0.02)
     monkeypatch.setattr(up_next, "START_GRACE_S", 0.3)
@@ -168,3 +172,31 @@ def test_the_stream_passes_after_on(server, shelf, signed_in, voice, monkeypatch
     sub = thread_events.subscribe(SID, "p8a")
     assert _wait(lambda: calls == [(SID, True), (SID, False)])
     thread_events.unsubscribe(*sub)
+
+
+def test_mark_read_marks_the_threads_held_replies_heard(server, shelf, signed_in, voice):
+    """`POST /speech/heard` (Mark read): the thread's held replies count as
+    heard and it leaves up next; another thread's are untouched."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    a = _row("one")
+    b = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                       source="claude-code", text="two",
+                       extras={"held": True, "source_session": SID})
+    other = _row("theirs", session=SID_B)
+    plain = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                           source="claude-code", text="spoken", extras={"source_session": SID})
+    up_next.add(SID, a)
+    res, obj = call(server, "POST", "/speech/heard", {"session": SID}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "marked": 2}
+    assert st.history_row(a)["extras"]["heard"] is True
+    assert st.history_row(b)["extras"]["heard"] is True
+    assert "heard" not in st.history_row(other)["extras"]
+    assert "heard" not in st.history_row(plain)["extras"]
+    assert up_next.listing() == []
+    res, obj = call(server, "POST", "/speech/heard", {"session": SID}, AUTH)
+    assert res.status == 200 and obj["marked"] == 0
+    res, obj = call(server, "POST", "/speech/heard", {"session": "x"}, AUTH)
+    assert res.status == 400
+    assert voice[1] == []

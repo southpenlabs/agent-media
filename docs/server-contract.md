@@ -3220,6 +3220,17 @@ The speech bar.
   open did before); `remove` takes it off and plays nothing (the reply keeps
   its Play). 400 `"not a session id"` or `'action must be "play" or
   "remove"'`; 404 `"that thread is not up next"`.
+- **Mark read marks it heard** (8 Nov 2026, David: "when we Mark something
+  as read, should we also mark it as heard?"). `POST /speech/heard` (gated
+  like `/speech/ctl`, guests too) `{"session"}` → `{"ok": true, "marked":
+  n}`: every held reply of that thread not yet heard (agent thread:
+  `extras.source_session`; room: `extras.session`) gets `extras.heard`, as
+  if played to its end, so it loses `unheard` (§6.2.2), does not play on
+  the open, is not chained by `replay-unheard`, and the thread leaves Up
+  next. Each keeps its ▶. A later Mark unread does not bring it back. The
+  app calls it on every Mark read (the list's, the ⋮'s, the one under the
+  newest message) and ignores an older server's 404 (`GET /features`
+  `mark_heard` says it is here). 400 `"not a session id"`.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
@@ -4777,6 +4788,7 @@ local look, never a network call:
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
+| `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |

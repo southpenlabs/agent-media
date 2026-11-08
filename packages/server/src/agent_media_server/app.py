@@ -419,7 +419,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -478,7 +478,7 @@ CORS_PATHS = CORS_PATHS | ROOM_DELEGATE_PATHS
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
-GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/balance",
+GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/heard", "/speech/balance",
                          "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
                          "/book/state",
@@ -3270,6 +3270,25 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         print(f"speech/up-next: {action} {us[:8]}", file=sys.stderr)
         _json(h, 200, {"ok": True, "up_next": up_next.listing()})
+    elif path == "/speech/heard":
+        # Mark read (§6.5): the thread's held replies count as heard — no
+        # play on the open, no chain, off up next; each keeps its ▶.
+        ok, detail = auth.may_control_speech(_bearer(h))
+        if not ok:
+            _json(h, detail.pop("status", 403), {"ok": False, **detail})
+            return True
+        from . import up_next
+        from agent_media_core.state import StateStore
+
+        body = _read_json(h) or {}
+        us = str(body.get("session") or "")
+        if not sessions._SESSION.fullmatch(us):
+            _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        marked = StateStore().mark_thread_heard(us)
+        up_next.remove(us)
+        print(f"speech/heard: {us[:8]} {len(marked)} marked", file=sys.stderr)
+        _json(h, 200, {"ok": True, "marked": len(marked)})
     elif path == "/speech/ctl":
         # The app's speech bar buttons. The caller's ABS bearer, like
         # /reply, and only the listener's verbs (_APP_SPEECH_ACTIONS).
