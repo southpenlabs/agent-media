@@ -110,3 +110,28 @@ def test_play_now_is_a_reply_action_where_there_is_a_gate(gate):
     assert t and t["label"] == "Play now" and t["confirm"] is False
     assert features.detect()["play_gate"] is True
     reply_actions.reset()
+
+
+def test_a_missed_music_load_is_not_replayed_in_a_treatment(gate, monkeypatch, tmp_path):
+    """A phone reconnecting mid-treatment is not handed a song's load it
+    missed before (speech_frames.frames_after); a fresh one, or speech, is."""
+    import time
+
+    from agent_media_server import speech_frames
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    speech_frames._reset_for_tests()
+    try:
+        now = time.time()
+        for ch in ("music", "speech"):
+            hub = speech_frames._HUBS[ch]
+            hub.frames.append({"seq": 1, "at": now - 60, "ops": [{"op": "load", "uri": YT}]})
+            hub.frames.append({"seq": 2, "at": now - 60, "ops": [{"op": "pause", "on": True}]})
+            hub.frames.append({"seq": 3, "at": now, "ops": [{"op": "load", "uri": YT}]})
+        gate("exit 1")
+        assert [f["seq"] for f in speech_frames.frames_after(0, "music")] == [1, 2, 3]
+        gate("exit 0")
+        assert [f["seq"] for f in speech_frames.frames_after(0, "music")] == [2, 3]
+        assert [f["seq"] for f in speech_frames.frames_after(0, "speech")] == [1, 2, 3]
+    finally:
+        speech_frames._reset_for_tests()

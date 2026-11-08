@@ -3953,7 +3953,10 @@ like the speech gate. red5: dotfiles' `phs-treatment-guard now`.
   **Never**: pause, stop, volume, seek, next/prev in a queue, resuming what
   is loaded, a book's self-heal reload of the part that was playing.
 - **Asked twice**: on the way in and again right before the audio starts,
-  after a fetch or a copy.
+  after a fetch or a copy. And once more on the phone's side of the frames
+  (§ speech frames): a phone that reconnects is handed the frames it missed
+  (up to 2 min), and while the gate holds starts a missed music, hand-off or
+  book `load` older than 10 s is not replayed (`frames_after`).
 - **Late is held**: a start carried out more than `MEDIA_PLAY_MAX_AGE_S`
   (600 s with a gate; 0 off) after it was asked for is held the same way. A
   router's fallback (Sasonica's player gave up, the Termux mpv takes it) is

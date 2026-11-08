@@ -542,9 +542,30 @@ def seq(channel: str = "speech") -> int:
 def frames_after(cursor: int, channel: str = "speech") -> list[dict]:
     """Frames newer than `cursor` and young enough to still mean something."""
     hub = _HUBS[channel]
-    cutoff = time.time() - REPLAY_S
+    now = time.time()
+    cutoff = now - REPLAY_S
     with hub.lock:
-        return [f for f in hub.frames if f["seq"] > cursor and f["at"] >= cutoff]
+        out = [f for f in hub.frames if f["seq"] > cursor and f["at"] >= cutoff]
+    if channel != "speech" and any(f["at"] < now - REPLAY_LATE_S and _starts(f) for f in out):
+        # A phone that reconnects is handed what it missed, up to REPLAY_S
+        # late: a song's load sent before a treatment began would start in
+        # it (8 Nov 2026). While the play gate holds starts, a missed load is
+        # not replayed (agent_media_core.play_gate); a fresh one passed the
+        # gate a moment ago and goes as it is.
+        from agent_media_core import play_gate
+
+        if play_gate.blocked():
+            log.info("frames: %s: a missed load not replayed (play gate)", channel)
+            out = [f for f in out if not (f["at"] < now - REPLAY_LATE_S and _starts(f))]
+    return out
+
+
+#: A frame older than this, handed over on a reconnect, is a late one.
+REPLAY_LATE_S = 10.0
+
+
+def _starts(frame: dict) -> bool:
+    return any(o.get("op") == "load" for o in frame.get("ops") or [])
 
 
 def report(device: str, body: dict, channel: str = "speech") -> tuple[bool, dict]:
