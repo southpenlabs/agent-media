@@ -10283,6 +10283,17 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="minutes of fade before the stop (default 3)")
     s.add_argument("--target", default="", help="rooms|local|phone")
     s.set_defaults(func=cmd_sleep)
+    s = sub.add_parser("place", help="where a place is, for a reply's [[map:]] marker "
+                                      "(place_find; maps proposal step 2)")
+    psub = s.add_subparsers(dest="place_cmd", required=True)
+    t = psub.add_parser("find", help="the best matches, each as `name @ lat,lon` to copy "
+                                      "into [[map: …]]")
+    t.add_argument("words", nargs="+", help="what to find: a name, an address, \"cafe Carlton\"")
+    t.add_argument("--near", default="", help="lean towards `phone` (its shared location) "
+                                             "or `lat,lon`")
+    t.add_argument("--limit", type=int, default=5)
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_find)
     s = sub.add_parser("tune", help="songs of the listener's own near some words "
                                      "(tune_related; the reply's tune is reply_tune)")
     tsub = s.add_subparsers(dest="tune_cmd", required=True)
@@ -11209,6 +11220,34 @@ def _end_opts_before_time(argv: list[str]) -> list[str]:
             a.insert(j, "--")
         break
     return a
+
+
+def cmd_place_find(a) -> int:
+    from . import place_find
+
+    words = " ".join(a.words or []).strip()
+    if not words:
+        print("place find: say what to look for", file=sys.stderr)
+        return 2
+    near = place_find.near_point(a.near) if a.near else None
+    if a.near and near is None:
+        print(f"place find: no point for --near {a.near}"
+              + (" (the phone is not sharing its location)" if a.near == "phone" else ""),
+              file=sys.stderr)
+    try:
+        rows = place_find.find(words, near=near, limit=a.limit)
+    except Exception as e:  # noqa: BLE001 - the geocoder is out of reach
+        print(f"place find: the geocoder did not answer: {e}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return 0 if rows else 1
+    if not rows:
+        print("place find: nothing found", file=sys.stderr)
+        return 1
+    for r in rows:
+        print(f"{place_find.marker_part(r)}    ({r['address']})")
+    return 0
 
 
 def cmd_tune_index(a) -> int:

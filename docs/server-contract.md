@@ -9294,6 +9294,23 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - Any signed-in device or the host; a guest device gets 403 `guest`
   (location is the owner's).
 - In `/features`: `map: true` (the app offers the Map entry only then).
+- **A chat's places** (9 Nov 2026, maps proposal step 2; David: "Start on
+  places"). A reply's `[[map: Name @ lat,lon | …]]` pins places and
+  `[[route: A @ lat,lon | B @ lat,lon]]` draws a line through them in order
+  (core `intake/_text.py extract_places`; never spoken, never shown). A part
+  without coordinates is dropped; a route of one point is a pin. Each
+  message on `/conversation/log` and the thread stream then has `places:
+  [{kind: "pins" | "route", points: [{name, lat, lon}]}]`, one per marker.
+  `GET /map/layers?thread=<session>` puts `{id: "thread:<session>", name:
+  "Places in this chat", kind: "points", icon: "pin", default_on: true}`
+  first (400 for a bad id); `GET /map/layer?id=thread:<session>` answers
+  every place in the chat's newest 2000 messages, a Point each (`title`,
+  `msg` the message id, `link` `/t/<session>`, `group` the marker's number)
+  and a LineString per route (`route: true`, `title` "A → B").
+- **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
+  (core `place_find.py`): an agent's coordinates for the marker, from a
+  Nominatim geocoder (`MEDIA_GEOCODER_URL`, default
+  nominatim.openstreetmap.org), each match printed as `name @ lat,lon`.
 
 ### 6.51 Related threads from the org-roam graph — gated (built 7 Nov 2026)
 
