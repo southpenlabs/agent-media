@@ -218,7 +218,10 @@ def has_item(target: Target) -> bool:
 
 
 def play(path: Path, target: Target, start_ms: int = 0, rate: Optional[float] = None) -> Optional[dict]:
-    """Start `path` in the app at `start_ms`. None = not taken, use mpv."""
+    """Start `path` in the app at `start_ms`. None = not taken, use mpv.
+    Raises play_gate.PlayHeld when a start may not happen now."""
+    from . import play_gate
+    play_gate.check(str(path), target=target.name, kind="book")
     if not reachable(target):
         return None
     item = item_for(path)

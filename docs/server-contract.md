@@ -801,7 +801,9 @@ take-back. MEDIA_ROOM_REPLIES=0 turns them off.
 `GET /actions/tasks` → `{"ok", "tasks": [{"name", "label", "confirm"}]}`:
 what a `task` action may name. Built in, `restart <service>` for each of
 this host's services but sessiond (`media restart-services --only <name>
---after 10`, run in-process; confirm), then what add-ons offer through the
+--after 10`, run in-process; confirm), and `play held` ("Play now", no
+confirm) where there is a play gate (§6.9a "The play gate": the thread's
+newest held start, played now on purpose), then what add-ons offer through the
 `agent_media.action_tasks` entry point group (a list, or a callable giving
 one, of `{name, label, confirm, run}`, `run(session)` answering the note's
 words or `(ok, words)`).
@@ -3924,6 +3926,60 @@ the station cannot play there (`abs`) or plays in the hand-off app, when
 what plays is not a YouTube track or web address (a book, a file), or while
 a move is under way. The app sends it after a choice in the picker (David,
 20 Oct 2026).
+
+#### The play gate — held during a treatment (8 Nov 2026)
+
+`agent_media_core.play_gate` (David, 8 Nov 2026: a song asked for before a
+PHS treatment started on the phone in the middle of one — a slow phone fetch,
+retried late; he chose "Gate + hold"). `MEDIA_PLAY_GATE_CMD` names a command
+run with no arguments before every media **start**; unset (or `-`), there is
+no gate and nothing here changes. Exit 1 lets the start through; anything
+else holds it — exit 0 ("a treatment is under way"), 2 ("can't tell"), a
+crash, a timeout (`MEDIA_PLAY_GATE_TIMEOUT_S`, 10 s): it **fails closed**,
+like the speech gate. red5: dotfiles' `phs-treatment-guard now`.
+`GET /features` says `play_gate: true` where there is one.
+
+- **What counts as a start**: every player's own play — Mopidy
+  (`sinks/music.py`), the Termux mpv (`music_local`), Sasonica's player
+  (`music_sasonica`), the ABS app (`music_app`), the book channel
+  (`sinks/book.py`, `phone_player.play`), Spotify (`spotify_remote.play`),
+  the hand-off app (`radio_io.HandoffPlayer.send`) and the radio's rooms
+  queue — an append included; so every route that reaches one: these
+  controls, `/music/radio`, the MCP `music_play`/`book_play`, `media music
+  play`, `media book play`, a book playlist's next part, a reply's
+  `[[tune:]]` (held as its line, `tune:<line>`) and its music bed (held,
+  never written down: a reply spoken to the earbuds in a treatment goes
+  without one). The radio feeds nothing in a treatment and carries on after.
+  **Never**: pause, stop, volume, seek, next/prev in a queue, resuming what
+  is loaded, a book's self-heal reload of the part that was playing.
+- **Asked twice**: on the way in and again right before the audio starts,
+  after a fetch or a copy.
+- **Late is held**: a start carried out more than `MEDIA_PLAY_MAX_AGE_S`
+  (600 s with a gate; 0 off) after it was asked for is held the same way. A
+  router's fallback (Sasonica's player gave up, the Termux mpv takes it) is
+  judged by the first ask; a play the server hands to `media` carries the
+  time (`MEDIA_PLAY_REQUESTED_AT`), as does a "Play the song" waiting for the
+  reading to end.
+- **A held start never plays by itself.** It is written down
+  (`play-held.json` in the state dir: `id`, `at`, `uri`, `title`, `kind`
+  music|book|tune, `target`, `session` when known, `reason`; 20 kept, 12 h,
+  the same thing held again within 10 min is the same hold) and the caller
+  is told: `media` exits 3 with the reason and how to play it anyway; MCP
+  tools answer `{"ok": false, "held": true, "reason", "id"}`; these controls
+  answer **409** `{"error", "held": true, "code": "held", …the GET
+  answer}`.
+- **Play now**: `GET /music` adds `"on_hold": [{id, at, uri, title, kind,
+  target, session, reason}]` (newest first; the key is absent without a
+  gate). `{"action": "held", "id"?, "play": true}` plays one now, through the
+  gate on purpose (the newest when no `id`); `{"action": "held", "id",
+  "dismiss": true}` forgets it; 404 for an unknown id. The reply action
+  registry (`GET /actions/tasks`) has `task play held` ("Play now", no confirm) where
+  there is a gate: the thread's newest held start, else the newest. `media
+  music held [ID] [--play|--dismiss|--json]` from a shell. Once the treatment
+  is over the phone gets one note naming what was held (§6.23, id
+  `play-held`, kept); never during one.
+- **On purpose**: `"force": true` on `play`/`add`/`book`/`song` (and the
+  MCP tools' `force`, `media music|book play --in-treatment`) goes through.
 
 #### `GET /music/recent` — gated (like `/speech/now`) (28 Sep 2026)
 

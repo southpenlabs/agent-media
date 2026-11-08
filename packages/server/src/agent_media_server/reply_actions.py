@@ -129,14 +129,35 @@ def _restart_task(short: str) -> dict:
             "run": run}
 
 
+def _play_held_task() -> dict:
+    """`play held` ("Play now"): the start the play gate held for this thread
+    (agent_media_core.play_gate), else the newest held, played now on
+    purpose. An agent told a play was held offers it under its reply:
+    `[[actions: Play now -> task play held]]`. No confirm: undone by Stop."""
+    def run(session: str) -> tuple[bool, str]:
+        from agent_media_core import play_gate
+
+        r = play_gate.play_now("", session)
+        e = r.get("played") or {}
+        if r.get("ok"):
+            return True, f"playing {e.get('title') or e.get('uri')}"
+        return False, str(r.get("error") or "failed")
+
+    from agent_media_core.play_gate import TASK_NAME
+    return {"name": TASK_NAME, "label": "Play now", "confirm": False, "run": run}
+
+
 def _builtin() -> list[dict]:
+    from agent_media_core import play_gate
+
+    gate = [_play_held_task()] if play_gate.enabled() else []
     try:
         from agent_media_core import restart_services as rs
 
         svcs = rs.services()
     except Exception:  # noqa: BLE001 - no service manager here: no restarts
-        return []
-    out, seen = [], set()
+        return gate
+    out, seen = list(gate), set()
     for s in svcs:
         if rs.is_sessiond(s) or s.short in seen:
             continue

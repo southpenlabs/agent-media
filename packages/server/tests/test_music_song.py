@@ -27,7 +27,7 @@ LIB = {"source": "library", "title": "Gymnopédie No. 1", "artist": "Erik Satie"
 @pytest.fixture()
 def player(monkeypatch):
     ran: list = []
-    monkeypatch.setattr(music, "_run", lambda argv: (ran.append(argv), (True, ""))[1])
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (ran.append(argv), (True, ""))[1])
     monkeypatch.setattr(music, "_answer", lambda: {"now": None})
     monkeypatch.setattr(music, "_speaking", lambda: False)
     yield ran
@@ -98,7 +98,7 @@ def test_while_a_reply_is_read_it_waits_for_the_end(server, signed_in, audio_hos
 
 
 def test_a_failed_play_is_502(server, signed_in, audio_host, player, monkeypatch):
-    monkeypatch.setattr(music, "_run", lambda argv: (False, "no player"))
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (False, "no player"))
     rid = _row({"bed_song": FAV})
     res, obj = call(server, "POST", "/music", {"action": "song", "id": rid}, headers=AUTH)
     assert res.status == 502 and obj["error"] == "no player"

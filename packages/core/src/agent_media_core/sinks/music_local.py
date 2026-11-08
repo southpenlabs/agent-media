@@ -335,14 +335,25 @@ class SinkMusicLocal:
     # ---- playback (download happens on the phone, over SSH) --------------
 
     def play(self, uri: str, target: Target = DEFAULT_TARGET,
-             replace: bool = True, **_: object) -> None:
+             replace: bool = True, **opts: object) -> None:
         """Download `uri` on the phone (residential IP) and play it locally.
 
         Delegates acquisition+load to the phone-side helper over SSH because the
         download must originate on the residential IP. `replace=False` appends to
         the phone's mpv playlist instead of replacing it.
+
+        The play gate (play_gate) is asked on the way in and again right
+        before the load. The phone helper fetches and plays in one step, so
+        that second ask is before its ssh, not after its download.
         """
+        from .. import play_gate
+        with play_gate.request(title=str(opts.get("title") or "")):
+            play_gate.check(uri, target=target.name or "phone")
+            self._play(uri, target, replace, play_gate)
+
+    def _play(self, uri: str, target: Target, replace: bool, play_gate) -> None:
         if seeded := seed_from_rooms_cache(uri):
+            play_gate.check(uri, target=target.name or "phone", stage="load")
             title = _phone_title(_watch_id(uri) or "")
             mode = "replace" if replace else "append-play"
             cmd = ["loadfile", seeded, mode]
@@ -361,6 +372,7 @@ class SinkMusicLocal:
         addon = youtube_addon.get("youtube-downloads")
         if addon is None:
             raise ipc.MpvIpcError("sink-music-local: downloading from YouTube isn't available on this server")
+        play_gate.check(uri, target=target.name or "phone", stage="load")
         try:
             r = addon.phone_play(uri, replace)
         except subprocess.TimeoutExpired as e:

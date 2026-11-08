@@ -488,7 +488,15 @@ def play(vid: str) -> Optional[dict]:
         at = st["queue"].index(song)
         st["queue"].remove(song)
         st["fetching"] = song
-    took = _send(where, song, replace=True)
+    from .play_gate import PlayHeld
+    try:
+        took = _send(where, song, replace=True)
+    except PlayHeld:
+        # Held (a treatment): the song goes back where it was on the list.
+        with _station() as st:
+            st["fetching"] = None
+            st["queue"].insert(min(at, len(st["queue"])), song)
+        raise
     with _station() as st:
         st["fetching"] = None
         if took:
@@ -614,6 +622,12 @@ def tick() -> None:
             log.info("radio: %s", OFF_HERE)
             st["on"] = False
             return
+    from . import play_gate
+    if play_gate.blocked():
+        # In a treatment (play_gate): nothing new is queued or started; the
+        # station carries on feeding once it is over. Not held one by one —
+        # a station's next song is not something to offer back.
+        return
     p = _props(where)
     if p is None:
         return

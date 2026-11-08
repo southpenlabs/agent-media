@@ -6943,6 +6943,40 @@ def cmd_bookmarks(a) -> int:
                           json_out=bool(getattr(a, "json", False)))
 
 
+def _cmd_music_held(a) -> int:
+    """`media music held [ID] [--play|--dismiss] [--json]`: the starts the
+    play gate held (play_gate.py) — listed, played now on purpose, or
+    forgotten. Nothing held ever plays by itself."""
+    from . import play_gate
+
+    hid = (a.uri or "").strip()
+    if getattr(a, "play", False):
+        r = play_gate.play_now(hid)
+        if not r.get("ok"):
+            print(f"media music held: {r.get('error')}", file=sys.stderr)
+            return 1
+        e = r.get("played") or {}
+        print(f"▶ {e.get('title') or e.get('uri')}")
+        return 0
+    if getattr(a, "dismiss", False):
+        if not play_gate.dismiss(hid):
+            print("media music held --dismiss: give the id of a held start", file=sys.stderr)
+            return 1
+        return 0
+    rows = play_gate.held()
+    if getattr(a, "json", False):
+        print(json.dumps({"enabled": play_gate.enabled(), "held": rows}))
+        return 0
+    if not rows:
+        print("nothing held" + ("" if play_gate.enabled() else " (no play gate here: MEDIA_PLAY_GATE_CMD unset)"))
+        return 0
+    for e in rows:
+        when = time.strftime("%H:%M", time.localtime(float(e.get("at") or 0)))
+        print(f"{e.get('id')}  {when}  {e.get('kind')}  {e.get('title') or e.get('uri')}"
+              f"  — {e.get('reason')}")
+    return 0
+
+
 def cmd_music(a) -> int:
     from .route import coerce_content_type, detect_content_type
 
@@ -6997,6 +7031,8 @@ def cmd_music(a) -> int:
         return _cmd_music_radio(m, a)
     if a.action in ("bed", "bed-off", "bed-list"):
         return _music_bed_suggest(m, a.action, a.uri or "", where=getattr(a, "where", "") or "")
+    if a.action == "held":
+        return _cmd_music_held(a)
     if a.action == "play":
         if not a.uri:
             print("media music play: a URI is required", file=sys.stderr)
@@ -7010,10 +7046,13 @@ def cmd_music(a) -> int:
             radio.stop()
         where = _resolve_music_where(getattr(a, "where", "auto"))
         ct = coerce_content_type(getattr(a, "as_type", None)) or detect_content_type(a.uri)
+        from .play_gate import PlayHeld
         if where in ("abs", "sasonica"):
             try:
                 m.play(a.uri, Target(name=where), replace=not a.add,
                        title=getattr(a, "title", "") or "")
+            except PlayHeld:
+                raise              # said by main(), exit EXIT_HELD
             except Exception as e:  # noqa: BLE001
                 print(f"media music play ({where}) failed: {e}", file=sys.stderr)
                 return 1
@@ -7030,6 +7069,8 @@ def cmd_music(a) -> int:
                 return 2
             try:
                 SinkMusicLocal().play(a.uri, replace=not a.add)
+            except PlayHeld:
+                raise
             except Exception as e:  # noqa: BLE001
                 print(f"media music play (phone) failed: {e}", file=sys.stderr)
                 return 1
@@ -7870,6 +7911,9 @@ def cmd_book(a) -> int:
             return 0
         if not r.get("ok", True):
             print(r.get("reason", "book play failed"), file=sys.stderr)
+            if r.get("held"):
+                from .play_gate import EXIT_HELD
+                return EXIT_HELD
             return 1
         print(f"▶ {r['uri']} (from {fmt_time((r.get('resumed_from_ms') or 0)/1000)})")
         return 0
@@ -10266,7 +10310,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
                             "chapters", "chapter", "radio", "dislike",
-                            "bed", "bed-off", "bed-list"))
+                            "bed", "bed-off", "bed-list", "held"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "
@@ -10295,6 +10339,13 @@ def _build_parser() -> argparse.ArgumentParser:
                         "control surfaces that need structured state")
     s.add_argument("--add", action="store_true",
                    help="for 'play': queue without clearing the playlist")
+    s.add_argument("--in-treatment", action="store_true",
+                   help="for 'play': play even while the play gate holds starts "
+                        "(MEDIA_PLAY_GATE_CMD: a treatment under way)")
+    s.add_argument("--play", action="store_true",
+                   help="for 'held': play the held start (the id given, else the newest) now")
+    s.add_argument("--dismiss", action="store_true",
+                   help="for 'held': forget the held start with the id given")
     s.add_argument("--restart-first", action="store_true",
                    help="for 'prev': restart the current track if past its "
                         "start (⏮ style; grace = MEDIA_POPUP_PREV_RESTART_S)")
@@ -10999,6 +11050,8 @@ def _add_book_parser(sub) -> None:
                     help="explicit start offset in ms")
     bp.add_argument("--target", default="", help="rooms|local|phone")
     bp.add_argument("--title", default="", help=argparse.SUPPRESS)
+    bp.add_argument("--in-treatment", action="store_true",
+                    help="play even while the play gate holds starts (MEDIA_PLAY_GATE_CMD)")
 
     biy = b.add_parser("import-youtube", help="download a YouTube video/playlist into Audiobookshelf")
     biy.add_argument("uri", help="YouTube video or playlist URL")
@@ -11142,11 +11195,18 @@ def main(argv=None) -> int:
     if argv[:1] == ["session"]:
         return cmd_session(argparse.Namespace(args=list(argv[1:])))
     args = _build_parser().parse_args(_end_opts_before_time(argv))
+    from . import play_gate
+    if getattr(args, "in_treatment", False):
+        # `--in-treatment`: this play goes through the play gate on purpose.
+        os.environ["MEDIA_PLAY_FORCE"] = "1"
     try:
         return args.func(args)
     except ipc.MpvIpcError as e:
         print(f"media: speech broker not reachable: {e}", file=sys.stderr)
         return 1
+    except play_gate.PlayHeld as e:
+        print(f"media: {e}", file=sys.stderr)
+        return play_gate.EXIT_HELD
 
 
 if __name__ == "__main__":

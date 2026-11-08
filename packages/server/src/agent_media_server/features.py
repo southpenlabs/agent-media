@@ -60,6 +60,10 @@ never a network call, so the app can ask on every start.
             where personal use allows it (personal_use "facebook-stories",
             MEDIA_STORIES its own setting). Nothing about it reaches the
             server: this is only whether the row is offered
+  play_gate starts are held during a treatment (MEDIA_PLAY_GATE_CMD,
+            agent_media_core.play_gate, 8 Nov 2026): GET /music carries
+            `on_hold`, POST /music {"action": "held", "id"?, "play"|"dismiss"}
+            plays one now or forgets it, and a play with `force` goes through
   signed_in the app's signed-in browser may read pages and play friends-only
             videos (personal_use "signed-in-reading"); read_page follows it
   personal_use  {"on", "methods": {name: allowed}} (personal_use.py, 2 Nov
@@ -140,12 +144,18 @@ def _personal(name: str):
     return check
 
 
+def _play_gate() -> bool:
+    from agent_media_core import play_gate
+
+    return play_gate.enabled()
+
+
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
           "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "music_sung": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
-          "youtube": _personal("youtube")}
+          "youtube": _personal("youtube"), "play_gate": _play_gate}
 
 
 def detect() -> dict[str, bool]:

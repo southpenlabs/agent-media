@@ -2325,6 +2325,10 @@ def main() -> None:
     # The radio's loop (agent_media_server.radio): idle until a station is on.
     from agent_media_server import radio as _radio
     _radio.start()
+    # Starts the play gate held during a treatment: one phone note once it
+    # is over (agent_media_core.play_gate); nothing where there is no gate.
+    from agent_media_core import play_gate as _play_gate
+    _play_gate.start_notifier()
     # This server on its accounts' lists at sasonica.com, daily (roadmap 20).
     from agent_media_server import servers_report as _servers_report
     _servers_report.start()

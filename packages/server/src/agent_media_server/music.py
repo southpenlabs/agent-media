@@ -84,6 +84,9 @@ ACTIONS = {
     # Suggest what is playing (or `uri`) for the backing music; `off` takes
     # it back (agent_media_core.music_bed_favourites.suggest).
     "bed": "bed",
+    # A start the play gate held (agent_media_core.play_gate): played now on
+    # purpose, or forgotten.
+    "held": "held",
 }
 
 _CACHE_TTL_S = 2.5
@@ -108,24 +111,51 @@ def _status() -> dict:
     return cli._music_status_json(SinkMusicRouter(SinkMusic()))
 
 
-def _run(argv: list[str]) -> tuple[bool, str]:
+#: The last `_run`'s exit code, per thread: EXIT_HELD says the play gate held
+#: it (agent_media_core.play_gate), which the answer reports as `held`.
+_RC = threading.local()
+
+
+def _cli(argv: list[str], requested_at: float | None = None) -> tuple[bool, str]:
+    """`media <argv>`, carrying when the play was asked for (play_gate:
+    a play that would start too late is held, not started)."""
+    from agent_media_core import play_gate
+
+    env = play_gate.child_env()
+    if requested_at is not None:
+        env["MEDIA_PLAY_REQUESTED_AT"] = f"{requested_at:.3f}"
+    _RC.code = None
+    try:
+        r = subprocess.run([sys.executable, "-m", "agent_media_core.cli", *argv],
+                           capture_output=True, text=True, timeout=_CMD_TIMEOUT_S, env=env)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return False, str(e)
+    _RC.code = r.returncode
+    said = (r.stderr or r.stdout or "").strip()
+    # A held play's words are said whole: why, and how to play it anyway.
+    return r.returncode == 0, said[-1000:] if _was_held() else said[-300:]
+
+
+def _was_held() -> bool:
+    from agent_media_core.play_gate import EXIT_HELD
+
+    return getattr(_RC, "code", None) == EXIT_HELD
+
+
+def _run(argv: list[str], requested_at: float | None = None) -> tuple[bool, str]:
     """`media music <argv>`, as the desk runs it."""
-    try:
-        r = subprocess.run([sys.executable, "-m", "agent_media_core.cli", "music", *argv],
-                           capture_output=True, text=True, timeout=_CMD_TIMEOUT_S)
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, str(e)
-    return r.returncode == 0, (r.stderr or r.stdout or "").strip()[-300:]
+    return _cli(["music", *argv], requested_at)
 
 
-def _run_book(uri: str) -> tuple[bool, str]:
+def _run_book(uri: str, force: bool = False) -> tuple[bool, str]:
     """`media book play <uri>` (resumes where it was left)."""
-    try:
-        r = subprocess.run([sys.executable, "-m", "agent_media_core.cli", "book", "play", "--", uri],
-                           capture_output=True, text=True, timeout=_CMD_TIMEOUT_S)
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, str(e)
-    return r.returncode == 0, (r.stderr or r.stdout or "").strip()[-300:]
+    return _cli(["book", "play", *(["--in-treatment"] if force else []), "--", uri])
+
+
+def _held_answer(said: str) -> dict:
+    """The answer to a play the play gate held: 409, `held`, and why."""
+    return {"error": said.removeprefix("media: ") or "held: a treatment is under way",
+            "held": True, "code": "held", "status": 409, **_answer()}
 
 
 def _reset_cache(forget: bool = False) -> None:
@@ -255,7 +285,21 @@ def _answer() -> dict:
         out["move"] = move
     out["bed"] = _bed_state(now)
     out["verdict"] = _verdict(now)
+    held = _held_list()
+    if held is not None:
+        out["on_hold"] = held
     return out
+
+
+def _held_list() -> list | None:
+    """The starts the play gate held, newest first, for a "Play now"; None
+    where there is no gate (the key is left out)."""
+    from agent_media_core import play_gate
+
+    if not play_gate.enabled():
+        return None
+    keep = ("id", "at", "uri", "title", "kind", "target", "session", "reason")
+    return [{k: e.get(k) for k in keep} for e in play_gate.held()]
 
 
 def _verdict(now: dict) -> str | None:
@@ -523,13 +567,14 @@ def _speaking() -> bool:
         return False
 
 
-def _song_after_speech(argv: list[str]) -> None:
-    """Play the song once the reading ends (bounded), never over it."""
+def _song_after_speech(argv: list[str], requested_at: float | None = None) -> None:
+    """Play the song once the reading ends (bounded), never over it. Judged
+    by when it was asked for (play_gate): too late, it is held, not played."""
     deadline = time.monotonic() + _SONG_WAIT_S
     while _speaking() and time.monotonic() < deadline:
         time.sleep(_SONG_POLL_S)
     time.sleep(_SONG_SETTLE_S)
-    done, said = _run(argv)
+    done, said = _run(argv, requested_at)
     _reset_cache()
     if not done:
         print(f"music: song after the reply failed: {said}", file=sys.stderr)
@@ -565,8 +610,10 @@ def _song_control(body: dict) -> tuple[bool, dict]:
     argv = ["play", uri]
     if label(song):
         argv.append(f"--title={label(song)}")
+    if body.get("force") is True:
+        argv.append("--in-treatment")
     if _speaking():
-        threading.Thread(target=_song_after_speech, args=(argv,), name="music-song",
+        threading.Thread(target=_song_after_speech, args=(argv, time.time()), name="music-song",
                          daemon=True).start()
         return True, {**_answer(), "song": {**shown(song), "when": "after"}}
     done, said = _run(argv)
@@ -768,7 +815,7 @@ def _spotify_play(body: dict) -> tuple[bool, dict]:
     refusal carries `code`: signed_out, sign_in_again, premium, no_device
     (with `link`, the album on Spotify, which opens the app), choose (with
     `devices`) or spotify."""
-    from agent_media_core import music_links, spotify_remote
+    from agent_media_core import music_links, play_gate, spotify_remote
 
     uri = str(body.get("uri") or "")
     a = music_links.find(uri) if uri.startswith("album:") else None
@@ -778,6 +825,8 @@ def _spotify_play(body: dict) -> tuple[bool, dict]:
         r = spotify_remote.play(music_links.spotify_uri(uri) or "", device=str(body.get("device") or ""))
     except spotify_remote.RemoteError as e:
         return False, {"error": str(e), "code": e.code, "link": a.get("url"), **e.extra, "status": 409}
+    except play_gate.PlayHeld:
+        raise                      # control() answers it as held
     except Exception as e:  # noqa: BLE001 — Spotify unreachable
         return False, {"error": f"couldn't reach Spotify: {e}", "code": "spotify", "status": 502}
     return True, {"spotify": True, "device": r.get("device"), "title": a.get("title")}
@@ -796,6 +845,46 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     action = str(body.get("action") or "")
     if action not in ACTIONS:
         return False, {"error": "unknown action", "status": 400}
+    if action == "held":
+        return _held_control(body)
+    from agent_media_core import play_gate
+
+    # `force: true`: through the play gate on purpose (music in a treatment).
+    force = body.get("force") is True
+    try:
+        with play_gate.request(force=force, session=str(body.get("session") or ""),
+                               source="media-tab"):
+            ok, out = _control(action, body, force)
+    except play_gate.PlayHeld as e:
+        return False, _held_answer(str(e))
+    if not ok and _was_held():
+        return False, _held_answer(str(out.get("error") or ""))
+    return ok, out
+
+
+def _held_control(body: dict) -> tuple[bool, dict]:
+    """`{"action": "held", "id"?, "play": true}` plays a start the play gate
+    held, now, on purpose (the newest when no id); `"dismiss": true` forgets
+    it. The answer's `on_hold` lists what is still held."""
+    from agent_media_core import play_gate
+
+    hid = body.get("id")
+    hid = hid if isinstance(hid, str) else ""
+    if body.get("dismiss") is True:
+        if not hid or not play_gate.dismiss(hid):
+            return False, {"error": "no held play with that id", "status": 404, **_answer()}
+        return True, _answer()
+    if body.get("play") is not True:
+        return False, {"error": "say play or dismiss", "status": 400}
+    r = play_gate.play_now(hid, str(body.get("session") or ""))
+    _reset_cache()
+    if not r.get("ok"):
+        return False, {"error": r.get("error") or "play failed",
+                       "status": 404 if not r.get("played") else 502, **_answer()}
+    return True, _answer()
+
+
+def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
     if action in ("radio", "dislike"):
         return _radio_control(body)
     if action == "room":
@@ -828,7 +917,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
 
         # A saved link's download plays as music, from its web address.
         url = podcast_links.play_url(uri.strip())
-        done, said = _run(["play", url]) if url else _run_book(uri.strip())
+        done, said = (_run(["play", *(["--in-treatment"] if force else []), url]) if url
+                      else _run_book(uri.strip(), force))
         _reset_cache()
         if not done:
             print(f"music: book play failed: {said}", file=sys.stderr)
@@ -846,6 +936,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return False, {"error": "no saved album under that id", "status": 404}
         r = music_links.play(body["uri"])
         _reset_cache()
+        if r.get("held"):
+            return False, _held_answer(str(r.get("error") or ""))
         if not r.get("ok"):
             extra = {k: r[k] for k in ("code", "link") if r.get(k)}
             return False, {"error": r.get("error") or "album failed", "status": 409 if extra else 502,
@@ -863,6 +955,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         argv.append(uri.strip())
         if action == "add":
             argv.append("--add")
+        if force:
+            argv.append("--in-treatment")
     done, said = _run(argv)
     _reset_cache(forget=action == "stop")
     if not done:

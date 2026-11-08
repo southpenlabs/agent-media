@@ -291,7 +291,16 @@ class SinkMusic:
     fades = True
 
     def play(self, uri: str, target: Target = DEFAULT_TARGET,
-             replace: bool = True, **_: object) -> None:
+             replace: bool = True, **opts: object) -> None:
+        # The play gate (play_gate): asked on the way in, and again once the
+        # fetch is done, right before Mopidy starts it.
+        from .. import play_gate
+        with play_gate.request(title=str(opts.get("title") or "")):
+            self._play(uri, target, replace, play_gate)
+
+    def _play(self, uri: str, target: Target, replace: bool, play_gate) -> None:
+        asked = uri
+        play_gate.check(asked, target=target.name or "rooms")
         playlist = _expand_youtube_playlist(uri)
         if playlist:
             # YouTube playlist → play the first track as soon as it's fetched;
@@ -299,6 +308,7 @@ class SinkMusic:
             # (Mopidy-YouTube's own playlist expansion is unreliable).
             from . import music_fetch
             first = _may_stream(_localise_youtube(playlist[0]))
+            play_gate.check(asked, target=target.name or "rooms", stage="load")
             with _connect(target) as s:
                 if replace:
                     _cmd(s, "clear")
@@ -310,6 +320,7 @@ class SinkMusic:
         uri = _to_music_uri(uri)  # YouTube → mpv: backend; else unchanged
         uri = _localise_youtube(uri)  # …and mpv:<watch-url> → local file
         uri = _may_stream(uri)  # still a stream: only where that is allowed
+        play_gate.check(asked, target=target.name or "rooms", stage="load")
         with _connect(target) as s:
             if replace:
                 _cmd(s, "clear")

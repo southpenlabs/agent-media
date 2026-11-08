@@ -163,10 +163,15 @@ class SinkMusicApp:
         """
         if not replace or not configured():
             return False
-        url, title = resolve(uri)
-        if not url:
-            log.info("sink-music-app: nothing the app can play for %s", uri)
-            return False
+        # The play gate (play_gate): on the way in and after the fetch.
+        from .. import play_gate
+        with play_gate.request():
+            play_gate.check(uri, target=target.name or "abs")
+            url, title = resolve(uri)
+            if not url:
+                log.info("sink-music-app: nothing the app can play for %s", uri)
+                return False
+            play_gate.check(uri, target=target.name or "abs", title=title or "", stage="load")
         s = phone_player.request(ABS_TARGET, "/play",
                                  {"url": url, "title": title or None, "rate": 1.0})
         if s is None:

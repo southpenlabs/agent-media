@@ -51,6 +51,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A restart of sessiond is said aloud (restart_services.announce, `media
     # say --alert`): never from a test, which would speak on the real phone.
     monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "0")
+    # The play gate (agent_media_core.play_gate): off ("-", which no env file
+    # refills), so no test asks red5's real treatment check. A test of the
+    # gate sets its own.
+    monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "-")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     # Files a reply names are copied into the upload root as the thread is
     # read (file_links.py): never into the real ~/shared, and no copy

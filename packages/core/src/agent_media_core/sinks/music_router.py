@@ -199,7 +199,13 @@ class SinkMusicRouter:
 
     def play(self, uri: str, target: Target = Target(name="local"),
              replace: bool = True, **opts) -> None:
-        target = _resolve_target(target)
+        # One play, however many players it tries: a fallback after a slow
+        # fetch is judged by when the play was asked for (play_gate).
+        from .. import play_gate
+        with play_gate.request(title=str(opts.get("title") or "")):
+            self._play(uri, _resolve_target(target), replace, **opts)
+
+    def _play(self, uri: str, target: Target, replace: bool, **opts) -> None:
         if target.name in _SASONICA_TARGETS:
             if self.sasonica.play(uri, target, replace=replace, **opts):
                 if replace:

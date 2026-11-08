@@ -1502,7 +1502,18 @@ def start(plan: Plan, target=None, sink=None,
     sink's under player runs (its own stop_under ends it), the second is to
     be called when the reading is over (Mopidy's tracks taken back; the
     credit marked no longer playing). (False, None): nothing started. Never
-    raises."""
+    raises.
+
+    The play gate (play_gate) holds a bed too: in a treatment a reply that
+    is spoken (to his earbuds) goes without one. Not written down — a bed is
+    never offered back."""
+    from . import play_gate
+    try:
+        play_gate.check(f"bed:{getattr(plan, 'style', '') or ''}", kind="bed",
+                        target=getattr(target, "name", "") or "", record=False)
+    except play_gate.PlayHeld as e:
+        log.info("music bed: held: %s", e.record.get("reason"))
+        return False, None
     try:
         if plan.kind == "stream":
             from . import music_bed_stream as st

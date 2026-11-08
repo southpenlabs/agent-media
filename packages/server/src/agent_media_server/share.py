@@ -41,6 +41,8 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
             return False, {"error": str(e), "status": 422}
         r = music_links.play(got["id"])
         if not r.get("ok"):
+            if r.get("held"):      # the play gate: a treatment is under way
+                return False, {"error": r.get("error"), "held": True, "status": 409}
             return False, {"error": r.get("error") or "couldn't play it", "status": 502}
         return True, {"url": url, "channel": "music", "title": got["title"],
                       "line": f"Playing {got['title']} ({got['tracks']} tracks, from YouTube)"}

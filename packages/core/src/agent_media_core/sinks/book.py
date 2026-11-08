@@ -241,6 +241,11 @@ def _stage_local_for_remote(path: Path, target: Target) -> Optional[str]:
         return None
 
 
+def _play_env() -> dict:
+    from .. import play_gate
+    return play_gate.child_env()
+
+
 def start_stage_local_for_remote(path: Path, target: Target, *, start_ms: int = -1,
                                  title: str = "") -> bool:
     """Stage a local file to a remote target in the background, then play it."""
@@ -317,6 +322,9 @@ except Exception as e:
         [sys.executable, "-c", code, str(path), target.name, str(start_ms), title],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
+        # When the play was asked for: a copy that ends after the play gate's
+        # age limit is held, not started (play_gate.child_env).
+        env=_play_env(),
     )
     return True
 
@@ -529,11 +537,22 @@ class SinkBook:
     # ---- playback --------------------------------------------------------
 
     def play(self, uri: str, target: Target = DEFAULT_TARGET,
-             start_ms: Optional[int] = None, **_: object) -> str:
+             start_ms: Optional[int] = None, **opts: object) -> str:
         """Load and play `uri` from `start_ms` (or the beginning).
 
         Returns the normalized URI handed to mpv (i.e. the bookmark key).
+
+        The play gate (play_gate) is asked on the way in and again right
+        before the load, after any staging. A reload of the part that was
+        playing (the self-heal) says it is ``continuing``.
         """
+        from .. import play_gate
+        with play_gate.request(title=str(opts.get("title") or "")):
+            play_gate.check(uri, target=target.name, kind="book")
+            return self._play(uri, target, start_ms)
+
+    def _play(self, uri: str, target: Target, start_ms: Optional[int]) -> str:
+        from .. import play_gate
         norm = normalize_uri(uri)
         endpoint = _socket_for(target)
         if target.name not in ("", "local") and not norm.startswith(("http://", "https://", "rtsp://")):
@@ -591,6 +610,7 @@ class SinkBook:
                 play_uri = f"{play_uri}?token={token}"
             elif token and "token=" not in play_uri:
                 play_uri = f"{play_uri}&token={token}"
+        play_gate.check(uri, target=target.name, kind="book", stage="load")
         # Leave a breadcrumb after final URL rewrite so observers/state agree.
         _write_load_intent(play_uri, start_ms or 0)
 

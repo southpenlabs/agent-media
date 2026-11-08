@@ -173,8 +173,12 @@ class PhonePlayer:
         """Queue (or play) `song`; this is its download."""
         from .types import Target
 
+        from .play_gate import PlayHeld
+
         try:
             took = self._sink().play(yt_uri(song["id"]), Target(name=self.where), replace=replace)
+        except PlayHeld:
+            raise                  # held, not lost: the caller says so
         except Exception as e:  # noqa: BLE001 — a song that will not come is skipped
             log.info("radio: %s did not play: %s", song["id"], e)
             took = False
@@ -351,6 +355,9 @@ class RoomsPlayer:
             log.info("radio: %s could not be fetched for the house", song["id"])
             return False
         uri = f"mpv:{local}"
+        from . import play_gate
+        play_gate.check(yt_uri(song["id"]), target="rooms", stage="load",
+                        title=str(song.get("title") or ""))
         try:
             if replace:
                 self._mpd("clear", f'add "{uri}"', "play")
@@ -523,7 +530,14 @@ class HandoffPlayer:
 
     def send(self, song: dict, replace: bool = False) -> bool:
         from .sinks import _mpv_ipc as ipc
+        from . import play_gate
 
+        # A hand-off is a start on the phone's own music app (play_gate).
+        play_gate.check(yt_uri(song["id"]), target="handoff",
+                        kind="tune" if song.get("tune") else "music",
+                        title=str(song.get("q") or song.get("title") or ""),
+                        # A tune is written down by reply_tune, as its line.
+                        record=not song.get("tune"))
         try:
             ipc.command(self._ep(), "loadfile", self.entry(song),
                         "replace" if replace else "append-play")

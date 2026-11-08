@@ -50,7 +50,7 @@ from .route import (
     detect_content_type,
     resolve,
 )
-from . import library, phone_player
+from . import library, phone_player, play_gate
 from . import youtube_addon as _youtube_addon
 from .sinks import SinkBook, SinkMusic, SinkSpeech
 from .sinks.book import normalize_uri
@@ -189,6 +189,12 @@ def _save_book_bookmark(book: SinkBook, state: StateStore,
             state.set_resume_pos(np["uri"], pos)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _held(e: "play_gate.PlayHeld") -> dict:
+    """A tool's answer for a start the play gate held."""
+    return {"ok": False, "held": True, "reason": str(e), "id": e.record.get("id"),
+            "uri": e.record.get("uri"), "why": e.record.get("reason")}
 
 
 def _target(name: str) -> Target:
@@ -586,7 +592,7 @@ def mute_status() -> dict:
 
 @mcp.tool()
 def music_play(uri: str, replace: bool = True, target: str = "",
-               content_type: str = "") -> dict:
+               content_type: str = "", force: bool = False) -> dict:
     """Play a URI on the music sink (Mopidy) — music or longform alike.
 
     Args:
@@ -599,8 +605,15 @@ def music_play(uri: str, replace: bool = True, target: str = "",
             Defaults to auto-detection from the URI — which classifies a
             bare YouTube/HTTP URL as music, so set `audiobook` explicitly
             for spoken-word content from YouTube.
+        force: Play even during a treatment (the play gate, MEDIA_PLAY_GATE_CMD).
+            Only when David asks for music in a treatment; otherwise a held
+            play answers `held` and is offered back, never played later.
     """
-    _music().play(uri, _music_target(target), replace=replace)
+    try:
+        with play_gate.request(force=force, source="mcp"):
+            _music().play(uri, _music_target(target), replace=replace)
+    except play_gate.PlayHeld as e:
+        return _held(e)
     ct = coerce_content_type(content_type) or detect_content_type(uri)
     _state().set_music_intent(uri, ct.value)
     return {"ok": True, "uri": uri, "content_type": ct.value}
@@ -627,7 +640,11 @@ def music_resume(target: str = "") -> dict:
         if not last:
             return {"ok": False, "reason": "no music to resume"}
         ct = last.get("content_type") or "music"
-        m.play(last["uri"], t, replace=True)
+        try:
+            # Nothing loaded: reopening the last is a start (play_gate).
+            m.play(last["uri"], t, replace=True)
+        except play_gate.PlayHeld as e:
+            return _held(e)
         _state().set_music_intent(last["uri"], ct)
         return {"ok": True, "uri": last["uri"], "content_type": ct,
                 "reopened": True}
@@ -689,7 +706,7 @@ def music_seek(position_ms: int, target: str = "") -> dict:
 
 @mcp.tool()
 def book_play(uri: str, resume: bool = True, start_ms: int = -1,
-              target: str = "", title: str = "") -> dict:
+              target: str = "", title: str = "", force: bool = False) -> dict:
     """Play longform audio (audiobook / podcast) on the book channel.
 
     Use this instead of `music_play` for spoken-word you want to come back
@@ -704,7 +721,16 @@ def book_play(uri: str, resume: bool = True, start_ms: int = -1,
             URI's saved bookmark.
         start_ms: Explicit start offset (ms). -1 (default) means use the
             bookmark when `resume`, else start from the beginning.
+        force: Play even during a treatment (the play gate); see music_play.
     """
+    try:
+        with play_gate.request(force=force, title=title):
+            return _book_play(uri, resume, start_ms, target, title)
+    except play_gate.PlayHeld as e:
+        return _held(e)
+
+
+def _book_play(uri: str, resume: bool, start_ms: int, target: str, title: str) -> dict:
     b, st, t = _book(), _state(), _book_target(target)
     norm = normalize_uri(uri)
     # Download-first: a YouTube URL is unplayable directly on a datacenter IP
@@ -823,7 +849,11 @@ def book_resume(target: str = "") -> dict:
         if not last:
             return {"ok": False, "reason": "no book to resume"}
         start = st.get_resume_pos(last) or 0
-        b.play(last, t, start_ms=start)
+        try:
+            # Nothing loaded: reopening the last book is a start (play_gate).
+            b.play(last, t, start_ms=start)
+        except play_gate.PlayHeld as e:
+            return _held(e)
         st.set_now_playing(sink="book", uri=last, started_at=time.time(),
                            content_type="audiobook", target=t.name)
         return {"ok": True, "uri": last, "resumed_from_ms": start}
@@ -1069,7 +1099,9 @@ def _reheal_after_error(last_pos_ms: "int | None",
     np = st.get_now_playing("book")
     t = _book_target((np or {}).get("target") or "")
     log.warning("book self-heal: reloading %s at %sms on %s", norm, pos, t.name)
-    b.play(norm, t, start_ms=(pos or 0))
+    from . import play_gate
+    with play_gate.request(continuing=True):  # the part that was playing, not a start
+        b.play(norm, t, start_ms=(pos or 0))
     return True
 
 
@@ -1114,6 +1146,8 @@ def _autoadvance_loop() -> None:
                 if reason == "eof":
                     try:
                         _advance_after_eof()
+                    except play_gate.PlayHeld as e:
+                        log.info("book auto-advance held: %s", e)
                     except Exception:  # noqa: BLE001 — never kill the watcher
                         log.exception("book auto-advance failed")
                     failures = 0

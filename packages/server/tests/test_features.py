@@ -35,6 +35,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     from agent_media_core import personal_use
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": False, "signed_in": False, "stories": False, "personal": True, "app_update": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "music_sung": True, "room_delegate": False, "map": True,
+                   "play_gate": False,
                    "personal_use": {"on": False, "methods": {m: False for m in personal_use.METHODS},
                                     "addons": ["facebook-previews", "youtube-radio", "youtube-search", "youtube-streaming"]}}
     assert "/features" in app.CORS_PATHS
@@ -69,6 +70,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     monkeypatch.delenv("MEDIA_PRACTICE_PROFILES", raising=False)
+    monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "phs-treatment-guard now")
     from agent_media_core import personal_use
     for m in personal_use.ADDON_METHODS:
         personal_use.register(m, object())
@@ -78,6 +80,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": True, "signed_in": True, "stories": True, "personal": True, "app_update": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "music_sung": True, "room_delegate": False, "map": True,
+                   "play_gate": True,
                    "personal_use": {"on": True, "methods": {m: True for m in personal_use.METHODS},
                                     "addons": sorted(personal_use.ADDON_METHODS)}}
 

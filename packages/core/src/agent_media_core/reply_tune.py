@@ -234,17 +234,50 @@ def _after_reply(event, row: int) -> Optional[str]:
     entry = {"at": time.time(), "line": line, "route": r, "row": row,
              "level": level(),
              "session": md.get("session_id") or md.get("session") or None}
-    if r == "handoff":
-        why = _handoff(line, artist, title, entry["level"])
-    else:
-        why, found = _spotify(artist, title, entry["level"])
-        if found:
-            entry["track"] = found
+    # A tune is a start like any other (play_gate): in a treatment it is held
+    # and offered back ("Play now"), never played later by itself.
+    from . import play_gate
+    with play_gate.request(session=str(entry["session"] or ""), title=line,
+                           source="reply-tune"):
+        try:
+            play_gate.check(TUNE_PREFIX + line, target=r, kind="tune", title=line)
+            why, found = _play_route(r, line, artist, title, entry["level"])
+        except play_gate.PlayHeld as e:
+            return _skip(f"held: {e.record.get('reason')}", line)
+    if found:
+        entry["track"] = found
     if why:
         return _skip(why, line)
     _record(entry)
     log.info("reply tune %r played on %s", line, r)
     return None
+
+
+#: A held tune's uri in play_gate's list: the line, asked of the route again.
+TUNE_PREFIX = "tune:"
+
+
+def _play_route(r: str, line: str, artist: str, title: str,
+                start_level: int) -> tuple[Optional[str], Optional[dict]]:
+    if r == "handoff":
+        return _handoff(line, artist, title, start_level), None
+    return _spotify(artist, title, start_level)
+
+
+def play_now(line: str) -> Optional[str]:
+    """Play a held tune now, on purpose (play_gate.play_now): the route as
+    a reply would, without the switch, cooldown or the gate. None when it was
+    asked of a player, else why not."""
+    r = route()
+    if r is None:
+        return "no tune route here (MEDIA_REPLY_TUNE)"
+    artist, title = split(line)
+    if not title:
+        return "no title"
+    from . import play_gate
+    with play_gate.request(force=True):
+        why, _ = _play_route(r, line, artist, title, level())
+    return why
 
 
 def _handoff(line: str, artist: str, title: str, start_level: int = 100) -> Optional[str]:

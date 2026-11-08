@@ -34,7 +34,7 @@ def _no_phone(monkeypatch):
 def player(monkeypatch):
     ran: list = []
     monkeypatch.setattr(music, "_status", lambda: dict(NOW))
-    monkeypatch.setattr(music, "_run", lambda argv: (ran.append(argv), (True, ""))[1])
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (ran.append(argv), (True, ""))[1])
     music._reset_cache(forget=True)
     yield ran
     music._reset_cache(forget=True)
@@ -148,7 +148,7 @@ def test_a_bad_control_is_400_and_runs_nothing(server, signed_in, audio_host, pl
 
 
 def test_a_failed_control_is_502_with_the_state(server, signed_in, audio_host, player, monkeypatch):
-    monkeypatch.setattr(music, "_run", lambda argv: (False, "nothing playing"))
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (False, "nothing playing"))
     res, obj = call(server, "POST", "/music", {"action": "next"}, AUTH)
     assert res.status == 502 and obj["error"] == "nothing playing" and obj["now"] == SAID
 
@@ -195,7 +195,7 @@ def test_a_failed_read_after_a_track_keeps_the_track(server, signed_in, audio_ho
 
 
 def test_a_stop_is_believed_at_once(server, signed_in, audio_host, monkeypatch):
-    monkeypatch.setattr(music, "_run", lambda argv: (True, ""))
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (True, ""))
     states = [dict(NOW)]
     monkeypatch.setattr(music, "_status", lambda: states[0])
     music._reset_cache(forget=True)
@@ -233,7 +233,7 @@ def test_a_book_is_played_only_from_the_list(server, signed_in, audio_host, monk
     monkeypatch.setattr(music_recent, "_library_books", lambda which: [])
     monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
     ran = []
-    monkeypatch.setattr(music, "_run_book", lambda uri: (ran.append(uri), (True, ""))[1])
+    monkeypatch.setattr(music, "_run_book", lambda uri, *_: (ran.append(uri), (True, ""))[1])
     monkeypatch.setattr(music, "_answer", lambda: {"now": None})
     res, obj = call(server, "POST", "/music", {"action": "book", "uri": "/etc/passwd"}, headers=AUTH)
     assert res.status == 400 and ran == []
@@ -536,7 +536,7 @@ def test_a_failed_move_goes_back(server, signed_in, audio_host, player, mover, m
 
     monkeypatch.setattr(cli, "_resolve_music_where", lambda w: "rooms")
     ran: list = []
-    monkeypatch.setattr(music, "_run", lambda argv: (ran.append(argv), (argv[0] != "play", "no"))[1])
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (ran.append(argv), (argv[0] != "play", "no"))[1])
     res, obj = call(server, "POST", "/music", {"action": "move"}, AUTH)
     assert res.status == 200
     assert ran == [["pause"], ["play", NOW["uri"], "--where", "rooms"], ["resume"]]

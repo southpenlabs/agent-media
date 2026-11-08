@@ -216,12 +216,18 @@ class SinkMusicSasonica(SinkMusicLocal):
         --title``), used when the phone has none."""
         if not (self._ep_override or configured()):
             return False
-        url, title = resolve(uri)
-        given = str(opts.get("title") or "").strip()
-        title = title or given
-        if not url:
-            log.info("sink-music-sasonica: nothing the app can play for %s", uri)
-            return False
+        # The play gate (play_gate): asked on the way in, and again after the
+        # phone's fetch, right before the app is handed the track.
+        from .. import play_gate
+        with play_gate.request(title=str(opts.get("title") or "")):
+            play_gate.check(uri, target=target.name or "sasonica")
+            url, title = resolve(uri)
+            given = str(opts.get("title") or "").strip()
+            title = title or given
+            if not url:
+                log.info("sink-music-sasonica: nothing the app can play for %s", uri)
+                return False
+            play_gate.check(uri, target=target.name or "sasonica", title=title, stage="load")
         try:
             ipc.command(self._endpoint(), "loadfile", url,
                         "replace" if replace else "append-play")

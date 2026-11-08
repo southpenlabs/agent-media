@@ -31,6 +31,20 @@ def _no_live_phone_backend(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_play_gate(monkeypatch):
+    """The env file names the play gate (MEDIA_PLAY_GATE_CMD, red5's PHS
+    treatment check): inherited, every play in the suite would ask the real
+    check and be held during a treatment. Off with "-", which no later load
+    of the env file refills; a test of the gate sets its own."""
+    monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "-")
+    monkeypatch.delenv("MEDIA_PLAY_MAX_AGE_S", raising=False)
+    monkeypatch.delenv("MEDIA_PLAY_FORCE", raising=False)
+    monkeypatch.delenv("MEDIA_PLAY_REQUESTED_AT", raising=False)
+    from agent_media_core import play_gate
+    play_gate.forget_verdict()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_rooms(monkeypatch):
     """Keep the suite away from the house speakers' Snapcast server.
 

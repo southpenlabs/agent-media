@@ -75,7 +75,10 @@ def play(spotify_uri: str, device: str = "") -> dict:
     """Play `spotify_uri` (``spotify:album:…``, ``…playlist:…`` or
     ``…track:…``) on `device`, or the one `devices` makes plain.
     ``{"ok", "device"}``; RemoteError with a code otherwise (``choose``
-    carries ``devices``)."""
+    carries ``devices``). Raises play_gate.PlayHeld when a start may not
+    happen now."""
+    from . import play_gate
+    play_gate.check(spotify_uri, target="spotify")
     tok = _token()
     found = _call("GET", "/me/player/devices", tok).get("devices") or []
     found = [d for d in found if d.get("id") and not d.get("is_restricted")]

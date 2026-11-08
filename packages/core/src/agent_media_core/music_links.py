@@ -240,9 +240,13 @@ def _play_youtube(a: dict) -> dict:
                            capture_output=True, text=True, timeout=60)
         ok, said = r.returncode == 0, (r.stderr or r.stdout or "").strip()[-300:]
     except (subprocess.TimeoutExpired, OSError) as e:
-        ok, said = False, str(e)
+        r, ok, said = None, False, str(e)
     if ok:
         return {"ok": True, "title": a.get("title"), "on": "music"}
+    from .play_gate import EXIT_HELD
+    if r is not None and r.returncode == EXIT_HELD:
+        # Held by the play gate (a treatment): said as it is, not as YouTube.
+        return {"ok": False, "held": True, "error": said.removeprefix("media: ")}
     return {"ok": False, "code": "youtube", "link": a.get("url"),
             "error": "YouTube can't be played on this server: open it in YouTube"
             if "can't be streamed" in said or not said else said}
