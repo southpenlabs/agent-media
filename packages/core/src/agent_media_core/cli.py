@@ -2955,12 +2955,34 @@ def _seek_to_end(sock) -> int:
     return 0
 
 
+def _keep_end_resume_point() -> None:
+    """End of reply on a replay (a held reply played from its message, the
+    thread's open or Up next) keeps where it was cut as the message's resume
+    point, as a Stop does (David, 9 Nov 2026: "I'd prefer its resume point").
+    The replay cleared the old one as it began and its end writes nothing, so
+    without this the message went back to unheard from the top. The sentence
+    being read is kept, so ▶ picks up at it. Not a question (its End moves on
+    to the answer) and not a live reply (its row is written on the way out)."""
+    try:
+        np = StateStore().get_now_playing("speech") or {}
+        ex = np.get("extras") or {}
+        if isinstance(ex, str):
+            ex = json.loads(ex)
+        rid, at = ex.get("history_id"), ex.get("current_sentence_idx")
+        if not isinstance(rid, int) or ex.get("ask") or not isinstance(at, int) or at <= 0:
+            return
+        StateStore().set_stopped_at(rid, at)
+    except Exception:  # noqa: BLE001 — the jump matters more than the note
+        pass
+
+
 def cmd_jump(a) -> int:
     """Seek to the start or end of the current clip."""
     sock = _sock()
     if a.where == "start":
         ipc.command(sock, "seek", 0, "absolute", critical=True)
         return 0
+    _keep_end_resume_point()
     # End-of-response on the phone lane: hand the turn's own follower — a live
     # reply's follow loop, or a replay's tracker — a past-the-end jump and
     # touch the player not at all. The follower reads the request on its next

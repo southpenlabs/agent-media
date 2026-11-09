@@ -2,6 +2,8 @@
 
 import pytest
 
+from agent_media_core.state import StateStore
+
 from agent_media_core import cli
 
 
@@ -330,6 +332,37 @@ def test_jump_end_on_phone_hands_the_turn_to_its_follower(monkeypatch, extras):
     assert cli.cmd_jump(A()) == 0
     assert navs == [(cli.sys.maxsize, "abs")]
     assert fake.calls == []
+
+
+@pytest.mark.parametrize("ask", [False, True], ids=["reply", "question"])
+def test_jump_end_on_a_replay_keeps_its_resume_point(monkeypatch, tmp_path, ask):
+    """End of reply on a replayed (held) reply keeps the sentence it was on
+    as the message's resume point, as a Stop does, instead of leaving it
+    unheard from the top (David, 9 Nov 2026). A question's End moves on to
+    its answer and keeps none."""
+    import time as _t
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    st = StateStore()
+    rid = st.add_history(sink="speech", uri="/x.mp3", started_at=_t.time(),
+                         target="abs", source="claude-code", text="a. b. c. d. e.",
+                         extras={"held": True, "session": "s1",
+                                 **({"ask": True} if ask else {})})
+    st.set_now_playing("speech", "/x.mp3", _t.time(), target="abs",
+                       extras={"replay": True, "writer_pid": 1, "history_id": rid,
+                               "current_sentence_idx": 3,
+                               **({"ask": True} if ask else {})})
+    monkeypatch.setattr(cli, "ipc", _FakeIpc({"playlist-count": 3}))
+    monkeypatch.setattr(cli, "_sock", lambda: "tcp://phone.example:6613")
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
+    monkeypatch.setattr(cli, "_now_speaking", lambda: st.get_now_playing("speech"))
+    monkeypatch.setattr(cli, "_write_nav_request", lambda *a, **k: None)
+
+    class A:
+        where = "end"
+    assert cli.cmd_jump(A()) == 0
+    stop = (st.history_row(rid)["extras"] or {}).get("stopped_at")
+    assert (stop or {}).get("sentence") == (None if ask else 3)
 
 
 def test_jump_end_on_phone_without_a_follower_drives_the_player(monkeypatch):
