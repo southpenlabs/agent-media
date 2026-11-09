@@ -104,3 +104,12 @@ def test_devices_refusal_is_not_disguised_as_network_failure(server, monkeypatch
     res = _request(server, "GET", "/devices", {"Origin": "https://localhost"})
     assert res.status == 401
     assert res.getheader("Access-Control-Allow-Origin") == "*"
+
+
+@pytest.mark.parametrize("path", ["/watch", "/watch/item", "/accounts/trakt", "/accounts/trakt/start",
+                                  "/accounts/trakt/finish", "/accounts/trakt/signout"])
+def test_preflight_allows_the_trakt_routes(server, path):
+    # The app's WebView asks before each call; a 405 read as "Could not reach" (9 Nov 2026).
+    res = _request(server, "OPTIONS", path, {"Origin": "https://localhost"})
+    assert res.status == 204
+    assert res.getheader("Access-Control-Allow-Origin")

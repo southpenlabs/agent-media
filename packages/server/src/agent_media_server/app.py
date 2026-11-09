@@ -827,8 +827,11 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import spotify_auth
 
         return spotify_auth.handle(h, method, path, _bearer(h), _json)
-    if path in WATCH_PATHS:
+    if path in WATCH_PATHS and method in ("GET", "POST"):
         # Movies and TV from Trakt, and signing in to it (watch.py, §6.54).
+        # An OPTIONS preflight goes on to _options like every CORS path: the
+        # app's WebView asks one before each call, and a 405 here read in
+        # the app as "Could not reach" (David, 9 Nov 2026 screenshot).
         from . import watch
 
         return watch.handle(h, method, path, _bearer(h), _json)
