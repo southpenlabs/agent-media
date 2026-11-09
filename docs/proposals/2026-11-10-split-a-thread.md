@@ -5,7 +5,8 @@ and end up working on a whole bunch of issues in that thread. it would be
 nice to split them off automatically somehow. but getting a list of them
 before finalising." And: "maybe they could even be extracted into issues
 in github or forgejo or some kind of ticketing system with links back to
-the original thread and reply?" (thread a9ef3980). Status: **proposed**.
+the original thread and reply?" (thread a9ef3980). Status: **decided 10 Nov 2026** (open questions
+answered below; not built yet).
 
 ## What it is
 
@@ -98,11 +99,14 @@ inbox instead, with the same body and links.
 3. The GitHub/Forgejo adapter and **Issue**.
 4. The review sheet in the app; the agent offering a split on its own.
 
-## Open questions
+## Decided (David, 10 Nov 2026)
 
-- Should the original thread be renamed after the first topic (what it was
-  started for) once the rest are split off?
-- When a topic's work is mid-way (uncommitted files), should the new thread
-  take it over and the old one be told to leave it alone?
-- Forgejo: which instance, and should it mirror the GitHub repos or be
-  separate?
+- **The original thread** is renamed after its first topic (the one it was
+  started for) once the rest are split off.
+- **Mid-way work moves with its topic**: a new thread is told which files
+  and uncommitted changes are now its own, and the old thread is told to
+  leave them alone.
+- **Trackers**: an open topic goes both to David's Org inbox (a TODO with
+  the links) and, when it is about a repo, to that repo's GitHub issues.
+  A Forgejo on red2 is to be set up ("possibly tomorrow") and added as a
+  `forgejo` tracker then; the adapter is the same.
