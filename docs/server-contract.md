@@ -9510,6 +9510,15 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `python -m agent_media_server.map_osm refresh` (a weekly timer on the
   host; pyosmium, the server's `map-extract` extra) downloads the file to
   the cache dir, keeps the cameras and deletes the download.
+  `python -m agent_media_server.map_osm update` (daily) applies the
+  extract's change files since the kept file's sequence (Geofabrik's
+  `<name>-updates/` beside `<name>-latest.osm.pbf`, or
+  `MEDIA_MAP_OSM_UPDATES`): new, moved and retagged cameras, removed ones
+  and changed enforcement relations; the kept file holds the raw elements
+  and `sequence` for it, and `as_of` becomes the change file's time. A
+  device node a changed relation names but whose own record did not
+  change waits for the next full download (David, 10 Nov 2026: "some kind
+  of incremental update a little bit more regularly").
 - **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default
