@@ -31,6 +31,17 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # starts would go into a scope on the host's user manager
     # (procinfo.outliving_service): never from a test.
     monkeypatch.delenv("INVOCATION_ID", raising=False)
+    # The Map's camera layers ask a public Overpass server (map_osm.py): never
+    # from a test. One that wants an answer patches map_osm._fetch itself.
+    from agent_media_server import map_osm
+
+    def _no_overpass(layer, sq):
+        raise RuntimeError("a test asked the real Overpass server")
+
+    monkeypatch.setattr(map_osm, "_fetch", _no_overpass)
+    # ...and its squares are kept under a scratch cache, not the real one.
+    monkeypatch.setattr(map_osm, "_cache_dir",
+                        lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")
     # A fresh chat asks whether its agent is installed and signed in *on this
     # machine* (send._agent_unready) — which made the /ask tests pass on a
     # desk with Claude Code signed in and fail everywhere else (CI, a scratch

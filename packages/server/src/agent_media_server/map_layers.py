@@ -110,8 +110,13 @@ def _addons() -> list[dict]:
 
 
 def _all() -> list[dict]:
-    seen = {"phone"}
+    from . import map_osm
+
     out = [{"layer": _PHONE, "features": _phone_features}]
+    # OpenStreetMap's cameras (map_osm.py): read for the box on screen.
+    for lay in map_osm.layers():
+        out.append({"layer": lay, "features": (lambda lid: lambda bbox: map_osm.read(lid, bbox))(lay["id"])})
+    seen = {i["layer"]["id"] for i in out}
     for item in _addons():
         if item["layer"]["id"] not in seen:
             seen.add(item["layer"]["id"])
@@ -176,9 +181,13 @@ def layer(layer_id: str, bbox_raw: str, bearer: str) -> tuple[bool, dict]:
         return False, {"status": 404, "error": "no such layer"}
     bbox = _bbox(bbox_raw)
     try:
-        feats = [f for f in item["features"](bbox) or [] if _inside(f, bbox)]
+        got = item["features"](bbox)
+        # A source may answer (features, extra): extra's keys (as_of, partial,
+        # zoom_in) go on the collection.
+        got, extra = got if isinstance(got, tuple) else (got, {})
+        feats = [f for f in got or [] if _inside(f, bbox)]
     except Exception:
         log.exception("map layer %s failed", layer_id)
         return False, {"status": 502, "error": "that layer could not be read"}
-    return True, {"type": "FeatureCollection", "layer": layer_id,
+    return True, {**extra, "type": "FeatureCollection", "layer": layer_id,
                   "at": round(time.time(), 3), "features": feats}

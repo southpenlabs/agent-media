@@ -20,6 +20,9 @@ dependencies = ["agent-media-core", "httpx>=0.27", "icalendar>=6", "websockets>=
 # Tags by meaning for the tags sheet's Auto (tag_embed.py): a small local
 # embedding model, ONNX, no PyTorch. Without it, Auto matches words.
 tags-embed = ["fastembed>=0.9"]
+# The Map's cameras from a weekly OpenStreetMap file (map_osm.py refresh):
+# pyosmium, BSD-2.
+map-extract = ["osmium>=4"]
 
 [project.scripts]
 # The quick tunnel (tunnel.py); `sasonica tunnel` runs it.

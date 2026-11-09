@@ -59,7 +59,7 @@ def test_an_add_on_layer_and_a_failing_one(server, monkeypatch):
               "features": lambda bbox: 1 / 0}
     monkeypatch.setattr(map_layers, "_addons", lambda: [cams, broken])
     ids = [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
-    assert ids == ["phone", "cams", "broken"]
+    assert ids == ["phone", "speed_cameras", "surveillance", "cams", "broken"]
     got = call(server, "GET", "/map/layer?id=cams", headers=pixel)[1]
     assert got["features"][0]["properties"]["title"] == "Cam"
     assert call(server, "GET", "/map/layer?id=broken", headers=pixel)[0].status == 502
@@ -104,3 +104,105 @@ def test_a_chats_places_are_a_layer(server, monkeypatch):
     (line,) = [f for f in got if f["geometry"]["type"] == "LineString"]
     assert line["properties"]["title"] == "Home → Park" and line["properties"]["msg"] == "m3"
     assert call(server, "GET", "/map/layers?thread=nope", headers=pixel)[0].status == 400
+
+
+OVERPASS = [
+    {"type": "node", "id": 1, "lat": -37.81, "lon": 144.96, "tags": {"highway": "speed_camera", "maxspeed": "60"}},
+    {"type": "relation", "id": 9, "tags": {"type": "enforcement", "enforcement": "traffic_signals"},
+     "members": [{"type": "node", "ref": 2, "role": "device"}, {"type": "node", "ref": 3, "role": "from"}]},
+    {"type": "node", "id": 2, "lat": -37.815, "lon": 144.965, "tags": {}},
+    {"type": "node", "id": 3, "lat": -37.816, "lon": 144.966, "tags": {}},
+]
+
+
+def test_speed_cameras_from_osm_for_the_box_on_screen(server, monkeypatch):
+    from agent_media_server import map_osm
+
+    pixel, _ = _device("Pixel 8a")
+    asked = []
+    monkeypatch.setattr(map_osm, "_fetch", lambda layer, sq: (asked.append(sq), OVERPASS)[1])
+    # The worker, run in place: the square is fetched as it is asked for.
+    monkeypatch.setattr(map_osm, "_ask", map_osm._fill)
+    lays = {lay["id"]: lay for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]}
+    assert lays["speed_cameras"]["bbox"] is True and lays["speed_cameras"]["default_on"] is False
+    # No box, or one too wide: zoom in.
+    got = call(server, "GET", "/map/layer?id=speed_cameras", headers=pixel)[1]
+    assert got["features"] == [] and got["zoom_in"] is True
+    got = call(server, "GET", "/map/layer?id=speed_cameras&bbox=140,-40,150,-30", headers=pixel)[1]
+    assert got["zoom_in"] is True and asked == []
+    # A box in one square: the first read says partial (fetched behind it),
+    # the next has it, and later ones come from the cache.
+    box = "144.95,-37.82,144.97,-37.805"
+    got = call(server, "GET", f"/map/layer?id=speed_cameras&bbox={box}", headers=pixel)[1]
+    assert got["features"] == [] and got["partial"] is True and len(asked) == 1
+    got = call(server, "GET", f"/map/layer?id=speed_cameras&bbox={box}", headers=pixel)[1]
+    titles = sorted(f["properties"]["title"] for f in got["features"])
+    assert titles == ["Red light camera", "Speed camera 60"] and got["partial"] is False and got["as_of"] > 0
+    n = len(asked)
+    call(server, "GET", f"/map/layer?id=speed_cameras&bbox={box}", headers=pixel)
+    assert len(asked) == n
+
+
+def test_the_squares_go_to_the_worker_and_off_by_setting(server, monkeypatch):
+    from agent_media_server import map_osm
+
+    pixel, _ = _device("Pixel 8a")
+    queued = []
+    monkeypatch.setattr(map_osm, "_ask", lambda layer, sq: queued.append(sq))
+    got = call(server, "GET", "/map/layer?id=surveillance&bbox=144.0,-38.0,144.45,-37.7", headers=pixel)[1]
+    assert got["partial"] is True and len(queued) == 20  # 4 rows by 5 columns, all to the worker
+    monkeypatch.setenv("MEDIA_MAP_SPEED_CAMERAS", "off")
+    ids = [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
+    assert "speed_cameras" not in ids and "surveillance" in ids
+
+
+OSM_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6">
+ <node id="1" lat="-37.81" lon="144.96" version="1"><tag k="highway" v="speed_camera"/><tag k="maxspeed" v="60"/></node>
+ <node id="2" lat="-37.815" lon="144.965" version="1"/>
+ <node id="3" lat="-37.80" lon="144.95" version="1"><tag k="man_made" v="surveillance"/><tag k="operator" v="City"/></node>
+ <node id="4" lat="-37.70" lon="144.90" version="1"><tag k="amenity" v="cafe"/></node>
+ <relation id="9" version="1"><member type="node" ref="2" role="device"/>
+  <tag k="type" v="enforcement"/><tag k="enforcement" v="traffic_signals"/></relation>
+</osm>
+"""
+
+
+def test_the_weekly_file_keeps_only_cameras(server, monkeypatch, tmp_path):
+    import pytest
+
+    pytest.importorskip("osmium")
+    from agent_media_server import map_osm
+
+    pbf = tmp_path / "x.osm"
+    pbf.write_text(OSM_XML)
+    elements = map_osm._elements(str(pbf))
+    assert sorted(e["id"] for e in elements if e["type"] == "node") == [1, 2, 3]
+    # refresh, with the download faked: the file is "fetched" from disk.
+    monkeypatch.setattr(map_osm.urllib.request, "urlopen",
+                        lambda req, timeout=0: open(pbf, "rb"))
+    monkeypatch.setattr(map_osm, "_cache_dir", lambda: tmp_path)
+    # open() has no headers; a bare file reads fine as the response.
+    class _Res:
+        def __init__(self):
+            self.f = open(pbf, "rb")
+            self.headers = {"Last-Modified": "Sun, 08 Nov 2026 23:44:53 GMT"}
+
+        def read(self, n):
+            return self.f.read(n)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.f.close()
+
+    monkeypatch.setattr(map_osm.urllib.request, "urlopen", lambda req, timeout=0: _Res())
+    monkeypatch.setattr(map_osm, "_elements", lambda p: elements)
+    assert map_osm.refresh("https://example.invalid/x.osm.pbf") == {"speed_cameras": 2, "surveillance": 1}
+    assert not (tmp_path / "extract.osm.pbf").exists()
+    monkeypatch.setenv("MEDIA_MAP_OSM_EXTRACT", "https://example.invalid/x.osm.pbf")
+    pixel, _ = _device("Pixel 8a")
+    got = call(server, "GET", "/map/layer?id=speed_cameras&bbox=144.95,-37.82,144.97,-37.805", headers=pixel)[1]
+    assert sorted(f["properties"]["title"] for f in got["features"]) == ["Red light camera", "Speed camera 60"]
+    assert got["partial"] is False and got["as_of"] == 1794181493

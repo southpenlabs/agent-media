@@ -9454,6 +9454,33 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   every place in the chat's newest 2000 messages, a Point each (`title`,
   `msg` the message id, `link` `/t/<session>`, `group` the marker's number)
   and a LineString per route (`route: true`, `title` "A → B").
+- **Cameras from OpenStreetMap** (10 Nov 2026, maps proposal step 3; David:
+  "Camera overlays"; `map_osm.py`). Two more built-in layers, off until
+  switched on: `speed_cameras` (OSM `highway=speed_camera`, and the device
+  of each `type=enforcement` relation titled by what it enforces: "Speed
+  camera 60", "Red light camera", "Average speed camera", "Phone detection
+  camera", "Seatbelt camera") and `surveillance` ("CCTV", with its operator
+  as `detail`). Each layer's entry has `bbox: true` (read it for the box on
+  screen), `min_zoom` (11 and 14: below it, do not ask), `source` and `note`
+  (say it is not complete). A read answers `as_of` (when its oldest part was
+  fetched), `partial: true` while parts are still to come (ask again in a
+  few seconds), or `zoom_in: true` with no features when there is no box or
+  it spans more than 64 squares of 0.1°. Asked of Overpass
+  (`MEDIA_OVERPASS_URL`, default overpass-api.de) a square at a time, at
+  most 4 new squares per read, each kept a day in the cache dir and served
+  stale when Overpass is away. `MEDIA_MAP_SPEED_CAMERAS=off` leaves
+  `speed_cameras` out (where showing them is not allowed). Every features
+  source may answer `(features, extra)`; `extra`'s keys go on the
+  collection. Overpass is asked in the background: a read answers at once
+  with the squares kept and `partial: true` for the rest (a worker fetches
+  them, trying each address in the comma-separated `MEDIA_OVERPASS_URL`).
+  **Or a weekly file** (David: "Weekly Australia file"; public Overpass and
+  ohsome refuse a cloud host): with `MEDIA_MAP_OSM_EXTRACT` naming an
+  `.osm.pbf`, the layers read `osm-cameras.json` in the state dir (`as_of`:
+  the file's Last-Modified; `missing: true` before its first refresh), and
+  `python -m agent_media_server.map_osm refresh` (a weekly timer on the
+  host; pyosmium, the server's `map-extract` extra) downloads the file to
+  the cache dir, keeps the cameras and deletes the download.
 - **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default
