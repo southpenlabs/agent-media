@@ -29,6 +29,7 @@ class FakeTrakt:
     def __init__(self):
         self.calls = []
         self.token_bodies = []
+        self.writes = []
         self.device = [(400, {}), (200, {"access_token": "acc", "refresh_token": "ref",
                                          "expires_in": 604800, "created_at": 0})]
 
@@ -63,7 +64,24 @@ class FakeTrakt:
             return 200, [{"rank": 1, "listed_at": "2026-10-02T00:00:00.000Z", "type": "show", "show": OTHER}]
         if p == "/shows/7/progress/watched":
             return 200, {"aired": 19, "completed": 14, "last_watched_at": "2026-11-08T21:00:00.000Z",
-                         "next_episode": _ep(2, 6, "Attila", 106)}
+                         "next_episode": _ep(2, 6, "Attila", 106),
+                         "seasons": [{"number": 0, "aired": 2, "completed": 0},
+                                     {"number": 1, "aired": 9, "completed": 9},
+                                     {"number": 2, "aired": 10, "completed": 5}]}
+        if p in ("/sync/history", "/sync/watchlist"):
+            self.writes.append((p, body))
+            kind = next(iter(body))
+            return 201, {"added": {kind: 1}, "existing": {}, "not_found": {kind: []}}
+        if p in ("/sync/history/remove", "/sync/watchlist/remove"):
+            self.writes.append((p, body))
+            kind = next(iter(body))
+            return 200, {"deleted": {"movies" if kind == "ids" else kind: 1}, "not_found": {}}
+        if p == "/sync/history/movies/1":
+            return 200, [{"id": 555, "watched_at": "2026-11-09T10:00:00.000Z", "movie": MOVIE}]
+        if p == "/search/movie":
+            assert "query=arr" in path.lower()
+            return 200, [{"type": "movie", "score": 90, "movie": MOVIE},
+                         {"type": "movie", "score": 10, "movie": {**MOVIE, "title": "Arrival 2", "ids": {"trakt": 2, "slug": "a2"}}}]
         if p == "/shows/9/progress/watched":
             return 200, {"aired": 150, "completed": 150, "next_episode": None}
         return 404, {}
@@ -254,7 +272,64 @@ def test_no_tmdb_credential_is_a_404_for_details(server, signed_in, fake):
 
 
 def test_the_routes_are_gated(server, fake, creds):
+    res, _ = call(server, "POST", "/watch", {"action": "watched", "kind": "movie", "ids": {"trakt": 1}})
+    assert res.status in (401, 403)
+    res, _ = call(server, "GET", "/watch/search?kind=movie&query=arr")
+    assert res.status in (401, 403)
     res, _ = call(server, "GET", "/watch?kind=movie")
     assert res.status in (401, 403)
     res, _ = call(server, "POST", "/accounts/trakt/start", {})
     assert res.status in (401, 403)
+
+
+def test_marking_watched_undo_and_the_watchlist(server, signed_in, fake, creds):
+    _connect(server)
+    call(server, "GET", "/watch?kind=movie", headers=AUTH)
+    n = len(fake.calls)
+    res, obj = call(server, "POST", "/watch", {"action": "watched", "kind": "movie", "ids": {"trakt": 1}}, AUTH)
+    assert res.status == 200 and obj["changed"] == 1 and obj["not_found"] is False
+    assert fake.writes[-1] == ("/sync/history", {"movies": [{"ids": {"trakt": 1}}]})
+    assert obj["undo"] == {"action": "unwatch", "history_ids": [555]}, "Undo takes back this watch only"
+    # The lists are asked again after a write.
+    call(server, "GET", "/watch?kind=movie", headers=AUTH)
+    assert any(c[1].startswith("/sync/history/movies?") for c in fake.calls[n:])
+    res, obj = call(server, "POST", "/watch", obj["undo"], AUTH)
+    assert obj["changed"] == 1 and fake.writes[-1] == ("/sync/history/remove", {"ids": [555]})
+    # A season of a show, with a time.
+    call(server, "POST", "/watch", {"action": "watched", "kind": "season", "ids": {"trakt": 7}, "season": 2,
+                                    "watched_at": "2026-11-01T20:00:00Z"}, AUTH)
+    assert fake.writes[-1][1] == {"shows": [{"ids": {"trakt": 7}, "seasons": [{"number": 2, "watched_at": "2026-11-01T20:00:00Z"}]}]}
+    # The watchlist, on and off.
+    call(server, "POST", "/watch", {"action": "watchlist", "kind": "show", "ids": {"trakt": 9}}, AUTH)
+    assert fake.writes[-1] == ("/sync/watchlist", {"shows": [{"ids": {"trakt": 9}}]})
+    call(server, "POST", "/watch", {"action": "unwatchlist", "kind": "movie", "ids": {"trakt": 1}}, AUTH)
+    assert fake.writes[-1] == ("/sync/watchlist/remove", {"movies": [{"ids": {"trakt": 1}}]})
+    res, obj = call(server, "POST", "/watch", {"action": "watched", "kind": "planet", "ids": {"trakt": 1}}, AUTH)
+    assert res.status == 400
+    res, obj = call(server, "POST", "/watch", {"action": "watched", "kind": "movie", "ids": {}}, AUTH)
+    assert res.status == 400
+
+
+def test_on_watchlist_search_and_a_shows_seasons(server, signed_in, fake, creds):
+    _connect(server)
+    _, obj = call(server, "GET", "/watch?kind=movie", headers=AUTH)
+    assert obj["items"][0]["on_watchlist"] is True
+    _, obj = call(server, "GET", "/watch?kind=tv", headers=AUTH)
+    by_show = {i["show"]: i["on_watchlist"] for i in obj["items"]}
+    assert by_show == {"Severance": False, "Bluey": True}, "an episode carries its show's"
+    res, obj = call(server, "GET", "/watch/search?kind=movie&query=Arr", headers=AUTH)
+    assert res.status == 200 and [i["title"] for i in obj["items"]] == ["Arrival", "Arrival 2"]
+    assert [i["on_watchlist"] for i in obj["items"]] == [True, False]
+    res, obj = call(server, "GET", "/watch/search?kind=movie&query=a", headers=AUTH)
+    assert res.status == 400
+    res, obj = call(server, "GET", "/watch/show?id=7", headers=AUTH)
+    assert obj["seasons"] == [{"number": 1, "aired": 9, "completed": 9}, {"number": 2, "aired": 10, "completed": 5}]
+    assert obj["left"] == 5
+
+
+def test_writing_is_for_admins_and_needs_a_sign_in(server, signed_in, fake, creds, monkeypatch):
+    res, obj = call(server, "POST", "/watch", {"action": "watched", "kind": "movie", "ids": {"trakt": 1}}, AUTH)
+    assert res.status == 400 and "connect" in obj["error"]
+    res, _ = call(server, "OPTIONS", "/watch/search")
+    assert res.status in (200, 204), "a preflight is answered"
+    assert fake.writes == []

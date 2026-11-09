@@ -555,6 +555,7 @@ def listing(kind: str, which: str, now: Optional[float] = None) -> dict:
         out["signed_in"] = False
         out["reason"] = str(e)
         return out
+    _mark_watchlist(kind, items, now)
     from . import tmdb
     if tmdb.set_up():
         try:
@@ -565,3 +566,164 @@ def listing(kind: str, which: str, now: Optional[float] = None) -> dict:
     out["items"] = items
     out["genres"] = sorted({g for i in items for g in i.get("genres") or []})
     return out
+
+
+# ---- writing (David, 9 Nov 2026: "Add those buttons") ---------------------------------------
+#
+# Marking watched, taking a watch back, and the watchlist, from the app, so
+# Trakt's own app is not needed. Each write empties the lists kept above, so
+# the next listing shows it at once.
+
+ACTIONS = ("watched", "unwatch", "watchlist", "unwatchlist")
+_PLURAL = {"movie": "movies", "episode": "episodes", "show": "shows"}
+
+
+def _post(path: str, body: dict, now: float) -> dict:
+    code, got = _request("POST", path, body, token=_access(now))
+    if code == 401:
+        code, got = _request("POST", path, body, token=_access(now, force=True))
+    if code not in (200, 201):
+        raise TraktError(f"Trakt answered HTTP {code} for {path}")
+    return got if isinstance(got, dict) else {}
+
+
+def _count(part) -> int:
+    return sum(v for v in (part or {}).values() if isinstance(v, int)) if isinstance(part, dict) else 0
+
+
+def _missing(got: dict) -> bool:
+    nf = got.get("not_found") or {}
+    return any(isinstance(v, list) and v for v in nf.values())
+
+
+def _target(kind: str, ids: dict, season=None, watched_at=None) -> dict:
+    """The sync body for one movie, episode, show or a show's season."""
+    clean = {k: ids[k] for k in ("trakt", "slug", "tmdb", "imdb") if isinstance(ids, dict) and ids.get(k)}
+    if not clean:
+        raise ValueError("which one: ids.trakt (or slug, tmdb, imdb)")
+    at = {"watched_at": watched_at} if watched_at else {}
+    if kind == "season":
+        if not isinstance(season, int) or season < 0:
+            raise ValueError("a season needs its number")
+        return {"shows": [{"ids": clean, "seasons": [{"number": season, **at}]}]}
+    if kind not in _PLURAL:
+        raise ValueError("kind must be movie, episode, show or season")
+    return {_PLURAL[kind]: [{"ids": clean, **at}]}
+
+
+def _last_history_id(kind: str, ids: dict, now: float) -> Optional[int]:
+    """The newest history row of a movie or episode just marked, so Undo
+    takes back that watch only (not earlier ones)."""
+    if kind not in ("movie", "episode") or not ids.get("trakt"):
+        return None
+    try:
+        rows = _get(f"/sync/history/{_PLURAL[kind]}/{ids['trakt']}?limit=1", now)
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return rows[0].get("id")
+    except TraktError:
+        pass
+    return None
+
+
+def write(body: dict, now: Optional[float] = None) -> dict:
+    """POST /watch: `{"action": watched|unwatch|watchlist|unwatchlist,
+    "kind": movie|episode|show|season, "ids", "season"?, "watched_at"?}`,
+    or `{"action": "unwatch", "history_ids": [...]}` (a watch's Undo).
+    `{action, changed, not_found, undo?}`. ValueError for a bad body or when
+    not signed in; TraktError when Trakt fails."""
+    if not signed_in():
+        raise ValueError("not connected to Trakt: connect it in Settings")
+    now = time.time() if now is None else now
+    action = str(body.get("action") or "")
+    if action not in ACTIONS:
+        raise ValueError(f"action must be one of {', '.join(ACTIONS)}")
+    kind = str(body.get("kind") or "")
+    ids = body.get("ids") if isinstance(body.get("ids"), dict) else {}
+    hist = body.get("history_ids")
+    try:
+        if action == "unwatch" and isinstance(hist, list) and hist:
+            hids = [int(h) for h in hist][:50]
+            got = _post("/sync/history/remove", {"ids": hids}, now)
+            return {"action": action, "changed": _count(got.get("deleted")), "not_found": _missing(got)}
+        watched_at = body.get("watched_at") or None
+        if watched_at is not None and not isinstance(watched_at, str):
+            raise ValueError("watched_at is an ISO time")
+        if action in ("watchlist", "unwatchlist") and kind not in ("movie", "show", "episode"):
+            raise ValueError("a watchlist takes a movie, a show or an episode")
+        target = _target(kind, ids, body.get("season"), watched_at if action == "watched" else None)
+        path = {"watched": "/sync/history", "unwatch": "/sync/history/remove",
+                "watchlist": "/sync/watchlist", "unwatchlist": "/sync/watchlist/remove"}[action]
+        got = _post(path, target, now)
+        part = got.get("added") if action in ("watched", "watchlist") else got.get("deleted")
+        out = {"action": action, "changed": _count(part), "not_found": _missing(got)}
+        if action == "watchlist":
+            out["changed"] += _count(got.get("existing"))
+        if action == "watched":
+            hid = _last_history_id(kind, ids, now)
+            out["undo"] = ({"action": "unwatch", "history_ids": [hid]} if hid is not None else
+                           {"action": "unwatch", "kind": kind, "ids": ids,
+                            **({"season": body.get("season")} if kind == "season" else {})})
+        return out
+    finally:
+        clear_cache()
+
+
+def search(kind: str, query: str, now: Optional[float] = None) -> list[dict]:
+    """GET /watch/search: movies or shows on Trakt matching `query`, each
+    with `on_watchlist` and a poster where TMDb is set up."""
+    if kind not in KINDS:
+        raise ValueError("kind must be movie or tv")
+    q = " ".join(str(query or "").split())[:120]
+    if len(q) < 2:
+        raise ValueError("type at least two letters")
+    if not signed_in():
+        raise ValueError("not connected to Trakt: connect it in Settings")
+    import urllib.parse
+    now = time.time() if now is None else now
+    what = "movie" if kind == "movie" else "show"
+    rows = _cached(f"s:{what}:{q.lower()}", now, lambda: _get(
+        f"/search/{what}?query={urllib.parse.quote(q)}&extended=full&limit=20", now))
+    items = []
+    for r in rows if isinstance(rows, list) else []:
+        o = r.get(what) if isinstance(r, dict) else None
+        if isinstance(o, dict):
+            items.append(_movie(o) if what == "movie" else _show(o))
+    _mark_watchlist(kind, items, now)
+    from . import tmdb
+    if tmdb.set_up():
+        try:
+            tmdb.add_posters(items)
+        except Exception:  # noqa: BLE001 — the results without their pictures
+            pass
+    return items
+
+
+def _mark_watchlist(kind: str, items: list[dict], now: float) -> None:
+    """`on_watchlist` on each item (an episode: its show's)."""
+    try:
+        listed = {i["ids"].get("trakt") for i in _watchlist(kind, now)}
+    except (TraktError, ValueError):
+        return
+    for i in items:
+        tid = ((i.get("show_ids") if i.get("kind") == "episode" else i.get("ids")) or {}).get("trakt")
+        i["on_watchlist"] = tid is not None and tid in listed
+
+
+def show(trakt_id: int, now: Optional[float] = None) -> dict:
+    """GET /watch/show: a show's seasons as watched so far, for its sheet's
+    Mark a season watched. `{seasons: [{number, aired, completed}], left}`."""
+    if not signed_in():
+        raise ValueError("not connected to Trakt: connect it in Settings")
+    now = time.time() if now is None else now
+    tid = int(trakt_id)
+    prog = _cached(f"p:{tid}", now, lambda: _get(
+        f"/shows/{tid}/progress/watched?hidden=false&specials=false&count_specials=false&extended=full", now))
+    seasons = []
+    for s in (prog.get("seasons") if isinstance(prog, dict) else None) or []:
+        if isinstance(s, dict) and isinstance(s.get("number"), int) and s["number"] > 0:
+            seasons.append({"number": s["number"], "aired": int(s.get("aired") or 0),
+                            "completed": int(s.get("completed") or 0)})
+    aired = prog.get("aired") if isinstance(prog, dict) else None
+    done = prog.get("completed") if isinstance(prog, dict) else None
+    return {"seasons": seasons,
+            "left": max(0, aired - done) if isinstance(aired, int) and isinstance(done, int) else None}

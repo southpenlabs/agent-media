@@ -7,6 +7,11 @@ agent_media_core.tmdb; David, 9 Nov 2026).
             "reason"?, "tmdb"}
   GET  /watch/item?kind=movie|tv&tmdb=<id>                gated →
            {"ok", "trailer", "where", "poster", "tagline", "region", "attribution"}
+  POST /watch {"action": watched|unwatch|watchlist|unwatchlist, "kind": movie|episode|show|season,
+               "ids", "season"?, "watched_at"?} | {"action": "unwatch", "history_ids"}   admins →
+           {"ok", "action", "changed", "not_found", "undo"?}
+  GET  /watch/search?kind=movie|tv&query=   gated → {"ok", "items"}
+  GET  /watch/show?id=<trakt id>            gated → {"ok", "seasons": [{number, aired, completed}], "left"}
   GET  /accounts/trakt              admins → {"ok", "set_up", "signed_in", "user", "flow", "pending", "reason"?}
   POST /accounts/trakt/start        admins → device {"ok", "flow", "user_code", "verification_url",
                                     "expires_in", "interval"} | pkce {"ok", "flow", "url", "redirect_uri",
@@ -24,7 +29,7 @@ from http.server import BaseHTTPRequestHandler
 
 from . import auth
 
-PATHS = frozenset({"/watch", "/watch/item", "/accounts/trakt", "/accounts/trakt/start",
+PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/accounts/trakt", "/accounts/trakt/start",
                    "/accounts/trakt/finish", "/accounts/trakt/signout"})
 
 
@@ -32,9 +37,56 @@ def _q(h: BaseHTTPRequestHandler, name: str) -> str:
     return (urllib.parse.parse_qs(h.path.partition("?")[2]).get(name) or [""])[0].strip()
 
 
+def _body(h: BaseHTTPRequestHandler) -> dict:
+    import json
+    n = int(h.headers.get("Content-Length") or 0)
+    try:
+        body = json.loads(h.rfile.read(n) or b"{}") if n else {}
+    except ValueError:
+        body = {}
+    return body if isinstance(body, dict) else {}
+
+
 def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_json) -> bool:
     from agent_media_core import tmdb, trakt
 
+    if path == "/watch" and method == "POST":
+        user, err = auth.may_admin(bearer)
+        if not user:
+            send_json(h, err.pop("status", 403), {"ok": False, **err})
+            return True
+        try:
+            got = trakt.write(_body(h))
+        except ValueError as e:
+            send_json(h, 400, {"ok": False, "error": str(e)})
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"watch: write: {e}", file=sys.stderr)
+            send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
+            return True
+        send_json(h, 200, {"ok": True, **got})
+        return True
+    if path in ("/watch/search", "/watch/show"):
+        if method != "GET":
+            return False
+        user, err = auth.gate(bearer)
+        if not user:
+            send_json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        try:
+            if path == "/watch/search":
+                got = {"items": trakt.search(_q(h, "kind"), _q(h, "query"))}
+            else:
+                got = trakt.show(int(_q(h, "id") or "x"))
+        except ValueError as e:
+            send_json(h, 400, {"ok": False, "error": str(e)})
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"watch: {e}", file=sys.stderr)
+            send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
+            return True
+        send_json(h, 200, {"ok": True, **got})
+        return True
     if path in ("/watch", "/watch/item"):
         if method != "GET":
             return False

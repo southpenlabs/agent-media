@@ -9542,6 +9542,38 @@ Shows tabs). An older server says neither: no card, no tabs.
   imdb}, "poster"?}`. An episode adds `show` (the show's title; `title` is
   the episode's own), `season`, `number` and `show_ids`; `year` is the
   show's. `genres` at the top is every item's, sorted.
+  Every item also has `on_watchlist` (an episode: its show's), from the
+  watchlist as kept.
+
+**Writing to Trakt** (9 Nov 2026; David: "Add those buttons", so Trakt's
+own app is not needed). Admins only (`auth.may_admin`), as the account
+routes; each write empties the lists kept, so the next `GET /watch` shows
+it at once.
+
+- `POST /watch {"action", "kind", "ids", "season"?, "watched_at"?}` →
+  `{"ok", "action", "changed", "not_found", "undo"?}`. `action`:
+  `watched` (`POST /sync/history`; `watched_at` an ISO time, else now),
+  `unwatch` (`/sync/history/remove`: every watch of it), `watchlist`
+  (`/sync/watchlist`) or `unwatchlist` (`/sync/watchlist/remove`). `kind`:
+  `movie`, `episode`, `show` (the whole show) or `season` (a show's `ids`
+  and the season's `number` in `season`); a watchlist takes a movie, show
+  or episode. `ids` is an item's `ids` (`trakt`, else `slug`, `tmdb`,
+  `imdb`). `changed` is how many Trakt added or removed (for `watchlist`,
+  ones already on it count); `not_found` true when Trakt knew none of it.
+  A `watched` answers `undo`, the body that takes it back: for a movie or
+  an episode `{"action": "unwatch", "history_ids": [id]}` (that watch only,
+  its newest history row, so earlier watches stay), else the same item
+  with `unwatch`. `POST /watch {"action": "unwatch", "history_ids"}` removes
+  those history rows (`/sync/history/remove {"ids"}`). 400 for a bad body
+  or when not connected; 502 when Trakt fails.
+- `GET /watch/search?kind=movie|tv&query=` (gated) → `{"ok", "items"}`:
+  Trakt's `GET /search/movie|show?query=…&extended=full&limit=20`, as items
+  (a `movie` or a `show`) with `on_watchlist` and, with TMDb, `poster`.
+  Kept as the lists are. 400 under two letters or when not connected.
+- `GET /watch/show?id=<trakt id>` (gated) → `{"ok", "seasons": [{"number",
+  "aired", "completed"}], "left"}`: the show's seasons as watched so far
+  (`/shows/{id}/progress/watched`, specials left out), for its sheet's
+  Mark a season watched.
 
 **TMDb, optional.** With `MEDIA_TMDB_TOKEN` (TMDb's v4 read access token,
 sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
