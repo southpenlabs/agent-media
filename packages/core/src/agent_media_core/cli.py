@@ -5351,6 +5351,12 @@ def _follow_replay(a) -> int:
                     continue
                 answered.set()
                 if not said:
+                    # The furthest clip the player was heard on: where a stop
+                    # is stamped if it then goes away, whatever this loop's
+                    # tick had got to (a clip per sentence is the sentence).
+                    pos = snap.get("playlist-pos")
+                    if isinstance(pos, int) and len(durations) > 1:
+                        timeline["furthest"] = max(timeline.get("furthest", -1), pos)
                     if _reached_last(snap):
                         reached.set()
                     _correct(snap)
@@ -5382,7 +5388,8 @@ def _follow_replay(a) -> int:
                     return _then() if _then_row() is not None else 0
                 if last < len(timeline["offsets"]) - 1:
                     from .sinks.speech import mark_speech_stopped
-                    mark_speech_stopped(sentence=max(last, 0), tick=False)
+                    mark_speech_stopped(sentence=max(last, timeline.get("furthest", 0), 0),
+                                        tick=False)
                 return _finish()
             if _barged_in():
                 _note_displaced()

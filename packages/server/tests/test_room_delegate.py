@@ -80,7 +80,8 @@ def test_handing_starts_the_agents_session_with_what_it_needs(rig):
     assert "Mode: draft" in text and "are we on for Saturday?" in text and "David: hi Sam" in text
     d = out["delegate"]
     assert (d["agent"], d["name"], d["mode"], d["session"]) == ("kit", "Kit", "draft", "agent-1")
-    assert 23.9 * 3600 < d["until"] - time.time() <= 24 * 3600
+    # `until` is kept to the millisecond (rounded, so up to 0.5 ms past now + 24 h).
+    assert 23.9 * 3600 < d["until"] - time.time() <= 24 * 3600 + 0.001
     assert out["link"] == "https://x/t/agent-1"
     # On the room's log and its /targets row while it holds.
     env = matrix.envelope(r, limit=30)

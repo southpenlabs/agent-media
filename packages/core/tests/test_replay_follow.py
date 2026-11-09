@@ -73,7 +73,10 @@ def test_the_clock_carries_the_replay(store, monkeypatch):
 
     monkeypatch.setattr(StateStore, "set_now_playing",
                         lambda self, sink, **kw: _spy(sink, **kw))
-    _track()
+    # Half a second a sentence: at 0.15 s a busy runner's first tick came
+    # after the second sentence had begun, and 0 was never written (CI's
+    # 3.11 job, 9 Nov 2026: "[1, 2]"). What is checked is the order.
+    _track(offsets=cli.json.dumps([0.0, 0.5, 1.0]), durations=cli.json.dumps([1.5]))
     assert seen == [0, 1, 2], f"sentences did not step in order: {seen}"
 
 

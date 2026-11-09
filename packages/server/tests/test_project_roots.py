@@ -373,8 +373,14 @@ def test_4_a_failure_partway_removes_what_was_made(home, monkeypatch, code, stat
         pytest.skip("no dir_fd here")
     monkeypatch.setattr(project_roots, "DIR_FD", dir_fd)
     real, calls = os.mkdir, []
+    me = threading.get_ident()
 
     def mkdir(path, *a, **kw):
+        # This test's own mkdirs only: os.mkdir is the process's, and a thread
+        # an earlier test left running (a server writing its state) made the
+        # third call once, so this add's own all went through (CI, 9 Nov 2026).
+        if threading.get_ident() != me:
+            return real(path, *a, **kw)
         calls.append(path)
         if len(calls) == 3:
             raise OSError(code, os.strerror(code))
