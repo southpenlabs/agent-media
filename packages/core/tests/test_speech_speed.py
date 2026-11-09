@@ -61,7 +61,7 @@ def test_an_unreachable_player_still_writes_1x_down(monkeypatch):
 # ── Start speed, per-thread speed, back after a break (David, 2 Nov 2026) ──
 
 def test_settings_default_and_refuse_odd_values():
-    assert speech_speed.settings() == {"reset": False, "start": 1.0, "per_thread": False, "break_min": 0}
+    assert speech_speed.settings() == {"reset": False, "start": 1.0, "per_thread": False, "break_min": 0, "step": 0}
     with pytest.raises(ValueError):
         speech_speed.save_settings(start=1.1)
     with pytest.raises(ValueError):
@@ -69,7 +69,32 @@ def test_settings_default_and_refuse_odd_values():
     assert speech_speed.save_settings(start=1.25, break_min=15)["start"] == 1.25
     # The old switch keeps the others.
     speech_speed.set_reset_after_reply(True)
-    assert speech_speed.settings() == {"reset": True, "start": 1.25, "per_thread": False, "break_min": 15}
+    assert speech_speed.settings() == {"reset": True, "start": 1.25, "per_thread": False, "break_min": 15, "step": 0}
+
+
+def test_speed_steps_ladder_or_even(monkeypatch):
+    """The steps a press moves by (David, 10 Nov 2026: "a setting somewhere to
+    set the speed increments"): the ladder by default, even steps when set."""
+    nx = speech_speed.next_speed
+    # The ladder, as before.
+    assert [nx(1.0, 1), nx(1.25, 1), nx(1.5, 1), nx(2.0, 1), nx(3.0, 1)] == [1.25, 1.5, 2.0, 3.0, 3.0]
+    assert [nx(1.0, -1), nx(0.5, -1), nx(0.3, -1), nx(1.75, -1), nx(0.9, 1)] == [0.9, 0.4, 0.3, 1.5, 1.0]
+    # Even steps, set.
+    with pytest.raises(ValueError):
+        speech_speed.save_settings(step=0.2)
+    speech_speed.save_settings(step=0.1)
+    assert speech_speed.settings()["step"] == 0.1
+    assert [nx(1.0, 1), nx(1.1, 1), nx(1.9, 1), nx(1.0, -1), nx(0.3, -1), nx(3.0, 1)] == [1.1, 1.2, 2.0, 0.9, 0.3, 3.0]
+    speech_speed.save_settings(step=0.25)
+    # Off the grid lands back on it: 1.1 up is 1.25, down 1.0.
+    assert [nx(1.1, 1), nx(1.1, -1), nx(1.25, 1), nx(1.25, -1), nx(0.3, 1)] == [1.25, 1.0, 1.5, 1.0, 0.5]
+    speech_speed.save_settings(step=0.05)
+    assert [nx(1.0, 1), nx(1.05, 1), nx(1.0, -1), nx(1.33, 1), nx(1.33, -1)] == [1.05, 1.1, 0.95, 1.35, 1.3]
+    # The CLI's press uses it.
+    from agent_media_core import cli
+    assert cli._speed_next(1.0, 1) == 1.05
+    speech_speed.save_settings(step=0)
+    assert cli._speed_next(1.0, 1) == 1.25
 
 
 def test_reset_goes_back_to_the_start_speed(sent):
