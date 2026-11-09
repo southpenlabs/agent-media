@@ -129,11 +129,58 @@ def mark_now_heard() -> tuple[bool, dict]:
         return False, {"status": 404, "error": "nothing is being read"}
     rid = ex.get("history_id")
     rid = rid if isinstance(rid, int) else None
+    at = ex.get("current_sentence_idx")
     run_ctl("jump-end", 1)
     if rid is not None:
         st.set_stopped_at(rid, None)
         st.mark_heard(rid)
-    return True, {"id": rid, "session": str(ex.get("source_session") or "")}
+    with _MARK_LOCK:
+        _LAST_MARK[0] = {"id": rid, "started_at": np.get("started_at"),
+                         "sentence": at if isinstance(at, int) and at >= 0 else 0,
+                         "at": time.time()}
+    return True, {"id": rid, "session": str(ex.get("source_session") or ""), "undo": True}
+
+
+#: How long the player's Mark heard can be undone (the app's notice shows less).
+MARK_UNDO_S = 120.0
+#: The last Mark heard: its row (a live reply's is found by `started_at`, written
+#: as it ends) and the sentence it was on.
+_LAST_MARK: list = [None]
+_MARK_LOCK = threading.Lock()
+
+
+def undo_mark_heard() -> tuple[bool, dict]:
+    """Undo the player's last Mark heard (David, 9 Nov 2026: "let's add the undo
+    option"): the reply gets back the resume point End alone would have kept —
+    the sentence it was on (`stopped_at`; the top, for the first) — so it is
+    unheard again with its Resume. Once, and within MARK_UNDO_S."""
+    from agent_media_core.state import StateStore
+
+    with _MARK_LOCK:
+        mark = _LAST_MARK[0]
+        _LAST_MARK[0] = None
+    if not mark or time.time() - mark["at"] > MARK_UNDO_S:
+        return False, {"status": 404, "error": "nothing to undo"}
+    st = StateStore()
+    rid = mark["id"]
+    end = time.monotonic() + 3.0
+    while rid is None:
+        # A live reply's row is written as it ends, a moment after the End.
+        for r in st.recent_history(sink="speech", limit=40):
+            try:
+                same = abs(float(r.get("started_at")) - float(mark["started_at"])) < 0.01
+            except (TypeError, ValueError):
+                same = False
+            if same and not (r.get("extras") or {}).get("listener"):
+                rid = int(r["id"])
+                break
+        if rid is None:
+            if time.monotonic() > end:
+                return False, {"status": 409, "error": "that reply is not filed yet"}
+            time.sleep(0.2)
+    st.set_stopped_at(rid, int(mark["sentence"]))
+    st.set_extra(rid, "heard", None)
+    return True, {"id": rid}
 
 
 def stop_speech() -> str:

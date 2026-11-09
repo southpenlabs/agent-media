@@ -238,9 +238,37 @@ def test_mark_heard_from_the_player_ends_the_reply_and_marks_it(server, shelf, s
     rid = _row("being read")
     st.set_stopped_at(rid, 2)
     st.set_now_playing("speech", "/x.mp3", time.time(), target="sasonica",
-                       extras={"replay": True, "history_id": rid, "source_session": SID})
+                       extras={"replay": True, "history_id": rid, "source_session": SID,
+                               "current_sentence_idx": 4})
     res, obj = call(server, "POST", "/speech/heard", {"now": True}, AUTH)
-    assert res.status == 200 and obj == {"ok": True, "id": rid, "session": SID}
+    assert res.status == 200 and obj == {"ok": True, "id": rid, "session": SID, "undo": True}
     assert ran == ["jump-end"]
     ex = st.history_row(rid)["extras"]
     assert ex["heard"] is True and "stopped_at" not in ex
+    # Undo: unheard again, its resume point the sentence it was on; once only.
+    res, obj = call(server, "POST", "/speech/heard", {"undo": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "id": rid}
+    ex = st.history_row(rid)["extras"]
+    assert "heard" not in ex and ex["stopped_at"]["sentence"] == 4
+    res, obj = call(server, "POST", "/speech/heard", {"undo": True}, AUTH)
+    assert res.status == 404
+
+
+def test_undoing_mark_heard_on_a_live_reply_finds_its_row(server, shelf, signed_in, voice, monkeypatch):
+    """A live reply has no row while it is read: the undo finds the one filed
+    under its start as it ends."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    monkeypatch.setattr(speech, "_CTL", lambda *a, **k: "")
+    began = time.time()
+    st.set_now_playing("speech", "/x.mp3", began, target="sasonica",
+                       extras={"source_session": SID, "current_sentence_idx": 2})
+    res, obj = call(server, "POST", "/speech/heard", {"now": True}, AUTH)
+    assert res.status == 200 and obj["id"] is None
+    rid = st.add_history(sink="speech", uri="/x.mp3", started_at=began, target="sasonica",
+                         source="claude-code", text="live", extras={"source_session": SID, "heard": True})
+    res, obj = call(server, "POST", "/speech/heard", {"undo": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "id": rid}
+    ex = st.history_row(rid)["extras"]
+    assert "heard" not in ex and ex["stopped_at"]["sentence"] == 2

@@ -3292,7 +3292,12 @@ The speech bar.
   Resume and no unheard ▶; a live reply (`id` null) is heard as End ends
   it. Plain End of reply on a replay instead keeps the sentence it was on
   as the resume point (`stopped_at`). 404 `"nothing is being read"`.
-  `GET /features` `mark_heard_now` says it is here.
+  `GET /features` `mark_heard_now` says it is here. The answer's `"undo":
+  true` says `POST /speech/heard {"undo": true}` → `{"ok": true, "id"}`
+  takes the last one back, once and within two minutes: the reply is
+  unheard again, its resume point the sentence it was on (a live reply's
+  row found by its start, filed as it ends). 404 `"nothing to undo"`; 409
+  `"that reply is not filed yet"`.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
