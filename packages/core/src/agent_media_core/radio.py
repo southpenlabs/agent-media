@@ -54,6 +54,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Iterator, Optional
@@ -606,9 +607,19 @@ def _skip(where: str) -> None:
             return
 
 
-def tick() -> None:
+# The download of the next song when `tick(fetch_aside=True)` runs it on its
+# own thread, so one at a time.
+_FETCH: list = [None]
+
+
+def tick(fetch_aside: bool = False) -> None:
     """One look at the player: follow what came up, stay a song ahead, and
-    top the list up. Blocks while a song downloads."""
+    top the list up. Blocks while a song downloads, unless `fetch_aside`
+    (the server's loop): then the download of the next song runs on its own
+    thread and the passes go on looking at the player. A download to the
+    phone can take minutes, and a player emptied meanwhile (the app updated)
+    sat silent with Now playing saying it could not read it, until the
+    download ended (David, 9 Nov 2026)."""
     with _station() as st:
         if not st["on"] or st.get("moving"):
             # A move is putting the song on elsewhere (move): the old player
@@ -703,18 +714,30 @@ def tick() -> None:
         low = st["on"] and len(st["queue"]) < _LOW_WATER
         ready = nxt is None or nxt["id"] in st["ready"]
     if nxt and not ready:
-        with _station() as st:
-            st["fetching"] = nxt
-        ok = _prefetch(where, nxt)
-        with _station() as st:
-            st["fetching"] = None
-            if ok:
-                st["ready"].append(nxt["id"])
-            else:
-                st["queue"] = [s for s in st["queue"] if s["id"] != nxt["id"]]
+        if not fetch_aside:
+            _fetch_next(where, nxt)
+        elif not (_FETCH[0] and _FETCH[0].is_alive()):
+            _FETCH[0] = threading.Thread(target=_fetch_next, args=(where, nxt),
+                                         name="radio-fetch", daemon=True)
+            _FETCH[0].start()
         return
     if low:
         _refill()
+
+
+def _fetch_next(where: str, song: dict) -> None:
+    """Download `song`, the list's next, ahead of its turn: ready when it
+    came, off the list when it could not."""
+    with _station() as st:
+        st["fetching"] = song
+    ok = _prefetch(where, song)
+    with _station() as st:
+        st["fetching"] = None
+        if ok:
+            if song["id"] not in st["ready"]:
+                st["ready"].append(song["id"])
+        else:
+            st["queue"] = [s for s in st["queue"] if s["id"] != song["id"]]
 
 
 def _resume(where: str) -> bool:

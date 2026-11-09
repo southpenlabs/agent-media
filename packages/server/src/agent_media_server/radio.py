@@ -27,7 +27,7 @@ def _loop() -> None:
         _WAKE.wait(_PERIOD_S)
         _WAKE.clear()
         try:
-            radio.tick()
+            radio.tick(fetch_aside=True)
         except Exception as e:  # noqa: BLE001 — the loop outlives a bad pass
             print(f"radio: tick failed: {e}", file=sys.stderr)
 

@@ -223,6 +223,30 @@ def test_a_song_cut_off_is_put_on_again_where_it_was(station):
     assert sent[-1] == (MIX[1]["id"], False)
 
 
+def test_a_slow_download_does_not_stop_it_following_the_player(station, monkeypatch):
+    """The server's loop downloads the next song on its own thread: a
+    download to the phone took minutes while the app updated, and the song
+    it cut off waited silent for it (David, 9 Nov 2026)."""
+    import threading
+    player, sent, fetched, _ = station
+    gate, began = threading.Event(), threading.Event()
+    monkeypatch.setattr(radio, "_prefetch",
+                        lambda where, song: (fetched.append(song["id"]), began.set(), gate.wait(5))[2])
+    radio.start(SEED["id"], "sasonica", playing=True)
+    player.t = 150.0
+    radio.tick(fetch_aside=True)   # the next queued
+    radio.tick(fetch_aside=True)   # the one after starts downloading
+    assert began.wait(5) and radio.read()["fetching"]["id"] == MIX[2]["id"]
+    player.items, player.pos = [], 0
+    radio.tick(fetch_aside=True)   # the download still going
+    assert sent[-1] == (SEED["id"], True) and player.seeks == [150000]
+    radio.tick(fetch_aside=True)   # no second download meanwhile
+    assert fetched == [MIX[2]["id"]]
+    gate.set()
+    radio._FETCH[0].join(5)
+    assert radio.read()["fetching"] is None and MIX[2]["id"] in radio.read()["ready"]
+
+
 def test_a_song_played_out_is_not_put_on_again(station):
     player, sent, _, _ = station
     radio.start(SEED["id"], "sasonica", playing=True)
