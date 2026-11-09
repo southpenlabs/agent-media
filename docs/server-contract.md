@@ -3937,7 +3937,8 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
   `"practice_sound"` (a practice's sound fetched ahead; shown nowhere).
   `title` the video's, null until known; `pct` 0-100, or null while the
   size is not known (a phone route that answers only at the end, such as
-  the phone's jobs worker, stays null throughout); `phase` `"downloading"`
+  a jobs worker from before 10 Nov 2026's progress posts (§6.21a), stays
+  null throughout); `phase` `"downloading"`
   or `"copying"` (brought from the phone, its own percent). Read from
   `agent_media_core.downloads` (one small JSON per download under the
   state dir, written by whichever process downloads); one not updated for
@@ -6543,6 +6544,52 @@ narrowed to a restart's four fields: no command.
   result, err}`. It refuses a restart with another field, or a job of a kind
   it does not know, with rc 2, and runs nothing. A restart of the worker's own
   service is detached, 10 s out, so the answer gets back first.
+
+**A command's progress** (10 Nov 2026; David: "let's change that helper to
+get the percentage"). A download asked of the phone used to say nothing
+until it ended, so the app's progress mark (§6.9a `downloads`) stayed "not
+known".
+
+- `POST /jobs/run {cmd, timeout, stream: true}` (the canvas's own route,
+  the host's token; `agent_media_core.phone_run` asks it so) answers
+  `application/x-ndjson`: a `{"progress": line}` for each progress line the
+  worker posts while the command runs, then the answer, `{rc, out, err}`.
+  Without `stream`, one JSON at the end as before.
+- Such a job's frame carries `progress: true`. The worker then reads the
+  command's output as it comes and posts the newest progress line (yt-dlp's
+  `[download]  42.3% …`, or agent_media_core.downloads' `[amdl] …`) at most
+  once a second: `POST /jobs/progress {id, line}` (a jobs worker's token; 403
+  another device's job, `{"late": true}` one already answered or gone). Its
+  answer at the end is unchanged. A worker from before ignores the mark and
+  answers at the end; a server without the route (404) is not asked again
+  for that job.
+- phone_run prints each line to stderr as it comes, where the caller's
+  progress mark reads it, as it read ssh's.
+
+**Downloads in line, stopped when not wanted** (10 Nov 2026, David agreed).
+
+- A download says so on `POST /jobs/run`: `tag` `"<purpose>:<video id>"`
+  (§6.9a `downloads`' purpose) and `priority` `"foreground"` (someone waits
+  on it: a song or link put on, a station song played now) or
+  `"background"` (the radio's prefetch, a saved link or practice kept).
+  phone_run sends them from `AGENT_MEDIA_DOWNLOAD=<purpose>:<id>:<priority>`,
+  which agent_media_core.downloads.run gives its child.
+- At most 2 of a device's downloads run at once (`MAX_DOWNLOADS`); the rest
+  wait in line, foreground first, then in the order asked, for as long as
+  their own timeout, not the 10 s pickup. Untagged commands (is it cached,
+  a title, chapters, a search) are never held.
+- `POST /jobs/cancel {tag}` (the canvas's own, the host's token; a tag
+  ending in `:` means every download of that purpose) → `{ok, cancelled: n}`.
+  Each matching job is answered `{rc: 130, err: "cancelled: …"}` at once;
+  one still in line leaves it, one running is sent down its worker's stream
+  as `event: cancel`, `{id}`, and the worker stops its process group. A
+  worker from before ignores the frame and its late answer is dropped. The
+  radio turned off cancels `radio:`, a 👎 that takes the fetching song's
+  channel off cancels that song's, `media music stop` cancels `music:`, and
+  a streaming `/jobs/run` whose caller has gone cancels its own job.
+- The worker runs every command in a process group of its own: on its
+  timeout (rc 124) or a cancel (rc 130) the whole group is stopped, TERM
+  then KILL, the helper's yt-dlp with it.
 
 **Updates** (built 18 Oct 2026). The same channel carries an update: pull,
 then restart.

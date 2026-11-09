@@ -33,7 +33,9 @@ device takes restarts and updates and never a command — commands stay the
 phone's (`MEDIA_PHONE_JOBS_DEVICE`) alone — and its token opens no other
 route (auth._device leaves it out): a stolen laptop token restarts nothing.
 
-    run(cmd, timeout)       → {rc, out, err}; rc 255 with no worker / on timeout
+    run(cmd, timeout, on_progress) → {rc, out, err}; rc 255 with no worker / on timeout
+    progress(device, body)  → a running command's progress line (POST /jobs/progress)
+    cancel(tag)             → downloads no longer wanted, stopped (POST /jobs/cancel)
     serve(h, device, kinds) → the worker's stream (`job` frames)
     result(device, body)    → the worker's answer
     restart(name, body)     → (status, answer): `media restart-services --host
@@ -41,6 +43,34 @@ route (auth._device leaves it out): a stolen laptop token restarts nothing.
     update(name, body)      → (status, answer): `media update --host NAME`
                               (POST /jobs/update: pull, then restart)
     workers()               → GET /jobs/devices
+
+**Progress while a command runs** (David, 10 Nov 2026: "let's change that
+helper to get the percentage"). A download asked of the phone took its
+whole output at the end, so the app's progress mark (agent_media_core.
+downloads) could say only "downloading". A caller that wants it (phone_run,
+`POST /jobs/run {"stream": true}`) gets its job's frame marked `progress:
+true`; the worker then posts the latest progress line it sees (yt-dlp's
+`[download]  42.3% …`, or the downloads template's `[amdl] …`) at most once
+a second, `POST /jobs/progress {id, line}`, and the canvas hands each on as
+an NDJSON line `{"progress": line}` before the answer itself. A worker from
+before ignores the mark and answers at the end, as it always did.
+
+**Downloads: one or two at a time, a play first, and cancelled when not
+wanted** (David, 10 Nov 2026). A command that is a download says so: `tag`
+`"<purpose>:<video id>"` (agent_media_core.downloads' purpose) and
+`priority` `"foreground"` (a song or link put on, waiting to play) or
+`"background"` (the radio's next, a saved link or practice kept). At most
+MAX_DOWNLOADS of a device's run at once; the rest wait in line, the
+foreground ones first, then in the order asked, and waiting in line is not
+"no worker took it". Anything else (is it cached, a title, chapters, a
+search) goes at once, as before. `cancel(tag)` (`POST /jobs/cancel {tag}`,
+the canvas's own, the host's token; a tag ending in ":" names every one of
+that purpose) answers each matching job rc 130 at once: one still waiting
+leaves the line, one running is sent an `event: cancel` frame `{id}` and the
+worker kills its process group (a worker from before ignores the frame and
+its late answer is dropped). The radio turned off, a station song 👎'd and a
+`music stop` use it; a streaming caller that has gone away (its progress
+line cannot be written) cancels its own job.
 
 **A restart is a job of its own kind** (David, 18 Oct 2026: "I don't want to
 have to rely on tailscale"). `media restart-services --host NAME` used to
@@ -86,6 +116,14 @@ RESTART_TIMEOUT_S = 60.0
 #: How long an update's caller waits: a pull (at most 90 s on the device),
 #: then its restart (up to 60 s), and a margin.
 UPDATE_TIMEOUT_S = 180.0
+#: A device's downloads running at once (tagged commands); the rest wait in line.
+MAX_DOWNLOADS = 2
+#: A cancelled job's answer.
+CANCELLED_RC = 130
+TAG_RE = re.compile(r"[a-z_]{1,20}:[A-Za-z0-9_-]{0,64}")
+#: Progress lines kept per job between a caller's reads (the newest win).
+MAX_PROGRESS = 20
+MAX_PROGRESS_LINE = 500
 #: The kinds a worker may say it takes besides a command (`?kinds=`).
 KINDS = ("restart", "update")
 #: A restart's fields, and nothing else.
@@ -100,6 +138,8 @@ _QUEUE: deque[str] = deque()
 #: Connected worker streams, by token: {"at", "kinds"}.
 _WORKERS: dict[int, dict] = {}
 _NEXT = 0
+#: Running jobs to be stopped, by device: the ids its stream is to send as `cancel`.
+_CANCELS: dict[str, list[str]] = {}
 
 
 def worker_device() -> str:
@@ -133,10 +173,11 @@ def connected(device: str = "") -> bool:
         return any(not device or w.get("device") == device for w in _WORKERS.values())
 
 
-def _submit(job: dict, timeout: float) -> dict | None:
+def _submit(job: dict, timeout: float, on_progress=None) -> dict | None:
     """Queue `job` and wait for its answer; the job when answered, else None
     with `job["why"]` saying why. Called holding `_COND`. The job is gone from
-    the queue and the table either way: nothing outlives its wait."""
+    the queue and the table either way: nothing outlives its wait. Progress
+    lines the worker posts meanwhile go to `on_progress`, the lock let go."""
     jid = job["id"]
     _JOBS[jid] = job
     _QUEUE.append(jid)
@@ -147,12 +188,28 @@ def _submit(job: dict, timeout: float) -> dict | None:
         now = time.monotonic()
         if now >= end:
             break
-        if job["taken"] is None and now >= pickup:
+        # A download waiting its turn behind others is in line, not lost;
+        # with no worker connected at all it is given up as anything is.
+        if job["taken"] is None and now >= pickup and not (
+                job.get("tag") and connected(job.get("device") or "")):
             break
         _COND.wait(timeout=min(end, pickup if job["taken"] is None else end) - now)
+        if on_progress is not None and job.get("progress"):
+            lines, job["progress"] = job["progress"], []
+            _COND.release()
+            try:
+                for ln in lines:
+                    on_progress(ln)
+            except Exception:  # noqa: BLE001 — the caller has gone: nobody wants it now
+                on_progress = None
+                _COND.acquire()
+                _cancel_job(job, "the caller went away")
+                continue
+            _COND.acquire()
     _JOBS.pop(jid, None)
     if jid in _QUEUE:
         _QUEUE.remove(jid)
+    _COND.notify_all()          # a download's place in line is free
     if job["done"]:
         return job
     job["why"] = "no phone worker took it" if job["taken"] is None else "timed out on the phone"
@@ -164,17 +221,25 @@ def _new(kind: str, timeout: float, **fields) -> dict:
             "at": time.time(), "taken": None, "done": False, **fields}
 
 
-def run(cmd: str, timeout: float = DEFAULT_TIMEOUT_S) -> dict:
-    """Queue `cmd` for the worker and wait for its answer."""
+def run(cmd: str, timeout: float = DEFAULT_TIMEOUT_S, on_progress=None,
+        tag: str = "", priority: str = "") -> dict:
+    """Queue `cmd` for the worker and wait for its answer; with
+    `on_progress`, each progress line the worker posts while it runs. A
+    `tag` ("<purpose>:<id>") makes it a download: in line behind at most
+    MAX_DOWNLOADS others, `priority` "foreground" ahead of "background"."""
     timeout = max(1.0, min(float(timeout or DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S))
     if not cmd or not isinstance(cmd, str):
         return {"rc": 2, "out": "", "err": "no command"}
+    tag = tag if isinstance(tag, str) and TAG_RE.fullmatch(tag) else ""
+    priority = "foreground" if priority == "foreground" else "background"
     phone = worker_device()
     with _COND:
         if not phone or not any(w.get("device") == phone for w in _WORKERS.values()):
             return {"rc": 255, "out": "", "err": "no phone worker connected"}
-        job = _new("cmd", timeout, cmd=cmd, device=phone)
-        if _submit(job, timeout) is None:
+        job = _new("cmd", timeout, cmd=cmd, device=phone, progress=[],
+                   want_progress=on_progress is not None,
+                   **({"tag": tag, "priority": priority} if tag else {}))
+        if _submit(job, timeout, on_progress) is None:
             return {"rc": 255, "out": "", "err": job["why"]}
         return {"rc": job["rc"], "out": job["out"], "err": job["err"]}
 
@@ -339,6 +404,63 @@ def result(device: str, body) -> tuple[bool, dict]:
     return True, {}
 
 
+def _cancel_job(job: dict, why: str) -> None:
+    """Answer `job` rc 130 now; a running one's worker is told to stop it.
+    Called holding `_COND`."""
+    if job["done"]:
+        return
+    if job["taken"] is not None:
+        _CANCELS.setdefault(job.get("device") or "", []).append(job["id"])
+    elif job["id"] in _QUEUE:
+        _QUEUE.remove(job["id"])
+    job.update(done=True, rc=CANCELLED_RC, out="", err=f"cancelled: {why}")
+    _COND.notify_all()
+
+
+def cancel(tag: str) -> int:
+    """Cancel the downloads tagged `tag` (`"radio:<id>"`), or every one of a
+    purpose (`"radio:"`). How many were cancelled."""
+    if not isinstance(tag, str) or not TAG_RE.fullmatch(tag):
+        return 0
+    n = 0
+    with _COND:
+        for job in list(_JOBS.values()):
+            t = job.get("tag") or ""
+            if t and not job["done"] and (t == tag or (tag.endswith(":") and t.startswith(tag))):
+                _cancel_job(job, tag)
+                n += 1
+    return n
+
+
+def _running_downloads(device: str) -> int:
+    return sum(1 for j in _JOBS.values() if j.get("tag") and j.get("device") == device
+               and j["taken"] is not None and not j["done"])
+
+
+def progress(device: str, body) -> tuple[bool, dict]:
+    """`POST /jobs/progress {id, line}`: a running command's newest progress
+    line, from the worker that runs it, for its caller (run's on_progress)."""
+    if not device or device not in jobs_devices():
+        return False, {"status": 403, "error": "not a jobs worker of this server"}
+    if not isinstance(body, dict):
+        return False, {"status": 400, "error": "a JSON object, please"}
+    line = body.get("line")
+    if not isinstance(line, str) or not line.strip():
+        return False, {"status": 400, "error": "line: the progress line"}
+    with _COND:
+        job = _JOBS.get(str(body.get("id") or ""))
+        if job is None or job.get("done"):
+            return True, {"late": True}
+        if job.get("device") != device:
+            return False, {"status": 403, "error": "not this worker's job"}
+        if job.get("want_progress"):
+            got = job.setdefault("progress", [])
+            got.append(line.strip()[:MAX_PROGRESS_LINE])
+            del got[:-MAX_PROGRESS]
+            _COND.notify_all()
+    return True, {}
+
+
 def _clean_result(got, rc: int) -> dict | None:
     """A restart's `result` as the phone sent it, kept to run()'s shape."""
     if not isinstance(got, dict):
@@ -377,7 +499,10 @@ def _frame(job: dict) -> dict:
     if job["kind"] in ("restart", "update"):
         return {"id": job["id"], "kind": job["kind"], job["kind"]: job[job["kind"]],
                 "timeout": job["timeout"]}
-    return {"id": job["id"], "cmd": job["cmd"], "timeout": job["timeout"]}
+    frame = {"id": job["id"], "cmd": job["cmd"], "timeout": job["timeout"]}
+    if job.get("want_progress"):
+        frame["progress"] = True
+    return frame
 
 
 def _mine(job: dict | None, device: str, kinds: set[str]) -> bool:
@@ -432,24 +557,16 @@ def serve(h, device: str, kinds=()) -> bool:
         last = time.monotonic()
         while True:
             with _COND:
-                _COND.wait_for(lambda: any(_mine(_JOBS.get(j), device, mine)
-                                           for j in _QUEUE),
+                _COND.wait_for(lambda: bool(_CANCELS.get(device)) or bool(_pick(device, mine, peek=True)),
                                timeout=max(0.01, PING_S - (time.monotonic() - last)))
                 # No longer a jobs worker (the setting moved, the device was
                 # revoked): take nothing more, and let the stream go.
                 if device not in jobs_devices():
                     return True
-                out = []
-                for jid in list(_QUEUE):
-                    job = _JOBS.get(jid)
-                    if job is None:
-                        _QUEUE.remove(jid)
-                    elif _mine(job, device, mine):
-                        _QUEUE.remove(jid)
-                        job["taken"] = time.monotonic()
-                        out.append(_frame(job))
-            for j in out:
-                h.wfile.write(f"event: job\ndata: {json.dumps(j)}\n\n".encode())
+                out = [("job", _frame(j)) for j in _pick(device, mine)]
+                out += [("cancel", {"id": jid}) for jid in _CANCELS.pop(device, [])]
+            for event, j in out:
+                h.wfile.write(f"event: {event}\ndata: {json.dumps(j)}\n\n".encode())
                 last = time.monotonic()
             if not out and time.monotonic() - last >= PING_S:
                 h.wfile.write(b"event: ping\ndata: {}\n\n")
@@ -464,8 +581,28 @@ def serve(h, device: str, kinds=()) -> bool:
     return True
 
 
+def _pick(device: str, kinds: set[str], peek: bool = False) -> list[dict]:
+    """The jobs to hand `device`'s stream now, taken off the queue (unless
+    `peek`): everything that is not a download, and downloads up to
+    MAX_DOWNLOADS running, foreground first. Called holding `_COND`."""
+    for jid in [j for j in _QUEUE if j not in _JOBS]:
+        _QUEUE.remove(jid)
+    mine = [_JOBS[j] for j in _QUEUE if _mine(_JOBS[j], device, kinds)]
+    plain = [j for j in mine if not j.get("tag")]
+    free = MAX_DOWNLOADS - _running_downloads(device)
+    loads = sorted((j for j in mine if j.get("tag")),
+                   key=lambda j: j.get("priority") != "foreground")[:max(0, free)]
+    got = plain + loads
+    if not peek:
+        for job in got:
+            _QUEUE.remove(job["id"])
+            job["taken"] = time.monotonic()
+    return got
+
+
 def _reset_for_tests() -> None:
     with _COND:
+        _CANCELS.clear()
         _JOBS.clear()
         _QUEUE.clear()
         _WORKERS.clear()

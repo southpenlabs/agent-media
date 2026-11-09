@@ -167,3 +167,36 @@ def test_the_filter_can_leave_the_entry_for_the_next_step(monkeypatch, capsys):
     assert downloads.active()[0]["phase"] == "copying"
     assert downloads.main(["done", "--id", "dQw4w9WgXcQ", "--purpose", "book"]) == 0
     assert downloads.active() == []
+
+
+def test_run_says_what_the_download_is_to_its_child():
+    """phone_run sends it on as the job's tag and priority (the phone's line)."""
+    with downloads.track("aaaaaaaaaaa", "radio") as t:
+        r = downloads.run([sys.executable, "-c", "import os; print(os.environ['AGENT_MEDIA_DOWNLOAD'])"], t, timeout=10)
+    assert r.stdout.strip() == "radio:aaaaaaaaaaa:background"
+    with downloads.context(priority="foreground"), downloads.track("bbbbbbbbbbb", "radio") as t:
+        assert t.priority == "foreground"
+    with downloads.track("ccccccccccc", "music") as t:
+        assert t.priority == "foreground"
+
+
+def test_cancel_goes_to_the_phones_line_only_where_downloads_go_that_way(monkeypatch):
+    from agent_media_core import phone_run
+
+    asked = []
+    monkeypatch.setattr(phone_run, "cancel", lambda tag: asked.append(tag) or 1)
+    monkeypatch.delenv("MEDIA_PHONE_JOBS", raising=False)
+    downloads.cancel("radio:", wait=True)
+    assert asked == []
+    monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
+    downloads.cancel("radio:", wait=True)
+    assert asked == ["radio:"]
+
+
+def test_the_radio_turned_off_cancels_its_downloads(monkeypatch):
+    from agent_media_core import radio
+
+    asked = []
+    monkeypatch.setattr(downloads, "cancel", lambda tag, wait=False: asked.append(tag))
+    radio.stop()
+    assert asked == ["radio:"]

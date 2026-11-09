@@ -24,6 +24,21 @@ when the checkout's venv is broken — the moment an update is wanted most):
   `{server, token, device_id}` in ~/.config/agent-media/jobs-worker.json).
   It takes restarts and updates only: the server never sends it a command.
 
+**Progress** (David, 10 Nov 2026: "let's change that helper to get the
+percentage"). A command whose frame says `progress: true` (a download the
+app shows the progress of) runs with its output read as it comes: the
+newest progress line in it (yt-dlp's `[download]  42.3% …`, or agent-media
+downloads' `[amdl] …`) is posted to `/jobs/progress {id, line}` at most once
+a second, and the whole output is still answered at the end. A server
+without that route (404) is not asked again for that job.
+
+**Stopping** (David, 10 Nov 2026). Every command runs in a process group of
+its own: on its timeout (rc 124) or an `event: cancel` frame `{id}` from the
+server (a download no longer wanted: rc 130) the whole group is stopped,
+TERM then KILL, so a helper's yt-dlp does not go on downloading after `sh`
+is gone. How many downloads run at once, and in what order, is the
+server's (phone_jobs: one or two, a play first).
+
 **Restarts** (David, 18 Oct 2026: "I don't want to have to rely on
 tailscale"). `media restart-services --host p8a` on red5 sends a job of kind
 `restart` down the same stream: `{id, kind: "restart", restart: {only, after,
@@ -88,6 +103,10 @@ GIT_TIMEOUT_S = 90
 #: answer gets out before this worker (one of the services) restarts.
 UPDATE_AFTER_S = 10.0
 SERVICE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9@._-]{0,63}")
+#: A progress line in a command's output (agent_media_core.downloads reads the same).
+PROGRESS_RE = re.compile(r"^\s*(?:\[download\]\s+\d{1,3}(?:\.\d+)?%|\[amdl\]\s)")
+#: Progress posted at most this often.
+PROGRESS_EVERY_S = 1.0
 
 
 def _config() -> dict:
@@ -118,13 +137,13 @@ def _token() -> str:
         return ""
 
 
-def _post(path: str, body: dict, token: str = "") -> dict:
+def _post(path: str, body: dict, token: str = "", timeout: float = 30) -> dict:
     headers = {"Content-Type": "application/json", "User-Agent": UA}
     if token:
         headers["Authorization"] = "Bearer " + token
     req = urllib.request.Request(_server() + path, data=json.dumps(body).encode(),
                                  method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"{}")
 
 
@@ -138,6 +157,95 @@ def _answer(job_id, body: dict, token: str) -> None:
             time.sleep(2 * (attempt + 1))
 
 
+def _kill_group(proc) -> None:
+    """Stop the command and everything it started: `sh` runs the helper,
+    which runs yt-dlp, and killing `sh` alone left the download going."""
+    import signal
+
+    for sig, wait in ((signal.SIGTERM, 2.0), (getattr(signal, "SIGKILL", signal.SIGTERM), 2.0)):
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, sig)
+            else:                        # Windows: no groups; the process itself
+                proc.kill()
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            proc.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+#: The commands running now, by job id: set its event to cancel it.
+_RUNNING: "dict[str, threading.Event]" = {}
+
+
+def run_job(argv: list, timeout: float, post=None, cancelled=None) -> "tuple[int, str, str]":
+    """`argv` in a process group of its own, its stdout and stderr read as
+    they come. `post(line)` (when given) gets the newest progress line at
+    most every PROGRESS_EVERY_S. On the timeout, or `cancelled` (an Event)
+    set, the whole group is stopped: rc 124 "timed out", rc 130 "cancelled".
+    `(rc, out, err)`."""
+    import codecs
+
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, start_new_session=hasattr(os, "killpg"))
+    got = {"out": [], "err": []}
+    latest = [None]
+
+    def pump(stream, key):
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        pending = ""
+        while True:
+            chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(4096)
+            text = dec.decode(chunk or b"", final=not chunk)
+            got[key].append(text)
+            pending += text
+            parts = re.split(r"[\r\n]", pending)
+            pending = parts.pop()
+            # The unended last one too: a bar rewrites its line with \r and
+            # ends it only when the next comes.
+            for ln in [*parts, pending]:
+                if PROGRESS_RE.match(ln):
+                    latest[0] = ln.strip()
+            if not chunk:
+                return
+
+    readers = [threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
+               threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True)]
+    for r in readers:
+        r.start()
+    end = time.monotonic() + timeout
+    sent, last_post = None, 0.0
+    rc = None
+    while rc is None:
+        try:
+            rc = proc.wait(timeout=max(0.0, min(0.25, end - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            stop = "timed out" if time.monotonic() >= end else \
+                "cancelled" if cancelled is not None and cancelled.is_set() else ""
+            if stop:
+                _kill_group(proc)
+                for r in readers:
+                    r.join(timeout=2)
+                return (124 if stop == "timed out" else 130), "".join(got["out"]), stop
+        now = time.monotonic()
+        if (rc is None and post is not None and latest[0] and latest[0] != sent
+                and now - last_post >= PROGRESS_EVERY_S):
+            sent, last_post = latest[0], now
+            try:
+                post(sent)
+            except urllib.error.HTTPError as e:
+                if e.code in (404, 405):        # a server without the route
+                    post = None
+            except (OSError, ValueError):
+                pass
+    for r in readers:
+        r.join(timeout=5)
+    return rc, "".join(got["out"]), "".join(got["err"])
+
+
 def _run(job: dict, token: str) -> None:
     cmd = str(job.get("cmd") or "")
     try:
@@ -145,14 +253,18 @@ def _run(job: dict, token: str) -> None:
     except (TypeError, ValueError):
         timeout = 600.0
     t0 = time.monotonic()
+    argv = ["sh", "-c", 'cd "$HOME" && ' + cmd]
+    jid = str(job.get("id") or "")
+    post = None
+    if job.get("progress") is True:
+        post = lambda ln: _post("/jobs/progress", {"id": jid, "line": ln}, token, timeout=10)  # noqa: E731
+    _RUNNING[jid] = cancelled = threading.Event()
     try:
-        r = subprocess.run(["sh", "-c", 'cd "$HOME" && ' + cmd], capture_output=True,
-                           text=True, timeout=timeout, stdin=subprocess.DEVNULL)
-        rc, out, err = r.returncode, r.stdout, r.stderr
-    except subprocess.TimeoutExpired as e:
-        rc, out, err = 124, (e.stdout or "") if isinstance(e.stdout, str) else "", "timed out"
+        rc, out, err = run_job(argv, timeout, post, cancelled)
     except OSError as e:
         rc, out, err = 127, "", str(e)
+    finally:
+        _RUNNING.pop(jid, None)
     print(f"job {job.get('id')}: rc {rc} in {time.monotonic() - t0:.1f}s: {cmd[:80]}",
           flush=True)
     _answer(job.get("id"), {"rc": rc, "out": out[:MAX_OUT], "err": err[:MAX_OUT]}, token)
@@ -390,12 +502,17 @@ def _stream(token: str) -> None:
             elif line.startswith("data:"):
                 data.append(line[5:].strip())
             elif not line:
-                if event == "job" and data:
+                if event in ("job", "cancel") and data:
                     try:
                         job = json.loads("\n".join(data))
                     except ValueError:
                         job = None
-                    if isinstance(job, dict):
+                    if isinstance(job, dict) and event == "cancel":
+                        # A download no longer wanted: its process group is stopped.
+                        ev = _RUNNING.get(str(job.get("id") or ""))
+                        if ev is not None:
+                            ev.set()
+                    elif isinstance(job, dict):
                         threading.Thread(target=_handle, args=(job, token), daemon=True).start()
                 event, data = "", []
 

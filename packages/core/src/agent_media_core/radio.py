@@ -299,7 +299,9 @@ def _send(where: str, song: dict, replace: bool = False) -> bool:
     (marked as the radio's, for its Up next row's progress: downloads)."""
     from . import downloads
 
-    with downloads.context("radio", song.get("title") or None):
+    # Played now (replace): someone is waiting on it, ahead in the phone's line.
+    with downloads.context("radio", song.get("title") or None,
+                           priority="foreground" if replace else None):
         return radio_io.player(where).send(song, replace=replace)
 
 
@@ -452,6 +454,9 @@ def stop() -> None:
         if st["on"]:
             st["on"] = False
             _archive(st)
+    # Its downloads are not wanted now (downloads.cancel: the phone's line).
+    from . import downloads
+    downloads.cancel("radio:")
 
 
 def dislike() -> Optional[dict]:
@@ -465,10 +470,18 @@ def dislike() -> Optional[dict]:
         if cur and cur not in st["banned"]:
             st["banned"].append(cur)
         ch = (song or {}).get("channel") or ""
+        gone = None
         if ch:
             st["strikes"][ch] = st["strikes"].get(ch, 0) + 1
             if st["strikes"][ch] >= _CHANNEL_STRIKES:
                 st["queue"] = [s for s in st["queue"] if s.get("channel") != ch]
+                # The song being fetched ahead went with its channel: stop it.
+                fetching = st.get("fetching") or {}
+                if fetching.get("channel") == ch:
+                    gone = fetching.get("id")
+    if gone:
+        from . import downloads
+        downloads.cancel(f"radio:{gone}")
     _skip(where)
     return snapshot()
 

@@ -7150,8 +7150,10 @@ def cmd_music(a) -> int:
     if a.action == "stop":
         # Stop is the end of a radio station too, or it would put the
         # song back on (radio._resume).
-        from . import radio
+        from . import downloads, radio
         radio.stop()
+        # A song put on and still downloading is not wanted either.
+        downloads.cancel("music:", wait=True)
         b.stop()
         StateStore().clear_music_intent()
         return 0

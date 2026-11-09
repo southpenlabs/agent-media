@@ -74,6 +74,62 @@ def test_a_command_runs_on_the_phone_as_ssh_ran_it(worker, host, tmp_path):
     assert phone_run.run("exit 3", timeout=10)[0] == 3
 
 
+#: A phone helper's download, as play-local's yt-dlp prints it to stderr: the
+#: bar rewritten with \r, a moment between each step (recorded on a local file).
+_BAR = ("printf '[download] Destination: abc.mka\\n' >&2; "
+        "printf '\\r[download]  10.0%% of    2.86MiB at  1.00MiB/s ETA 00:02' >&2; sleep 1.3; "
+        "printf '\\r[download]  55.5%% of    2.86MiB at  1.00MiB/s ETA 00:01' >&2; sleep 1.3; "
+        "printf '\\r[download] 100%% of    2.86MiB in 00:00:02\\n' >&2; echo /x/abc.mka")
+
+
+def test_a_downloads_progress_comes_back_while_it_runs(worker, host):
+    """David, 10 Nov 2026: "let's change that helper to get the percentage":
+    the worker posts the newest progress line while the command runs, and
+    phone_run hands each on before the answer."""
+    seen = []
+    t0 = time.monotonic()
+    rc, out, err = phone_run.run(_BAR, timeout=20, on_progress=lambda ln: seen.append((ln, time.monotonic() - t0)))
+    took = time.monotonic() - t0
+    assert rc == 0 and out == "/x/abc.mka\n" and "100% of" in err
+    lines = [ln for ln, _ in seen]
+    assert lines[:2] == ["[download]  10.0% of    2.86MiB at  1.00MiB/s ETA 00:02",
+                         "[download]  55.5% of    2.86MiB at  1.00MiB/s ETA 00:01"]
+    assert all(at < took - 0.5 for _, at in seen[:2]), seen      # while it ran, not at the end
+
+
+def test_phone_run_prints_progress_to_stderr_as_ssh_did(worker, host, monkeypatch):
+    """`python -m agent_media_core.phone_run` (music_local.phone_argv): each
+    progress line on stderr as it comes, where downloads.run reads it."""
+    from agent_media_core import downloads
+
+    monkeypatch.setattr(downloads, "_MIN_WRITE_S", 0.0)
+    pcts = []
+    with downloads.track("abcabcabcab", "music") as t:
+        real = t.feed
+        t.feed = lambda ln: (real(ln) and (pcts.append(t.pct) or True))  # type: ignore[method-assign]
+        r = downloads.run([sys.executable, "-m", "agent_media_core.phone_run", _BAR], t, timeout=30,
+                          env=os.environ)
+    assert r.returncode == 0 and r.stdout == "/x/abc.mka\n"
+    assert pcts[:2] == [10.0, 55.5]
+
+
+def test_a_command_without_progress_is_run_as_before(worker, host):
+    """A caller that does not ask (and so an older canvas's run) gets no
+    `progress` mark on the frame, and nothing is posted."""
+    got = phone_jobs.run("printf '\\r[download]  10.0%% of 1MiB' >&2; echo hi", timeout=10)
+    assert (got["rc"], got["out"]) == (0, "hi\n") and "[download]  10.0% of 1MiB" in got["err"]
+
+
+def test_progress_is_only_a_running_jobs_workers(server, monkeypatch):
+    headers, dev = _device("p8a Termux jobs")
+    monkeypatch.setenv("MEDIA_PHONE_JOBS_DEVICE", dev)
+    pixel, _ = _device("Pixel 8a")
+    assert call(server, "POST", "/jobs/progress", {"id": "x", "line": "[download] 1%"}, pixel)[0].status == 403
+    res, obj = call(server, "POST", "/jobs/progress", {"id": "gone", "line": "[download] 1%"}, headers)
+    assert res.status == 200 and obj.get("late") is True
+    assert call(server, "POST", "/jobs/progress", {"id": "x"}, headers)[0].status == 400
+
+
 def test_phone_argv_is_a_drop_in_for_ssh(worker, host, monkeypatch):
     from agent_media_core.sinks import music_local
 
@@ -634,3 +690,140 @@ def test_the_devices_cli_sets_the_jobs_bit(capsys):
     assert "[jobs worker]" in capsys.readouterr().out
     assert devices.cli_devices(["--no-jobs", dev]) == 0
     assert dev not in phone_jobs.jobs_devices()
+
+
+def test_phone_run_reads_an_older_canvas_whole(monkeypatch):
+    """A canvas from before `stream` answers one JSON at the end: read as before."""
+    import json as _json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Old(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers["Content-Length"]))
+            body = _json.dumps({"rc": 0, "out": "/x/abc.mka\n", "err": "[download] 100%\n"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Old)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("MEDIA_PHONE_JOBS_URL", "http://%s:%d" % srv.server_address)
+    monkeypatch.setenv("AMUX_AUTH_TOKEN", "hosttok")
+    try:
+        seen = []
+        assert phone_run.run("x", timeout=5, on_progress=seen.append) == (0, "/x/abc.mka\n", "[download] 100%\n")
+        assert seen == []
+    finally:
+        srv.shutdown()
+
+
+# --- stopping, cancelling and the downloads' line (David, 10 Nov 2026) ----------------
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie is gone for this purpose.
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+    except OSError:
+        return True
+
+
+def _bg_pid(tmp_path, name="pid"):
+    f = tmp_path / name
+    assert _wait(lambda: f.exists() and f.read_text().strip()), "the command never started"
+    return int(f.read_text())
+
+
+def test_a_timeout_stops_the_whole_group(worker, host, tmp_path):
+    """`sh` ran the helper, which ran yt-dlp: killing `sh` alone left the
+    download going. Now the command's process group goes."""
+    t0 = time.monotonic()
+    got = phone_jobs.run(f"sleep 60 & echo $! > {tmp_path}/pid; wait", timeout=2)
+    assert got["rc"] == 255 or got["rc"] == 124
+    assert time.monotonic() - t0 < 15
+    pid = _bg_pid(tmp_path)
+    assert _wait(lambda: not _alive(pid)), "the helper's child kept running"
+
+
+def test_a_cancelled_download_is_130_at_once_and_stopped_on_the_phone(worker, host, tmp_path):
+    out = {}
+    th = threading.Thread(target=lambda: out.update(phone_jobs.run(
+        f"sleep 60 & echo $! > {tmp_path}/pid; wait", timeout=60, tag="radio:aaaaaaaaaaa")))
+    th.start()
+    pid = _bg_pid(tmp_path)
+    assert phone_jobs.cancel("radio:bbbbbbbbbbb") == 0          # not that one
+    assert phone_jobs.cancel("radio:") == 1                     # every radio download
+    th.join(timeout=5)
+    assert out["rc"] == 130 and out["err"].startswith("cancelled")
+    assert _wait(lambda: not _alive(pid)), "the download went on after its cancel"
+
+
+def test_cancel_over_http_from_phone_run(worker, host, tmp_path, monkeypatch):
+    """phone_run.cancel (downloads.cancel's way) and a tagged phone_run.run."""
+    monkeypatch.setenv("AGENT_MEDIA_DOWNLOAD", "music:ccccccccccc:foreground")
+    out = []
+    th = threading.Thread(target=lambda: out.append(phone_run.run(
+        f"sleep 60 & echo $! > {tmp_path}/pid; wait", timeout=60)))
+    th.start()
+    _bg_pid(tmp_path)
+    assert phone_run.cancel("music:ccccccccccc") == 1
+    th.join(timeout=5)
+    assert out and out[0][0] == 130
+
+
+def test_downloads_run_two_at_a_time_a_play_first(worker, host, tmp_path, monkeypatch):
+    """At most MAX_DOWNLOADS run; the next to start is a foreground one (a
+    play) before the background ones (a prefetch, a keep) asked earlier.
+    Anything not a download goes at once."""
+    monkeypatch.setattr(phone_jobs, "MAX_DOWNLOADS", 2)
+    log = tmp_path / "log"
+    gate = tmp_path / "go"
+
+    def job(name, tag, prio):
+        cmd = f"echo {name} >> {log}; while [ ! -e {gate} ]; do sleep 0.1; done"
+        threading.Thread(target=lambda: phone_jobs.run(cmd, timeout=30, tag=tag, priority=prio),
+                         daemon=True).start()
+
+    def started():
+        return log.read_text().split() if log.exists() else []
+    job("bg1", "radio:aaaaaaaaaa1", "background")
+    job("bg2", "podcast:aaaaaaaaaa2", "background")
+    assert _wait(lambda: started() == ["bg1", "bg2"] or started() == ["bg2", "bg1"])
+    job("bg3", "practice:aaaaaaaaaa3", "background")
+    time.sleep(0.3)
+    job("fg", "music:aaaaaaaaaa4", "foreground")
+    # A title lookup is not a download: it does not wait in line.
+    assert phone_jobs.run("echo quick", timeout=10)["out"] == "quick\n"
+    time.sleep(0.5)
+    assert sorted(started()) == ["bg1", "bg2"], "a third download started"
+    gate.touch()
+    assert _wait(lambda: len(started()) == 4)
+    assert started()[2] == "fg", started()
+
+
+def test_a_download_in_line_is_not_given_up_after_pickup(worker, host, tmp_path, monkeypatch):
+    monkeypatch.setattr(phone_jobs, "MAX_DOWNLOADS", 1)
+    monkeypatch.setattr(phone_jobs, "PICKUP_S", 0.5)
+    gate = tmp_path / "go"
+    first = {}
+    threading.Thread(target=lambda: first.update(phone_jobs.run(
+        f"while [ ! -e {gate} ]; do sleep 0.1; done", timeout=20, tag="radio:aaaaaaaaaa1")),
+        daemon=True).start()
+    time.sleep(0.3)
+    second = {}
+    th = threading.Thread(target=lambda: second.update(phone_jobs.run(
+        "echo second", timeout=20, tag="radio:aaaaaaaaaa2")))
+    th.start()
+    time.sleep(1.5)                       # past pickup, still in line
+    gate.touch()
+    th.join(timeout=10)
+    assert second == {"rc": 0, "out": "second\n", "err": ""}

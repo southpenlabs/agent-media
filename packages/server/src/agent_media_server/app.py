@@ -3587,6 +3587,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = phone_jobs.result(auth.jobs_device_id(_bearer(h)), _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/jobs/progress":
+        # A running command's progress line from the worker (phone_jobs.progress).
+        from . import phone_jobs
+
+        ok, detail = phone_jobs.progress(auth.jobs_device_id(_bearer(h)), _read_json(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/speech/state", "/music/state", "/handoff/state", "/book/state"):
         # The phone's players, reported back while they play from frames
         # (speech_frames.py, roadmap item 15): on every change and every

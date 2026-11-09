@@ -2111,8 +2111,39 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
                 return
             from agent_media_server import phone_jobs
             body = self._read_json() or {}
-            self._json(200, phone_jobs.run(str(body.get("cmd") or ""),
-                                           body.get("timeout") or phone_jobs.DEFAULT_TIMEOUT_S))
+            cmd = str(body.get("cmd") or "")
+            timeout = body.get("timeout") or phone_jobs.DEFAULT_TIMEOUT_S
+            # A download (phone_run from downloads.run): its tag and place in line.
+            tagged = {"tag": str(body.get("tag") or ""), "priority": str(body.get("priority") or "")}
+            if body.get("stream") is not True:
+                self._json(200, phone_jobs.run(cmd, timeout, **tagged))
+                return
+            # `stream`: NDJSON, a `{"progress": line}` per line the worker
+            # posts while the command runs, then the answer (phone_run).
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            def line(obj: dict) -> None:
+                self.wfile.write(json.dumps(obj).encode() + b"\n")
+                self.wfile.flush()
+            got = phone_jobs.run(cmd, timeout, on_progress=lambda ln: line({"progress": ln}), **tagged)
+            try:
+                line(got)
+            except OSError:
+                pass
+        elif path == "/jobs/cancel":
+            # Downloads on the phone no longer wanted (phone_jobs.cancel; core
+            # phone_run.cancel): the host's token, never the public listener.
+            if not _desk_authorized(self):
+                self._json(401, {"error": "unauthorized"})
+                return
+            from agent_media_server import phone_jobs
+            body = self._read_json() or {}
+            self._json(200, {"ok": True, "cancelled": phone_jobs.cancel(str(body.get("tag") or ""))})
         elif path == "/play":
             # Replay a pane's last spoken clip — open like /agents (plays audio,
             # never injects keystrokes).

@@ -20,7 +20,7 @@ One entry is one video id downloading for one `purpose`:
 
 ``{"id", "purpose", "title", "pct", "phase", "updated_at"}``: `pct` 0-100,
 or null while the size is not known (a route that only answers at the end,
-the phone's jobs worker, says nothing until then); `phase` "downloading" or
+such as an older phone jobs worker, says nothing until then); `phase` "downloading" or
 "copying" (brought from the phone). An entry not touched for STALE_S is a
 download that died without saying, and is not shown.
 
@@ -119,15 +119,23 @@ def is_progress(line: str) -> bool:
     return bool(_TEMPLATE_RE.match(s) or _YTDLP_RE.match(s))
 
 
+#: The purposes someone is waiting on (a play): ahead in the phone's line.
+FOREGROUND = ("music", "book")
+
+
 @contextlib.contextmanager
-def context(purpose: Optional[str] = None, title: Optional[str] = None) -> Iterator[None]:
+def context(purpose: Optional[str] = None, title: Optional[str] = None,
+            priority: Optional[str] = None) -> Iterator[None]:
     """Downloads started inside this block are for `purpose`, named `title`,
-    unless their writer says otherwise (the radio's prefetch)."""
+    unless their writer says otherwise (the radio's prefetch). `priority`
+    "foreground" or "background" overrides the purpose's (FOREGROUND)."""
     cur = dict(_CONTEXT.get())
     if purpose:
         cur["purpose"] = purpose
     if title:
         cur["title"] = title
+    if priority:
+        cur["priority"] = priority
     tok = _CONTEXT.set(cur)
     try:
         yield
@@ -138,8 +146,10 @@ def context(purpose: Optional[str] = None, title: Optional[str] = None) -> Itera
 class Tracker:
     """One download's entry: `feed` it output lines, `phase` it to copying."""
 
-    def __init__(self, vid: str, purpose: str, title: Optional[str] = None) -> None:
+    def __init__(self, vid: str, purpose: str, title: Optional[str] = None,
+                 priority: Optional[str] = None) -> None:
         self.vid, self.purpose, self.title = vid, purpose, title
+        self.priority = priority or ("foreground" if purpose in FOREGROUND else "background")
         if not title:
             # A later step of the same download (the copy after it) keeps its name.
             with contextlib.suppress(OSError, ValueError, AttributeError):
@@ -199,11 +209,33 @@ def track(vid: str, purpose: Optional[str] = None, title: Optional[str] = None) 
     """An entry for `vid` while the block runs, removed when it ends.
     `purpose` and `title` default to the caller's `context`, then "music"."""
     ctx = _CONTEXT.get()
-    t = Tracker(vid, ctx.get("purpose") or purpose or "music", title or ctx.get("title"))
+    t = Tracker(vid, ctx.get("purpose") or purpose or "music", title or ctx.get("title"),
+                ctx.get("priority"))
     try:
         yield t
     finally:
         t.done()
+
+
+def cancel(tag: str, wait: bool = False) -> None:
+    """Stop the downloads tagged `tag` that are no longer wanted
+    (`"radio:"` every one of the radio's, `"radio:<id>"` one): through the
+    phone's jobs line where downloads go that way (MEDIA_PHONE_JOBS=1;
+    phone_run.cancel), in the background unless `wait`. Elsewhere nothing:
+    an ssh download runs to its end as before."""
+    if os.environ.get("MEDIA_PHONE_JOBS", "") != "1":
+        return
+
+    def go() -> None:
+        try:
+            from . import phone_run
+            phone_run.cancel(tag)
+        except Exception:  # noqa: BLE001 — a download left running is the old way
+            pass
+    if wait:
+        go()
+    else:
+        threading.Thread(target=go, daemon=True, name="downloads-cancel").start()
 
 
 def finish(vid: str, purpose: str) -> None:
@@ -278,6 +310,10 @@ def run(argv: Sequence[str], tracker: Optional[Tracker], timeout: Optional[float
     `tracker`. Progress lines are left out of the output unless
     `keep_progress`. Raises TimeoutExpired (the process killed) and OSError
     as `subprocess.run` does."""
+    if tracker is not None:
+        # What it is, for the phone's jobs line (phone_run: tag and priority).
+        kw["env"] = {**(kw.get("env") or os.environ),
+                     "AGENT_MEDIA_DOWNLOAD": f"{tracker.purpose}:{tracker.vid}:{tracker.priority}"}
     proc = subprocess.Popen(list(argv), stdin=kw.pop("stdin", subprocess.DEVNULL),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
     got: dict[str, list[str]] = {"out": [], "err": []}
