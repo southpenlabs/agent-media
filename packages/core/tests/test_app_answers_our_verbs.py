@@ -47,6 +47,13 @@ _VIA_HELPERS = {"get_property", "set_property", "observe_property"}
 #: refuses (then the claim is read, written and read back as before).
 _OPTIONAL = {"am-claim", "am-claim-play"}
 
+#: Sent from cli.py at a music mpv, never the speech player: `media music
+#: chapter`'s ``add chapter ±1`` (_music_chapter_step, 9 Nov 2026) goes to
+#: the Termux mpv or this host's music mpv (_music_mpv_chapters); Sasonica's
+#: player steps chapters in its sink instead. The scrape cannot tell the
+#: socket, so it is named here.
+_MUSIC_MPV_ONLY = {"add"}
+
 
 def _sent_verbs() -> set[str]:
     found = set()
@@ -56,7 +63,7 @@ def _sent_verbs() -> set[str]:
             pytest.fail(f"{rel} is gone — this test is looking in the wrong "
                         "place and would pass by finding nothing")
         found |= set(_SENT.findall(path.read_text()))
-    return found - _VIA_HELPERS - _OPTIONAL
+    return found - _VIA_HELPERS - _OPTIONAL - _MUSIC_MPV_ONLY
 
 
 def _implemented_verbs() -> set[str]:
