@@ -17,7 +17,7 @@ NOW = {"backend": "phone", "uri": "yt:https://www.youtube.com/watch?v=nMDHjVVj3b
        "title": "A Mix", "chapter": None, "pos_ms": 7000, "dur_ms": 3019000,
        "paused": False, "speed": 1.0, "volume": 100, "held": False}
 #: NOW as answered: the artist lookup knows nothing here, so the title is the song.
-SAID = {**NOW, "artist": None, "song": "A Mix", "album": None}
+SAID = {**NOW, "artist": None, "song": "A Mix", "album": None, "channel": None}
 
 
 @pytest.fixture(autouse=True)
@@ -249,6 +249,46 @@ def test_a_book_is_played_only_from_the_list(server, signed_in, audio_host, monk
     assert res.status == 400 and ran == []
     res, obj = call(server, "POST", "/music", {"action": "book", "uri": "/home/u/audiobooks/Hounded.m4b"}, headers=AUTH)
     assert res.status == 200 and ran == ["/home/u/audiobooks/Hounded.m4b"]
+
+
+def test_recent_searches_with_q(server, signed_in, audio_host, monkeypatch):
+    """`?q=` (9 Nov 2026): the server searches, the whole history."""
+    from agent_media_core import music_recent
+    asked = []
+    monkeypatch.setattr(music_recent, "listed", lambda kind, which, q="": asked.append((kind, which, q)) or [{"id": 1}])
+    res, obj = call(server, "GET", "/music/recent?q=vani%20born", headers=AUTH)
+    assert res.status == 200 and obj["q"] == "vani born" and obj["items"] == [{"id": 1}]
+    res, obj = call(server, "GET", "/music/recent?kind=book&list=most&q=druid", headers=AUTH)
+    assert res.status == 200 and asked == [("music", "recent", "vani born"), ("book", "most", "druid")]
+    _, obj = call(server, "GET", "/music/recent", headers=AUTH)
+    assert "q" not in obj and asked[-1] == ("music", "recent", "")
+
+
+def test_a_channels_page_route(server, signed_in, audio_host, monkeypatch):
+    from agent_media_core import music_channel
+    asked = []
+    page = {"name": "VaniBorn", "key": "vaniborn", "url": "https://www.youtube.com/@vaniborn",
+            "youtube": "https://www.youtube.com/channel/UC1", "details": None, "played": [], "uploads": [],
+            "sources": {"details": None, "uploads": None}}
+    monkeypatch.setattr(music_channel, "page", lambda **kw: asked.append(kw) or page)
+    res, obj = call(server, "GET", "/music/channel?name=vaniBorn", headers=AUTH)
+    assert res.status == 200 and obj == {"ok": True, "channel": page}
+    res, obj = call(server, "GET", "/music/channel?vid=MMMMMMMMMMM&name=VaniBorn", headers=AUTH)
+    assert res.status == 200 and asked[-1] == {"name": "VaniBorn", "url": "", "vid": "MMMMMMMMMMM"}
+    res, obj = call(server, "GET", "/music/channel", headers=AUTH)
+    assert res.status == 400 and obj["ok"] is False
+    res, obj = call(server, "GET", "/music/channel?url=https://evil.example/x", headers=AUTH)
+    assert res.status == 400 and len(asked) == 2
+    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    res, obj = call(server, "GET", "/music/channel?name=x", headers=AUTH)
+    assert res.status == 401
+
+
+def test_now_carries_its_channel(server, signed_in, audio_host, player, monkeypatch):
+    from agent_media_core import music_channel
+    monkeypatch.setattr(music_channel, "row", lambda vid: {"name": "vaniBorn", "key": "vaniborn"} if vid == "nMDHjVVj3bA" else None)
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["now"]["channel"] == {"name": "vaniBorn", "key": "vaniborn"}
 
 
 def test_recent_is_gated(server, monkeypatch, audio_host):

@@ -4,8 +4,10 @@ server-contract.md §6.9a. Step 1 of docs/proposals/2026-09-28-music-tab.md
 (David, 28 Sep 2026: "Let's build the Media tab UI").
 
   GET  /music                → {"ok", "now": {...}, "chapters": [...], "where": {...}}
-  GET  /music/recent[?kind=music|book|podcast][&list=recent|liked|most|…]
+  GET  /music/recent[?kind=music|book|podcast][&list=recent|liked|most|…][&q=words]
                              → {"ok", "kind", "list", "items": [{"uri", "title", "at", "session", …}]}
+  GET  /music/channel?name=…|url=…|vid=…
+                             → {"ok", "channel": {"name", "key", "youtube", "details", "played", "uploads", …}}
   POST /music {"action", …}  → the same, after doing it
 
 `radio` is the station (agent_media_core.radio; docs/proposals/
@@ -264,16 +266,22 @@ def _who(now: dict) -> dict:
     from agent_media_core import media_meta
     from agent_media_core.music_recent import _music_meta
 
+    from agent_media_core import music_channel
+
     vid = now.get("media_id") or ""
     if not vid or len(vid) != 11:
-        return {"artist": None, "song": None, "album": None}
+        return {"artist": None, "song": None, "album": None, "channel": None}
     try:
         got = _music_meta(f"yt:{vid}", now.get("title") or "")
         if not media_meta.known(f"yt:{vid}"):
             media_meta.fill([(f"yt:{vid}", "music", {"vid": vid, "title": now.get("title") or ""})])
-        return {"artist": got.get("artist"), "song": got.get("song"), "album": got.get("album")}
+        # Who uploaded it (music_channel; 9 Nov 2026): the channel page's way in.
+        ch = music_channel.row(vid)
+        if ch is None:
+            music_channel.fill([vid])
+        return {"artist": got.get("artist"), "song": got.get("song"), "album": got.get("album"), "channel": ch}
     except Exception:  # noqa: BLE001 — the title alone will do
-        return {"artist": None, "song": None, "album": None}
+        return {"artist": None, "song": None, "album": None, "channel": None}
 
 
 def _answer() -> dict:
@@ -778,13 +786,15 @@ def now(bearer: str) -> tuple[bool, dict]:
     return True, _answer()
 
 
-def recent(bearer: str, kind: str = "music", which: str = "recent") -> tuple[bool, dict]:
+def recent(bearer: str, kind: str = "music", which: str = "recent", q: str = "") -> tuple[bool, dict]:
     """`GET /music/recent` — gated like /speech/now: what was played, newest
     first, one per track, with the conversation that put it on
     (agent_media_core.music_recent). `kind` is music, book or podcast;
     `which` (`?list=`) one of its lists (music_recent.LISTS): what was
     played, the most played, the songs liked, a book library's, the newest
-    podcast episodes."""
+    podcast episodes. `q` (`?q=`, 9 Nov 2026) searches: the whole history
+    for what was played and the most played, the list's own rows for the
+    others; the answer echoes it."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -794,12 +804,41 @@ def recent(bearer: str, kind: str = "music", which: str = "recent") -> tuple[boo
         return False, {"error": "kind must be music, book or podcast", "status": 400}
     if which not in music_recent.LISTS[kind]:
         return False, {"error": f"list must be one of {', '.join(music_recent.LISTS[kind])}", "status": 400}
+    q = (q or "").strip()[:200]
     try:
-        items = music_recent.listed(kind=kind, which=which)
+        items = music_recent.listed(kind=kind, which=which, q=q)
     except Exception as e:  # noqa: BLE001 — an empty list, not a 500
         print(f"music: recent failed: {e}", file=sys.stderr)
         items = []
-    return True, {"kind": kind, "list": which, "lists": list(music_recent.LISTS[kind]), "items": items}
+    out = {"kind": kind, "list": which, "lists": list(music_recent.LISTS[kind]), "items": items}
+    if q:
+        out["q"] = q
+    return True, out
+
+
+def channel(bearer: str, name: str = "", url: str = "", vid: str = "") -> tuple[bool, dict]:
+    """`GET /music/channel` — gated like /music/recent: a YouTube channel's
+    page (agent_media_core.music_channel.page), found by `name` (a channel
+    or an artist), `url` (its address) or `vid` (a video of its): its
+    details and latest uploads where they can be had, and everything played
+    from it or by that artist."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    name, url, vid = (name or "").strip()[:200], (url or "").strip()[:300], (vid or "").strip()
+    if url and not url.startswith("https://www.youtube.com/"):
+        return False, {"error": "url must be a YouTube channel's address", "status": 400}
+    if not (name or url or vid):
+        return False, {"error": "say name, url or vid", "status": 400}
+    from agent_media_core import music_channel
+
+    try:
+        got = music_channel.page(name=name, url=url, vid=vid)
+    except Exception as e:  # noqa: BLE001 — a name and nothing else, not a 500
+        print(f"music: channel failed: {e}", file=sys.stderr)
+        got = {"name": name, "key": music_channel.key(name), "url": url or None, "youtube": url or None,
+               "details": None, "played": [], "uploads": [], "sources": {"details": None, "uploads": None}}
+    return True, {"channel": got}
 
 
 def _played_book(uri: str) -> bool:

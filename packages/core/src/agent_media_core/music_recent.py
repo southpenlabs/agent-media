@@ -173,19 +173,92 @@ LISTS = {"music": ("recent", "liked", "most", "stations", "albums", "sung"),
 
 
 def recent(limit: int = 40, store: Optional[StateStore] = None,
-           kind: str = "music") -> list[dict]:
+           kind: str = "music", q: str = "") -> list[dict]:
     """``[{"id", "uri", "title", "art", "at", "session", "inferred", "kind",
     …}]``, newest first, one row per URI (its latest play). Music rows carry
     `artist`, `album`, `song`, `genre`; books and podcasts `author`, `series`,
     `narrator`, `genre` (media_meta: null until looked up). A YouTube row
     whose chapters are known adds `chapters` (each a song: `index`, `title`,
     `start`, `end`, `artist`, `song`, `album`, `genre`) and `mix`
-    (music_chapters)."""
+    (music_chapters), and its uploader as `channel` once looked up
+    (music_channel.row).
+
+    `q` (9 Nov 2026) searches the whole history instead of the newest
+    `limit`: every word of it, case and accents aside, in the title, artist,
+    song, album, genre, channel, or a chapter's artist or song (a book's
+    author, series, narrator); `limit` matches at most."""
     store = store or StateStore()
+    if q.strip():
+        if kind in ("book", "podcast"):
+            rows = _spoken_books(store, kind, 100000, 100000)
+        else:
+            rows = _music_rows(store, 100000, None, lookups=False)
+        hits = [r for r in rows if matches(r, q)][:limit]
+        if kind == "music":
+            fill_rows(hits)
+        return hits
     # How far back plays are counted (`plays`): further for a long list.
     window = min(4000, max(400, limit * 10))
     if kind in ("book", "podcast"):
         return _spoken_books(store, kind, limit, window)
+    out = _music_rows(store, window, limit)
+    fill_rows(out)
+    return out
+
+
+def history(store: Optional[StateStore] = None) -> list[dict]:
+    """Every music row of the whole history, newest first, one per track,
+    in recent()'s shape — no lookups started (music_channel's page)."""
+    return _music_rows(store or StateStore(), 100000, None, lookups=False)
+
+
+def _words(text: str) -> str:
+    from . import music_channel
+
+    return re.sub(r"[\W_]+", " ", music_channel.fold(text)).strip()
+
+
+def matches(row: dict, q: str) -> bool:
+    """Whether every word of `q` is in the row's names (case and accents
+    aside; a word also found with the spaces taken out, so "vaniborn"
+    finds "Vani Born")."""
+    words = _words(q).split()
+    if not words:
+        return True
+    names = [row.get(k) for k in ("title", "artist", "album", "song", "genre",
+                                   "author", "series", "narrator")]
+    ch = row.get("channel") if isinstance(row.get("channel"), dict) else {}
+    names += [ch.get("name"), ch.get("uploader"), ch.get("handle")]
+    for c in row.get("chapters") or []:
+        names += [c.get("artist"), c.get("song"), c.get("title")]
+    hay = _words(" ".join(str(n) for n in names if n))
+    tight = hay.replace(" ", "")
+    return all(w in hay or w in tight for w in words)
+
+
+def fill_rows(rows: list[dict]) -> None:
+    """Start the background lookups the rows still need: names, chapters'
+    songs, channels."""
+    from . import music_channel, music_chapters
+
+    vids = [v for v in (_vid(r.get("uri") or "") for r in rows) if v]
+    wanted = [(f"yt:{v}", "music", {"vid": v, "title": r.get("title") or ""})
+              for r in rows for v in [_vid(r.get("uri") or "")] if v]
+    for r in rows:
+        vid = _vid(r.get("uri") or "")
+        if vid:
+            wanted += music_chapters.songs(vid, r.get("artist"))[1]
+    media_meta.fill(wanted)
+    music_chapters.fill(vids)
+    music_channel.fill(vids)
+
+
+def _music_rows(store: StateStore, window: int, limit: Optional[int],
+                lookups: bool = True) -> list[dict]:
+    """The music rows of the newest `window` plays, `limit` of them (all
+    when None). `lookups`: ask oEmbed for a few names not known yet."""
+    from . import music_channel
+
     rows = [r for r in store.recent_history(sink="music", limit=window, requested=True)
             if _asked(r)]
     plays: dict[str, int] = {}
@@ -204,7 +277,7 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
             continue
         seen.add(k)
         picked.append(r)
-        if len(picked) >= limit:
+        if limit is not None and len(picked) >= limit:
             break
     cache = _titles()
     looked = 0
@@ -217,7 +290,7 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
             named[k] = cache[k]
             continue
         title = _cached_title(vid)
-        if not title and looked < _LOOKUPS:
+        if not title and lookups and looked < _LOOKUPS:
             looked += 1
             title = _oembed(vid)
         if title:
@@ -226,6 +299,7 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
         _keep_titles(cache)
     oldest = min((r["started_at"] for r in picked), default=0.0)
     speakers = _speakers(store, oldest - _INFER_S) if picked else []
+    channels = music_channel.rows([v for v in (_vid(r["uri"]) for r in picked) if v])
     out = []
     for r in picked:
         extras = r.get("extras") if isinstance(r.get("extras"), dict) else {}
@@ -234,19 +308,18 @@ def recent(limit: int = 40, store: Optional[StateStore] = None,
         if not sid:
             sid = _inferred(speakers, float(r["started_at"]))
             inferred = sid is not None
+        vid = _vid(r["uri"])
         out.append({"id": r["id"], "uri": r["uri"],
                     "title": named.get(_key(r["uri"])) or None, "art": art(r["uri"]),
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
                     "plays": plays.get(_key(r["uri"]), 1),
-                    "kind": "music", **_music_meta(r["uri"], named.get(_key(r["uri"])) or "")})
-    wanted = [(f"yt:{_vid(r['uri'])}", "music", {"vid": _vid(r["uri"]), "title": named.get(_key(r["uri"])) or ""})
-              for r in picked if _vid(r["uri"])]
-    wanted += _with_chapters(out)
-    media_meta.fill(wanted)
+                    "kind": "music", **_music_meta(r["uri"], named.get(_key(r["uri"])) or ""),
+                    "channel": channels.get(vid) if vid else None})
+    _with_chapters(out, fill=False)
     return out
 
 
-def _with_chapters(rows: list[dict]) -> list:
+def _with_chapters(rows: list[dict], fill: bool = True) -> list:
     """Give each YouTube row its chapters as songs (`chapters`) and say
     whether it is a mix (`mix`), music_chapters; start reading the ones not
     known. The lookups the chapters still need, for media_meta.fill."""
@@ -264,7 +337,8 @@ def _with_chapters(rows: list[dict]) -> list:
         if chs:
             row["chapters"] = chs
             row["mix"] = music_chapters.is_mix(chs)
-    music_chapters.fill(vids)
+    if fill:
+        music_chapters.fill(vids)
     return wanted
 
 
@@ -425,8 +499,12 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
     return out
 
 
+#: The most a search answers (`GET /music/recent?q=`).
+SEARCH_LIMIT = 200
+
+
 def listed(kind: str = "music", which: str = "recent", store: Optional[StateStore] = None,
-           limit: int = 40) -> list[dict]:
+           limit: int = 40, q: str = "") -> list[dict]:
     """One of a kind's lists (LISTS), in Recently played's shape. `recent`
     is what was played; `most` the same by how often (`plays`, then the
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
@@ -434,7 +512,17 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
     newest first (`published`, epoch seconds); `saved` the YouTube links
     saved for the Podcasts tab (podcast_links); `albums` the Spotify albums,
     playlists and songs saved for the Music tab (music_links); `sung` every
-    song sung out after a long reply, taken up or not (music_sung)."""
+    song sung out after a long reply, taken up or not (music_sung).
+
+    `q` searches: `recent` and `most` the whole history (recent()), the
+    other lists their own rows (`matches`), up to SEARCH_LIMIT."""
+    if q.strip():
+        if which in ("recent", "most"):
+            rows = recent(limit=SEARCH_LIMIT, store=store, kind=kind, q=q)
+            if which == "most":
+                rows.sort(key=lambda r: (-(r.get("plays") or 1), -float(r.get("at") or 0)))
+            return rows
+        return [r for r in listed(kind, which, store, limit=1000) if matches(r, q)][:SEARCH_LIMIT]
     if which == "recent":
         return recent(limit=limit, store=store, kind=kind)
     if which == "most":

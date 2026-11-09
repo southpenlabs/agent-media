@@ -457,6 +457,7 @@ def _no_practice_lookups(monkeypatch):
     monkeypatch.setenv("MEDIA_FACTS_URL", "-")
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
+    monkeypatch.setenv("MEDIA_MUSIC_CHANNEL", "0")
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     # The add-on methods (personal_use.ADDON_METHODS) as stand-ins, never
     # an installed personal-use add-on even where there is one: a test

@@ -4140,6 +4140,72 @@ from `start` seconds in (a chapter's `start`): `media music play <uri>
 made once the player has the track (up to 12 s). 400 for a `start` that is
 not a non-negative number; ignored for `add`.
 
+**Searching the whole history (9 Nov 2026)** (`?q=`; David: the Music
+tab's search filtered only the forty rows Recently played answered, so an
+older VaniBorn mix could not be found). `GET /music/recent?q=<words>` (with
+any `kind` and `list`) answers the rows holding every word, matched on the
+server with case and accents aside (a word is also found with the spaces
+taken out, so "vaniborn" finds "Vani Born"): title, `artist`, `song`,
+`album`, `genre`, the `channel`'s names and handle, and a mix's chapters'
+artists and songs (a book's or episode's `author`, `series`, `narrator`).
+For `recent` and `most` that is the **whole** play history (newest first,
+`most` then by `plays`); every other list is searched in its own rows. At
+most 200; the answer echoes `"q"`. The query is cut at 200 characters. A
+server before this ignores `q` and answers the plain list, so a client
+checks `/features` `music_search` before relying on it.
+
+**A row's channel (9 Nov 2026)** (`agent_media_core.music_channel`; David:
+"Also count it under its channel/uploader"). A YouTube music row carries
+`"channel"`: `{"name"` (without " - Topic"), `"uploader"` (as YouTube
+writes it), `"key"` (the name folded: no " - Topic", case, accents or
+anything not a letter or digit — "vaniBorn", "VaniBorn - Topic" and a
+chapter's "Vani Born" share `vaniborn`), `"url"` (the channel's address),
+`"id"` (`UC…`, when the address gives it), `"handle"` (`@…`, likewise),
+`"topic"` (YouTube's automatic "<Artist> - Topic" channel)`}`, or `null`
+until it is known. It comes from YouTube's public oEmbed (`author_name`,
+`author_url`), looked up in the background a few videos a pass and kept
+in `music-channels.json` (one not answered is asked again a day later);
+the rooms cache's `.title` sidecar holds only the title. `GET /music`'s
+`now` carries the same `channel` for what is playing. The app counts a
+mix under its channel as well as its chapters' artists, grouping by `key`
+and writing the name the Topic channel or the catalogue does.
+
+`GET /music/channel?name=<name>|url=<address>|vid=<video id>` (9 Nov 2026,
+gated like `/music/recent`; David: "Can we get to an info page for the
+channel too?") answers `{"ok", "channel": {"name", "key", "url",
+"youtube", "details", "played", "uploads", "sources"}}`: a YouTube channel
+or an artist, found by name, by the channel's address
+(`https://www.youtube.com/…` only, 400 otherwise) or by a video of its (400
+with none of them).
+
+- `played`: every music row of the whole history (in `/music/recent`'s
+  shape, newest first) whose `channel.key`, `artist` (not a mix's, which is
+  only its uploader's name again) or a chapter's artist has the key — the
+  channel's songs and its mixes, and mixes the artist is in.
+- `url`: the channel's address — of a `vid`, else the one most of the
+  plays came from, the uploader's own before its Topic channel; `null`
+  when nothing played came from a channel of that name.
+- `details` (or `null`): `{"name", "photo", "photo_large", "banner",
+  "description", "subscribers", "videos", "country", "url"}` from the
+  channel's About page, read by the personal-use add-on's
+  `youtube-metadata` `channel(url)`; `null` without the add-on or with no
+  `url`. `subscribers` and `videos` are YouTube's own words ("77.1K
+  subscribers").
+- `uploads`: the channel's latest uploads (up to 15, rows `{"id": "up:<vid>",
+  "uri": "yt:<vid>", "title", "art", "published", "at", "kind": "music"}`)
+  from YouTube's public RSS feed of the channel id, when the id is known
+  (the add-on's canonical address, or an `id` in the address); else `[]`.
+- `youtube`: the channel on YouTube (canonical address, else `url`, else a
+  YouTube search for the name). `name`: written as the Topic channel or
+  the catalogue does, else a song's artist, else the uploader.
+- `sources`: `{"details": "page" | null, "uploads": "feed" | null}`, what
+  answered.
+
+Details and uploads are kept a day (`music-channel-pages.json`; a failed
+read an hour). MEDIA_MUSIC_CHANNEL=0 turns every lookup off (the tests do);
+what is kept is still answered. A row or upload plays as any does, `POST
+/music {"action": "play", "uri"}`, through the play gate (409 `held`).
+
 `POST /music {"action": "book", "uri"}` (29 Sep 2026) plays a book or
 podcast again (`media book play`, resumed where it was left). Only a `uri`
 one of the book or podcast lists holds is accepted (400 otherwise), so
@@ -4964,6 +5030,8 @@ local look, never a network call:
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
+| `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
+| `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |

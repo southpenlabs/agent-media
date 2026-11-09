@@ -132,6 +132,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_PODCAST_RESOLVE", "0")
     # … and who an artist, author or show is (media_people).
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
+    # … and a video's channel, a channel's page and uploads (music_channel).
+    monkeypatch.setenv("MEDIA_MUSIC_CHANNEL", "0")
     # The tests exercise the personal-use methods (personal_use.py) as a
     # personal install has them; test_personal_use.py checks a public one.
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
