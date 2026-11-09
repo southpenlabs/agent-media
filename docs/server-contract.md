@@ -3896,6 +3896,9 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
   track not yet looked up is looked up in the background), else what the
   title says; null when neither knows. The app's song-change banner reads
   them.
+- `now.album` (9 Nov 2026): the song's album from the same lookup (the
+  iTunes catalogue, matched on artist and song); null when not found or
+  not yet looked up. Absent on older servers.
 - `chapters` are a mix's tracks (one file, many tracks) when the live file
   is played by Sasonica from the phone's cache, read on the phone with
   ffprobe and kept per file; `[]` otherwise. `now.chapter` names the one

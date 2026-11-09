@@ -256,22 +256,24 @@ def _move_state() -> dict | None:
 
 
 def _who(now: dict) -> dict:
-    """`artist` and `song` for a YouTube track (media_meta: MusicBrainz,
-    else what the title says), so the app's banner can name both when the
-    song changes (David, 29 Oct 2026); null for anything else."""
+    """`artist`, `song` and `album` for a YouTube track (media_meta: the
+    iTunes catalogue, else what the title says), so the app's banner can
+    name them when the song changes (David, 29 Oct 2026; the album, 9 Nov
+    2026: "can we get the artist and album info with it?"); null for
+    anything else."""
     from agent_media_core import media_meta
     from agent_media_core.music_recent import _music_meta
 
     vid = now.get("media_id") or ""
     if not vid or len(vid) != 11:
-        return {"artist": None, "song": None}
+        return {"artist": None, "song": None, "album": None}
     try:
         got = _music_meta(f"yt:{vid}", now.get("title") or "")
         if not media_meta.known(f"yt:{vid}"):
             media_meta.fill([(f"yt:{vid}", "music", {"vid": vid, "title": now.get("title") or ""})])
-        return {"artist": got.get("artist"), "song": got.get("song")}
+        return {"artist": got.get("artist"), "song": got.get("song"), "album": got.get("album")}
     except Exception:  # noqa: BLE001 — the title alone will do
-        return {"artist": None, "song": None}
+        return {"artist": None, "song": None, "album": None}
 
 
 def _answer() -> dict:

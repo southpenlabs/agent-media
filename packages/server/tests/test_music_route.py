@@ -17,7 +17,7 @@ NOW = {"backend": "phone", "uri": "yt:https://www.youtube.com/watch?v=nMDHjVVj3b
        "title": "A Mix", "chapter": None, "pos_ms": 7000, "dur_ms": 3019000,
        "paused": False, "speed": 1.0, "volume": 100, "held": False}
 #: NOW as answered: the artist lookup knows nothing here, so the title is the song.
-SAID = {**NOW, "artist": None, "song": "A Mix"}
+SAID = {**NOW, "artist": None, "song": "A Mix", "album": None}
 
 
 @pytest.fixture(autouse=True)
@@ -107,10 +107,11 @@ def test_a_like_on_a_mix_is_its_chapter(server, signed_in, audio_host, player, m
 
 def test_now_names_the_artist(server, signed_in, audio_host, player, monkeypatch):
     from agent_media_core import media_meta
-    monkeypatch.setattr(media_meta, "known", lambda key: {"artist": "Massive Attack", "song": "Teardrop", "found": True}
+    monkeypatch.setattr(media_meta, "known", lambda key: {"artist": "Massive Attack", "song": "Teardrop", "album": "Mezzanine", "found": True}
                         if key == "yt:nMDHjVVj3bA" else None)
     _, obj = call(server, "GET", "/music", headers=AUTH)
     assert obj["now"]["artist"] == "Massive Attack" and obj["now"]["song"] == "Teardrop"
+    assert obj["now"]["album"] == "Mezzanine"
     assert keys(obj["where"]) == {"current", "next", "overridden", "options", "rooms"}
     assert obj["where"]["rooms"] == []  # no music stream on this host
 
