@@ -2785,7 +2785,7 @@ phone's `uri` is the original's clip URI, prefetched) and `outro` "",
 the original song — from the bed's own position for a separated bed (the
 same recording, cut and trimmed alike), else from the same fraction of the
 song snapped to a section start within `snap_s` — over
-`MEDIA_MUSIC_BED_VOCAL_XFADE_MS` (2000) aligned or `_LOOSE_XFADE_MS` (3000),
+`MEDIA_MUSIC_BED_VOCAL_XFADE_MS` (2000) aligned or `_LOOSE_XFADE_MS` (3000), to `_START_DB` (-12) under its full level, then eases up to it over `_RISE_MS` (6000, a smoothstep; `after` carries `"rise_ms"` and `"start_db"`, 10 Nov 2026: "Sing it out should ease in gently from a lower volume"),
 plays it at a music level (the original is loudnormed to
 `MEDIA_MUSIC_BED_VOCAL_LUFS`, -16) to the end of the next chorus at least
 `_AHEAD_S` (15) on, else the next boundary that far on, else `_FALLBACK_S`

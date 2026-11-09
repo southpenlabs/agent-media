@@ -57,7 +57,12 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+# RISE_MS / START_DB: in gently (David, 10 Nov 2026: "Sing it out should ease
+# in gently from a lower volume") — the crossfade brings the song to START_DB
+# under its full level, then it eases up over RISE_MS (the phone's
+# VocalHandover.songEase, a smoothstep).
 DEFAULTS = {"LUFS": -16.0, "XFADE_MS": 2000.0, "LOOSE_XFADE_MS": 3000.0,
+            "RISE_MS": 6000.0, "START_DB": -12.0,
             "SNAP_S": 8.0, "AHEAD_S": 15.0, "FALLBACK_S": 30.0, "FADE_MS": 3000.0,
             "MAX_MB": 300.0, "PER_PASS": 2.0}
 #: Where a separated bed is cut (music_bed_favourites._cut's default) and
@@ -287,7 +292,8 @@ def after_for(bed_path) -> Optional[dict]:
             "bounds": list(rec.get("bounds") or []), "choruses": list(rec.get("choruses") or []),
             "xfade_ms": tunable("XFADE_MS" if aligned else "LOOSE_XFADE_MS"),
             "fade_ms": tunable("FADE_MS"), "ahead_s": tunable("AHEAD_S"),
-            "fallback_s": tunable("FALLBACK_S"), "snap_s": tunable("SNAP_S")}
+            "fallback_s": tunable("FALLBACK_S"), "snap_s": tunable("SNAP_S"),
+            "rise_ms": max(0.0, tunable("RISE_MS")), "start_db": min(0.0, tunable("START_DB"))}
 
 
 def _python() -> Optional[str]:

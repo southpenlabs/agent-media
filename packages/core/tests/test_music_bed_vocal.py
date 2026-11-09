@@ -101,6 +101,7 @@ def test_a_long_reply_over_a_kept_favourite_sings_it_out(tmp_path):
     assert a["uri"].endswith("music-bed-vocal-k1.mp3") and a["aligned"] is True
     assert a["bounds"] == [30.0, 55.0] and a["choruses"] == [[30.0, 55.0]]
     assert a["xfade_ms"] == 2000.0 and a["fade_ms"] == 3000.0 and a["ahead_s"] == 15.0
+    assert a["rise_ms"] == 6000.0 and a["start_db"] == -12.0     # in gently, from a lower level
     assert p["outro"] == "" and p["carry_ms"] == 0       # it replaces both
     json.dumps(p)
 
