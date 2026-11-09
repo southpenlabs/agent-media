@@ -16,6 +16,10 @@ next. That stays the default. The listener can choose (David, 31 Oct and
   thread's speed is forgotten.
 - `break_min`: with the speed carrying between replies, it goes back to the
   start speed when nothing has been spoken for this many minutes (0: never).
+- `step`: how far a faster or slower press moves (David, 10 Nov 2026: "a
+  setting somewhere to set the speed increments"): 0, the ladder (1, 1.25,
+  1.5, 2, 3, and 0.1 steps under 1×), or one of STEPS, even steps all the
+  way (`next_speed`, which cli.py `media speed up|down` uses).
 
 Applied where a reply ends (`at_reply_end`: intake/submit.py, both the live
 reply and the remote renderer, and cli.py `_finish` for a replay) and where
@@ -24,7 +28,7 @@ player that cannot be reached keeps its rate, and a press after that starts
 from what was written down, because what a press sends is absolute.
 
 Kept in `<state_dir>/speech-speed-reset.json` as `{"reset", "start",
-"per_thread", "break_min", "at"}`, and what was heard in
+"per_thread", "break_min", "step", "at"}`, and what was heard in
 `speech-speed-heard.json` (`{"last_end", "threads": {session: rate}}`); the
 server's, so every device paired with it (`GET`/`POST /speech/speed-reset`,
 the app's Settings and the full player's speed keys).
@@ -48,6 +52,11 @@ HEARD = "speech-speed-heard.json"
 STARTS = (1.0, 1.25, 1.5, 1.75, 2.0)
 #: The break lengths offered, in minutes (0: never).
 BREAKS = (0, 5, 15, 30, 60)
+#: The even steps a press may move by (0, not one of them, is the ladder).
+STEPS = (0.05, 0.1, 0.25)
+#: The ladder at and above 1×, flat steps under it, and the ends (cli.py's).
+RUNGS = (1.0, 1.25, 1.5, 2.0, 3.0)
+FLAT, MIN, MAX = 0.1, 0.3, 3.0
 #: Threads remembered, newest kept.
 MAX_THREADS = 200
 
@@ -68,7 +77,7 @@ def _write(path: Path, data: dict) -> None:
 
 
 def settings() -> dict:
-    """`{"reset", "start", "per_thread", "break_min"}`, defaults filled in."""
+    """`{"reset", "start", "per_thread", "break_min", "step"}`, defaults filled in."""
     try:
         raw = json.loads(_path().read_text())
         if not isinstance(raw, dict):
@@ -77,11 +86,13 @@ def settings() -> dict:
         raw = {}
     start = raw.get("start")
     brk = raw.get("break_min")
+    step = raw.get("step")
     return {
         "reset": bool(raw.get("reset", False)),
         "start": float(start) if isinstance(start, (int, float)) and float(start) in STARTS else 1.0,
         "per_thread": bool(raw.get("per_thread", False)),
         "break_min": int(brk) if isinstance(brk, (int, float)) and int(brk) in BREAKS else 0,
+        "step": float(step) if isinstance(step, (int, float)) and not isinstance(step, bool) and float(step) in STEPS else 0,
     }
 
 
@@ -108,8 +119,42 @@ def save_settings(**changes) -> dict:
         if v not in BREAKS:
             raise ValueError(f"break_min must be one of {', '.join(map(str, BREAKS))}")
         cur["break_min"] = v
+    if "step" in changes and changes["step"] is not None:
+        v = float(changes["step"])
+        if v != 0 and v not in STEPS:
+            raise ValueError(f"step must be 0 or one of {', '.join(map(str, STEPS))}")
+        cur["step"] = 0 if v == 0 else v
     _write(_path(), {**cur, "at": time.time()})
     return cur
+
+
+def next_speed(cur: float, direction: int, step: float | None = None) -> float:
+    """The speed a faster (+1) or slower (-1) press goes to from `cur`.
+
+    `step` (the setting when None): 0 climbs the ladder at and above 1× and
+    moves FLAT under it; an even step goes to the next multiple of it, so a
+    rate off the grid (1.75 with 0.25... or 1.33) lands back on it. Between
+    MIN and MAX."""
+    if step is None:
+        step = settings()["step"]
+    eps = 1e-6
+    if step:
+        n = cur / step
+        k = (int(n + eps) + 1) if direction > 0 else (int(n - eps) if abs(n - round(n)) > eps else round(n) - 1)
+        return round(max(MIN, min(MAX, k * step)), 2)
+    if direction > 0:
+        if cur < 1.0 - eps:
+            return min(round(cur + FLAT, 2), 1.0)
+        for r in RUNGS:
+            if r > cur + eps:
+                return r
+        return MAX
+    if cur > 1.0 + eps:
+        for r in reversed(RUNGS):
+            if r < cur - eps:
+                return r
+        return 1.0
+    return max(round(cur - FLAT, 2), MIN)
 
 
 def reset_after_reply() -> bool:

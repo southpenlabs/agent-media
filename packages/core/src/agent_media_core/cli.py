@@ -2829,22 +2829,10 @@ _SPEED_RUNGS = (1.0, 1.25, 1.5, 2.0, 3.0)
 
 
 def _speed_next(cur: float, direction: int) -> float:
-    """Next speed for a [ / ] press: +1 faster / -1 slower. Hops _SPEED_RUNGS
-    at/above 1.0x; flat _SPEED_FLAT steps below. Clamped to [_SPEED_MIN, _SPEED_MAX]."""
-    eps = 1e-6
-    if direction > 0:
-        if cur < 1.0 - eps:
-            return min(round(cur + _SPEED_FLAT, 2), 1.0)
-        for r in _SPEED_RUNGS:
-            if r > cur + eps:
-                return r
-        return _SPEED_MAX
-    if cur > 1.0 + eps:
-        for r in reversed(_SPEED_RUNGS):
-            if r < cur - eps:
-                return r
-        return 1.0
-    return max(round(cur - _SPEED_FLAT, 2), _SPEED_MIN)
+    """Next speed for a [ / ] press: +1 faster / -1 slower, by the listener's
+    steps (speech_speed.next_speed: the ladder, or even steps when set)."""
+    from . import speech_speed
+    return speech_speed.next_speed(cur, direction)
 
 
 @contextlib.contextmanager

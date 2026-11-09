@@ -28,7 +28,14 @@ public Overpass and ohsome servers refuse a cloud host's address (red5: a
 in the state dir instead. `python -m agent_media_server.map_osm refresh`
 (a weekly timer on the host) downloads the file to the cache dir, keeps
 the cameras with pyosmium (the `map-extract` extra, BSD) and deletes the
-download; nothing is asked of Overpass then.
+download; nothing is asked of Overpass then. Between full downloads,
+`... map_osm update` (daily) applies the extract's change files (Geofabrik
+publishes a few MB a day beside it, `<extract>-updates/`; or
+`MEDIA_MAP_OSM_UPDATES`) to the kept cameras, so a camera mapped today is on
+the Map tomorrow (David, 10 Nov 2026: "some kind of incremental update a
+little bit more regularly"). The kept file holds the raw elements and the
+change sequence it is up to for that; a device node a changed relation names
+but whose own record did not change is placed at the next full download.
 """
 
 from __future__ import annotations
@@ -287,14 +294,107 @@ def refresh(url: str | None = None) -> dict:
         when = parsedate_to_datetime(as_of).timestamp() if as_of else time.time()
     except (TypeError, ValueError):
         when = time.time()
-    out = {"at": time.time(), "as_of": when, "source": url,
+    return _keep(elements, when, url, sequence=None)
+
+
+def _keep(elements: list[dict], as_of: float, source: str, sequence: int | None) -> dict:
+    """Write the kept file: the layers' features, and the raw elements and
+    change sequence the daily update works from. Returns counts."""
+    out = {"at": time.time(), "as_of": as_of, "source": source, "sequence": sequence,
+           "elements": elements,
            "speed_cameras": _features("speed_cameras", elements),
            "surveillance": _features("surveillance", elements)}
     path = _extract_path()
     part = path.with_suffix(".tmp")
     part.write_text(json.dumps(out))
     os.replace(part, path)
-    return {"speed_cameras": len(out["speed_cameras"]), "surveillance": len(out["surveillance"])}
+    return {"speed_cameras": len(out["speed_cameras"]), "surveillance": len(out["surveillance"]),
+            "sequence": sequence}
+
+
+def _updates_url(source: str) -> str:
+    """Geofabrik's change files beside an extract: `x-latest.osm.pbf` → `x-updates`."""
+    own = os.environ.get("MEDIA_MAP_OSM_UPDATES") or ""
+    if own:
+        return own.rstrip("/")
+    base = source.rsplit("/", 1)
+    name = base[-1].split("-latest")[0].split(".osm")[0]
+    return f"{base[0]}/{name}-updates" if len(base) == 2 else ""
+
+
+def _camera_node(tags) -> bool:
+    return tags.get("highway") == "speed_camera" or tags.get("man_made") == "surveillance"
+
+
+def apply_changes(elements: list[dict], changes) -> list[dict]:
+    """The kept elements with a change set applied. `changes` yields
+    `("node" | "relation", id, deleted, tags, lat, lon, members)`."""
+    nodes = {e["id"]: e for e in elements if e["type"] == "node"}
+    rels = {e["id"]: e for e in elements if e["type"] == "relation"}
+    pending_nodes = []
+    for kind, oid, deleted, tags, lat, lon, members in changes:
+        if kind == "relation":
+            devs = [{"type": "node", "ref": m[0], "role": "device"} for m in members or []
+                    if m[1] == "device"]
+            if deleted or tags.get("type") != "enforcement" or not devs:
+                rels.pop(oid, None)
+            else:
+                rels[oid] = {"type": "relation", "id": oid, "tags": dict(tags), "members": devs}
+        else:
+            pending_nodes.append((oid, deleted, tags, lat, lon))
+    devices = {m["ref"] for r in rels.values() for m in r["members"]}
+    for oid, deleted, tags, lat, lon in pending_nodes:
+        if deleted or lat is None or not (_camera_node(tags) or oid in devices):
+            nodes.pop(oid, None)
+        else:
+            nodes[oid] = {"type": "node", "id": oid, "lat": lat, "lon": lon, "tags": dict(tags)}
+    # A node kept only as a device that no relation names any more goes.
+    for oid in [k for k, n in nodes.items() if not _camera_node(n.get("tags") or {}) and k not in devices]:
+        del nodes[oid]
+    return list(rels.values()) + list(nodes.values())
+
+
+def update() -> dict:
+    """Bring the kept cameras up to the extract's latest change file."""
+    import datetime as dt
+
+    import osmium
+    from osmium.replication.server import ReplicationServer
+
+    path = _extract_path()
+    kept = json.loads(path.read_text())
+    if "elements" not in kept:
+        raise SystemExit("the kept file is from before updates: run refresh once")
+    url = _updates_url(kept.get("source") or os.environ.get("MEDIA_MAP_OSM_EXTRACT") or "")
+    if not url:
+        raise SystemExit("no change files for this extract (set MEDIA_MAP_OSM_UPDATES)")
+    rs = ReplicationServer(url)
+    rs.set_request_parameter("headers", {"User-Agent": USER_AGENT})
+    seq = kept.get("sequence")
+    if seq is None:
+        seq = rs.timestamp_to_sequence(dt.datetime.fromtimestamp(kept["as_of"], dt.timezone.utc))
+        if seq is None:
+            raise SystemExit("could not find where the kept file's date falls in the change files")
+    changes: list = []
+
+    class _H(osmium.SimpleHandler):
+        def node(self, n):
+            ok = n.location.valid() and not n.deleted
+            changes.append(("node", n.id, n.deleted, dict(n.tags),
+                            n.location.lat if ok else None, n.location.lon if ok else None, None))
+
+        def relation(self, r):
+            changes.append(("relation", r.id, r.deleted, dict(r.tags), None, None,
+                            [(m.ref, m.role) for m in r.members if m.type == "n"]))
+
+    got = rs.collect_diffs(seq + 1, max_size=200 * 1024)
+    if got is None:
+        return {"sequence": seq, "changed": 0, "up_to_date": True}
+    got.reader.apply(_H(), simplify=True)
+    state = rs.get_state_info(got.id)
+    when = state.timestamp.timestamp() if state else time.time()
+    counts = _keep(apply_changes(kept["elements"], changes), when, kept.get("source") or "", got.id)
+    return {**counts, "changed": len(changes), "newest": got.newest}
 
 
 def read(layer: str, bbox) -> tuple[list[dict], dict]:
@@ -333,9 +433,12 @@ def read(layer: str, bbox) -> tuple[list[dict], dict]:
 if __name__ == "__main__":
     import sys
 
-    if sys.argv[1:2] != ["refresh"]:
-        raise SystemExit("usage: python -m agent_media_server.map_osm refresh [url]")
+    if sys.argv[1:2] not in (["refresh"], ["update"]):
+        raise SystemExit("usage: python -m agent_media_server.map_osm refresh [url] | update")
     from agent_media_core.intake._env import load_env_file
 
     load_env_file("map-osm")
-    print(json.dumps(refresh(sys.argv[2] if len(sys.argv) > 2 else None)))
+    if sys.argv[1] == "update":
+        print(json.dumps(update()))
+    else:
+        print(json.dumps(refresh(sys.argv[2] if len(sys.argv) > 2 else None)))

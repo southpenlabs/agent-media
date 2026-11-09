@@ -4114,8 +4114,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/speech/speed-reset":
         # Settings' and the full player's "Back to 1× after each reply".
         body = _read_json(h) or {}
-        # Any of reset, start, per_thread, break_min (2 Nov 2026); none of them is a bad one, not a read.
-        keys = ("reset", "start", "per_thread", "break_min")
+        # Any of reset, start, per_thread, break_min (2 Nov 2026), step (10 Nov 2026); none of them is a bad one, not a read.
+        keys = ("reset", "start", "per_thread", "break_min", "step")
         changes = {k: body[k] for k in keys if body.get(k) is not None}
         ok, detail = pins.speech_speed_reset(_bearer(h), **changes) if changes else pins.speech_speed_reset(_bearer(h), reset="")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})

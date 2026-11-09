@@ -2478,6 +2478,15 @@ with nothing spoken starts at `start`. Applied as a live reply starts and
 ends (`at_reply_start` / `at_reply_end`); what was heard is kept in
 `<state_dir>/speech-speed-heard.json`.
 
+Since 10 Nov 2026 it also carries the steps a faster or slower press moves
+by (David: "a setting somewhere to set the speed increments"): `step`, 0
+for the ladder (1, 1.25, 1.5, 2, 3, and 0.1 under 1×; the default) or one
+of `steps` (0.05, 0.1, 0.25), even steps from 0.3 to 3 that land on the
+step's multiples; `GET` adds `"step"` and `"steps"`, `POST` takes `step`,
+400 for anything else. `speed+` / `speed-` (`/speech/ctl`) and
+`media speed up|down` use it (`speech_speed.next_speed`). An app reads
+`steps` to know the server has it.
+
 Pinned by `packages/server/tests/test_reap.py` and
 `packages/core/tests/test_speech_speed.py`.
 
@@ -9548,6 +9557,15 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `python -m agent_media_server.map_osm refresh` (a weekly timer on the
   host; pyosmium, the server's `map-extract` extra) downloads the file to
   the cache dir, keeps the cameras and deletes the download.
+  `python -m agent_media_server.map_osm update` (daily) applies the
+  extract's change files since the kept file's sequence (Geofabrik's
+  `<name>-updates/` beside `<name>-latest.osm.pbf`, or
+  `MEDIA_MAP_OSM_UPDATES`): new, moved and retagged cameras, removed ones
+  and changed enforcement relations; the kept file holds the raw elements
+  and `sequence` for it, and `as_of` becomes the change file's time. A
+  device node a changed relation names but whose own record did not
+  change waits for the next full download (David, 10 Nov 2026: "some kind
+  of incremental update a little bit more regularly").
 - **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default

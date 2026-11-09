@@ -199,10 +199,42 @@ def test_the_weekly_file_keeps_only_cameras(server, monkeypatch, tmp_path):
 
     monkeypatch.setattr(map_osm.urllib.request, "urlopen", lambda req, timeout=0: _Res())
     monkeypatch.setattr(map_osm, "_elements", lambda p: elements)
-    assert map_osm.refresh("https://example.invalid/x.osm.pbf") == {"speed_cameras": 2, "surveillance": 1}
+    assert map_osm.refresh("https://example.invalid/x.osm.pbf") == {"speed_cameras": 2, "surveillance": 1, "sequence": None}
     assert not (tmp_path / "extract.osm.pbf").exists()
     monkeypatch.setenv("MEDIA_MAP_OSM_EXTRACT", "https://example.invalid/x.osm.pbf")
     pixel, _ = _device("Pixel 8a")
     got = call(server, "GET", "/map/layer?id=speed_cameras&bbox=144.95,-37.82,144.97,-37.805", headers=pixel)[1]
     assert sorted(f["properties"]["title"] for f in got["features"]) == ["Red light camera", "Speed camera 60"]
     assert got["partial"] is False and got["as_of"] == 1794181493
+
+
+def test_a_change_set_updates_the_kept_cameras():
+    from agent_media_server import map_osm
+
+    kept = [{"type": "relation", "id": 9, "tags": {"type": "enforcement", "enforcement": "traffic_signals"},
+             "members": [{"type": "node", "ref": 2, "role": "device"}]},
+            {"type": "node", "id": 1, "lat": -37.81, "lon": 144.96, "tags": {"highway": "speed_camera"}},
+            {"type": "node", "id": 2, "lat": -37.815, "lon": 144.965, "tags": {}},
+            {"type": "node", "id": 3, "lat": -37.8, "lon": 144.95, "tags": {"man_made": "surveillance"}}]
+    changes = [
+        ("node", 1, True, {}, None, None, None),                                   # removed
+        ("node", 3, False, {"amenity": "bench"}, -37.8, 144.95, None),             # no longer a camera
+        ("node", 5, False, {"highway": "speed_camera", "maxspeed": "80"}, -37.9, 145.0, None),  # new
+        ("relation", 9, False, {"type": "enforcement", "enforcement": "average_speed"}, None, None, [(2, "device")]),
+    ]
+    got = map_osm.apply_changes(kept, changes)
+    titles = sorted(f["properties"]["title"] for f in map_osm._features("speed_cameras", got))
+    assert titles == ["Average speed camera", "Speed camera 80"]
+    assert map_osm._features("surveillance", got) == []
+    # The relation gone: its device node goes with it.
+    got = map_osm.apply_changes(got, [("relation", 9, True, {}, None, None, None)])
+    assert sorted(e["id"] for e in got) == [5]
+
+
+def test_the_change_files_sit_beside_the_extract(monkeypatch):
+    from agent_media_server import map_osm
+
+    assert map_osm._updates_url("https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf") == \
+        "https://download.geofabrik.de/australia-oceania/australia-updates"
+    monkeypatch.setenv("MEDIA_MAP_OSM_UPDATES", "https://x.example/u/")
+    assert map_osm._updates_url("anything") == "https://x.example/u"
