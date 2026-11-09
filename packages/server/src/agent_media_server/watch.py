@@ -11,6 +11,9 @@ agent_media_core.tmdb; David, 9 Nov 2026).
                "ids", "season"?, "watched_at"?} | {"action": "unwatch", "history_ids"}   admins →
            {"ok", "action", "changed", "not_found", "undo"?}
   GET  /watch/search?kind=movie|tv&query=   gated → {"ok", "items"}
+  GET  /watch/discover?kind=movie|tv&list=trending|popular|recommended|anticipated&genre=&year=&page=
+       &hide_watched=0|1   gated → {"ok", "kind", "list", "lists", "page", "more", "hide_watched",
+                           "signed_in", "items", "genres": [{slug, name}]}
   GET  /watch/show?id=<trakt id>            gated → {"ok", "seasons": [{number, aired, completed}], "left"}
   GET  /accounts/trakt              admins → {"ok", "set_up", "signed_in", "user", "flow", "pending", "reason"?}
   POST /accounts/trakt/start        admins → device {"ok", "flow", "user_code", "verification_url",
@@ -29,7 +32,7 @@ from http.server import BaseHTTPRequestHandler
 
 from . import auth
 
-PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/accounts/trakt", "/accounts/trakt/start",
+PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/accounts/trakt", "/accounts/trakt/start",
                    "/accounts/trakt/finish", "/accounts/trakt/signout"})
 
 
@@ -66,7 +69,7 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             return True
         send_json(h, 200, {"ok": True, **got})
         return True
-    if path in ("/watch/search", "/watch/show"):
+    if path in ("/watch/search", "/watch/show", "/watch/discover"):
         if method != "GET":
             return False
         user, err = auth.gate(bearer)
@@ -76,6 +79,12 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         try:
             if path == "/watch/search":
                 got = {"items": trakt.search(_q(h, "kind"), _q(h, "query"))}
+            elif path == "/watch/discover":
+                page = _q(h, "page") or "1"
+                if not page.isdigit():
+                    raise ValueError("page is a number")
+                got = trakt.discover(_q(h, "kind"), _q(h, "list"), _q(h, "genre"), _q(h, "year"),
+                                     int(page), _q(h, "hide_watched") != "0")
             else:
                 got = trakt.show(int(_q(h, "id") or "x"))
         except ValueError as e:

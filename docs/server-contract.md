@@ -9658,6 +9658,25 @@ it at once.
   Trakt's `GET /search/movie|show?query=…&extended=full&limit=20`, as items
   (a `movie` or a `show`) with `on_watchlist` and, with TMDb, `poster`.
   Kept as the lists are. 400 under two letters or when not connected.
+- `GET /watch/discover?kind=movie|tv&list=trending|popular|recommended|anticipated&genre=&year=&page=&hide_watched=0|1`
+  (gated; 10 Nov 2026, David: "browse and search that movie and shows
+  database of items not yet marked in trakt") → `{"ok", "kind", "list",
+  "lists", "page", "more", "hide_watched", "signed_in", "items", "genres"}`.
+  `trending`, `popular` and `anticipated` are Trakt's public `GET
+  /movies|shows/<list>?extended=full&page=&limit=20` (asked with the
+  client ID only, so they work before connecting; kept an hour, and kept
+  through a write), with `genres=<genre>` and `years=<year>` passed on.
+  `recommended` is this account's `GET /recommendations/movies|shows`
+  (signed in only, else 400 and not in `lists`; up to 100, kept a quarter of
+  an hour, filtered by genre and year and paged here). `genre` is a slug
+  from `genres` (`[{"slug", "name"}]`, Trakt's `/genres/movies|shows`, kept a
+  day); `year` a year or a span (`1990-1999`); `page` from 1, `more` true
+  when another page may follow. Items are the list's (a `movie` or a
+  `show`), with `poster` where TMDb is set up; signed in, each also has
+  `watched` (from `GET /sync/watched/movies|shows`, kept a quarter of an
+  hour: a show any episode of which was watched) and `on_watchlist`, and
+  what was watched is left out unless `hide_watched=0`. 400 for a list,
+  genre, year or page that is not one; 502 when Trakt fails.
 - `GET /watch/show?id=<trakt id>` (gated) → `{"ok", "seasons": [{"number",
   "aired", "completed"}], "left"}`: the show's seasons as watched so far
   (`/shows/{id}/progress/watched`, specials left out), for its sheet's

@@ -377,15 +377,24 @@ def _get(path: str, now: float) -> object:
     return got
 
 
-def clear_cache() -> None:
+#: Keys of what is the same for everyone (Trakt's public lists, its genres):
+#: kept through a write, which changes only this account's.
+_PUBLIC = ("d:", "g:")
+
+
+def clear_cache(everything: bool = True) -> None:
     with _lock:
-        _cache.clear()
+        if everything:
+            _cache.clear()
+        else:
+            for k in [k for k in _cache if not k.startswith(_PUBLIC)]:
+                del _cache[k]
 
 
-def _cached(key: str, now: float, fn):
+def _cached(key: str, now: float, fn, ttl: float = TTL_S):
     with _lock:
         hit = _cache.get(key)
-    if hit and now - hit[0] < TTL_S:
+    if hit and now - hit[0] < ttl:
         return hit[1]
     value = fn()
     with _lock:
@@ -665,7 +674,7 @@ def write(body: dict, now: Optional[float] = None) -> dict:
                             **({"season": body.get("season")} if kind == "season" else {})})
         return out
     finally:
-        clear_cache()
+        clear_cache(everything=False)
 
 
 def search(kind: str, query: str, now: Optional[float] = None) -> list[dict]:
@@ -727,3 +736,138 @@ def show(trakt_id: int, now: Optional[float] = None) -> dict:
     done = prog.get("completed") if isinstance(prog, dict) else None
     return {"seasons": seasons,
             "left": max(0, aired - done) if isinstance(aired, int) and isinstance(done, int) else None}
+
+
+# ---- discovering (David, 10 Nov 2026: "browse and search that movie and shows database of
+# items not yet marked in trakt") -------------------------------------------------------------
+#
+# Trakt's trending, popular and most anticipated lists (public: the client ID
+# only, kept an hour) and its recommendations for this account (kept a
+# quarter of an hour), each item marked `watched` and `on_watchlist`, and by
+# default without what was already watched.
+
+DISCOVER = ("trending", "popular", "recommended", "anticipated")
+PUBLIC_TTL_S = 3600.0
+RECOMMENDED_TTL_S = 900.0
+GENRES_TTL_S = 86400.0
+WATCHED_TTL_S = 900.0
+PAGE_SIZE = 20
+
+
+def _public_get(path: str) -> object:
+    code, got = _request("GET", path)
+    if code != 200:
+        raise TraktError(f"Trakt answered HTTP {code} for {path.partition('?')[0]}")
+    return got
+
+
+def genres(kind: str, now: Optional[float] = None) -> list[dict]:
+    """Trakt's genres for movies or shows, `[{slug, name}]`, kept a day."""
+    now = time.time() if now is None else now
+    what = "movies" if kind == "movie" else "shows"
+    rows = _cached(f"g:{what}", now, lambda: _public_get(f"/genres/{what}"), GENRES_TTL_S)
+    out = []
+    for g in rows if isinstance(rows, list) else []:
+        if isinstance(g, dict) and g.get("slug") and g["slug"] != "none":
+            out.append({"slug": str(g["slug"]), "name": _genres({"genres": [g["slug"]]})[0]})
+    return sorted(out, key=lambda g: g["name"])
+
+
+def _watched_ids(kind: str, now: float) -> set:
+    """The Trakt ids of every movie (or show, any episode of it) this account
+    has watched: GET /sync/watched/movies|shows, kept a quarter of an hour."""
+    what = "movies" if kind == "movie" else "shows"
+    path = f"/sync/watched/{what}" + ("?extended=noseasons" if what == "shows" else "")
+    rows = _cached(f"wd:{what}", now, lambda: _get(path, now), WATCHED_TTL_S)
+    one = "movie" if kind == "movie" else "show"
+    return {((r.get(one) or {}).get("ids") or {}).get("trakt") for r in rows if isinstance(r, dict)} \
+        if isinstance(rows, list) else set()
+
+
+def _years(year: str) -> Optional[tuple[int, int]]:
+    y = str(year or "").strip()
+    if not y:
+        return None
+    a, _, b = y.partition("-")
+    try:
+        lo, hi = int(a), int(b or a)
+    except ValueError:
+        raise ValueError("year is a year (2024) or a span (1990-1999)") from None
+    if not (1870 <= lo <= hi <= 2100):
+        raise ValueError("year is a year (2024) or a span (1990-1999)")
+    return lo, hi
+
+
+def discover(kind: str, which: str, genre: str = "", year: str = "", page: int = 1,
+             hide_watched: bool = True, now: Optional[float] = None) -> dict:
+    """What GET /watch/discover answers (less `ok`). ValueError for a bad
+    kind, list, genre or year, or recommendations when not signed in;
+    TraktError when Trakt fails."""
+    if kind not in KINDS:
+        raise ValueError("kind must be movie or tv")
+    which = which or "trending"
+    if which not in DISCOVER:
+        raise ValueError(f"list must be one of {', '.join(DISCOVER)}")
+    if not set_up():
+        raise ValueError(NOT_SET_UP)
+    me = signed_in()
+    if which == "recommended" and not me:
+        raise ValueError("recommendations need Trakt connected: connect it in Settings")
+    genre = str(genre or "").strip().lower()
+    if genre and not all(c.isalnum() or c == "-" for c in genre):
+        raise ValueError("genre is one of the genres' slugs")
+    span = _years(year)
+    page = max(1, min(int(page or 1), 50))
+    now = time.time() if now is None else now
+    what = "movies" if kind == "movie" else "shows"
+    one = "movie" if kind == "movie" else "show"
+    import urllib.parse
+    if which == "recommended":
+        # Trakt gives up to 100, unpaged and unfiltered: filtered and paged here.
+        rows = _cached(f"r:{what}", now, lambda: _get(
+            f"/recommendations/{what}?extended=full&limit=100&ignore_collected=false", now), RECOMMENDED_TTL_S)
+        raw = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        objs = [r.get(one) if isinstance(r.get(one), dict) else r for r in raw]
+        if genre:
+            objs = [o for o in objs if genre in [str(g).lower() for g in o.get("genres") or []]]
+        if span:
+            objs = [o for o in objs if isinstance(o.get("year"), int) and span[0] <= o["year"] <= span[1]]
+        start = (page - 1) * PAGE_SIZE
+        more = len(objs) > start + PAGE_SIZE
+        objs = objs[start:start + PAGE_SIZE]
+    else:
+        q = {"extended": "full", "page": page, "limit": PAGE_SIZE}
+        if genre:
+            q["genres"] = genre
+        if span:
+            q["years"] = f"{span[0]}-{span[1]}" if span[0] != span[1] else str(span[0])
+        path = f"/{what}/{which}?{urllib.parse.urlencode(q)}"
+        rows = _cached(f"d:{path}", now, lambda: _public_get(path), PUBLIC_TTL_S)
+        raw = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        # Trending and anticipated wrap each in {watchers|list_count, movie}; popular does not.
+        objs = [r.get(one) if isinstance(r.get(one), dict) else r for r in raw]
+        more = len(raw) >= PAGE_SIZE
+    items = [_movie(o) if kind == "movie" else _show(o) for o in objs if isinstance(o, dict) and o.get("ids")]
+    if me:
+        try:
+            seen = _watched_ids(kind, now)
+        except (TraktError, ValueError):
+            seen = set()
+        for i in items:
+            i["watched"] = i["ids"].get("trakt") in seen
+        _mark_watchlist(kind, items, now)
+        if hide_watched:
+            items = [i for i in items if not i["watched"]]
+    from . import tmdb
+    if tmdb.set_up():
+        try:
+            tmdb.add_posters(items)
+        except Exception:  # noqa: BLE001 — the list without its pictures
+            pass
+    try:
+        gs = genres(kind, now)
+    except TraktError:
+        gs = []
+    return {"kind": kind, "list": which, "lists": [d for d in DISCOVER if d != "recommended" or me],
+            "page": page, "more": more, "hide_watched": hide_watched and me, "signed_in": me,
+            "items": items, "genres": gs}

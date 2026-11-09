@@ -471,7 +471,7 @@ PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
 SHARES_PATHS = frozenset({"/shares"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
 # Movies and TV from Trakt, and its sign-in (watch.py, §6.54).
-WATCH_PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/accounts/trakt", "/accounts/trakt/start",
+WATCH_PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/accounts/trakt", "/accounts/trakt/start",
                          "/accounts/trakt/finish", "/accounts/trakt/signout"})
 CORS_PATHS = CORS_PATHS | WATCH_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).

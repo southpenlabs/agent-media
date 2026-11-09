@@ -5,6 +5,7 @@ tmdb._request) is a stub here."""
 from __future__ import annotations
 
 import os
+import urllib.parse
 import stat
 
 import pytest
@@ -30,6 +31,7 @@ class FakeTrakt:
         self.calls = []
         self.token_bodies = []
         self.writes = []
+        self.public = []
         self.device = [(400, {}), (200, {"access_token": "acc", "refresh_token": "ref",
                                          "expires_in": 604800, "created_at": 0})]
 
@@ -78,6 +80,30 @@ class FakeTrakt:
             return 200, {"deleted": {"movies" if kind == "ids" else kind: 1}, "not_found": {}}
         if p == "/sync/history/movies/1":
             return 200, [{"id": 555, "watched_at": "2026-11-09T10:00:00.000Z", "movie": MOVIE}]
+        if p == "/genres/movies":
+            return 200, [{"name": "Action", "slug": "action"}, {"name": "Science Fiction", "slug": "science-fiction"},
+                         {"name": "None", "slug": "none"}]
+        if p == "/sync/watched/movies":
+            return 200, [{"plays": 2, "movie": MOVIE}]
+        if p == "/sync/watched/shows":
+            assert "extended=noseasons" in path
+            return 200, [{"plays": 3, "show": SHOW}]
+        if p == "/movies/trending":
+            self.public.append((path, token))
+            q = urllib.parse.parse_qs(path.partition("?")[2])
+            rows = [{"watchers": 9, "movie": MOVIE},
+                    {"watchers": 5, "movie": {**MOVIE, "title": "Dune", "year": 2021, "ids": {"trakt": 3, "slug": "dune"},
+                                              "genres": ["science-fiction", "adventure"]}}]
+            if q.get("page") == ["2"]:
+                rows = []
+            return 200, rows
+        if p == "/movies/popular":
+            return 200, [{**MOVIE, "title": "Heat", "year": 1995, "ids": {"trakt": 4, "slug": "heat"}, "genres": ["crime"]}]
+        if p == "/shows/anticipated":
+            return 200, [{"list_count": 99, "show": {**OTHER, "title": "Next Big Show", "ids": {"trakt": 20}}}]
+        if p == "/recommendations/movies":
+            return 200, [{**MOVIE, "title": f"Rec {n}", "year": 1990 + n, "ids": {"trakt": 100 + n, "slug": f"rec-{n}"},
+                          "genres": ["action"] if n % 2 else ["drama"]} for n in range(30)]
         if p == "/search/movie":
             assert "query=arr" in path.lower()
             return 200, [{"type": "movie", "score": 90, "movie": MOVIE},
@@ -276,6 +302,8 @@ def test_the_routes_are_gated(server, fake, creds):
     assert res.status in (401, 403)
     res, _ = call(server, "GET", "/watch/search?kind=movie&query=arr")
     assert res.status in (401, 403)
+    res, _ = call(server, "GET", "/watch/discover?kind=movie")
+    assert res.status in (401, 403)
     res, _ = call(server, "GET", "/watch?kind=movie")
     assert res.status in (401, 403)
     res, _ = call(server, "POST", "/accounts/trakt/start", {})
@@ -333,3 +361,54 @@ def test_writing_is_for_admins_and_needs_a_sign_in(server, signed_in, fake, cred
     res, _ = call(server, "OPTIONS", "/watch/search")
     assert res.status in (200, 204), "a preflight is answered"
     assert fake.writes == []
+
+
+def test_discover_trending_hides_what_was_watched(server, signed_in, fake, creds):
+    _connect(server)
+    res, obj = call(server, "GET", "/watch/discover?kind=movie&list=trending&genre=science-fiction&year=2010-2029",
+                    headers=AUTH)
+    assert res.status == 200 and obj["list"] == "trending"
+    assert obj["lists"] == ["trending", "popular", "recommended", "anticipated"]
+    assert [i["title"] for i in obj["items"]] == ["Dune"], "Arrival is watched: left out"
+    assert obj["items"][0]["watched"] is False and obj["items"][0]["on_watchlist"] is False
+    assert obj["genres"] == [{"slug": "action", "name": "Action"}, {"slug": "science-fiction", "name": "Science Fiction"}]
+    path, token = fake.public[-1]
+    q = urllib.parse.parse_qs(path.partition("?")[2])
+    assert q["genres"] == ["science-fiction"] and q["years"] == ["2010-2029"] and q["extended"] == ["full"]
+    assert token == "", "a public list is asked with the client ID only"
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=trending&hide_watched=0", headers=AUTH)
+    assert [(i["title"], i["watched"], i["on_watchlist"]) for i in obj["items"]] == [("Arrival", True, True), ("Dune", False, False)]
+    # Kept an hour, and through a write.
+    n = len(fake.public)
+    call(server, "POST", "/watch", {"action": "watchlist", "kind": "movie", "ids": {"trakt": 3}}, AUTH)
+    call(server, "GET", "/watch/discover?kind=movie&list=trending&hide_watched=0", headers=AUTH)
+    assert len(fake.public) == n
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=trending&page=2", headers=AUTH)
+    assert obj["items"] == [] and obj["more"] is False and obj["page"] == 2
+
+
+def test_discover_popular_anticipated_and_recommended(server, signed_in, fake, creds):
+    _connect(server)
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=popular", headers=AUTH)
+    assert [i["title"] for i in obj["items"]] == ["Heat"] and obj["items"][0]["genres"] == ["Crime"]
+    _, obj = call(server, "GET", "/watch/discover?kind=tv&list=anticipated", headers=AUTH)
+    assert obj["items"][0]["title"] == "Next Big Show" and obj["items"][0]["kind"] == "show"
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=recommended", headers=AUTH)
+    assert len(obj["items"]) == 20 and obj["more"] is True
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=recommended&page=2", headers=AUTH)
+    assert len(obj["items"]) == 10 and obj["more"] is False
+    _, obj = call(server, "GET", "/watch/discover?kind=movie&list=recommended&genre=action&year=1990-1999", headers=AUTH)
+    assert [i["title"] for i in obj["items"]] == ["Rec 1", "Rec 3", "Rec 5", "Rec 7", "Rec 9"]
+    for bad in ("list=nope", "year=soon", "genre=a%20b", "page=x"):
+        res, _ = call(server, "GET", f"/watch/discover?kind=movie&{bad}", headers=AUTH)
+        assert res.status == 400, bad
+
+
+def test_discover_signed_out_has_no_recommendations(server, signed_in, fake, creds):
+    res, obj = call(server, "GET", "/watch/discover?kind=movie&list=trending", headers=AUTH)
+    assert res.status == 200 and obj["signed_in"] is False and "recommended" not in obj["lists"]
+    assert "watched" not in obj["items"][0]
+    res, _ = call(server, "GET", "/watch/discover?kind=movie&list=recommended", headers=AUTH)
+    assert res.status == 400
+    res, _ = call(server, "OPTIONS", "/watch/discover")
+    assert res.status in (200, 204)
