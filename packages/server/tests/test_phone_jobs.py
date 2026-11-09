@@ -789,7 +789,8 @@ def test_downloads_run_two_at_a_time_a_play_first(worker, host, tmp_path, monkey
     gate = tmp_path / "go"
 
     def job(name, tag, prio):
-        cmd = f"echo {name} >> {log}; while [ ! -e {gate} ]; do sleep 0.1; done"
+        # Each waits for its own gate (or the common one), so one place frees at a time.
+        cmd = f"echo {name} >> {log}; while [ ! -e {gate} ] && [ ! -e {gate}-{name} ]; do sleep 0.1; done"
         threading.Thread(target=lambda: phone_jobs.run(cmd, timeout=30, tag=tag, priority=prio),
                          daemon=True).start()
 
@@ -805,9 +806,11 @@ def test_downloads_run_two_at_a_time_a_play_first(worker, host, tmp_path, monkey
     assert phone_jobs.run("echo quick", timeout=10)["out"] == "quick\n"
     time.sleep(0.5)
     assert sorted(started()) == ["bg1", "bg2"], "a third download started"
+    Path(f"{gate}-bg1").touch()          # one place frees: the play takes it
+    assert _wait(lambda: len(started()) == 3)
+    assert started()[2] == "fg", started()
     gate.touch()
     assert _wait(lambda: len(started()) == 4)
-    assert started()[2] == "fg", started()
 
 
 def test_a_download_in_line_is_not_given_up_after_pickup(worker, host, tmp_path, monkeypatch):
