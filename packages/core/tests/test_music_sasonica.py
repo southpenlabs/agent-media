@@ -282,28 +282,43 @@ def _at(monkeypatch, t):
     return sent
 
 
-def test_next_is_the_next_chapter(monkeypatch):
+def test_chapter_next_is_the_next_chapter(monkeypatch):
     sent = _at(monkeypatch, 150.0)
-    SinkMusicSasonica("tcp://p8a:6615").next()
+    SinkMusicSasonica("tcp://p8a:6615").chapter_next()
     assert sent == [("tcp://p8a:6615", "cmd", "seek", 200.0, "absolute")]
 
 
-def test_next_after_the_last_chapter_is_the_playlists(monkeypatch):
+def test_chapter_next_after_the_last_chapter_is_the_playlists(monkeypatch):
     sent = _at(monkeypatch, 250.0)
+    SinkMusicSasonica("tcp://p8a:6615").chapter_next()
+    assert sent == [("tcp://p8a:6615", "cmd", "playlist-next", "weak")]
+
+
+def test_chapter_prev_restarts_the_chapter_past_its_start(monkeypatch):
+    sent = _at(monkeypatch, 150.0)
+    SinkMusicSasonica("tcp://p8a:6615").chapter_prev()
+    assert sent == [("tcp://p8a:6615", "cmd", "seek", 100.0, "absolute")]
+
+
+def test_chapter_prev_at_a_chapters_start_is_the_one_before(monkeypatch):
+    sent = _at(monkeypatch, 101.0)
+    SinkMusicSasonica("tcp://p8a:6615").chapter_prev()
+    assert sent == [("tcp://p8a:6615", "cmd", "seek", 0.0, "absolute")]
+
+
+# ⏮ / ⏭ are the whole clip, even inside a mix with chapters (David, 9 Nov
+# 2026: "we need one for next and previous clip").
+
+def test_next_in_a_mix_is_the_next_item_not_the_next_chapter(monkeypatch):
+    sent = _at(monkeypatch, 150.0)
     SinkMusicSasonica("tcp://p8a:6615").next()
     assert sent == [("tcp://p8a:6615", "cmd", "playlist-next", "weak")]
 
 
-def test_prev_restarts_the_chapter_past_its_start(monkeypatch):
-    sent = _at(monkeypatch, 150.0)
-    SinkMusicSasonica("tcp://p8a:6615").previous()
-    assert sent == [("tcp://p8a:6615", "cmd", "seek", 100.0, "absolute")]
-
-
-def test_prev_at_a_chapters_start_is_the_one_before(monkeypatch):
+def test_previous_in_a_mix_is_the_previous_item_not_a_chapter(monkeypatch):
     sent = _at(monkeypatch, 101.0)
     SinkMusicSasonica("tcp://p8a:6615").previous()
-    assert sent == [("tcp://p8a:6615", "cmd", "seek", 0.0, "absolute")]
+    assert sent == [("tcp://p8a:6615", "cmd", "playlist-prev", "weak")]
 
 
 def test_only_music_files_urls_have_a_phone_path():

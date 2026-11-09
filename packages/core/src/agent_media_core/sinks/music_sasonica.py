@@ -13,11 +13,15 @@ and one different verb:
     127.0.0.1:6616). The ``abs`` route (copy it to red5, serve it back) is
     the fallback: over the phone's link it moved ~8 KB/s on 28 Sep 2026, so
     a 52 MB mix would have taken an hour to start.
-  - **next / previous** move by chapter inside a mix (a DJ set is one file
-    of many tracks): ExoPlayer does not read Matroska chapters, so they are
-    read on the phone (``ffprobe``, over the same ssh as its titles) and
-    kept per file. Past the last chapter, or in a file without any, they are
-    the playlist's.
+  - **next / previous** are the queue's, a whole item each, as on every
+    other player (David, 9 Nov 2026: "we need one for next and previous
+    clip"). **chapter_next / chapter_prev** move by chapter inside a mix (a
+    DJ set is one file of many tracks): ExoPlayer does not read Matroska
+    chapters, so they are read on the phone (``ffprobe``, over the same ssh
+    as its titles) and kept per file. Past the last chapter, or in a file
+    without any, they are the queue's. The app's lock screen and earbud
+    keys step chapters this way on the phone itself (sasonica-app
+    MusicSession), as they have no chapter keys of their own.
   - **everything else** (pause, seek, speed, volume, the observation reads
     the coordinator follows) is the mpv IPC it inherits.
 
@@ -300,7 +304,11 @@ class SinkMusicSasonica(SinkMusicLocal):
         t = p.get("time-pos")
         return p.get("path"), (float(t) if isinstance(t, (int, float)) else None)
 
-    def next(self, target: Target = SASONICA_TARGET) -> None:
+    # next / previous are SinkMusicLocal's: the queue's next and previous
+    # item (playlist-next / playlist-prev, a no-op at either end).
+
+    def chapter_next(self, target: Target = SASONICA_TARGET) -> None:
+        """The next chapter of a mix, else the queue's next item."""
         try:
             path, t = self._where()
             chs = chapters(path or "")
@@ -312,9 +320,10 @@ class SinkMusicSasonica(SinkMusicLocal):
             return
         super().next(target)
 
-    def previous(self, target: Target = SASONICA_TARGET) -> None:
+    def chapter_prev(self, target: Target = SASONICA_TARGET) -> None:
         """The chapter before, or this one's start when past its first
-        seconds (a ⏮ that restarts first, as the popup's does)."""
+        seconds (a ⏮ that restarts first, as the popup's does); without
+        chapters, the queue's previous item."""
         try:
             path, t = self._where()
             chs = chapters(path or "")

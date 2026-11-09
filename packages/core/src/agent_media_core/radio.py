@@ -466,6 +466,17 @@ def dislike() -> Optional[dict]:
     return snapshot()
 
 
+def skip() -> Optional[dict]:
+    """⏭ on a station: the next song (the queued one, else the next on the
+    list, now), nothing banned. None when no station is on."""
+    with _station() as st:
+        if not st["on"]:
+            return None
+        where = st["where"]
+    _skip(where)
+    return snapshot()
+
+
 def play(vid: str) -> Optional[dict]:
     """A song from the list, now (a tap on Up next): the songs before it stay
     to come. None when no station is on; ValueError when `vid` is not on the

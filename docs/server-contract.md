@@ -3888,7 +3888,7 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
 - `now` is `media music status --json` for whichever player is live
   (Sasonica's own, the Termux mpv, Mopidy), so the tab and the desk popup
   agree: `{"backend", "uri", "media_id", "path", "title", "chapter",
-  "pos_ms", "dur_ms", "paused", "speed", "volume", "held"}`, every field
+  "pos_ms", "dur_ms", "paused", "speed", "volume", "held", "queue"}`, every field
   nullable. A phone player is `"backend": "phone"`; nothing playing is
   `"backend": "mopidy"` with the rest null.
 - `now.artist`, `now.song` (29 Oct 2026): who and what for a YouTube track,
@@ -3902,9 +3902,19 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
 - `chapters` are a mix's tracks (one file, many tracks) when the live file
   is played by Sasonica from the phone's cache, read on the phone with
   ffprobe and kept per file; `[]` otherwise. `now.chapter` names the one
-  playing. For such a file `next`/`prev` move by chapter (`prev` restarts
-  the chapter when past its first 3 s), and a tap on a track is
-  `seek` to its `start_ms`.
+  playing. A tap on a track, and the app's Previous/Next chapter keys, are
+  `seek` to its `start_ms`; `next`/`prev` are the whole clip even here
+  (below). `media music chapter next|prev` steps a chapter from a desk
+  (past either end, the queue's item); the phone's lock screen and earbud
+  keys step a mix's chapters on the phone itself (sasonica-app
+  MusicSession), having no chapter keys of their own.
+- `now.queue` (9 Nov 2026): `{"pos", "count"}`, where the item playing
+  sits in its player's queue (0-based; the phone players' `playlist-pos`
+  / `playlist-count`, Mopidy's `song` / `playlistlength`), or null when
+  the player does not say. With no station on (`radio.on`), `pos + 1 ==
+  count` is "no next clip" and `pos == 0` "no previous clip" (the app
+  disables the key, though `prev` still restarts the clip past its first
+  3 s). Absent on older servers.
 - `where` is the `music` block of `GET /audio/targets` (§6.9), for the
   tab's picker; a choice is `POST /audio/target` as before. It adds
   `rooms` (20 Oct 2026): the house speakers one by one, `[{"id", "label",
@@ -3920,7 +3930,14 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
 `{"action": "pause" | "resume" | "toggle" | "next" | "prev" | "stop" |
 "like" | "seek" | "seek-by", "to"?: seconds, "by"?: seconds}` → the `GET`
 answer, read afresh after the action. The `media music` verbs, run as the
-desk runs them: `prev` restarts the track when it is past its start, `seek`
+desk runs them. `next` and `prev` are always the whole clip (item), on
+every player, a mix on Sasonica's player included (they stepped its
+chapters until 9 Nov 2026; David: "we need one for next and previous
+clip"): `next` is the queue's next item, or with a station on its next
+song (the queued one, else the next on its list, now; nothing is put off
+the station, unlike `dislike`); a no-op at the queue's end otherwise.
+`prev` restarts the clip when more than 3 s into it (a second `prev`
+within 5 s steps back regardless), else the queue's previous item; `seek`
 takes `to` (absolute), `seek-by` takes `by` (±). 400 for an unknown action
 or a missing/non-number `to`/`by` (nothing is run); 502 with `error` (and
 the state) when the verb failed.

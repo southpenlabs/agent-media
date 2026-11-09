@@ -5992,7 +5992,7 @@ def _phone_music_props(patient: bool = False) -> Optional[dict]:
                 ep,
                 ["idle-active", "pause", "time-pos", "duration", "speed",
                  "media-title", "chapter-metadata/by-key/title", "volume",
-                 "path", music_sasonica.NAMES],
+                 "path", music_sasonica.NAMES, "playlist-pos", "playlist-count"],
                 timeout=_PHONE_READ_TIMEOUT_S, attempts=attempts)
         except (ipc.MpvIpcError, OSError):
             continue
@@ -6178,6 +6178,25 @@ def _music_named_backend(where: str) -> str:
     return ""
 
 
+def _int_or_none(v) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _music_queue(pos, count) -> Optional[dict]:
+    """`{"pos", "count"}`: where the item playing sits in its player's queue
+    (0-based), so a ⏮ / ⏭ with no item that way can say so (David, 9 Nov
+    2026: "we need one for next and previous clip"). None when the player
+    does not say."""
+    if isinstance(pos, bool) or isinstance(count, bool):
+        return None
+    if not isinstance(pos, int) or not isinstance(count, int) or pos < 0 or count <= pos:
+        return None
+    return {"pos": pos, "count": count}
+
+
 def _music_status_json(m: "SinkMusic", patient: bool = False,
                        where: str = "") -> dict:
     """Structured music-channel snapshot for a control surface.
@@ -6194,7 +6213,7 @@ def _music_status_json(m: "SinkMusic", patient: bool = False,
     out: dict = {"backend": None, "uri": None, "media_id": None, "path": None,
                  "title": None, "chapter": None,
                  "pos_ms": None, "dur_ms": None, "paused": None, "speed": None,
-                 "volume": None, "held": _music_hold_active()}
+                 "volume": None, "held": _music_hold_active(), "queue": None}
 
     props = None if where == "rooms" else _phone_music_props(patient=patient)
     if props is not None:
@@ -6230,6 +6249,7 @@ def _music_status_json(m: "SinkMusic", patient: bool = False,
             uri=asked or None,
             path=path or None,
             media_id=media_id or None,
+            queue=_music_queue(props.get("playlist-pos"), props.get("playlist-count")),
         )
         return out
     if where == "phone":
@@ -6256,7 +6276,9 @@ def _music_status_json(m: "SinkMusic", patient: bool = False,
             return None
 
     out.update(paused=(state == "pause"),
-               pos_ms=_ms(_f("elapsed")), dur_ms=_ms(_f("duration")))
+               pos_ms=_ms(_f("elapsed")), dur_ms=_ms(_f("duration")),
+               queue=_music_queue(_int_or_none(st.get("song")),
+                                  _int_or_none(st.get("playlistlength"))))
     try:
         vol = int(st.get("volume", ""))
         out["volume"] = vol if vol >= 0 else None
@@ -6357,6 +6379,29 @@ def _music_mpv_chapters() -> Optional[tuple[str, list, Optional[int]]]:
         return ep, list(props.get("chapter-list") or []), (
             int(cur) if isinstance(cur, int) else None)
     return None
+
+
+def _music_chapter_step(m: "SinkMusic", forward: bool) -> int:
+    """`music chapter next|prev`: a chapter on or back inside the live track
+    (past either end, the queue's item, as the phone's lock screen does).
+    Sasonica's player has no chapters of its own, so its sink steps them
+    (SinkMusicSasonica.chapter_next); an mpv steps its own."""
+    from .sinks.music_sasonica import SinkMusicSasonica
+    b = _music_live_backend(m)
+    if isinstance(b, SinkMusicSasonica):
+        (b.chapter_next if forward else b.chapter_prev)()
+        return 0
+    from .sinks import _mpv_ipc as ipc
+    got = _music_mpv_chapters()
+    if got is None or not got[1]:
+        print("media music chapter: no chapters in what is playing", file=sys.stderr)
+        return 1
+    try:
+        ipc.command(got[0], "add", "chapter", 1 if forward else -1)
+    except (ipc.MpvIpcError, OSError) as e:
+        print(f"media music chapter: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _cmd_music_chapters(a) -> int:
@@ -7075,6 +7120,8 @@ def cmd_music(a) -> int:
             print(label)
             print(spd)
         return 0
+    if a.action == "chapter" and (a.uri or "").strip() in ("next", "prev"):
+        return _music_chapter_step(m, a.uri.strip() == "next")
     if a.action in ("chapters", "chapter"):
         return _cmd_music_chapters(a)
     if a.action == "bookmark":
@@ -7152,12 +7199,15 @@ def cmd_music(a) -> int:
     if a.action == "volume":
         b.volume_delta(int(float(a.uri or 0)))
         return 0
-    from .sinks.music_sasonica import SinkMusicSasonica
-    if a.action == "prev" and isinstance(b, SinkMusicSasonica):
-        # Sasonica's player restarts by chapter itself: a mix is one file,
-        # and restarting "the track" would go back to the start of the set.
-        b.previous()
-        return 0
+    # next / prev are the whole item on every player, Sasonica's included: a
+    # mix's chapters are `music chapter next|prev` (David, 9 Nov 2026: "we
+    # need one for next and previous clip").
+    if a.action == "next":
+        # With a station on, its next song: the one queued, else the next on
+        # its list now (radio.skip), not a no-op at the queue's end.
+        from . import radio
+        if radio.skip() is not None:
+            return 0
     if a.action == "prev" and getattr(a, "restart_first", False):
         # Popup `<`: ⏮ semantics — restart the track if we're past its start.
         if b is m:
@@ -10436,7 +10486,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         "rate; for 'bookmark': optional note; for "
                         "'bookmarks': optional limit; for 'like': optional "
                         "note; for 'likes': optional limit; for 'chapter': "
-                        "1-based chapter number (see 'chapters'); for 'bed' / "
+                        "1-based chapter number (see 'chapters'), or next / "
+                        "prev to step one inside a mix; for 'bed' / "
                         "'bed-off': a yt: address, link or \"artist title\" "
                         "(default: what is playing)")
     s.add_argument("--lines", action="store_true",

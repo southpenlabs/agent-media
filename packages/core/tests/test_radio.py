@@ -159,6 +159,21 @@ def test_dislike_skips_and_keeps_the_song_off(station):
     assert SEED["id"] in radio.read()["banned"]
 
 
+def test_skip_is_the_next_song_and_bans_nothing(station):
+    """⏭ with a station on (`media music next`): on to its next song, and
+    unlike 👎 the song left is not put off the station."""
+    player, sent, _, _ = station
+    radio.start(SEED["id"], "sasonica", playing=True)
+    radio.tick()
+    assert radio.skip() is not None
+    assert player.pos == 0 or player.items[player.pos] == MIX[1]["id"]
+    assert radio.read()["banned"] == []
+
+
+def test_skip_with_no_station_is_none(station):
+    assert radio.skip() is None
+
+
 def test_two_thumbs_down_on_a_channel_keep_it_off(station):
     player, sent, _, _ = station
     radio.start(SEED["id"], "sasonica", playing=True)
