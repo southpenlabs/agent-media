@@ -228,8 +228,11 @@ class SinkMusicSasonica(SinkMusicLocal):
         from .. import play_gate
         with play_gate.request(title=str(opts.get("title") or "")):
             play_gate.check(uri, target=target.name or "sasonica")
-            url, title = resolve(uri)
             given = str(opts.get("title") or "").strip()
+            from .. import downloads
+            # The phone's fetch, named for the app's progress mark (downloads).
+            with downloads.context(title=given or None):
+                url, title = resolve(uri)
             title = title or given
             if not url:
                 log.info("sink-music-sasonica: nothing the app can play for %s", uri)

@@ -46,11 +46,37 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "downloads"}
     assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
+    assert obj["downloads"] == []
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
     assert obj["art"] == "https://i.ytimg.com/vi/nMDHjVVj3bA/hqdefault.jpg"
     assert obj["now"] == SAID and obj["chapters"] == []
+
+
+def test_downloads_show_their_progress(server, signed_in, audio_host, player, monkeypatch):
+    """What is downloading, and how far (David, 10 Nov 2026: "a little
+    progress indicator when something is downloading"): every download in
+    `downloads`, and the radio's next song's on its row of `radio.next`."""
+    from agent_media_core import downloads
+
+    monkeypatch.setattr(music, "_radio", lambda: {
+        "on": True, "seed": {"id": "nMDHjVVj3bA", "title": "A Mix"}, "available": True, "more": 0,
+        "next": [{"id": "aaaaaaaaaaa", "title": "Next", "channel": "C", "state": "fetching"},
+                 {"id": "bbbbbbbbbbb", "title": "After", "channel": "C", "state": None}]})
+    with downloads.track("aaaaaaaaaaa", "radio", "Next") as radio_dl, \
+            downloads.track("ccccccccccc", "book", "A Talk") as book_dl:
+        radio_dl.feed("[download]  42.3% of    3.20MiB at  1.00MiB/s ETA 00:02")
+        book_dl.set_phase("copying")
+        _, obj = call(server, "GET", "/music", headers=AUTH)
+        assert sorted(obj["downloads"], key=lambda d: d["id"]) == [
+            {"id": "aaaaaaaaaaa", "purpose": "radio", "title": "Next", "pct": 42.3, "phase": "downloading"},
+            {"id": "ccccccccccc", "purpose": "book", "title": "A Talk", "pct": None, "phase": "copying"}]
+        assert obj["radio"]["next"][0]["pct"] == 42.3
+        assert "pct" not in obj["radio"]["next"][1]
+    music._reset_cache()
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["downloads"] == [] and "pct" not in obj["radio"]["next"][0]
 
 
 def test_the_verdict_is_remembered(server, signed_in, audio_host, player, monkeypatch):

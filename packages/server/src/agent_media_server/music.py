@@ -20,6 +20,12 @@ that song off the station, and the next one on.
 /music/radio`) starts one from the favourite a long reply sang out, on the
 app's player, where the phone has put it (31 Oct 2026).
 
+`downloads` is what is downloading now (agent_media_core.downloads):
+`[{id, purpose, title, pct, phase}]`, a song or link before it plays
+(`music`, `book`), the station's next (`radio`, also as `pct` on its row of
+`radio.next`), a saved link or kept practice (`podcast`, `practice`); `pct`
+0-100 or null while not known (10 Nov 2026).
+
 `{"action": "radio", "resume": true | sid}` puts a kept station back on
 where it was turned off (radio.resume): `radio.last` while off names the
 newest for a day ("Back to radio"); `GET /music/recent?list=stations` lists
@@ -288,8 +294,10 @@ def _answer() -> dict:
     now, chapters = _now()
     now = {**now, **_who(now)}
     where = audio.channel_block("music")
+    loading = _downloads()
     out = {"now": now, "art": _art(now), "chapters": chapters,
-           "where": {**where, "rooms": _rooms()}, "radio": _radio()}
+           "where": {**where, "rooms": _rooms()}, "radio": _with_pct(_radio(), loading),
+           "downloads": loading}
     move = _move_state()
     if move:
         out["move"] = move
@@ -299,6 +307,34 @@ def _answer() -> dict:
     if held is not None:
         out["on_hold"] = held
     return out
+
+
+def _downloads() -> list[dict]:
+    """The downloads under way (agent_media_core.downloads), for the app's
+    progress marks: a song or link before it plays, a saved link or a kept
+    practice on its row, the radio's next song (David, 10 Nov 2026: "a
+    little progress indicator when something is downloading")."""
+    try:
+        from agent_media_core import downloads
+
+        return downloads.active()
+    except Exception as e:  # noqa: BLE001 — the tab can do without it
+        print(f"music: downloads failed: {e}", file=sys.stderr)
+        return []
+
+
+def _with_pct(radio: dict, loading: list[dict]) -> dict:
+    """Each song of the radio's list being downloaded gets its `pct` (null
+    while not known), from the download under way for that id."""
+    by_id = {}
+    for d in loading:
+        if d["purpose"] == "radio" or d["id"] not in by_id:
+            by_id[d["id"]] = d
+    rows = radio.get("next")
+    if not rows or not by_id:
+        return radio
+    return {**radio, "next": [{**r, "pct": by_id[r["id"]]["pct"]} if r.get("state") == "fetching" and r.get("id") in by_id
+                              else r for r in rows]}
 
 
 def _held_list() -> list | None:
