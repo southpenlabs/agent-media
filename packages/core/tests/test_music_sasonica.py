@@ -319,3 +319,20 @@ def test_a_mix_hands_the_app_its_chapters(monkeypatch):
     assert SinkMusicSasonica("tcp://p8a:6615").play("yt:m")
     assert ("tcp://p8a:6615", "set", "user-data/agent-media/chapters",
             [[0.0, "A"], [100.0, "B"], [200.0, "C"]]) in sent
+
+
+def test_status_names_a_queued_song_by_its_own_name():
+    """The app answers media-title with the last replace's title; a queued
+    song that came up is named from the names map for its own URL."""
+    from agent_media_core import cli
+
+    url = "http://localhost:6616/EJRdDhnTRoo.mka"
+    props = {"path": url, "media-title": "Stuck In The Middle With You",
+             music_sasonica.NAMES: {"http://localhost:6616/ln7Vn_WKkWU.mka": ["Stuck In The Middle With You", ""],
+                        url: ["Gimme Shelter", "The Rolling Stones"]}}
+    out = cli._own_track_name(dict(props))
+    assert out["media-title"] == "The Rolling Stones - Gimme Shelter"
+    assert music_sasonica.NAMES not in out
+    # No entry for the playing URL (or no map): the player's title stands.
+    assert cli._own_track_name({"path": "x", "media-title": "T", music_sasonica.NAMES: {}})["media-title"] == "T"
+    assert cli._own_track_name({"path": url, "media-title": "T"})["media-title"] == "T"

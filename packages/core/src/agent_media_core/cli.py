@@ -5992,13 +5992,39 @@ def _phone_music_props(patient: bool = False) -> Optional[dict]:
                 ep,
                 ["idle-active", "pause", "time-pos", "duration", "speed",
                  "media-title", "chapter-metadata/by-key/title", "volume",
-                 "path"],
+                 "path", music_sasonica.NAMES],
                 timeout=_PHONE_READ_TIMEOUT_S, attempts=attempts)
         except (ipc.MpvIpcError, OSError):
             continue
         if props.get("idle-active") is False:
-            return props
+            return _own_track_name(props)
     return None       # idle (or unknown) ⇒ the phone isn't the live backend
+
+
+def _own_track_name(props: dict) -> dict:
+    """`props` with `media-title` the playing track's own name from the app's
+    names map (music_sasonica.NAMES), where it has one.
+
+    Sasonica's player answers `media-title` with the last replace's
+    `force-media-title`, so a queued song that comes up kept the song
+    before's name until the radio's next pass relabelled it — and that pass
+    waits on a download, so Now playing named the old song 33 s into the new
+    one (David, 9 Nov 2026). The map is keyed by the URL loaded and written
+    for every track, queued or not. The artist goes in front as
+    "Artist - Song", the form media_meta splits."""
+    from .sinks import music_sasonica
+    names = props.pop(music_sasonica.NAMES, None)
+    if not isinstance(names, dict):
+        return props
+    pair = names.get(str(props.get("path") or ""))
+    if not isinstance(pair, list) or not pair:
+        return props
+    title = str(pair[0] or "").strip()
+    artist = str(pair[1] or "").strip() if len(pair) > 1 else ""
+    if title and title != "null":
+        props["media-title"] = f"{artist} - {title}" if artist and artist != "null" else title
+    return props
+
 
 
 def _mpv_music_label(props: dict) -> str:
