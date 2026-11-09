@@ -222,3 +222,25 @@ def test_mark_read_marks_the_threads_held_replies_heard(server, shelf, signed_in
     res, obj = call(server, "POST", "/speech/heard", {"session": "x"}, AUTH)
     assert res.status == 400
     assert voice[1] == []
+
+
+def test_mark_heard_from_the_player_ends_the_reply_and_marks_it(server, shelf, signed_in, voice, monkeypatch):
+    """`POST /speech/heard {now: true}` (the player's Mark heard): the reply
+    being read gets End of reply, and its row is heard with no resume point;
+    with nothing being read, 404 (9 Nov 2026)."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    ran: list = []
+    monkeypatch.setattr(speech, "_CTL", lambda action, arg, *a, **k: ran.append(action) or "")
+    res, obj = call(server, "POST", "/speech/heard", {"now": True}, AUTH)
+    assert res.status == 404 and ran == []
+    rid = _row("being read")
+    st.set_stopped_at(rid, 2)
+    st.set_now_playing("speech", "/x.mp3", time.time(), target="sasonica",
+                       extras={"replay": True, "history_id": rid, "source_session": SID})
+    res, obj = call(server, "POST", "/speech/heard", {"now": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "id": rid, "session": SID}
+    assert ran == ["jump-end"]
+    ex = st.history_row(rid)["extras"]
+    assert ex["heard"] is True and "stopped_at" not in ex

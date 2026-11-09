@@ -3300,6 +3300,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from agent_media_core.state import StateStore
 
         body = _read_json(h) or {}
+        if body.get("now") is True:
+            # The player's Mark heard: the reply being read ends and is heard.
+            done, info = speech.mark_now_heard()
+            if not done:
+                _json(h, info.pop("status", 409), {"ok": False, **info})
+                return True
+            print(f"speech/heard: now, reply {info.get('id')}", file=sys.stderr)
+            _json(h, 200, {"ok": True, **info})
+            return True
         us = str(body.get("session") or "")
         if not sessions._SESSION.fullmatch(us):
             _json(h, 400, {"ok": False, "error": "not a session id"})

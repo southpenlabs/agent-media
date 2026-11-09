@@ -112,6 +112,30 @@ def row_sentences(row_id: int) -> list[str] | None:
     return replay_sentence_map(row)
 
 
+def mark_now_heard() -> tuple[bool, dict]:
+    """Mark heard from the player (David, 9 Nov 2026: "It would be nice to be
+    able to mark it heard from the media player too"): the reply being read
+    ends, as End of reply does, and counts as heard — no resume point, no ▶
+    of an unheard one. A replay's row (`history_id`) is marked here, after
+    the End (which keeps a resume point, `cli._keep_end_resume_point`); a
+    live reply's row is written as it ends, heard because End ended it.
+    False with a status when nothing is being read."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    np = st.get_now_playing("speech") or {}
+    ex = np.get("extras") or {}
+    if not np or not isinstance(ex, dict):
+        return False, {"status": 404, "error": "nothing is being read"}
+    rid = ex.get("history_id")
+    rid = rid if isinstance(rid, int) else None
+    run_ctl("jump-end", 1)
+    if rid is not None:
+        st.set_stopped_at(rid, None)
+        st.mark_heard(rid)
+    return True, {"id": rid, "session": str(ex.get("source_session") or "")}
+
+
 def stop_speech() -> str:
     """Stop the clip playing now, on the player it is playing on — what
     `media stop` does. "" when done, else why not. `/session/stop` calls this

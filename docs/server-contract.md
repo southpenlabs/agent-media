@@ -3284,6 +3284,15 @@ The speech bar.
   app calls it on every Mark read (the list's, the ⋮'s, the one under the
   newest message) and ignores an older server's 404 (`GET /features`
   `mark_heard` says it is here). 400 `"not a session id"`.
+- **Mark heard from the player** (9 Nov 2026, David: "It would be nice to
+  be able to mark it heard from the media player too"). `POST
+  /speech/heard {"now": true}` → `{"ok": true, "id", "session"}`: the
+  reply being read gets End of reply (`jump-end`) and counts as heard — a
+  replay's row (`id`) gets `extras.heard` and loses `stopped_at`, so no
+  Resume and no unheard ▶; a live reply (`id` null) is heard as End ends
+  it. Plain End of reply on a replay instead keeps the sentence it was on
+  as the resume point (`stopped_at`). 404 `"nothing is being read"`.
+  `GET /features` `mark_heard_now` says it is here.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
@@ -4928,6 +4937,7 @@ local look, never a network call:
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
+| `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
