@@ -80,23 +80,49 @@ This is useful on its own (sharing a single reply) and should land first.
 
 ## Trackers
 
-The server knows the setup, the app doesn't (app-stays-generic): a
-`trackers` list in the server's config, each `{id, kind: github|forgejo,
-base_url, repos: [...], token_env}`, with a repo mapped to a tracker by its
-git remote. GitHub and Forgejo (and Gitea, the same API) both take
-`POST /repos/{owner}/{repo}/issues` with a title, body and labels, so one
-adapter with two base URLs covers both. A token is a scoped credential
-held by the server (issues: write on the named repos only). Other trackers
-(Linear, a plain Org file of TODOs) are later adapters behind the same
-`kind`. With no tracker for a repo, an issue becomes a TODO in David's Org
-inbox instead, with the same body and links.
+The server knows the setup, the app doesn't (app-stays-generic). Each
+project picks its own trackers, one or several (David, 10 Nov 2026: "Can
+we have different issue trackers for different projects? it would be nice
+to have the option for gitlab too").
+
+Trackers, in the server's config:
+`{id, kind: github|gitlab|forgejo|org, base_url, token_env, project?}`.
+Kinds:
+- `github`: `POST /repos/{owner}/{repo}/issues` (title, body, labels).
+- `forgejo` (and Gitea, the same API): the same call under
+  `<base_url>/api/v1`.
+- `gitlab` (gitlab.com or self-hosted): `POST
+  /api/v4/projects/{id or url-encoded path}/issues` (title, description,
+  comma-separated labels); closing is a `PUT` with `state_event=close`.
+- `org`: a TODO appended to an Org file (default David's inbox), no token.
+Linear or Jira are later kinds behind the same three calls (create, close,
+link).
+
+Which tracker a topic goes to:
+1. **The project's own choice**, in the project's settings (the project
+   page, §project-page; kept server-side as `trackers: [id…]` per project
+   folder). A project can list several (Org and GitHub both).
+2. **Otherwise from its git remote**: a github.com remote → `github`, a
+   gitlab host → `gitlab`, a host matching a configured Forgejo → that
+   tracker, with the repo path taken from the remote. Pushing to two
+   remotes offers both.
+3. **Otherwise the default list** (`org` alone, to start).
+In the review sheet each topic shows its tracker(s) and can be switched
+to any other configured one for that one split.
+
+A token is a scoped credential held by the server, one per tracker
+(GitHub: issues write on the named repos; GitLab: a project access token
+with `api` scope at Reporter; Forgejo: `write:issue`). The app is told
+only each tracker's id, kind and display name (`GET /trackers`), never a
+token or URL it would have to know about.
 
 ## Order
 
 1. Reply anchors (`#<msg-id>`) in the app and the server's link builder.
 2. `propose` / `apply` with **New thread** and **Note only**, a question
    card for review.
-3. The GitHub/Forgejo adapter and **Issue**.
+3. **Issue**: the Org and GitHub trackers and per-project choice, then
+   GitLab and Forgejo.
 4. The review sheet in the app; the agent offering a split on its own.
 
 ## Decided (David, 10 Nov 2026)
@@ -110,3 +136,5 @@ inbox instead, with the same body and links.
   the links) and, when it is about a repo, to that repo's GitHub issues.
   A Forgejo on red2 is to be set up ("possibly tomorrow") and added as a
   `forgejo` tracker then; the adapter is the same.
+- **Per project**: each project chooses its own tracker(s), falling back
+  to its git remote and then to Org; GitLab is a supported kind.
