@@ -11323,6 +11323,38 @@ def _end_opts_before_time(argv: list[str]) -> list[str]:
     return a
 
 
+def _music_opts_after_uri(argv: list[str], parser) -> list[str]:
+    """``music <action> --opt… <uri>`` → ``music <action> <uri> --opt…``.
+
+    Python 3.11's argparse gives the optional `uri` positional nothing when
+    an option comes between it and `action`, and then refuses the uri as an
+    unrecognized argument (fixed in 3.12): ``media music play --in-treatment
+    yt:…`` (play_gate's "Play now", the server's force) failed there with
+    exit 2. The options are moved after the uri, which every version reads
+    the same."""
+    if len(argv) < 4 or argv[0] != "music" or argv[2] in ("--", "-h", "--help") \
+            or not argv[2].startswith("-"):
+        return argv
+    try:
+        sub = next(a for a in parser._subparsers._group_actions if "music" in a.choices).choices["music"]
+    except (AttributeError, StopIteration, KeyError):
+        return argv
+    opts, i = [], 2
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--" or not tok.startswith("-") or tok.lstrip("-").replace(".", "").isdigit():
+            break
+        act = sub._option_string_actions.get(tok.split("=", 1)[0])
+        if act is None:
+            return argv               # not one of music's: let argparse say so
+        takes = 0 if "=" in tok else (1 if act.nargs is None else act.nargs if isinstance(act.nargs, int) else 0)
+        opts.extend(argv[i:i + 1 + takes])
+        i += 1 + takes
+    if i >= len(argv) or argv[i] == "--" or not opts:
+        return argv
+    return [*argv[:2], argv[i], *opts, *argv[i + 1:]]
+
+
 def cmd_place_find(a) -> int:
     from . import place_find
 
@@ -11393,7 +11425,8 @@ def main(argv=None) -> int:
         return cmd_contacts(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["session"]:
         return cmd_session(argparse.Namespace(args=list(argv[1:])))
-    args = _build_parser().parse_args(_end_opts_before_time(argv))
+    parser = _build_parser()
+    args = parser.parse_args(_music_opts_after_uri(_end_opts_before_time(argv), parser))
     from . import play_gate
     if getattr(args, "in_treatment", False):
         # `--in-treatment`: this play goes through the play gate on purpose.

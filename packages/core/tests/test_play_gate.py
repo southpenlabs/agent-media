@@ -382,3 +382,25 @@ def test_cli_play_with_start_seeks_once_it_plays(monkeypatch):
     seeks.clear()
     a.start = 0
     assert cli._cmd_music_play(object(), a) == 0 and seeks == []
+
+
+@pytest.mark.parametrize("argv,want", [
+    (["music", "play", "--in-treatment", "yt:x"], ["music", "play", "yt:x", "--in-treatment"]),
+    (["music", "play", "--start", "30", "--add", "yt:x"], ["music", "play", "yt:x", "--start", "30", "--add"]),
+    (["music", "play", "--start=30", "yt:x"], ["music", "play", "yt:x", "--start=30"]),
+    (["music", "seek", "--", "-5:00"], ["music", "seek", "--", "-5:00"]),
+    (["music", "status", "--json"], ["music", "status", "--json"]),
+    (["book", "play", "--in-treatment", "x"], ["book", "play", "--in-treatment", "x"]),
+])
+def test_music_options_before_the_uri_parse_on_every_python(argv, want):
+    """Python 3.11's argparse refused `music play --in-treatment <uri>` (the
+    optional uri positional got nothing, then the uri was "unrecognized";
+    CI's 3.11 job, 9 Nov 2026): main moves the options after the uri."""
+    from agent_media_core import cli
+
+    parser = cli._build_parser()
+    got = cli._music_opts_after_uri(argv, parser)
+    assert got == want
+    if argv[0] == "music" and "yt:x" in argv:
+        a = parser.parse_args(got)
+        assert a.uri == "yt:x"
