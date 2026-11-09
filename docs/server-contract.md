@@ -3924,6 +3924,25 @@ The app's Media tab (docs/proposals/2026-09-28-music-tab.md, step 1).
   room's own level, not the duck's). `[]` when the host has no music
   stream, `null` when the Snapcast server did not answer. Kept 2.5 s.
 - Reading asks the phone, so an answer is kept 1.5 s.
+- `downloads` (10 Nov 2026; David: "It would be nice to have a little
+  progress indicator when something is downloading"): what is downloading
+  now, newest first, `[{"id", "purpose", "title", "pct", "phase"}]`. `id` is
+  the YouTube video id; `purpose` what it is for: `"music"` (a song or link
+  put on a music player, or a practice played, before it plays), `"book"`
+  (a link put on the book channel, before it plays: `fetching: true`
+  answers), `"radio"` (the station's next song, fetched ahead or about to
+  play; also `pct` on its row of `radio.next`), `"podcast"` (a saved link
+  of the Podcasts tab being kept, its row `downloaded: false`),
+  `"practice"` (a practice's small video being kept, `kept: "fetching"`),
+  `"practice_sound"` (a practice's sound fetched ahead; shown nowhere).
+  `title` the video's, null until known; `pct` 0-100, or null while the
+  size is not known (a phone route that answers only at the end, such as
+  the phone's jobs worker, stays null throughout); `phase` `"downloading"`
+  or `"copying"` (brought from the phone, its own percent). Read from
+  `agent_media_core.downloads` (one small JSON per download under the
+  state dir, written by whichever process downloads); one not updated for
+  60 s is left out. `[]` when nothing is downloading; absent on older
+  servers, where the app shows what it did before.
 
 #### `POST /music` — gated (like `/speech/ctl`)
 
@@ -4216,10 +4235,11 @@ this is not a way to play any file on the host.
 Songs like one track, one after another, until turned off
 (docs/proposals/2026-09-29-radio.md). The `GET` answer (and every `POST`
 answer) carries `"radio": {"on", "seed": {"id", "title"} | null, "next":
-[{"id", "title", "channel", "state"}], "more"?}`: `next` is at most ten
+[{"id", "title", "channel", "state", "pct"?}], "more"?}`: `next` is at most ten
 songs to come, `state` `"ready"` (queued in the player or in the phone's
-cache), `"fetching"` (downloading now) or null; `more` how many are listed
-past those. Off is `{"on": false, "seed": null, "next": [], "available"}`.
+cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
+`"fetching"` row whose download is under way, 0-100 or null while not known
+(`downloads` above); `more` how many are listed past those. Off is `{"on": false, "seed": null, "next": [], "available"}`.
 
 - `{"action": "radio"}` starts a station from what is playing;
   `{"action": "radio", "uri"}` plays `uri` and starts one from it. A

@@ -364,7 +364,13 @@ def fetch(vid: str) -> Optional[Path]:
     if addon is None:
         print("podcast-links: downloading from YouTube isn't available on this server", file=sys.stderr)
         return None
-    got = addon.fetch_audio(vid, folder())
+    from . import downloads
+
+    title = next((x.get("title") for x in _load() if x.get("vid") == vid), None)
+    # Its row's progress (downloads; David, 10 Nov 2026: "a little progress
+    # indicator when something is downloading").
+    with downloads.context("podcast", title):
+        got = addon.fetch_audio(vid, folder())
     if got is None:
         return None
     out = shrink(got)

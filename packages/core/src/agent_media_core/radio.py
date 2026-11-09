@@ -295,12 +295,19 @@ def _props(where: str) -> Optional[dict]:
 
 
 def _send(where: str, song: dict, replace: bool = False) -> bool:
-    """Queue (or play) `song`; with the phone's players, its download."""
-    return radio_io.player(where).send(song, replace=replace)
+    """Queue (or play) `song`; with the phone's players, its download
+    (marked as the radio's, for its Up next row's progress: downloads)."""
+    from . import downloads
+
+    with downloads.context("radio", song.get("title") or None):
+        return radio_io.player(where).send(song, replace=replace)
 
 
 def _prefetch(where: str, song: dict) -> bool:
-    return radio_io.player(where).prefetch(song)
+    from . import downloads
+
+    with downloads.context("radio", song.get("title") or None):
+        return radio_io.player(where).prefetch(song)
 
 
 def _label(where: str, song: dict) -> None:

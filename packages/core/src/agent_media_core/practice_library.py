@@ -1230,12 +1230,17 @@ def _fetch_small(vid: str, video: bool) -> Optional[Path]:
     if addon is None or key in _fetching:
         return None
     _fetching.add(key)
+    from . import downloads
+
+    # The kept video's progress is its row's (downloads, §6.9a); the sound's
+    # is fetched ahead and shown nowhere.
     try:
-        if video:
-            fetch = getattr(addon, "fetch_video", None)
-            return fetch(vid, _yt_dir(True)) if fetch else None
-        fmt = getattr(addon, "LOW_AUDIO", None)
-        return addon.fetch_audio(vid, _yt_dir(False), **({"fmt": fmt} if fmt else {}))
+        with downloads.context("practice" if video else "practice_sound"):
+            if video:
+                fetch = getattr(addon, "fetch_video", None)
+                return fetch(vid, _yt_dir(True)) if fetch else None
+            fmt = getattr(addon, "LOW_AUDIO", None)
+            return addon.fetch_audio(vid, _yt_dir(False), **({"fmt": fmt} if fmt else {}))
     finally:
         _fetching.discard(key)
 
