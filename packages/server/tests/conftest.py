@@ -39,6 +39,14 @@ def _clean_media_env(monkeypatch, tmp_path, request):
         raise RuntimeError("a test asked the real Overpass server")
 
     monkeypatch.setattr(map_osm, "_fetch", _no_overpass)
+    # Practice embeds' pictures are read from their makers' pages
+    # (practice_embed.fill_art): never from a test.
+    from agent_media_core import practice_embed
+
+    def _no_embed_page(url):
+        raise RuntimeError("a test asked a real embed page for its picture")
+
+    monkeypatch.setattr(practice_embed, "_fetch_page", _no_embed_page)
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

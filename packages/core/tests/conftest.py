@@ -4,6 +4,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _no_embed_pages(monkeypatch):
+    """Practice embeds' pictures are read from their makers' pages
+    (practice_embed.fill_art): never from a test. One that wants a page
+    patches `_fetch_page` itself."""
+    from agent_media_core import practice_embed
+
+    def _no_embed_page(url):
+        raise RuntimeError("a test asked a real embed page for its picture")
+
+    monkeypatch.setattr(practice_embed, "_fetch_page", _no_embed_page)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_phone_backend(monkeypatch):
     """Keep the suite away from the real phone player.
 
