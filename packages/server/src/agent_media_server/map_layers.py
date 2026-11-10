@@ -122,6 +122,11 @@ def _all() -> list[dict]:
 
     for lay in map_vic.layers():
         out.append({"layer": lay, "features": map_vic.read})
+    # People's reports of phone cameras, a personal-use add-on (map_reports.py).
+    from . import map_reports
+
+    for lay in map_reports.layers():
+        out.append({"layer": lay, "features": map_reports.read})
     seen = {i["layer"]["id"] for i in out}
     for item in _addons():
         if item["layer"]["id"] not in seen:
@@ -244,6 +249,12 @@ def alerts(near: str, radius_km: str, bearer: str, host: bool = False) -> tuple[
             x, y = f["geometry"]["coordinates"][:2]
             points.append({"lat": y, "lon": x, "kind": p.get("enforces", "speed"),
                            **({"limit": p["limit"]} if p.get("limit") else {})})
+    # Reported phone cameras (personal use): confirmed and suspected spots.
+    from . import map_reports
+
+    for r in map_reports.reports():
+        if box[1] <= r["lat"] <= box[3] and box[0] <= r["lon"] <= box[2]:
+            points.append({"lat": r["lat"], "lon": r["lon"], "kind": "phone", "reported": r.get("kind") or "phone"})
     if map_vic.enabled():
         feats, _x = map_vic.read(box)
         for f in feats:

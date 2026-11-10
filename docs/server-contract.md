@@ -9697,6 +9697,19 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   spreadsheet the page links, finds each road with Nominatim's structured
   search (one a second, kept in the cache dir, a miss asked again after 30
   days) and keeps `vic-cameras.json` in the state dir.
+- **Reported phone cameras** (11 Nov 2026; David: "let's use the speed
+  camera locations data for personal use"; `map_reports.py`): a
+  personal-use method, `camera-reports` (core `personal_use`), provided by
+  an add-on. Where allowed, a layer `camera_reports` ("Reported phone
+  cameras", `bbox: true`, `min_zoom` 9, off until switched on): each report
+  a Point, `title` "Phone camera (reported)" or "Suspected phone camera",
+  `detail` its place, `link` its video where there is one; and each is in
+  `/map/alerts`'s `points` as `kind: "phone"` with `reported` (`phone` or
+  `suspected`). The add-on gives `URLS`, `parse(texts)` and `SOURCE`;
+  `python -m agent_media_server.map_reports refresh [--force]` reads each
+  URL through the phone (§6.21 `fetch`; the site refuses a cloud host) and
+  keeps `camera-reports.json` in the state dir, doing nothing while it is
+  under 20 h old, and keeping what it had when the phone does not answer.
 - **`GET /map/alerts?near=lat,lon[&radius_km=25]`** (10 Nov 2026; David:
   "let's organise alerts for when approaching them"): the cameras the
   phone alerts on while moving fast, around where it is (1–50 km, default

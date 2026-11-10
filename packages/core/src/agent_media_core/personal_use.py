@@ -62,6 +62,9 @@ METHODS = {
                            "(its Developer Policy III.3 and III.5 leave an assistant doing this in doubt)"),
     "signed-in-reading": ("MEDIA_SIGNED_IN_READING",
                           "pages read, and friends-only videos played, with the app's stored sign-ins"),
+    "camera-reports": ("MEDIA_CAMERA_REPORTS",
+                       "people's reports of where phone and seatbelt cameras stand, read from a "
+                       "community site through the phone, for the Map and the camera alerts"),
 }
 
 #: The methods an add-on provides, not this package (ADDON_GROUP entries).
@@ -69,7 +72,7 @@ ADDON_METHODS = {"spotify-via-youtube", "insight-timer-profiles", "facebook-prev
                  "messaging-bridges",
                  "youtube-accounts", "youtube-metadata",
                  "youtube-radio", "youtube-downloads",
-                 "youtube-streaming", "youtube-search"}
+                 "youtube-streaming", "youtube-search", "camera-reports"}
 ADDON_GROUP = "agent_media.addons"
 _PROVIDERS: dict[str, Any] = {}
 _LOADED: list = [False]

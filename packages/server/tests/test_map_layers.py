@@ -330,3 +330,50 @@ def test_the_phone_is_handed_the_cameras_around_it(server, monkeypatch, tmp_path
     assert got["roads"] == [{"name": "Queen Street", "where": "Queen Street, Altona", "kind": "phone_seatbelt",
                              "lines": [[[144.79, -37.874], [144.80, -37.876]]]}]
     assert call(server, "GET", "/map/alerts?near=nowhere", headers=pixel)[0].status == 400
+
+
+class _FakeReports:
+    URLS = ["https://reports.example/vic.txt"]
+    SOURCE = "reports.example"
+
+    @staticmethod
+    def parse(texts):
+        out = []
+        for line in texts["https://reports.example/vic.txt"].splitlines():
+            name, lat, lon, kind = line.split("|")
+            out.append({"name": name, "lat": float(lat), "lon": float(lon), "kind": kind})
+        return out
+
+
+def test_reported_cameras_kept_shown_and_alerted_only_on_personal_use(server, monkeypatch, tmp_path):
+    from agent_media_core import personal_use, phone_ask
+
+    from agent_media_server import map_reports
+
+    pixel, _ = _device("Pixel 8a")
+    ids = lambda: [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
+    assert "camera_reports" not in ids()              # personal use, but no add-on
+    personal_use.register("camera-reports", _FakeReports)
+    try:
+        monkeypatch.delenv("MEDIA_PERSONAL_USE")
+        assert "camera_reports" not in ids()          # the add-on, but not personal use
+        monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+        assert "camera_reports" in ids()
+        page = tmp_path / "page.txt"
+        page.write_text("Queen Street, Altona|-37.874|144.795|phone\nAirport Drive, Tullamarine|-37.700|144.867|suspected\n")
+        asked = []
+        monkeypatch.setattr(phone_ask, "ask", lambda kind, why, timeout_s=0, url="", **k: (asked.append(url), {
+            "status": "ok", "result": {"status": 200, "path": str(page)}})[1])
+        assert map_reports.refresh() == {"reports": 2}
+        assert asked == ["https://reports.example/vic.txt"]
+        assert map_reports.refresh()["fresh"] is True    # under a day old: not asked again
+        got = call(server, "GET", "/map/layer?id=camera_reports&bbox=144.7,-37.9,144.9,-37.8", headers=pixel)[1]
+        assert [(f["properties"]["title"], f["properties"]["detail"]) for f in got["features"]] == [
+            ("Phone camera (reported)", "Queen Street, Altona")]
+        alerts = call(server, "GET", "/map/alerts?near=-37.8,144.85", headers=pixel)[1]
+        assert sorted(p["reported"] for p in alerts["points"] if p["kind"] == "phone") == ["phone", "suspected"]
+        # A phone that does not answer leaves what was kept.
+        monkeypatch.setattr(phone_ask, "ask", lambda *a, **k: {"status": "timeout"})
+        assert map_reports.refresh(force=True) == {"reports": 2, "asked": "timeout", "http": None}
+    finally:
+        personal_use.register("camera-reports", None)
