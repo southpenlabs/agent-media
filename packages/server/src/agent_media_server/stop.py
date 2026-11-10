@@ -142,3 +142,63 @@ def session_release(session: str, bearer: str) -> tuple[bool, dict]:
                        "code": code, "status": headless._STATUS.get(code, 500)}
     return True, {"session": session, "released": int(r.get("released") or 0),
                   "held": int(r.get("held") or 0), "through": bool(r.get("through"))}
+
+
+def session_run_now(session: str, bearer: str) -> tuple[bool, dict]:
+    """`POST /session/run-now` — Run now on a message held for a free
+    session slot (server-contract.md §6.3 "Run now"; David, 11 Nov 2026).
+    Its held messages are marked `slot: "high"` and go now, another
+    session parked for them if every slot is busy (one only waiting on a
+    card, a long command or background work first), which is resumed by
+    itself when a slot frees (sessiond.py `run_now`). Not to be confused
+    with `/session/priority`, the thread's speech level (§6.4)."""
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from .driver import headless
+
+    r = headless.call("run_now", session=session, timeout=30.0)
+    if not r.get("ok"):
+        code = str(r.get("code") or "internal")
+        if code == "bad_request":
+            return False, {"error": "the session host is too old to run it now; it goes "
+                           "when a session frees up", "code": "unsupported", "status": 501}
+        return False, {"error": str(r.get("error") or "the session host refused"),
+                       "code": code, "status": headless._STATUS.get(code, 500)}
+    return True, {"session": session, "sent": int(r.get("sent") or 0),
+                  "held": int(r.get("held") or 0), "bumped": r.get("bumped") or None,
+                  "why": str(r.get("why") or "")}
+
+
+def session_slots(bearer: str) -> tuple[bool, dict]:
+    """`GET /sessions/slots` — who holds the host's session slots and why,
+    and which threads wait for one (§6.3 "Run now"; sessiond.py `slots`),
+    each with the thread's title."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from . import headless_mail
+    from .driver import headless
+
+    r = headless.call("slots", timeout=10.0)
+    if not r.get("ok"):
+        code = str(r.get("code") or "internal")
+        if code == "bad_request":
+            return False, {"error": "the session host is too old to say", "code": "unsupported",
+                           "status": 501}
+        return False, {"error": str(r.get("error") or "the session host refused"),
+                       "code": code, "status": headless._STATUS.get(code, 500)}
+
+    def titled(row: dict) -> dict:
+        out = {k: v for k, v in row.items() if k != "first_text"}
+        out["title"] = headless_mail._title(row) or None
+        return out
+
+    return True, {"live": int(r.get("live") or 0), "max": int(r.get("max") or 0),
+                  "short": bool(r.get("short")), "free_mb": r.get("free_mb"),
+                  "holders": [titled(x) for x in r.get("holders") or [] if isinstance(x, dict)],
+                  "held": [titled(x) for x in r.get("held") or [] if isinstance(x, dict)],
+                  "bumped": [x for x in r.get("bumped") or [] if isinstance(x, dict)]}

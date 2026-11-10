@@ -15,6 +15,8 @@ by accident.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 import socket
@@ -44,6 +46,28 @@ _INPUT_MAX = 300
 #: How long a `!` command's output waits for a sessiond that is down (one
 #: restarting takes a few seconds; its own restart is a command like any).
 DELIVER_WAIT_S = 30.0
+
+
+#: Run now (`slot: "high"`, §6.3) for the send or start this request makes:
+#: set by the `/reply` and `/ask` routes around their call (`run_now`), so
+#: the layers between (routing, send.ask, send.reply) need not carry it. A
+#: pane has no slots and ignores it.
+SLOT: "contextvars.ContextVar[str]" = contextvars.ContextVar("headless_slot", default="")
+
+
+@contextlib.contextmanager
+def run_now(slot: object):
+    """`with run_now(body.get("slot")):` — a request's Run now, for the
+    headless send or start inside it."""
+    tok = SLOT.set("high" if slot == "high" else "")
+    try:
+        yield
+    finally:
+        SLOT.reset(tok)
+
+
+def _slot_kw() -> dict:
+    return {"slot": "high"} if SLOT.get() == "high" else {}
 
 
 def call(op: str, *, timeout: float = 30.0, **kw) -> dict:
@@ -429,7 +453,7 @@ class HeadlessDriver:
         from .. import send
 
         r = call("start", cwd=cwd, text=compose(text, quote), agent=agent, workspace=host,
-                 model=model, mode=mode, timeout=30.0,
+                 model=model, mode=mode, timeout=30.0, **_slot_kw(),
                  **({"system_prompt_file": system_prompt_file} if system_prompt_file else {}),
                  **({"fork_from": fork_from, "fork_at": fork_at} if fork_from else {}))
         if not r.get("ok") and r.get("code") == "unsupported" and agent not in ("claude", "antigravity") \
@@ -451,7 +475,8 @@ class HeadlessDriver:
                       "driver": HEADLESS, "acked": bool(r.get("acked")),
                       # Every slot busy: made, its first message held (`busy`).
                       **({"held": True} if r.get("held") else {}),
-                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {})}
+                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {}),
+                      **({"slot": "high"} if r.get("slot") == "high" else {})}
 
     def send(self, session, body, text, *, quote=""):
         from .. import archive, rest, send, shell
@@ -482,7 +507,8 @@ class HeadlessDriver:
             rest.clear_quietly(session)
             return True, {"session": session, "pane": None, "opened": False,
                           "submitted": True, "driver": HEADLESS, "shell": True}
-        r = call("send", session=session, text=compose(text, quote), timeout=30.0)
+        r = call("send", session=session, text=compose(text, quote), timeout=30.0,
+                 **_slot_kw())
         if not r.get("ok"):
             return _failed(r, session=session, pane=None)
         send._record_turn(session, text)
@@ -497,7 +523,11 @@ class HeadlessDriver:
                       **({"held": True} if r.get("held") else {}),
                       **({"quota": r["quota"]} if isinstance(r.get("quota"), dict) else {}),
                       # Or until one of the busy sessions finishes (`busy`).
-                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {})}
+                      **({"busy": r["busy"]} if isinstance(r.get("busy"), dict) else {}),
+                      # Run now (§6.3): kept on it while held, and what it parked.
+                      **({"slot": "high"} if r.get("slot") == "high" else {}),
+                      **({"run_now": r["run_now"]} if isinstance(r.get("run_now"), dict)
+                         else {})}
 
     def resume(self, session):
         from .. import rest

@@ -669,6 +669,216 @@ def test_an_ordinary_agent_never_yields_its_slot(host, monkeypatch):
     assert context.read_squeeze() is None
 
 
+# --- Run now: the top of the slot scale (§6.3; David, 11 Nov 2026) ---------------
+
+def test_run_now_parks_a_card_before_a_generating_turn_and_it_comes_back(host, monkeypatch):
+    """Every slot busy: a Run now new chat parks the session waiting on a
+    card, not the one generating; that one is resumed by itself once a slot
+    frees, told to ask again, and the slots view said all of it."""
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "2")
+    a = start(host, "tool: touch z")
+    wait_for(lambda: state(host, a) == "approval")
+    b = start(host, "slow: 4")
+    wait_for(lambda: state(host, b) == "working")
+    view = host.sup.slots()
+    why = {x["session"]: x for x in view["holders"]}
+    assert why[a]["reason"] == "card" and why[a]["next"] is True
+    assert why[b]["reason"] == "working" and why[b]["next"] is False
+    with driver.headless.run_now("high"):
+        ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work),
+                                              text="reply: urgent")
+    assert ok and not d.get("held"), d
+    c = d["session"]
+    wait_for(lambda: last_text(host, c) == "urgent")
+    assert host.sup.get(b)["live"]
+    wait_for(lambda: state(host, a) == "parked")
+    cut = host.sup.sessions[a].cut_off or {}
+    if cut:      # not resumed yet
+        assert cut["why"] == "run_now" and cut["for"] == c and cut["question"] is True
+    # b ends, a slot frees: a comes back with the note, asking again.
+    wait_for(lambda: "ask it again" in (last_text(host, a) or ""), timeout=20)
+    assert "Run now" in last_text(host, a)
+
+
+def test_run_now_on_a_held_message_parks_one_in_a_long_command(host, monkeypatch):
+    """A message already held for a slot, then Run now on it (the banner's
+    button): the session stuck in a long foreground command is parked, the
+    command named in its resume note; the slots view and held.json said
+    why it waited."""
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    monkeypatch.setenv("MEDIA_SESSIOND_LONG_COMMAND_S", "0")
+    a = start(host, "slow: 30")
+    wait_for(lambda: state(host, a) == "working")
+    s = host.sup.sessions[a]
+    host.sup._on_event(s, {"type": "system", "subtype": "task_started", "task_id": "b1",
+                           "tool_use_id": "toolu_fg", "task_type": "local_bash",
+                           "description": "pytest -q the whole lot"})
+    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: b")
+    assert ok and d["held"] is True and "slot" not in d
+    b = d["session"]
+    assert sessiond.held_waits(host.sup.root)[b]["slot"] == "normal"
+    row: dict = {}
+    sessiond.add_slot_status(row, b, sessiond.held_waits(host.sup.root), None)
+    assert row["slot_held"]["slot"] == "normal"
+    view = host.sup.slots()
+    assert view["held"][0]["session"] == b and view["held"][0]["for"] == "slot"
+    assert view["holders"][0]["reason"] == "command"
+    assert view["holders"][0]["detail"] == "pytest -q the whole lot"
+    got = host.sup.handle({"op": "run_now", "session": b})
+    assert got["ok"] and got["sent"] == 1 and got["held"] == 0 and got["bumped"] == a, got
+    wait_for(lambda: last_text(host, b) == "b")
+    assert b not in sessiond.held_waits(host.sup.root)
+    cut = host.sup.sessions[a].cut_off
+    note = sessiond.resume_note(host.sup.sessions[a], cut or {
+        "why": "run_now", "turn": True, "command": ["pytest -q the whole lot"]})
+    assert "pytest -q the whole lot" in note and "re-run it" in note
+    # b idle now: a takes its slot back by itself.
+    wait_for(lambda: "Run now" in (last_text(host, a) or ""), timeout=20)
+
+
+def test_run_now_never_parks_another_run_now(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    with driver.headless.run_now("high"):
+        ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work),
+                                              text="slow: 3")
+    a = d["session"]
+    wait_for(lambda: state(host, a) == "working")
+    assert host.sup.sessions[a].slot_high is True
+    with driver.headless.run_now("high"):
+        ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work),
+                                              text="reply: second")
+    assert ok and d["held"] is True and d["slot"] == "high"
+    b = d["session"]
+    assert host.sup.get(a)["live"]
+    assert host.sup.slots()["held"][0]["slot"] == "high"
+    # a's turn ends: no longer a Run now, idle, so b takes its slot.
+    wait_for(lambda: last_text(host, b) == "second", timeout=15)
+
+
+def test_a_quiet_thread_on_a_card_is_parked_first_for_any_slot(host, monkeypatch):
+    """The speech level is the slot default (§6.4): a Quiet thread only
+    waiting is parked for an ordinary new chat, and comes back by itself."""
+    from agent_media_core import speak_priority
+
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(host, "tool: touch z")
+    wait_for(lambda: state(host, a) == "approval")
+    speak_priority.set_level(a, "quiet")
+    assert host.sup.slots()["holders"][0]["speech"] == "quiet"
+    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="reply: b")
+    assert ok and not d.get("held"), d
+    b = d["session"]
+    wait_for(lambda: last_text(host, b) == "b")
+    wait_for(lambda: "speech level is Quiet" in (last_text(host, a) or ""), timeout=20)
+
+
+def test_an_interrupt_thread_runs_now_by_itself(host, monkeypatch):
+    from agent_media_core import speak_priority
+
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(host, "reply: first")
+    wait_for(lambda: state(host, a) == "waiting")
+    host.sup.park(a)
+    wait_for(lambda: state(host, a) == "parked")
+    b = start(host, "tool: touch z")
+    wait_for(lambda: state(host, b) == "approval")
+    speak_priority.set_level(a, "interrupt")
+    ok, d = driver.headless_driver().send(a, "", "reply: loud")
+    assert ok and not d.get("held"), d
+    wait_for(lambda: last_text(host, a) == "loud")
+    cut = host.sup.sessions[b].cut_off
+    if cut:     # not back yet
+        assert cut["why"] == "run_now" and cut["for_from"] == "speech"
+
+
+def test_an_interrupt_thread_is_parked_for_a_run_now_only_as_a_last_resort(monkeypatch):
+    from agent_media_core import speak_priority
+
+    sup = sessiond.Supervisor.__new__(sessiond.Supervisor)
+    S = sessiond.Session
+    loud, busy, quiet, card = S("loud", "/"), S("busy", "/"), S("quiet", "/"), S("card", "/")
+    loud.state = card.state = quiet.state = "approval"
+    for x in (loud, card, quiet):
+        x.pending["r"] = {"request": {"subtype": "can_use_tool", "tool_name": "Bash"}}
+    busy.state = "working"
+    loud.last_event_at, quiet.last_event_at, card.last_event_at, busy.last_event_at = 1, 4, 2, 3
+    speak_priority.set_level("loud", "interrupt")
+    speak_priority.set_level("quiet", "quiet")
+    order = [t[2].id for t in sup._ranked([loud, busy, quiet, card])]
+    assert order == ["quiet", "card", "busy", "loud"]
+    assert sup._run_now_victim([loud, busy]) is busy
+    assert sup._run_now_victim([loud]) is loud
+
+
+def test_held_work_goes_run_now_first_then_a_bumped_session_then_oldest():
+    S = sessiond.Session
+    old, high, bumped = S("old", "/"), S("high", "/"), S("bumped", "/")
+    old.held = [{"text": "x", "at": 1.0}]
+    high.held = [{"text": "y", "at": 5.0, "slot": "high"}]
+    bumped.cut_off = {"why": "run_now", "due": True}
+    got = sessiond.Supervisor._delivery_order([old, bumped, high])
+    assert [x.id for x in got] == ["high", "bumped", "old"]
+
+
+def test_the_slot_reasons():
+    s = sessiond.Session("x", "/")
+    s.state = "waiting"
+    assert sessiond.slot_reason(s) == ("idle", "")
+    s.tasks["t"] = time.time()
+    assert sessiond.slot_reason(s) == ("tasks", "1")
+    s.state = "approval"
+    s.pending["r"] = {"request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion"}}
+    assert sessiond.slot_reason(s) == ("card", "question")
+    s.pending["r"] = {"request": {"subtype": "can_use_tool", "tool_name": "Bash"}}
+    assert sessiond.slot_reason(s) == ("card", "Bash")
+    s.pending.clear()
+    s.state = "working"
+    s.foreground["toolu"] = time.time()
+    assert sessiond.slot_reason(s)[0] == "working"          # a short call
+    s.foreground["toolu"] = time.time() - 3600
+    s.task_info["t"] = {"description": "make all", "tool_use_id": "toolu"}
+    assert sessiond.slot_reason(s) == ("command", "make all")
+    s.backgrounded.add("toolu")
+    assert sessiond.slot_reason(s)[0] == "working"
+
+
+def test_run_now_and_slots_over_http(app_host, server, signed_in, typed, monkeypatch):
+    monkeypatch.setenv("MEDIA_SESSIONS_CACHE_S", "0")
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(app_host, "tool: touch z")
+    wait_for(lambda: state(app_host, a) == "approval")
+    st, r = req(server, "POST", "/ask", {"text": "reply: queued one", "target": "new"}, AUTH)
+    assert st == 200 and r.get("held") is True, r
+    b = r["session"]
+    st, got = req(server, "GET", "/sessions/slots", headers=AUTH)
+    assert st == 200 and got["max"] == 1, got
+    assert got["holders"][0]["session"] == a and got["holders"][0]["reason"] == "card"
+    assert got["held"][0]["session"] == b and got["held"][0]["slot"] == "normal"
+    assert "first_text" not in got["held"][0] and got["held"][0]["title"]
+    st, r = req(server, "POST", "/session/run-now", {"session": b}, AUTH)
+    assert st == 200 and r["bumped"] == a and r["held"] == 0, r
+    wait_for(lambda: last_text(app_host, b) == "queued one")
+    st, r = req(server, "POST", "/session/run-now", {"session": "nope"}, AUTH)
+    assert st == 400
+
+
+def test_a_reply_sent_with_run_now_takes_a_slot(app_host, server, signed_in, typed,
+                                                 monkeypatch):
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(app_host, "reply: first")
+    wait_for(lambda: state(app_host, a) == "waiting")
+    host = app_host
+    host.sup.park(a)
+    wait_for(lambda: state(host, a) == "parked")
+    b = start(host, "tool: touch z")
+    wait_for(lambda: state(host, b) == "approval")
+    st, r = req(server, "POST", "/reply", {"session": a, "text": "reply: now please",
+                                            "slot": "high"}, AUTH)
+    assert st == 200 and not r.get("held"), r
+    wait_for(lambda: last_text(host, a) == "now please")
+    assert (host.sup.sessions[b].cut_off or {}).get("why") in ("run_now", None)
+
+
 def test_resume_brings_a_parked_session_back_saying_nothing(host, monkeypatch):
     sid = start(host, "reply: a")
     wait_for(lambda: state(host, sid) == "waiting")

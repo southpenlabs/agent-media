@@ -63,6 +63,19 @@ What it does per session:
   squeeze record their hook reads), and `MEDIA_RESTART_LOW_GRACE_S` (120)
   later it is parked, cut off `why: "slot"`, and resumed naming its agents
   once there is room and no other session holds messages (`_yield_low`).
+  That is the bottom of the slot scale; its top is **Run now** (11 Nov
+  2026, server-contract.md §6.3): a message sent with `slot: "high"` — or
+  any message to a thread whose speech level is Interrupt (§6.4, the slot
+  default) — parks a session at once rather than being held (`_ranked`:
+  idle; then only waiting on a card, a long foreground command
+  (`MEDIA_SESSIOND_LONG_COMMAND_S`, 60), background work or low-priority
+  agents, a Quiet thread first; then generating; an Interrupt thread
+  last; never a Run now's own turn), cut off `why: "run_now"` and resumed
+  by itself, ahead of held messages, when a slot frees. A Quiet thread
+  only waiting is parked the same way (`why: "quiet"`) for any wanted
+  slot. `run_now` marks a held message so after the fact; `slots` says
+  who holds each slot and why, and who waits (`GET /sessions/slots`), and
+  `held.json` which threads hold messages, for the rows (`slot_held`).
 
 It writes nothing to tmux. Transcripts land where Claude Code puts them
 (`~/.claude/projects/…`), so the canvas's transcript reader works unchanged.
@@ -130,12 +143,14 @@ Ops (request `{"op", …}` → `{"ok": true, …}` or `{"ok": false, "error",
 `answer`, `close`, `park`, `events`, `configure` (model and plan mode;
 session_settings.py), `relocate` (the directory a moved thread resumes in;
 moves.py), `release` (what is held for a restart goes now, and the restart
-lets the session through: the app's Send now). `send` with `keep_pending` is refused `pending` rather than
+lets the session through: the app's Send now), `run_now` and `slots` (above;
+`send` and `start` take `slot: "high"`). `send` with `keep_pending` is refused `pending` rather than
 answer a waiting card the way typing does (another session's mail,
 headless_mail.py).
 
 Config (env): MEDIA_SESSIOND_SOCKET, MEDIA_SESSIOND_IDLE, MEDIA_SESSIOND_MAX,
 MEDIA_SESSIOND_MIN_FREE_MB, MEDIA_SESSIOND_BACKGROUND_AFTER, MEDIA_SESSIOND_TASK_STALE_S,
+MEDIA_SESSIOND_LONG_COMMAND_S,
 MEDIA_SESSIOND_CLOSE_GRACE, MEDIA_SESSIOND_ELICIT_TIMEOUT, MEDIA_SESSIOND_CLAUDE (the binary; default
 `harnesses.program("claude")`), MEDIA_HEADLESS_MODEL (`--model`),
 MEDIA_HEADLESS_PERMISSIONS (`strict` | `normal`, see permissions.py),
@@ -189,6 +204,13 @@ def _env_f(name: str, default: float) -> float:
 
 def idle_s() -> float:
     return _env_f("MEDIA_SESSIOND_IDLE", 1800.0)
+
+
+def long_command_s() -> float:
+    """How long a foreground command must have run before a Run now
+    (`slot: "high"`) counts its session as only waiting on it, parkable
+    ahead of one whose turn is generating."""
+    return _env_f("MEDIA_SESSIOND_LONG_COMMAND_S", 60.0)
 
 
 def task_stale_s() -> float:
@@ -378,6 +400,34 @@ def _write_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def held_waits_path(root: Path | None = None) -> Path:
+    return (root or state_root()) / "held.json"
+
+
+def held_waits(root: Path | None = None) -> dict[str, dict]:
+    """`{session: {"since", "slot"}}` for every session holding messages
+    (`Supervisor._note_held`), read from disk; {} when none or unreadable."""
+    try:
+        got = json.loads(held_waits_path(root).read_text()).get("held")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {str(k): v for k, v in got.items() if isinstance(v, dict)} \
+        if isinstance(got, dict) else {}
+
+
+def add_slot_status(row: dict, session: str, waits: dict, restart: dict | None) -> None:
+    """`slot_held: {"since", "slot": "high" | "normal"}` on a headless
+    thread's row, in place, while its message waits for a free session
+    slot (§6.1, §6.3 "Run now"); gone otherwise. Not while a restart is
+    pending (`restart_pending` says it) or for the usage limit (`quota`).
+    `waits`: `held_waits()`, read once by the caller."""
+    w = waits.get(session) if session and not restart and not row.get("quota") else None
+    if w:
+        row["slot_held"] = {"since": w.get("since"), "slot": w.get("slot") or "normal"}
+    else:
+        row.pop("slot_held", None)
+
+
 def restart_view() -> dict | None:
     """A pending restart of the session host as the app is told it (§6.1,
     `restart_pending`): `{"since", "deadline", "state", "waiting_on":
@@ -495,6 +545,9 @@ class Session:
         self.quota_resumed = 0.0
         #: The task count park_idle last logged holding this session for.
         self.park_held = 0
+        #: A Run now (`slot: "high"`) message started its turn: never parked
+        #: for another Run now until that turn ends (its `result`).
+        self.slot_high = False
         self.background_rids: set[str] = set()
         #: The `initialize` request at spawn (`_initialize`), its answer not ours.
         self.init_rids: set[str] = set()
@@ -756,6 +809,74 @@ def _low_only(s: "Session") -> bool:
     return all(context.is_low_agent(str(t.get("id") or "")) for t in tasks)
 
 
+#: What holds a slot, as `slot_reason` names it (the app's Queued view and
+#: held banner say these, §6.3 "Run now"). The first five are what a Run now
+#: parks before a turn that is generating ("working", "starting").
+SLOT_REASONS = ("idle", "low", "card", "tasks", "command", "working", "starting")
+
+
+def _speech_level(session: str) -> str:
+    """The thread's speech level (core speak_priority.py, §6.4: its own,
+    else the default), which is also its slot default: `interrupt` makes
+    its messages Run now, `quiet` parks it first. "normal" when unread."""
+    try:
+        from agent_media_core import speak_priority
+
+        return speak_priority.level_of(session)
+    except Exception:  # noqa: BLE001 — a level is a default, never a failure
+        return "normal"
+
+
+def _slot_mark(slot: str, slot_from: str) -> dict:
+    """A held message's Run now mark: `slot: "high"` and where it came
+    from (`slot_from`: "message", or "speech" for an Interrupt thread)."""
+    return {"slot": "high", "slot_from": slot_from or "message"} if slot == "high" else {}
+
+
+def _foreground_commands(s: "Session") -> list[str]:
+    """What each foreground call `s` is blocked on is (its `task_started`
+    description), oldest first: a Bash it has not been asked to background."""
+    out = []
+    by_tool = {str(i.get("tool_use_id") or ""): i for i in s.task_info.values()}
+    for tid, _at in sorted(s.foreground.items(), key=lambda kv: kv[1]):
+        if tid in s.backgrounded:
+            continue
+        info = by_tool.get(tid) or {}
+        out.append(str(info.get("description") or "a command"))
+    return out
+
+
+def slot_reason(s: "Session", now: float | None = None) -> tuple[str, str]:
+    """Why a live session holds its slot, and a few words more: `card` (a
+    question or permission card up — the detail its tool), `low` (only
+    low-priority background agents, `_low_only`), `tasks` (its turn over,
+    background tasks running — how many), `command` (in one foreground
+    command for `long_command_s()` or more — the command), `working` (its
+    turn generating, or a short call), `starting`, or `idle` (nothing: an
+    ordinary new message parks it anyway)."""
+    now = now or time.time()
+    if s.pending or s.state == "approval":
+        req = (next(iter(s.pending.values()), {}) or {}).get("request") or {}
+        tool = str(req.get("tool_name") or "")
+        kind = ("question" if tool == "AskUserQuestion" or req.get("subtype") == "elicitation"
+                else tool or "permission")
+        return "card", kind
+    if s.state == "starting":
+        return "starting", ""
+    if s.state == "working" or s.queued:
+        fg = [at for tid, at in s.foreground.items() if tid not in s.backgrounded]
+        if fg and now - min(fg) >= long_command_s() and not s.queued:
+            cmds = _foreground_commands(s)
+            return "command", (cmds[0] if cmds else "a command")[:160]
+        return "working", ""
+    if _low_only(s):
+        return "low", str(len(s.task_list(now)))
+    n = s.active_tasks(now)
+    if n:
+        return "tasks", str(n)
+    return "idle", ""
+
+
 def _low_grace_s() -> float:
     try:
         from agent_media_core.restart_services import low_grace_s
@@ -787,7 +908,7 @@ def resume_note(s: "Session", cut: dict) -> str:
     running, and what to do about it."""
     tag = "[From the session host] "
     only_question = cut.get("question") and not cut.get("turn") and not cut.get("tasks")
-    if only_question:
+    if only_question and cut.get("why") not in ("run_now", "quiet"):
         return (tag + "The session host restarted while your question (or permission "
                 "request) was waiting for David's answer, and it was lost with the "
                 "restart. If you still need the answer, ask it again the same way.")
@@ -818,7 +939,36 @@ def resume_note(s: "Session", cut: dict) -> str:
         n = int(cut["queued"])
         what.append(f"{n} message{'s' if n != 1 else ''} sent to you mid-turn that may "
                     "not have reached you (check the thread's last messages)")
-    if cut.get("why") == "slot":
+    if cut.get("why") == "quiet":
+        cmds = [str(c) for c in cut.get("command") or [] if c]
+        if cmds:
+            what.insert(0, "the foreground command " + "; ".join(
+                f"\u201c{c}\u201d" for c in cmds) + " (stopped part-way; re-run it if "
+                "it is still needed, in the background if it is long)")
+        note = (tag + "Another chat needed a session slot and this thread's speech level "
+                "is Quiet, so the session host parked it first, cutting off: "
+                + "; ".join(what or ["work in progress"]) + ". There is room again; pick "
+                "up where you left off (a question or permission request that was waiting "
+                "was lost: ask it again the same way if you still need it).")
+    elif cut.get("why") == "run_now":
+        # Parked for another chat's Run now (`Supervisor._bump`): what was
+        # cut off, a foreground command by name, and a card to ask again.
+        if only_question and not cut.get("command"):
+            note = (tag + "Another chat was sent with Run now while every session slot "
+                    "was busy, so the session host parked this one while your question "
+                    "(or permission request) waited for David, and it was lost. There is "
+                    "room again: if you still need the answer, ask it again the same way.")
+        else:
+            cmds = [str(c) for c in cut.get("command") or [] if c]
+            if cmds:
+                what.insert(0, "the foreground command " + "; ".join(
+                    f"\u201c{c}\u201d" for c in cmds) + " (stopped part-way; re-run it if "
+                    "it is still needed, in the background if it is long)")
+            note = (tag + "Another chat was sent with Run now while every session slot "
+                    "was busy, so the session host parked this one, cutting off: "
+                    + "; ".join(what or ["work in progress"]) + ". There is room again; "
+                    "pick up where you left off.")
+    elif cut.get("why") == "slot":
         note = (tag + "Another chat needed a session slot, so the session host parked "
                 "this one while only low-priority background agents were running in it. "
                 "There is room again.")
@@ -1382,6 +1532,10 @@ class Supervisor:
                     cut["due"] = True
                 if s.held or cut.get("due"):
                     todo.append(s.id)
+            # The order a free slot goes in (`delivery_order`): Run now
+            # first, then a session a Run now parked, then the oldest held.
+            todo = [x.id for x in self._delivery_order(
+                [self.sessions[sid] for sid in todo])]
         done = []
         for sid in todo:
             try:
@@ -1397,6 +1551,112 @@ class Supervisor:
             except Exception:  # noqa: BLE001
                 log.exception("sessiond: resuming after the usage limit")
         return done
+
+    @staticmethod
+    def _delivery_order(sessions: "list[Session]") -> "list[Session]":
+        """Held work in the order a freed slot takes it: a Run now held
+        message, then a session parked for one (it was running), then held
+        messages oldest first, then anything else due."""
+        def key(x: Session) -> tuple:
+            high = any(m.get("slot") == "high" for m in x.held)
+            bumped = (x.cut_off or {}).get("why") in ("run_now", "quiet")
+            first = min((float(m.get("at") or 0) for m in x.held), default=float("inf"))
+            return (0 if high else 1 if bumped else 2, first)
+        return sorted(sessions, key=key)
+
+    def run_now(self, session: str) -> dict:
+        """The app's Run now on a message held for a slot (§6.3, David, 11
+        Nov 2026): every message held for `session` is marked `slot:
+        "high"` and delivered now, another session parked for it if every
+        slot is busy (`_run_now_victim`). Not past a pending restart
+        (`release` is that) or the usage limit: there it only keeps the
+        mark. `{"session", "sent", "held", "bumped": the session parked for
+        it or None, "why": what still holds it or ""}`."""
+        with self.lock:
+            s = self._get(session)
+            for m in s.held:
+                m.update(_slot_mark("high", "message"))
+            before = len(s.held)
+            self._save(s)
+            live_before = {x.id for x in self.sessions.values() if x.running}
+        why = ""
+        if self.draining() and self._holds_for_restart(session):
+            why = "restart"
+        else:
+            q = _quota()
+            rec = q.read() if q.path().exists() else None
+            if rec and q.limited(rec=rec, agent=s.agent) is not None:
+                why = "quota"
+        if not why and before:
+            self._deliver(session)
+        with self.lock:
+            left = len(s.held)
+            bumped = next((x.id for x in self.sessions.values()
+                           if x.id in live_before
+                           and (x.cut_off or {}).get("why") in ("run_now", "quiet")
+                           and (x.cut_off or {}).get("for") == session), None)
+            if left and not why:
+                why = "busy"
+        log.info("sessiond: %s Run now (%d sent, %d held%s)", session[:8], before - left,
+                 left, f", {bumped[:8]} parked for it" if bumped else "")
+        return {"session": session, "sent": before - left, "held": left,
+                "bumped": bumped, "why": why}
+
+    def slots(self) -> dict:
+        """Who holds the host's session slots and who waits for one (§6.3
+        `GET /sessions/slots`): `{"live", "max", "short", "free_mb",
+        "holders": [{"session", "reason", "detail", "state", "since",
+        "run_now", "next"}], "held": [{"session", "since", "count", "slot",
+        "for", "first_text"}], "bumped": [{"session", "for", "reason", "at"}]}`.
+        `holders` are the live sessions, `next` on the one a Run now would
+        park; `held` in the order a freed slot takes them, `for` being
+        "slot", "restart" or "quota"; `bumped` the sessions a Run now parked,
+        waiting to be resumed."""
+        draining = bool(self.draining())
+        q = _quota()
+        rec = q.read() if q.path().exists() else None
+        free = mem_available_mb()
+        with self.lock:
+            now = time.time()
+            live = [x for x in self.sessions.values() if x.running and x.agent != "opencode"]
+            victim = self._run_now_victim(live)
+            holders = []
+            for x in sorted(live, key=lambda x: x.idle_since()):
+                reason, detail = slot_reason(x, now)
+                holders.append({"session": x.id, "reason": reason, "detail": detail,
+                                "state": x.state, "since": round(x.idle_since(), 3),
+                                "run_now": x.slot_high, "next": x is victim,
+                                "speech": _speech_level(x.id),
+                                "first_text": x.first_text})
+            waiting = [x for x in self.sessions.values() if x.held]
+            held = []
+            for x in self._delivery_order(waiting):
+                limited = bool(rec) and q.limited(rec=rec, agent=x.agent) is not None
+                held.append({"session": x.id, "since": min(float(m.get("at") or 0)
+                                                           for m in x.held),
+                             "count": len(x.held),
+                             "slot": "high" if any(m.get("slot") == "high" for m in x.held)
+                             else "normal",
+                             "slot_from": next((str(m.get("slot_from") or "message")
+                                                for m in x.held if m.get("slot") == "high"),
+                                               None),
+                             "speech": _speech_level(x.id),
+                             "for": "restart" if draining else "quota" if limited else "slot",
+                             "first_text": x.first_text})
+            bumped = [{"session": x.id, "for": str(x.cut_off.get("for") or ""),
+                       "why": str(x.cut_off.get("why")),
+                       "reason": str(x.cut_off.get("reason") or ""),
+                       "level": str(x.cut_off.get("level") or "normal"),
+                       "for_from": str(x.cut_off.get("for_from") or "message"),
+                       "at": x.cut_off.get("at"), "first_text": x.first_text}
+                      for x in self.sessions.values()
+                      if (x.cut_off or {}).get("why") in ("run_now", "quiet")
+                      and not x.running]
+            n = len(live)
+        return {"live": n, "max": max_live(),
+                "short": bool(n) and free is not None and free < min_free_mb(),
+                "free_mb": round(free) if free is not None else None,
+                "holders": holders, "held": held, "bumped": bumped}
 
     def _deliver(self, sid: str) -> bool:
         """Resume `sid` if it is due (a note saying what was cut off), then
@@ -1429,10 +1689,14 @@ class Supervisor:
                 self._save(s)
         if text:
             why = {"quota": "the usage limit", "drain": "the drain",
-               "slot": "a slot freed"}.get(
+                   "slot": "a slot freed", "run_now": "another chat's Run now",
+                   "quiet": "a slot wanted while it was Quiet"}.get(
                 str(cut.get("why")), "the restart")
             try:
-                self.send(sid, text, _internal=True)
+                # A thread parked for a slot does not park a Quiet one to
+                # come back (`_ensure_room` `quiet`): no trading places.
+                self.send(sid, text, _internal=True,
+                          _no_bump=str(cut.get("why")) in ("run_now", "quiet"))
                 log.info("sessiond: %s resumed after %s", sid[:8], why)
             except Refused as e:
                 if e.code == "busy":
@@ -1448,7 +1712,9 @@ class Supervisor:
                 m = s.held[0]
             try:
                 self.send(sid, str(m.get("text") or ""), uid=str(m.get("uuid") or ""),
-                          keep_pending=bool(m.get("keep_pending")), _internal=True)
+                          keep_pending=bool(m.get("keep_pending")), _internal=True,
+                          slot=str(m.get("slot") or ""),
+                          slot_from=str(m.get("slot_from") or ""))
             except Refused as e:
                 if e.code in ("pending", "busy"):
                     return False
@@ -1748,6 +2014,25 @@ class Supervisor:
             _write_atomic(record_path(s.id, self.root), s.record())
         except OSError as e:
             log.warning("sessiond: could not write the record for %s (%s)", s.id[:8], e)
+        self._note_held()
+
+    def _note_held(self) -> None:
+        """Keep `held.json` (`held_waits`) saying which sessions hold
+        messages, when the first was held and whether one is a Run now:
+        the server marks those threads' rows from it (`add_slot_status`)
+        without a call here per list. Written only when it changes."""
+        with self.lock:
+            now_held = {x.id: {"since": min(float(m.get("at") or 0) for m in x.held),
+                               "slot": "high" if any(m.get("slot") == "high" for m in x.held)
+                               else "normal"}
+                        for x in self.sessions.values() if x.held}
+            if now_held == getattr(self, "_held_seen", None):
+                return
+            self._held_seen = now_held
+            try:
+                _write_atomic(held_waits_path(self.root), {"held": now_held})
+            except OSError as e:
+                log.warning("sessiond: could not write %s (%s)", held_waits_path(self.root), e)
 
     def _log_event(self, s: Session, ev: dict) -> None:
         path = self.root / f"{s.id}.events.jsonl"
@@ -2017,7 +2302,8 @@ class Supervisor:
                     s.tasks[key] = now
                     s.task_info[key] = {"description": str(obj.get("description") or "")[:200],
                                         "type": str(obj.get("task_type") or ""),
-                                        "background": bool(obj.get("is_backgrounded"))}
+                                        "background": bool(obj.get("is_backgrounded")),
+                                        **({"tool_use_id": tid} if tid else {})}
             elif t == "system" and sub in ("task_progress", "task_updated"):
                 key = _task_key(obj)
                 status = ((obj.get("patch") or {}).get("status")
@@ -2109,6 +2395,7 @@ class Supervisor:
                                              name="quota-warn").start()
             elif t == "result":
                 s.foreground.clear()
+                s.slot_high = False
                 if _quota().is_limit_result(obj):
                     self._quota_cut(s, obj, now)
                 s.last_result = _result_summary(obj)
@@ -2334,10 +2621,18 @@ class Supervisor:
 
     # -- capacity --
 
-    def _ensure_room(self, exclude: Session | None = None) -> None:
+    def _ensure_room(self, exclude: Session | None = None, slot: str = "",
+                     for_id: str = "", quiet: bool = True, slot_from: str = "") -> None:
         """Make room for one more live process, parking the least recently
         used idle one if the cap is reached or memory is short; refuse when
-        none is idle."""
+        none is idle. With none idle, a thread whose speech level is Quiet
+        (§6.4) and that is only waiting (a card, a long command, background
+        work) is parked next (`_bump`, why "quiet") — unless `quiet` is off
+        (the resume of a thread parked that way, or a Quiet thread itself
+        wanting the slot, so they never trade places). `slot == "high"` (a
+        Run now, for session `for_id`; `slot_from` "speech" when its
+        Interrupt level made it one): the session `_run_now_victim` picks
+        is parked at once rather than waiting on low-priority agents' grace."""
         # An opencode chat is a row in the shared server, not a process.
         live = [x for x in self.sessions.values()
                 if x.running and x is not exclude and x.agent != "opencode"]
@@ -2351,6 +2646,19 @@ class Supervisor:
         idle = sorted((x for x in live if x.state == "waiting" and not x.pending
                        and not x.queued and not x.active_tasks()),
                       key=lambda x: x.idle_since())
+        who = for_id or (exclude.id if exclude else "")
+        if not idle and quiet:
+            ranked = self._ranked(live)
+            if ranked and ranked[0][0] == 0 and ranked[0][3] == "quiet":
+                self._bump(ranked[0][2], who, why="quiet")
+                self._end_squeeze()
+                return
+        if not idle and slot == "high":
+            victim = self._run_now_victim(live)
+            if victim is not None:
+                self._bump(victim, who, slot_from=slot_from)
+                self._end_squeeze()
+                return
         if not idle and self._yield_low(live):
             return
         if not idle:
@@ -2398,6 +2706,72 @@ class Supervisor:
         self._end_squeeze()
         return True
 
+    def _ranked(self, live: "list[Session]") -> "list[tuple]":
+        """Under the lock: the live sessions a wanted slot may take, in the
+        order it takes them, as `(tier, idle_since, session, speech level)`.
+        Never one a Run now is running in (`slot_high`), one holding
+        messages, or an opencode row. Tier -1 idle; 0 only waiting (on a
+        card, a long foreground command, background work — `slot_reason`)
+        with the speech level Quiet, or held only by low-priority agents;
+        1 only waiting; 2 generating; 3 and 4 the same two for a thread
+        whose speech level is Interrupt, parked only when nothing else is
+        (§6.4: the speech level is the slot default). Least recently active
+        first within a tier."""
+        now = time.time()
+        out = []
+        for x in live:
+            if x.slot_high or x.held or x.unstarted or x.agent == "opencode":
+                continue
+            reason = slot_reason(x, now)[0]
+            level = _speech_level(x.id)
+            gen = reason in ("working", "starting")
+            if reason == "idle":
+                tier = -1
+            elif level == "interrupt":
+                tier = 4 if gen else 3
+            elif gen:
+                tier = 2
+            elif level == "quiet" or reason == "low":
+                tier = 0
+            else:
+                tier = 1
+            out.append((tier, x.idle_since(), x, level))
+        return sorted(out, key=lambda t: (t[0], t[1]))
+
+    def _run_now_victim(self, live: "list[Session]") -> "Session | None":
+        """Under the lock: the session a Run now parks (`_ranked`'s first),
+        or None."""
+        ranked = self._ranked(live)
+        return ranked[0][2] if ranked else None
+
+    def _bump(self, s: Session, for_id: str, why: str = "run_now",
+              slot_from: str = "") -> None:
+        """Under the lock: park `s` for another chat's Run now (or, `why`
+        "quiet", for any wanted slot, its speech level being Quiet), cut off
+        with what it was doing (due at once, `level` its speech level,
+        `for_from` "speech" when the Run now was the other's Interrupt
+        level), so
+        `deliver_due` resumes it with `resume_note` once a slot frees —
+        ahead of ordinary held messages, its card asked again if it had one,
+        a foreground command named as cut off."""
+        now = time.time()
+        reason, detail = slot_reason(s, now)
+        cmds = _foreground_commands(s)
+        fg_tools = set(s.foreground) - s.backgrounded
+        tasks = [t for t in s.task_list(now) if t.get("tool_use_id") not in fg_tools]
+        s.cut_off = {"state": s.state, "turn": s.state in ("starting", "working"),
+                     "question": bool(s.pending) or s.state == "approval",
+                     "tasks": tasks, "command": cmds, "queued": len(s.queued),
+                     "last_text": s.last_text, "at": round(now, 3), "why": why,
+                     "for": for_id, "reason": reason, "detail": detail,
+                     "level": _speech_level(s.id), "due": True,
+                     **({"for_from": slot_from} if slot_from else {})}
+        self._save(s)
+        log.info("sessiond: %s parked for %s's %s (%s%s)", s.id[:8], for_id[:8],
+                 "Run now" if why == "run_now" else "slot (it is Quiet)",
+                 reason, f": {detail}" if detail else "")
+        self._park(s)
+
     def _end_squeeze(self) -> None:
         if self._squeeze is not None:
             self._squeeze = None
@@ -2444,9 +2818,12 @@ class Supervisor:
     def start(self, cwd: str, text: str, *, session: str = "", agent: str = "claude",
               workspace: str = "", permissions: str = "", model: str = "",
               mode: str = "", system_prompt_file: str = "", fork_from: str = "",
-              fork_at: str = "") -> dict:
+              fork_at: str = "", slot: str = "") -> dict:
         """`fork_from`/`fork_at` (§6.34): start as a copy of that Claude
-        session up to that record, not afresh."""
+        session up to that record, not afresh. `slot: "high"` (Run now):
+        with every slot busy, another session is parked for it
+        (`_ensure_room`) rather than its first message held."""
+        slot = "high" if slot == "high" else ""
         from . import permissions as perms
 
         if agent not in ("claude", "opencode", "antigravity"):
@@ -2471,13 +2848,18 @@ class Supervisor:
             raise Refused(QUOTA_REFUSED.format(at=_clock(float(lim["resets_at"]))),
                           "quota_limited", quota=q.view(rec=lim))
         session = session or str(uuid.uuid4())
+        slot_from = "message" if slot else ""
+        if not slot and _speech_level(session) == "interrupt":
+            # The speech level is the slot default (§6.4): Interrupt runs now.
+            slot, slot_from = "high", "speech"
         with self.lock:
             if session in self.sessions:
                 raise Refused(f"session {session[:8]} already exists", "exists")
             if not os.path.isdir(cwd):
                 raise Refused(f"no such directory {cwd!r}", "bad_cwd")
             try:
-                self._ensure_room()
+                self._ensure_room(slot=slot, for_id=session, slot_from=slot_from,
+                                  quiet=_speech_level(session) != "quiet")
                 full = ""
             except Refused as e:
                 if e.code != "busy":
@@ -2501,20 +2883,21 @@ class Supervisor:
                 # frees.
                 s.unstarted = True
                 self.sessions[session] = s
-                return {**self._busy_hold(s, str(uuid.uuid4()), text, False, full),
-                        "fresh": True}
+                return {**self._busy_hold(s, str(uuid.uuid4()), text, False, full, slot,
+                                          slot_from), "fresh": True}
             self._spawn(s, resume=False)
             self.sessions[session] = s
-        return self.send(session, text, _fresh=True)
+        return self.send(session, text, _fresh=True, slot=slot)
 
     def _busy_hold(self, s: Session, uid: str, text: str, keep_pending: bool,
-                   why: str = "") -> dict:
+                   why: str = "", slot: str = "", slot_from: str = "") -> dict:
         """Under the lock: hold a message for a session that cannot run
         because every slot is busy or memory is short (`_ensure_room`, its
         words `why`), as a restart's is held; `deliver_due` sends it when
-        one frees. Answered `held: true` with `busy: {"live", "max", "why"}`."""
+        one frees. Answered `held: true` with `busy: {"live", "max", "why"}`.
+        `slot: "high"` is kept on it (a Run now that found nothing to park)."""
         s.held.append({"uuid": uid, "text": text, "at": round(time.time(), 3),
-                       "keep_pending": keep_pending})
+                       "keep_pending": keep_pending, **_slot_mark(slot, slot_from)})
         if not s.first_text:
             s.first_text = " ".join(text.split())[:200]
         self._save(s)
@@ -2525,7 +2908,8 @@ class Supervisor:
         return {"session": s.id, "uuid": uid, "fresh": False, "resumed": False,
                 "queued": True, "held": True, "acked": False, "state": s.state,
                 "live": s.live, "pid": s.proc.pid if s.live else None,
-                "busy": {"live": live, "max": max_live(), "why": why}}
+                "busy": {"live": live, "max": max_live(), "why": why},
+                **_slot_mark(slot, slot_from)}
 
     def _await_exit(self, s: Session) -> None:
         """A process being parked or closed is on its way out: wait for it to
@@ -2536,7 +2920,8 @@ class Supervisor:
                 raise Refused(f"session {s.id[:8]} is still shutting down", "busy")
 
     def send(self, session: str, text: str, *, uid: str = "", _fresh: bool = False,
-             keep_pending: bool = False, _internal: bool = False) -> dict:
+             keep_pending: bool = False, _internal: bool = False, slot: str = "",
+             slot_from: str = "", _no_bump: bool = False) -> dict:
         """`keep_pending`: a message that is not David's (another session's
         mail, headless_mail.py) must not answer his question or permission
         card the way typing does, so it is refused `pending` instead — under
@@ -2545,12 +2930,24 @@ class Supervisor:
         While a restart is pending (`draining`) a message is **held**: kept
         on the session (and its record, so it outlives the restart), no turn
         started, answered `held: true`; `deliver_due` sends it after.
-        `_internal` is that delivery, and a resume note."""
+        `_internal` is that delivery, and a resume note.
+
+        `slot: "high"` is Run now (§6.3): when every slot is busy the session
+        `_run_now_victim` picks is parked for this one instead of the
+        message being held; held anyway (a restart, the usage limit, nothing
+        to park), it keeps the mark. The top of the slot scale whose bottom
+        is the low-priority agents (`_yield_low`)."""
         if not (text or "").strip():
             raise Refused("empty message", "empty_text")
         uid = uid or str(uuid.uuid4())
+        slot = "high" if slot == "high" else ""
+        slot_from = (slot_from or "message") if slot else ""
+        level = _speech_level(session)
+        if not slot and not _internal and level == "interrupt":
+            # The speech level is the slot default (§6.4): Interrupt runs now.
+            slot, slot_from = "high", "speech"
         if not _fresh and not _internal:
-            held = self._quota_hold(session, text, uid, keep_pending)
+            held = self._quota_hold(session, text, uid, keep_pending, slot, slot_from)
             if held is not None:
                 return held
         if not _fresh and not _internal and self._holds_for_restart(session):
@@ -2559,7 +2956,7 @@ class Supervisor:
                 if keep_pending and (s.pending or s.state == "approval"):
                     raise Refused(PENDING_KEPT, "pending")
                 s.held.append({"uuid": uid, "text": text, "at": round(time.time(), 3),
-                               "keep_pending": keep_pending})
+                               "keep_pending": keep_pending, **_slot_mark(slot, slot_from)})
                 self._save(s)
                 log.info("sessiond: %s: message held for the pending restart (%d held)",
                          s.id[:8], len(s.held))
@@ -2580,14 +2977,26 @@ class Supervisor:
             resumed = False
             if not s.live:
                 if s.held and not _internal and not _fresh:
-                    # Behind what is already held for it, not ahead.
-                    return self._busy_hold(s, uid, text, keep_pending)
+                    # Behind what is already held for it, not ahead; a Run
+                    # now takes what is ahead of it along (`run_now`).
+                    out = self._busy_hold(s, uid, text, keep_pending, slot=slot,
+                                          slot_from=slot_from)
+                    if slot:
+                        got = self.run_now(session)
+                        if not any(m.get("uuid") == uid for m in s.held):
+                            return {**out, "held": False, "queued": False, "busy": None,
+                                    "run_now": got, "state": s.state, "live": s.live,
+                                    "pid": s.proc.pid if s.live else None}
+                        out["run_now"] = got
+                    return out
                 try:
-                    self._ensure_room(exclude=s)
+                    self._ensure_room(exclude=s, slot=slot, slot_from=slot_from,
+                                      quiet=not _no_bump and level != "quiet")
                 except Refused as e:
                     if e.code != "busy" or _internal:
                         raise
-                    return self._busy_hold(s, uid, text, keep_pending, e.error)
+                    return self._busy_hold(s, uid, text, keep_pending, e.error, slot,
+                                           slot_from)
                 self._spawn(s, resume=True)
                 resumed = True
             # A message typed while a question or permission is up answers
@@ -2629,6 +3038,8 @@ class Supervisor:
                                         "content": [{"type": "text", "text": said}]},
                             "parent_tool_use_id": None})
             s.interrupt_killed = []
+            if slot:
+                s.slot_high = True
             s.turns += 1
             if not s.first_text:
                 s.first_text = " ".join(text.split())[:200]
@@ -2641,7 +3052,7 @@ class Supervisor:
                 "pid": s.proc.pid if s.live else None}
 
     def _quota_hold(self, session: str, text: str, uid: str,
-                    keep_pending: bool) -> dict | None:
+                    keep_pending: bool, slot: str = "", slot_from: str = "") -> dict | None:
         """A message to a Claude session while the usage limit holds (core
         quota.py): **held** like a restart's (kept on the session, answered
         `held: true` with `quota: {resets_at, state}`), since a turn now would
@@ -2662,7 +3073,7 @@ class Supervisor:
                 if keep_pending and (s.pending or s.state == "approval"):
                     raise Refused(PENDING_KEPT, "pending")
                 s.held.append({"uuid": uid, "text": text, "at": round(time.time(), 3),
-                               "keep_pending": keep_pending})
+                               "keep_pending": keep_pending, **_slot_mark(slot, slot_from)})
                 self._save(s)
                 cwd, n = s.cwd, len(s.held)
             q.add_waiting({"kind": "headless", "session": session, "cwd": cwd, "agent": agent})
@@ -3264,8 +3675,9 @@ class Supervisor:
                 # `system_prompt`: `start` takes a `system_prompt_file`.
                 # `held`: messages are held while a restart is pending.
                 # `quota`: the usage limit's sessions are resumed at its reset.
+                # `run_now`: `slot: "high"`, the `run_now` and `slots` ops.
                 return {"ok": True, "pid": os.getpid(), "system_prompt": True, "held": True,
-                        "quota": True}
+                        "quota": True, "run_now": True}
             if op == "list":
                 return {"ok": True, "sessions": self.list()}
             if op == "get":
@@ -3279,7 +3691,8 @@ class Supervisor:
                     model=str(req.get("model") or ""), mode=str(req.get("mode") or ""),
                     system_prompt_file=str(req.get("system_prompt_file") or ""),
                     fork_from=str(req.get("fork_from") or ""),
-                    fork_at=str(req.get("fork_at") or ""))}
+                    fork_at=str(req.get("fork_at") or ""),
+                    slot=str(req.get("slot") or ""))}
             if op == "antigravity_hook":
                 from .antigravity_adapter import approval
                 return {"ok": True, "hook": approval(self, sid, req.get("payload") or {}, stage=str(req.get("stage") or "pre"))}
@@ -3290,11 +3703,16 @@ class Supervisor:
             if op == "send":
                 return {"ok": True, **self.send(sid, str(req.get("text") or ""),
                                                 uid=str(req.get("uuid") or ""),
-                                                keep_pending=bool(req.get("keep_pending")))}
+                                                keep_pending=bool(req.get("keep_pending")),
+                                                slot=str(req.get("slot") or ""))}
             if op == "rename":
                 return {"ok": True, **self.rename(sid, str(req.get("title") or ""))}
             if op == "release":
                 return {"ok": True, **self.release(sid)}
+            if op == "run_now":
+                return {"ok": True, **self.run_now(sid)}
+            if op == "slots":
+                return {"ok": True, **self.slots()}
             if op == "resume":
                 return {"ok": True, **self.resume(sid)}
             if op == "relocate":

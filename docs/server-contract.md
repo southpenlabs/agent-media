@@ -282,6 +282,12 @@ Everything a message can be pointed at.
   row (headless or desk) and a thread's snapshot (§11) that is in line
   carries `"quota": {"resets_at", "state"}`, so the app can say "Paused by
   the usage limit — resumes at 3:00"; it goes once the thread is resumed.
+- **`slot_held`** (11 Nov 2026; additive, only while there is one): a
+  headless thread whose message waits for a free session slot (§6.3 "Run
+  now") carries `"slot_held": {"since": <epoch s, the first held>, "slot":
+  "high" | "normal"}` on its row; `high` when it is marked Run now. Not
+  while a restart is pending (`restart_pending`) or for the usage limit
+  (`quota`). The app's Queued filter is these rows.
 - `sessions` is `sessions_index()`. Live sessions come first, titled from the
   pane (Claude's terminal title with the spinner stripped; Codex, pi and
   Hermes from their own session files, cut to 60 chars). A live session
@@ -1594,6 +1600,68 @@ threads.mark_held): show the waiting note on that message, since the
 waiting send has already retired against it. The mark goes once the host
 hands the message over.
 
+**Run now** (11 Nov 2026; David, after a chat sat queued 25 minutes while
+his list showed nothing working: "high priority on a held message"). The
+top of the session-slot scale, whose bottom is the `low-priority` agent
+type (a session held only by those gives its slot up after a grace, §17
+and sessiond.py `_yield_low`): **low-priority agents ↔ normal ↔ Run now**.
+Not the speech level (`POST /session/priority`, §6.4), though that is its
+default — see below.
+
+- **When sending**: `POST /reply` and `POST /ask` take `"slot": "high"`.
+  When every slot is busy, instead of the message being held, the host
+  parks a session for it — `_ranked` order: one idle; else one only
+  waiting (a question or permission card up, one foreground command
+  running `MEDIA_SESSIOND_LONG_COMMAND_S` (60) or more, background tasks,
+  only low-priority agents), a Quiet thread's first, least recently active
+  first; only when there is none, one whose turn is generating; a thread
+  whose speech level is Interrupt last of all. Never one a Run now is
+  running in (until that turn ends), never one with held messages. The
+  parked one is cut off with what it was doing and **resumed by itself**
+  when a slot frees, ahead of ordinary held messages, with a note saying
+  what was cut off (a foreground command by name, to re-run; background
+  agents to continue by SendMessage; a card lost, to ask again). Nothing
+  to park (every other slot a Run now): the message is held as before, its
+  answer adding `"slot": "high"`, and it goes first when a slot frees. The
+  answer is otherwise as ever. A pane has no slots and ignores it.
+- **After the fact**: `POST /session/run-now {"session"}` (gated, CORS)
+  marks every message held for that thread Run now and sends them at once,
+  parking a session as above. → `{"ok": true, "session", "sent": <how many
+  went>, "held": <how many still wait>, "bumped": <the session parked for
+  it, or null>, "why": "" | "busy" (nothing could be parked) | "restart" |
+  "quota"}`. It does not pass a pending restart (Send now,
+  `/session/release`, does) or the usage limit; there it only keeps the
+  mark. 400 for a bad id, 404 `not_found`, 503 `down`, 501 `unsupported`
+  from a host too old for it.
+- **The speech level is the slot default** (§6.4; David, 11 Nov 2026): a
+  thread at `interrupt` has every message Run now without asking
+  (`slot_from: "speech"`); a thread at `quiet` is the first parked for any
+  wanted slot — an ordinary held message too, not only a Run now — once it
+  is only waiting (never mid-generation, and after an idle one), and is
+  resumed the same way. `auto`, `pocket` and `normal` are ordinary. A Run
+  now from the message works on any thread. A thread parked for a slot
+  never parks a Quiet one to come back, and a Quiet thread never parks
+  another Quiet one. A headless thread's level is its own or the default
+  (a Matrix room is not a session-slot holder).
+- **Who holds the slots, and who waits**: `GET /sessions/slots` (gated,
+  CORS) → `{"ok": true, "live", "max", "short" (low on memory), "free_mb",
+  "holders": [{"session", "title", "reason", "detail", "state", "since",
+  "speech", "run_now", "next"}], "held": [{"session", "title", "since",
+  "count", "slot": "high" | "normal", "slot_from": "message" | "speech" |
+  null, "speech", "for": "slot" | "restart" | "quota"}], "bumped":
+  [{"session", "for", "why": "run_now" | "quiet", "reason", "level",
+  "for_from", "at", "first_text"}]}`. `holders` are the live sessions,
+  least recently active first; `reason` is `card` (`detail`: "question" or
+  the tool asking), `command` (`detail`: the command), `tasks` (`detail`:
+  how many), `low` (only low-priority agents; `detail`: how many),
+  `working`, `starting` or `idle`; `speech` the thread's level; `run_now`
+  a Run now turn running; `next` on the one a Run now would park. `held`
+  in the order a freed slot takes them. `bumped` the threads parked for a
+  slot, waiting to come back: `for` the thread they made room for, `why`
+  `quiet` when their Quiet level was the reason, `for_from: "speech"` when
+  the other's Interrupt level made it a Run now. Render the reasons
+  plainly with links to the threads; the app keeps no list of them.
+
 **Held for a restart** (19 Oct 2026): while a restart of the session host
 is pending (`restart_pending`, §6.1, §17 "Restarts"), a reply is not given
 to the agent but kept: the answer adds `"held": true` (with `queued: true`,
@@ -2214,6 +2282,11 @@ questions follow their own rule, `POST /device/black`):
 | `normal` | the usual rules (the built-in default) |
 | `quiet` | rendered and archived unheard (`extras.held`, `unheard: true` on the transcript) and never played by itself |
 
+- **The level is also the thread's session-slot default** (11 Nov 2026,
+  §6.3 "Run now"): `interrupt` makes each of its messages Run now (it
+  takes a slot when every one is busy, parking another), `quiet` makes it
+  the first parked for a wanted slot once it is only waiting; the rest are
+  ordinary. That scale's other end is the `low-priority` agent type.
 - `priority` in the answer, and on the rows, is true for interrupt and auto.
   The older body `{"session", "priority": bool}` still works: true is auto,
   false normal; with neither, auto.

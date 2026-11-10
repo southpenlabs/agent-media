@@ -432,6 +432,7 @@ def add_projects(rows: list[dict], folders: dict[str, str] | None = None) -> lis
     from agent_media_core import quota
 
     limit = quota.read() if quota.path().exists() else None
+    waits = sessiond.held_waits()
 
     for r in rows:
         sid = str(r.get("session") or "")
@@ -449,6 +450,8 @@ def add_projects(rows: list[dict], folders: dict[str, str] | None = None) -> lis
             sessiond.add_restart_status(r, sid, restart)
             # Waiting for the usage limit's reset (§6.1 `quota`): only then.
             sessiond.add_quota_status(r, sid, limit)
+            # Waiting for a free session slot (§6.3 "Run now"): only then.
+            sessiond.add_slot_status(r, sid, waits, restart)
     return rows
 
 

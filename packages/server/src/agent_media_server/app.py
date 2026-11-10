@@ -121,6 +121,11 @@ device gets its token):
   POST /session/release {"session"} → Send now on a message held for a
                   restart: its held messages go now and the restart waits
                   for the session (stop.py session_release, §6.2.2)
+  POST /session/run-now {"session"} → Run now on a message held for a free
+                  session slot: it goes now, another session parked for it
+                  and resumed when a slot frees (stop.py session_run_now, §6.3)
+  GET  /sessions/slots → who holds the session slots and why, who waits
+                  (stop.py session_slots, §6.3 "Run now")
   POST /session/retract {"session", "id"?, "text"?} → take back your last
                   message: interrupt the turn and its queue, mark the message,
                   and the next one says so (retract.py, §6.19)
@@ -421,7 +426,7 @@ CORS_PATHS = frozenset({
     "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
-    "/session/stop", "/session/release", "/session/thinking-speech", "/session/voice",
+    "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
@@ -2279,6 +2284,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/sessions/state":
         ok, detail = sessions.session_states(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/sessions/slots":
+        # Who holds the session slots and why, and who waits (§6.3 "Run now").
+        from . import stop
+
+        ok, detail = stop.session_slots(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/upload":
         # A file shared earlier, back as itself: the app's chip draws a
         # photo from it. Only under the upload root (uploads.find).
@@ -3448,17 +3459,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Sent from here: on Automatic the reply is spoken here (speech_frames.used).
         from . import speech_frames as frames_hub
         frames_hub.used(auth.device_id(_bearer(h)) or None)
-        ok, detail = send.reply(
-            str(body.get("item") or ""),
-            refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
-            quote=str(body.get("quote") or ""),
-            mode=str(body.get("mode") or "continue"),
-            session=str(body.get("session") or ""),
-            keep_reading=bool(body.get("keep_reading")),
-            voice=bool(body.get("voice")),
-            nudge=body.get("nudge") is True,
-            reply_to=str(body.get("reply_to") or ""),
-            from_chip=str(body.get("from_chip") or ""))
+        from .driver import headless as _headless
+
+        with _headless.run_now(body.get("slot")):     # Run now (§6.3)
+            ok, detail = send.reply(
+                str(body.get("item") or ""),
+                refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
+                quote=str(body.get("quote") or ""),
+                mode=str(body.get("mode") or "continue"),
+                session=str(body.get("session") or ""),
+                keep_reading=bool(body.get("keep_reading")),
+                voice=bool(body.get("voice")),
+                nudge=body.get("nudge") is True,
+                reply_to=str(body.get("reply_to") or ""),
+                from_chip=str(body.get("from_chip") or ""))
         status = detail.pop("status", 400)
         if not ok:
             # Which thread too: a refusal that names only the reason
@@ -3481,30 +3495,33 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # chat" in the app. Gated like /reply — the ABS bearer is the
         # credential — and it lands in the scratch tmux session.
         body = _read_json(h) or {}
-        ok, detail = routing.ask_routed(
-            refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
-            target=str(body.get("target") or ""),
-            player_item=str(body.get("player_item") or ""),
-            player_session=str(body.get("player_session") or ""),
-            sticky=str(body.get("sticky") or ""),
-            parse=body.get("parse", True) is not False,
-            dry=body.get("dry") is True,
-            agent=str(body.get("agent") or ""),
-            project=str(body.get("project") or ""),
-            cwd=str(body.get("cwd") or ""),
-            model=str(body.get("model") or ""),
-            plan=body.get("plan") is True,
-            profile=str(body.get("profile") or ""),
-            level=str(body.get("level") or ""),
-            new_project=str(body.get("new_project") or ""),
-            repo=str(body.get("repo") or ""),
-            agents_md=(body.get("agents_md") if body.get("agents_md") in (True, "draft")
-                       else False),
-            preset=str(body.get("preset") or ""),
-            root=str(body.get("root") or ""),
-            persona=str(body.get("persona") or ""),
-            role=str(body.get("role") or ""),
-            worktree=body.get("worktree") if isinstance(body.get("worktree"), dict) else None)
+        from .driver import headless as _headless
+
+        with _headless.run_now(body.get("slot")):     # Run now (§6.3)
+            ok, detail = routing.ask_routed(
+                refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
+                target=str(body.get("target") or ""),
+                player_item=str(body.get("player_item") or ""),
+                player_session=str(body.get("player_session") or ""),
+                sticky=str(body.get("sticky") or ""),
+                parse=body.get("parse", True) is not False,
+                dry=body.get("dry") is True,
+                agent=str(body.get("agent") or ""),
+                project=str(body.get("project") or ""),
+                cwd=str(body.get("cwd") or ""),
+                model=str(body.get("model") or ""),
+                plan=body.get("plan") is True,
+                profile=str(body.get("profile") or ""),
+                level=str(body.get("level") or ""),
+                new_project=str(body.get("new_project") or ""),
+                repo=str(body.get("repo") or ""),
+                agents_md=(body.get("agents_md") if body.get("agents_md") in (True, "draft")
+                           else False),
+                preset=str(body.get("preset") or ""),
+                root=str(body.get("root") or ""),
+                persona=str(body.get("persona") or ""),
+                role=str(body.get("role") or ""),
+                worktree=body.get("worktree") if isinstance(body.get("worktree"), dict) else None)
         status = detail.pop("status", 400)
         if ok and str(body.get("target") or "") == "new" and detail.get("session"):
             from . import discard
@@ -3549,6 +3566,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = stop.session_release(str(body.get("session") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/run-now":
+        # Run now on a message held for a free session slot (stop.py
+        # session_run_now, §6.3) — not /session/priority, the speech level.
+        from . import stop
+
+        body = _read_json(h) or {}
+        ok, detail = stop.session_run_now(str(body.get("session") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/mic/ask", "/mic/cancel", "/mic/answer"):
         # The phone as the TV's mic (server-contract.md §6.20, mic.py; David,

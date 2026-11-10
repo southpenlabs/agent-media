@@ -350,6 +350,12 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     or memory short): with no idle session to park, one held only by such
     agents has them told to hand back and is parked after the same grace,
     then resumed once a slot is free and no one else is waiting.
+    That is the bottom of the slot scale; its top is **Run now**
+    (11 Nov 2026, server-contract.md §6.3): a message sent with `slot:
+    "high"`, or a thread whose speech level (§6.4) is Interrupt, parks a
+    session that is only waiting (a card, a long command, background work;
+    a Quiet thread's first) at once, and that one is resumed by itself
+    when a slot frees. Low-priority agents ↔ normal ↔ Run now.
   - the detached run (`--fire --drain`) checks every 3 s
     (`MEDIA_RESTART_DRAIN_POLL_S`) and restarts **the moment nothing is
     busy**. A session busy only with a question or permission card does
