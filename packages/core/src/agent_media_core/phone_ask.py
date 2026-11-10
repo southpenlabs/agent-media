@@ -143,7 +143,7 @@ def shared_location() -> dict | None:
 
 
 def ask(kind: str, why: str, timeout_s: float = 300.0,
-        session: str | None = None, until: str = "") -> dict:
+        session: str | None = None, until: str = "", url: str = "") -> dict:
     """Ask, then wait up to `timeout_s` (the ask's own time on the phone is
     the server's: 5 min for a photo, 2 for the others). `session` defaults
     to the caller's. A `dnd` needs `until` (until_epoch's forms). A
@@ -163,6 +163,9 @@ def ask(kind: str, why: str, timeout_s: float = 300.0,
             return {"status": "error",
                     "error": "until: a time like 15:30, or minutes like +90"}
         body["params"] = {"until": at}
+    if kind == "fetch":
+        # A page read through the phone's connection (server-contract §6.21).
+        body["params"] = {"url": url}
     try:
         code, obj = _call("POST", "/phone/ask", body)
         if code != 200:
@@ -182,6 +185,26 @@ def ask(kind: str, why: str, timeout_s: float = 300.0,
             if code != 200:
                 return {"status": "error", "error": obj.get("error") or f"HTTP {code}"}
             a = obj["ask"]
-        return _outcome(a)
+        out = _outcome(a)
+        if kind == "fetch" and out.get("status") == "ok":
+            out["result"] = _keep_page(out.get("result") or {})
+        return out
     except (OSError, ValueError, KeyError) as e:
         return {"status": "error", "error": str(e)}
+
+
+def _keep_page(res: dict) -> dict:
+    """A fetched page's body written to a file in the cache dir, so the
+    caller gets a path, not megabytes of base64: `{status, type, url, path, bytes}`."""
+    import base64
+    import hashlib
+    from pathlib import Path
+
+    body = base64.b64decode(res.get("body_b64") or b"")
+    base = os.environ.get("XDG_CACHE_HOME")
+    d = (Path(base) if base else Path.home() / ".cache") / "agent-media" / "phone-fetch"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / (hashlib.sha256(body).hexdigest()[:16] + ".bin")
+    path.write_bytes(body)
+    return {"status": res.get("status"), "type": res.get("type") or "", "url": res.get("url") or "",
+            "path": str(path), "bytes": len(body)}

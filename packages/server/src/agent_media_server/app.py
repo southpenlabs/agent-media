@@ -625,6 +625,10 @@ def body_limit(path: str) -> int:
         return voice_clips.AUDIO_MAX   # a stretch of dictation, as audio (§6.36)
     # A Termux job's output (phone_jobs.py): up to 1 MiB each of out and
     # err, which JSON may escape to several times that.
+    if path == "/phone/answer":
+        from . import phone
+
+        return phone.FETCH_MAX * 2   # a fetched page, base64 in JSON
     return 8 * MAX_BODY * 16 if path == "/jobs/result" else MAX_BODY
 
 _SPEECH_NOW_SEEN: set[str] = set()

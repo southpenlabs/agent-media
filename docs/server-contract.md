@@ -6176,7 +6176,16 @@ Pinned by `packages/server/tests/test_phone.py`; the frame by
   `no_phone` at once. One open ask per session: a second one settles the
   first `cancelled`. `dnd` (3 Oct 2026) needs `params.until`, epoch seconds,
   at least a minute and at most 12 hours ahead (else 400); the ask carries
-  it as `until`.
+  it as `until`. `fetch` (10 Nov 2026; David: "Can we set up the sasonica
+  app to do it instead of ADB?") needs `params.url`, an https address (else
+  400), carried as `url` and `host`: the phone reads the page over its own
+  connection, for a site that refuses this host, and answers `{status (the
+  site's HTTP status), type, url (after redirects), body_b64}` (a body of at
+  most 4 MiB; `/phone/answer` takes up to 8 MiB). The phone fetches only
+  from hosts allowed on it: the first ask for a host is a notification
+  (Allow this site / Deny), later ones go through unseen. Expires in 2 min.
+  Core `phone_ask.ask("fetch", why, url=…)` saves the body to a file and
+  returns its `path`.
 - `GET /phone/ask?id=&wait=<s>` — host token. Long-polls up to `wait`
   (≤ 60 s) for the ask to settle; → `{ask}`, 404 when unknown (a restart).
 - `POST /phone/answer {id, decision: "allow"|"deny", result?}` — a paired

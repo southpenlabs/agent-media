@@ -382,3 +382,40 @@ def test_a_stale_kept_point_is_not_read_back(server, host, tmp_path):
         phone._SHARED.clear()
         phone._SHARED_READ = False
     assert call(server, "GET", "/device/location", headers=host)[1]["location"] is None
+
+
+def test_a_page_fetched_through_the_phone(server, host, pixel):
+    import base64
+
+    phone.listening(("fetch",), True)
+    try:
+        for bad in ({"kind": "fetch", "why": "x"}, {"kind": "fetch", "why": "x", "params": {"url": "http://a.example/"}}):
+            assert call(server, "POST", "/phone/ask", bad, host)[0].status == 400
+        body = {"kind": "fetch", "why": "the camera reports", "params": {"url": "https://Site.example/vic/map.php"}}
+        res, obj = call(server, "POST", "/phone/ask", body, host)
+        a = obj["ask"]
+        assert res.status == 200 and a["url"] == "https://Site.example/vic/map.php" and a["host"] == "site.example"
+        assert phone.open_asks(("fetch",))[0]["host"] == "site.example"
+        page = base64.b64encode(b"<html>cams</html>").decode()
+        res, obj = call(server, "POST", "/phone/answer", {"id": a["id"], "decision": "allow", "result": {
+            "status": 200, "type": "text/html", "url": "https://site.example/vic/map.php", "body_b64": page}}, pixel)
+        assert res.status == 200 and obj["ask"]["status"] == "ok"
+        assert obj["ask"]["result"]["body_b64"] == page
+        # No status back: failed.
+        a = call(server, "POST", "/phone/ask", body, host)[1]["ask"]
+        got = call(server, "POST", "/phone/answer", {"id": a["id"], "decision": "allow", "result": {}}, pixel)[1]
+        assert got["ask"]["status"] == "failed"
+    finally:
+        phone.listening(("fetch",), False)
+
+
+def test_the_tool_keeps_a_fetched_page_as_a_file(monkeypatch, tmp_path):
+    import base64
+
+    from agent_media_core import phone_ask
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    got = phone_ask._keep_page({"status": 200, "type": "text/html", "url": "https://x.example/",
+                                "body_b64": base64.b64encode(b"<p>hi</p>").decode()})
+    assert got["status"] == 200 and got["bytes"] == 9
+    assert open(got["path"], "rb").read() == b"<p>hi</p>"

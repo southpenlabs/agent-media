@@ -356,7 +356,7 @@ def converse(text: str,
 
 @mcp.tool()
 def phone_ask(why: str, kind: str = "photo", until: str = "",
-              timeout_s: float = 300.0) -> dict:
+              timeout_s: float = 300.0, url: str = "") -> dict:
     """Ask David's phone for something only it has, and wait for his answer.
 
     `kind="photo"`: David gets a notification with your `why`, and if he
@@ -381,14 +381,24 @@ def phone_ask(why: str, kind: str = "photo", until: str = "",
     near), and say so in `why`. If location is off in his app's Settings
     you get "no_phone".
 
+    `kind="fetch"`: the phone reads `url` (https) over its own connection
+    and sends the page back, for a site that refuses this host (an
+    Australian site that blocks cloud addresses). The phone fetches only
+    from sites David has allowed on it: the first ask for a site shows him
+    a notification to allow it, later ones go straight through. You get
+    {"status" (the site's HTTP status), "type", "url" (after redirects),
+    "path" (the body, saved), "bytes"}. Only for a site that matters to the
+    task, never to get round a site's own refusal of him.
+
     Every ask needs his yes. Ask only for what the task needs, say why in one
     plain sentence ("show me the router's lights, to see whether the WAN
     light is on"), and if he says no, do not ask again for the same thing.
 
     Args:
         why: One sentence, shown to David as-is.
-        kind: "photo", "dnd" or "location".
+        kind: "photo", "dnd", "location" or "fetch".
         until: For "dnd": when the quiet ends.
+        url: For "fetch": the page to read.
         timeout_s: How long to wait (the phone gives up after 5 minutes for
             a photo, 2 for the others).
 
@@ -400,7 +410,7 @@ def phone_ask(why: str, kind: str = "photo", until: str = "",
     """
     from . import phone_ask as _phone
 
-    return _phone.ask(kind, why, timeout_s, until=until)
+    return _phone.ask(kind, why, timeout_s, until=until, url=url)
 
 
 def _await_quiet(target: Target, max_wait_s: float = 120.0) -> None:

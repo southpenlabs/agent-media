@@ -53,9 +53,11 @@ from . import auth, sessions
 
 #: What a phone can be asked for. Photo first (David, 1 Oct 2026); dnd and
 #: location follow.
-KINDS = ("photo", "location", "dnd")
+KINDS = ("photo", "location", "dnd", "fetch")
 #: How long an ask stays open: a photo may need a walk to the router.
-TTL_S = {"photo": 300, "location": 120, "dnd": 120}
+TTL_S = {"photo": 300, "location": 120, "dnd": 120, "fetch": 120}
+#: The largest page a `fetch` brings back (its body, before base64).
+FETCH_MAX = 4 << 20
 #: A settled ask stays readable this long.
 KEEP_S = 120
 #: How far ahead a `dnd` may run: a phone left quiet by mistake for a day
@@ -187,7 +189,7 @@ def _title_of(session: str) -> str | None:
 def _public(a: dict) -> dict:
     """An ask as the frame and the tool see it."""
     return {k: a[k] for k in ("id", "kind", "why", "session", "title", "at", "expires",
-                              "until", "status", "result", "error") if a.get(k) is not None}
+                              "until", "url", "host", "status", "result", "error") if a.get(k) is not None}
 
 
 def _until(params, now: float) -> tuple[float | None, str]:
@@ -308,6 +310,17 @@ def ask(kind, why, session=None, params=None) -> tuple[bool, dict]:
         if until is None:
             return False, {"status": 400, "error": err}
         rec["until"] = until
+    if kind == "fetch":
+        # A page read through the phone's own connection (David, 10 Nov 2026:
+        # "Can we set up the sasonica app to do it instead of ADB?"): https
+        # only; the phone fetches only from sites it has been allowed.
+        from urllib.parse import urlsplit
+
+        url = str((params or {}).get("url") or "") if isinstance(params, dict) else ""
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname or len(url) > 2000:
+            return False, {"status": 400, "error": "fetch needs params.url, an https address"}
+        rec["url"], rec["host"] = url, parts.hostname.lower()
     global _VERSION
     with _COND:
         _prune(now)
@@ -372,6 +385,8 @@ def answer(ask_id, decision, result, bearer: str) -> tuple[bool, dict]:
             res = result if isinstance(result, dict) else {}
             if a["kind"] == "photo" and not str(res.get("path") or ""):
                 _settle(a, "failed", device=device, error="no photo came back")
+            elif a["kind"] == "fetch" and not isinstance(res.get("status"), int):
+                _settle(a, "failed", device=device, error="no page came back")
             elif a["kind"] == "dnd" and res.get("on") is not True:
                 _settle(a, "failed", device=device, error="the phone did not go quiet")
             elif a["kind"] == "location":
