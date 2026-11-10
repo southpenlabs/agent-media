@@ -291,3 +291,10 @@ def test_victorias_list_read_drawn_as_roads_and_off_by_default(server, monkeypat
     got = call(server, "GET", "/map/layer?id=vic_phone_seatbelt&bbox=145.3,-38.6,145.5,-38.4", headers=pixel)[1]
     assert [f["properties"]["detail"] for f in got["features"]] == ["Bass Highway, Anderson (2 sites)"]
     assert got["as_of"] == 1793836800
+
+
+def test_the_host_token_reads_the_map(server, monkeypatch):
+    monkeypatch.setenv("AMUX_AUTH_TOKEN", "hosttok")
+    res, obj = call(server, "GET", "/map/layers", headers={"X-Auth-Token": "hosttok"})
+    assert res.status == 200 and obj["layers"][0]["id"] == "phone"
+    assert call(server, "GET", "/map/layers", headers={"X-Auth-Token": "wrong"})[0].status == 401

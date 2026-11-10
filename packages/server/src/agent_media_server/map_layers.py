@@ -129,7 +129,9 @@ def _all() -> list[dict]:
     return out
 
 
-def _gate(bearer: str) -> tuple[bool, dict]:
+def _gate(bearer: str, host: bool = False) -> tuple[bool, dict]:
+    if host:
+        return True, {}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -162,8 +164,8 @@ def _inside(feature: dict, bbox) -> bool:
     return in_lon and s <= lat <= n
 
 
-def layers(bearer: str, thread: str = "") -> tuple[bool, dict]:
-    ok, err = _gate(bearer)
+def layers(bearer: str, thread: str = "", host: bool = False) -> tuple[bool, dict]:
+    ok, err = _gate(bearer, host)
     if not ok:
         return False, err
     items = _all()
@@ -175,8 +177,8 @@ def layers(bearer: str, thread: str = "") -> tuple[bool, dict]:
     return True, {"layers": [dict(i["layer"]) for i in items]}
 
 
-def layer(layer_id: str, bbox_raw: str, bearer: str) -> tuple[bool, dict]:
-    ok, err = _gate(bearer)
+def layer(layer_id: str, bbox_raw: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    ok, err = _gate(bearer, host)
     if not ok:
         return False, err
     sid = _thread_id(layer_id)

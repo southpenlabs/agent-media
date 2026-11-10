@@ -4654,11 +4654,14 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # The Map page's layers (map_layers.py, §6.50).
         from . import map_layers
 
-        ok, detail = map_layers.layers(bearer, arg("thread"))
+        # The host's own token too: an agent on this host reads the map (§6.50).
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.layers(bearer, arg("thread"), host=host)
     elif method == "GET" and path == "/map/layer":
         from . import map_layers
 
-        ok, detail = map_layers.layer(arg("id"), arg("bbox"), bearer)
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.layer(arg("id"), arg("bbox"), bearer, host=host)
     elif method == "GET" and path == "/doc/read":
         # A project's document in the reader (doc_read.py).
         try:
