@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 from agent_media_server import devices, map_layers
@@ -298,3 +299,34 @@ def test_the_host_token_reads_the_map(server, monkeypatch):
     res, obj = call(server, "GET", "/map/layers", headers={"X-Auth-Token": "hosttok"})
     assert res.status == 200 and obj["layers"][0]["id"] == "phone"
     assert call(server, "GET", "/map/layers", headers={"X-Auth-Token": "wrong"})[0].status == 401
+
+
+def test_the_phone_is_handed_the_cameras_around_it(server, monkeypatch, tmp_path):
+    from agent_media_server import map_osm, map_vic
+
+    pixel, _ = _device("Pixel 8a")
+    elements = [
+        {"type": "node", "id": 1, "lat": -37.81, "lon": 144.96, "tags": {"highway": "speed_camera", "maxspeed": "60"}},
+        {"type": "relation", "id": 9, "tags": {"type": "enforcement", "enforcement": "traffic_signals"},
+         "members": [{"type": "node", "ref": 2, "role": "device"}]},
+        {"type": "node", "id": 2, "lat": -37.815, "lon": 144.965, "tags": {}},
+        {"type": "relation", "id": 8, "tags": {"type": "enforcement", "enforcement": "mobile_phone"},
+         "members": [{"type": "node", "ref": 3, "role": "device"}]},
+        {"type": "node", "id": 3, "lat": -37.816, "lon": 144.966, "tags": {}},
+        {"type": "node", "id": 4, "lat": -36.0, "lon": 146.0, "tags": {"highway": "speed_camera"}},  # far away
+    ]
+    monkeypatch.setenv("MEDIA_MAP_OSM_EXTRACT", "https://example.invalid/x.osm.pbf")
+    monkeypatch.setattr(map_osm, "_extract", {"mtime": None, "data": None})
+    map_osm._keep(elements, 1794181493, "https://example.invalid/x.osm.pbf", None)
+    got = call(server, "GET", "/map/alerts?near=-37.81,144.96", headers=pixel)[1]
+    assert sorted((p["kind"], p.get("limit")) for p in got["points"]) == [("phone", None), ("red_light", None), ("speed", "60")]
+    assert got["roads"] == [] and got["radius_km"] == 25.0
+    # Victoria's roads, where on.
+    monkeypatch.setenv("MEDIA_MAP_VIC", "1")
+    (tmp_path / "state" / "agent-media" / "vic-cameras.json").write_text(json.dumps({"as_of": 1, "features": [
+        {"type": "Feature", "properties": {"title": "Phone & seatbelt camera site", "detail": "Queen Street, Altona (2 sites)"},
+         "geometry": {"type": "LineString", "coordinates": [[144.79, -37.874], [144.80, -37.876]]}}]}))
+    got = call(server, "GET", "/map/alerts?near=-37.85,144.85", headers=pixel)[1]
+    assert got["roads"] == [{"name": "Queen Street", "where": "Queen Street, Altona", "kind": "phone_seatbelt",
+                             "lines": [[[144.79, -37.874], [144.80, -37.876]]]}]
+    assert call(server, "GET", "/map/alerts?near=nowhere", headers=pixel)[0].status == 400

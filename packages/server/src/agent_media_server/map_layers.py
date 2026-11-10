@@ -20,6 +20,7 @@ chats and listen but has no business knowing where the phone is.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from importlib.metadata import entry_points
 
@@ -198,3 +199,60 @@ def layer(layer_id: str, bbox_raw: str, bearer: str, host: bool = False) -> tupl
         return False, {"status": 502, "error": "that layer could not be read"}
     return True, {**extra, "type": "FeatureCollection", "layer": layer_id,
                   "at": round(time.time(), 3), "features": feats}
+
+
+#: The cameras the phone is handed for its alerts, around where it is.
+ALERT_RADIUS_KM = 25.0
+
+
+def alerts(near: str, radius_km: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/alerts?near=lat,lon[&radius_km=]`: the cameras the phone
+    alerts on as it drives (David, 10 Nov 2026: "alerts for when approaching
+    them"), compact: `points` (speed, red light, average speed cameras with
+    `kind` and `limit`) and `roads` (Victoria's phone and seatbelt sites,
+    where on, each a name and its lines)."""
+    import math
+
+    from . import map_osm, map_vic
+
+    ok, err = _gate(bearer, host)
+    if not ok:
+        return False, err
+    try:
+        lat, lon = (float(x) for x in (near or "").split(","))
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError
+    except ValueError:
+        return False, {"status": 400, "error": "near is lat,lon"}
+    try:
+        r = min(max(float(radius_km or ALERT_RADIUS_KM), 1.0), 50.0)
+    except ValueError:
+        r = ALERT_RADIUS_KM
+    dlat = r / 111.0
+    dlon = r / (111.0 * max(math.cos(math.radians(lat)), 0.05))
+    box = (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
+    points, roads = [], []
+    if any(l["id"] == "speed_cameras" for l in map_osm.layers()):
+        if os.environ.get("MEDIA_MAP_OSM_EXTRACT"):
+            feats, _x = map_osm._from_extract("speed_cameras", box)
+        else:
+            feats, _x = map_osm.read("speed_cameras", box)
+        for f in feats:
+            p = f.get("properties") or {}
+            if p.get("enforces", "speed") not in ("speed", "red_light", "average_speed", "phone", "seatbelt"):
+                continue
+            x, y = f["geometry"]["coordinates"][:2]
+            points.append({"lat": y, "lon": x, "kind": p.get("enforces", "speed"),
+                           **({"limit": p["limit"]} if p.get("limit") else {})})
+    if map_vic.enabled():
+        feats, _x = map_vic.read(box)
+        for f in feats:
+            g = f["geometry"]
+            lines = ([g["coordinates"]] if g["type"] == "LineString"
+                     else g["coordinates"] if g["type"] == "MultiLineString"
+                     else [[g["coordinates"], g["coordinates"]]])
+            name = ((f.get("properties") or {}).get("detail") or "").split(" (")[0]
+            roads.append({"name": name.split(",")[0], "where": name, "kind": "phone_seatbelt",
+                          "lines": lines})
+    return True, {"at": round(time.time(), 3), "near": [lat, lon], "radius_km": r,
+                  "points": points, "roads": roads}

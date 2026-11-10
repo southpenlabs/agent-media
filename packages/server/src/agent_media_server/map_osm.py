@@ -67,6 +67,10 @@ _queue: list[tuple[str, tuple[int, int]]] = []
 _wake = threading.Event()
 _worker: threading.Thread | None = None
 
+#: An enforcement relation's kind, as the phone's alerts name it.
+KIND_OF = {"maxspeed": "speed", "average_speed": "average_speed", "traffic_signals": "red_light",
+           "mobile_phone": "phone", "seatbelt": "seatbelt", "check": "check"}
+
 ENFORCES = {"maxspeed": "Speed camera", "average_speed": "Average speed camera",
             "traffic_signals": "Red light camera", "mobile_phone": "Phone detection camera",
             "seatbelt": "Seatbelt camera", "check": "Checkpoint"}
@@ -197,6 +201,11 @@ def _features(layer: str, elements: list[dict]) -> list[dict]:
         seen.add(el.get("id"))
         detail = tags.get("operator") or tags.get("name") or ""
         props = {"title": title, "osm": f"node/{el['id']}"}
+        if layer == "speed_cameras":
+            # What it enforces and the limit, for the phone's alerts (GET /map/alerts).
+            props["enforces"] = KIND_OF.get((rel or {}).get("enforcement", ""), "speed")
+            if limit:
+                props["limit"] = limit
         if detail:
             props["detail"] = detail
         out.append({"type": "Feature", "properties": props,
@@ -241,6 +250,12 @@ def _from_extract(layer: str, bbox) -> tuple[list[dict], dict]:
         except (OSError, ValueError):
             return [], {"missing": True}
     data = _extract["data"] or {}
+    if data.get("elements") and not data.get("_built"):
+        # Built from the raw elements as it is read, so a change to how
+        # features are made shows without waiting for the next download.
+        for lid in LAYERS:
+            data[lid] = _features(lid, data["elements"])
+        data["_built"] = True
     feats = [f for f in data.get(layer) or [] if _in_box(f, bbox)]
     return feats, {"partial": False, "as_of": round(data.get("as_of") or data.get("at") or 0)}
 

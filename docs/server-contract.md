@@ -9613,6 +9613,15 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   spreadsheet the page links, finds each road with Nominatim's structured
   search (one a second, kept in the cache dir, a miss asked again after 30
   days) and keeps `vic-cameras.json` in the state dir.
+- **`GET /map/alerts?near=lat,lon[&radius_km=25]`** (10 Nov 2026; David:
+  "let's organise alerts for when approaching them"): the cameras the
+  phone alerts on while moving fast, around where it is (1–50 km, default
+  25). → `{at, near: [lat, lon], radius_km, points: [{lat, lon, kind,
+  limit?}], roads: [{name, where, kind: "phone_seatbelt", lines: [[[lon,
+  lat], …]]}]}`. `kind` is `speed`, `red_light`, `average_speed`, `phone`
+  or `seatbelt` (OSM, the `speed_cameras` layer; each camera feature there
+  now carries `enforces` and `limit` too); `roads` are Victoria's sites
+  (`MEDIA_MAP_VIC`). 400 for a bad `near`; the map's gate (a guest 403).
 - **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default
