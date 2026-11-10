@@ -9599,6 +9599,20 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   device node a changed relation names but whose own record did not
   change waits for the next full download (David, 10 Nov 2026: "some kind
   of incremental update a little bit more regularly").
+- **Victoria's phone and seatbelt camera sites** (10 Nov 2026; David: "what
+  about mobile phone and seatbelt cameras?"; `map_vic.py`). With
+  `MEDIA_MAP_VIC=1`, a layer `vic_phone_seatbelt` ("Phone & seatbelt
+  cameras", `kind: "lines"`, `bbox: true`, `min_zoom` 9, off until switched
+  on): each approved site on Victoria's monthly list (vic.gov.au, CC BY
+  4.0) as the road in its suburb, a LineString (or a Point where only that
+  was found), `title` "Phone & seatbelt camera site", `detail` "Road,
+  Suburb (n sites)"; the cameras are on trailers and may be anywhere along
+  the road. `as_of` is the list's effective date. `python -m
+  agent_media_server.map_vic refresh [--force]` (daily on the host; it
+  does nothing until the page links a new file) reads the newest
+  spreadsheet the page links, finds each road with Nominatim's structured
+  search (one a second, kept in the cache dir, a miss asked again after 30
+  days) and keeps `vic-cameras.json` in the state dir.
 - **`media place find <words> [--near phone|lat,lon] [--limit n] [--json]`**
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default

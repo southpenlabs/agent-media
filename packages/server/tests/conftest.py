@@ -47,6 +47,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
         raise RuntimeError("a test asked a real embed page for its picture")
 
     monkeypatch.setattr(practice_embed, "_fetch_page", _no_embed_page)
+    # Victoria's camera list (map_vic.py) is never fetched or geocoded by a test.
+    from agent_media_server import map_vic
+
+    def _no_vic(*a, **k):
+        raise RuntimeError("a test reached vic.gov.au or the geocoder")
+
+    monkeypatch.setattr(map_vic, "_get", _no_vic)
+    monkeypatch.setattr(map_vic, "_road_line", _no_vic)
+    monkeypatch.setattr(map_vic, "_cache", lambda: tmp_path / "vic-roads.json")
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

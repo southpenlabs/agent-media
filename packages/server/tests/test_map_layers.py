@@ -238,3 +238,56 @@ def test_the_change_files_sit_beside_the_extract(monkeypatch):
         "https://download.geofabrik.de/australia-oceania/australia-updates"
     monkeypatch.setenv("MEDIA_MAP_OSM_UPDATES", "https://x.example/u/")
     assert map_osm._updates_url("anything") == "https://x.example/u"
+
+
+def _xlsx(rows):
+    """A one-sheet .xlsx with inline strings, as Victoria's list is laid out."""
+    import io
+    import zipfile
+
+    def cell(v):
+        return (f'<c t="inlineStr"><is><t>{v}</t></is></c>' if isinstance(v, str) else f"<c><v>{v}</v></c>")
+    xml = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+           + "".join("<row>" + "".join(cell(v) for v in r) + "</row>" for r in rows)
+           + "</sheetData></worksheet>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/worksheets/sheet1.xml", xml)
+    return buf.getvalue()
+
+
+VIC = _xlsx([["MOBILE PHONE AND SEATBELT CAMERA LOCATIONS"], ["Road", "Suburb", "Reason Code ", "Effective Date "],
+             ["Queen Street", "ALTONA", "A", 46331], ["Bass Highway", "ANDERSON", "A", 46331],
+             ["Bass Highway", "ANDERSON", "B", 46331], ["Nowhere Lane", "NOWHERE", "A", 46331],
+             ["C - Identified by Police as deemed necessary. "]])
+
+
+def test_victorias_list_read_drawn_as_roads_and_off_by_default(server, monkeypatch):
+    from agent_media_server import map_vic
+
+    sites, eff = map_vic.read_sites(VIC)
+    assert [(s["road"], s["suburb"], s["count"]) for s in sites] == [
+        ("Queen Street", "Altona", 1), ("Bass Highway", "Anderson", 2), ("Nowhere Lane", "Nowhere", 1)]
+    assert eff == 1793836800.0  # 1 Nov 2026
+    page = ('<a href="/sites/default/files/2026-09/DDS_camera_locations_October-2026.xlsx">'
+            '<a href="https://www.vic.gov.au/sites/default/files/2026-10/DDS_camera_locations_November-2026.xlsx">')
+    assert map_vic.newest_file(page).endswith("2026-10/DDS_camera_locations_November-2026.xlsx")
+
+    lines = {("Queen Street", "Altona"): {"type": "LineString", "coordinates": [[144.79, -37.874], [144.80, -37.876]]},
+             ("Bass Highway", "Anderson"): {"type": "LineString", "coordinates": [[145.44, -38.52], [145.45, -38.53]]}}
+    monkeypatch.setattr(map_vic, "_get", lambda url, timeout=60: page.encode() if url == map_vic.PAGE else VIC)
+    monkeypatch.setattr(map_vic, "_road_line", lambda road, suburb: lines.get((road, suburb)))
+    monkeypatch.setattr(map_vic.time, "sleep", lambda s: None)
+    assert map_vic.refresh() == {"file": map_vic.SITE + "/sites/default/files/2026-10/DDS_camera_locations_November-2026.xlsx",
+                                 "sites": 3, "drawn": 2, "missed": 1}
+    assert map_vic.refresh()["unchanged"] is True
+
+    pixel, _ = _device("Pixel 8a")
+    ids = [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
+    assert "vic_phone_seatbelt" not in ids
+    monkeypatch.setenv("MEDIA_MAP_VIC", "1")
+    ids = [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
+    assert "vic_phone_seatbelt" in ids
+    got = call(server, "GET", "/map/layer?id=vic_phone_seatbelt&bbox=145.3,-38.6,145.5,-38.4", headers=pixel)[1]
+    assert [f["properties"]["detail"] for f in got["features"]] == ["Bass Highway, Anderson (2 sites)"]
+    assert got["as_of"] == 1793836800

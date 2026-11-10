@@ -116,6 +116,11 @@ def _all() -> list[dict]:
     # OpenStreetMap's cameras (map_osm.py): read for the box on screen.
     for lay in map_osm.layers():
         out.append({"layer": lay, "features": (lambda lid: lambda bbox: map_osm.read(lid, bbox))(lay["id"])})
+    # Victoria's phone and seatbelt camera sites (map_vic.py), where switched on.
+    from . import map_vic
+
+    for lay in map_vic.layers():
+        out.append({"layer": lay, "features": map_vic.read})
     seen = {i["layer"]["id"] for i in out}
     for item in _addons():
         if item["layer"]["id"] not in seen:
