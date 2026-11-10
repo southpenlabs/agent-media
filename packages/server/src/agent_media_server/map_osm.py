@@ -389,6 +389,9 @@ def update() -> dict:
 
     got = rs.collect_diffs(seq + 1, max_size=200 * 1024)
     if got is None:
+        if kept.get("sequence") is None:
+            # Nothing new, but where it is up to is kept, so the next run starts there.
+            _keep(kept["elements"], kept["as_of"], kept.get("source") or "", seq)
         return {"sequence": seq, "changed": 0, "up_to_date": True}
     got.reader.apply(_H(), simplify=True)
     state = rs.get_state_info(got.id)
