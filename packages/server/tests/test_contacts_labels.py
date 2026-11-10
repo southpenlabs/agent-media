@@ -194,7 +194,7 @@ def test_new_fields_read_google_whole_again(monkeypatch):
     contacts._save_token({"refresh_token": "r", "obtained_at": 1})
     calls = []
 
-    def fetch(token):
+    def fetch(token, aid=None):
         calls.append(token)
         return ([{"resourceName": "people/c1", "etag": "e",
                   "names": [{"displayName": "Lionel Smith"}],
@@ -202,7 +202,7 @@ def test_new_fields_read_google_whole_again(monkeypatch):
                       "contactGroupResourceName": "contactGroups/abc"}}]}], "next-token")
 
     monkeypatch.setattr(contacts, "_fetch", fetch)
-    monkeypatch.setattr(contacts, "_groups", lambda: {"contactGroups/abc": "Book club"})
+    monkeypatch.setattr(contacts, "_groups", lambda aid=None: {"contactGroups/abc": "Book club"})
     conn = contacts._connect()
     contacts._set_meta(conn, "google_sync_token", "made-before-labels")
     conn.close()

@@ -271,8 +271,8 @@ device gets its token):
                   host has agent-memory (search.py, §6.14)
   GET  /contacts?q=[&limit=][&label=…&label=…][&labels_mode=any|all] →
                   people from the phone's contacts, or those a name, number or
-                  email being typed matches, with any (or all) of the labels
-                  (contacts.py, §6.25)
+                  email being typed matches, with any (or all) of the labels,
+                  `&account=` only one Google account's (contacts.py, §6.25)
   GET  /contacts/<id> → one person's card: names, phones, emails,
                   addresses, notes, sources, and the rooms that are theirs
   GET  /contacts/<id>/mail[?limit=] → their newest mail (from, subject,
@@ -311,12 +311,14 @@ device gets its token):
   POST /contacts/<id>/same|different {"other"} → "Same person?" answered:
                   the bridged one joins the other, or the suggestion goes
   GET  /contacts/google → the caller's book's Google: signed in as whom,
-                  expired (sign in again), last sync (contacts.py, §6.25)
+                  expired (sign in again), last sync, each account's
+                  (`accounts`; contacts.py, §6.25)
   POST /contacts/google/login {"port"} → {url, state}: a sign-in redirecting
                   to the app's own loopback listener on 127.0.0.1:<port>
   POST /contacts/google/finish {"state", "code" | "url"} → the token kept
                   in the caller's book, and a sync of it
-  POST /contacts/google/signout → the book forgets Google
+  POST /contacts/google/signout [{"account"}] → the book forgets that Google
+                  account, or every one
   GET  /bridges → the mautrix bridges on this host: each one's sign-ins
                   and their state, and the ways to sign in (bridges.py,
                   §6.26; the owner only, as every /bridges route)
@@ -1078,7 +1080,8 @@ def _contacts(h: BaseHTTPRequestHandler, path: str, query: str) -> None:
     arg = lambda k: (qs.get(k) or [""])[0]  # noqa: E731
     _json_z(h, 200, {"ok": True, **contacts.listing(arg("q"), arg("limit"), qs.get("label") or [],
                                                      arg("labels_mode") or "any", arg("sort"),
-                                                     arg("since"), arg("service"))})
+                                                     arg("since"), arg("service"),
+                                                     arg("account"))})
 
 
 def _room_avatar(h: BaseHTTPRequestHandler, thread: str, query: str) -> None:
@@ -1707,12 +1710,15 @@ def _contacts_google(h: BaseHTTPRequestHandler, act: str) -> None:
     try:
         if act == "state":
             _json(h, 200, {"ok": True, "google": contacts.google_state()})
-        elif act == "signout":
-            _json(h, 200, {"ok": True, "google": contacts.sign_out()})
         else:
             body = _read_json(h)
             body = body if isinstance(body, dict) else {}
-            if act == "login":
+            if act == "signout":
+                # One account by its id, else every one (§6.25 "Google, per book").
+                aid = body.get("account")
+                _json(h, 200, {"ok": True, "google": contacts.sign_out(
+                    str(aid) if aid not in (None, "") else None)})
+            elif act == "login":
                 _json(h, 200, {"ok": True, **contacts.start_login(body.get("port"))})
             else:
                 got = contacts.finish_login(str(body.get("state") or ""),

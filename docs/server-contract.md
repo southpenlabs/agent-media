@@ -7081,7 +7081,7 @@ when accepted.
  "contacts": [
    {"id": "3f0c…-uuid", "name": "Lionel Smith",
     "phones": ["+61412345678"], "emails": ["lionel@example.com"],
-    "labels": ["Family", "My Contacts"]}],
+    "labels": ["Family", "My Contacts"], "google_accounts": ["main", "3fa2c1d0"]}],
  "total": 1, "synced_at": 1792200000.5,
  "sources": [{"kind": "android", "synced_at": 1792200000.5, "error": null}]}
 ```
@@ -7099,7 +7099,16 @@ when accepted.
   failed (`"… adb: no devices/emulators found"` with the phone off Wi-Fi),
   else `null`. The app can say "as of <time>" from it. **`synced_at`** is
   the newest of them. A server with no source answers `"contacts": []`,
-  `"total": 0`, `"sources": []`.
+  `"total": 0`, `"sources": []`. `google`'s is every Google account's
+  (below, "Several accounts"): the newest good read, the first error.
+- **`google_accounts`** (10 Nov 2026): the ids of the Google accounts the
+  person is in (`GET /contacts/google`'s `accounts[].id`), the one whose
+  values won first; left out when they are in none.
+- **`account=<id>`** (10 Nov 2026; David: "keep them separate"): only the
+  people in that Google account, with `q`, `label`, `sort`, `since` and
+  `service` as ever; `total` counts those. The People list is paged here,
+  so the app filters by asking, not by hiding rows. An id the book does
+  not hold is nobody (`"contacts": []`, `"total": 0`), not an error.
 
 #### `GET /contacts/<id>` — gated (`auth.gate`)
 
@@ -7134,7 +7143,12 @@ hold (and for any path that is not a uuid, as an unknown route).
   lookup key (the contact's id is a uuid made from it), `raw` its raw
   contact ids, `accounts` their account types, `version` the sum of their
   versions (it moves on any edit). `google`, when signed in: `{"kind":
-  "google", "id": "people/c123", "etag"}`, first when it won.
+  "google", "id": "people/c123", "etag", "account": "main", "email":
+  "me@gmail.com"}`, first when it won; one per Google account the person
+  is in, oldest sign-in first. `account` is the account's id (`GET
+  /contacts/google`), `email` its address (`""` when the sign-in predates
+  the `email` scope); an added account's `id` is `<account id>:people/c123`
+  (below, "Several accounts").
 - **`updated`**: when the card last changed here (epoch s).
 - **`crm`**: the person in the Drupal CRM and the fields only it has
   (below, "The CRM"), or `null`.
@@ -7263,18 +7277,75 @@ with `expired_at`, the sync stops trying it, the last good copy of the
 contacts stays, and `GET /contacts/google` says `"expired": true` so the
 app offers "Sign in again". A new sign-in clears it.
 
+**Several accounts** (10 Nov 2026; David: "multiple contact accounts" — his
+own Gmail and his work one, davidj4phs@gmail.com, in one book, and "keep
+them separate" so the app can show either or both). A book holds any number
+of Google accounts, each its own sign-in:
+
+- **Which account a sign-in is.** Its address (the `email` scope) decides:
+  an address the book already holds is that account signing in again (its
+  token replaced, `expired` cleared); a new address **adds** an account. A
+  token with no address (a sign-in from before the `email` scope) is the
+  first account, and the first account, while it has no address, is the
+  one the next address replaces.
+- **Where the tokens are.** The first account is the file a single sign-in
+  always used, `google-contacts-token.json`, read as it was (nothing
+  migrated); each added one is `google-contacts-tokens/<id>.json` beside
+  it, 0600 too. The first file is filled only when the book holds no
+  account, so it is always the oldest. Each account has an **`id`**, short
+  and opaque to the app: the first is `main`; an added one is 8 hex digits
+  of its address's SHA-256, the same each time that address signs in.
+- **Records.** The first account's records keep the bare resource name as
+  their id (`people/c123`), so a live book's contact ids do not change; an
+  added account's are `<id>:people/c123`, which two accounts cannot share.
+  Each card source carries `account` and `email`.
+- **One person in two accounts is one contact** (David's call, 10 Nov
+  2026), tagged with both (`google_accounts`). The join is as above, one
+  Google contact per phone contact **per account**: a Google contact joins
+  the one phone contact sharing its number (else its address), and a later
+  account's contact also joins the one contact holding an earlier
+  account's that shares it. Field by field, the earlier-signed-in account
+  wins where both have a value, then the later, then the phone; labels are
+  every account's. Cards made before this are made again from the kept
+  records (`CARDS_VERSION` `google-accounts-1`).
+- **Each syncs on its own**: its own sync token, last sync, last error,
+  expired state and labels (its own `contactGroups`). One account expiring
+  or failing does not stop the others; an expired one is not tried until it
+  signs in again. Signing one out deletes only its token, records and
+  state.
+- `… contacts login` adds or signs in again by the same rule and names the
+  account; `… contacts status` lists every account (its id, address,
+  state, contacts and last sync).
+
+Pinned by `packages/server/tests/test_contacts_google_accounts.py`.
+
 #### `GET /contacts/google` — gated (`auth.gate`)
 
 ```json
 {"ok": true,
  "google": {"available": true, "signed_in": true, "expired": false,
             "email": "kat@gmail.com", "signed_in_at": 1792300000.1,
-            "last_sync": 1792300004.2, "last_error": null, "contacts": 412}}
+            "last_sync": 1792300004.2, "last_error": null, "contacts": 530,
+            "accounts": [
+              {"id": "main", "email": "kat@gmail.com", "signed_in": true,
+               "expired": false, "signed_in_at": 1792300000.1,
+               "last_sync": 1792300004.2, "last_error": null, "contacts": 412},
+              {"id": "3fa2c1d0", "email": "kat@work.example", "signed_in": false,
+               "expired": true, "signed_in_at": 1792900000.4,
+               "last_sync": 1793000000.0, "last_error": "Google no longer takes the sign-in …",
+               "contacts": 118}]}}
 ```
 
 `available` is whether this server has an OAuth client at all (false: the
-app hides the row's Sign in). `email` is `null` for a sign-in made before
-the `email` scope was asked. `contacts` counts Google's records in the book.
+app hides the row's Sign in). The top-level fields describe the **first**
+account (oldest sign-in), as they did a single sign-in, so an older app
+still works; `contacts` there counts every Google record in the book, so a
+person in two accounts counts twice. `email` is `null` for a sign-in made
+before the `email` scope was asked. **`accounts`** (10 Nov 2026) is each
+account, oldest sign-in first: `id` (what `account=` and `google_accounts`
+name), `email` (`null` as above), `signed_in` (and not expired),
+`expired`, `signed_in_at` (this token's), `last_sync`, `last_error` and
+`contacts` (its records). `[]` when the book holds none.
 
 `exports` (always there, whatever Google's state) is where each network's
 export is requested, for Settings → Contacts → Import a file:
@@ -7307,18 +7378,22 @@ client.
 
 `url` is the whole redirect address (its `state` must match), `code` the
 bare code. → `{"ok": true, "google": <as GET>}` once the token is kept; a
-full sync of the book's Google then runs in the background (`last_sync`
-moves when it is done). 400 for an unknown, spent or expired state, or an
+full sync of that account then runs in the background (its `last_sync`
+moves when it is done). The sign-in's address decides whether it adds an
+account or signs one in again (above, "Several accounts"). 400 for an unknown, spent or expired state, or an
 address from another sign-in or carrying Google's `error`; **403 for a
 state another account started** (it stays that account's to finish); 502
 when Google refuses the code or cannot be reached.
 
-#### `POST /contacts/google/signout` — gated
+#### `POST /contacts/google/signout [{"account"}]` — gated
 
-The book forgets Google: the refresh token is revoked at Google (best
-effort) and deleted, and Google's records leave the book (the phone's, for
-the owner, stay). → `{"ok": true, "google": <as GET>}`. A POST rather than
-a DELETE, as `/me/signout` is.
+The book forgets a Google account: its refresh token is revoked at Google
+(best effort) and deleted, and its records and sync state leave the book
+(the phone's, for the owner, stay; a person also in another account stays,
+as that account's). `{"account": <id>}` names one; with none, every account
+goes (as a single sign-in always did). An id the book does not hold is
+nothing to do. → `{"ok": true, "google": <as GET>}`. A POST rather than a
+DELETE, as `/me/signout` is.
 
 **The bridged networks** (19 Oct 2026; David: "draw in contacts from the
 other providers we have bridges for"). `bridges`, the owner's book only, on

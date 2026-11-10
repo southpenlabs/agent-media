@@ -35,6 +35,7 @@ import json
 import re
 import shlex
 import threading
+import urllib.parse
 
 from . import contacts, contacts_android, contacts_writeback as wb
 
@@ -83,13 +84,18 @@ def editable(card: dict) -> bool:
 
 
 def google_url(card: dict) -> str:
-    """The person in Google Contacts, from a Google source's resource name
-    (`people/c123…`), or ""."""
+    """The person in Google Contacts, from the first Google source's
+    resource name (`people/c123…`, after an added account's `<id>:`), or "".
+    An added account's link names its address (`authuser`), so the browser
+    opens that Google account's copy."""
     for s in card.get("sources") or []:
         if s.get("kind") == "google":
-            m = re.fullmatch(r"people/(c\d+)", s.get("id") or "")
+            m = re.fullmatch(r"(?:[0-9a-f]{8}:)?people/(c\d+)", s.get("id") or "")
             if m:
-                return f"https://contacts.google.com/person/{m.group(1)}"
+                url = f"https://contacts.google.com/person/{m.group(1)}"
+                if s.get("account") not in (None, "", contacts.FIRST) and s.get("email"):
+                    url += "?" + urllib.parse.urlencode({"authuser": s["email"]})
+                return url
     return ""
 
 

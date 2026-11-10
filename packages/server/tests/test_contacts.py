@@ -483,7 +483,9 @@ def test_overrides_win(rooms):
 def test_a_card_carries_its_rooms_newest_first(rooms):
     lionel = contacts.contact_id("google", "people/c1")
     c = contacts.card(lionel)
-    assert c["sources"] == [{"kind": "google", "id": "people/c1", "etag": "e1"}]
+    # The first Google account's: its id and address (none in this token).
+    assert c["sources"] == [{"kind": "google", "id": "people/c1", "etag": "e1",
+                             "account": "main", "email": ""}]
     assert c["addresses"] == [{"formatted": "1 Main Rd, Donvale VIC 3111", "type": "Home"}]
     assert c["notes"] == "Met at the market."
     assert [(x["room"], x["at"]) for x in c["rooms"]] == [("!c:ryer.org", 20.0),
@@ -500,7 +502,9 @@ def test_routes_shape_and_auth(server, signed_in, rooms):
     assert res.status == 200 and set(obj) == {"ok", "contacts", "total", "synced_at", "sources",
                                                 "sort", "talked"}
     assert [set(r) for r in obj["contacts"]] == [{"id", "name", "phones", "emails", "labels",
-                                                 "last", "count_90d", "photo"}]
+                                                 "last", "count_90d", "photo",
+                                                 "google_accounts"}]
+    assert obj["contacts"][0]["google_accounts"] == ["main"]
     mel = obj["contacts"][0]["id"]
     res, obj = call(server, "GET", f"/contacts/{mel}", headers=AUTH)
     assert res.status == 200 and set(obj) == {"ok", "contact"}

@@ -35,7 +35,11 @@ read-only card is `GET /contacts/<id>` (`card`).
   `~/.config/agent-media/google-oauth-client.json` (or
   `MEDIA_GOOGLE_OAUTH_CLIENT`: a path, or the JSON itself); the refresh
   token is kept next to `secrets.env`, owner-only, in
-  `~/.config/agent-media/google-contacts-token.json`.
+  `~/.config/agent-media/google-contacts-token.json`. A book holds several
+  Google accounts (David, 10 Nov 2026: "multiple contact accounts"): that
+  file is the first, each added one `google-contacts-tokens/<id>.json`; an
+  added account's records' sids are `<id>:people/c123`, and a person in two
+  accounts is one contact (`_rebuild`).
 * `MEDIA_CONTACTS=0` leaves the background sync off.
 * **One book per person** (David, 18 Oct 2026: "Where contacts live").
   Every read and write is of the current account's book (`account()`): a
@@ -269,8 +273,88 @@ def client_path() -> Path:
     return config_dir() / "google-oauth-client.json"
 
 
-def token_path() -> Path:
-    return account_config_dir() / "google-contacts-token.json"
+#: The book's first Google account: its token is the one file a single
+#: sign-in always had (`google-contacts-token.json`), its records' sids the
+#: bare resource names, so nothing of a live book moves (David, 10 Nov
+#: 2026: "multiple contact accounts").
+FIRST = "main"
+
+
+def token_path(aid: str | None = None) -> Path:
+    """Account `aid`'s token: the first's `google-contacts-token.json`, any
+    other's `google-contacts-tokens/<aid>.json` beside it."""
+    if not aid or aid == FIRST:
+        return account_config_dir() / "google-contacts-token.json"
+    return account_config_dir() / "google-contacts-tokens" / f"{aid}.json"
+
+
+def account_id_for(email: str) -> str:
+    """An added account's id: short, and the same each time its address
+    signs in again (so its records' sids, and its contacts' ids, are too)."""
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()[:8]
+
+
+_AID = re.compile(r"[0-9a-f]{8}")
+
+
+def google_accounts() -> list[dict]:
+    """The book's Google accounts, oldest sign-in first: `[{id, email,
+    token}]`. The first file is always first (it is filled only when the
+    book has no account), the others by when they were added."""
+    out = []
+    tok = load_token(FIRST)
+    if tok:
+        out.append({"id": FIRST, "email": tok.get("email") or "", "token": tok})
+    rest = []
+    try:
+        files = sorted((account_config_dir() / "google-contacts-tokens").glob("*.json"))
+    except OSError:
+        files = []
+    for f in files:
+        if not _AID.fullmatch(f.stem):
+            continue
+        tok = load_token(f.stem)
+        if tok:
+            rest.append({"id": f.stem, "email": tok.get("email") or "", "token": tok})
+    rest.sort(key=lambda a: (a["token"].get("added_at") or a["token"].get("obtained_at") or 0,
+                             a["id"]))
+    return out + rest
+
+
+def google_sid(aid: str, resource_name: str) -> str:
+    """A Google record's sid: the first account's the bare resource name
+    (its contacts keep their ids), another's prefixed with its id, so two
+    accounts' `people/c1` never collide."""
+    return resource_name if aid == FIRST else f"{aid}:{resource_name}"
+
+
+def google_account_of(sid: str) -> str:
+    """Which account a Google record's sid is of (a resource name holds no
+    colon)."""
+    return sid.partition(":")[0] if ":" in sid else FIRST
+
+
+def resource_name_of(sid: str) -> str:
+    return sid.rpartition(":")[2]
+
+
+def _gkind(aid: str) -> str:
+    """An account's meta prefix: the first's the single sign-in's own
+    (`google`), another's `google.<id>`."""
+    return "google" if aid == FIRST else f"google.{aid}"
+
+
+def _gk(aid: str, name: str) -> str:
+    """An account's meta key (`google_sync_token`, `google.<id>_sync_token`)."""
+    return f"{_gkind(aid)}_{name}"
+
+
+def _account_sql(aid: str) -> tuple[str, tuple]:
+    """The WHERE clause, with its parameters, picking account `aid`'s
+    Google records."""
+    if aid == FIRST:
+        return "kind='google' AND instr(sid, ':')=0", ()
+    return "kind='google' AND substr(sid, 1, ?)=?", (len(aid) + 1, f"{aid}:")
 
 
 def db_path() -> Path:
@@ -428,7 +512,7 @@ _KEPT = {"overrides", "drupal_links", "merges", "aliases", "photo_src", "found",
          "person_level", "notify"}
 #: Bump when the cards are made differently from the same records: the
 #: next sync rebuilds them (records kept, nothing read again).
-CARDS_VERSION = "gateways-1"
+CARDS_VERSION = "google-accounts-1"
 #: Bump when what a row holds changes: the store is emptied (but for the
 #: overrides and the seed's links) and read again.
 SCHEMA_VERSION = "2"
@@ -645,10 +729,24 @@ def _merge(google: dict, phone: dict) -> dict:
     return out
 
 
+def _merged(entry: dict) -> dict:
+    """A contact's card from its phone card and its Google cards (oldest
+    sign-in first): each Google account wins over those after it and over
+    the phone, field by field (`_merge`)."""
+    out = entry.get("base")
+    for g in reversed(entry["google"]):
+        out = g if out is None else _merge(g, out)
+    return out
+
+
 def _rebuild(conn: sqlite3.Connection) -> None:
     """The merged book from the records: one contact per phone contact (its
     id from its lookup key); a Google contact sharing a number, else an
-    address, with exactly one of them joins it, else stands as its own."""
+    address, with exactly one of them joins it, else stands as its own.
+    One Google contact per phone contact per Google account: a later
+    account's contact joins, the same way, the one contact holding an
+    earlier account's (David, 10 Nov 2026: one person in both accounts is
+    one contact, tagged with both)."""
     recs = conn.execute("SELECT kind, sid, card, meta FROM records ORDER BY kind, sid").fetchall()
     book: dict[str, dict] = {}
     by_phone: dict[str, set] = {}
@@ -664,26 +762,53 @@ def _rebuild(conn: sqlite3.Connection) -> None:
             by_phone.setdefault(p, set()).add(cid)
         for e in emails:
             by_email.setdefault(e, set()).add(cid)
-    for kind, sid, card, meta in recs:
-        if kind != "google":
-            continue
-        c = json.loads(card)
-        phones, emails = _keys(c)
+    accts = google_accounts()
+    order = {a["id"]: i for i, a in enumerate(accts)}
+    addr = {a["id"]: a["email"] for a in accts}
+    grecs = sorted(((google_account_of(sid), sid, card, meta)
+                    for kind, sid, card, meta in recs if kind == "google"),
+                   key=lambda r: (order.get(r[0], len(order)), r[0], r[1]))
+    # Each account's numbers and addresses, to the contact holding them.
+    g_phone: dict[str, dict[str, set]] = {}
+    g_email: dict[str, dict[str, set]] = {}
+    held: dict[str, set] = {}             # contact -> the accounts it holds
+    parts: dict[str, dict] = {}           # contact -> {base, google: [cards]}
+
+    def look(main: dict, per: dict, keys: set, aid: str) -> set:
         hits: set = set()
-        for p in phones:
-            hits |= by_phone.get(p, set())
+        for k in keys:
+            hits |= main.get(k, set())
+            for other, idx in per.items():
+                if other != aid:
+                    hits |= idx.get(k, set())
+        return hits
+
+    for aid, sid, card, meta in grecs:
+        c = json.loads(card)
+        m = json.loads(meta)
+        phones, emails = _keys(c)
+        hits = look(by_phone, g_phone, phones, aid)
         if not hits:
-            for e in emails:
-                hits |= by_email.get(e, set())
-        # One Google contact per phone contact.
-        hits = {h for h in hits if not any(s["kind"] == kind for s in book[h]["sources"])}
-        src = _source(kind, sid, json.loads(meta))
+            hits = look(by_email, g_email, emails, aid)
+        hits = {h for h in hits if aid not in held.get(h, set())}
+        src = {**_source("google", sid, m), "account": aid,
+               "email": addr.get(aid) or m.get("email") or ""}
         if len(hits) == 1:
             cid = next(iter(hits))
-            book[cid] = {"card": _merge(c, book[cid]["card"]),
-                         "sources": [src] + book[cid]["sources"]}
+            part = parts.setdefault(cid, {"base": book[cid]["card"], "google": []})
+            part["google"].append(c)
+            srcs = book[cid]["sources"]
+            n = sum(1 for s in srcs if s["kind"] == "google")
+            book[cid] = {"card": _merged(part), "sources": srcs[:n] + [src] + srcs[n:]}
         else:
-            book[contact_id(kind, sid)] = {"card": c, "sources": [src]}
+            cid = contact_id("google", sid)
+            parts[cid] = {"base": None, "google": [c]}
+            book[cid] = {"card": c, "sources": [src]}
+        held.setdefault(cid, set()).add(aid)
+        for p in phones:
+            g_phone.setdefault(aid, {}).setdefault(p, set()).add(cid)
+        for e in emails:
+            g_email.setdefault(aid, {}).setdefault(e, set()).add(cid)
     _rebuild_bridges(conn, recs, book)
     _rebuild_drupal(conn, recs, book)
     old = {cid: (raw, upd) for cid, raw, upd in conn.execute(
@@ -1101,17 +1226,18 @@ def load_client() -> dict | None:
             "token_uri": c.get("token_uri") or TOKEN_URI}
 
 
-def load_token() -> dict | None:
+def load_token(aid: str | None = None) -> dict | None:
+    """Account `aid`'s token (the first's when none is named)."""
     try:
-        data = json.loads(token_path().read_text())
+        data = json.loads(token_path(aid).read_text())
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) and data.get("refresh_token") else None
 
 
-def _save_token(data: dict) -> None:
+def _save_token(data: dict, aid: str | None = None) -> None:
     """Owner-only from the first byte, and atomic (devices.py's way)."""
-    path = token_path()
+    path = token_path(aid)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -1130,11 +1256,14 @@ def _save_token(data: dict) -> None:
         raise
 
 
-def signed_in() -> bool:
+def signed_in(aid: str | None = None) -> bool:
     """A client and a refresh token Google still takes (an expired one is
-    not tried again until the next sign-in)."""
-    tok = load_token()
-    return load_client() is not None and tok is not None and not tok.get("expired_at")
+    not tried again until the next sign-in): account `aid`'s, or, with none
+    named, any of the book's."""
+    if load_client() is None:
+        return False
+    toks = [load_token(aid)] if aid else [a["token"] for a in google_accounts()]
+    return any(t is not None and not t.get("expired_at") for t in toks)
 
 
 def _email_of(body: dict) -> str:
@@ -1192,12 +1321,15 @@ _ACCESS: dict = {}                    # {"token", "expires"}: the owner's, this 
 _ACCESSES: dict = {"": _ACCESS}       # every book's, by account
 
 
-def _access() -> dict:
-    return _ACCESSES.setdefault(account(), {})
+def _access(aid: str | None = None) -> dict:
+    """The access token of account `aid` (the first's when none is named)
+    in this book, this process only."""
+    key = account() if not aid or aid == FIRST else f"{account()}\x00{aid}"
+    return _ACCESSES.setdefault(key, {})
 
 
-def _store_access(body: dict) -> None:
-    acc = _access()
+def _store_access(body: dict, aid: str | None = None) -> None:
+    acc = _access(aid)
     acc.clear()
     acc.update(token=body["access_token"],
                    expires=time.time() + float(body.get("expires_in") or 3600))
@@ -1217,19 +1349,55 @@ def exchange(client: dict, code: str, verifier: str, redirect_uri: str) -> dict:
                           "(remove the app's access at myaccount.google.com first)")
     kept = {"refresh_token": body["refresh_token"], "scope": body.get("scope") or SCOPE,
             "client_id": client["client_id"], "obtained_at": round(time.time(), 3)}
-    if _email_of(body):
-        kept["email"] = _email_of(body)
-    _save_token(kept)
-    _store_access(body)
-    return kept
+    email = _email_of(body)
+    if email:
+        kept["email"] = email
+    aid, was = _slot_for(email)
+    kept["added_at"] = (was or {}).get("added_at") or (was or {}).get("obtained_at") \
+        or kept["obtained_at"]
+    if was is not None and (was.get("email") or "").lower() != email.lower():
+        # The first file's address-less token taken by an address: what it
+        # synced is read again whole, as that address's.
+        _reset_account_meta(aid)
+    _save_token(kept, aid)
+    _store_access(body, aid)
+    return {**kept, "id": aid}
 
 
-def access_token() -> str:
-    """A current access token, refreshed when it is near its end."""
-    acc = _access()
+def _slot_for(email: str) -> tuple[str, dict | None]:
+    """Where a new sign-in's token goes, and the token it replaces: an
+    address the book has already is that account signing in again; a token
+    with no address (the scope before `email`) is the first account, and an
+    address-less first account is the one a new address replaces; any
+    other address is an account added (the first file when the book has
+    none)."""
+    accts = google_accounts()
+    if email:
+        for a in accts:
+            if a["email"] and a["email"].lower() == email.lower():
+                return a["id"], a["token"]
+    first = next((a for a in accts if a["id"] == FIRST), None)
+    if not email or not accts or (first is not None and not first["email"]):
+        return FIRST, first["token"] if first else None
+    return account_id_for(email), None
+
+
+def _reset_account_meta(aid: str) -> None:
+    conn = _connect()
+    try:
+        for k in ("sync_token", "fields"):
+            _set_meta(conn, _gk(aid, k), None)
+    finally:
+        conn.close()
+
+
+def access_token(aid: str | None = None) -> str:
+    """A current access token of account `aid` (the first's when none is
+    named), refreshed when it is near its end."""
+    acc = _access(aid)
     if acc.get("token") and acc.get("expires", 0) - 60 > time.time():
         return acc["token"]
-    client, tok = load_client(), load_token()
+    client, tok = load_client(), load_token(aid)
     if client is None:
         raise NotSignedIn(f"no OAuth client ({client_path()})")
     if tok is None:
@@ -1245,14 +1413,14 @@ def access_token() -> str:
         if err == "invalid_grant":
             # Kept as expired, not deleted: the book says "sign in again"
             # and the sync stops trying until it is.
-            _save_token({**tok, "expired_at": round(time.time(), 3)})
+            _save_token({**tok, "expired_at": round(time.time(), 3)}, aid)
             raise SignInExpired("Google no longer takes the sign-in (revoked, or the "
                                 "7 days a testing-mode sign-in lasts are up); sign in again")
         raise SyncError(f"token refresh failed ({err})")
     if body.get("refresh_token") and body["refresh_token"] != tok["refresh_token"]:
-        _save_token({**tok, "refresh_token": body["refresh_token"]})
-    _store_access(body)
-    return _access()["token"]
+        _save_token({**tok, "refresh_token": body["refresh_token"]}, aid)
+    _store_access(body, aid)
+    return _access(aid)["token"]
 
 
 # --- the sync -------------------------------------------------------------------
@@ -1261,13 +1429,13 @@ class _Expired(Exception):
     pass
 
 
-def _groups() -> dict[str, str]:
-    """The book's Google contact groups, resource name to name (one page:
-    the API's most is 1000). A failure is no names, not no sync."""
+def _groups(aid: str | None = None) -> dict[str, str]:
+    """Account `aid`'s Google contact groups, resource name to name (one
+    page: the API's most is 1000). A failure is no names, not no sync."""
     try:
         status, body = _request(
             "GET", f"{PEOPLE}/contactGroups?pageSize=1000&groupFields=name",
-            headers={"Authorization": f"Bearer {access_token()}"})
+            headers={"Authorization": f"Bearer {access_token(aid)}"})
     except (OSError, urllib.error.URLError, NotSignedIn) as e:
         log.info("contacts: google labels unread: %s", e)
         return {}
@@ -1278,9 +1446,9 @@ def _groups() -> dict[str, str]:
             for g in body.get("contactGroups") or [] if g.get("resourceName")}
 
 
-def _fetch(sync_token: str | None) -> tuple[list[dict], str | None]:
-    """Every Google connection (or every change since `sync_token`), and the
-    token for next time."""
+def _fetch(sync_token: str | None, aid: str | None = None) -> tuple[list[dict], str | None]:
+    """Every Google connection of account `aid` (or every change since
+    `sync_token`), and the token for next time."""
     people: list[dict] = []
     page: str | None = None
     retried = False
@@ -1293,9 +1461,9 @@ def _fetch(sync_token: str | None) -> tuple[list[dict], str | None]:
             params["syncToken"] = sync_token
         status, body = _request(
             "GET", f"{PEOPLE}/people/me/connections?{urllib.parse.urlencode(params)}",
-            headers={"Authorization": f"Bearer {access_token()}"})
+            headers={"Authorization": f"Bearer {access_token(aid)}"})
         if status == 401 and not retried:
-            _access().clear()                  # a token Google ended early
+            _access(aid).clear()               # a token Google ended early
             retried = True
             continue
         err = body.get("error") if isinstance(body.get("error"), dict) else {}
@@ -1319,30 +1487,65 @@ def _failed(kind: str, e: Exception) -> None:
         conn.close()
 
 
-def sync_google(full: bool = False) -> dict:
-    """Bring Google's records up to date. A sync token makes it the changes
-    only; none, or an expired one, makes it everything."""
+def sync_google(full: bool = False, account: str | None = None) -> dict:
+    """Bring Google's records up to date: account `account`'s, or every
+    account's the book holds, each on its own (an expired one is not tried;
+    one that fails is said in its own `last_error` and in `errors`, and the
+    others still sync). One account answers as a single sign-in always did,
+    and raises what stopped it; several sum their counts, `accounts` each
+    one's, and raise only when none synced."""
+    if account is not None:
+        return _sync_google_one(account, full)
+    accts = google_accounts()
+    live = [a["id"] for a in accts if not a["token"].get("expired_at")] \
+        or [a["id"] for a in accts[:1]] or [FIRST]
+    if len(live) == 1:
+        return _sync_google_one(live[0], full)
+    done, errors, first = {}, {}, None
+    for aid in live:
+        try:
+            done[aid] = _sync_google_one(aid, full)
+        except (NotSignedIn, SyncError, OSError, urllib.error.URLError) as e:
+            errors[aid] = str(e) or type(e).__name__
+            first = first or e
+    if not done:
+        raise first
+    last = list(done.values())[-1]
+    out = {"source": "google", "full": all(r["full"] for r in done.values()),
+           "changed": sum(r["changed"] for r in done.values()),
+           "deleted": sum(r["deleted"] for r in done.values()),
+           "contacts": last["contacts"], "accounts": done}
+    if errors:
+        out["errors"] = errors
+    return out
+
+
+def _sync_google_one(aid: str, full: bool = False) -> dict:
+    """One account's sync. A sync token makes it the changes only; none, or
+    an expired one, makes it everything."""
     with _SYNC_LOCK:
         conn = _connect()
         try:
-            token = None if full else _meta(conn, "google_sync_token")
+            token = None if full else _meta(conn, _gk(aid, "sync_token"))
             # A sync token is only good for the fields it was made with: new
             # fields (the labels' memberships) read everything again.
-            if _meta(conn, "google_fields") != PERSON_FIELDS:
+            if _meta(conn, _gk(aid, "fields")) != PERSON_FIELDS:
                 token = None
         finally:
             conn.close()
         try:
             try:
-                people, next_token = _fetch(token)
+                people, next_token = _fetch(token, aid)
             except _Expired:
                 log.info("contacts: sync token expired, full resync")
                 token = None
-                people, next_token = _fetch(None)
+                people, next_token = _fetch(None, aid)
         except (NotSignedIn, SyncError, OSError, urllib.error.URLError) as e:
-            _failed("google", e)
+            _failed(_gkind(aid), e)
             raise
-        groups = _groups() if any(p.get("memberships") for p in people) else {}
+        groups = _groups(aid) if any(p.get("memberships") for p in people) else {}
+        email = (load_token(aid) or {}).get("email") or ""
+        where, args = _account_sql(aid)
         reg = region()
         from . import contacts_photos
         changed = deleted = 0
@@ -1355,29 +1558,31 @@ def sync_google(full: bool = False) -> dict:
                     rn = p.get("resourceName") or ""
                     if not rn:
                         continue
+                    sid = google_sid(aid, rn)
                     if (p.get("metadata") or {}).get("deleted"):
                         deleted += conn.execute("DELETE FROM records WHERE kind='google' "
-                                                "AND sid=?", (rn,)).rowcount
+                                                "AND sid=?", (sid,)).rowcount
                         continue
-                    seen.add(rn)
+                    seen.add(sid)
                     conn.execute("INSERT OR REPLACE INTO records (kind, sid, card, meta) "
                                  "VALUES ('google', ?, ?, ?)",
-                                 (rn, json.dumps(card_of(p, reg, groups)),
+                                 (sid, json.dumps(card_of(p, reg, groups)),
                                   json.dumps({"etag": p.get("etag") or "",
-                                              "photo": contacts_photos.google_url(p)})))
+                                              "photo": contacts_photos.google_url(p),
+                                              "account": aid, "email": email})))
                     changed += 1
                 if token is None:
                     # Everything was read: what is not in it is gone.
                     for (sid,) in conn.execute(
-                            "SELECT sid FROM records WHERE kind='google'").fetchall():
+                            f"SELECT sid FROM records WHERE {where}", args).fetchall():
                         if sid not in seen:
                             conn.execute("DELETE FROM records WHERE kind='google' AND sid=?",
                                          (sid,))
                             deleted += 1
-                _set_meta(conn, "google_sync_token", next_token)
-                _set_meta(conn, "google_fields", PERSON_FIELDS)
-                _set_meta(conn, "google_synced_at", str(round(time.time(), 3)))
-                _set_meta(conn, "google_last_error", None)
+                _set_meta(conn, _gk(aid, "sync_token"), next_token)
+                _set_meta(conn, _gk(aid, "fields"), PERSON_FIELDS)
+                _set_meta(conn, _gk(aid, "synced_at"), str(round(time.time(), 3)))
+                _set_meta(conn, _gk(aid, "last_error"), None)
                 if changed or deleted:
                     _rebuild(conn)
                 conn.execute("COMMIT")
@@ -1828,11 +2033,27 @@ _SYNCS = {"android": lambda full: sync_android(), "google": lambda full: sync_go
 
 # --- reading the store ----------------------------------------------------------
 
+def google_accounts_of(card: dict) -> list[str]:
+    """The Google accounts a card's person is in, by id, as its sources
+    list them (the winning one first)."""
+    out: list[str] = []
+    for s in card.get("sources") or []:
+        if s.get("kind") == "google":
+            aid = s.get("account") or google_account_of(str(s.get("id") or ""))
+            if aid not in out:
+                out.append(aid)
+    return out
+
+
 def _row(cid: str, name: str, card: dict) -> dict:
-    return {"id": cid, "name": name,
-            "phones": [p["value"] for p in card.get("phones") or [] if p.get("value")],
-            "emails": [e["value"] for e in card.get("emails") or [] if e.get("value")],
-            "labels": card.get("labels") or []}
+    row = {"id": cid, "name": name,
+           "phones": [p["value"] for p in card.get("phones") or [] if p.get("value")],
+           "emails": [e["value"] for e in card.get("emails") or [] if e.get("value")],
+           "labels": card.get("labels") or []}
+    got = google_accounts_of(card)
+    if got:
+        row["google_accounts"] = got
+    return row
 
 
 def _matches(q: str, name: str, card: dict) -> int:
@@ -1864,6 +2085,13 @@ def _source_states(conn: sqlite3.Connection | None) -> list[dict]:
     for kind in KINDS:
         synced = _meta(conn, f"{kind}_synced_at") if conn is not None else None
         err = _meta(conn, f"{kind}_last_error") if conn is not None else None
+        if kind == "google" and conn is not None:
+            # Every account's: the newest good read, the first error.
+            for a in google_accounts():
+                s2 = _meta(conn, _gk(a["id"], "synced_at"))
+                if s2 and (not synced or float(s2) > float(synced)):
+                    synced = s2
+                err = err or _meta(conn, _gk(a["id"], "last_error"))
         if synced or err or kind in sources():
             out.append({"kind": kind, "synced_at": float(synced) if synced else None,
                         "error": err})
@@ -1891,13 +2119,15 @@ def _services_of(card: dict, act: dict | None) -> set[str]:
 
 def listing(q: str = "", limit: int | str | None = None,
             label: str | list[str] | tuple = "", mode: str = "any",
-            sort: str = "", since: int | str | None = None, service: str = "") -> dict:
+            sort: str = "", since: int | str | None = None, service: str = "",
+            account: str = "") -> dict:
     """`GET /contacts`: everyone, or those `q` matches as it is typed (name,
     a phone's digits as written or dialled at home, an email); `label`, one
     label or several, only the people with any of them (`mode` "any", the
     default) or with every one (`mode` "all"); `since`, only those talked to
     in the last that many days; `service`, only those on that channel (a
-    timeline channel: sms, messenger, …). Each row carries `last` {day,
+    timeline channel: sms, messenger, …); `account`, only those in that
+    Google account (its id; an unknown one is no one). Each row carries `last` {day,
     channel} and `count_90d` from the book's ledger (timeline.activity);
     `sort` is one of SORTS, after how well `q` matches when there is one."""
     from . import timeline
@@ -1913,6 +2143,7 @@ def listing(q: str = "", limit: int | str | None = None,
     order = (sort or "").strip().lower()
     order = order if order in SORTS else "name"
     service = (service or "").strip().lower()
+    gacct = (account or "").strip()
     picked = [label] if isinstance(label, str) else list(label or [])
     want = {fold(x) for x in picked if x and fold(x)}
     every = (mode or "").strip().lower() == "all"
@@ -1940,6 +2171,8 @@ def listing(q: str = "", limit: int | str | None = None,
                 if cutoff and not (last and last["day"] >= cutoff):
                     continue
                 if service and service not in _services_of(card, act):
+                    continue
+                if gacct and gacct not in google_accounts_of(card):
                     continue
                 score = _matches(q, name, card) if q else 2
                 if score:
@@ -2670,19 +2903,21 @@ def cmd_login(a) -> int:
                 print("Gave up waiting for the sign-in.", file=sys.stderr)
                 return 1
             try:
-                login.finish(text)
+                kept = login.finish(text)
             except ValueError as e:
                 print(f"{e}. Try again.", file=sys.stderr)
                 continue
             except NotSignedIn as e:
                 print(str(e), file=sys.stderr)
                 return 1
-            print(f"Signed in ({'redirect' if src == 'loopback' else 'pasted address'}). "
-                  f"Token kept in {token_path()}.")
+            aid = (kept or {}).get("id") or FIRST
+            print(f"Signed in ({'redirect' if src == 'loopback' else 'pasted address'}) "
+                  f"as {(kept or {}).get('email') or 'an unknown address'}, "
+                  f"account {aid}. Token kept in {token_path(aid)}.")
             break
     finally:
         login.close()
-    return cmd_sync(argparse.Namespace(full=True, source="google"))
+    return cmd_sync(argparse.Namespace(full=True, source="google", account=aid))
 
 
 # --- the sign-in, from the app (§6.25 "Google, per book") ----------------------
@@ -2742,38 +2977,68 @@ def finish_login(state: str, code: str = "", url: str = "") -> dict:
     client = load_client()
     if client is None:
         raise NotSignedIn("this server has no Google OAuth client")
-    exchange(client, got, p["verifier"], p["redirect_uri"])
-    _kick_sync(account())
+    kept = exchange(client, got, p["verifier"], p["redirect_uri"])
+    _kick_sync(account(), kept["id"])
     return google_state()
 
 
-def _kick_sync(key: str) -> None:
-    """A full Google sync of `key`'s book, off the request's thread."""
+def _kick_sync(key: str, aid: str | None = None) -> None:
+    """A full Google sync of `key`'s book (account `aid`'s only, when
+    named), off the request's thread."""
     def run():
         with as_account(key):
             try:
-                sync_google(full=True)
+                sync_google(full=True, account=aid)
             except Exception as e:  # noqa: BLE001 — said in the book's state
                 log.info("contacts[%s]: google sync after sign-in: %s", key or "owner", e)
     threading.Thread(target=run, name="contacts-google-signin", daemon=True).start()
 
 
+def _google_counts(conn: sqlite3.Connection | None) -> dict[str, int]:
+    """Google's records in the book, by account."""
+    out: dict[str, int] = {}
+    if conn is not None:
+        for (sid,) in conn.execute("SELECT sid FROM records WHERE kind='google'"):
+            aid = google_account_of(sid)
+            out[aid] = out.get(aid, 0) + 1
+    return out
+
+
+def _account_state(a: dict, conn: sqlite3.Connection | None, counts: dict) -> dict:
+    tok = a["token"]
+    synced = _meta(conn, _gk(a["id"], "synced_at")) if conn is not None else None
+    expired = bool(tok.get("expired_at"))
+    return {"id": a["id"], "email": a["email"] or None, "signed_in": not expired,
+            "expired": expired, "signed_in_at": tok.get("obtained_at"),
+            "last_sync": float(synced) if synced else None,
+            "last_error": _meta(conn, _gk(a["id"], "last_error")) if conn is not None else None,
+            "contacts": counts.get(a["id"], 0)}
+
+
 def google_state() -> dict:
     """`GET /contacts/google`: this book's Google — `{available, signed_in,
-    email, expired, signed_in_at, last_sync, last_error, contacts}` — and
-    `exports`, where each network's export is requested (contacts_exports)."""
-    tok = load_token()
+    email, expired, signed_in_at, last_sync, last_error, contacts}`, the
+    first account's (as a single sign-in always said) but `contacts`, every
+    Google record in the book; `accounts`, each account's, oldest sign-in
+    first — and `exports`, where each network's export is requested
+    (contacts_exports)."""
+    accts = google_accounts()
     conn = _connect(create=False)
-    synced = err = None
-    n = 0
     try:
-        if conn is not None:
-            synced = _meta(conn, "google_synced_at")
-            err = _meta(conn, "google_last_error")
-            n = conn.execute("SELECT COUNT(*) FROM records WHERE kind='google'").fetchone()[0]
+        counts = _google_counts(conn)
+        each = [_account_state(a, conn, counts) for a in accts]
+        if each:
+            first = each[0]
+            synced, err = first["last_sync"], first["last_error"]
+        else:
+            # Signed out: what the single sign-in's keys still say.
+            synced = _meta(conn, "google_synced_at") if conn is not None else None
+            synced = float(synced) if synced else None
+            err = _meta(conn, "google_last_error") if conn is not None else None
     finally:
         if conn is not None:
             conn.close()
+    tok = accts[0]["token"] if accts else None
     expired = bool(tok and tok.get("expired_at"))
     from .contacts_exports import export_links
 
@@ -2781,34 +3046,48 @@ def google_state() -> dict:
             "signed_in": bool(tok) and not expired, "expired": expired,
             "email": (tok or {}).get("email") or None,
             "signed_in_at": (tok or {}).get("obtained_at"),
-            "last_sync": float(synced) if synced else None,
-            "last_error": err, "contacts": n}
+            "last_sync": synced, "last_error": err, "contacts": sum(counts.values()),
+            "accounts": each}
 
 
-def sign_out() -> dict:
-    """`POST /contacts/google/signout`: this book forgets Google — the token
-    (revoked at Google when it can be), and Google's records in the book."""
-    tok = load_token()
-    if tok:
-        try:
-            _request("POST", "https://oauth2.googleapis.com/revoke",
-                     form={"token": tok["refresh_token"]}, timeout=10.0)
-        except (OSError, urllib.error.URLError):
-            pass                               # forgotten here either way
-    try:
-        token_path().unlink()
-    except FileNotFoundError:
-        pass
-    _access().clear()
+def sign_out(account: str | None = None) -> dict:
+    """`POST /contacts/google/signout [{"account"}]`: this book forgets that
+    Google account — its token (revoked at Google when it can be), its
+    records and its sync state — or, with none named, every account. An
+    account the book does not hold is nothing to do."""
+    accts = google_accounts()
+    ids = [a["id"] for a in accts] if account is None else [str(account)]
+    ids = [aid for aid in ids if aid == FIRST or _AID.fullmatch(aid)]
+    for aid in ids:
+        tok = load_token(aid)
+        if tok:
+            try:
+                _request("POST", "https://oauth2.googleapis.com/revoke",
+                         form={"token": tok["refresh_token"]}, timeout=10.0)
+            except (OSError, urllib.error.URLError):
+                pass                           # forgotten here either way
+            try:
+                token_path(aid).unlink()
+            except FileNotFoundError:
+                pass
+        _access(aid).clear()
+    if account is None and FIRST not in ids:
+        ids.append(FIRST)                      # the single sign-in's keys, whatever is left
     with _WRITE:
         conn = _connect(create=False)
         if conn is not None:
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                gone = conn.execute("DELETE FROM records WHERE kind='google'").rowcount
-                for k in ("google_sync_token", "google_synced_at", "google_last_error",
-                          "google_failed_at"):
-                    _set_meta(conn, k, None)
+                gone = 0
+                for aid in ids:
+                    where, args = _account_sql(aid)
+                    gone += conn.execute(f"DELETE FROM records WHERE {where}", args).rowcount
+                    for k in ("sync_token", "synced_at", "last_error", "failed_at"):
+                        _set_meta(conn, _gk(aid, k), None)
+                    if aid != FIRST:
+                        _set_meta(conn, _gk(aid, "fields"), None)
+                if account is None:
+                    gone += conn.execute("DELETE FROM records WHERE kind='google'").rowcount
                 if gone:
                     _rebuild(conn)
                 conn.execute("COMMIT")
@@ -2836,6 +3115,10 @@ def status() -> dict:
                              "failed_at": float(failed) if failed else None,
                              "last_error": _meta(conn, f"{kind}_last_error")}
             per.setdefault("google", {})["sync_token"] = bool(_meta(conn, "google_sync_token"))
+        counts = _google_counts(conn)
+        gaccts = [{**_account_state(a, conn, counts), "token": str(token_path(a["id"])),
+                   "sync_token": bool(conn is not None and _meta(conn, _gk(a["id"], "sync_token")))}
+                  for a in google_accounts()]
     finally:
         if conn is not None:
             conn.close()
@@ -2852,7 +3135,7 @@ def status() -> dict:
                        "expired": bool(tok and tok.get("expired_at")),
                        "email": (tok or {}).get("email") or None,
                        "signed_in_at": tok.get("obtained_at") if tok else None,
-                       **per.get("google", {})},
+                       **per.get("google", {}), "accounts": gaccts},
             "bridges": {"owner_bridges": sorted(_owner_bridges()), **per.get("bridges", {})},
             "import": {**per.get("import", {})},
             "drupal": {"connection": str(_drupal_config_path()), "configured": _drupal_configured(),
@@ -2888,7 +3171,14 @@ def cmd_status(_a) -> int:
         print(f"{k:13} {s[k]}")
     for src in KINDS:
         for k, v in s[src].items():
+            if src == "google" and k == "accounts":
+                continue
             print(f"{src + '.' + k:24} {_when(v) if k.endswith('_at') else v}")
+    for a in s["google"]["accounts"]:
+        state = "expired" if a["expired"] else "signed in"
+        print(f"google account {a['id']:9} {a['email'] or '(no address)'}: {state}, "
+              f"{a['contacts']} contacts, last sync {_when(a['last_sync']) or 'never'}"
+              + (f", error: {a['last_error']}" if a["last_error"] else ""))
     return 0 if s["sources"] else 1
 
 
@@ -2896,8 +3186,11 @@ def cmd_sync(a) -> int:
     which = getattr(a, "source", "") or ""
     if which:
         try:
-            got = {"synced": [_SYNCS[which](bool(getattr(a, "full", False)))],
-                   "errors": {}}
+            if which == "google" and getattr(a, "account", None):
+                one = sync_google(bool(getattr(a, "full", False)), account=a.account)
+            else:
+                one = _SYNCS[which](bool(getattr(a, "full", False)))
+            got = {"synced": [one], "errors": {}}
         except Exception as e:  # noqa: BLE001 — said, with its source
             got = {"synced": [], "errors": {which: str(e)}}
     else:
@@ -2924,6 +3217,8 @@ def cmd_sync(a) -> int:
         else:
             print(f"google {'full' if s['full'] else 'changes'}: {s['changed']} changed, "
                   f"{s['deleted']} gone, {s['contacts']} contacts")
+            for aid, e in (s.get("errors") or {}).items():
+                print(f"google account {aid}: sync failed: {e}", file=sys.stderr)
     for src, e in got["errors"].items():
         print(f"{src}: sync failed: {e}", file=sys.stderr)
     return 1 if got["errors"] else 0

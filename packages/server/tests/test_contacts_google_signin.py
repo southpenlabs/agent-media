@@ -80,9 +80,9 @@ def google(monkeypatch):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"installed": {"client_id": "cid.apps", "client_secret": "s"}}))
     # The sync after a sign-in, run inline so a test can look at its result.
-    def inline(key):
+    def inline(key, aid=None):
         with contacts.as_account(key):
-            contacts.sync_google(full=True)
+            contacts.sync_google(full=True, account=aid)
     monkeypatch.setattr(contacts, "_kick_sync", inline)
     return fake
 
