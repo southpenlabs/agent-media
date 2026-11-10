@@ -9128,6 +9128,17 @@ names the first time they are read.
   `folders`. `play` starts nothing here: it counts the play and answers
   `{"ok", "playing", "title", "embed", "page"}` for the app to open the
   embed itself.
+  Each embed also carries `art` and `art_large` once its picture is known
+  (10 Nov 2026; David: "let's get the pictures"): the picture its own
+  page names for a shared link (`og:image`, as a link preview reads it;
+  an Insight Timer track's `…/pictures/tiny_rectangle_medium.jpeg`, and
+  `rectangle_medium` for `art_large`), absent until then. A GET with
+  embeds lacking one starts `practice_embed.fill_art` in the background:
+  one page a second, each answer kept in
+  `<state_dir>/practice-embed-art.json`, a page with none asked again
+  after a week. The app loads the picture from the maker's own address,
+  as it does a YouTube thumbnail. `MEDIA_PRACTICE_EMBED_ART=0`: none are
+  asked for.
   With embeds in the list, the answer also has `"embed_play": "page" |
   "widget"` (2 Nov 2026, after reading Insight Timer's terms: their track
   page driven in a hidden WebView with the app's own controls is outside

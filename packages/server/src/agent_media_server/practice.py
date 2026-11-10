@@ -100,6 +100,12 @@ def listing(bearer: str) -> tuple[bool, dict]:
            "styles": lib.style_tree([tuple(i["style_path"]) for i in items if i.get("style_custom")])}
     if any(i.get("source") == "embed" for i in items):
         out["embed_play"] = embed_play()
+        # Their pictures, looked up in the background (practice_embed.fill_art).
+        try:
+            from agent_media_core import practice_embed
+            practice_embed.fill_art_soon()
+        except Exception as e:  # noqa: BLE001 — the list without new pictures
+            print(f"practice: embed pictures failed: {e}", file=sys.stderr)
     return True, out
 
 
