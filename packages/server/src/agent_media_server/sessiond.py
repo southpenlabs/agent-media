@@ -25,8 +25,9 @@ What it does per session:
 * **reads** every event and keeps the session's state from them, never from
   what it sent — a finished background task starts a turn by itself:
   `system/init` or `command_lifecycle started` → working; `control_request
-  can_use_tool` → approval (kept here, since the CLI does not re-send pending
-  requests to a reconnecting client); `result` → waiting;
+  can_use_tool` (or `elicitation`, an MCP server asking the person) →
+  approval (kept here, since the CLI does not re-send pending requests to a
+  reconnecting client); `result` → waiting;
 * **backgrounds** a blocking command a message is waiting behind, once it
   has run `MEDIA_SESSIOND_BACKGROUND_AFTER` seconds (default 30; 0 never):
   the `background_tasks` control request, Ctrl+B's own. A message sent
@@ -135,7 +136,7 @@ headless_mail.py).
 
 Config (env): MEDIA_SESSIOND_SOCKET, MEDIA_SESSIOND_IDLE, MEDIA_SESSIOND_MAX,
 MEDIA_SESSIOND_MIN_FREE_MB, MEDIA_SESSIOND_BACKGROUND_AFTER, MEDIA_SESSIOND_TASK_STALE_S,
-MEDIA_SESSIOND_CLOSE_GRACE, MEDIA_SESSIOND_CLAUDE (the binary; default
+MEDIA_SESSIOND_CLOSE_GRACE, MEDIA_SESSIOND_ELICIT_TIMEOUT, MEDIA_SESSIOND_CLAUDE (the binary; default
 `harnesses.program("claude")`), MEDIA_HEADLESS_MODEL (`--model`),
 MEDIA_HEADLESS_PERMISSIONS (`strict` | `normal`, see permissions.py),
 MEDIA_HEADLESS_EXTRA_ARGS (more `claude` flags; debugging and smoke runs),
@@ -263,6 +264,13 @@ def background_after_s() -> float:
     """How long a foreground command may hold a queued message before it is
     backgrounded; 0 (or less) never."""
     return _env_f("MEDIA_SESSIOND_BACKGROUND_AFTER", 30.0)
+
+
+def elicit_timeout_s() -> float:
+    """How long an MCP server's question (an `elicitation` control request)
+    waits on the card before it is declined, so a thread never hangs on one
+    nobody saw; 0 (or less) never."""
+    return _env_f("MEDIA_SESSIOND_ELICIT_TIMEOUT", 900.0)
 
 
 def close_grace_s() -> float:
@@ -2034,13 +2042,36 @@ class Supervisor:
             elif t == "control_request":
                 req = obj.get("request") or {}
                 rid = str(obj.get("request_id") or "")
-                if req.get("subtype") == "can_use_tool" and rid:
+                if req.get("subtype") in ("can_use_tool", "elicitation") and rid:
+                    # An `elicitation` is an MCP server asking the person
+                    # (a form, or a URL to visit): a card like a question,
+                    # answered `{action, content}` (driver/headless.py),
+                    # declined if nobody answers in `elicit_timeout_s`.
                     s.pending[rid] = {"request_id": rid, "request": req, "at": round(now, 3)}
                     s.set_state("approval")
+                    if req.get("subtype") == "elicitation":
+                        log.info("sessiond: %s elicitation from %s (%s)", s.id[:8],
+                                 req.get("mcp_server_name") or "?", req.get("mode") or "form")
+                        if elicit_timeout_s() > 0:
+                            t = threading.Timer(elicit_timeout_s(), self._elicit_expired,
+                                                args=(s, rid))
+                            t.daemon = True
+                            t.start()
                 elif rid:
                     # Nothing else is ours to answer (hook callbacks, MCP
                     # messages are for SDK hosts); say so, or the CLI waits.
+                    log.info("sessiond: %s refused control_request %s%s", s.id[:8],
+                             req.get("subtype"),
+                             f" from {req.get('server_name') or req.get('mcp_server_name')}"
+                             if req.get("server_name") or req.get("mcp_server_name") else "")
                     self._reply_error(s, rid, f"{req.get('subtype')} is not supported here")
+            elif t == "control_cancel_request":
+                # The CLI gave up on a request it sent (an MCP server's
+                # question timed out or was aborted): the card goes with it.
+                rid = str(obj.get("request_id") or "")
+                if s.pending.pop(rid, None) is not None and not s.pending \
+                        and s.state == "approval":
+                    s.set_state("working")
             elif t == "control_response":
                 resp = obj.get("response") or {}
                 rid = str(resp.get("request_id") or "")
@@ -2094,7 +2125,8 @@ class Supervisor:
                     s.auto_titled = True
                     threading.Thread(target=self._auto_title, args=(s,), daemon=True,
                                      name="auto-title").start()
-            if (s.state, len(s.pending)) != before or t in ("result", "control_request"):
+            if (s.state, len(s.pending)) != before or t in ("result", "control_request",
+                                                          "control_cancel_request"):
                 self._save(s)
             if s.queued and s.foreground:
                 self._background_held(s)
@@ -2172,6 +2204,28 @@ class Supervisor:
             log.exception("sessiond: auto-title %s", s.id[:8])
         else:
             log.info("sessiond: %s named %r", s.id[:8], title)
+
+    def _elicit_expired(self, s: Session, rid: str) -> None:
+        """An MCP server's question nobody answered: declined, so the turn
+        goes on (`elicit_timeout_s`)."""
+        with self.cond:
+            entry = s.pending.get(rid)
+            if entry is None or not s.running:
+                return
+            log.info("sessiond: %s elicitation %s from %s declined after %.0f s unanswered",
+                     s.id[:8], rid[:12], (entry.get("request") or {}).get("mcp_server_name") or "?",
+                     elicit_timeout_s())
+            try:
+                self._write(s, {"type": "control_response",
+                                "response": {"subtype": "success", "request_id": rid,
+                                             "response": {"action": "decline"}}})
+            except Refused:
+                return
+            del s.pending[rid]
+            if not s.pending and s.state == "approval":
+                s.set_state("working")
+            self._save(s)
+            self.cond.notify_all()
 
     def _reply_error(self, s: Session, rid: str, error: str) -> None:
         try:
@@ -2546,10 +2600,11 @@ class Supervisor:
                     del s.pending[rid]
                     self.cond.notify_all()
                     continue
+                elicit = (s.pending[rid].get("request") or {}).get("subtype") == "elicitation"
                 self._write(s, {"type": "control_response",
                                 "response": {"subtype": "success", "request_id": rid,
-                                             "response": {"behavior": "deny",
-                                                          "message": TYPED_INSTEAD}}})
+                                             "response": {"action": "cancel"} if elicit else
+                                             {"behavior": "deny", "message": TYPED_INSTEAD}}})
                 del s.pending[rid]
             if s.state == "approval":
                 s.set_state("working")

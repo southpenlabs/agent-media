@@ -322,6 +322,8 @@ class Fake:
                 self.tool_turn(text[5:].strip())
             elif text == "ask":
                 self.ask_turn()
+            elif text.startswith("elicit"):
+                self.elicit_turn(text[6:].strip() or "form")
             elif text.startswith("agent:"):
                 aid, _, desc = text[6:].strip().partition(" ")
                 self.agents[aid] = desc
@@ -426,6 +428,46 @@ class Fake:
         said = ", ".join(f'"{q}"="{a}"' for q, a in answers.items())
         self.tool_result(tid, f"The user answered: {said}")
         words = "answers: " + "; ".join(f"{a}" for a in answers.values())
+        self.assistant([{"type": "text", "text": words}], stop="end_turn")
+        self.result(words)
+
+    def elicit_turn(self, kind: str) -> None:
+        """An MCP server asking the person, as the CLI forwards it (2.1.319's
+        `elicitation` control request): `form` (fields), `url` (a page to
+        visit) or `withdrawn` (the CLI cancels it before an answer)."""
+        rid = str(uuid.uuid4())
+        q: "queue.Queue[dict]" = queue.Queue()
+        self.responses[rid] = q
+        req = {"subtype": "elicitation", "mcp_server_name": "tickets",
+               "message": "Which seat would you like?", "mode": "form"}
+        if kind == "url":
+            req.update(mode="url", url="https://example.com/sign-in", elicitation_id="el1",
+                       message="Sign in to the ticket office")
+        else:
+            req.update(requested_schema={"type": "object", "properties": {
+                "row": {"type": "string", "title": "Row", "enum": ["A", "B"],
+                        "enumNames": ["Front row", "Back row"]},
+                "count": {"type": "integer", "title": "How many seats"},
+                "aisle": {"type": "boolean", "title": "Aisle seat"},
+                "note": {"type": "string", "title": "Anything else"}},
+                "required": ["row", "count", "aisle"]},
+                property_order=["row", "count", "aisle", "note"])
+        emit({"type": "control_request", "request_id": rid, "request": req})
+        try:
+            if kind == "withdrawn":
+                time.sleep(TICK * 20)
+                emit({"type": "control_cancel_request", "request_id": rid})
+                resp = {"response": {"action": "cancel"}}
+            else:
+                resp = q.get()
+        finally:
+            self.responses.pop(rid, None)
+        if resp.get("subtype") in ("eof", "interrupted"):
+            return
+        body = resp.get("response") or {}
+        words = f"elicit {body.get('action')}"
+        if "content" in body:
+            words += " " + json.dumps(body["content"], sort_keys=True)
         self.assistant([{"type": "text", "text": words}], stop="end_turn")
         self.result(words)
 

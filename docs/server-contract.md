@@ -1135,8 +1135,9 @@ goes back; `1` on the review page sends.
 **Headless form** (22 Sep 2026, §17). A headless session's approval is not
 read off a screen: it is the agent's own pending permission request
 (`control_request can_use_tool`), kept by `media-sessiond` until answered —
-it never times out. The object carries the request's fields **and** the v0
-fields above, so a client that answers by number keeps working:
+it never times out (an MCP elicitation does, below). The object carries the
+request's fields **and** the v0 fields above, so a client that answers by
+number keeps working:
 
 ```json
 {"id": "34c79dca-81d5-47ff-a698-e9fd66575082",
@@ -1173,6 +1174,27 @@ fields above, so a client that answers by number keeps working:
   answer it. `key` is a hash of `id`.
 - One approval at a time: the oldest pending request. The next appears once
   it is answered.
+- **An MCP server asking the person** (10 Nov 2026; the CLI's `elicitation`
+  control request, which sessiond used to refuse unseen) is a `kind:
+  "question"` approval with `tool: "elicitation"` and `elicitation: {"server",
+  "mode": "form" | "url", "message", "url", "id"}`, so the ordinary question
+  card renders it. A form's fields are one question each, in the server's
+  order: an enum or boolean as single-select options (`free_text: false`;
+  Yes/No for a boolean), an array of enums as multi-select, a string or
+  number as free text with no options; a field the server does not require
+  also offers `Skip`. The server's message leads the first question (it is
+  the whole question when there is one field). A URL request, or a form with
+  no fields, is one question, `Accept` or `Decline` (numbered, so `choice`
+  answers it), the URL after the message. Answers take the usual shapes; the
+  CLI is sent `{"action": "accept", "content": {field: value}}` (numbers
+  parsed, a 400 when they do not parse), a deny (the card's Cancel) is
+  `{"action": "decline"}`, a message typed over it is `{"action": "cancel"}`,
+  and one left unanswered for `MEDIA_SESSIOND_ELICIT_TIMEOUT` seconds (900;
+  0 never) is declined by sessiond so the turn goes on. When the CLI
+  withdraws the request (`control_cancel_request`), the card goes. The
+  answer's response carries `action` (and `content`) in place of `answers`.
+  Any other control request sessiond does not take is refused, logged at
+  INFO with its subtype and server.
 
 #### 6.2.2 Messages — BUILT 22 Sep 2026
 

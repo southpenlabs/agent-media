@@ -364,6 +364,83 @@ def test_a_question_is_answered_with_multi_select_and_free_text(host):
     wait_for(lambda: last_text(host, sid) == "answers: apple, pear; Something else entirely")
 
 
+def test_an_mcp_elicitation_is_a_question_card_and_accept_returns_its_content(host):
+    sid = start(host, "elicit")
+    wait_for(lambda: state(host, sid) == "approval")
+    appr = driver.headless_driver().approval(sid)
+    assert appr["kind"] == "question" and appr["tool"] == "elicitation"
+    assert appr["elicitation"]["server"] == "tickets"
+    qs = appr["questions"]
+    assert [q["question"] for q in qs] == ["Which seat would you like?\n\nRow",
+                                          "How many seats", "Aisle seat", "Anything else"]
+    assert [o["label"] for o in qs[0]["options"]] == ["Front row", "Back row"]
+    assert qs[0]["free_text"] is False and qs[1]["options"] == [] and qs[1]["free_text"]
+    assert [o["label"] for o in qs[2]["options"]] == ["Yes", "No"]
+    # Not required: it can be left out.
+    assert [o["label"] for o in qs[3]["options"]] == ["Skip"] and qs[3]["free_text"]
+    # The card's shape: option numbers and typed words, one per question.
+    bad = [{"question_index": 0, "selected": [2]}, {"question_index": 1, "other_text": "two"},
+           {"question_index": 2, "selected": [1]}, {"question_index": 3, "selected": [1]}]
+    ok, d = driver.headless_driver().answer(sid, {"request_id": appr["id"], "answers": bad})
+    assert not ok and d["status"] == 400 and "number" in d["error"]
+    bad[1] = {"question_index": 1, "other_text": "2"}
+    ok, d = driver.headless_driver().answer(sid, {"request_id": appr["id"], "answers": bad})
+    assert ok and d["action"] == "accept"
+    assert d["content"] == {"row": "B", "count": 2, "aisle": True}
+    wait_for(lambda: last_text(host, sid) ==
+             'elicit accept {"aisle": true, "count": 2, "row": "B"}')
+    assert state(host, sid) == "waiting"
+
+
+def test_an_elicitation_cancelled_on_the_card_is_declined(host):
+    sid = start(host, "elicit")
+    wait_for(lambda: state(host, sid) == "approval")
+    appr = driver.headless_driver().approval(sid)
+    ok, d = driver.headless_driver().answer(
+        sid, {"request_id": appr["id"], "decision": "deny", "message": "cancelled"})
+    assert ok and d["action"] == "decline"
+    wait_for(lambda: last_text(host, sid) == "elicit decline")
+
+
+def test_a_url_elicitation_is_accept_or_decline_by_number(host):
+    sid = start(host, "elicit url")
+    wait_for(lambda: state(host, sid) == "approval")
+    appr = driver.headless_driver().approval(sid)
+    assert appr["questions"][0]["question"] == \
+        "Sign in to the ticket office\n\nhttps://example.com/sign-in"
+    assert [o["label"] for o in appr["options"]] == ["Accept", "Decline"]
+    ok, d = driver.headless_driver().answer(sid, {"choice": 1, "key": appr["key"]})
+    assert ok and d["action"] == "accept" and "content" not in d
+    wait_for(lambda: last_text(host, sid) == "elicit accept")
+
+
+def test_an_unanswered_elicitation_is_declined_after_its_timeout(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_SESSIOND_ELICIT_TIMEOUT", "0.3")
+    sid = start(host, "elicit")
+    wait_for(lambda: state(host, sid) == "approval")
+    wait_for(lambda: last_text(host, sid) == "elicit decline")
+    assert driver.headless_driver().approval(sid) is None
+    assert state(host, sid) == "waiting"
+
+
+def test_an_elicitation_the_cli_withdraws_takes_its_card_away(host):
+    sid = start(host, "elicit withdrawn")
+    wait_for(lambda: state(host, sid) == "approval")
+    wait_for(lambda: last_text(host, sid) == "elicit cancel")
+    assert driver.headless_driver().approval(sid) is None
+    assert not host.sup.sessions[sid].pending
+
+
+def test_a_message_typed_over_an_elicitation_cancels_it(host):
+    sid = start(host, "elicit")
+    wait_for(lambda: state(host, sid) == "approval")
+    ok, d = driver.headless_driver().send(sid, {}, "reply: no thanks")
+    assert ok
+    wait_for(lambda: last_text(host, sid) == "no thanks")
+    assert any(e.get("type") == "result" and e.get("result") == "elicit cancel"
+               for e in host.sup.sessions[sid].events)
+
+
 def test_a_message_typed_over_a_question_answers_it(host):
     # Typed instead of choosing: the question is declined with a note that
     # the reply follows, so it does not sit on screen with nothing to press.

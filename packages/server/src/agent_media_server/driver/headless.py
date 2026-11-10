@@ -121,6 +121,145 @@ def _trim(value):
     return value
 
 
+#: An elicitation's options when there is nothing to fill in (or a URL to
+#: visit), and the one a field the server does not require offers.
+_ACCEPT, _DECLINE, _SKIP = "Accept", "Decline", "Skip"
+
+
+def _elicit_fields(req: dict) -> list[dict]:
+    """An MCP elicitation's form (`requested_schema`, the restricted JSON
+    Schema MCP allows: flat string, number, integer, boolean and enum
+    properties) as questions for the card, each with what turns its answer
+    back into a value: `{"name", "type", "question", "header", "options":
+    [label], "values": {label: value}, "multiSelect", "free_text",
+    "required"}`, in the CLI's `property_order`."""
+    schema = req.get("requested_schema") if isinstance(req.get("requested_schema"), dict) else {}
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = set(schema.get("required") or [])
+    order = [n for n in req.get("property_order") or [] if n in props]
+    order += [n for n in props if n not in order]
+    fields, seen = [], set()
+    for name in order:
+        prop = props.get(name) if isinstance(props.get(name), dict) else {}
+        kind = str(prop.get("type") or "string")
+        label = str(prop.get("title") or prop.get("description") or name)
+        if label in seen:
+            label = f"{label} ({name})"
+        seen.add(label)
+        values: dict = {}
+        multi = False
+        if kind == "boolean":
+            values = {"Yes": True, "No": False}
+        elif kind == "array":
+            multi = True
+            items = prop.get("items") if isinstance(prop.get("items"), dict) else {}
+            prop = items
+        if prop.get("oneOf") or prop.get("anyOf"):
+            for o in prop.get("oneOf") or prop.get("anyOf") or []:
+                if isinstance(o, dict) and "const" in o:
+                    values[str(o.get("title") or o["const"])] = o["const"]
+        elif isinstance(prop.get("enum"), list):
+            names = prop.get("enumNames") if isinstance(prop.get("enumNames"), list) else []
+            for i, v in enumerate(prop["enum"]):
+                values[str(names[i] if i < len(names) else v)] = v
+        options = list(values)
+        if name not in required:
+            options.append(_SKIP)
+        detail = str(prop.get("description") or "") if prop.get("title") else ""
+        fields.append({"name": name, "type": kind, "question": label, "detail": detail,
+                       "options": options, "values": values, "multiSelect": multi,
+                       "free_text": not values, "required": name in required})
+    return fields
+
+
+def _elicitation_approval(out: dict, req: dict) -> dict:
+    """An MCP server asking the person (an `elicitation` control request) as
+    a question card: a form's fields one question each, or — a URL to visit,
+    or nothing to fill in — one question, Accept or Decline. The card's
+    Cancel declines it (`_answer_entry`)."""
+    server = str(req.get("mcp_server_name") or "")
+    message = str(req.get("message") or "")
+    url = str(req.get("url") or "") if req.get("mode") == "url" else ""
+    header = str(req.get("display_name") or req.get("title") or server)[:40]
+    fields = [] if url else _elicit_fields(req)
+    qs = []
+    if not fields:
+        text = f"{message}\n\n{url}" if url else message
+        qs.append({"question": text or f"{server} asks to go on", "header": header,
+                   "options": [{"n": 1, "label": _ACCEPT,
+                                "description": f"Open {url}" if url else "",
+                                "detail": f"Open {url}" if url else "", "checked": False},
+                               {"n": 2, "label": _DECLINE, "description": "", "detail": "",
+                                "checked": False}],
+                   "multiSelect": False, "free_text": False})
+    for i, f in enumerate(fields):
+        # The server's words lead the first question, or stand for it when
+        # there is only one field.
+        text = f["question"]
+        if i == 0 and message:
+            text = message if len(fields) == 1 and not f["detail"] else f"{message}\n\n{text}"
+        qs.append({"question": text, "header": header if i == 0 else f["name"],
+                   "options": [{"n": j + 1, "label": lab,
+                                "description": f["detail"] if j == 0 and lab != _SKIP else "",
+                                "detail": f["detail"] if j == 0 and lab != _SKIP else "",
+                                "checked": False}
+                               for j, lab in enumerate(f["options"])],
+                   "multiSelect": f["multiSelect"], "free_text": f["free_text"]})
+    one = len(qs) == 1 and not qs[0]["multiSelect"] and not qs[0]["free_text"]
+    out.update(kind="question", tool="elicitation", display_name=header or "MCP server",
+               input_summary=message[:200], input={}, description=message,
+               elicitation={"server": server, "mode": "url" if url else "form",
+                            "message": message, "url": url or None,
+                            "id": req.get("elicitation_id")},
+               questions=qs, question=qs[0]["question"],
+               multiSelect=any(q["multiSelect"] for q in qs),
+               free_text=any(q["free_text"] for q in qs),
+               options=[{"n": o["n"], "label": o["label"], "detail": o["detail"]}
+                        for o in qs[0]["options"]] if one else [],
+               partial=not one)
+    return out
+
+
+def _elicit_response(req: dict, appr: dict, labels: dict) -> dict | str:
+    """The card's answers (`{question: label | [labels] | text}`, as
+    asks.as_labels gives them) as the elicitation's response, `{"action":
+    "accept", "content": {field: value}}` or `{"action": "decline"}`; a
+    string is why they will not do."""
+    qs = appr["questions"]
+    fields = [] if (appr.get("elicitation") or {}).get("url") else _elicit_fields(req)
+    if not fields:
+        got = labels.get(qs[0]["question"])
+        return {"action": "accept"} if got == _ACCEPT else {"action": "decline"}
+    content: dict = {}
+    for f, q in zip(fields, qs):
+        got = labels.get(q["question"])
+        picks = got if isinstance(got, list) else [got]
+        picks = [str(x).strip() for x in picks if str(x if x is not None else "").strip()]
+        if _SKIP in picks and not f["required"]:
+            continue
+        if f["values"]:
+            bad = [x for x in picks if x not in f["values"]]
+            if bad:
+                return f"{bad[0]!r} is not one of the choices for {f['question']!r}"
+            vals = [f["values"][x] for x in picks]
+            content[f["name"]] = vals if f["multiSelect"] else vals[0]
+            continue
+        text = picks[0] if picks else ""
+        if f["type"] in ("number", "integer"):
+            try:
+                num = float(text.replace(",", ""))
+            except ValueError:
+                return f"{f['question']!r} takes a number"
+            if f["type"] == "integer":
+                if num != int(num):
+                    return f"{f['question']!r} takes a whole number"
+                num = int(num)
+            content[f["name"]] = num
+        else:
+            content[f["name"]] = text
+    return {"action": "accept", "content": content}
+
+
 def approval_of(entry: dict) -> dict:
     """A pending `can_use_tool` request as the thread's `approval`.
 
@@ -148,6 +287,8 @@ def approval_of(entry: dict) -> dict:
            "at": entry.get("at"), "partial": False,
            "key": hashlib.sha1(rid.encode()).hexdigest()[:12],
            "agent": "antigravity" if entry.get("antigravity") else "opencode" if entry.get("oc") else "claude"}
+    if req.get("subtype") == "elicitation":
+        return _elicitation_approval(out, req)
     if tool == "AskUserQuestion":
         qs = []
         for q in inp.get("questions") or []:
@@ -510,7 +651,20 @@ class HeadlessDriver:
                            "approval": appr}
         req = entry.get("request") or {}
         inp = req.get("input") if isinstance(req.get("input"), dict) else {}
-        if decision == "deny":
+        if req.get("subtype") == "elicitation":
+            response = {"action": "decline"}
+            if decision == "allow":
+                answers = request.get("answers")
+                try:
+                    labels = asks.as_labels(appr["questions"],
+                                            asks.normalise(appr["questions"], answers))
+                except asks.Refused as e:
+                    return False, {"error": str(e), "status": 400, "approval": appr}
+                got = _elicit_response(req, appr, labels)
+                if isinstance(got, str):
+                    return False, {"error": got, "status": 400, "approval": appr}
+                response = got
+        elif decision == "deny":
             response = {"behavior": "deny",
                         "message": str(request.get("message") or "").strip() or DENY_MESSAGE}
         elif appr["kind"] == "question":
@@ -541,6 +695,10 @@ class HeadlessDriver:
             out["answered"] = int(request.get("choice") or 0)
             out["label"] = next((o["label"] for o in appr["options"]
                                  if o["n"] == out["answered"]), "")
-        if appr["kind"] == "question" and decision == "allow":
+        if appr.get("elicitation"):
+            out["action"] = response["action"]
+            if "content" in response:
+                out["content"] = response["content"]
+        elif appr["kind"] == "question" and decision == "allow":
             out["answers"] = response["updatedInput"]["answers"]
         return True, out
