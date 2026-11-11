@@ -1,7 +1,7 @@
 """Draining and resuming around a restart of media-sessiond (19 Oct 2026).
 
 While a restart is pending (core restart_services' record) sessiond holds new
-messages, refuses new chats and delivers what it held after; a stop notes
+messages and new chats' first messages and delivers what it held after; a stop notes
 what each live session was doing, and the next start resumes the ones cut
 off, once, with a note. Against the fake `claude` (test_headless.py's
 `host`: sessiond in-process on a throwaway socket, a throwaway state dir).
@@ -49,14 +49,18 @@ def test_messages_are_held_while_a_restart_is_pending_then_delivered(host):
     assert _said(host.sup, sid) == "a" and state(host, sid) == "waiting"
     assert [m["text"] for m in sessiond.read_record(sid)["held"]] == ["reply: held"]
     assert host.sup.deliver_due() == []
-    # No new chat while it is pending.
-    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work), text="hi")
-    assert not ok and d["code"] == "restart_pending"
+    # A new chat is made, its first message held, not refused.
+    ok, d = driver.headless_driver().start(agent="claude", cwd=str(host.work),
+                                           text="reply: fresh")
+    assert ok and d["held"] is True and d["fresh"] is True
+    new = d["session"]
+    assert not host.sup.sessions[new].live
     # It gave up (or was cancelled): what it held goes out, in order.
     rs.clear_pending()
     _fresh(host.sup)
-    assert host.sup.deliver_due() == [sid]
+    assert sorted(host.sup.deliver_due()) == sorted([sid, new])
     wait_for(lambda: _said(host.sup, sid) == "held")
+    wait_for(lambda: _said(host.sup, new) == "fresh")
     assert sessiond.read_record(sid)["held"] == []
 
 
@@ -111,6 +115,25 @@ def test_held_messages_outlive_the_restart(host):
         assert sup2.deliver_due() == [sid]
         wait_for(lambda: _said(sup2, sid) == "after")
         assert "--resume" in starts(host)[-1]["argv"]
+    finally:
+        sup2.shutdown()
+
+
+def test_a_new_chat_held_for_the_restart_starts_after_it(host):
+    # David, 11 Nov 2026: a new chat refused "start the chat again once it
+    # has" — "this should happen automatically".
+    _pend()
+    _fresh(host.sup)
+    new = host.sup.start(str(host.work), "reply: later")["session"]
+    rs._update_pending(lambda r: {**r, "state": "firing"})
+    sessiond.stop(host.srv)
+    sup2 = sessiond.Supervisor()
+    sup2.load()
+    try:
+        assert [m["text"] for m in sup2.sessions[new].held] == ["reply: later"]
+        assert sup2.deliver_due() == [new]
+        wait_for(lambda: _said(sup2, new) == "later")
+        assert "--resume" not in starts(host)[-1]["argv"]
     finally:
         sup2.shutdown()
 

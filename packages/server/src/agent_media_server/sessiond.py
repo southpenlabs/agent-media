@@ -99,7 +99,8 @@ never has two writers.
 **Drain, then resume** (19 Oct 2026). While a restart is pending (core
 restart_services' record, `draining`), `send` holds each message on the
 session (`held`, in its record, so it outlives the restart) instead of
-starting a turn, and `start` is refused `restart_pending`; `deliver_due`
+starting a turn, and `start` makes the chat with its first message held
+(`unstarted`, 11 Nov 2026; it was refused before); `deliver_due`
 sends them, in order, once none is pending. A stop first notes on each live
 session what it was doing (`begin_stop` → `cut_off`; a crash leaves the
 record saying it), and the next start resumes each session cut off — mid-
@@ -2840,11 +2841,15 @@ class Supervisor:
                               "quota_limited", quota=q.view(rec=lim))
             return self._oc_start(cwd, text, workspace=workspace,
                                   permissions=perms.mode(permissions), model=model)
-        if self.draining():
-            raise Refused(RESTART_REFUSED, "restart_pending")
+        # A restart pending (David, 11 Nov 2026, screenshot: a new chat
+        # refused with "start the chat again once it has" — "this should
+        # happen automatically"): the chat is made now and its first message
+        # held, as a reply in an open thread is; `deliver_due` starts it after
+        # the restart, and its reply notifies as any does.
+        restart_hold = bool(self.draining())
         q = _quota()
         lim = q.limited(agent=agent) if q.path().exists() else None
-        if lim:
+        if lim and not restart_hold:
             raise Refused(QUOTA_REFUSED.format(at=_clock(float(lim["resets_at"]))),
                           "quota_limited", quota=q.view(rec=lim))
         session = session or str(uuid.uuid4())
@@ -2857,14 +2862,15 @@ class Supervisor:
                 raise Refused(f"session {session[:8]} already exists", "exists")
             if not os.path.isdir(cwd):
                 raise Refused(f"no such directory {cwd!r}", "bad_cwd")
-            try:
-                self._ensure_room(slot=slot, for_id=session, slot_from=slot_from,
-                                  quiet=_speech_level(session) != "quiet")
-                full = ""
-            except Refused as e:
-                if e.code != "busy":
-                    raise
-                full = e.error
+            full = ""
+            if not restart_hold:
+                try:
+                    self._ensure_room(slot=slot, for_id=session, slot_from=slot_from,
+                                      quiet=_speech_level(session) != "quiet")
+                except Refused as e:
+                    if e.code != "busy":
+                        raise
+                    full = e.error
             s = Session(session, cwd, agent=agent, workspace=workspace,
                         permissions=perms.mode(permissions), model=model,
                         mode="plan" if mode == "plan" else "")
@@ -2875,6 +2881,17 @@ class Supervisor:
                     raise Refused("only a Claude Code chat can be branched with its history",
                                   "unsupported")
                 s.fork_from, s.fork_at = fork_from, fork_at
+            if restart_hold:
+                s.unstarted = True
+                self.sessions[session] = s
+                uid = str(uuid.uuid4())
+                s.held.append({"uuid": uid, "text": text, "at": round(time.time(), 3),
+                               "keep_pending": False, **_slot_mark(slot, slot_from)})
+                self._save(s)
+                log.info("sessiond: %s: new chat held for the pending restart", s.id[:8])
+                return {"session": s.id, "uuid": uid, "fresh": True, "resumed": False,
+                        "queued": True, "held": True, "acked": False, "state": s.state,
+                        "live": False, "pid": None, **_slot_mark(slot, slot_from)}
             if full:
                 # Every slot busy (David, 2 Nov 2026: "Can a message in this
                 # situation be queued with an alert banner of some sort rather

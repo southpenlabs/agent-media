@@ -1667,8 +1667,10 @@ is pending (`restart_pending`, §6.1, §17 "Restarts"), a reply is not given
 to the agent but kept: the answer adds `"held": true` (with `queued: true`,
 `acked: false`), and the message is delivered, in order, once the host has
 restarted (or the restart gives up). Show it as "held until the server
-restarts", not as failed. A new chat is refused meanwhile: 503 `code:
-"restart_pending"`, with a sentence.
+restarts", not as failed. A new chat is not refused (11 Nov 2026; before,
+503 `code: "restart_pending"`): it is made, its id answered with `"held":
+true, "fresh": true`, and it starts once the host has restarted, as a held
+reply goes; an opencode chat is still refused that way.
 
 **Send now** on a held message (3 Nov 2026; David: "a way of overriding
 the hold on a message for a restart"): `POST /session/release
@@ -11109,7 +11111,8 @@ writes nothing to tmux.
   pending (`$XDG_STATE_HOME/agent-media/restart-pending.json`, written by
   `restart_services`), sessiond holds every new message (`send` answers
   `held: true`; the message is kept in the session's record, so it
-  outlives the restart) and refuses new chats (`restart_pending`), so no
+  outlives the restart) and holds a new chat's first message the same way
+  (11 Nov 2026; it refused them, `restart_pending`, before), so no
   session becomes busy again; each busy session is told once, by its
   context hook, to end its turn. A session whose only business is a
   question or permission card does not hold the restart up: the agent
