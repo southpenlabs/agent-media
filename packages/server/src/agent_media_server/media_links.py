@@ -12,7 +12,7 @@ server knows what each tab does with it).
 - podcast — a YouTube video, saved and downloaded small
   (agent_media_core.podcast_links); the Podcasts tab's `saved` list.
 - practice — a YouTube video or a podcast feed (practice_library.add).
-- book — a YouTube video or playlist, imported into Audiobookshelf as
+- book — a YouTube video or playlist, imported into the audiobook folder as
   `media book import-youtube` does.
 - music — a Spotify album, playlist or song (agent_media_core.music_links),
   the Music tab's `albums` list, played from YouTube.

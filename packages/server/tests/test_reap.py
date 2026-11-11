@@ -1,10 +1,9 @@
-"""The idle reaper (`reap.py`), resting (`rest.py`), pins (`pins.py`) and the
-archive import (`archive_import.py`).
+"""The idle reaper (`reap.py`), resting (`rest.py`) and pins (`pins.py`).
 
 Everything underneath is fake: the live sweep, the panes' screens, the speech
 state, the memory (a fake /proc root from the conftest), transcripts (under
 the throwaway CLAUDE_CONFIG_DIR / CODEX_HOME / PI_CODING_AGENT_DIR /
-HERMES_HOME), the gateway and Audiobookshelf. Closing a pane goes to a
+HERMES_HOME) and the gateway. Closing a pane goes to a
 recorder; nothing here can reach tmux.
 """
 
@@ -18,7 +17,7 @@ import time
 
 import pytest
 
-from agent_media_server import (app, archive, archive_import, drafts, panes, pins, procmem,
+from agent_media_server import (app, drafts, panes, pins, procmem,
                                 reap, recaps, rest, send, sessions)
 
 from test_contract import (AUTH, SID, SID2, call, server, shelf,  # noqa: F401
@@ -440,10 +439,9 @@ def test_a_failed_send_leaves_the_mark(server, shelf, signed_in, typed, monkeypa
 
 @pytest.fixture()
 def no_retag(monkeypatch):
-    """A close or a resume re-tags the ABS items in the background
-    (`send._retag` → `book_tracks.sync_tags`), which would reach the host's
-    real Audiobookshelf. Never from a test."""
-    monkeypatch.setattr(send, "_retag", lambda s: None)
+    """Kept for its callers: a close or a resume used to re-tag the
+    Audiobookshelf items in the background (gone with Audiobookshelf,
+    11 Nov 2026). Nothing left to stub."""
 
 
 def test_a_resume_clears_the_mark(server, shelf, signed_in, typed, no_retag, monkeypatch):
@@ -492,7 +490,7 @@ def test_a_generated_recap_shows_on_the_rows_and_the_log(server, shelf, signed_i
     assert {r["session"]: r for r in obj["sessions"]}[SID]["recap"] == \
         {"text": "where this thread was", "at": 1789974112.0, "source": "agent-media"}
     monkeypatch.setattr(book_tracks, "conversation_log",
-                        lambda s, f, target=None, positions=True: [])
+                        lambda s: [])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
     res, obj = call(server, "GET", f"/conversation/log?session={SID}", headers=AUTH)
     assert res.status == 200, obj
@@ -622,10 +620,7 @@ def test_pin_refusals(server, shelf, signed_in, monkeypatch):
 
 
 def test_pin_is_gated_and_open_to_the_web_client(server, shelf, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "POST", "/session/pin", {"session": SID})
     assert res.status == 401 and obj["ok"] is False
     assert not pins.PINS.path().exists()
@@ -683,10 +678,7 @@ def test_pocket_leases_the_thread_open(server, shelf, signed_in, typed):
 
 def test_pocket_is_gated(server, shelf, monkeypatch):
     from agent_media_core import watching
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "POST", "/session/pocket", {"session": SID2, "pocketed": True})
     assert res.status == 401 and not watching.is_open(SID2, pocketed=True)
 
@@ -774,10 +766,7 @@ def test_a_question_recheck_never_runs_outside_the_server(monkeypatch):
 
 def test_black_screen_is_gated(server, shelf, monkeypatch):
     from agent_media_core import watching
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "POST", "/device/black", {"on": True})
     assert res.status == 401 and not watching.black_screen_on()
 
@@ -1009,101 +998,6 @@ def test_the_language_is_the_servers(server, shelf, signed_in, monkeypatch):
     assert "/settings/language" in app.CORS_PATHS
 
 
-# --- the archive import ---------------------------------------------------------------------
-
-@pytest.fixture()
-def abs_fake(monkeypatch, tmp_path):
-    """A conversations library of four items and an audiobook library, on one
-    server. Any write to ABS fails the test."""
-    from agent_media_core import book_tracks
-
-    d = tmp_path / "book-tracks"
-    d.mkdir(exist_ok=True)
-    for sid, folder in ((SID, "/lib/Conversations/p-agent-media/Sasonica music"),
-                        (SID2, "/lib/Conversations/p-agent-media/Sasonica web"),
-                        (S3, "/lib/Conversations/p-sasonica/Player")):
-        (d / f"{sid}.json").write_text(json.dumps({"session": sid, "folder": folder}))
-    monkeypatch.setattr(sessions, "_manifest_dir", lambda: d)
-
-    def item(i, path, tags, title=""):
-        return {"id": i, "path": path,
-                "media": {"tags": tags, "metadata": {"title": title or path.split("/")[-1]}}}
-
-    libs = {
-        "lib-conv": [item("li_1", "/conversations/p-agent-media/Sasonica music", ["archived"]),
-                     item("li_2", "/conversations/p-agent-media/Sasonica web", ["live"]),
-                     item("li_3", "/conversations/p-sasonica/Player", ["archived", "x"]),
-                     item("li_4", "/conversations/p-old/Before manifests", ["archived"])],
-        "lib-books": [item("li_9", "/audiobooks/Author/A Book", ["archived"])],
-    }
-    asked = []
-
-    def items(url, token, lib_id):
-        asked.append((url, lib_id))
-        return libs[lib_id]
-
-    monkeypatch.setattr(book_tracks, "_abs_items", items)
-
-    def no_writes(*a, **k):
-        raise AssertionError("the import wrote to Audiobookshelf")
-
-    monkeypatch.setattr(book_tracks, "_abs_patch", no_writes)
-    servers = [("http://abs", "tok", [{"id": "lib-conv", "name": "Conversations"},
-                                      {"id": "lib-books", "name": "Audiobooks"}])]
-    return servers, asked
-
-
-def test_import_maps_archived_items_to_sessions(abs_fake):
-    servers, asked = abs_fake
-    archive.set_archived(S3, True)
-    rows, problems = archive_import.plan(servers)
-    assert problems == []
-    by = {r["item"]: r for r in rows}
-    assert set(by) == {"li_1", "li_3", "li_4"}          # the audiobook is not reported
-    assert by["li_1"]["session"] == SID and by["li_1"]["state"] == "mark"
-    assert by["li_3"]["session"] == S3 and by["li_3"]["state"] == "already"
-    assert by["li_4"]["session"] is None and by["li_4"]["state"] == "unmapped"
-    assert by["li_1"]["tail"] == "p-agent-media/Sasonica music"
-
-
-def test_import_is_a_dry_run_unless_applied(abs_fake):
-    servers, _ = abs_fake
-    buf = io.StringIO()
-    assert archive_import.run(servers=servers, out=buf) == 0
-    assert not archive.is_archived(SID)
-    text = buf.getvalue()
-    assert "would mark" in text and SID[:8] in text and "run with --apply" in text
-    buf = io.StringIO()
-    archive_import.run(apply=True, servers=servers, out=buf)
-    assert archive.is_archived(SID) and not archive.is_archived(SID2)
-    assert "marked" in buf.getvalue()
-    obj_buf = io.StringIO()
-    archive_import.run(servers=servers, as_json=True, out=obj_buf)
-    states = {r["item"]: r["state"] for r in json.loads(obj_buf.getvalue())["rows"]}
-    assert states["li_1"] == "already"
-
-
-def test_import_marks_a_session_once_across_servers(abs_fake):
-    servers, _ = abs_fake
-    rows, _ = archive_import.plan(servers + servers)
-    assert [r["session"] for r in rows if r["state"] == "mark"] == [SID, S3]
-    assert [r["item"] for r in rows if r["state"] == "unmapped"] == ["li_4"]
-
-
-def test_import_reports_a_library_that_did_not_answer(abs_fake, monkeypatch):
-    from agent_media_core import book_tracks
-
-    servers, _ = abs_fake
-
-    def boom(url, token, lib_id):
-        raise OSError("timed out")
-
-    monkeypatch.setattr(book_tracks, "_abs_items", boom)
-    buf = io.StringIO()
-    assert archive_import.run(servers=servers, out=buf) == 1
-    assert "problem: http://abs library Conversations: timed out" in buf.getvalue()
-
-
 # --- the CLI ---------------------------------------------------------------------------------
 
 def _media(argv: list[str]) -> int:
@@ -1125,15 +1019,6 @@ def test_media_session_reap_dispatches(monkeypatch):
     assert seen == [(None, False, True), ("apply", True, True), ("dry-run", False, False)]
     with pytest.raises(SystemExit):
         _media(["session-reap", "--apply", "--dry-run"])
-
-
-def test_media_session_archive_import_dispatches(monkeypatch):
-    seen = []
-    monkeypatch.setattr(archive_import, "run", lambda apply=False, as_json=False:
-                        seen.append((apply, as_json)) or 0)
-    assert _media(["session-archive-import"]) == 0
-    assert _media(["session-archive-import", "--apply"]) == 0
-    assert seen == [(False, False), (True, False)]
 
 
 def test_the_timer_template_runs_the_reaper():

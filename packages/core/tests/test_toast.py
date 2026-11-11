@@ -242,7 +242,7 @@ def test_the_feed_and_the_log_carry_unheard(tmp_path):
                          extras={**base, "held": True, "muted": True})
     turns = session_feed.turns("s9", store=st)
     assert [t.unheard for t in turns] == [False, True]
-    lines = book_tracks.conversation_log("s9", tmp_path, positions=False)
+    lines = book_tracks.conversation_log("s9")
     assert [l.get("unheard", False) for l in lines] == [False, True]
     st.mark_heard(rid)
     assert [t.unheard for t in session_feed.turns("s9", store=st)] == [False, False]

@@ -91,11 +91,10 @@ def test_the_commented_lines_stay_commented(tmp_path, monkeypatch):
     path = tmp_path / "agent-media.env"
     path.write_text(EXAMPLE.read_text())
     monkeypatch.setenv("MEDIA_ENV_FILE", str(path))
-    for k in ("MEDIA_SPEECH_DEFAULT_TARGET", "MEDIA_ABS_URLS", "MEDIA_REPLY_USERS"):
+    for k in ("MEDIA_SPEECH_DEFAULT_TARGET", "MEDIA_REPLY_TMUX"):
         monkeypatch.delenv(k, raising=False)
     _env.load_env_file("test")
-    assert not os.environ.get("MEDIA_ABS_URLS")
-    assert not os.environ.get("MEDIA_REPLY_USERS")
+    assert not os.environ.get("MEDIA_REPLY_TMUX")
 
 
 def test_it_does_not_carry_secrets():

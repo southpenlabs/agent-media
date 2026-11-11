@@ -16,8 +16,8 @@ after a week):
   words from the English Wikipedia page MusicBrainz links (through
   Wikidata), so the page is that artist's and no namesake's.
 - **author** — the English Wikipedia page of that name, only when its
-  description says a writer; else the description Audiobookshelf keeps
-  for the author.
+  description says a writer. (Audiobookshelf's own author description was
+  the fallback until it was left, 11 Nov 2026.)
 - **show** — the iTunes podcast directory's show of that name: artwork,
   who makes it, genre, episode count, its Apple page; the words from the
   show's own feed. A show saved from YouTube links is its channel instead
@@ -243,36 +243,16 @@ def _artist(name: str) -> Optional[dict]:
 
 # ---- authors ------------------------------------------------------------------------
 
-def _abs_author(name: str) -> Optional[str]:
-    """Audiobookshelf's description of the author, where it keeps one."""
-    try:
-        from . import book_tracks
-        ready = book_tracks._abs_ready()
-        if not ready:
-            return None
-        url, token, libs = ready
-        for lib in libs:
-            req = urllib.request.Request(f"{url}/api/libraries/{lib['id']}/authors",
-                                         headers={"Authorization": f"Bearer {token}"})
-            with urllib.request.urlopen(req, timeout=12) as r:
-                for a in json.loads(r.read()).get("authors") or []:
-                    if _norm(a.get("name", "")) == _norm(name) and (a.get("description") or "").strip():
-                        return a["description"].strip()
-    except Exception:  # noqa: BLE001 — none kept
-        return None
-    return None
-
-
 def _author(name: str) -> Optional[dict]:
     wiki = _wiki(name)
     if wiki and not _WRITER.search(wiki.get("short") or ""):
         wiki = None
-    words = (wiki or {}).get("description") or _abs_author(name)
-    if not (wiki or words):
+    if not wiki:
         return None
+    words = wiki.get("description")
     links = [{"label": "Wikipedia", "url": wiki["url"]}] if wiki and wiki.get("url") else []
     place = _where((wiki or {}).get("qid"), ("P551", "P19"))
-    return {"source": "wikipedia" if wiki else "audiobookshelf", "name": name, "photo": (wiki or {}).get("photo"),
+    return {"source": "wikipedia", "name": name, "photo": (wiki or {}).get("photo"),
             "photo_large": (wiki or {}).get("photo_large"), "description": words, "region": ", ".join(x for x in (place.get("city"), place.get("country")) if x) or None,
             "facts": [wiki["short"]] if wiki and wiki.get("short") else [], "links": links, **place}
 

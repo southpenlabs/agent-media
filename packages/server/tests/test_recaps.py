@@ -242,11 +242,11 @@ def test_targets_rows_carry_the_recap(server, shelf, signed_in):
 def test_the_log_carries_the_recap_but_never_as_a_line(server, shelf, signed_in, monkeypatch):
     from agent_media_core import activity, book_tracks
 
-    monkeypatch.setattr(book_tracks, "conversation_log", lambda s, f, target=None, positions=True: [
+    monkeypatch.setattr(book_tracks, "conversation_log", lambda s: [
         {"start": None, "end": None, "who": "you", "text": "One?", "at": 10.0, "key": ""}])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
     _transcript(SID, [_recap("where we are" + HINT)])
-    for path in ("/conversation/log?item=li_1", f"/conversation/log?session={SID}"):
+    for path in (f"/conversation/log?session={SID}",):
         res, obj = call(server, "GET", path, headers=AUTH)
         assert res.status == 200, obj
         assert obj["recap"] == {"text": "where we are", "at": 1789974112.291,

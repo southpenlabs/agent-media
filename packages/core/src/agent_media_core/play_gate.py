@@ -28,13 +28,13 @@ fetch, retried, finished late. He chose "Gate + hold":
 
 What counts as a start: anything that makes a player begin something new —
 a play, an append, a radio station's next song, a book's next part, a
-reply's tune or music bed, a hand-off to the phone's music app, Spotify.
+reply's tune or music bed, Spotify.
 Never pause, stop, volume, seek, or resuming what is already loaded; a
 book's self-heal reload of the part that was playing is a resume
 (:func:`request` with ``continuing=True``).
 
 Where it sits: in each player's own ``play`` (sinks/music.py, music_local,
-music_sasonica, music_app, book.py, phone_player.play, spotify_remote.play,
+music_sasonica, book.py, spotify_remote.play,
 radio_io.HandoffPlayer.send), which every route reaches — the HTTP routes,
 the MCP tools, the CLI, the radio loop, the book auto-advance, reply_tune —
 plus music_bed.start for the backing music. A caller that knows more (when
@@ -428,7 +428,7 @@ def play_now(hid: str = "", session: str = "") -> dict:
         argv = ["music", "play", "--in-treatment"]
         if e.get("title"):
             argv.append(f"--title={e['title']}")
-        if e.get("target") and e["target"] in ("rooms", "local", "phone", "abs", "sasonica"):
+        if e.get("target") and e["target"] in ("rooms", "local", "phone", "sasonica"):
             argv += ["--where", str(e["target"])]
         if e.get("start"):
             # A mix's chapter: from where it was asked to start.

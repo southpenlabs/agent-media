@@ -297,10 +297,10 @@ def waiting_for(session: str, at: float) -> list[dict]:
 
 # --- what is being said, for the app's mini player ------------------------------
 
-#: `{session: (title, item, at)}` — a reply is polled every couple of seconds
-#: for as long as it plays, and its title and library item do not change while
-#: it does, so asking tmux and ABS once a minute is plenty.
-_NOW_CACHE: dict[str, tuple[str, str | None, float]] = {}
+#: `{session: (title, at)}` — a reply is polled every couple of seconds for as
+#: long as it plays, and its title does not change while it does, so asking
+#: once a minute is plenty.
+_NOW_CACHE: dict[str, tuple[str, float]] = {}
 _NOW_TTL_S = 60.0
 
 
@@ -325,7 +325,7 @@ def _session_title(session: str) -> str:
     return title
 
 
-#: `{session: (title, at)}` for the waiting replies: same TTL, no ABS call.
+#: `{session: (title, at)}` for the waiting replies: same TTL.
 _TITLE_CACHE: dict[str, tuple[str, float]] = {}
 
 
@@ -378,9 +378,8 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
 
     The canvas's speech snapshot (`state`) says whether a voice is live and
     which session it belongs to; this adds what the app needs to show it
-    anywhere — the conversation's title and its library item on the caller's
-    own server, so a tap can open it. Gated like `/conversation`: titles and
-    sentences are the conversation's, and the ABS bearer is the credential.
+    anywhere — the conversation's title, so a tap can open it. Gated like
+    `/conversation`: titles and sentences are the conversation's.
     """
     user, err = auth.gate(bearer)
     if not user:
@@ -389,7 +388,7 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
     paused = bool(state.get("paused"))
     out = {"live": speaking or paused, "speaking": speaking, "paused": paused,
            "sentence": state.get("sentence") or "", "session": None,
-           "title": "", "item": None,
+           "title": "",
            "pos": state.get("pos"), "dur": state.get("dur"),
            "speed": state.get("speed"), "muted": bool(state.get("muted"))}
     # Where that voice is (or the next one will be): the bar shows it, and
@@ -421,8 +420,7 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
             out["images"] = images
             out["figure"] = bool(figure)
     # Replies said but not heard yet, because the voice is busy. The app's
-    # "New reply waiting". Named, like the live one, but title only: the
-    # library item is looked up when it plays.
+    # "New reply waiting". Named, like the live one.
     out["queued"] = [_queued_row(q) for q in state.get("queued") or []
                      if isinstance(q, dict)]
     # Threads whose reply was paused and then let go by the hold (the
@@ -434,11 +432,10 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
     if out["live"] and sessions._SESSION.fullmatch(session):
         now = time.time()
         hit = _NOW_CACHE.get(session)
-        if not hit or now - hit[2] > _NOW_TTL_S:
-            item, ready = threads.item_for_session(session, bearer)
-            hit = (_session_title(session), item if ready else None, now)
+        if not hit or now - hit[1] > _NOW_TTL_S:
+            hit = (_session_title(session), now)
             _NOW_CACHE[session] = hit
-        out.update(session=session, title=hit[0], item=hit[1])
+        out.update(session=session, title=hit[0])
     return True, out
 
 

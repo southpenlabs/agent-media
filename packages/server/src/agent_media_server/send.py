@@ -1,13 +1,11 @@
-"""Reply from the player: an Audiobookshelf listener types back into a session.
+"""Typing into a session: a reply from the app, revived if it has ended.
 
-You are listening to a past conversation in Sasonica (the ABS app fork). A box
-under the player takes a line of text and puts it into the Claude Code session
-that produced what you are hearing — reviving it in a tmux window if it has
-since ended.
-
-The design, and the arguments for it, are in
-`docs/proposals/2026-09-04-reply-from-the-player.md`. Two of the three things
-it settles are identity and live in `auth_abs`; the third is implemented here:
+A box under a thread takes a line of text and puts it into the agent session
+behind it — reviving it in a tmux window if it has since ended. This began as
+"reply from the player", typed under Sasonica's Audiobookshelf player
+(`docs/proposals/2026-09-04-reply-from-the-player.md`); Audiobookshelf was
+left on 11 Nov 2026, and who may type is now the paired device (auth.py).
+What this module settles:
 
 * **A dead session is revived, not refused.** In a background window, in the
   attached tmux client, because Claude Code's TUI will not start without one.
@@ -680,11 +678,11 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
         persona: str = "", role: str = "", root: str = "") -> tuple[bool, dict]:
     """Start a fresh session with `text` as its first message.
 
-    What the phone's assistant button does. Nothing to resume and no item yet:
+    What the phone's assistant button does. Nothing to resume yet:
     the window opens in the scratch session, the words are typed in, and the
     listener's turn is shelved against the new session's uuid so the
     conversation appears in the library once its first reply is spoken. The
-    app is told the uuid and polls `/conversation?session=` for the item.
+    app is told the uuid and polls `/conversation?session=`.
     `project` (a series name) opens it in that project's directory instead,
     and `cwd` (a directory, as `/targets` hands them out) says the same thing
     without the library's naming convention in the middle.
@@ -910,16 +908,6 @@ def _ask_pane(text: str, *, agent: str, cwd: str, host: str, flags: list[str],
 
 # --- managing the session behind a conversation ---------------------------------
 
-def _retag(session: str) -> None:
-    """Reconcile the live tag now rather than at the next sweep."""
-    try:
-        from agent_media_core import book_tracks
-
-        threading.Thread(target=book_tracks.sync_tags, daemon=True).start()
-    except Exception:  # noqa: BLE001 — the sweep will get it
-        pass
-
-
 def session_resume(session: str, bearer: str) -> tuple[bool, dict]:
     """Bring a conversation's session back in a tmux window, saying nothing.
 
@@ -954,7 +942,6 @@ def _resume_pane(session: str) -> tuple[bool, dict]:
                             agent=sessions.agent_of(session))
     if err:
         return False, {"error": err, "pane": pane or None}
-    _retag(session)
     from . import rest
 
     rest.clear_quietly(session)          # resumed: no longer resting
@@ -977,7 +964,6 @@ def close_pane(session: str, pane: str = "") -> tuple[bool, dict]:
     pane = live
     if not panes._tmux(["kill-pane", "-t", pane]) and panes._tmux(["display", "-pt", pane, "#{pane_id}"]):
         return False, {"error": f"could not close {pane}", "pane": pane}
-    _retag(session)
     return True, {"session": session, "pane": pane, "live": False, "closed": True}
 
 
@@ -1092,17 +1078,15 @@ def _record_turn(session: str, text: str, pane: str = "") -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
-def reply(item: str, text: str, bearer: str, *, quote: str = "",
+def reply(text: str, bearer: str, *, quote: str = "",
           mode: str = "continue", session: str = "",
           keep_reading: bool = False, voice: bool = False,
           nudge: bool = False, reply_to: str = "",
           from_chip: str = "") -> tuple[bool, dict]:
-    """Put `text` into `session`, or into the session behind ABS item `item`.
+    """Put `text` into `session`.
 
-    `session` is the v1 form (server-contract.md §10) and wins when both are
-    given: it is the thread's own id, and asking ABS which session an item
-    means is a network call that can only agree with it or be wrong. `item`
-    stays until the ABS exit.
+    (An Audiobookshelf item id used to stand in for the session; that form
+    went with Audiobookshelf, 11 Nov 2026.)
 
     `continue` types into the live pane, reviving the session in a background
     window if it has ended. `branch` always opens a fresh session in the same
@@ -1145,62 +1129,56 @@ def reply(item: str, text: str, bearer: str, *, quote: str = "",
     if not text:
         return False, {"error": "empty reply"}
     session = (session or "").strip()
-    if session and not sessions._SESSION.fullmatch(session):
+    if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
     from . import driver
 
-    if session:
-        from . import matrix, quick
+    from . import matrix, quick
 
-        if quick.has(session):
-            # A quick chat (quick.py): the fast model answers; nothing to type into.
-            if mode == "branch" or nudge:
-                return False, {"error": "a quick chat cannot be branched or nudged", "status": 409}
-            body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
-            return quick.reply(session, body)
-        room = matrix.room(session)
-        if room is not None:
-            # A Matrix room (matrix.py): sent as the owner, straight to the
-            # homeserver. None of a session's machinery applies — no pane, no
-            # speech, no branch; a quote rides in front as Markdown.
-            if mode == "branch":
-                return False, {"error": "a Matrix room cannot be branched", "status": 409}
-            if nudge:
-                return False, {"error": "a Matrix room cannot be nudged", "status": 409}
-            # Replying is reading (§6.32): the network is told first, in
-            # either mode, so the reply never sits under unread messages.
-            got, detail = room.read()
-            if not got:
-                log.info("reply: read receipt for %s not sent: %s", session[:8],
-                         detail.get("error"))
-            from . import room_delegate, room_send
+    if quick.has(session):
+        # A quick chat (quick.py): the fast model answers; nothing to type into.
+        if mode == "branch" or nudge:
+            return False, {"error": "a quick chat cannot be branched or nudged", "status": 409}
+        body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
+        return quick.reply(session, body)
+    room = matrix.room(session)
+    if room is not None:
+        # A Matrix room (matrix.py): sent as the owner, straight to the
+        # homeserver. None of a session's machinery applies — no pane, no
+        # speech, no branch; a quote rides in front as Markdown.
+        if mode == "branch":
+            return False, {"error": "a Matrix room cannot be branched", "status": 409}
+        if nudge:
+            return False, {"error": "a Matrix room cannot be nudged", "status": 409}
+        # Replying is reading (§6.32): the network is told first, in
+        # either mode, so the reply never sits under unread messages.
+        got, detail = room.read()
+        if not got:
+            log.info("reply: read receipt for %s not sent: %s", session[:8],
+                     detail.get("error"))
+        from . import room_delegate, room_send
 
-            # A room handed to an agent (§6.53): a tapped agent chip goes out
-            # in the agent's name; David's own words take the chat back.
-            named = room_delegate.outgoing(session, drawn, from_chip)
-            if named != drawn:
-                drawn = text = named
-            # Attached files go as themselves, never as a path on this host
-            # (room_send.py, §6.33); a room with none is sent as before.
-            if reply_to.strip():
-                # A real reply (§6.31): the bridge makes it the network's own.
-                return room_send.send(room, drawn, reply_to=reply_to.strip())
-            body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
-            return room_send.send(room, body)
-        # A session id nothing knows — not running, no transcript — is the
-        # same answer an item with no session behind it gets: not there.
-        # Checked here rather than left to `deliver`, because `branch` would
-        # otherwise open a fresh session in no particular directory.
-        if not sessions.live_sessions().get(session) and not sessions.session_exists(session) \
-                and not driver.owned_headless(session):
-            return False, {"error": f"no such session {session[:8]}", "status": 404}
-    else:
-        session, err = sessions.session_for_item(item, bearer)
-        if not session:
-            return False, {"error": err, "status": 404}
+        # A room handed to an agent (§6.53): a tapped agent chip goes out
+        # in the agent's name; David's own words take the chat back.
+        named = room_delegate.outgoing(session, drawn, from_chip)
+        if named != drawn:
+            drawn = text = named
+        # Attached files go as themselves, never as a path on this host
+        # (room_send.py, §6.33); a room with none is sent as before.
+        if reply_to.strip():
+            # A real reply (§6.31): the bridge makes it the network's own.
+            return room_send.send(room, drawn, reply_to=reply_to.strip())
+        body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
+        return room_send.send(room, body)
+    # A session id nothing knows — not running, no transcript — is not
+    # there. Checked here rather than left to `deliver`, because `branch` would
+    # otherwise open a fresh session in no particular directory.
+    if not sessions.live_sessions().get(session) and not sessions.session_exists(session) \
+            and not driver.owned_headless(session):
+        return False, {"error": f"no such session {session[:8]}", "status": 404}
     from . import shell
 
     if nudge:

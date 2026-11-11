@@ -497,7 +497,7 @@ def test_a_card_carries_its_rooms_newest_first(rooms):
 # --- the routes -----------------------------------------------------------------
 
 def test_routes_shape_and_auth(server, signed_in, rooms):
-    # No bearer, ABS down, a guest: test_contract's GATED_GETS.
+    # No bearer: test_contract's GATED_GETS.
     res, obj = call(server, "GET", "/contacts?q=mel", headers=AUTH)
     assert res.status == 200 and set(obj) == {"ok", "contacts", "total", "synced_at", "sources",
                                                 "sort", "talked"}
@@ -525,18 +525,11 @@ def test_routes_shape_and_auth(server, signed_in, rooms):
 def test_a_card_is_gated_like_the_list(server, monkeypatch):
     # The list is in test_contract's GATED_GETS; a card for an id not held
     # answers 404 to a device, so it is pinned here instead.
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     path = f"/contacts/{contacts.contact_id('google', 'people/c1')}"
     res, obj = call(server, "GET", path)
     assert res.status == 401 and obj["ok"] is False and isinstance(obj["error"], str)
     assert res.getheader("Access-Control-Allow-Origin") == "*"
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda bearer: ({"username": "guest", "type": "user"}, 200))
-    res, _ = call(server, "GET", path, headers=AUTH)
-    assert res.status == 403
 
 
 def test_start_honours_the_switch(monkeypatch):

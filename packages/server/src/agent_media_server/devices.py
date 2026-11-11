@@ -308,7 +308,7 @@ def list_devices() -> list[dict]:
 
 def revoke(device_id: str) -> bool:
     """Forget a device. Its token answers 401 on its next request (it is then
-    simply unknown, and falls through to the ABS check, which refuses it)."""
+    simply unknown)."""
     with _locked():
         rows = _load(fresh=True)
         keep = [d for d in rows if d.get("id") != device_id]

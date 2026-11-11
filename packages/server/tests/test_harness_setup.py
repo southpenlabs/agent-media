@@ -4,7 +4,7 @@ import os
 import pytest
 
 from agent_media_core import harnesses
-from agent_media_server import auth_abs, panes, send, sessions
+from agent_media_server import auth, panes, send, sessions
 from agent_media_server import harnesses as agents
 
 
@@ -12,7 +12,7 @@ from agent_media_server import harnesses as agents
 def _here(tmp_path, monkeypatch):
     """A registry of our own, an open gate, and a tmux that says yes."""
     monkeypatch.setenv("MEDIA_AGENT_SETUP_DIR", str(tmp_path / "setup"))
-    monkeypatch.setattr(auth_abs, "may_control_speech", lambda bearer: (True, {}))
+    monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
     monkeypatch.setattr(send, "ask_target", lambda: ("scratch", "/home/ryer", []))
     monkeypatch.setattr(send, "ensure_host", lambda host, cwd: True)
 
@@ -71,7 +71,7 @@ def test_hermes_cannot_be_conjured_from_nothing(monkeypatch):
 
 
 def test_the_gate_is_the_app_bearer(monkeypatch):
-    monkeypatch.setattr(auth_abs, "may_control_speech",
+    monkeypatch.setattr(auth, "may_control_speech",
                         lambda bearer: (False, {"error": "not allowed", "status": 403}))
     assert agents.agents("")[0] is False
     assert agents.run("claude", "install", "")[0] is False
@@ -320,7 +320,7 @@ def test_wire_refuses_a_row_that_is_not_a_name(monkeypatch):
 
 
 def test_setup_is_gated(monkeypatch):
-    monkeypatch.setattr(auth_abs, "may_control_speech",
+    monkeypatch.setattr(auth, "may_control_speech",
                         lambda bearer: (False, {"error": "not allowed", "status": 403}))
     assert agents.wiring("")[0] is False
     assert agents.wire("mail", "")[0] is False

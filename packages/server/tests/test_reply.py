@@ -1,96 +1,16 @@
-"""Replying to a conversation from the Audiobookshelf player."""
+"""Replying to a conversation from the app (first written for Sasonica's
+Audiobookshelf player; Audiobookshelf was left on 11 Nov 2026)."""
 
 import json
 import os
 
 import pytest
 
-from agent_media_server import auth_abs, drafts, panes, routing, send, sessions, threads
+from agent_media_server import auth, drafts, panes, routing, send, sessions, threads
 from agent_media_core import harnesses
 
+SESS = "5e550000-1111-2222-3333-444444444444"
 
-# --- who may type -------------------------------------------------------------
-
-def test_root_may_reply_without_configuration(monkeypatch):
-    monkeypatch.delenv("MEDIA_REPLY_USERS", raising=False)
-    monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    ok, who = auth_abs.may_reply({"username": "david", "type": "root"})
-    assert (ok, who) == (True, "david")
-
-
-def test_root_can_be_switched_off(monkeypatch):
-    monkeypatch.setenv("MEDIA_REPLY_ROOT", "0")
-    monkeypatch.delenv("MEDIA_REPLY_USERS", raising=False)
-    ok, _ = auth_abs.may_reply({"username": "david", "type": "root"})
-    assert ok is False
-
-
-def test_admin_is_not_enough(monkeypatch):
-    # A library-management role is not a keyboard: admins are named or nothing.
-    monkeypatch.delenv("MEDIA_REPLY_USERS", raising=False)
-    ok, why = auth_abs.may_reply({"username": "sam", "type": "admin"})
-    assert ok is False and "not allowed" in why
-
-
-def test_named_user_may_reply(monkeypatch):
-    monkeypatch.setenv("MEDIA_REPLY_USERS", " sam , cece ")
-    assert auth_abs.may_reply({"username": "cece", "type": "user"})[0] is True
-    assert auth_abs.may_reply({"username": "guest", "type": "user"})[0] is False
-
-
-def test_no_identity_is_a_refusal():
-    assert auth_abs.may_reply(None)[0] is False
-
-
-# --- identity comes from ABS, and is cached -----------------------------------
-
-def test_identity_asks_abs_once_per_ttl(monkeypatch):
-    calls = []
-
-    def fake_get(url, bearer, path, method="GET"):
-        calls.append((path, method, bearer))
-        return {"user": {"username": "david", "type": "root"}}, 200
-
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", fake_get)
-    auth_abs._IDENT.clear()
-    assert auth_abs.abs_identity("tok")[0]["username"] == "david"
-    assert auth_abs.abs_identity("tok")[0]["username"] == "david"
-    assert calls == [("/api/authorize", "POST", "tok")]
-
-
-def test_identity_of_a_bad_token_is_none(monkeypatch):
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
-    auth_abs._IDENT.clear()
-    assert auth_abs.abs_identity("nope") == (None, 401)
-    assert auth_abs.abs_identity("") == (None, 401)
-
-
-def test_a_refusal_is_never_cached(monkeypatch):
-    # One transient failure used to refuse every reply for the next minute.
-    answers = [(None, 0), ({"user": {"username": "d", "type": "root"}}, 200)]
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    # One server, so the two canned answers line up with the two calls. Without
-    # this the test reads the dev machine's real abs-bridge.env: an extra server
-    # there consumes an answer of its own and the assertion desyncs.
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: answers.pop(0))
-    auth_abs._IDENT.clear()
-    assert auth_abs.abs_identity("tok") == (None, 0)
-    assert auth_abs.abs_identity("tok")[0]["username"] == "d"
-
-
-def test_an_unreachable_abs_is_not_a_401(monkeypatch):
-    # A 401 sends the app off to refresh its token, and a failed refresh logs
-    # the user out — an outage must never do that.
-    assert auth_abs._identity_error(0)["status"] == 503
-    assert auth_abs._identity_error(503)["status"] == 503
-    assert auth_abs._identity_error(401)["status"] == 401
-    assert auth_abs._identity_error(500)["status"] == 502
-
-
-# --- item → session -----------------------------------------------------------
 
 def _manifests(tmp_path, monkeypatch, rows):
     d = tmp_path / "book-tracks"
@@ -98,49 +18,6 @@ def _manifests(tmp_path, monkeypatch, rows):
     for sid, folder in rows:
         (d / f"{sid}.json").write_text(json.dumps({"session": sid, "folder": folder}))
     monkeypatch.setattr(sessions, "_manifest_dir", lambda: d)
-
-
-def test_item_resolves_to_its_session(tmp_path, monkeypatch):
-    _manifests(tmp_path, monkeypatch,
-               [("abc-1", "/home/ryer/conversations/scratch/scratch - Drones")])
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    # ABS reports its own mount; only the <author>/<title> tail is shared.
-    monkeypatch.setattr(auth_abs, "_abs_get",
-                        lambda *a, **k: ({"path": "/conversations/scratch/scratch - Drones"}, 200))
-    assert sessions.session_for_item("item1", "tok") == ("abc-1", "")
-
-
-def test_an_item_with_no_manifest_is_not_a_conversation(tmp_path, monkeypatch):
-    _manifests(tmp_path, monkeypatch, [("abc-1", "/x/scratch/scratch - Drones")])
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: ({"path": "/books/Tolkien/Hobbit"}, 200))
-    sid, why = sessions.session_for_item("item1", "tok")
-    assert sid is None and "not a conversation" in why
-
-
-def test_an_item_abs_will_not_show_us_is_refused(monkeypatch):
-    # The caller's own bearer does the lookup, so ABS's library permissions
-    # decide this for us: no item, no reply.
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 404))
-    assert sessions.session_for_item("item1", "tok") == (None, "no such item")
-
-
-def test_an_unreachable_abs_is_not_a_missing_item(monkeypatch):
-    # These were the same message, and they send you to opposite places: one
-    # says the library is wrong, the other says the server blinked. Status 0
-    # is "could not be reached" (see _abs_get).
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 0))
-    sid, why = sessions.session_for_item("item1", "tok")
-    assert sid is None and "did not answer" in why and "no such item" not in why
-
-
-def test_a_broken_abs_says_what_it_said(monkeypatch):
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 500))
-    sid, why = sessions.session_for_item("item1", "tok")
-    assert sid is None and "500" in why and "no such item" not in why
 
 
 # --- the message itself --------------------------------------------------------
@@ -163,31 +40,19 @@ def test_no_quote_is_just_the_text():
 # --- refusals before anything is typed ----------------------------------------
 
 def test_reply_refuses_an_empty_message():
-    ok, detail = send.reply("item1", "   ", "tok")
+    ok, detail = send.reply("   ", "tok", session=SESS)
     assert ok is False and detail["error"] == "empty reply"
 
 
-def test_reply_refuses_a_user_who_may_not_type(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "guest", "type": "user"}, 200))
-    monkeypatch.delenv("MEDIA_REPLY_USERS", raising=False)
-    typed = []
-    monkeypatch.setattr(sessions, "session_for_item",
-                        lambda *a, **k: typed.append("looked up") or ("s", ""))
-    ok, detail = send.reply("item1", "hi", "tok")
-    assert ok is False and "not allowed" in detail["error"]
-    assert typed == []  # refused before we go anywhere near a pane
-
-
 def test_a_session_with_no_transcript_is_not_revived(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(sessions, "session_for_item", lambda *a, **k: ("gone-1", ""))
     monkeypatch.setattr(sessions, "live_sessions", dict)
     monkeypatch.setattr(sessions, "session_exists", lambda s: False)
     opened = []
     monkeypatch.setattr(send, "open_window", lambda *a, **k: opened.append(1) or ("%1", ""))
-    ok, detail = send.reply("item1", "hi", "tok")
-    assert ok is False and "no transcript" in detail["error"]
+    ok, detail = send.reply("hi", "tok", session=SESS)
+    assert ok is False and detail["status"] == 404 and "no such session" in detail["error"]
     assert opened == []
 
 
@@ -198,26 +63,25 @@ def _allowed(monkeypatch):
     # Stub the shelving for EVERY test that gets as far as a successful send.
     # Left real, it renders speech and writes a history row against whatever
     # session id the test invented — on a background thread, so it outlives the
-    # tmp-dir monkeypatching — and "sess-1" duly appeared in the real library as
+    # tmp-dir monkeypatching — and SESS duly appeared in the real library as
     # a conversation called "You: hi". Tests that care about it override this.
     monkeypatch.setattr(send, "_record_turn", lambda s, t, p="": None)
     monkeypatch.setattr(send, "_ensure_submitted", lambda p, t, timeout=3.0, agent="claude": True)
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(sessions, "session_for_item", lambda *a, **k: ("sess-1", ""))
     monkeypatch.setattr(sessions, "session_exists", lambda s: True)
     monkeypatch.setattr(sessions, "transcript_cwd", lambda s: "/home/ryer/projects/x")
 
 
 def test_a_live_session_is_typed_into_directly(monkeypatch, _allowed):
     sent = []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: sent.append((p, t)) or "")
     monkeypatch.setattr(send, "open_window", lambda *a, **k: pytest.fail("should not revive"))
-    ok, detail = send.reply("item1", "hi", "tok", quote="a turn")
+    ok, detail = send.reply("hi", "tok", session=SESS, quote="a turn")
     assert ok is True
-    assert detail == {"session": "sess-1", "pane": "%7", "opened": False,
+    assert detail == {"session": SESS, "pane": "%7", "opened": False,
                       "submitted": True}
     assert sent == [("%7", 'Re: "a turn" — hi')]
 
@@ -232,36 +96,36 @@ def test_a_dead_session_is_revived_in_a_window(monkeypatch, _allowed):
     monkeypatch.setattr(sessions, "live_sessions", dict)
     monkeypatch.setattr(send, "open_window", fake_open)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: sent.append((p, t)) or "")
-    ok, detail = send.reply("item1", "hi", "tok")
+    ok, detail = send.reply("hi", "tok", session=SESS)
     assert ok is True and detail["opened"] is True and detail["pane"] == "%9"
-    assert opened == [("sess-1", "/home/ryer/projects/x", True)]
+    assert opened == [(SESS, "/home/ryer/projects/x", True)]
     assert sent == [("%9", "hi")]
 
 
 def test_a_stale_pane_id_falls_through_to_a_revive(monkeypatch, _allowed):
     # Pane ids get recycled, so a live_sessions hit is still probed.
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: False)
     monkeypatch.setattr(send, "open_window", lambda *a, **k: ("%9", ""))
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "")
-    ok, detail = send.reply("item1", "hi", "tok")
+    ok, detail = send.reply("hi", "tok", session=SESS)
     assert ok is True and detail["pane"] == "%9"
 
 
 def test_a_window_that_never_comes_up_is_reported(monkeypatch, _allowed):
     monkeypatch.setattr(sessions, "live_sessions", dict)
     monkeypatch.setattr(send, "open_window", lambda *a, **k: ("%9", "%9 did not come up"))
-    ok, detail = send.reply("item1", "hi", "tok")
+    ok, detail = send.reply("hi", "tok", session=SESS)
     assert ok is False and "did not come up" in detail["error"]
 
 
 def test_branch_never_resumes_and_seeds_a_fresh_session(monkeypatch, _allowed):
     opened, sent = [], []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(send, "open_window",
                         lambda s, cwd, *, resume, agent="claude": opened.append(resume) or ("%9", ""))
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: sent.append(t) or "")
-    ok, detail = send.reply("item1", "go deeper", "tok", quote="a turn", mode="branch")
+    ok, detail = send.reply("go deeper", "tok", session=SESS, quote="a turn", mode="branch")
     assert ok is True and detail["branched"] is True
     assert opened == [False]                       # a branch is not a resume
     assert sent == ['Re: "a turn" — go deeper']    # ... but it carries the quote
@@ -287,72 +151,28 @@ def test_focus_walks_the_client_to_the_pane(monkeypatch):
     assert ["select-pane", "-t", "%7"] in calls
 
 
-# --- "should the app draw a reply box here?" -----------------------------------
-
-def test_conversation_says_yes_for_a_live_one(monkeypatch):
-    monkeypatch.setattr(sessions, "suggestion_for", lambda *a, **k: "sp4 is up now too")
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(sessions, "session_for_item", lambda *a, **k: ("sess-1", ""))
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
-    monkeypatch.setattr(sessions, "session_exists", lambda s: True)
-    ok, detail = threads.conversation("item1", "tok")
-    assert ok is True
-    assert detail == {"session": "sess-1", "live": True, "pane": "%7", "resumable": True,
-                      "suggestion": "sp4 is up now too"}
-
-
-def test_conversation_says_no_to_someone_who_may_not_reply(monkeypatch):
-    # The box must not appear where the send would be refused.
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "guest", "type": "user"}, 200))
-    monkeypatch.delenv("MEDIA_REPLY_USERS", raising=False)
-    ok, detail = threads.conversation("item1", "tok")
-    assert ok is False and "not allowed" in detail["error"]
-
-
-def test_conversation_says_no_for_an_ordinary_audiobook(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(sessions, "session_for_item", lambda *a, **k: (None, "not a conversation"))
-    ok, _ = threads.conversation("item1", "tok")
-    assert ok is False
-
-
-def test_an_unreachable_abs_does_not_read_as_a_bad_login(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: (None, 0))
-    ok, detail = send.reply("item1", "hi", "tok")
-    assert ok is False and detail["status"] == 503
-    assert "did not answer" in detail["error"]
-
-
-def test_a_rejected_token_reads_as_401(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: (None, 401))
-    ok, detail = threads.conversation("item1", "tok")
-    assert ok is False and detail["status"] == 401
-
-
 # --- the listener's own words go on the shelf too -------------------------------
 
 def test_a_sent_reply_is_recorded_as_a_turn(monkeypatch, _allowed):
     recorded = []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "")
     monkeypatch.setattr(send, "_record_turn", lambda s, t, p="": recorded.append((s, t)))
-    ok, _ = send.reply("item1", "try the second one", "tok", quote="a turn")
+    ok, _ = send.reply("try the second one", "tok", session=SESS, quote="a turn")
     assert ok is True
     # The words as typed, not the quoted line that went into the pane: the
     # quote is context for the agent, not something the listener said.
-    assert recorded == [("sess-1", "try the second one")]
+    assert recorded == [(SESS, "try the second one")]
 
 
 def test_nothing_is_recorded_when_the_send_fails(monkeypatch, _allowed):
     recorded = []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "pane is gone")
     monkeypatch.setattr(send, "_record_turn", lambda s, t, p="": recorded.append(s))
-    ok, _ = send.reply("item1", "hi", "tok")
+    ok, _ = send.reply("hi", "tok", session=SESS)
     assert ok is False and recorded == []
 
 
@@ -391,95 +211,21 @@ def test_recording_a_turn_never_touches_the_real_library(monkeypatch):
     assert started and started[0]["daemon"] is True
 
 
-# --- more than one Audiobookshelf ---------------------------------------------
-
-def test_one_server_by_default(monkeypatch, tmp_path):
-    monkeypatch.delenv("MEDIA_ABS_URLS", raising=False)
-    monkeypatch.setattr(sessions.Path, "home", staticmethod(lambda: tmp_path))
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://one.example/")
-    assert auth_abs.abs_urls() == ["http://one.example"]
-
-
-def test_extra_servers_come_from_the_environment(monkeypatch, tmp_path):
-    monkeypatch.setenv("MEDIA_ABS_URLS", " http://two.example , http://one.example/ ,, ")
-    monkeypatch.setattr(sessions.Path, "home", staticmethod(lambda: tmp_path))
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://one.example")
-    # Publishing server first, no duplicates, no empties.
-    assert auth_abs.abs_urls() == ["http://one.example", "http://two.example"]
-
-
-def test_extra_servers_can_live_beside_the_abs_config(monkeypatch, tmp_path):
-    monkeypatch.delenv("MEDIA_ABS_URLS", raising=False)
-    cfg = tmp_path / ".config" / "agent-media"
-    cfg.mkdir(parents=True)
-    (cfg / "abs-bridge.env").write_text('ABS_URL=http://one.example\nABS_URLS="http://two.example"\n')
-    monkeypatch.setattr(sessions.Path, "home", staticmethod(lambda: tmp_path))
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://one.example")
-    assert auth_abs.abs_urls() == ["http://one.example", "http://two.example"]
-
-
-def test_identity_tries_each_server_and_remembers_which(monkeypatch):
-    auth_abs._IDENT.clear()
-    asked = []
-
-    def fake_get(url, bearer, path, method="GET"):
-        asked.append(url)
-        if url == "http://two.example":
-            return {"user": {"username": "david", "type": "root"}}, 200
-        return None, 401
-
-    monkeypatch.setattr(auth_abs, "abs_urls",
-                        lambda: ["http://one.example", "http://two.example"])
-    monkeypatch.setattr(auth_abs, "_abs_get", fake_get)
-    user, status = auth_abs.abs_identity("tok")
-    assert (user["username"], status) == ("david", 200)
-    assert asked == ["http://one.example", "http://two.example"]
-    # And the item lookups that follow go to the server that knew them.
-    assert auth_abs.abs_home("tok") == "http://two.example"
-
-
-def test_a_token_no_server_knows_is_a_401(monkeypatch):
-    auth_abs._IDENT.clear()
-    monkeypatch.setattr(auth_abs, "abs_urls",
-                        lambda: ["http://one.example", "http://two.example"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
-    assert auth_abs.abs_identity("tok") == (None, 401)
-
-
-def test_a_server_being_down_does_not_hide_a_refusal(monkeypatch):
-    # One unreachable, one refusing: the token is still the reason, and 401 is
-    # what the app must be told rather than "the server did not answer".
-    auth_abs._IDENT.clear()
-    seq = iter([(None, 0), (None, 401)])
-    monkeypatch.setattr(auth_abs, "abs_urls",
-                        lambda: ["http://down.example", "http://two.example"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: next(seq))
-    assert auth_abs.abs_identity("tok") == (None, 401)
-
-
-def test_abs_home_falls_back_to_the_publishing_server(monkeypatch):
-    auth_abs._IDENT.clear()
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://one.example")
-    assert auth_abs.abs_home("never-seen") == "http://one.example"
-
-
 # --- the transcript log flags a reply in flight ---------------------------------
 
 def _log_ready(monkeypatch, tmp_path, lines):
-    """Everything log_for_item needs, with a canned set of transcript lines."""
+    """Everything the session log needs, with a canned set of transcript lines."""
     from agent_media_core import book_tracks
     _manifests(tmp_path, monkeypatch,
-               [("sess-1", "/home/ryer/conversations/scratch/A talk")])
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.setattr(sessions, "session_for_item", lambda *a, **k: ("sess-1", ""))
+               [(SESS, "/home/ryer/conversations/scratch/A talk")])
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(book_tracks, "conversation_log", lambda *a, **k: lines)
 
 
 def test_log_is_pending_when_the_listener_had_the_last_word(monkeypatch, tmp_path):
     _log_ready(monkeypatch, tmp_path,
                [{"who": "agent", "text": "Hi"}, {"who": "you", "text": "A question"}])
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok is True
     assert detail["pending"] is True
 
@@ -487,14 +233,14 @@ def test_log_is_pending_when_the_listener_had_the_last_word(monkeypatch, tmp_pat
 def test_log_is_not_pending_once_the_answer_has_landed(monkeypatch, tmp_path):
     _log_ready(monkeypatch, tmp_path,
                [{"who": "you", "text": "A question"}, {"who": "agent", "text": "An answer"}])
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok is True
     assert detail["pending"] is False
 
 
 def test_an_empty_log_is_not_pending(monkeypatch, tmp_path):
     _log_ready(monkeypatch, tmp_path, [])
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok is True and detail["pending"] is False
 
 
@@ -698,7 +444,7 @@ def _asker(monkeypatch, tmp_path):
     monkeypatch.setattr(send, "_agent_unready", lambda agent: "")
     monkeypatch.setattr(send, "_settle", lambda p, timeout=5.0: None)
     monkeypatch.setattr(send, "_ensure_submitted", lambda p, t, timeout=3.0, agent="claude": True)
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
     _amux(tmp_path, monkeypatch, 'CC_DIR="/home/ryer/scratch"\nCC_FLAGS="--yolo"\n')
 
@@ -734,13 +480,6 @@ def test_ask_refuses_an_empty_message_before_opening_anything(monkeypatch, _aske
     monkeypatch.setattr(send, "open_window", lambda *a, **k: pytest.fail("opened"))
     ok, detail = send.ask("   ", "tok")
     assert ok is False and "empty" in detail["error"]
-
-
-def test_ask_refuses_a_user_who_may_not_type(monkeypatch, _asker):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "guest", "type": "user"}, 200))
-    monkeypatch.setattr(send, "open_window", lambda *a, **k: pytest.fail("opened"))
-    ok, detail = send.ask("hi", "tok")
-    assert ok is False and detail["status"] == 403
 
 
 def test_ask_reports_a_window_that_never_came_up(monkeypatch, _asker):
@@ -786,40 +525,6 @@ def test_ask_in_an_unknown_project_opens_nothing(monkeypatch, _asker):
     monkeypatch.setattr(send, "open_window", lambda *a, **k: pytest.fail("opened"))
     ok, detail = send.ask("hi", "tok", project="p-gone")
     assert ok is False and detail["status"] == 404 and "p-gone" in detail["error"]
-
-
-def test_conversation_for_session_waits_for_the_item_and_its_tracks(tmp_path, monkeypatch):
-    sid = "11111111-2222-3333-4444-555555555555"
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {sid: "%9"})
-    monkeypatch.setattr(sessions, "session_exists", lambda s: True)
-    monkeypatch.setattr(auth_abs, "abs_home", lambda b: "http://phone-abs")
-    _manifests(tmp_path, monkeypatch, [])
-    ok, detail = threads.conversation_for_session(sid, "tok")
-    assert ok is True and detail["item"] is None and detail["scanning"] is False and detail["live"] is True
-
-    (tmp_path / "book-tracks" / f"{sid}.json").write_text(json.dumps(
-        {"session": sid, "folder": "/home/ryer/conversations/scratch/scratch - Time"}))
-    rows = {"results": [{"id": "li_42", "path": "/conversations/scratch/scratch - Time",
-                         "media": {"numTracks": 0}}]}
-    asked = []
-
-    def abs_get(url, bearer, path, **k):
-        asked.append((url, bearer, path))
-        if path == "/api/libraries":
-            return {"libraries": [{"id": "pod", "mediaType": "podcast"}, {"id": "conv", "mediaType": "book"}]}, 200
-        return rows, 200
-
-    monkeypatch.setattr(auth_abs, "_abs_get", abs_get)
-    ok, detail = threads.conversation_for_session(sid, "tok")
-    assert detail["item"] is None and detail["scanning"] is True     # created, no tracks yet
-    assert all(u == "http://phone-abs" and b == "tok" for u, b, _ in asked)   # the caller's server
-    assert not any("/pod/" in p for _, _, p in asked)                # book libraries only
-
-    rows["results"][0]["media"]["numTracks"] = 5
-    ok, detail = threads.conversation_for_session(sid, "tok")
-    assert detail["item"] == "li_42" and detail["scanning"] is False
 
 
 def test_conversation_for_session_rejects_a_non_uuid():
@@ -902,12 +607,12 @@ def test_a_reply_that_never_left_the_box_is_a_refusal(monkeypatch, _allowed):
     # Not shelved: a turn recorded here is a question the conversation shows
     # with an answer that is never coming.
     shelved = []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "")
     monkeypatch.setattr(send, "_ensure_submitted", lambda p, t, timeout=3.0, agent="claude": False)
     monkeypatch.setattr(send, "_record_turn", lambda s, t, p="": shelved.append(1))
-    ok, detail = send.reply("item1", "hi", "tok")
+    ok, detail = send.reply("hi", "tok", session=SESS)
     assert ok is False and shelved == []
     assert detail["submitted"] is False and detail["status"] == 502
     assert "did not take it" in detail["error"] and "%7" in detail["error"]
@@ -975,39 +680,39 @@ def test_rename_of_an_ended_session_is_not_typed_anywhere(monkeypatch):
 def test_a_ghost_that_fits_is_the_suggestion(monkeypatch):
     monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "sp4 is up now too")
     monkeypatch.setattr(sessions, "_followup", lambda s: {"text": "ours", "key": "k1"})
-    assert sessions.suggestion_for("sess-1", "%1", "k1") == "sp4 is up now too"
+    assert sessions.suggestion_for(SESS, "%1", "k1") == "sp4 is up now too"
 
 
 def test_a_truncated_ghost_gives_way_to_the_followup(monkeypatch):
     monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "enable the working event …")
     monkeypatch.setattr(sessions, "_followup", lambda s: {"text": "enable the working event hook", "key": "k1"})
-    assert sessions.suggestion_for("sess-1", "%1", "k1") == "enable the working event hook"
+    assert sessions.suggestion_for(SESS, "%1", "k1") == "enable the working event hook"
     # ...but not one written for an earlier reply, and never the cut ghost:
     # the right follow-up lands a few seconds later
-    assert sessions.suggestion_for("sess-1", "%1", "k2") == ""
+    assert sessions.suggestion_for(SESS, "%1", "k2") == ""
     monkeypatch.setattr(sessions, "_followup", lambda s: None)
-    assert sessions.suggestion_for("sess-1", "%1", "k1") == ""
+    assert sessions.suggestion_for(SESS, "%1", "k1") == ""
     monkeypatch.setattr(sessions, "_followup", lambda s: {"text": "enable the working event hook", "key": "k1"})
     # ...and the /conversation route, with no log in hand, takes it anyway
-    assert sessions.suggestion_for("sess-1", "%1") == "enable the working event hook"
+    assert sessions.suggestion_for(SESS, "%1") == "enable the working event hook"
 
 
 def test_no_pane_still_has_the_followup(monkeypatch):
     monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: (_ for _ in ()).throw(AssertionError("no pane")))
     monkeypatch.setattr(sessions, "_followup", lambda s: {"text": "ours", "key": "k1"})
-    assert sessions.suggestion_for("sess-1", "", "k1") == "ours"
+    assert sessions.suggestion_for(SESS, "", "k1") == "ours"
     monkeypatch.setattr(sessions, "_followup", lambda s: None)
-    assert sessions.suggestion_for("sess-1", "", "k1") == ""
+    assert sessions.suggestion_for(SESS, "", "k1") == ""
 
 
 def test_the_agents_chips_are_offered_as_given(monkeypatch):
     monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "a ghost")
     monkeypatch.setattr(sessions, "_followup", lambda s: {
         "text": "Commit it", "replies": ["Commit it", "Leave it"], "source": "agent", "key": "k1"})
-    assert sessions.suggestions_for("sess-1", "%1", "k1") == [
+    assert sessions.suggestions_for(SESS, "%1", "k1") == [
         {"text": "Commit it", "source": "agent"}, {"text": "Leave it", "source": "agent"}]
     # ...and never for a later reply
-    assert sessions.suggestions_for("sess-1", "%1", "k2") == [{"text": "a ghost", "source": "ghost"}]
+    assert sessions.suggestions_for(SESS, "%1", "k2") == [{"text": "a ghost", "source": "ghost"}]
 
 
 def test_the_models_chips_follow_a_ghost_that_fits(monkeypatch):
@@ -1015,10 +720,10 @@ def test_the_models_chips_follow_a_ghost_that_fits(monkeypatch):
     monkeypatch.setattr(sessions, "_followup", lambda s: {
         "text": "a", "replies": ["a", "Run it", "b", "c"], "source": "model", "key": "k1"})
     # the ghost says what a chip says: one of them
-    assert [o["text"] for o in sessions.suggestions_for("sess-1", "%1", "k1")] == ["a", "Run it", "b"]
+    assert [o["text"] for o in sessions.suggestions_for(SESS, "%1", "k1")] == ["a", "Run it", "b"]
     monkeypatch.setattr(sessions, "ghost_prompt", lambda pane: "deploy …")
     monkeypatch.setattr(sessions, "_followup", lambda s: None)
-    assert sessions.suggestions_for("sess-1", "%1", "k1") == []
+    assert sessions.suggestions_for(SESS, "%1", "k1") == []
 
 
 def test_log_carries_the_chips_but_not_under_a_question(monkeypatch, tmp_path):
@@ -1027,7 +732,7 @@ def test_log_carries_the_chips_but_not_under_a_question(monkeypatch, tmp_path):
     chips = [{"text": "go", "source": "agent"}]
     monkeypatch.setattr(sessions, "suggestions_for", lambda *a, **k: chips)
     monkeypatch.setattr(sessions, "live_sessions", lambda: {})
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok and detail["suggestions"] == chips
 
 
@@ -1035,7 +740,7 @@ def test_log_carries_no_suggestion_while_pending(monkeypatch, tmp_path):
     _log_ready(monkeypatch, tmp_path,
                [{"who": "agent", "text": "Hi", "key": "k1"}, {"who": "you", "text": "A question"}])
     monkeypatch.setattr(sessions, "suggestion_for", lambda *a, **k: "never")
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok and detail["suggestion"] == ""
 
 
@@ -1048,9 +753,9 @@ def test_log_offers_the_suggestion_for_its_last_reply(monkeypatch, tmp_path):
         return "do the thing"
     monkeypatch.setattr(sessions, "suggestion_for", fake)
     monkeypatch.setattr(sessions, "live_sessions", lambda: {})
-    ok, detail = threads.log_for_item("item1", "tok")
+    ok, detail = threads.log_for_session(SESS, "tok")
     assert ok and detail["suggestion"] == "do the thing"
-    assert seen == {"session": "sess-1", "last_key": "k9"}
+    assert seen == {"session": SESS, "last_key": "k9"}
 
 
 # --- where the assistant button's words go ---------------------------------------
@@ -1115,7 +820,6 @@ def test_sessions_index_lists_live_by_pane_title_then_the_shelf(tmp_path, monkey
 @pytest.fixture
 def _router(monkeypatch, _asker):
     monkeypatch.setattr(sessions, "sessions_index", lambda: _IDX)
-    monkeypatch.setattr(threads, "item_for_session", lambda s, b: ("li_9", True))
     monkeypatch.setattr(sessions, "session_exists", lambda s: True)
     sent = {}
     monkeypatch.setattr(send, "deliver", lambda s, body, text: sent.update(session=s, body=body) or (True, {"session": s, "pane": "%1", "opened": False}))
@@ -1125,14 +829,14 @@ def _router(monkeypatch, _asker):
 
 def test_routed_ask_follows_a_spoken_target(_router):
     ok, d = routing.ask_routed("reply to digital assistant, does the earbud work", "tok")
-    assert ok and d["mode"] == "continued" and d["how"] == "spoken" and d["item"] == "li_9"
+    assert ok and d["mode"] == "continued" and d["how"] == "spoken"
     assert d["title"] == "Sasonica default digital assistant"
     assert _router == {"session": "aaaaaaaa-1111-2222-3333-444444444444", "body": "does the earbud work"}
 
 
 def test_routed_ask_spoken_new_chat_beats_player_and_sticky(_router):
     ok, d = routing.ask_routed("new chat, what is the time", "tok",
-                             player_item="item1", sticky="cccccccc-1111-2222-3333-444444444444")
+                             player_session="bbbbbbbb-1111-2222-3333-444444444444", sticky="cccccccc-1111-2222-3333-444444444444")
     assert ok and d["mode"] == "new" and d["how"] == "spoken" and _router == {"fresh": "what is the time"}
 
 
@@ -1144,10 +848,11 @@ def test_routed_ask_prefers_a_picked_target_over_the_words(_router):
 
 
 def test_routed_ask_then_the_player_then_sticky_then_new(_router, monkeypatch):
-    monkeypatch.setattr(sessions, "session_for_item", lambda item, b: ("bbbbbbbb-1111-2222-3333-444444444444", "") if item == "playing" else (None, "no"))
-    ok, d = routing.ask_routed("go on", "tok", player_item="playing", sticky="cccccccc-1111-2222-3333-444444444444")
+    gone = "dddddddd-1111-2222-3333-444444444444"
+    monkeypatch.setattr(sessions, "session_exists", lambda s: s != gone)
+    ok, d = routing.ask_routed("go on", "tok", player_session="bbbbbbbb-1111-2222-3333-444444444444", sticky="cccccccc-1111-2222-3333-444444444444")
     assert d["how"] == "player" and _router["session"].startswith("bbbbbbbb")
-    ok, d = routing.ask_routed("go on", "tok", player_item="a book", sticky="cccccccc-1111-2222-3333-444444444444")
+    ok, d = routing.ask_routed("go on", "tok", player_session=gone, sticky="cccccccc-1111-2222-3333-444444444444")
     assert d["how"] == "sticky" and _router["session"].startswith("cccccccc")
     ok, d = routing.ask_routed("go on", "tok")
     assert d["mode"] == "new" and d["how"] == "default" and _router["fresh"] == "go on"
@@ -1198,14 +903,14 @@ def test_routed_ask_sets_a_fresh_sessions_speech_level(_router, monkeypatch, tmp
 
 def test_routed_ask_a_bare_name_switches_and_sends_nothing(_router):
     ok, d = routing.ask_routed("reply to digital assistant", "tok")
-    assert ok and d["mode"] == "switched" and d["title"] == "Sasonica default digital assistant" and d["item"] == "li_9"
+    assert ok and d["mode"] == "switched" and d["title"] == "Sasonica default digital assistant"
     assert _router == {}
 
 
 def test_routed_ask_dry_run_says_where_without_sending(_router):
     ok, d = routing.ask_routed("reply to digital assistant does the earbud work", "tok", dry=True)
     assert ok and d["dry"] is True and d["mode"] == "continued" and d["how"] == "spoken"
-    assert d["session"].startswith("aaaaaaaa") and d["text"] == "does the earbud work" and d["item"] == "li_9"
+    assert d["session"].startswith("aaaaaaaa") and d["text"] == "does the earbud work"
     ok, d = routing.ask_routed("what is the time", "tok", dry=True)
     assert d["mode"] == "new" and d["how"] == "default" and d["session"] is None
     assert _router == {}
@@ -1218,9 +923,8 @@ SID = "11111111-2222-3333-4444-555555555555"
 
 @pytest.fixture
 def _manager(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.delenv("MEDIA_REPLY_ROOT", raising=False)
-    monkeypatch.setattr(send, "_retag", lambda s: None)
 
 
 def test_resume_a_live_session_just_says_where(monkeypatch, _manager):
@@ -1291,25 +995,25 @@ def test_a_draft_keeps_the_writer_clock_and_is_capped(tmp_path, monkeypatch, _ma
 def test_a_draft_is_gated_like_a_reply(monkeypatch):
     assert drafts.draft_read("../x", "tok")[1]["status"] == 400
     assert drafts.draft_write("../x", "hi", 0, "tok")[1]["status"] == 400
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "guest", "type": "user"}, 200))
-    assert drafts.draft_read(SID, "tok")[1]["status"] == 403
-    assert drafts.draft_write(SID, "hi", 0, "tok")[1]["status"] == 403
+    monkeypatch.setattr(auth, "_device", lambda b: None)
+    assert drafts.draft_read(SID, "tok")[1]["status"] == 401
+    assert drafts.draft_write(SID, "hi", 0, "tok")[1]["status"] == 401
 
 
 def test_manage_needs_a_session_id_and_a_permitted_user(monkeypatch):
     assert send.session_close("../x", "tok")[1]["status"] == 400
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "guest", "type": "user"}, 200))
-    assert send.session_resume(SID, "tok")[1]["status"] == 403
+    monkeypatch.setattr(auth, "_device", lambda b: None)
+    assert send.session_resume(SID, "tok")[1]["status"] == 401
 
 
 def test_a_reply_into_a_live_pane_checks_its_enter_landed(monkeypatch, _allowed):
     checked = []
-    monkeypatch.setattr(sessions, "live_sessions", lambda: {"sess-1": "%7"})
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "")
     monkeypatch.setattr(send, "_ensure_submitted",
                         lambda p, t, timeout=3.0, agent="claude": checked.append((p, t)) or True)
-    ok, _ = send.reply("item1", "a long message that the TUI is still taking when Enter arrives", "tok")
+    ok, _ = send.reply("a long message that the TUI is still taking when Enter arrives", "tok", session=SESS)
     assert ok and checked == [("%7", "a long message that the TUI is still taking when Enter arrives")]
 
 
@@ -1452,8 +1156,7 @@ def test_a_directory_no_session_has_run_in_is_refused(tmp_path, monkeypatch):
     # /ask opens a shell where it is told to, so the phone picks from the
     # list the server published, not from anywhere on the disk.
     _places_world(tmp_path, monkeypatch, [("s-1", "agent-media", 100)])
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.setattr(auth_abs, "may_reply", lambda u: (True, ""))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     ok, detail = send.ask("hi", "tok", cwd="/etc")
     assert not ok and detail["status"] == 404
 

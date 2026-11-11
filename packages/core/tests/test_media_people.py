@@ -51,11 +51,7 @@ def test_an_artist_is_the_exact_name_with_its_linked_wikipedia_page(monkeypatch)
 
 def test_an_author_page_must_say_a_writer(monkeypatch):
     _fake(monkeypatch, {P.WIKI_SUMMARY: {"extract": "A footballer.", "description": "English footballer"}})
-    monkeypatch.setattr(P, "_abs_author", lambda name: None)
     assert P.profile("author", "John Smith")["profile"] is None
-    monkeypatch.setattr(P, "_abs_author", lambda name: "Writes urban fantasy.")
-    got = P.profile("author", "M. D. Massey", fresh=True)["profile"]
-    assert (got["source"], got["description"]) == ("audiobookshelf", "Writes urban fantasy.")
 
 
 def test_a_show_from_the_directory_with_its_feeds_words(monkeypatch):

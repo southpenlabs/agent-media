@@ -1,6 +1,6 @@
 """Interrupting music for speech decides which backend is live once.
 
-Every router call re-resolved the live backend — a probe of the app, then of
+Every router call re-resolved the live backend — a probe of Sasonica, then of
 the phone's mpv, each ~1s across the tailnet — and before_speech makes three
 calls to interrupt music: what is playing, where it is, pause it. On 21 Sep
 that was 2.7s to probe and ~3.5s more to pause, and nothing kept the three
@@ -37,10 +37,10 @@ class _Backend:
 
 def _router(monkeypatch):
     import agent_media_core.sinks.music_router as R
-    monkeypatch.setattr(R, "_app_configured", lambda: True)
+    monkeypatch.setattr(R, "_sasonica_configured", lambda: True)
     monkeypatch.setattr(R, "_local_configured", lambda: True)
     app, local, mopidy = _Backend(False), _Backend(True), _Backend(False)
-    return SinkMusicRouter(mopidy=mopidy, local=local, app=app), app, local
+    return SinkMusicRouter(mopidy=mopidy, local=local, sasonica=app), app, local
 
 
 LOCAL = Target(name="local")

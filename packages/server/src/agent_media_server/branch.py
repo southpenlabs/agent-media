@@ -113,7 +113,7 @@ def session_branch(session: str, mid: str, text: str, bearer: str, *,
     if not (text or "").strip():
         return False, {"error": "a branch needs a first message", "status": 400}
     if mode == "quote":
-        return send.reply("", text, bearer, quote=quote, mode="branch", session=session)
+        return send.reply(text, bearer, quote=quote, mode="branch", session=session)
     if mode not in ("history", "before"):
         return False, {"error": "mode is history, before or quote", "status": 400}
     user, err = auth.gate(bearer)
@@ -129,7 +129,7 @@ def session_branch(session: str, mid: str, text: str, bearer: str, *,
             return False, {"error": "that message is not in this chat's transcript", "status": 404}
         if not at:
             # Your first message: nothing to remember, a fresh chat in its folder.
-            ok, detail = send.reply("", text, bearer, mode="branch", session=session)
+            ok, detail = send.reply(text, bearer, mode="branch", session=session)
             if ok:
                 detail["branched"] = True
                 detail["from"] = {"session": session, "id": mid}

@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from agent_media_server import alerts, auth_abs, mic, panes, session_events, sessions
+from agent_media_server import alerts, auth, mic, panes, session_events, sessions
 
 from test_contract import AUTH, SID2, call, server, shelf, signed_in, typed  # noqa: F401
 from test_mic import _device
@@ -54,7 +54,7 @@ def _idle_watcher(deadline: float = 5.0) -> None:
 
 
 def test_refused_without_a_credential(server, screen, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     st = Stream(server, "/sessions/events")
     try:
         assert st.status == 401
@@ -207,7 +207,7 @@ def test_a_revoked_credential_ends_the_stream(server, screen, monkeypatch):
     st = Stream(server, "/sessions/events?ping=0.2", AUTH)
     try:
         assert st.event()[0] == "sessions"
-        monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+        monkeypatch.setattr(auth, "_device", lambda b: None)
         with pytest.raises(EOFError):
             for _ in range(20):
                 st.event(2.0)

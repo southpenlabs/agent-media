@@ -1121,14 +1121,11 @@ def _pause_if_heard(it: dict) -> Optional[float]:
 
 
 def _book_seconds(target: str) -> float:
-    """Where the book channel is, in seconds: the phone's player when it
-    holds the item, else the book mpv's. 0.0 when neither says."""
+    """Where the book channel is, in seconds: the book mpv's. 0.0 when it
+    does not say."""
     try:
-        from . import mcp_server, phone_player
+        from . import mcp_server
         t = mcp_server._book_target(target)
-        st = phone_player.state(t) if phone_player.enabled() else None
-        if st and st.get("item"):
-            return float(st.get("t") or 0)
         ms = mcp_server._book().position(t)
         return (ms or 0) / 1000
     except Exception:  # noqa: BLE001

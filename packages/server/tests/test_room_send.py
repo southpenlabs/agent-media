@@ -111,7 +111,7 @@ def test_through_reply_into_a_real_room(shared, monkeypatch):
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
     photo = shared / "cat.jpg"
     photo.write_bytes(b"jpeg")
-    ok, d = send.reply("", f"here\nShared file: {photo}", "tok", session=r.thread)
+    ok, d = send.reply(f"here\nShared file: {photo}", "tok", session=r.thread)
     assert ok, d
     assert [b["msgtype"] for b in put] == ["m.image", "m.text"]
     msgs = r.page(30)[0]

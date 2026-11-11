@@ -328,8 +328,8 @@ _DEFAULT_MIC_MAX_S = 120.0
 #
 # Sasonica (the chat app, com.sasonica.app) since 2026-09-26: the mic watch
 # lives in its speech service, and WakeReceiver starts that again. From
-# 2026-09-21 it was the Audiobookshelf app's media-button receiver (that app is
-# Sasonica ABS now, com.sasonica.abs, and keeps only the book).
+# 2026-09-21 it was the Audiobookshelf app's media-button receiver (that app
+# became Sasonica ABS, com.sasonica.abs, and was retired on 11 Nov 2026).
 _DEFAULT_MIC_REVIVE_CMD = (
     "am broadcast -n com.sasonica.app/.speech.WakeReceiver")
 # ...and the activity is still here, because since Android 12 a background app

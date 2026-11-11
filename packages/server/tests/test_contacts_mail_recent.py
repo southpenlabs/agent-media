@@ -206,9 +206,6 @@ def test_the_route_without_notmuch(server, signed_in, book):
 
 
 def test_the_route_is_gated(server, book, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "GET", f"/contacts/{LIONEL}/mail")
     assert res.status in (401, 403)

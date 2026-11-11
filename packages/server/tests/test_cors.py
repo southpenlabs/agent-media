@@ -56,7 +56,7 @@ def test_answer_carries_the_header_even_when_it_refuses(server):
     # No bearer, so this is a 401/404 — and the browser still has to be
     # allowed to READ it, or the client shows a network error instead of the
     # server's own words about why it said no.
-    res = _request(server, "GET", "/conversation?item=nope")
+    res = _request(server, "GET", "/conversation?session=6c73498c-02c1-4846-8350-a82006973571")
     assert res.status in (401, 403, 404)
     assert res.getheader("Access-Control-Allow-Origin") == "*"
 

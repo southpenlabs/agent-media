@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_media_server import asks, auth_abs, panes, send, sessions
+from agent_media_server import asks, auth, panes, send, sessions
 
 FIX = Path(__file__).parent / "fixtures" / "asks"
 SID = "11111111-2222-3333-4444-555555555555"
@@ -488,8 +488,7 @@ def test_a_screen_that_ignores_the_keys_is_stuck_not_answered():
 
 @pytest.fixture
 def pane(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.setattr(auth_abs, "may_reply", lambda u: (True, ""))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%7"})
     monkeypatch.setattr(panes, "alive", lambda p: True)
     monkeypatch.setattr(sessions, "_agent_of_pane", lambda p: "claude")

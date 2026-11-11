@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from agent_media_server import auth, auth_abs, presets, project_roots, send, sessions
+from agent_media_server import auth, presets, project_roots, send, sessions
 
 
 @pytest.fixture
@@ -18,8 +18,8 @@ def home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(h))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     monkeypatch.delenv("MEDIA_PROJECTS_DIR", raising=False)
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200)
-                        if b == "tok" else (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"}
+                        if b == "tok" else None)
     return h.resolve()
 
 

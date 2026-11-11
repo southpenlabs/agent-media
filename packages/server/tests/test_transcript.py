@@ -640,7 +640,7 @@ def rigged(monkeypatch, script):
 
     _conversation(script, 30)
     monkeypatch.setattr(book_tracks, "conversation_log",
-                        lambda s, f, target=None, positions=True: [])
+                        lambda s: [])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
     return script
 

@@ -55,7 +55,7 @@ def test_a_quote_typed_by_hand_stays_in_the_words(server, signed_in, pane, voice
 
 def test_a_quote_without_an_id_is_sent_as_before_and_not_kept(server, signed_in, pane, voice,
                                                               typed):
-    send.reply("", "ok", "tok", session=SID, quote="the plan")
+    send.reply("ok", "tok", session=SID, quote="the plan")
     assert [a for n, a in typed if n == "_send_to_pane"][-1][1] == 'Re: "the plan" — ok'
     assert not replies.STORE.get(SID)
 
@@ -99,7 +99,7 @@ def test_replying_in_a_room_sends_a_real_reply(monkeypatch):
     # Replying is reading (§6.32): the receipt goes by POST, not counted here.
     monkeypatch.setattr(matrix, "_post", lambda *a, **k: {})
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
-    ok, d = send.reply("", "hi back", "tok", session=r.thread, reply_to="$1", quote="hello")
+    ok, d = send.reply("hi back", "tok", session=r.thread, reply_to="$1", quote="hello")
     assert ok, d
     (path, body), = sent
     assert "/send/m.room.message/" in path
@@ -107,5 +107,5 @@ def test_replying_in_a_room_sends_a_real_reply(monkeypatch):
     assert body == {"msgtype": "m.text", "body": "hi back",
                     "m.relates_to": {"m.in_reply_to": {"event_id": "$1"}}}
     assert r.page(30)[0][-1]["reply_to"] == {"id": "$1", "text": "hello", "name": "Sam"}
-    ok, err = send.reply("", "x", "tok", session=r.thread, reply_to="$nope")
+    ok, err = send.reply("x", "tok", session=r.thread, reply_to="$nope")
     assert not ok and err["status"] == 404

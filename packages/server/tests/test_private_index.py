@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from agent_media_core import book_tracks, private, private_cards, sealed
+from agent_media_core import private, private_cards, sealed
 from agent_media_core.state.store import StateStore, default_db_path
 from agent_media_server import org_related, private_index, seal
 
@@ -76,7 +76,6 @@ def _seal_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(seal, "staging_roots", lambda: [tmp_path / "incoming"])
     monkeypatch.setattr(seal, "SETTLE_S", 0)
     monkeypatch.setattr(seal, "_running", lambda s: False)
-    monkeypatch.setattr(book_tracks, "_abs_ready_all", lambda: [])
 
 
 def test_a_private_thread_gets_a_sealed_card_at_seal(tmp_path, monkeypatch, key, ollama):
@@ -182,7 +181,6 @@ def test_a_private_thread_matches_from_its_own_card(key, ollama, monkeypatch):
 def test_forget_deletes_the_card(tmp_path, monkeypatch, key, ollama):
     from agent_media_server import forget
 
-    monkeypatch.setattr(book_tracks, "_abs_ready_all", lambda: [])
     monkeypatch.setattr(forget, "backup_root", lambda: tmp_path / "backups")
     StateStore(default_db_path())
     _card(A, "tomato", ["garden"])

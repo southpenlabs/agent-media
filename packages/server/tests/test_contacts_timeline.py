@@ -629,10 +629,7 @@ def test_routes_shape_and_auth(server, signed_in, crm, book):
 
 
 def test_routes_are_gated(server, book, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "GET", f"/contacts/{LIONEL}/timeline")
     assert res.status in (401, 403)
     res, _ = call(server, "POST", f"/contacts/{LIONEL}/notes", {"text": "x"})

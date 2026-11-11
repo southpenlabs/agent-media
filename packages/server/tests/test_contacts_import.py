@@ -254,10 +254,7 @@ def test_the_route_raw_and_multipart(server, signed_in, book):
 
 
 def test_the_route_is_gated(server, book, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = _post_raw(server, "/contacts/import", _zip(FB_ZIP),
                   headers={"Content-Type": "application/zip"})
     assert res.status in (401, 403)

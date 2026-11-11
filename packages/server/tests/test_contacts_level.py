@@ -212,10 +212,7 @@ def test_the_older_notify_form_is_read_as_a_level(server, signed_in, book):
 
 
 def test_the_route_is_gated(server, book, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "POST", f"/contacts/{LIONEL}/level", {"level": "quiet"})
     assert res.status in (401, 403)
     assert contacts.card(LIONEL)["level"] is None

@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_media_server import auth_abs, plan_usage
+from agent_media_server import auth, plan_usage
 
 RAW = {
     "limits": [
@@ -18,7 +18,7 @@ RAW = {
 
 @pytest.fixture(autouse=True)
 def _here(monkeypatch):
-    monkeypatch.setattr(auth_abs, "may_control_speech", lambda bearer: (True, {}))
+    monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
     monkeypatch.setattr(plan_usage, "_cache", (0.0, {}))
     monkeypatch.setattr(plan_usage, "_token", lambda: "tok")
 

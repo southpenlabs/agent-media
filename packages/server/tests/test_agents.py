@@ -348,10 +348,7 @@ def test_agents_route_shape(server, shelf, signed_in, th, monkeypatch):
 
 
 def test_the_log_route_is_gated(server, th, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     a = th.spawn("a0000000040", "toolu_A", "Gated")
     a.prompt("Do it.")
     res, obj = call(server, "GET", f"/threads/{SID}/agents/a0000000040/log")
@@ -383,7 +380,7 @@ def test_the_snapshot_counts_agents_and_an_event_says_when_they_change(
     from agent_media_core import activity, book_tracks
 
     monkeypatch.setattr(book_tracks, "conversation_log",
-                        lambda s, f, target=None, positions=True: [])
+                        lambda s: [])
     monkeypatch.setattr(activity, "attach", lambda s, ls: None)
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%7"})
     th.main.prompt("Hello")

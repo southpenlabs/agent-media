@@ -6,9 +6,8 @@ port, in its own process — its handler answers its own routes (the page,
 because clients know one address and changing it is a migration nobody needs.
 `Handler` below serves only these routes, for a server with no canvas in it.
 
-Endpoints (all gated by `auth.gate`: a paired device's token, else the
-caller's Audiobookshelf bearer — see auth.py; except /pair, which is how a
-device gets its token):
+Endpoints (all gated by `auth.gate`: a paired device's token — see auth.py;
+except /pair, which is how a device gets its token):
 
   GET  /app/…     → the Sasonica web app (sasonica-app built for /app/), when
                   a bundle is present (MEDIA_WEB_APP_DIR, else the binary's
@@ -22,11 +21,9 @@ device gets its token):
                   by `media-visual-canvas pair --device NAME`) for a device
                   token. No auth; failures rate-limited per source address.
                   (GET /pair is the canvas's own amux page, not this.)
-  GET  /conversation?item=<abs item id>   → the session behind that item and
-                  whether it is still live
-  GET  /conversation?session=<uuid>   → a session the phone started: its item
-                  id once the library has one, and whether it is live
-  GET  /conversation/log?item=<abs item id>|session=<uuid>[&limit=&before=]
+  GET  /conversation?session=<uuid>   → a session the phone started: whether
+                  it is live and can be replied to
+  GET  /conversation/log?session=<uuid>[&limit=&before=]
                   → the conversation, read: its messages from the transcript
                   (transcript.py) and its spoken lines
   GET  /threads/<uuid>/events   → the same thread as a stream of changes
@@ -35,16 +32,12 @@ device gets its token):
   GET  /threads/<uuid>/agents   → the thread's background agents (agents.py)
   GET  /threads/<uuid>/agents/<id>/log[?limit=&before=]   → one agent's own
                   turns as messages, read-only
-  GET  /item?id=<abs item id>   → that library item carrying only what the
-                  app reads, gzipped (1267 KB → 25 KB on a long
-                  conversation); see abs_item.py
-  GET  /commands?item=|session=|project=|cwd=   → the slash menu
-  POST /reply     {"session"|"item", "text": "...", "quote": "...",
+  GET  /commands?session=|project=|cwd=   → the slash menu
+  POST /reply     {"session", "text": "...", "quote": "...",
                    "mode": "continue"|"branch", "refs"?, "voice"?, "nudge"?}
-                  → type into that session (or
-                  the one behind that item), reviving it in a background tmux
+                  → type into that session, reviving it in a background tmux
                   window if it has ended
-  POST /ask       {"text", "target"?, "player_session"?|"player_item"?, "sticky"?,
+  POST /ask       {"text", "target"?, "player_session"?, "sticky"?,
                    "parse"?, "project"?, "agent"?}
                   → the assistant button's words, routed: a picked session, a
                   session named in the words ("reply to drones, …"), the
@@ -107,7 +100,7 @@ device gets its token):
   GET  /sessions/events → the same, as a stream of changes, for a phone's
                   background notifier (session_events.py, §6.13)
   GET  /sessions/state  → every live session's working / waiting / approval,
-                  by uuid and item folder tail
+                  by uuid
   POST /session/resume {"session"} → bring that session back in a tmux
                   window (a reply's revive, without the reply)
   POST /session/close  {"session"} → close the pane it runs in
@@ -247,7 +240,7 @@ device gets its token):
   POST /drafts/saved {"text", "at"?, "private"?} → put one aside; answers
                   the name the fast models gave it (else its first words)
   POST /drafts/saved/delete {"id"} → drop one
-  POST /rename    {"item"|"session", "title"|"auto"} → rename a conversation
+  POST /rename    {"session", "title"|"auto"} → rename a conversation
   POST /share     {"text", "channel"?} → play a shared link
   POST /upload?name=<file name>  (the file as the raw body) → keep a file
                   shared to the app on the host; answers its {"path", "name",
@@ -404,14 +397,13 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from .keepalive import BodyDrain
 
-from . import (abs_item, archive, auth, devices, drafts, harnesses, pins, routing, send,
+from . import (archive, auth, devices, drafts, harnesses, pins, routing, send,
                sessions, share, speech, threads)
 from . import alerts, audio, doc_chat, doc_read, music, org, org_calendar, org_chat, org_edit, org_listen, org_setup, org_zettel, refs, uploads
 from . import app_links, web_app
 
 # The endpoints a browser on another origin may reach. Everything here
-# carries its own credential — a paired device's token, or the caller's
-# Audiobookshelf bearer handed back to ABS to ask who they are — and none of
+# carries its own credential — a paired device's token — and none of
 # it is reachable with the ambient authority a browser attaches by itself, so
 # opening them to any origin gives a drive-by page nothing it did not already
 # have. The canvas's token-guarded
@@ -420,10 +412,10 @@ from . import app_links, web_app
 # you happen to be visiting from spending it.
 #
 # Needed because the web client is served from a different port than the
-# canvas (Audiobookshelf on :13379, this on :8781). The Capacitor app never
+# canvas (the web client elsewhere, this on :8781). The Capacitor app never
 # needed it — a native HTTP client is not subject to the same-origin policy.
 CORS_PATHS = frozenset({
-    "/conversation", "/conversation/log", "/conversations", "/targets", "/item",
+    "/conversation", "/conversation/log", "/conversations", "/targets",
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
@@ -644,8 +636,8 @@ _SPEECH_NOW_SEEN: set[str] = set()
 
 #: Whether a request carries the host's own token (the canvas's amux token).
 #: Only /focus looks at it — the desk's browser may focus a pane with either
-#: credential. Handed in by the canvas (`register`); without one, only the
-#: ABS bearer admits.
+#: credential. Handed in by the canvas (`register`); without one, only a
+#: device token admits.
 _TOKEN_OK: Callable[[BaseHTTPRequestHandler], bool] | None = None
 
 
@@ -775,10 +767,9 @@ def _json(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
 def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
     """JSON, compressed if the caller said it could take it.
 
-    Audiobookshelf itself does not compress — it ignores Accept-Encoding
-    and sends its item JSON whole, which on a conversation is 1.27 MB of
-    highly repetitive text. Ours is already a tenth of that; gzip takes it
-    to a fortieth. Only worth the CPU on a body big enough to matter.
+    Big listings (contacts, the timeline, a long thread) are highly
+    repetitive text, and gzip takes them to a fraction. Only worth the CPU on
+    a body big enough to matter.
     """
     body = json.dumps(obj).encode()
     accepts = "gzip" in (h.headers.get("Accept-Encoding") or "").lower()
@@ -2004,30 +1995,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
     if agents_m or log_m:
         _thread_agents(h, (agents_m or log_m).group(1), log_m.group(2) if log_m else None, query)
         return True
-    elif path == "/item":
-        # The library item, carrying only what the app reads. Sasonica asks
-        # here first and falls back to Audiobookshelf, so this is a way of
-        # being quick rather than a thing to depend on. See abs_item.py for
-        # the measurements and for what is left out.
-        item_id = parse_qs(query).get("id", [""])[0]
-        ok, detail = abs_item.item_for_app(item_id, _bearer(h))
-        if ok:
-            _json_z(h, 200, detail)
-        else:
-            _json(h, detail.pop("status", 404), {"ok": False, **detail})
     elif path == "/conversation":
-        # "Is this item a conversation I can reply to?" — what the app asks
-        # before it draws the reply box. Authed by the caller's own ABS
-        # bearer, like /reply. `?session=` instead of `?item=` asks the
-        # other way round: a session the phone just started (see /ask),
-        # and whether the library has an item for it yet.
+        # "Is this a conversation I can reply to?" — what the app asks before
+        # it draws the reply box, gated like /reply. (`?item=`, an
+        # Audiobookshelf item, went with Audiobookshelf on 11 Nov 2026.)
         qs = parse_qs(query)
-        item = qs.get("item", [""])[0]
-        bearer = _bearer(h)
-        if qs.get("session", [""])[0] and not item:
-            ok, detail = threads.conversation_for_session(qs["session"][0], bearer)
-        else:
-            ok, detail = threads.conversation(item, bearer)
+        ok, detail = threads.conversation_for_session(qs.get("session", [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
     elif path == "/session/settings":
         # The reply box's model and plan chips: what this thread runs now,
@@ -2066,11 +2039,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/commands":
         # The slash menu for the reply box: what this session's terminal
-        # would offer. `?item=`, `?session=`, `?project=` or `?cwd=` (a
-        # new chat, in a place `/targets` published).
+        # would offer. `?session=`, `?project=` or `?cwd=` (a new chat, in a
+        # place `/targets` published).
         qs = parse_qs(query)
-        ok, detail = threads.commands_for(qs.get("item", [""])[0],
-                                          qs.get("session", [""])[0],
+        ok, detail = threads.commands_for(qs.get("session", [""])[0],
                                           qs.get("project", [""])[0], _bearer(h),
                                           cwd=qs.get("cwd", [""])[0])
         # One line per ask: this is a new route and the app is the only
@@ -2086,9 +2058,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = plan_usage.get(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/conversation/log":
-        # The same conversation, read rather than heard. `?session=` is the
-        # v1 form (server-contract.md §10) and wins when both are given; it
-        # never asks ABS, so it answers when ABS does not. `messages` is the
+        # The same conversation, read rather than heard, by `?session=`
+        # (server-contract.md §10). `messages` is the
         # thread as its transcript has it (transcript.py): the newest
         # `limit`, or those before `before` (a message id).
         qs = parse_qs(query)
@@ -2102,13 +2073,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             # token reads it, so `media room-log` can page back. A room is
             # the one thread an agent here cannot read off the disk.
             ok, detail = threads.session_log(session, **page)
-        elif session:
+        else:
             # `around=<message id>`: the page holding that message (a jump
-            # from search, §6.14). Session form only.
+            # from search, §6.14).
             ok, detail = threads.log_for_session(session, _bearer(h), **page,
                                                  around=qs.get("around", [""])[0])
-        else:
-            ok, detail = threads.log_for_item(qs.get("item", [""])[0], _bearer(h), **page)
         if ok and session and qs.get("looking", [""])[0] in ("1", "true", "yes"):
             # `&looking=1`: the poll of a client showing the thread without
             # its stream (the phone's light bubble): the thread counts as
@@ -2519,7 +2488,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/now":
         # The app's speech bar: /speech's live bit, named — the session's
-        # title and library item — and gated by the caller's ABS bearer.
+        # title — and gated by the caller's device token.
         ok, detail = speech.speech_now(_bearer(h), speech.current_state())
         if ok and detail.get("live") and detail.get("session"):
             # The reply's one-tap answers, for the mini player (session_events.answers_for).
@@ -3308,7 +3277,7 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 200, {"ok": True, "id": dev.get("id")})
     elif path == "/share":
         # "Play with agent-media" from the app's share sheet: media-share's
-        # /share, with the caller's ABS bearer instead of a token of its own.
+        # /share, with the caller's device token instead of the host's.
         body = _read_json(h) or {}
         ok, detail = share.share_from_app(str(body.get("text") or ""),
                                           str(body.get("channel") or ""), _bearer(h))
@@ -3432,7 +3401,7 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         print(f"speech/heard: {us[:8]} {len(marked)} marked", file=sys.stderr)
         _json(h, 200, {"ok": True, "marked": len(marked)})
     elif path == "/speech/ctl":
-        # The app's speech bar buttons. The caller's ABS bearer, like
+        # The app's speech bar buttons. The caller's device token, like
         # /reply, and only the listener's verbs (_APP_SPEECH_ACTIONS).
         ok, detail = auth.may_control_speech(_bearer(h))
         if not ok:
@@ -3526,16 +3495,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # reaches the terminal too (see book_tracks.rename).
         body = _read_json(h) or {}
         ok, detail = threads.rename_conversation(
-            str(body.get("item") or ""), str(body.get("session") or ""),
+            str(body.get("session") or ""),
             str(body.get("title") or ""), _bearer(h), auto=bool(body.get("auto")))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/reply":
-        # Reply to a conversation from inside the Audiobookshelf player.
-        # Deliberately NOT gated by the host's token: the credential here is
-        # the caller's own ABS bearer, verified with ABS, so the phone carries
-        # no secret of ours. See send.py and the proposal.
-        # `session` is the v1 form (server-contract.md §10); `item` stays
-        # until the ABS exit, and `session` wins when both are sent.
+        # Reply to a conversation from the app. Gated by the caller's device
+        # token, not the host's. See send.py.
         body = _read_json(h) or {}
         # Sent from here: on Automatic the reply is spoken here (speech_frames.used).
         from . import speech_frames as frames_hub
@@ -3544,7 +3509,6 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         with _headless.run_now(body.get("slot")):     # Run now (§6.3)
             ok, detail = send.reply(
-                str(body.get("item") or ""),
                 refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
                 quote=str(body.get("quote") or ""),
                 mode=str(body.get("mode") or "continue"),
@@ -3557,10 +3521,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         status = detail.pop("status", 400)
         if not ok:
             # Which thread too: a refusal that names only the reason
-            # cannot be told apart from the next one, and "no such item"
-            # is a question about WHICH item was asked for.
-            named = (f"session {str(body.get('session'))[:8]}" if body.get("session")
-                     else f"item {str(body.get('item') or '')!r}")
+            # cannot be told apart from the next one.
+            named = f"session {str(body.get('session') or '')[:8]}"
             print(f"reply: refused {status} ({detail.get('error')}) "
                   f"for {named} from {h.client_address[0]}", file=sys.stderr)
         else:
@@ -3573,8 +3535,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else status, {"ok": ok, **detail})
     elif path == "/ask":
         # A fresh session from the phone: the assistant button, or "new
-        # chat" in the app. Gated like /reply — the ABS bearer is the
-        # credential — and it lands in the scratch tmux session.
+        # chat" in the app. Gated like /reply, and it lands in the scratch
+        # tmux session.
         body = _read_json(h) or {}
         from .driver import headless as _headless
 
@@ -3582,7 +3544,6 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             ok, detail = routing.ask_routed(
                 refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
                 target=str(body.get("target") or ""),
-                player_item=str(body.get("player_item") or ""),
                 player_session=str(body.get("player_session") or ""),
                 sticky=str(body.get("sticky") or ""),
                 parse=body.get("parse", True) is not False,
@@ -4014,8 +3975,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             text=str(body.get("text") or ""), role=str(body.get("role") or ""))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/archive":
-        # Archive or un-archive a thread: a flag kept here, by session, now
-        # that the ABS tag it used to be is going. It ends nothing — "End &
+        # Archive or un-archive a thread: a flag kept here, by session (it
+        # was an Audiobookshelf tag once). It ends nothing — "End &
         # archive" in the app also sends /session/close. Gated like it.
         body = _read_json(h) or {}
         ok, detail = archive.session_archive(str(body.get("session") or ""),

@@ -52,12 +52,10 @@ MUSIC_LAST_FILE = "music-where-last"
 
 #: The speech targets the code knows by name, in the order a picker lists
 #: them. Any other name is offered only when the env configures it.
-KNOWN_SPEECH = ("abs", "phone", "rooms", "local")
+KNOWN_SPEECH = ("phone", "rooms", "local")
 
 _SPEECH_LABELS = {
-    "abs": "Phone (Sasonica ABS)",
-    # Sasonica's own Media3 player, on its own port beside Sasonica ABS.
-    # Offered only where the env configures it.
+    # Sasonica's own Media3 player. Offered only where the env configures it.
     "sasonica": "Phone (Sasonica)",
     "phone": "Phone (Termux player)",
     "rooms": "House speakers",
@@ -65,7 +63,7 @@ _SPEECH_LABELS = {
 
 #: `media music play --where` values a preference may hold. `default` is the
 #: absence of one, and `local` is `rooms` under another name.
-MUSIC_WHERE = ("auto", "rooms", "sasonica", "phone", "abs")
+MUSIC_WHERE = ("auto", "rooms", "sasonica", "phone")
 
 _MUSIC_LABELS = {
     "auto": "Automatic",
@@ -73,7 +71,6 @@ _MUSIC_LABELS = {
     # Sasonica's own media player (sinks/music_sasonica), 28 Sep 2026.
     "sasonica": "Phone (Sasonica)",
     "phone": "Phone (Termux player)",
-    "abs": "Phone (Sasonica ABS)",
 }
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
@@ -295,10 +292,6 @@ def speech_block() -> dict:
 def music_available(where: str) -> tuple[bool, Optional[str]]:
     if where not in MUSIC_WHERE:
         return False, f"unknown place {where!r}"
-    if where == "abs":
-        from .sinks.music_app import configured
-        if not configured():
-            return False, "Sasonica ABS's music player is not configured here"
     if where == "sasonica":
         from .sinks.music_sasonica import configured
         if not configured():

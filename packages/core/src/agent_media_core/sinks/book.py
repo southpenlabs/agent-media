@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote
 
 from .._paths import state_dir
 from .. import audio_backend, mopidy
@@ -99,23 +99,6 @@ def _socket_for(target: Target) -> "str | Path":
     if override:
         return override if override.startswith("tcp://") else Path(override)
     return _socket_path()
-
-
-def _abs_public_url(target: Target, private_url: str) -> str:
-    public = os.environ.get("MEDIA_AUDIOBOOKSHELF_PUBLIC_URL") or os.environ.get("ABS_PUBLIC_URL")
-    if public:
-        return public.rstrip("/")
-    if target.name in ("", "local"):
-        return private_url.rstrip("/")
-    base = os.environ.get(_env_key("MEDIA_SPEECH_CLIP_BASEURL", target.name))
-    if not base:
-        return private_url.rstrip("/")
-    host = urlsplit(base).hostname
-    if not host:
-        return private_url.rstrip("/")
-    p = urlsplit(private_url)
-    port = f":{p.port}" if p.port else ""
-    return urlunsplit((p.scheme, f"{host}{port}", "", "", "")).rstrip("/")
 
 
 def _remote_book_cache_dir(target: Target) -> str:
@@ -327,29 +310,6 @@ except Exception as e:
         env=_play_env(),
     )
     return True
-
-
-def _abs_config() -> tuple[str, str]:
-    """Audiobookshelf URL/token, accepting the existing abs-bridge env names."""
-    url = os.environ.get("MEDIA_AUDIOBOOKSHELF_URL") or os.environ.get("ABS_URL") or ""
-    token = os.environ.get("MEDIA_AUDIOBOOKSHELF_TOKEN") or os.environ.get("ABS_TOKEN") or ""
-    if url and token:
-        return url.rstrip("/"), token
-    try:
-        p = Path.home() / ".config" / "agent-media" / "abs-bridge.env"
-        for line in p.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            v = v.strip().strip('"\'')
-            if k == "ABS_URL" and not url:
-                url = v
-            elif k == "ABS_TOKEN" and not token:
-                token = v
-    except OSError:
-        pass
-    return url.rstrip("/"), token
 
 
 def load_intent_path() -> Path:
@@ -599,17 +559,7 @@ class SinkBook:
 
         secs = max(0.0, (start_ms or 0) / 1000.0)
 
-        # Inject Audiobookshelf token if URL requires it.
         play_uri = norm
-        abs_url, token = _abs_config()
-        if "audiobookshelf" in play_uri.lower() or (abs_url and abs_url in play_uri):
-            public_abs = _abs_public_url(target, abs_url)
-            if public_abs != abs_url:
-                play_uri = public_abs + play_uri[len(abs_url):]
-            if token and "?" not in play_uri:
-                play_uri = f"{play_uri}?token={token}"
-            elif token and "token=" not in play_uri:
-                play_uri = f"{play_uri}&token={token}"
         play_gate.check(uri, target=target.name, kind="book", stage="load")
         # Leave a breadcrumb after final URL rewrite so observers/state agree.
         _write_load_intent(play_uri, start_ms or 0)

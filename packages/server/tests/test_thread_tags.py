@@ -97,12 +97,9 @@ def test_refusals(server, shelf, signed_in):
 
 
 def test_tags_are_gated(server, shelf, monkeypatch):
-    from agent_media_server import auth_abs
 
     p = _node(SID, ":claude:inbox:")
     before = p.read_text()
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "POST", "/session/tags", {"session": SID, "add": ["x"]})
     assert res.status == 401 and p.read_text() == before
     res, obj = call(server, "GET", "/tags")
@@ -176,10 +173,7 @@ def test_suggest_refusals(server, shelf, signed_in, monkeypatch):
 
 
 def test_suggest_is_gated(server, shelf, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "POST", "/session/tags/suggest", {"session": SID})
     assert res.status == 401
     assert "/session/tags/suggest" in app.CORS_PATHS

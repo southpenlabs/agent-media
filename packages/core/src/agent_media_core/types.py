@@ -57,11 +57,16 @@ class ContentType(str, Enum):
 
 
 #: Target names retired by a rename, and what they are called now (27 Sep
-#: 2026: `app` is Sasonica ABS, `next` is Sasonica). A name stored before the
-#: rename — a history row, a saved choice, an env value — still resolves;
-#: the per-target env keys (MEDIA_SPEECH_SOCKET_<TARGET> …) were renamed
-#: with it and are read under the new name only.
-RENAMED_TARGETS = {"app": "abs", "next": "sasonica"}
+#: 2026: `app` became `abs`, Sasonica ABS, and `next` is Sasonica). A name
+#: stored before the rename — a history row, a saved choice, an env value —
+#: still resolves; the per-target env keys (MEDIA_SPEECH_SOCKET_<TARGET> …)
+#: were renamed with it and are read under the new name only.
+#:
+#: `abs` (and `app` before it) is `phone` since 11 Nov 2026, when Sasonica ABS
+#: was retired with Audiobookshelf: every play to it already fell back to the
+#: phone's own (Termux) player when the app did not take it, so a saved
+#: choice lands where it would have ended up anyway, not on a dead target.
+RENAMED_TARGETS = {"app": "phone", "abs": "phone", "next": "sasonica"}
 
 
 def target_name(name: str) -> str:

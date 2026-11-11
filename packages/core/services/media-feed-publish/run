@@ -44,6 +44,10 @@ export MEDIA_FEED_TOKEN MEDIA_FEED_BASE_URL MEDIA_FEED_SPOOL
 # the audio alive even when the render cache is swept. A conversation is
 # listenable while it is still being had, instead of an hour after it ends.
 #
+# Audiobookshelf, which served that shelf as its Conversations library, was
+# left on 11 Nov 2026; the shelf folder and its manifest stay, local files the
+# transcript and the thread list still read.
+#
 # Still here when it is wanted, by hand: `media feed session <id>` publishes a
 # conversation as one file the old way, which is what to reach for before its
 # clips age out of the cache. Documents keep their feeds — a document is

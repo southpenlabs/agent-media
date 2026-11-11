@@ -9,7 +9,6 @@ module was written against.
 """
 
 import json
-import pathlib
 
 import pytest
 
@@ -179,43 +178,6 @@ def test_a_track_is_a_second_name_not_a_second_copy(tmp_path):
     assert out.stat().st_ino == src.stat().st_ino
 
 
-def test_a_workspace_numbers_its_conversations_by_date(tmp_path, monkeypatch):
-    """A series reads in the order things happened, and only counts its own
-    workspace."""
-    import json as _json
-
-    from agent_media_core import book_tracks as bt
-
-    d = tmp_path / "book-tracks"
-    d.mkdir()
-    rows = [("late", "/c/work/Third", 300.0),
-            ("early", "/c/work/First", 100.0),
-            ("mid", "/c/work/Second", 200.0),
-            ("elsewhere", "/c/other/Only", 50.0)]
-    for session, folder, at in rows:
-        (d / f"{session}.json").write_text(_json.dumps(
-            {"session": session, "folder": folder,
-             "turns": [{"at": at, "title": "t", "files": ["a.mp3"]}]}))
-    monkeypatch.setattr(bt, "state_dir", lambda: tmp_path)
-
-    from pathlib import Path
-    assert bt._series_position("early", Path("/c/work/First")) == "1"
-    assert bt._series_position("mid", Path("/c/work/Second")) == "2"
-    assert bt._series_position("late", Path("/c/work/Third")) == "3"
-    # A different workspace is a different series, numbered from one.
-    assert bt._series_position("elsewhere", Path("/c/other/Only")) == "1"
-
-
-def test_a_conversation_with_no_manifest_has_no_position(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    from agent_media_core import book_tracks as bt
-
-    (tmp_path / "book-tracks").mkdir()
-    monkeypatch.setattr(bt, "state_dir", lambda: tmp_path)
-    assert bt._series_position("nobody", Path("/c/work/Whatever")) == ""
-
-
 # --- the transcript shows a turn before the manifest catches up -----------------
 
 def test_conversation_log_includes_the_live_tail(tmp_path, monkeypatch):
@@ -223,12 +185,9 @@ def test_conversation_log_includes_the_live_tail(tmp_path, monkeypatch):
     with no position — so a reply lands in the transcript within a poll of
     being spoken instead of waiting out the debounced publish."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     # The manifest is one turn behind: it has the agent's turn at 100 only.
     monkeypatch.setattr(bt, "_read_manifest",
                         lambda s: {"turns": [{"at": 100.0, "title": "First answer"}]})
-    # No Audiobookshelf, so no positions are fetched (and none are needed).
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     # Speech history has the published turn plus a newer listener turn (200)
     # and the agent's fresh reply (300) that has not been published yet.
     hist = [
@@ -241,21 +200,19 @@ def test_conversation_log_includes_the_live_tail(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
 
-    lines = bt.conversation_log("sess-1", folder)
-    assert [(l["who"], l["text"], l["start"]) for l in lines] == [
-        ("agent", "First answer", None),   # from the manifest turn
-        ("you", "a question", None),        # live tail: "You: " stripped
-        ("agent", "The fresh reply", None), # live tail: the reply, shown at once
+    lines = bt.conversation_log("sess-1")
+    assert [(l["who"], l["text"]) for l in lines] == [
+        ("agent", "First answer"),   # from the manifest turn
+        ("you", "a question"),        # live tail: "You: " stripped
+        ("agent", "The fresh reply"), # live tail: the reply, shown at once
     ]
 
 
 def test_conversation_log_lines_carry_their_history_id(tmp_path, monkeypatch):
     """A tap on a line replays that turn by id through the speech player."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest",
                         lambda s: {"turns": [{"at": 100.0, "title": "First answer"}]})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     hist = [
         session_feed.Turn(at=100.0, text="First answer", id=41),
         session_feed.Turn(at=300.0, text="The fresh reply", id=42),
@@ -263,7 +220,7 @@ def test_conversation_log_lines_carry_their_history_id(tmp_path, monkeypatch):
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
     monkeypatch.setattr(bt, "_live_turn", lambda s: None)
 
-    lines = bt.conversation_log("sess-1", folder)
+    lines = bt.conversation_log("sess-1")
     assert [l.get("id") for l in lines] == [41, 42]
 
 
@@ -271,9 +228,7 @@ def test_a_replay_lights_up_its_own_line(tmp_path, monkeypatch):
     """Replaying a turn marks that line live where it is, not a new line at
     the bottom with the replay's own start time."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     hist = [
         session_feed.Turn(at=100.0, text="First answer", id=41),
         session_feed.Turn(at=300.0, text="Second answer", id=42),
@@ -285,7 +240,7 @@ def test_a_replay_lights_up_its_own_line(tmp_path, monkeypatch):
         "elapsed": 0.4, "paused": False, "server_time": 900.4, "delay": 0.0,
         "history_id": 41})
 
-    lines = bt.conversation_log("sess-1", folder)
+    lines = bt.conversation_log("sess-1")
     assert [(l["text"], bool(l.get("live"))) for l in lines] == [
         ("First answer", True), ("Second answer", False)]
 
@@ -295,10 +250,8 @@ def test_conversation_log_shows_the_turn_being_spoken_now(tmp_path, monkeypatch)
     shows at once, so a reply appears while it is being spoken."""
     from agent_media_core import book_tracks as bt, session_feed
     from agent_media_core.state.store import StateStore
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest",
                         lambda s: {"turns": [{"at": 100.0, "title": "Earlier"}]})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: [
         session_feed.Turn(at=100.0, text="Earlier", workspace="p-agent-media",
                           clips=[], durations=[], sentences=[], listener=False)])
@@ -313,11 +266,11 @@ def test_conversation_log_shows_the_turn_being_spoken_now(tmp_path, monkeypatch)
                    # Local lane: durations, no offsets. Paused 4.5s in.
                    "clip_durations_s": [2.0, 3.0],
                    "play_started_at": 1000.0, "paused_at": 1004.5}})
-    lines = bt.conversation_log("sess-1", folder)
+    lines = bt.conversation_log("sess-1")
     # When the reading was taken, and the offset the reader takes off it.
     assert lines[-1].pop("server_time") > 0
     assert lines[-1].pop("delay") >= 0
-    assert lines[-1] == {"start": None, "end": None, "at": 300.0, "key": "",
+    assert lines[-1] == {"at": 300.0, "key": "",
                          "who": "agent", "text": "Speaking this now",
                          # Live, which sentence the voice is on, and the
                          # timeline so a reader can move it on its own clock.
@@ -337,7 +290,7 @@ def test_conversation_log_shows_the_turn_being_spoken_now(tmp_path, monkeypatch)
                    "clip_durations_s": [2.0, 3.0],
                    "play_started_at": 1000.0}})
     monkeypatch.setattr(bt.time, "time", lambda: 1001.25)
-    live = bt.conversation_log("sess-1", folder)[-1]
+    live = bt.conversation_log("sess-1")[-1]
     assert live["live"] and live["paused"] is False
     assert live["elapsed"] == 1.25 and live["sentence"] == 0
 
@@ -346,10 +299,8 @@ def test_conversation_log_ignores_a_live_turn_from_another_session(tmp_path, mon
     from agent_media_core import book_tracks as bt, session_feed
     from agent_media_core.state.store import StateStore
     import os
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest",
                         lambda s: {"turns": [{"at": 100.0, "title": "Earlier"}]})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: [
         session_feed.Turn(at=100.0, text="Earlier", workspace="p-agent-media",
                           clips=[], durations=[], sentences=[], listener=False)])
@@ -357,113 +308,8 @@ def test_conversation_log_ignores_a_live_turn_from_another_session(tmp_path, mon
         "started_at": 300.0,
         "extras": {"source_session": "OTHER", "text": "not this conversation",
                    "writer_pid": os.getpid()}})
-    lines = bt.conversation_log("sess-1", folder)
+    lines = bt.conversation_log("sess-1")
     assert [l["text"] for l in lines] == ["Earlier"]
-
-
-
-# --- the live tag -----------------------------------------------------------------
-
-def test_tags_for_adds_and_removes_only_the_live_tag():
-    from agent_media_core import book_tracks as b
-    assert b._tags_for("s1", ["keep"], live={"s1"}) == ["keep", "live"]
-    assert b._tags_for("s1", ["keep", "live"], live=set()) == ["keep"]
-    assert b._tags_for("s1", ["live", "live"], live={"s1"}) == ["live"]
-
-
-def test_sync_live_tags_patches_only_what_changed(tmp_path, monkeypatch):
-    import json
-    from agent_media_core import book_tracks as b
-    from agent_media_core import _paths
-    monkeypatch.setattr(_paths, "state_dir", lambda: tmp_path)
-    monkeypatch.setattr(b, "state_dir", lambda: tmp_path)
-    d = tmp_path / "book-tracks"
-    d.mkdir()
-    (d / "s-live.json").write_text(json.dumps({"session": "s-live", "folder": "/c/p-x/Alive one"}))
-    (d / "s-dead.json").write_text(json.dumps({"session": "s-dead", "folder": "/c/p-x/Ended one"}))
-    (d / "s-same.json").write_text(json.dumps({"session": "s-same", "folder": "/c/p-x/Already right"}))
-    items = [
-        {"id": "i1", "path": "/conversations/p-x/Alive one", "media": {"tags": []}},
-        {"id": "i2", "path": "/conversations/p-x/Ended one", "media": {"tags": ["live", "other"]}},
-        {"id": "i3", "path": "/conversations/p-x/Already right", "media": {"tags": ["live"]}},
-        {"id": "i4", "path": "/conversations/p-x/Not ours", "media": {"tags": ["live"]}},
-    ]
-    monkeypatch.setattr(b, "_abs_ready_all", lambda target=None: [("http://abs", "tok", [{"id": "lib"}])])
-    monkeypatch.setattr(b, "_abs_items", lambda url, token, lib: items)
-    patched = []
-    monkeypatch.setattr(b, "_abs_patch", lambda url, token, path, body: patched.append((path, body)))
-    n = b.sync_tags(live={"s-live", "s-same"}, now=0)
-    assert n == 2
-    assert patched == [("/api/items/i1/media", {"tags": ["live"]}),
-                       ("/api/items/i2/media", {"tags": ["other"]})]   # i3 right already, i4 not a conversation
-
-
-# --- the archived tag -------------------------------------------------------------
-
-DAY = 86400.0
-
-
-def _arch(have, manifest, live=(), now=10 * DAY):
-    from agent_media_core import book_tracks as b
-    return b._archived("s1", list(have), manifest, set(live), now)
-
-
-def test_a_closed_conversation_quiet_for_a_week_is_archived():
-    m = {"turns": [{"at": 1 * DAY}, {"at": 2 * DAY}]}
-    assert _arch([], m) == (["archived"], 2 * DAY)
-
-
-def test_a_recent_or_live_conversation_is_not_archived():
-    m = {"turns": [{"at": 5 * DAY}]}
-    assert _arch([], m) == ([], None)                        # six days quiet
-    assert _arch(["live"], {"turns": [{"at": DAY}]}, live={"s1"}) == (["live"], None)
-
-
-def test_unarchived_by_hand_stays_unarchived():
-    m = {"turns": [{"at": DAY}], "archived_through": DAY}
-    assert _arch([], m) == ([], DAY)
-
-
-def test_a_new_turn_brings_it_back():
-    m = {"turns": [{"at": DAY}, {"at": 9 * DAY}], "archived_through": DAY}
-    assert _arch(["archived"], m) == ([], None)
-
-
-def test_archived_by_hand_is_adopted_at_its_last_turn():
-    m = {"turns": [{"at": 9 * DAY}]}
-    assert _arch(["archived"], m, live={"s1"}) == (["archived"], 9 * DAY)
-
-
-def test_every_server_gets_the_archive(tmp_path, monkeypatch):
-    import json
-    from agent_media_core import book_tracks as b
-    monkeypatch.setattr(b, "state_dir", lambda: tmp_path)
-    d = tmp_path / "book-tracks"
-    d.mkdir()
-    (d / "s1.json").write_text(json.dumps(
-        {"session": "s1", "folder": "/c/p-x/Old one", "turns": [{"at": DAY}]}))
-    item = {"id": "i1", "path": "/conversations/p-x/Old one", "media": {"tags": []}}
-    monkeypatch.setattr(b, "_abs_ready_all", lambda target=None: [
-        ("http://a", "t", [{"id": "lib"}]), ("http://b", "t", [{"id": "lib"}])])
-    monkeypatch.setattr(b, "_abs_items", lambda url, token, lib: [dict(item)])
-    patched = []
-    monkeypatch.setattr(b, "_abs_patch", lambda url, token, path, body: patched.append((url, body)))
-    assert b.sync_tags(live=set(), now=10 * DAY) == 2
-    assert patched == [("http://a", {"tags": ["archived"]}), ("http://b", {"tags": ["archived"]})]
-    assert json.loads((d / "s1.json").read_text())["archived_through"] == DAY
-
-
-def test_live_session_ids_reads_the_registry_for_real(tmp_path, monkeypatch):
-    # Not mocked past the tmux call: the import it needs was once missing and
-    # every other test had stubbed the function away.
-    import os
-    from agent_media_core import book_tracks as b
-    monkeypatch.setenv("MEDIA_PANE_REGISTRY_DIR", str(tmp_path))
-    (tmp_path / "1").write_text("11111111-2222-3333-4444-555555555555")   # legacy row, no pid
-    (tmp_path / "2").write_text(f"22222222-2222-3333-4444-555555555555 {os.getpid()}")
-    (tmp_path / "3").write_text("33333333-2222-3333-4444-555555555555 999999999")  # dead pid
-    monkeypatch.setattr(b.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "%1 %2 %3"})())
-    assert b.live_session_ids() == {"11111111-2222-3333-4444-555555555555", "22222222-2222-3333-4444-555555555555"}
 
 
 def test_live_turn_carries_the_playout_delay_for_its_target(monkeypatch):
@@ -483,104 +329,21 @@ def test_live_turn_carries_the_playout_delay_for_its_target(monkeypatch):
     assert turn["delay"] == 1.2 and turn["offsets"] == [0.0, 1.5] and 0.9 < turn["elapsed"] < 1.3
 
 
-# --- progress, once the item has grown --------------------------------------
-
-def _progress_fixture(monkeypatch, prog, item_duration):
-    """book_tracks wired to one server holding one item, returning `prog`.
-
-    Yields the PATCH bodies the call made, in order.
-    """
-    from agent_media_core import book_tracks as b
-    item = {"id": "i1", "path": "/conversations/p-x/A talk",
-            "media": {"duration": item_duration}}
-    monkeypatch.setattr(b, "_abs_ready", lambda target=None: ("http://abs", "tok", [{"id": "lib"}]))
-    monkeypatch.setattr(b, "_abs_items", lambda url, token, lib: [item])
-    monkeypatch.setattr(b, "_abs_progress", lambda url, token, item_id: prog)
-    patched = []
-    monkeypatch.setattr(b, "_abs_patch", lambda url, token, path, body: patched.append((path, body)))
-    return patched
-
-
-def test_progress_is_rebased_on_the_length_the_item_is_now(monkeypatch, tmp_path):
-    # The bug this exists for: ABS records the duration at the moment the
-    # position was written and never revises it, so a conversation paused two
-    # sentences in stays two sentences long.
-    from agent_media_core import book_tracks as b
-    patched = _progress_fixture(
-        monkeypatch, {"currentTime": 101.1, "duration": 174.3, "isFinished": False}, 5118.5)
-    msg = b.sync_progress(tmp_path / "p-x" / "A talk")
-    assert msg and "174s -> 5118s" in msg
-    assert patched == [("/api/me/progress/i1",
-                        {"currentTime": 101.1, "duration": 5118.5,
-                         "progress": 101.1 / 5118.5})]
-
-
-def test_a_progress_already_in_step_is_left_alone(monkeypatch, tmp_path):
-    # Every write bumps the item to the top of Continue Listening, so a turn
-    # landing on a conversation nobody has moved in must write nothing.
-    from agent_media_core import book_tracks as b
-    patched = _progress_fixture(
-        monkeypatch, {"currentTime": 203.0, "duration": 412.4, "isFinished": False}, 412.4)
-    assert b.sync_progress(tmp_path / "p-x" / "A talk") is None
-    assert patched == []
-
-
-def test_a_finished_item_is_unfinished_before_it_is_positioned(monkeypatch, tmp_path):
-    # Order is the whole point: clearing isFinished in the same body as a
-    # position resets currentTime to zero.
-    from agent_media_core import book_tracks as b
-    patched = _progress_fixture(
-        monkeypatch, {"currentTime": 207.9, "duration": 207.9, "isFinished": True}, 412.4)
-    msg = b.sync_progress(tmp_path / "p-x" / "A talk")
-    assert msg and "re-opened" in msg
-    assert [p[1] for p in patched] == [
-        {"isFinished": False},
-        {"currentTime": 207.9, "duration": 412.4, "progress": 207.9 / 412.4},
-    ]
-
-
-def test_nobody_has_played_it_so_nothing_is_written(monkeypatch, tmp_path):
-    from agent_media_core import book_tracks as b
-    patched = _progress_fixture(monkeypatch, None, 412.4)
-    assert b.sync_progress(tmp_path / "p-x" / "A talk") is None
-    assert patched == []
-
-
 # --- what a conversation is called ------------------------------------------------
 
-def test_the_title_prefers_a_name_given_here(tmp_path, monkeypatch):
-    """Then Claude Code's own name for the session, then the opening question."""
-    from agent_media_core import book_tracks as b
-    from agent_media_core import conversation
-
-    monkeypatch.setattr(b, "_read_manifest", lambda session: {"title": "What we called it"})
-    monkeypatch.setattr(conversation, "session_name", lambda session: "A session name")
-    monkeypatch.setattr(session_feed, "asked_for", lambda session, ts: "The first question")
-    assert b.conversation_title("s1", []) == "What we called it"
-
-    monkeypatch.setattr(b, "_read_manifest", lambda session: {})
-    assert b.conversation_title("s1", []) == "A session name"
-
-    monkeypatch.setattr(conversation, "session_name", lambda session: "")
-    assert b.conversation_title("s1", [_turn(tmp_path, 1.0, "hi")]) == "The first question"
-
-
-def test_a_rename_is_kept_told_and_applied(tmp_path, monkeypatch):
+def test_a_rename_is_kept_and_told(tmp_path, monkeypatch):
     from agent_media_core import book_tracks as b
     from agent_media_core import conversation
 
     monkeypatch.setattr(b, "state_dir", lambda: tmp_path)
     b._write_manifest("s1", {"session": "s1", "folder": "/c/p-x/Old name"})
-    told, applied = [], []
+    told = []
     monkeypatch.setattr(conversation, "set_session_name",
                         lambda session, title: told.append((session, title)) or True)
-    monkeypatch.setattr(b, "set_metadata",
-                        lambda session, folder, target=None: applied.append(folder) or "ok")
 
     assert b.rename("s1", "  A better   name  ") == "A better name"
     assert b._read_manifest("s1")["title"] == "A better name"
     assert told == [("s1", "A better name")]
-    assert applied == [pathlib.Path("/c/p-x/Old name")]   # the shelf now, not next turn
 
 
 def test_a_rename_with_no_name_is_not_one(tmp_path, monkeypatch):
@@ -628,9 +391,7 @@ def test_the_newest_turn_carries_its_timeline_without_being_live(tmp_path, monke
     a player that knows its own position keeps bolding — and says nothing
     about being live, because it is not a claim that anything is playing."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(bt, "_live_turn", lambda s: None)
     hist = [
         session_feed.Turn(at=100.0, text="An older answer.",
@@ -642,7 +403,7 @@ def test_the_newest_turn_carries_its_timeline_without_being_live(tmp_path, monke
     ]
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
 
-    lines = bt.conversation_log("sess-1", folder)
+    lines = bt.conversation_log("sess-1")
     newest = lines[-1]
     assert newest["sentences"] == ["One.", "Two.", "Three."]
     assert newest["offsets"] == [0.0, 1.4, 3.9]   # measured, not summed
@@ -660,9 +421,7 @@ def test_a_newest_turn_measured_part_way_predicts_the_rest(tmp_path, monkeypatch
     2 Nov 2026: "The ticks aren't spaced out properly, all the way to the end
     of the line")."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(bt, "_live_turn", lambda s: None)
     hist = [session_feed.Turn(at=300.0, text="One. Two. Three. Four.",
                               sentences=["One.", "Two.", "Three.", "Four."],
@@ -670,7 +429,7 @@ def test_a_newest_turn_measured_part_way_predicts_the_rest(tmp_path, monkeypatch
                               starts=[5.0, 6.4])]
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
 
-    newest = bt.conversation_log("sess-1", folder)[-1]
+    newest = bt.conversation_log("sess-1")[-1]
     # From the first word, measured where measured, then by the clip lengths.
     assert newest["offsets"] == [0.0, 1.4, 3.4, 6.4]
     assert newest["measured"] is True
@@ -681,15 +440,13 @@ def test_an_unmeasured_turn_apportions_its_offsets(tmp_path, monkeypatch):
     timeline — summed clip lengths — and is labelled as not measured, because
     that one drifts within a reply and a reader is owed the difference."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(bt, "_live_turn", lambda s: None)
     hist = [session_feed.Turn(at=300.0, text="One. Two.",
                               sentences=["One.", "Two."], durations=[1.5, 2.0])]
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
 
-    line = bt.conversation_log("sess-1", folder)[-1]
+    line = bt.conversation_log("sess-1")[-1]
     assert line["offsets"] == [0.0, 1.5]
     assert line["measured"] is False
 
@@ -698,9 +455,7 @@ def test_a_live_newest_turn_keeps_the_live_fields(tmp_path, monkeypatch):
     """When the row is live, the live line wins: its `elapsed`/`server_time`
     are not overwritten by the ended turn's static timeline."""
     from agent_media_core import book_tracks as bt, session_feed
-    folder = tmp_path / "p-agent-media" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     hist = [session_feed.Turn(at=300.0, text="One. Two.", id=7,
                               sentences=["One.", "Two."], durations=[1.5, 2.0])]
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: list(hist))
@@ -710,7 +465,7 @@ def test_a_live_newest_turn_keeps_the_live_fields(tmp_path, monkeypatch):
         "elapsed": 2.0, "paused": False, "server_time": 902.0, "delay": 0.0,
         "history_id": 7})
 
-    line = bt.conversation_log("sess-1", folder)[-1]
+    line = bt.conversation_log("sess-1")[-1]
     assert line["live"] is True
     assert line["offsets"] == [0.0, 1.4] and line["elapsed"] == 2.0
 
@@ -747,9 +502,7 @@ def test_the_live_line_carries_the_replys_key(tmp_path, monkeypatch):
     import os
     from agent_media_core import book_tracks as bt, session_feed
     from agent_media_core.state.store import StateStore
-    folder = tmp_path / "p-scratch" / "A talk"
     monkeypatch.setattr(bt, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(bt, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(session_feed, "turns", lambda s, store=None: [])
     monkeypatch.setattr(StateStore, "get_now_playing", lambda self, sink: {
         "started_at": 300.0,
@@ -758,5 +511,5 @@ def test_the_live_line_carries_the_replys_key(tmp_path, monkeypatch):
                    "clip_sentences": ["Described words."],
                    "clip_durations_s": [2.0], "play_started_at": 1000.0}})
     assert bt._live_turn("sess-1")["key"] == "c900c50f"
-    (line,) = bt.conversation_log("sess-1", folder)
+    (line,) = bt.conversation_log("sess-1")
     assert line["live"] and line["key"] == "c900c50f"

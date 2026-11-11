@@ -131,7 +131,7 @@ def session_forward(session: str, mid: str, to: list, bearer: str, *,
                         shared = _shared_copy(info, content.get("filename") or content["body"]) or ""
                     if shared:
                         lines.append(f"Shared file: {shared}")
-                ok, detail = send.reply("", "\n".join(lines), bearer, session=t)
+                ok, detail = send.reply("\n".join(lines), bearer, session=t)
         except Exception as e:  # noqa: BLE001 — one chat, not the rest
             log.warning("forward to %s: %s", t[:8], e)
             ok, detail = False, {"error": str(e)}

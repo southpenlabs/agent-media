@@ -2,7 +2,7 @@
 
 These go over real HTTP to an in-process canvas, so what is pinned is what a
 client reads — status, envelope, key set — not what a function returns. The
-data underneath is faked at the seams (ABS identity, the pane sweep, the
+data underneath is faked at the seams (the device lookup, the pane sweep, the
 manifest shelf), and the real code between the seam and the socket builds the
 answer.
 
@@ -27,12 +27,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_media_server import auth_abs, panes, send, sessions, speech
+from agent_media_server import auth, panes, send, sessions, speech
 from agent_media_visual import canvas
 
 SID = "6c73498c-02c1-4846-8350-a82006973571"
 SID2 = "0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
-ROOT = {"username": "david", "type": "root"}
+OWNER = {"id": "d_test", "name": "test"}
 AUTH = {"Authorization": "Bearer tok"}
 
 
@@ -84,15 +84,10 @@ def shelf(monkeypatch, tmp_path):
 
 @pytest.fixture()
 def signed_in(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (ROOT, 200))
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    # An item lookup answers with the shelved conversation's folder; anything
-    # else (the library listing item_for_session walks) answers with nothing.
-    def get(url, bearer, path, method="GET"):
-        if path.startswith("/api/items/"):
-            return {"id": "li_1", "path": "/audiobooks/p-agent-media/Sasonica music"}, 200
-        return None, 404
-    monkeypatch.setattr(auth_abs, "_abs_get", get)
+    # A paired device: the owner, for any bearer the tests send — unless the
+    # bearer is a device a test really paired, which stays itself.
+    real = auth._device
+    monkeypatch.setattr(auth, "_device", lambda b: real(b) or (OWNER if b else None))
 
 
 @pytest.fixture()
@@ -132,39 +127,18 @@ def keys(obj) -> set:
 # --- the auth envelope, shared by every bearer-gated route ------------------------
 
 GATED_GETS = ["/targets", "/sessions/state", "/conversations",
-              f"/conversation?item=li_1", f"/conversation?session={SID}",
-              "/conversation/log?item=li_1", f"/draft?session={SID}",
+              f"/conversation?session={SID}",
+              f"/conversation/log?session={SID}", f"/draft?session={SID}",
               "/speech/now", f"/commands?session={SID}", "/audio/targets", "/dashboard", "/features",
               f"/threads/{SID}/agents", "/search?q=x", "/contacts?q=x"]
 
 
 @pytest.mark.parametrize("path", GATED_GETS)
 def test_no_bearer_is_401_with_an_error(server, monkeypatch, path):
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "GET", path)
     assert res.status == 401, obj
     assert obj["ok"] is False and isinstance(obj["error"], str)
     assert res.getheader("Access-Control-Allow-Origin") == "*"
-
-
-@pytest.mark.parametrize("path", GATED_GETS)
-def test_abs_down_is_503_never_401(server, monkeypatch, path):
-    # A 401 makes the client refresh its token and, failing that, log out.
-    # An outage must not end the session.
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 0))
-    res, obj = call(server, "GET", path, headers=AUTH)
-    assert res.status == 503, obj
-    assert obj["ok"] is False
-
-
-@pytest.mark.parametrize("path", GATED_GETS)
-def test_a_user_not_allowed_to_reply_is_403(server, monkeypatch, path):
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda bearer: ({"username": "guest", "type": "user"}, 200))
-    res, obj = call(server, "GET", path, headers=AUTH)
-    assert res.status == 403, obj
-    assert obj["ok"] is False
 
 
 # --- thread list ------------------------------------------------------------------
@@ -269,7 +243,7 @@ def test_sessions_state_shape(server, shelf, signed_in):
     assert keys(obj) == {"ok", "sessions", "host"}
     _, targets = call(server, "GET", "/targets", headers=AUTH)
     title = next(r["title"] for r in targets["sessions"] if r["session"] == SID2)
-    assert obj["sessions"] == [{"session": SID2, "tail": "", "state": "working",
+    assert obj["sessions"] == [{"session": SID2, "state": "working",
                                 "mem_mb": None, "title": title}]
     assert keys(obj["host"]) == {"mem_total_mb", "mem_available_mb", "swap_total_mb",
                                  "swap_free_mb", "mem_stall_pct", "strained", "sessions_mem_mb"}
@@ -278,21 +252,20 @@ def test_sessions_state_shape(server, shelf, signed_in):
 
 # --- one conversation -------------------------------------------------------------
 
-def test_conversation_by_item_shape(server, shelf, signed_in):
+def test_conversation_needs_a_session(server, shelf, signed_in):
+    # `?item=` (an Audiobookshelf item) went with Audiobookshelf, 11 Nov 2026.
     res, obj = call(server, "GET", "/conversation?item=li_1", headers=AUTH)
-    assert res.status == 200, obj
-    assert keys(obj) == {"ok", "session", "live", "pane", "resumable", "suggestion"}
-    assert obj["session"] == SID and obj["live"] is False and obj["pane"] is None
+    assert res.status == 400 and obj["ok"] is False
 
 
 def test_conversation_by_session_shape(server, shelf, signed_in):
     res, obj = call(server, "GET", f"/conversation?session={SID2}", headers=AUTH)
     assert res.status == 200, obj
     # `suggestion` joined on 22 Sep 2026 (§10: the session form gains what the
-    # item form has), deliberately.
-    assert keys(obj) == {"ok", "session", "item", "scanning", "live", "pane", "resumable",
-                         "suggestion"}
-    assert obj["live"] is True and obj["pane"] == "%42" and obj["item"] is None
+    # item form had), deliberately; `item` and `scanning` left with
+    # Audiobookshelf (11 Nov 2026).
+    assert keys(obj) == {"ok", "session", "live", "pane", "resumable", "suggestion"}
+    assert obj["live"] is True and obj["pane"] == "%42"
 
 
 def test_conversation_by_session_rejects_a_non_id(server, shelf, signed_in):
@@ -300,24 +273,18 @@ def test_conversation_by_session_rejects_a_non_id(server, shelf, signed_in):
     assert res.status == 400 and obj["ok"] is False
 
 
-def test_conversation_for_an_unknown_item_is_404(server, shelf, signed_in, monkeypatch):
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 404))
-    res, obj = call(server, "GET", "/conversation?item=li_x", headers=AUTH)
-    assert res.status == 404 and obj == {"ok": False, "error": "no such item"}
-
-
 def test_conversation_log_shape(server, shelf, signed_in, monkeypatch):
     from agent_media_core import activity, book_tracks
 
-    live_line = {"start": None, "end": None, "who": "agent", "text": "Two. Three.",
+    live_line = {"who": "agent", "text": "Two. Three.",
                  "at": 20.0, "key": "k2", "live": True,
                  "sentences": ["Two.", "Three."], "sentence": 0, "offsets": [0.0, 1.2],
                  "elapsed": 0.5, "paused": False, "server_time": 1.0, "delay": 0.0}
-    monkeypatch.setattr(book_tracks, "conversation_log", lambda s, f, target=None: [
-        {"start": 0.0, "end": 4.0, "who": "you", "text": "One?", "at": 10.0, "key": ""},
+    monkeypatch.setattr(book_tracks, "conversation_log", lambda s: [
+        {"who": "you", "text": "One?", "at": 10.0, "key": ""},
         live_line])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
-    res, obj = call(server, "GET", "/conversation/log?item=li_1&messages=1", headers=AUTH)
+    res, obj = call(server, "GET", f"/conversation/log?session={SID}&messages=1", headers=AUTH)
     assert res.status == 200, obj
     # `recap` joined on 22 Sep 2026, deliberately (§6.2): the thread's "while
     # you were away" card, never a line. `messages` and `older` joined on
@@ -336,7 +303,7 @@ def test_conversation_log_shape(server, shelf, signed_in, monkeypatch):
     assert keys(obj["messages"][0]) == {"id", "role", "at", "parts", "spoken", "turn"}
     assert obj["older"] is False
     you, agent = obj["lines"]
-    assert keys(you) == {"start", "end", "who", "text", "at", "key"}
+    assert keys(you) == {"who", "text", "at", "key"}
     # The live line's clock is brought up to the moment the answer leaves.
     assert agent["server_time"] > 1.0 and agent["elapsed"] > 0.5
 
@@ -352,9 +319,8 @@ def test_conversation_log_line_shape_from_book_tracks(monkeypatch):
     monkeypatch.setattr(book_tracks, "_read_manifest", lambda s: {"turns": []})
     monkeypatch.setattr(book_tracks.session_feed, "turns", lambda s: [turn])
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: None)
-    monkeypatch.setattr(book_tracks, "_abs_ready", lambda t: None)
-    (line,) = book_tracks.conversation_log(SID, None)
-    assert keys(line) == {"start", "end", "who", "text", "at", "key", "id", "ask"}
+    (line,) = book_tracks.conversation_log(SID)
+    assert keys(line) == {"who", "text", "at", "key", "id", "ask"}
     assert line["who"] == "agent" and line["text"] == "Which?" and line["id"] == 7
 
     # The newest turn also hands over its timeline when it has one — without
@@ -364,8 +330,8 @@ def test_conversation_log_line_shape_from_book_tracks(monkeypatch):
                              sentences=["One.", "Two."], durations=[1.5, 2.0],
                              starts=[0.0, 1.4])
     monkeypatch.setattr(book_tracks.session_feed, "turns", lambda s: [spoken])
-    (line,) = book_tracks.conversation_log(SID, None)
-    assert keys(line) == {"start", "end", "who", "text", "at", "key", "id",
+    (line,) = book_tracks.conversation_log(SID)
+    assert keys(line) == {"who", "text", "at", "key", "id",
                           "sentences", "offsets", "measured"}
     assert line["offsets"] == [0.0, 1.4] and line["measured"] is True
 
@@ -386,7 +352,7 @@ def test_commands_shape(server, shelf, signed_in, monkeypatch):
 def test_ask_dry_run_shape(server, shelf, signed_in, typed):
     res, obj = call(server, "POST", "/ask", {"text": "hello there", "dry": True}, AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "mode", "how", "agent", "session", "title", "item",
+    assert keys(obj) == {"ok", "mode", "how", "agent", "session", "title",
                          "text", "dry"}
     assert (obj["mode"], obj["how"], obj["session"]) == ("new", "default", None)
     assert typed == []
@@ -396,7 +362,7 @@ def test_ask_dry_run_to_a_picked_session(server, shelf, signed_in, typed):
     res, obj = call(server, "POST", "/ask",
                     {"text": "hello", "target": SID2, "dry": True}, AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "mode", "how", "session", "title", "item", "text", "dry"}
+    assert keys(obj) == {"ok", "mode", "how", "session", "title", "text", "dry"}
     assert (obj["mode"], obj["how"], obj["title"]) == ("continued", "picked", "Sasonica web")
     assert typed == []
 
@@ -422,7 +388,7 @@ def test_reply_to_a_live_session_shape(server, shelf, signed_in, typed, monkeypa
     # Not this machine's real pane %42: a working one there answered `queued`.
     from agent_media_server import send as send_mod
     monkeypatch.setattr(send_mod, "_pane_working", lambda *a, **k: False)
-    res, obj = call(server, "POST", "/reply", {"item": "li_1", "text": "yes"}, AUTH)
+    res, obj = call(server, "POST", "/reply", {"session": SID, "text": "yes"}, AUTH)
     assert res.status == 200, obj
     assert keys(obj) == {"ok", "session", "pane", "opened", "submitted"}
     assert obj == {"ok": True, "session": SID, "pane": "%42", "opened": False,
@@ -434,14 +400,14 @@ def test_reply_to_a_live_session_shape(server, shelf, signed_in, typed, monkeypa
 def test_reply_unsent_is_502_with_the_pane(server, shelf, signed_in, typed, monkeypatch):
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%42"})
     monkeypatch.setattr(send, "_ensure_submitted", lambda *a, **k: False)
-    res, obj = call(server, "POST", "/reply", {"item": "li_1", "text": "yes"}, AUTH)
+    res, obj = call(server, "POST", "/reply", {"session": SID, "text": "yes"}, AUTH)
     assert res.status == 502
     assert keys(obj) == {"ok", "error", "pane", "submitted", "session", "opened"}
     assert obj["submitted"] is False
 
 
 def test_reply_empty_is_400(server, shelf, signed_in):
-    res, obj = call(server, "POST", "/reply", {"item": "li_1", "text": ""}, AUTH)
+    res, obj = call(server, "POST", "/reply", {"session": SID, "text": ""}, AUTH)
     assert res.status == 400 and obj == {"ok": False, "error": "empty reply"}
 
 
@@ -570,7 +536,7 @@ def test_speech_now_quiet_shape(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "GET", "/speech/now", headers=AUTH)
     assert res.status == 200
     assert keys(obj) == {"ok", "live", "speaking", "paused", "sentence", "session",
-                         "title", "item", "pos", "dur", "speed", "muted", "target",
+                         "title", "pos", "dur", "speed", "muted", "target",
                          "replay", "queued", "left_paused", "thinking", "notif", "mic", "up_next"}
     assert obj["live"] is False and obj["session"] is None
     assert obj["replay"] is False and obj["queued"] == []
@@ -588,8 +554,6 @@ def test_speech_now_names_a_replay_and_what_waits(server, shelf, signed_in, monk
         "queued": [{"session": waiting, "urgent": False, "at": 1790031449.7}]})
     monkeypatch.setattr(sessions, "title_of", lambda s: {
         waiting: "Speech bar", replayed: "Filters"}.get(s, ""))
-    from agent_media_server import threads
-    monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     speech._NOW_CACHE.clear()
     speech._TITLE_CACHE.clear()
     res, obj = call(server, "GET", "/speech/now", headers=AUTH)
@@ -614,8 +578,6 @@ def test_speech_now_names_the_turn_it_is_on(server, shelf, signed_in, monkeypatc
         "turn": {"at": 1790031449.7, "id": 91}})
     monkeypatch.setattr(sessions, "title_of",
                         lambda s: "Filters" if s == sid else "")
-    from agent_media_server import threads
-    monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     speech._NOW_CACHE.clear()
     speech._TITLE_CACHE.clear()
     _, obj = call(server, "GET", "/speech/now", headers=AUTH)
@@ -634,7 +596,6 @@ def test_speech_now_carries_the_live_reply_s_pictures(server, shelf, signed_in, 
     Now playing shows them (5 Nov 2026). None drawn, or quiet: absent."""
     sid = "6c73498c-02c1-4846-8350-a82006973571"
     from agent_media_server import threads
-    monkeypatch.setattr(threads, "item_for_session", lambda s, b: (None, False))
     monkeypatch.setattr(threads, "_PICTURES_FOR", lambda k: (
         (["/img/fig.png"], True) if k == "k1" else ([], False)))
     speech._NOW_CACHE.clear()
@@ -694,9 +655,9 @@ def audio_host(monkeypatch):
         if k.startswith(("MEDIA_SPEECH_SOCKET_", "MEDIA_SPEECH_DEVICE_",
                          "MEDIA_REMOTE_SAY_CMD")):
             monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("MEDIA_SPEECH_DEFAULT_TARGET", "abs")
-    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_ABS", "tcp://127.0.0.1:1")
-    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_ABS", "")
+    monkeypatch.setenv("MEDIA_SPEECH_DEFAULT_TARGET", "sasonica")
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_SASONICA", "tcp://127.0.0.1:1")
+    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_SASONICA", "")
     audio._reset_cache()
     yield
     audio._reset_cache()
@@ -713,10 +674,10 @@ def test_audio_targets_shape(server, signed_in, audio_host):
     assert keys(obj["channels"]) == {"speech", "music"}
     sp, mu = obj["channels"]["speech"], obj["channels"]["music"]
     assert keys(sp) == {"current", "default", "overridden", "options"}
-    assert (sp["current"], sp["default"], sp["overridden"]) == ("abs", "abs", False)
-    assert [o["name"] for o in sp["options"]] == ["abs", "rooms", "local"]
+    assert (sp["current"], sp["default"], sp["overridden"]) == ("sasonica", "sasonica", False)
+    assert [o["name"] for o in sp["options"]] == ["rooms", "local", "sasonica"]
     assert all(keys(o) == OPTION_KEYS for o in sp["options"])
-    assert sp["options"][0]["label"] == "Phone (Sasonica ABS)"
+    assert sp["options"][-1]["label"] == "Phone (Sasonica)"
     assert keys(mu) == {"current", "next", "overridden", "options"}
     assert all(keys(o) == OPTION_KEYS for o in mu["options"])
     assert res.getheader("Access-Control-Allow-Origin") == "*"
@@ -734,8 +695,8 @@ def test_audio_target_sets_and_clears_speech(server, signed_in, audio_host):
     assert got["channels"]["speech"]["current"] == "rooms"   # the cache was dropped
     res, obj = call(server, "POST", "/audio/target",
                     {"channel": "speech", "target": None}, AUTH)
-    assert res.status == 200 and obj["current"] == "abs" and obj["overridden"] is False
-    assert audio_targets.speech_default() == "abs"
+    assert res.status == 200 and obj["current"] == "sasonica" and obj["overridden"] is False
+    assert audio_targets.speech_default() == "sasonica"
 
 
 @pytest.mark.parametrize("body", [
@@ -760,10 +721,9 @@ def test_audio_target_sets_the_next_music_play(server, signed_in, audio_host):
     assert (obj["channel"], obj["next"], obj["overridden"]) == ("music", "rooms", True)
 
 
-@pytest.mark.parametrize("who,status", [((None, 401), 401), ((None, 0), 503),
-                                        (({"username": "guest", "type": "user"}, 200), 403)])
+@pytest.mark.parametrize("who,status", [(None, 401)])
 def test_audio_target_is_gated(server, monkeypatch, audio_host, who, status):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: who)
+    monkeypatch.setattr(auth, "_device", lambda bearer: who)
     res, obj = call(server, "POST", "/audio/target",
                     {"channel": "speech", "target": "rooms"}, AUTH)
     assert res.status == status, obj
@@ -784,7 +744,7 @@ def test_a_paired_device_may_choose(server, audio_host):
 def test_speech_now_names_where_it_plays(server, shelf, signed_in, audio_host, monkeypatch):
     monkeypatch.setattr(canvas, "speech_state", lambda: {"kind": "state", "speaking": False})
     _, obj = call(server, "GET", "/speech/now", headers=AUTH)
-    assert obj["target"] == "abs"                     # quiet: where the next one goes
+    assert obj["target"] == "sasonica"                     # quiet: where the next one goes
     from agent_media_core import audio_targets
     audio_targets.set_speech_override("rooms")
     _, obj = call(server, "GET", "/speech/now", headers=AUTH)
@@ -797,12 +757,12 @@ def test_speech_now_while_live_names_the_reply_s_own_target(server, shelf, signe
     from agent_media_core import audio_targets
     from agent_media_core.state import StateStore
     StateStore().set_now_playing("speech", uri="/tmp/x.mp3", started_at=1.0,
-                                 target="abs", extras={})
+                                 target="sasonica", extras={})
     audio_targets.set_speech_override("rooms")
     monkeypatch.setattr(canvas, "speech_state",
                         lambda: {"kind": "state", "speaking": True, "session": SID})
     _, obj = call(server, "GET", "/speech/now", headers=AUTH)
-    assert obj["live"] is True and obj["target"] == "abs"
+    assert obj["live"] is True and obj["target"] == "sasonica"
 
 
 # --- the stream ---------------------------------------------------------------------

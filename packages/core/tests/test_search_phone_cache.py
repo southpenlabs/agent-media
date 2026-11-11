@@ -1,8 +1,6 @@
 """`search(channel="book")` lists the phone's cached books through the phone's
 Termux worker, not `ssh p8a find` (roadmap item 15, #6)."""
 
-import io
-import json
 import subprocess
 import sys
 
@@ -19,9 +17,6 @@ def _run_search(monkeypatch, tmp_path, jobs: str):
     monkeypatch.setenv("MEDIA_SPEECH_DEFAULT_TARGET", "sasonica")
     monkeypatch.setenv("MEDIA_MUSIC_LOCAL_SSH", "p8a")
     monkeypatch.setenv("MEDIA_PHONE_JOBS", jobs)
-    monkeypatch.setattr(mcp_server, "_abs_config", lambda: ("http://abs.invalid", "t"))
-    monkeypatch.setattr("urllib.request.urlopen",
-                        lambda *a, **k: io.BytesIO(json.dumps({"libraries": []}).encode()))
     seen = []
 
     def fake_run(argv, **kw):

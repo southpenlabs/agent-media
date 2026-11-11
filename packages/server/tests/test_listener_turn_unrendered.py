@@ -37,7 +37,7 @@ def isolated(tmp_path, monkeypatch):
 
 def _lines(tmp_path):
     assert book_tracks.record_listener_turn(S, "Can you check the build?") is True
-    return book_tracks.conversation_log(S, tmp_path / "nofolder", positions=False)
+    return book_tracks.conversation_log(S)
 
 
 def test_pending_while_the_last_line_is_an_unrendered_turn(isolated, monkeypatch):

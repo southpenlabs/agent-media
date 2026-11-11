@@ -399,7 +399,10 @@ def test_a_reconnecting_stream_gets_what_it_missed(server, screen, endpoint):
         st.close()
 
 
-def test_state_needs_a_device(server, screen):
+def test_state_needs_a_device(server, screen, monkeypatch):
+    from agent_media_server import auth
+
+    monkeypatch.setattr(auth, "_device", lambda b: None)    # a bearer that is no device
     assert call(server, "POST", "/speech/state", {"seq": 0}, AUTH)[0].status == 401
 
 

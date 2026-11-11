@@ -23,9 +23,8 @@ had exited. This is that for the whole trail, from the app (David, 15 Oct
 2. **Its spoken lines**: the speech-history rows (`extras.source_session`),
    which hold the text, and the clip files they name with every file beside
    each clip (`<stem>.*`: the text, the rendered audio).
-3. **Its shelf folder and manifest**, and its Audiobookshelf item is deleted
-   (the folder is gone). A folder another thread shares stays, as in
-   `forget`.
+3. **Its shelf folder and manifest**. A folder another thread shares stays,
+   as in `forget`.
 4. **Its search rows** are dropped; unsealing brings the transcript back and
    the index reads it again.
 
@@ -55,7 +54,7 @@ import tarfile
 import time
 from pathlib import Path
 
-from agent_media_core import book_tracks, harnesses, sealed
+from agent_media_core import harnesses, sealed
 from agent_media_core._paths import state_dir
 from agent_media_core.state.store import default_db_path
 
@@ -326,13 +325,7 @@ def seal(session: str) -> dict:
         else:
             p.unlink(missing_ok=True)
     report["search_rows"] = search.forget(session)
-    items = []
-    if report["folder"]:
-        for url, token, libs in book_tracks._abs_ready_all():
-            item = book_tracks._find_item(url, token, libs, Path(report["folder"]))
-            if item and item.get("id"):
-                items.append({"id": item["id"], "status": forget._abs_delete(url, token, item["id"])})
-    report.update(history=len(report["history"]), bundle=str(dest), abs_items=items)
+    report.update(history=len(report["history"]), bundle=str(dest))
     return report
 
 

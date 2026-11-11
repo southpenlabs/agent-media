@@ -8,8 +8,8 @@ codes land there, never in ~/.local/state.
 
 The two properties that matter most, and so are asserted most directly:
 
-* a device token is checked locally — ABS is never asked who it is, and the
-  token itself is never sent to ABS, not even for an item lookup;
+* a device token is checked locally, and is the only way in (the
+  Audiobookshelf fallback went with Audiobookshelf, 11 Nov 2026);
 * a device pairing code and the canvas's amux pairing code never unlock each
   other's page.
 """
@@ -23,46 +23,17 @@ import time
 
 import pytest
 
-from agent_media_server import auth_abs, devices
+from agent_media_server import devices
 from agent_media_visual import canvas
 
 # The contract test's rig: fixtures and helpers, by name (never `*`, which
 # would collect its tests a second time here).
-from test_contract import (AUTH, GATED_GETS, ROOT, SID, call, keys, server, shelf,  # noqa: F401
+from test_contract import (AUTH, GATED_GETS, SID, call, keys, server, shelf,  # noqa: F401
                            signed_in, typed)
 
 
 def _pair(addr, code, device="Pixel 8a", headers=None):
     return call(addr, "POST", "/pair", {"code": code, "device": device}, headers)
-
-
-@pytest.fixture()
-def abs_spy(monkeypatch):
-    """ABS as a recorder: who was asked who, and with which bearer.
-
-    `abs_identity` answers "root" so a route that wrongly asked it would still
-    succeed — the assertion on the call log is what catches it, not a status.
-    Item lookups answer the shelved conversation, as `signed_in` does.
-    """
-    calls = {"identity": [], "get": []}
-
-    def identity(bearer):
-        calls["identity"].append(bearer)
-        return ROOT, 200
-
-    def get(url, bearer, path, method="GET"):
-        calls["get"].append((bearer, path))
-        if path.startswith("/api/items/"):
-            return {"id": "li_1", "path": "/audiobooks/p-agent-media/Sasonica music"}, 200
-        return None, 404
-
-    monkeypatch.setattr(auth_abs, "abs_identity", identity)
-    monkeypatch.setattr(auth_abs, "_abs_get", get)
-    monkeypatch.setattr(auth_abs, "_abs_url", lambda: "http://abs")
-    # The host's own ABS login, which a device's item lookups go out under.
-    from agent_media_core import library
-    monkeypatch.setattr(library, "_abs_cfg", lambda target=None: ("http://abs", "hosttok", ""))
-    return calls
 
 
 @pytest.fixture()
@@ -229,46 +200,26 @@ def test_no_cors_on_the_amux_page(server, amux):
 @pytest.fixture()
 def quiet_routes(monkeypatch):
     """Fakes for what the gated GETs would otherwise reach past the gate: the
-    log's builder (which asks ABS for positions), the slash menu (`claude
+    log's builder, the slash menu (`claude
     -p`), the speech snapshot."""
     from agent_media_core import activity, book_tracks, slash_menu
 
     monkeypatch.setattr(book_tracks, "conversation_log",
-                        lambda s, f, target=None, positions=True: [])
+                        lambda s: [])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
     monkeypatch.setattr(slash_menu, "menu", lambda cwd: [])
     monkeypatch.setattr(canvas, "speech_state", lambda: {"kind": "state", "speaking": False})
 
 
-#: Gated GETs that need nothing from ABS once the caller is known. The others
-#: in GATED_GETS look an item up (`?item=`) or look for a session's item
-#: (`/conversation?session=`), and do that under the HOST's ABS login.
-_LOCAL = {"/targets", "/sessions/state", "/conversations", f"/draft?session={SID}",
-          "/speech/now", f"/commands?session={SID}"}
-
-
 @pytest.mark.parametrize("path", GATED_GETS)
-def test_a_device_token_passes_every_gate_without_asking_abs(
-        server, shelf, abs_spy, quiet_routes, device, path):
+def test_a_device_token_passes_every_gate(server, shelf, quiet_routes, device, path):
     token, _id = device
     res, obj = call(server, "GET", path, headers={"Authorization": f"Bearer {token}"})
     assert res.status == 200, obj
     assert obj["ok"] is True
-    assert abs_spy["identity"] == []                     # never "who is this?"
-    assert all(b != token for b, _ in abs_spy["get"])    # never shown to ABS
-    if path in _LOCAL:
-        assert abs_spy["get"] == []
 
 
-def test_a_device_is_the_owner_even_with_root_switched_off(
-        server, shelf, abs_spy, device, monkeypatch):
-    monkeypatch.setenv("MEDIA_REPLY_ROOT", "0")
-    token, _id = device
-    res, obj = call(server, "GET", "/targets", headers={"Authorization": f"Bearer {token}"})
-    assert res.status == 200, obj
-
-
-def test_a_device_token_can_reply(server, shelf, abs_spy, device, typed, monkeypatch):
+def test_a_device_token_can_reply(server, shelf, device, typed, monkeypatch):
     from agent_media_server import sessions
 
     monkeypatch.setattr(sessions, "live_sessions", lambda: {SID: "%42"})
@@ -277,25 +228,19 @@ def test_a_device_token_can_reply(server, shelf, abs_spy, device, typed, monkeyp
                     {"Authorization": f"Bearer {token}"})
     assert res.status == 200, obj
     assert ("_send_to_pane", ("%42", "yes")) in typed
-    assert abs_spy["identity"] == [] and abs_spy["get"] == []
 
 
-def test_a_revoked_token_falls_back_to_abs_and_is_401(server, shelf, abs_spy, device,
-                                                       monkeypatch):
+def test_a_revoked_token_is_401(server, shelf, device):
     token, device_id = device
     assert devices.revoke(device_id) is True
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda bearer: (abs_spy["identity"].append(bearer), (None, 401))[1])
     res, obj = call(server, "GET", "/targets", headers={"Authorization": f"Bearer {token}"})
     assert res.status == 401 and obj["ok"] is False
-    assert abs_spy["identity"] == [token]                 # the fallback ran
     assert devices.revoke(device_id) is False             # already gone
 
 
-def test_an_abs_bearer_still_works(server, shelf, signed_in, device):
-    # The migration keeps both: a bearer that is not a device goes to ABS.
+def test_a_bearer_that_is_no_device_is_401(server, shelf, device):
     res, obj = call(server, "GET", "/targets", headers=AUTH)
-    assert res.status == 200, obj
+    assert res.status == 401 and obj["ok"] is False
 
 
 # --- the store ----------------------------------------------------------------------
@@ -537,9 +482,9 @@ def test_revoking_from_the_app_stops_that_token(server, enroller, device):
     res, obj = call(server, "POST", "/devices/revoke", {"id": victim_id}, _auth(token))
     assert res.status == 200 and obj["id"] == victim_id
     assert victim_id not in [d["id"] for d in obj["devices"]]
-    # The revoked token is now nobody: it falls through to ABS, which refuses it.
+    # The revoked token is now nobody: 401.
     res2, _ = call(server, "GET", "/conversations", None, _auth(victim))
-    assert res2.status in (401, 403, 502, 503)
+    assert res2.status == 401
     res3, obj3 = call(server, "POST", "/devices/revoke", {"id": victim_id}, _auth(token))
     assert res3.status == 404 and obj3["code"] == "no_such_device"
 

@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 import time
 
-from agent_media_server import auth_abs, sessions, speech
+from agent_media_server import auth, sessions, speech
 
 A = "6c73498c-02c1-4846-8350-a82006973571"
 B = "7d84509d-13d2-4957-9c9b-b93117084682"
-ROOT = {"username": "david", "type": "root"}
+ROOT = {"id": "d_test", "name": "test"}
 
 
 def _as(monkeypatch, user=ROOT, status=200):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (user, status))
+    monkeypatch.setattr(auth, "_device", lambda bearer: user)
     monkeypatch.setattr(sessions, "title_of", lambda s, **k: {A: "Thread A", B: "Thread B"}.get(s, ""))
 
 

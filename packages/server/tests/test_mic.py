@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_media_server import auth_abs, devices, mic
+from agent_media_server import auth, devices, mic
 
 from test_contract import AUTH, SID2, call, server, shelf, signed_in, typed  # noqa: F401
 
@@ -65,7 +65,7 @@ def test_a_bad_session_id_is_400(server, tv):
 
 
 def test_refused_without_a_credential(server, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, obj = call(server, "POST", "/mic/ask", {})
     assert res.status == 401 and obj["ok"] is False
     res, obj = call(server, "POST", "/mic/cancel", {"id": "abcd1234"})
@@ -106,12 +106,6 @@ def test_open_asks_leaves_out_the_devices_own(server, tv, phone):
     assert mic.open_asks(tv[1]) == []
     assert mic.open_asks(phone[1]) == [a]
     assert mic.open_asks("") == [a], "a login that is no device excludes nothing"
-
-
-def test_an_abs_login_may_ask_too(server, signed_in):
-    res, obj = call(server, "POST", "/mic/ask", {}, AUTH)
-    assert res.status == 200, obj
-    assert obj["ask"]["device"] == "david" and obj["ask"]["device_id"] is None
 
 
 def test_cross_origin_like_reply(server):
@@ -169,7 +163,7 @@ def test_answer_and_status_refusals(server, tv, phone, monkeypatch):
     assert mic.open_asks(phone[1]) == [mic.open_asks()[0]], "a refused answer takes nothing"
     call(server, "POST", "/mic/cancel", {"id": a["id"]}, tv[0])
     assert call(server, "GET", f"/mic/ask?id={a['id']}", None, tv[0])[0].status == 404
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     assert call(server, "POST", "/mic/answer", {"id": a["id"]})[0].status == 401
     assert call(server, "GET", f"/mic/ask?id={a['id']}")[0].status == 401
     assert call(server, "OPTIONS", "/mic/answer")[0].status == 204

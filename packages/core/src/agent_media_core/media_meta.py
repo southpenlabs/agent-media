@@ -15,9 +15,10 @@ rock". A title with no artist is not searched on ("The Gambler" alone is
 anyone's), so a mix or a channel's own video keeps its channel as its artist
 and no genre.
 
-Books and podcasts are Audiobookshelf items, matched to the play by file
-name. Their genres there are "Audiobook" or YouTube's category, so a book's
-comes from the iTunes audiobook of the same title and author.
+Books and podcasts are files in the audiobook folder (book_library), matched
+to the play by file name. Their own genre tag is "Audiobook" or YouTube's
+category, so a book's comes from the iTunes audiobook of the same title and
+author.
 
 A mix's chapters are each looked up the same way (music_chapters.py), the
 song's artist from the chapter's title, either way round.

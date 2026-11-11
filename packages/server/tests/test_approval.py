@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_media_server import auth_abs, panes, send, sessions
+from agent_media_server import auth, panes, send, sessions
 
 # Claude Code's plan dialog, as a 34-column pane draws it (labels wrap).
 CLAUDE = """  ──────────────────────────────
@@ -62,8 +62,7 @@ def test_nothing_to_answer_when_the_pane_is_not_waiting(monkeypatch):
 
 @pytest.fixture
 def _allowed(monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
-    monkeypatch.setattr(auth_abs, "may_reply", lambda u: (True, ""))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
 
 
 @pytest.fixture

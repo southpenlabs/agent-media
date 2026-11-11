@@ -120,8 +120,8 @@ def test_who_is_the_owner(monkeypatch):
     monkeypatch.setenv("MEDIA_OWNER_ACCOUNT", f"{ISS}|email=k@x.test")
     assert auth.device_account(kats) == ""
     assert auth.device_account(davids) == auth.account_key_of(ISS, "david")
-    assert auth.account_key({"username": "david", "type": "root"}) == ""
-    assert auth.account_key({"username": "guest", "type": "user"}).startswith("abs-")
+    assert auth.account_key({"device": "d_1", "account_key": ""}) == ""
+    assert auth.account_key({"username": "david", "type": "root"}) == auth.NOBODY  # not a device
     assert auth.account_key(None) == auth.NOBODY
 
 

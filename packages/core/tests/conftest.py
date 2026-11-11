@@ -359,7 +359,7 @@ def _no_live_jobs_server(monkeypatch):
     nowhere; a test that wants a server sets MEDIA_PHONE_JOBS_URL itself.
 
     MEDIA_PHONE_JOBS goes too: the env file's `=1` turns every phone-side
-    command (music_local.phone_argv, phone_player's ssh transport) into a
+    command (music_local.phone_argv) into a
     job for the phone's worker instead of ssh, so the ssh tests read config
     rather than code — they failed here and passed in CI. A test of the job
     route sets it itself."""

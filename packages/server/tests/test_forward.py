@@ -35,7 +35,7 @@ def rooms(monkeypatch, tmp_path):
     pic.write_bytes(b"\x89PNG")
     monkeypatch.setattr(room_media, "fetch", lambda info, thumb: pic)
     agent = []
-    monkeypatch.setattr(send, "reply", lambda item, text, bearer, session="", **k:
+    monkeypatch.setattr(send, "reply", lambda text, bearer, session="", **k:
                         agent.append((session, text)) or (True, {}))
     return a, b, put, agent
 

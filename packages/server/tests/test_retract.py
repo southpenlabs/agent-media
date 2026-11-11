@@ -59,12 +59,12 @@ def test_an_idle_session_is_only_marked_and_the_next_reply_says_so(server, signe
     screen, keys = pane
     st, body = retract_(server, {"session": SID, "text": "delete the “old” branch"})
     assert st == 200 and body["interrupted"] is False and keys == []
-    ok, _ = send.reply("", "keep it", "tok", session=SID)
+    ok, _ = send.reply("keep it", "tok", session=SID)
     sent = [a for n, a in typed if n == "_send_to_pane"]
     assert sent and sent[-1][1].startswith('(I took back my last message, “delete the "old" branch”')
     assert sent[-1][1].endswith("keep it")
     # Owed once: the reply after carries no note.
-    send.reply("", "and again", "tok", session=SID)
+    send.reply("and again", "tok", session=SID)
     assert [a for n, a in typed if n == "_send_to_pane"][-1][1] == "and again"
     # Read back, the bubble loses the note; a message by its words is marked.
     msgs = [{"id": "u-9", "role": "user", "at": 0.0,

@@ -1,35 +1,23 @@
-"""The gate in front of every app route: a paired device, else the ABS login.
+"""The gate in front of every app route: a paired device.
 
-server-contract.md §9 "Migration": the gate is "a known device token, **or**
-an ABS bearer that passes §4.1". This module is that sentence, and the one
-place it is said. Every route that used to ask `auth_abs` directly asks here
-instead:
+server-contract.md §9: the gate is a known device token. It used to be "a
+known device token, **or** an Audiobookshelf bearer that passes §4.1"; the
+ABS fallback (and `auth_abs.py`) went when Audiobookshelf was left on
+11 Nov 2026 (David: "I'd like to move away from audiobookshelf" — "All the
+way"). This module is the one place the gate is said:
 
   gate(bearer)                → (user, {}) or (None, error)   — may manage sessions
   may_control_speech(bearer)  → (ok, error)                    — the speech bar, harnesses
   identity(bearer)            → (user, status)                 — who, without the may-reply check
   may_reply(user)             → (ok, why)
   may_admin(bearer)           → (user, {}) or (None, error)   — host setup (project roots); admins only
-  abs_bearer(bearer)          → the credential to show ABS for an item lookup
 
-The device check comes first because it is local and cheap: a hash and a
-compare against `devices.json`, never a network call, so a device-token
-request cannot be answered 503 by an Audiobookshelf that is down. Only a
-bearer that is NOT a known device token falls through to `auth_abs`,
-unchanged — including a revoked or mistyped device token, which ABS then
-refuses with the same 401 an unknown ABS token gets. "Looks like one of ours"
-is deliberately not a reason to skip the fallback: an ABS token that happened
-to be 43 url-safe characters would otherwise be turned away.
+The check is local and cheap: a hash and a compare against `devices.json`,
+never a network call. A bearer that is not a known device token — revoked,
+mistyped, or nobody's — is 401, which the app answers by pairing again.
 
-A device is the owner. It carries the rights `may_reply` grants the ABS root
-account — whatever `MEDIA_REPLY_ROOT` says, since that switch is about who
-ABS's root is, and a device was paired by someone with a shell on this host.
-v1 has one scope; see §9.
-
-The fallbacks call `auth_abs` through its module attributes on every call
-(`auth_abs._gate`, `auth_abs.may_control_speech`, …), so a test that
-monkeypatches `auth_abs.abs_identity` still reaches every route. At the ABS
-exit, the fallback lines here are what gets deleted.
+A device is the owner, less what its role takes away (a guest may read and
+listen, not type). v1 has one scope; see §9.
 """
 
 from __future__ import annotations
@@ -39,7 +27,7 @@ import threading
 import hashlib
 import re
 
-from . import auth_abs, devices
+from . import devices
 
 # The source address of the request this thread is answering, for a device's
 # `last_ip`. Set by `app.dispatch` before any route runs; a handler thread
@@ -67,7 +55,7 @@ def set_request_bearer(bearer: str) -> None:
 def _device(bearer: str) -> dict | None:
     """The device this bearer is — never a jobs-only one (`pair --jobs`):
     another host's worker token takes jobs down its stream and is no way in
-    to anything else (it falls through to ABS, which refuses it)."""
+    to anything else (it is refused like an unknown token)."""
     dev = devices.lookup(bearer, getattr(_REQ, "ip", ""))
     return None if devices.is_jobs_worker(dev) else dev
 
@@ -82,7 +70,7 @@ def jobs_device_id(bearer: str) -> str:
 
 def _owner(dev: dict) -> dict:
     """The user a device token stands for: the owner, marked as a device so
-    `may_reply` and `abs_bearer` can tell.
+    `may_reply` can tell.
 
     `enrol` is the one right a device does not automatically have (§9): it
     rides here so a route can ask without reading the store again, as does
@@ -101,7 +89,7 @@ def _owner(dev: dict) -> dict:
 # `iss`/`sub` its enrolment wrote on the device row.
 
 #: An account key: "" (the owner) or this.
-ACCOUNT_KEY = re.compile(r"(acct|abs)-[0-9a-f]{20}")
+ACCOUNT_KEY = re.compile(r"acct-[0-9a-f]{20}")
 NOBODY = "nobody"
 
 
@@ -137,15 +125,10 @@ def device_account(dev: dict) -> str:
 
 
 def account_key(user: dict | None) -> str:
-    """The book this caller (a `gate`/`identity` user) reads. An ABS login
-    is the owner when it is ABS's root, else a book of its own."""
-    if not user:
+    """The book this caller (a `gate`/`identity` user) reads."""
+    if not user or not user.get("device"):
         return NOBODY
-    if user.get("device"):
-        return str(user.get("account_key") or "")
-    if user.get("type") == "root":
-        return ""
-    return _key("abs", str(user.get("username") or user.get("id") or ""))
+    return str(user.get("account_key") or "")
 
 
 def request_account() -> str:
@@ -164,11 +147,15 @@ def request_account() -> str:
 
 
 def identity(bearer: str) -> tuple[dict | None, int]:
-    """`(user, status)` — `auth_abs.abs_identity`'s shape, device first."""
+    """`(user, status)`: the device's owner and 200, else `(None, 401)`."""
     dev = _device(bearer)
     if dev:
         return _owner(dev), 200
-    return auth_abs.abs_identity(bearer)
+    return None, 401
+
+
+def _unknown() -> dict:
+    return {"error": "not a paired device (unknown or revoked token)", "status": 401}
 
 
 def may_reply(user: dict | None) -> tuple[bool, str]:
@@ -176,16 +163,16 @@ def may_reply(user: dict | None) -> tuple[bool, str]:
         if user.get("role") == "guest":
             return False, "a guest may read and listen, not type"
         return True, str(user.get("username") or "")
-    return auth_abs.may_reply(user)
+    return False, "not a paired device"
 
 
 def gate(bearer: str) -> tuple[dict | None, dict]:
     """`(user, {})` when this bearer may manage sessions, else `(None, error)`
-    with the error's `status` set (401 / 403 / 502 / 503, per §4.1)."""
+    with the error's `status` set (401)."""
     dev = _device(bearer)
     if dev:
         return _owner(dev), {}
-    return auth_abs._gate(bearer)
+    return None, _unknown()
 
 
 def may_admin(bearer: str) -> tuple[dict | None, dict]:
@@ -193,8 +180,7 @@ def may_admin(bearer: str) -> tuple[dict | None, dict]:
     folders new projects go in (project_roots.py) — else `(None, error)`.
 
     `gate`, and then the role: a member or guest device is 403 `not_admin`
-    (docs/proposals/2026-10-18-roles.md). A device without a role is an admin,
-    and an ABS login is as it was (it leaves at the ABS exit).
+    (docs/proposals/2026-10-18-roles.md). A device without a role is an admin.
     """
     user, err = gate(bearer)
     if not user:
@@ -210,7 +196,7 @@ def may_control_speech(bearer: str) -> tuple[bool, dict]:
     reply may pause, or install an agent."""
     if _device(bearer):
         return True, {}
-    return auth_abs.may_control_speech(bearer)
+    return False, _unknown()
 
 
 def is_guest(bearer: str) -> bool:
@@ -224,8 +210,8 @@ def is_device(bearer: str) -> bool:
 
 
 def device_id(bearer: str) -> str:
-    """The id of the device this bearer is, "" for anything else (an ABS
-    login) — the `mic` frame leaves out a device's own asks (§6.20)."""
+    """The id of the device this bearer is, "" for anything else — the `mic`
+    frame leaves out a device's own asks (§6.20)."""
     dev = _device(bearer)
     return str(dev.get("id") or "") if dev else ""
 
@@ -234,9 +220,8 @@ def may_enrol(bearer: str) -> tuple[dict | None, dict]:
     """`gate`, and then the enrol bit: `(user, {})` for a device that may pair
     another, else `(None, error)` with a status.
 
-    An ABS login is **not** a way in. The bit is carried by a device row, and
-    the person at the desk has the CLI — so the answer for anything else is
-    403, not "fall through and see". A 401 for a bearer that is nobody, so
+    The bit is carried by a device row, and the person at the desk has the
+    CLI — so a device without it is 403. A 401 for a bearer that is nobody, so
     the app knows to pair rather than to ask for a different device.
     """
     user, err = gate(bearer)
@@ -246,25 +231,3 @@ def may_enrol(bearer: str) -> tuple[dict | None, dict]:
         return None, {"status": 403, "code": "not_enrolled",
                       "error": "this device may not manage other devices"}
     return user, {}
-
-
-def abs_bearer(bearer: str) -> str:
-    """What to show Audiobookshelf when looking up an item for this caller.
-
-    An ABS login is used as itself, as it always was — ABS then applies its
-    own library permissions. A device token means nothing to ABS and must
-    never be sent there (it is a credential for *this* host), so a device's
-    item lookups go out under the host's own ABS login instead: a device is
-    the owner, and the owner can see every item the host published. With no
-    ABS configured this is "", and the lookup finds nothing — the item fields
-    stay null, as §10 says they may until the ABS exit.
-    """
-    if not _device(bearer):
-        return bearer
-    try:
-        from agent_media_core import library
-
-        _url, token, _lib = library._abs_cfg()
-        return token or ""
-    except Exception:  # noqa: BLE001 — no ABS on this host is not an error
-        return ""

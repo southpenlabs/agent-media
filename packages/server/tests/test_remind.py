@@ -106,10 +106,7 @@ def test_remind_refusals(server, shelf, signed_in, monkeypatch):
 
 
 def test_remind_is_gated_and_open_to_the_web_client(server, shelf, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "POST", "/session/remind", {"session": SID, "at": time.time() + 60})
     assert res.status == 401 and obj["ok"] is False
     assert not remind.STORE.path().exists()

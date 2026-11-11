@@ -50,7 +50,7 @@ from .route import (
     detect_content_type,
     resolve,
 )
-from . import library, phone_player, play_gate
+from . import library, play_gate
 from . import youtube_addon as _youtube_addon
 from .sinks import SinkBook, SinkMusic, SinkSpeech
 from .sinks.book import normalize_uri
@@ -783,28 +783,6 @@ def _book_play(uri: str, resume: bool, start_ms: int, target: str, title: str) -
                                else "not cached, and downloading from YouTube isn't available here")}
     if t.name not in ("", "local") and not norm.startswith(("http://", "https://", "rtsp://")):
         p = Path(norm).expanduser()
-        # The phone's own player first (Sasonica's ExoPlayer, see phone_player):
-        # if the file is an item in the app's Audiobookshelf and the app takes
-        # it, nothing is staged and mpv is never touched. None = fall through.
-        if p.is_file():
-            if start_ms is not None and start_ms >= 0:
-                start = start_ms
-            elif resume:
-                start = st.get_resume_pos(norm) or 0
-            else:
-                start = 0
-            taken = phone_player.play(p, t, start_ms=start)
-            if taken:
-                _save_book_bookmark(b, st, t)
-                display_title = title.strip() or taken.get("title") or p.stem
-                st.set_now_playing(sink="book", uri=norm, started_at=time.time(),
-                                   content_type="audiobook", target=t.name,
-                                   extras={"title": display_title, "player": "sasonica",
-                                           "item_id": taken.get("item_id")})
-                st.set_book_last(norm, display_title)
-                st.clear_playlist_active()
-                return {"ok": True, "uri": norm, "resumed_from_ms": start, "target": t.name,
-                        "player": "sasonica", "state": taken}
         if p.is_file():
             try:
                 from .sinks.book import remote_cached_path, start_stage_local_for_remote
@@ -852,8 +830,6 @@ def book_resume(target: str = "") -> dict:
     """Resume the book channel. If nothing is loaded, reopen the last book
     played, at its saved bookmark."""
     b, st, t = _book(), _state(), _book_target(target)
-    if phone_player.has_item(t):
-        return {"ok": phone_player.request(t, "/resume", timeout=8.0) is not None, "player": "sasonica"}
     if b.idle(t):
         last = st.get_book_last()
         if not last:
@@ -875,8 +851,6 @@ def book_resume(target: str = "") -> dict:
 def book_pause(target: str = "") -> dict:
     """Pause the book channel and save its place."""
     b, t = _book(), _book_target(target)
-    if phone_player.has_item(t):
-        return {"ok": phone_player.request(t, "/pause", timeout=8.0) is not None, "player": "sasonica"}
     _save_book_bookmark(b, _state(), t)
     b.pause(t)
     return {"ok": True}
@@ -886,11 +860,6 @@ def book_pause(target: str = "") -> dict:
 def book_stop(target: str = "") -> dict:
     """Stop the book channel, saving its place first so you can resume later."""
     b, st, t = _book(), _state(), _book_target(target)
-    if phone_player.has_item(t):
-        ok = phone_player.request(t, "/stop", timeout=8.0) is not None
-        st.clear_now_playing("book")
-        st.clear_playlist_active()
-        return {"ok": ok, "player": "sasonica"}
     _save_book_bookmark(b, st, t)
     b.stop(t)
     st.clear_now_playing("book")
@@ -902,9 +871,6 @@ def book_stop(target: str = "") -> dict:
 def book_skip(seconds: float = 30, target: str = "") -> dict:
     """Skip the book by ±seconds (negative = back). Default +30s."""
     t = _book_target(target)
-    if phone_player.has_item(t):
-        return {"ok": phone_player.request(t, "/jump", {"by": seconds}, timeout=8.0) is not None,
-                "seconds": seconds, "player": "sasonica"}
     _book().skip(seconds, t)
     return {"ok": True, "seconds": seconds}
 
@@ -917,10 +883,6 @@ def book_seek(position_secs: float, target: str = "") -> dict:
     time — e.g. `position_secs=5615` for 1:33:35. Clamped to the file length.
     """
     t = _book_target(target)
-    if phone_player.has_item(t):
-        s = phone_player.request(t, "/seek", {"t": position_secs}, timeout=8.0)
-        return {"ok": s is not None, "position_ms": int((s or {}).get("t", position_secs) * 1000),
-                "player": "sasonica"}
     pos = _book().seek_to(position_secs, t)
     return {"ok": True, "position_ms": pos}
 
@@ -929,9 +891,6 @@ def book_seek(position_secs: float, target: str = "") -> dict:
 def book_speed(rate: float, target: str = "") -> dict:
     """Set book playback speed (0.25–4.0; 1.0 = normal)."""
     t = _book_target(target)
-    if phone_player.has_item(t):
-        s = phone_player.request(t, "/speed", {"rate": rate}, timeout=8.0)
-        return {"ok": s is not None, "speed": (s or {}).get("rate", rate), "player": "sasonica"}
     applied = _book().set_speed(rate, t)
     return {"ok": True, "speed": applied}
 
@@ -1402,72 +1361,18 @@ def book_playlist_rm(name: str) -> dict:
 # quiet bed). `focus` chooses which is in front; `book_bed` chooses whether
 # the music bed ducks (instrumental) or pauses (lyrics) under the book.
 
-def _abs_config() -> tuple[str, str]:
-    """Audiobookshelf URL/token, accepting the existing abs-bridge env names."""
-    url = os.environ.get("MEDIA_AUDIOBOOKSHELF_URL") or os.environ.get("ABS_URL") or ""
-    token = os.environ.get("MEDIA_AUDIOBOOKSHELF_TOKEN") or os.environ.get("ABS_TOKEN") or ""
-    if url and token:
-        return url, token
-    try:
-        for line in (Path.home() / ".config" / "agent-media" / "abs-bridge.env").read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            v = v.strip().strip('"\'')
-            if k == "ABS_URL" and not url:
-                url = v
-            elif k == "ABS_TOKEN" and not token:
-                token = v
-    except OSError:
-        pass
-    return url, token
-
-
 def search(channel: str, query: str = "") -> dict:
-    """Search for media across ABS, red5 cache, and the connected device."""
+    """Search for media in the book folders here and on the connected device.
+
+    Audiobookshelf's library was searched first until it was left (11 Nov
+    2026); the book folder it scanned is one of the local directories."""
     import shlex
     import subprocess
-    import urllib.parse
-    import urllib.request
-    import json
     if channel == "book":
-        url, token = _abs_config()
-        if not url or not token:
-            return {"error": "Audiobookshelf URL/token not set (MEDIA_AUDIOBOOKSHELF_* or ABS_* in abs-bridge.env)"}
-        url = url.rstrip("/")
-        req = urllib.request.Request(f"{url}/api/libraries", headers={"Authorization": f"Bearer {token}"})
-        try:
-            with urllib.request.urlopen(req, timeout=5) as r:
-                libraries = json.loads(r.read())["libraries"]
-        except Exception as e:
-            return {"error": f"failed to fetch libraries: {e}"}
-
         q = query.casefold().strip()
         results = []
-        for lib in libraries:
-            # Fetch the library and let fzf/client-side filtering do the search.
-            # ABS's /search endpoint is version-sensitive and returns 400 here.
-            req_url = f"{url}/api/libraries/{lib['id']}/items?limit=1000"
-            req = urllib.request.Request(req_url, headers={"Authorization": f"Bearer {token}"})
-            try:
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    res = json.loads(r.read())
-            except Exception:
-                continue
-            for item in res.get("results", []):
-                metadata = item.get("media", {}).get("metadata", {})
-                title = metadata.get("title") or item.get("title")
-                author = metadata.get("authorName") or ""
-                searchable = " ".join((str(title or ""), str(author), str(item.get("relPath") or ""))).casefold()
-                if not title or (q and q not in searchable):
-                    continue
-                # /play is a session endpoint and 404s for API tokens; /download streams bytes.
-                uri = f"{url}/api/items/{item['id']}/download"
-                label = f"{title} — {author}" if author else title
-                results.append({"uri": uri, "title": f"{label}  [ABS]"})
 
-        # Merge red5 cache/library files that ABS may not know about.
+        # The red5 cache and book folders.
         # `search` has no target param; use the default book target so the
         # per-target dir resolvers behave exactly as the untargeted default.
         t = _book_target("")

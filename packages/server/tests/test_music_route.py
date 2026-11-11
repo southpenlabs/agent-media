@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_media_server import auth_abs, music
+from agent_media_server import auth, music
 
 from test_contract import AUTH, audio_host, call, keys, server, signed_in, typed  # noqa: F401
 
@@ -189,10 +189,9 @@ def test_a_failed_control_is_502_with_the_state(server, signed_in, audio_host, p
     assert res.status == 502 and obj["error"] == "nothing playing" and obj["now"] == SAID
 
 
-@pytest.mark.parametrize("who,status", [((None, 401), 401),
-                                        (({"username": "guest", "type": "user"}, 200), 403)])
+@pytest.mark.parametrize("who,status", [(None, 401)])
 def test_controls_are_gated(server, monkeypatch, audio_host, player, who, status):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: who)
+    monkeypatch.setattr(auth, "_device", lambda bearer: who)
     res, obj = call(server, "POST", "/music", {"action": "pause"}, AUTH)
     assert res.status == status and obj["ok"] is False
     assert player == []
@@ -304,7 +303,7 @@ def test_a_channels_page_route(server, signed_in, audio_host, monkeypatch):
     assert res.status == 400 and obj["ok"] is False
     res, obj = call(server, "GET", "/music/channel?url=https://evil.example/x", headers=AUTH)
     assert res.status == 400 and len(asked) == 2
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, obj = call(server, "GET", "/music/channel?name=x", headers=AUTH)
     assert res.status == 401
 
@@ -317,7 +316,7 @@ def test_now_carries_its_channel(server, signed_in, audio_host, player, monkeypa
 
 
 def test_recent_is_gated(server, monkeypatch, audio_host):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, obj = call(server, "GET", "/music/recent", headers=AUTH)
     assert res.status == 401 and obj["ok"] is False
 
@@ -942,7 +941,7 @@ def test_versions_without_a_search_or_a_name(server, signed_in, audio_host, monk
 
 
 def test_versions_are_gated(server, monkeypatch, audio_host):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, obj = call(server, "GET", "/music/versions?uri=" + OTHER, headers=AUTH)
     assert res.status == 401 and obj["ok"] is False
 

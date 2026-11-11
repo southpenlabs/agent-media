@@ -221,10 +221,7 @@ def test_bad_requests(server, signed_in, pane, voice):
 
 
 def test_no_bearer_is_refused(server, pane, voice, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, body = call(server, "POST", "/session/stop", {"session": SID})
     assert res.status == 401 and body["ok"] is False
 

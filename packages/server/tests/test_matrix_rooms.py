@@ -145,7 +145,7 @@ def test_a_reply_without_an_owner_token_is_refused_not_resumed(one_room, monkeyp
 
     monkeypatch.delenv("MATRIX_OWNER_TOKEN", raising=False)
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
-    ok, err = send.reply("", "hello", "tok", session=one_room.thread)
+    ok, err = send.reply("hello", "tok", session=one_room.thread)
     assert not ok and err["status"] == 409
     assert matrix.rows()[0]["drivable"] is False
 
@@ -162,7 +162,7 @@ def test_a_reply_is_sent_as_the_owner_and_kept_once(one_room, monkeypatch):
     monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
     monkeypatch.setattr(matrix, "_put", put)
     monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
-    ok, detail = send.reply("", "on my way", "tok", session=one_room.thread,
+    ok, detail = send.reply("on my way", "tok", session=one_room.thread,
                             quote="where are you?")
     assert ok and detail["submitted"] and detail["event_id"] == "$mine"
     (path, body, token), = sent
@@ -174,7 +174,7 @@ def test_a_reply_is_sent_as_the_owner_and_kept_once(one_room, monkeypatch):
     assert [m["id"] for m in msgs][-1:] == ["$mine"] and len(msgs) == 3
     assert msgs[-1]["role"] == "user" and "peer" not in msgs[-1]
     assert matrix.rows()[0]["drivable"] is True
-    ok, err = send.reply("", "x", "tok", session=one_room.thread, mode="branch")
+    ok, err = send.reply("x", "tok", session=one_room.thread, mode="branch")
     assert not ok and err["status"] == 409
 
 

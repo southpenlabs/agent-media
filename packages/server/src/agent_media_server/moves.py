@@ -42,11 +42,10 @@ What a move does, in order:
    disk and the app say the same thing, and `project_of` derives the new
    project from the folder even without (1).
 
-   This costs the old Audiobookshelf app that conversation's listening
-   progress — ABS reads a folder that moved as a *new* item, new id and all
-   (the same reason `book_tracks.folder_for` keeps its first folder for
-   ever). David decided on 23 Sep 2026 that agreement between the files and
-   the app is worth more than progress in an app on its way out.
+   (This used to cost the old Audiobookshelf app that conversation's
+   listening progress; David decided on 23 Sep 2026 that agreement between
+   the files and the app was worth more. Audiobookshelf was left on
+   11 Nov 2026.)
 """
 
 from __future__ import annotations

@@ -323,14 +323,14 @@ def test_jump_end_on_phone_hands_the_turn_to_its_follower(monkeypatch, extras):
     monkeypatch.setattr(cli, "_sock", lambda: "tcp://phone.example:6613")
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
     monkeypatch.setattr(cli, "_now_speaking",
-                        lambda: {"target": "abs", "extras": extras})
+                        lambda: {"target": "tablet", "extras": extras})
     monkeypatch.setattr(cli, "_write_nav_request",
                         lambda idx, target: navs.append((idx, target)))
 
     class A:
         where = "end"
     assert cli.cmd_jump(A()) == 0
-    assert navs == [(cli.sys.maxsize, "abs")]
+    assert navs == [(cli.sys.maxsize, "tablet")]
     assert fake.calls == []
 
 
@@ -345,10 +345,10 @@ def test_jump_end_on_a_replay_keeps_its_resume_point(monkeypatch, tmp_path, ask)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     st = StateStore()
     rid = st.add_history(sink="speech", uri="/x.mp3", started_at=_t.time(),
-                         target="abs", source="claude-code", text="a. b. c. d. e.",
+                         target="tablet", source="claude-code", text="a. b. c. d. e.",
                          extras={"held": True, "session": "s1",
                                  **({"ask": True} if ask else {})})
-    st.set_now_playing("speech", "/x.mp3", _t.time(), target="abs",
+    st.set_now_playing("speech", "/x.mp3", _t.time(), target="tablet",
                        extras={"replay": True, "writer_pid": 1, "history_id": rid,
                                "current_sentence_idx": 3,
                                **({"ask": True} if ask else {})})
@@ -372,7 +372,7 @@ def test_jump_end_on_phone_without_a_follower_drives_the_player(monkeypatch):
     monkeypatch.setattr(cli, "_sock", lambda: "tcp://phone.example:6613")
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
     monkeypatch.setattr(cli, "_now_speaking",
-                        lambda: {"target": "abs", "extras": {"replay": True}})
+                        lambda: {"target": "tablet", "extras": {"replay": True}})
     monkeypatch.setattr(cli, "StateStore", lambda: type(
         "S", (), {"get_now_playing": lambda self, ch: None})())
     monkeypatch.setattr(cli, "_write_nav_request", lambda *a, **k: None)

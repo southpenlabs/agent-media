@@ -285,11 +285,8 @@ def test_the_routes(server, signed_in, rooms):
 
 
 def test_the_routes_are_gated(server, rooms, monkeypatch):
-    from agent_media_server import auth_abs
 
     contacts.sync_bridges()
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     fb = contacts.contact_id("bridges", FB_LIONEL)
     res, _ = call(server, "POST", f"/contacts/{fb}/same", {"other": LIONEL})
     assert res.status in (401, 403)

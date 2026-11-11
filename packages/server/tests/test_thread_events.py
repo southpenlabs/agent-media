@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from agent_media_server import auth_abs, sessions, thread_events
+from agent_media_server import auth, sessions, thread_events
 
 from test_contract import AUTH, SID2, call, server, shelf, signed_in, typed  # noqa: F401
 from test_transcript import SID, Script
@@ -37,7 +37,7 @@ def spoken(monkeypatch):
 
     lines: list = []
     monkeypatch.setattr(book_tracks, "conversation_log",
-                        lambda s, f, target=None, positions=True: [dict(l) for l in lines])
+                        lambda s: [dict(l) for l in lines])
     monkeypatch.setattr(activity, "attach", lambda s, ls: None)
     return lines
 
@@ -247,7 +247,7 @@ def test_a_page_reopening_its_stream_ends_the_old_one(server, signed_in, convo):
     # held two streams for minutes and counted as open (David, 2 Nov 2026).
     a = Stream(server, f"/threads/{SID}/events?client=page1", AUTH)
     a.event()
-    assert a.next("watching") == {"streams": 1, "devices": ["david"]}
+    assert a.next("watching") == {"streams": 1, "devices": ["test"]}
     other = Stream(server, f"/threads/{SID}/events?client=page2", AUTH)
     other.event()
     assert other.next("watching")["streams"] == 2
@@ -298,7 +298,7 @@ def test_closing_a_thread_ends_its_streams(server, signed_in, convo):
 
 
 def test_threads_open_is_gated(server, signed_in, convo, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, _ = call(server, "GET", "/threads/open", headers=AUTH)
     assert res.status == 401
 
@@ -336,14 +336,10 @@ def test_auth_and_refusals(server, shelf, signed_in, convo, monkeypatch):
     ghost = "11111111-2222-4333-8444-555555555555"
     res, obj = call(server, "GET", f"/threads/{ghost}/events", headers=AUTH)
     assert res.status == 404 and obj["ok"] is False
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     res, obj = call(server, "GET", f"/threads/{SID}/events")
     assert res.status == 401 and obj["ok"] is False
     assert res.getheader("Access-Control-Allow-Origin") == "*"
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda bearer: ({"username": "guest", "type": "user"}, 200))
-    res, obj = call(server, "GET", f"/threads/{SID}/events", headers=AUTH)
-    assert res.status == 403
     # None of the refusals subscribed; the one stream that opened is gone
     # once its next write (a ping at most) finds the client gone.
     assert _wait(lambda: thread_events.watching() == {})
@@ -354,8 +350,6 @@ def test_a_device_token_opens_it(server, shelf, convo, monkeypatch):
 
     code, _ = devices.mint_code("test phone")
     got = devices.redeem(code, "", "127.0.0.1")
-    monkeypatch.setattr(auth_abs, "abs_identity",
-                        lambda bearer: (_ for _ in ()).throw(AssertionError("asked ABS")))
     st = Stream(server, f"/threads/{SID}/events",
                 {"Authorization": f"Bearer {got['token']}"})
     assert st.status == 200 and st.event()[0] == "snapshot"

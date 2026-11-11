@@ -93,7 +93,7 @@ def test_an_opus_5_5_session_under_200k_has_the_1m_window():
 def test_the_log_carries_it(server, shelf, signed_in, monkeypatch):
     from agent_media_core import activity, book_tracks
 
-    monkeypatch.setattr(book_tracks, "conversation_log", lambda s, f, target=None, positions=True: [])
+    monkeypatch.setattr(book_tracks, "conversation_log", lambda s: [])
     monkeypatch.setattr(activity, "attach", lambda s, lines: None)
     _transcript(SID, [_reply(1, 1, 2, 3)])
     res, obj = call(server, "GET", f"/conversation/log?session={SID}", headers=AUTH)

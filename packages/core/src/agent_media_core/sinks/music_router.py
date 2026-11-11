@@ -4,11 +4,12 @@ The music channel now has two playout backends:
 
   - `SinkMusic`        — Mopidy/MPD (whole-house via Snapcast, or local out)
   - `SinkMusicLocal`   — the phone's local mpv (residential download, offline)
-  - `SinkMusicApp`     — Sasonica ABS's ExoPlayer on the phone (the `abs`
-                         target), falling back to the phone's mpv when it does
-                         not take it
   - `SinkMusicSasonica` — Sasonica's own media player (the `sasonica` target),
-                         the same fallback
+                         falling back to the phone's mpv when it does not
+                         take it
+
+(`SinkMusicApp`, Sasonica ABS's player and the `abs` target, was retired with
+Audiobookshelf on 11 Nov 2026; a stored `abs` is `phone` now, types.py.)
 
 The speech coordinator holds a single `self.music` and, before each clip, calls
 `now_playing_uri()` then `duck()`/`pause()` on it. If music is on the phone but
@@ -37,7 +38,6 @@ from typing import Iterator, Optional
 
 from ..types import Target
 from .music import SinkMusic
-from .music_app import SinkMusicApp, configured as _app_configured
 from .music_local import SinkMusicLocal, configured as _local_configured
 from .music_sasonica import SinkMusicSasonica, configured as _sasonica_configured
 
@@ -47,9 +47,6 @@ log = logging.getLogger(__name__)
 # Target names that mean "play on the phone-local backend". Everything else
 # (local, rooms, snapcast-*) is Mopidy's job.
 _PHONE_TARGETS = {"phone", "local-phone", "phone-local"}
-# The phone too, but played by an app (Sasonica ABS) rather than Termux's mpv.
-# See music_app.
-_ABS_TARGETS = {"abs"}
 # The phone, played by Sasonica's own media player. See music_sasonica.
 _SASONICA_TARGETS = {"sasonica"}
 
@@ -72,11 +69,9 @@ class SinkMusicRouter:
 
     def __init__(self, mopidy: Optional[SinkMusic] = None,
                  local: Optional[SinkMusicLocal] = None,
-                 app: Optional[SinkMusicApp] = None,
                  sasonica: Optional[SinkMusicSasonica] = None) -> None:
         self.mopidy = mopidy or SinkMusic()
         self.local = local or SinkMusicLocal()
-        self.app = app or SinkMusicApp()
         self.sasonica = sasonica or SinkMusicSasonica()
         # Which backend the in-force duck was sent to. See duck()/unduck().
         self._ducked_backend = None
@@ -96,15 +91,6 @@ class SinkMusicRouter:
         except Exception:  # noqa: BLE001 — bridge down ⇒ treat as not live
             return False
 
-    def _app_live(self) -> bool:
-        """True when Sasonica is configured AND holding a music session."""
-        if not _app_configured():
-            return False
-        try:
-            return self.app.loaded()
-        except Exception:  # noqa: BLE001 — app unreachable ⇒ not live
-            return False
-
     def _sasonica_live(self) -> bool:
         """True when Sasonica's media player is configured AND has a track loaded."""
         if not _sasonica_configured():
@@ -115,7 +101,7 @@ class SinkMusicRouter:
             return False
 
     def _observe_backend(self):
-        """Backend the coordinator should observe/duck: the app, then the
+        """Backend the coordinator should observe/duck: Sasonica, then the
         phone's mpv, whichever is live, else Mopidy. Asked once for all the
         calls inside one_resolution()."""
         if not self._pin_depth:
@@ -130,16 +116,13 @@ class SinkMusicRouter:
     def _resolve_observed(self):
         # Both phone players asked at once: over the phone's link each probe
         # is a connect and a request (~1.1s at 550ms RTT, 27 Sep), and asking
-        # them in turn put both on the path of every reply. The app still wins
+        # them in turn put both on the path of every reply. Sasonica wins
         # when both answer.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             sasonica = pool.submit(self._sasonica_live)
-            app = pool.submit(self._app_live)
             local = pool.submit(self._local_live)
             if sasonica.result():
                 return self.sasonica
-            if app.result():
-                return self.app
             return self.local if local.result() else self.mopidy
 
     @contextmanager
@@ -147,7 +130,7 @@ class SinkMusicRouter:
         """Decide which backend is live once for the calls inside.
 
         Each call re-resolves, which the module docstring calls cheap — one
-        bridge probe. Over the phone's link it is two (the app, then the
+        bridge probe. Over the phone's link it is two (Sasonica, then the
         phone's mpv), ~1s each, and interrupting music for speech makes three
         calls: what is playing, where it is, pause it. So before_speech was
         resolving the backend three times — 2.7s for the probe alone and
@@ -188,9 +171,6 @@ class SinkMusicRouter:
         # Only a caller that NAMED a phone target gets deterministic routing.
         if target.name in _PHONE_TARGETS:
             return self.local
-        if target.name in _ABS_TARGETS:
-            # The app when it holds music, else the mpv it fell back to.
-            return self.app if self._app_live() else self.local
         if target.name in _SASONICA_TARGETS:
             return self.sasonica if self._sasonica_live() else self.local
         return self._observe_backend()
@@ -216,11 +196,6 @@ class SinkMusicRouter:
                                      name="music-quiet-local").start()
                 return
             log.info("sink-music-router: Sasonica did not take %s; phone mpv instead", uri)
-            self.local.play(uri, target, replace=replace, **opts)
-        elif target.name in _ABS_TARGETS:
-            if self.app.play(uri, target, replace=replace, **opts):
-                return
-            log.info("sink-music-router: the app did not take %s; phone mpv instead", uri)
             self.local.play(uri, target, replace=replace, **opts)
         elif target.name in _PHONE_TARGETS:
             self.local.play(uri, target, replace=replace, **opts)
@@ -320,7 +295,7 @@ class SinkMusicRouter:
         during __init__ cannot recurse through _observe_backend before those
         attributes are bound.
         """
-        if name.startswith("_") or name in ("mopidy", "local", "app", "sasonica"):
+        if name.startswith("_") or name in ("mopidy", "local", "sasonica"):
             raise AttributeError(name)
         backend = self._observe_backend()
         attr = getattr(backend, name, None)

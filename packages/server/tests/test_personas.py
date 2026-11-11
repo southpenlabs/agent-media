@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from agent_media_server import auth_abs, driver, persona_scope, personas, presets, routing, send, sessions
+from agent_media_server import auth, driver, persona_scope, personas, presets, routing, send, sessions
 
 FAKE_RENDER = r'''#!{python}
 import json, os, sys
@@ -79,7 +79,7 @@ def asker(monkeypatch):
     monkeypatch.setattr(send, "_settle", lambda p, timeout=5.0: None)
     monkeypatch.setattr(send, "_ensure_submitted", lambda p, t, timeout=3.0, agent="claude": True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: got["typed"].append(t) or "")
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(sessions, "session_of_pane",
                         lambda p, timeout=10.0, agent="claude": got["session"])
     monkeypatch.setattr(send, "open_window",
@@ -112,13 +112,13 @@ def test_on_windows_the_python_renderer_runs_under_our_python(repo):
 def test_no_repo_is_empty_lists_not_an_error(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_PERSONAS_DIR", str(tmp_path / "nowhere"))
     assert personas.listing() == {"personas": [], "roles": [], "private": []}
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     ok, d = presets.listing("tok")
     assert ok and d["personas"] == [] and d["roles"] == [] and d["private"] == []
 
 
 def test_presets_carry_a_persona_and_role_and_list_them(repo, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     ok, d = presets.put({"name": "Review", "agent": "codex", "persona": "zara", "role": "reviewer"}, "tok")
     assert ok and (d["preset"]["persona"], d["preset"]["role"]) == ("zara", "reviewer")
     assert presets.put({"name": "Plain"}, "tok")[1]["preset"]["persona"] == ""
@@ -223,7 +223,7 @@ def test_headless_claude_passes_the_file_unless_sessiond_is_older(repo, asker, m
 def test_ask_routed_takes_persona_for_a_fresh_chat_only(monkeypatch):
     seen = []
     monkeypatch.setattr(send, "ask", lambda text, bearer, **kw: seen.append(kw) or (True, {"session": "s"}))
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(sessions, "sessions_index", lambda: [])
     ok, _ = routing.ask_routed("hi", "tok", target="new", persona="zara", role="planner")
     assert ok and (seen[0]["persona"], seen[0]["role"]) == ("zara", "planner")
@@ -250,7 +250,7 @@ def test_an_older_renderer_without_json_still_lists(repo):
 
 
 def test_json_listing_carries_the_front_matter_scope(described, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     ok, d = presets.listing("tok")
     assert d["personas"] == ["zara", "sam"] and d["private"] == ["zara"]
     assert d["scope"]["zara"] == {"agents": ["pi", "claude"], "projects": None, "private": True}
@@ -265,7 +265,7 @@ def test_local_then_user_layers_override_field_by_field(described, tmp_path, mon
     got = persona_scope.resolve(personas.described())
     assert got["scope"]["zara"] == {"agents": ["pi"], "projects": ["toys"], "private": True}
     assert got["trusted_models"] == ["venice/*"]
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     ok, d = persona_scope.put({"id": "zara", "agents": ["pi", "codex"], "trusted_models": ["venice/*", "ollama/*"]}, "tok")
     assert ok, d
     assert d["scope"]["zara"] == {"agents": ["pi", "codex"], "projects": ["toys"], "private": True}
@@ -283,7 +283,7 @@ def test_an_agent_the_scope_leaves_out_is_refused(described, asker):
 
 
 def test_presets_check_the_agent_too(described, monkeypatch):
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     assert not presets.put({"name": "X", "agent": "codex", "persona": "zara"}, "tok")[0]
     assert presets.put({"name": "Y", "agent": "", "persona": "zara"}, "tok")[0]   # the host's default: not judged
 

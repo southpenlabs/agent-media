@@ -45,11 +45,10 @@ def test_the_line_a_reader_gets_is_the_question_not_the_announcement(monkeypatch
         command: dict = field(default_factory=dict)
 
     monkeypatch.setattr(book_tracks, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(book_tracks, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: None)
     monkeypatch.setattr(book_tracks.session_feed, "turns",
                         lambda s: [T(at=2.0, text="red5 / pane: Which case do you mean? Option 1: In the app.", ask=ask)])
-    lines = book_tracks.conversation_log("s1", __import__("pathlib").Path("/tmp/x"))
+    lines = book_tracks.conversation_log("s1")
     assert len(lines) == 1
     line = lines[0]
     assert line["who"] == "agent"
@@ -72,14 +71,13 @@ def test_the_harnesss_own_asides_are_not_shown_as_listener_turns(monkeypatch):
         command: dict = field(default_factory=dict)
 
     monkeypatch.setattr(book_tracks, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(book_tracks, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: None)
     monkeypatch.setattr(book_tracks.session_feed, "turns", lambda s: [
         T(at=1.0, text="<task-notification><task-id>b1</task-id></task-notification>", listener=True),
         T(at=2.0, text="why are these repeating?", listener=True),
         T(at=3.0, text="Because a test left one playing.", listener=False),
     ])
-    lines = book_tracks.conversation_log("s1", __import__("pathlib").Path("/tmp/x"))
+    lines = book_tracks.conversation_log("s1")
     assert [l["text"] for l in lines] == ["why are these repeating?",
                                           "Because a test left one playing."]
 
@@ -111,11 +109,10 @@ def test_a_command_reaches_the_reader_as_a_command(monkeypatch):
         command: dict = field(default_factory=dict)
 
     monkeypatch.setattr(book_tracks, "_read_manifest", lambda s: {"turns": []})
-    monkeypatch.setattr(book_tracks, "_abs_ready", lambda target=None: None)
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: None)
     monkeypatch.setattr(book_tracks.session_feed, "turns",
                         lambda s: [T(at=1.0, text="You: /code-review high",
                                      listener=True, command=cmd)])
-    lines = book_tracks.conversation_log("s1", __import__("pathlib").Path("/tmp/x"))
+    lines = book_tracks.conversation_log("s1")
     assert lines[0]["command"] == cmd
     assert lines[0]["text"] == "/code-review high"      # the "You: " label is the chapter's

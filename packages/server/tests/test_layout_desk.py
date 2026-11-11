@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from agent_media_server import auth_abs, driver, new_project, panes, presets, send, sessions
+from agent_media_server import auth, driver, new_project, panes, presets, send, sessions
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def asker(monkeypatch):
     monkeypatch.setattr(send, "_settle", lambda p, timeout=5.0: None)
     monkeypatch.setattr(send, "_ensure_submitted", lambda p, t, timeout=3.0, agent="claude": True)
     monkeypatch.setattr(send, "_send_to_pane", lambda p, t: "")
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(sessions, "session_of_pane", lambda p, timeout=10.0, agent="claude": "")
     monkeypatch.setattr(send, "open_window",
                         lambda s, cwd, *, resume, host="", flags=(), agent="claude":
@@ -141,7 +141,7 @@ class _Headless:
 
 def test_default_headless_chat_is_filed_under_its_folder(default_desk, monkeypatch):
     hl = _Headless()
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(driver, "for_new", lambda agent="claude": hl)
     place = default_desk / "projects" / "runlet"
     place.mkdir(parents=True)
@@ -157,7 +157,7 @@ def test_davids_headless_chat_keeps_the_tmux_name(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_LAYOUT", "projects-per-tmux-session")
     monkeypatch.setenv("CC_HOME", str(tmp_path / "none"))
     hl = _Headless()
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     monkeypatch.setattr(driver, "for_new", lambda agent="claude": hl)
     assert send.ask("hi", "tok")[0]
     assert hl.started[-1]["host"] == "amux-scratch"
@@ -220,7 +220,7 @@ def test_a_new_project_refuses_a_name_already_there_or_not_a_name(default_desk, 
 def test_a_new_project_is_not_made_for_someone_signed_out(default_desk, asker, monkeypatch):
     monkeypatch.setenv("MEDIA_PROJECTS_DIR", str(default_desk / "projects"))
     (default_desk / "projects").mkdir(exist_ok=True)
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: (None, 401))
+    monkeypatch.setattr(auth, "_device", lambda b: None)
     ok, _ = send.ask("hi", "bad", new_project="drones")
     assert not ok and not (default_desk / "projects" / "drones").exists()
 
@@ -301,7 +301,7 @@ def test_a_new_project_can_have_its_first_chat_draft_agents_md(default_desk, ask
 
 def test_presets_are_added_replaced_and_removed(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    monkeypatch.setattr(auth_abs, "abs_identity", lambda b: ({"username": "d", "type": "root"}, 200))
+    monkeypatch.setattr(auth, "_device", lambda b: {"id": "d_test", "name": "test"})
     assert presets.put({"name": "A", "agent": "codex", "prompt": "go"}, "tok")[0]
     assert presets.put({"name": "A", "agent": "pi", "plan": True}, "tok")[0]
     assert presets.put({"name": "B"}, "tok")[0]

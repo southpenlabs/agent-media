@@ -22,7 +22,7 @@ ask questions:
 
 Only panes this module opened can be read or typed into, which is what keeps
 `keys()` from being a way to go rummaging through the desk's other windows.
-The gate on every call is the same ABS bearer the rest of the app carries
+The gate on every call is the same device token the rest of the app carries
 (`auth.may_control_speech`) — installing an agent is no more authority than
 `/ask` already hands out, which opens a session with permissions skipped.
 """

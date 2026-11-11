@@ -40,8 +40,7 @@ log = logging.getLogger(__name__)
 UNIT = "agent-media-feed-debounce"
 
 #: What it starts when it fires — the same oneshot the poll runs, so the
-#: publish rules, the environment and the chain into Audiobookshelf live in
-#: exactly one place.
+#: publish rules and the environment live in exactly one place.
 TARGET_UNIT = "agent-media-feed-publish.service"
 
 #: Default silence before a conversation counts as *finished*, in minutes.
@@ -69,8 +68,8 @@ def debounce_s() -> float:
         seconds = float(os.environ.get("MEDIA_FEED_DEBOUNCE_S") or DEFAULT_DEBOUNCE_S)
     except ValueError:
         seconds = DEFAULT_DEBOUNCE_S
-    # A floor, because the arming itself costs a systemd-run and the thing it
-    # starts asks Audiobookshelf to scan; once a turn is plenty.
+    # A floor, because the arming itself costs a systemd-run; once a turn is
+    # plenty.
     return max(15.0, seconds)
 
 

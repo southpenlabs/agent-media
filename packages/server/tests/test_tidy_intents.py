@@ -269,7 +269,7 @@ def test_an_emoji_paragraph_reaches_a_matrix_room_with_its_lines(monkeypatch):
 
     monkeypatch.setattr(matrix, "room", lambda s: Room() if s == S1 else None)
     monkeypatch.setattr(auth, "gate", lambda bearer: ({"username": "david"}, None))
-    ok, _ = send.reply("", EMOJI_SALAD, "tok", session=S1)
+    ok, _ = send.reply(EMOJI_SALAD, "tok", session=S1)
     assert ok and sent == [EMOJI_SALAD]
 
 
@@ -299,5 +299,5 @@ def test_a_room_send_keeps_the_pictures_first_row(monkeypatch):
     monkeypatch.setattr(matrix, "room", lambda s: Room() if s == S1 else None)
     monkeypatch.setattr(auth, "gate", lambda bearer: ({"username": "david"}, None))
     baby = "  😴\n  👶\n/ | \\  the baby\n  |    finally\n / \\   fell asleep 💤"
-    ok, _ = send.reply("", "\n" + baby + "  \n", "tok", session=S1)
+    ok, _ = send.reply("\n" + baby + "  \n", "tok", session=S1)
     assert ok and sent == [baby]

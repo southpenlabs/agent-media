@@ -63,7 +63,7 @@ def test_a_peek_tells_nobody_until_a_reply_or_mark_read(room):
     ok, d = read_receipts.session_read(room.thread, "tok", why="button")
     assert d["read"] == "$2" and d["up_to"] == "$2" and len(receipts(room)) == 1
     room.on_event(_ev(3, SAM, "and?"))
-    ok, _ = send.reply("", "yes", "tok", session=room.thread)
+    ok, _ = send.reply("yes", "tok", session=room.thread)
     assert ok and receipts(room)[-1].endswith("%243")
     # Back to the default: the entry goes.
     ok, d = read_receipts.session_read(room.thread, "tok", mode="default")

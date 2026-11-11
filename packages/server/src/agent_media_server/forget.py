@@ -11,9 +11,7 @@
 3. Its shelf folder and its book-tracks manifest. A folder is taken only when
    every session whose manifest names it is being deleted too (two
    conversations that asked the same question share one).
-4. Its item on each Audiobookshelf the host publishes to
-   (`book_tracks._abs_ready_all`), found by folder the way export finds it.
-5. Its search rows (`search.forget`), its private card if it has one
+4. Its search rows (`search.forget`), its private card if it has one
    (`private_cards`, not backed up: it is only an index), and its flags:
    archived, pinned, quiet, rested, moved, draft.
 
@@ -24,9 +22,8 @@ folder back and re-inserting the rows. The agent's own transcript (a Claude
 jsonl, a Codex rollout) is left alone: it is the agent's, and the deleted
 mark is what keeps it off the list.
 
-`abs_items` names library items to delete as well, by id: ones whose folder
-was already moved away, which ABS shows as missing and nothing here can find
-by path any more.
+(Its Audiobookshelf item was deleted too, until Audiobookshelf was left on
+11 Nov 2026.)
 """
 from __future__ import annotations
 
@@ -34,8 +31,6 @@ import json
 import shutil
 import sqlite3
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from agent_media_core import book_tracks, deleted, harnesses
@@ -75,21 +70,7 @@ def _folder_users(folder: str) -> set[str]:
     return out
 
 
-def _abs_delete(url: str, token: str, item_id: str) -> int:
-    """DELETE the library item (not its files: those were moved to the
-    backup already). The HTTP status, 0 when ABS did not answer."""
-    req = urllib.request.Request(f"{url}/api/items/{item_id}", method="DELETE",
-                                 headers={"Authorization": f"Bearer {token}"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except (urllib.error.URLError, OSError):
-        return 0
-
-
-def plan(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
+def plan(sessions: list[str]) -> dict:
     """What deleting `sessions` would take, without touching anything."""
     bad = [s for s in sessions if not harnesses.SESSION_ID.fullmatch(s)]
     if bad:
@@ -110,27 +91,17 @@ def plan(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
             }
     finally:
         conn.close()
-    items = []
-    folders = {v["folder"] for v in per.values() if v["folder"] and not v["folder_kept_for"]}
-    for url, token, libs in book_tracks._abs_ready_all():
-        for folder in sorted(folders):
-            item = book_tracks._find_item(url, token, libs, Path(folder))
-            if item and item.get("id"):
-                items.append({"url": url, "id": item["id"], "path": item.get("path", "")})
-        for item_id in abs_items:
-            items.append({"url": url, "id": item_id, "path": "(named)"})
-    return {"sessions": per, "abs_items": items}
+    return {"sessions": per}
 
 
-def apply(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
+def apply(sessions: list[str]) -> dict:
     """Delete `sessions` (see the module docstring). The plan, with outcomes."""
     from . import archive, drafts, moves, pins, rest, search
 
-    report = plan(sessions, abs_items)
+    report = plan(sessions)
     deleted.mark(sessions)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     conn = sqlite3.connect(default_db_path(), timeout=10.0)
-    tokens = {url: token for url, token, _libs in book_tracks._abs_ready_all()}
     try:
         for s, got in report["sessions"].items():
             keep = backup_root() / stamp / s
@@ -162,16 +133,12 @@ def apply(sessions: list[str], abs_items: tuple[str, ...] = ()) -> dict:
             got["backup"] = str(keep)
     finally:
         conn.close()
-    for item in report["abs_items"]:
-        token = tokens.get(item["url"], "")
-        item["status"] = _abs_delete(item["url"], token, item["id"]) if token else 0
     return report
 
 
-def run(sessions: list[str], *, apply_: bool = False, abs_items: tuple[str, ...] = (),
-        as_json: bool = False) -> int:
+def run(sessions: list[str], *, apply_: bool = False, as_json: bool = False) -> int:
     try:
-        report = apply(sessions, abs_items) if apply_ else plan(sessions, abs_items)
+        report = apply(sessions) if apply_ else plan(sessions)
     except ValueError as e:
         print(f"media session-delete: {e}")
         return 2
@@ -186,9 +153,6 @@ def run(sessions: list[str], *, apply_: bool = False, abs_items: tuple[str, ...]
         print(f"{s[:8]}: {verb} {got['history']} history rows, "
               f"{'the manifest, ' if got['manifest'] else ''}{where}"
               + (f", {got['search_rows']} search rows" if "search_rows" in got else ""))
-    for item in report["abs_items"]:
-        status = f" -> {item['status']}" if "status" in item else ""
-        print(f"abs {item['id']} {item['path']}{status}")
     if apply_ and report["sessions"]:
         print(f"backup: {backup_root()}")
     elif not apply_:

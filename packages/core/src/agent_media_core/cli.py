@@ -6322,14 +6322,6 @@ def _music_live_backend(m: "SinkMusic"):
                 return sas
         except Exception:  # noqa: BLE001 — app unreachable ⇒ not live
             pass
-    from .sinks.music_app import SinkMusicApp, configured as _app_configured
-    if _app_configured():
-        app = SinkMusicApp()
-        try:
-            if app.loaded():
-                return app
-        except Exception:  # noqa: BLE001 — app unreachable ⇒ not live
-            pass
     from .sinks.music_local import SinkMusicLocal, configured
     if configured():
         loc = SinkMusicLocal()
@@ -6571,12 +6563,12 @@ def cmd_speech_target(a) -> int:
 
 
 def _resolve_music_where(where: str) -> str:
-    """Resolve a `--where` value to a concrete backend: 'abs', 'phone' or 'rooms'.
+    """Resolve a `--where` value to a concrete backend: 'sasonica', 'phone' or 'rooms'.
 
     ``default`` follows MEDIA_MUSIC_DEFAULT_TARGET, then the speech default
-    device. Explicit ``auto`` keeps the old listener-aware routing. ``abs`` is
-    the phone played by Sasonica ABS, and needs its remote-control URL; without
-    one it means the phone's mpv, as it would if the app refused the track.
+    device. Explicit ``auto`` keeps the old listener-aware routing. ``abs``
+    (Sasonica ABS's player, retired 11 Nov 2026) is ``phone`` now
+    (types.RENAMED_TARGETS), where it fell back to anyway.
 
     A listener's stored choice (`audio_targets.music_pref`, set from the app's
     picker) stands in for ``default`` before any of that. It follows the env's
@@ -6586,15 +6578,12 @@ def _resolve_music_where(where: str) -> str:
     if where in ("", "default"):
         from . import audio_targets
         where = audio_targets.music_pref() or where
+    where = target_name(where)
     if where in ("local", "rooms"):
         return "rooms"
     if where == "phone":
         return "phone"
-    from .sinks.music_app import configured as _app_configured
     from .sinks.music_local import configured as _local_configured
-    where = target_name(where)
-    if where == "abs":
-        return "abs" if _app_configured() else "phone"
     if where == "sasonica":
         from .sinks.music_sasonica import configured as _sasonica_configured
         return "sasonica" if _sasonica_configured() else "phone"
@@ -6607,10 +6596,6 @@ def _resolve_music_where(where: str) -> str:
             from .sinks.music_sasonica import configured as _sasonica_configured
             if _sasonica_configured():
                 return "sasonica"
-        if default_target == "abs" and _app_configured():
-            return "abs"
-        if default_target == "abs" and _local_configured():
-            return "phone"
         if default_target in ("phone", "local-phone", "phone-local") and _local_configured():
             return "phone"
         if default_target in ("rooms", "local"):
@@ -6963,7 +6948,7 @@ def _resume_bookmark(bm: dict) -> int:
         m = SinkMusic()
         where = _resolve_music_where("auto")
         try:
-            if where in ("abs", "sasonica"):
+            if where == "sasonica":
                 from .sinks.music_router import SinkMusicRouter
                 SinkMusicRouter(mopidy=m).play(uri, Target(name=where), replace=True)
             elif where == "phone":
@@ -7287,7 +7272,7 @@ def _cmd_music_play_once(m, a) -> int:
     where = _resolve_music_where(getattr(a, "where", "auto"))
     ct = coerce_content_type(getattr(a, "as_type", None)) or detect_content_type(a.uri)
     from .play_gate import PlayHeld
-    if where in ("abs", "sasonica"):
+    if where == "sasonica":
         try:
             m.play(a.uri, Target(name=where), replace=not a.add,
                    title=getattr(a, "title", "") or "")
@@ -7943,10 +7928,10 @@ def cmd_feed(a) -> int:
         return 0
 
     if fc == "tracks":
-        # The growing layout: a conversation as an item that appends, one
-        # track per turn. Opt-in while the concatenated export is still the
-        # one being delivered — both write to the same tree, under different
-        # authors, so running this changes nothing about the other.
+        # The shelf: each conversation's clips hardlinked into a folder of
+        # its own, one track per sentence, appended as turns land. It was
+        # Audiobookshelf's Conversations library until 11 Nov 2026; the
+        # chapters, tags and re-opening went with it.
         from . import book_tracks
 
         if not book_tracks.enabled():
@@ -7961,57 +7946,8 @@ def cmd_feed(a) -> int:
                 if folder is not None and added]
         for _session, folder, added in grew:
             print(f"{folder}: +{added} track(s)")
-        if not sess:
-            # The sweep is also when a session that has ended stops being
-            # live: the tag is reconciled for every conversation, whether or
-            # not anything grew — a session usually ends without a new turn.
-            n = book_tracks.sync_tags()
-            if n:
-                print(f"live/archived tags: {n} item(s) changed")
         if not grew:
             print("no new turns")
-            # Asked about one conversation by name, answer about it anyway:
-            # the tracks can be there while the item's chapters are not,
-            # because a manifest can be rebuilt from a tree that was already
-            # written. The sweep over every conversation stays quiet.
-            if not sess:
-                return 0
-            grew = [(session, folder, 0) for session, folder, _a in rows
-                    if folder is not None]
-        if getattr(a, "no_reopen", False):
-            return 0
-
-        # Order matters, and it is the whole reason this is not two commands.
-        # Syncing progress asks the server what the item's duration is now;
-        # ask before the scan and the answer is the length it was before the
-        # turn landed — the position a finished listener would be put back to,
-        # and the total everyone else would be shown. So: write the files,
-        # make the server look, then sync.
-        from . import library
-
-        if not library.trigger_abs_scan("conversations"):
-            print("media feed tracks: no Audiobookshelf to scan — tracks are "
-                  "on disk, nothing was re-opened", file=sys.stderr)
-            return 0
-        for session, folder, _added in grew:
-            # Wait for the scan to have actually happened, rather than for a
-            # fixed number of seconds — the difference between a reply landing
-            # in the app in five seconds and in fifteen.
-            book_tracks.wait_for_tracks(
-                folder, len(list(folder.glob("*.mp3"))),
-                timeout_s=float(os.environ.get("MEDIA_ABS_SCAN_WAIT_S") or 25.0))
-            n = book_tracks.publish_chapters(session, folder)
-            if n:
-                print(f"{folder.name}: {n} chapter(s)")
-            described = book_tracks.set_metadata(session, folder)
-            if described:
-                print(f"{folder.name}: described as {described!r}")
-            cover = book_tracks.set_cover(session, folder)
-            if cover:
-                print(f"{folder.name}: cover {cover}")
-            synced = book_tracks.sync_progress(folder)
-            if synced:
-                print(f"{folder.name}: {synced}")
         return 0
 
     if fc == "xml":
@@ -8108,7 +8044,7 @@ def cmd_book(a) -> int:
             print("media book import-youtube: audiobook-fetch unavailable or playlist expansion failed", file=sys.stderr)
             return 1
         kind = "playlist" if len(urls) > 1 else "video"
-        print(f"⬇ importing YouTube {kind}: {len(urls)} item(s) into Audiobookshelf")
+        print(f"⬇ importing YouTube {kind}: {len(urls)} item(s) into the book folder")
         return 0
     if bc == "resume":
         r = srv.book_resume(target=tgt)
@@ -9478,21 +9414,12 @@ def cmd_sessiond(a) -> int:
     return sd.main(["--socket", a.socket] if a.socket else [])
 
 
-def cmd_session_archive_import(a) -> int:
-    """Carry ABS `archived` tags over to the server's archive flag."""
-    imp = _server_module("archive_import")
-    if imp is None:
-        return 1
-    return imp.run(apply=a.apply, as_json=a.json)
-
-
 def cmd_session_delete(a) -> int:
     """Delete threads everywhere this host keeps them (agent_media_server.forget)."""
     forget = _server_module("forget")
     if forget is None:
         return 1
-    return forget.run(a.sessions, apply_=a.apply, abs_items=tuple(a.abs_item or ()),
-                      as_json=a.json)
+    return forget.run(a.sessions, apply_=a.apply, as_json=a.json)
 
 
 def cmd_room_log(a) -> int:
@@ -10558,7 +10485,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="for 'bookmark': named register (e.g. 1, 2) for overlapping ranges")
     s.add_argument("--title", default="", help=argparse.SUPPRESS)
     s.add_argument("--where", type=target_name,
-                   choices=("default", "auto", "local", "rooms", "phone", "abs", "sasonica", "handoff"),
+                   choices=("default", "auto", "local", "rooms", "phone", "sasonica", "handoff"),
                    default="default",
                    help="for 'radio dj': 'handoff' is the listener's own music app "
                         "(the Sasonica app's hand-off player). "
@@ -10823,21 +10750,11 @@ def _build_parser() -> argparse.ArgumentParser:
                          "$XDG_RUNTIME_DIR/agent-media/sessiond.sock)")
     sd.set_defaults(func=cmd_sessiond)
 
-    sai = sub.add_parser("session-archive-import",
-                         help="set the archive flag for conversations tagged "
-                              "`archived` in Audiobookshelf (dry run unless --apply; "
-                              "never writes to ABS)")
-    sai.add_argument("--apply", action="store_true", help="set the flags")
-    sai.add_argument("--json", action="store_true")
-    sai.set_defaults(func=cmd_session_archive_import)
-
     sdel = sub.add_parser("session-delete",
                           help="delete threads everywhere: speech history, shelf folder, "
-                               "library item, search rows, flags; kept deleted from then on "
+                               "search rows, flags; kept deleted from then on "
                                "(dry run unless --apply; a backup is written first)")
     sdel.add_argument("sessions", nargs="+", metavar="SESSION")
-    sdel.add_argument("--abs-item", action="append", metavar="ID",
-                      help="also delete this library item (one ABS shows as missing)")
     sdel.add_argument("--apply", action="store_true", help="delete")
     sdel.add_argument("--json", action="store_true")
     sdel.set_defaults(func=cmd_session_delete)
@@ -10894,7 +10811,7 @@ def _build_parser() -> argparse.ArgumentParser:
                              "ambient"),
                     help="override the interruption content type")
     sh.add_argument("--where", type=target_name,
-                    choices=("default", "auto", "local", "rooms", "phone", "abs", "sasonica"),
+                    choices=("default", "auto", "local", "rooms", "phone", "sasonica"),
                     default="", help="where to play it (as `media music play`)")
     sh.add_argument("--no-probe", action="store_true",
                     help="skip the yt-dlp metadata fetch and classify on the "
@@ -11219,16 +11136,14 @@ def _add_book_parser(sub) -> None:
     fss.add_argument("--limit", type=int, default=15)
 
     ft = f.add_parser("tracks",
-                      help="write conversations as items that GROW — one "
-                           "track per turn, appended as turns land")
+                      help="hardlink conversations' clips onto the shelf — one "
+                           "track per sentence, appended as turns land")
     ft.add_argument("--session", default="",
                     help="one conversation (Claude session id); default all "
                          "that have spoken lately")
     ft.add_argument("--since-hours", type=float, default=24.0,
                     help="only conversations with a turn this recently "
                          "(0 = every one there has ever been)")
-    ft.add_argument("--no-reopen", action="store_true",
-                    help="do not clear isFinished on an item that grew")
 
     fx = f.add_parser("xml", help="print the feed XML (does not write it)")
     fx.add_argument("name")
@@ -11251,7 +11166,7 @@ def _add_book_parser(sub) -> None:
     bp.add_argument("--in-treatment", action="store_true",
                     help="play even while the play gate holds starts (MEDIA_PLAY_GATE_CMD)")
 
-    biy = b.add_parser("import-youtube", help="download a YouTube video/playlist into Audiobookshelf")
+    biy = b.add_parser("import-youtube", help="download a YouTube video/playlist into the book folder")
     biy.add_argument("uri", help="YouTube video or playlist URL")
     biy.add_argument("--target", default="", help="rooms|local|phone")
     biy.add_argument("--play", action="store_true", help="play the last fetched item when ready")

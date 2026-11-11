@@ -29,7 +29,7 @@ def _remote_app(monkeypatch):
     endpoints — a machine whose app target happened to be a unix socket would
     pass every assertion here without exercising anything.
     """
-    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_ABS", "tcp://p8a.test:6612")
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_TABLET", "tcp://p8a.test:6612")
     ipc.reset_breaker()
     yield
     ipc.reset_breaker()
@@ -37,7 +37,7 @@ def _remote_app(monkeypatch):
 
 def test_snapshot_is_not_judged_by_the_chatter_budget():
     with mock.patch.object(ipc, "get_properties", return_value={}) as got:
-        SinkSpeech().snapshot(Target("abs"))
+        SinkSpeech().snapshot(Target("tablet"))
     kwargs = got.call_args.kwargs
     assert kwargs["slow_s"] == 0, "a slow honest answer must not trip the breaker"
     assert kwargs["breaker_s"] == 5, "a dead phone should still be skipped, briefly"
@@ -61,8 +61,8 @@ def test_an_honest_slow_endpoint_is_still_readable_next_tick(monkeypatch):
 
     monkeypatch.setattr(ipc, "_get_properties_once", slow_once)
     sink = SinkSpeech()
-    first = sink.snapshot(Target("abs"))
-    second = sink.snapshot(Target("abs"))
+    first = sink.snapshot(Target("tablet"))
+    second = sink.snapshot(Target("tablet"))
     assert first and second, "the second tick was skipped as 'endpoint slow'"
     assert len(calls) == 2
 
@@ -76,7 +76,7 @@ def test_a_dead_endpoint_still_opens_the_breaker(monkeypatch):
 
     monkeypatch.setattr(ipc, "_get_properties_once", dead)
     sink = SinkSpeech()
-    assert sink.snapshot(Target("abs")) == {}
+    assert sink.snapshot(Target("tablet")) == {}
     with mock.patch.object(ipc, "_get_properties_once", side_effect=dead) as again:
-        assert sink.snapshot(Target("abs")) == {}
+        assert sink.snapshot(Target("tablet")) == {}
         assert again.call_count == 0, "a failed endpoint should be skipped, not retried"

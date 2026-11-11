@@ -87,10 +87,7 @@ def test_archive_refusals(server, shelf, signed_in, monkeypatch):
 
 
 def test_archive_is_gated(server, shelf, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, obj = call(server, "POST", "/session/archive", {"session": SID})
     assert res.status == 401 and obj["ok"] is False
     assert not archive._path().exists()

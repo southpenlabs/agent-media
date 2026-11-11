@@ -21,7 +21,6 @@ import os
 import re
 from pathlib import Path
 from typing import Optional, Sequence
-import urllib.request
 
 
 # Bare 11-char YouTube id from the common URL shapes (after any `yt:` strip).
@@ -66,114 +65,19 @@ def library_dir(target=None) -> Path:
 
 
 def abs_import_dir(target=None) -> Path:
-    """Host directory Audiobookshelf scans for books.
+    """The audiobook folder: what book_library reads and imports land in.
 
-    Override with MEDIA_AUDIOBOOK_ABS_DIR / ABS_AUDIOBOOK_DIR (or their
-    per-target _<TARGET> forms). The current container setup mounts
-    ~/audiobooks as /audiobooks, so prefer that when it exists; fall back to
-    the historical agent-media library.
+    Named for the Audiobookshelf that used to scan it (left 11 Nov 2026); the
+    name and its variables stay so a host's settings keep meaning the same
+    folder. Override with MEDIA_AUDIOBOOK_ABS_DIR / ABS_AUDIOBOOK_DIR (or their
+    per-target _<TARGET> forms). ~/audiobooks when it exists; else the
+    historical agent-media library.
     """
     override = _tenv("MEDIA_AUDIOBOOK_ABS_DIR", target) or _tenv("ABS_AUDIOBOOK_DIR", target)
     if override:
         return Path(override).expanduser()
     p = Path.home() / "audiobooks"
     return p if p.exists() else library_dir(target)
-
-
-def _abs_cfg(target=None) -> tuple[str, str, str]:
-    url = _tenv("MEDIA_AUDIOBOOKSHELF_URL", target) or _tenv("ABS_URL", target) or ""
-    token = _tenv("MEDIA_AUDIOBOOKSHELF_TOKEN", target) or _tenv("ABS_TOKEN", target) or ""
-    lib = _tenv("ABS_LIBRARY", target) or ""
-    try:
-        for line in (Path.home() / ".config" / "agent-media" / "abs-bridge.env").read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            v = v.strip().strip('"\'')
-            if k == "ABS_URL" and not url:
-                url = v
-            elif k == "ABS_TOKEN" and not token:
-                token = v
-            elif k == "ABS_LIBRARY" and not lib:
-                lib = v
-    except OSError:
-        pass
-    return url.rstrip("/"), token, lib
-
-
-def _abs_extra_servers(target=None) -> list[tuple[str, str]]:
-    """`(url, token)` for the *additional* Audiobookshelf servers that should
-    receive the same conversation metadata and rescans as the primary one.
-
-    Each has its own token, because an API key is minted per server: a bearer
-    from one is rejected by another. The format is therefore ``url|token``,
-    comma-separated, in ``ABS_SERVERS`` (env ``MEDIA_ABS_SERVERS`` for a
-    one-off) beside the primary ``ABS_URL``/``ABS_TOKEN`` in abs-bridge.env.
-    Blank — the default — means the single primary server it always was.
-
-    Distinct from ``ABS_URLS``, which is a bare-URL allow-list the reply/cast
-    side forwards the *caller's own* bearer to; those never carry a token and
-    must not, so metadata fan-out gets its own key rather than overloading it.
-    """
-    raw = _tenv("MEDIA_ABS_SERVERS", target) or ""
-    if not raw:
-        try:
-            for line in (Path.home() / ".config" / "agent-media"
-                         / "abs-bridge.env").read_text().splitlines():
-                line = line.strip()
-                if line.startswith("ABS_SERVERS=") and "=" in line:
-                    raw = line.split("=", 1)[1].strip().strip('"\'')
-                    break
-        except OSError:
-            pass
-    out: list[tuple[str, str]] = []
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if not entry or "|" not in entry:
-            continue
-        url, token = entry.split("|", 1)
-        url, token = url.strip().rstrip("/"), token.strip()
-        if url and token:
-            out.append((url, token))
-    return out
-
-
-def _scan_one(url: str, token: str, want: str) -> bool:
-    """Trigger a rescan of one server's book library. True on success."""
-    try:
-        req = urllib.request.Request(f"{url}/api/libraries", headers={"Authorization": f"Bearer {token}"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            libs = __import__("json").loads(r.read()).get("libraries", [])
-        lib = next((l for l in libs if l.get("id") == want or l.get("name") == want), None) if want else None
-        lib = lib or next((l for l in libs if l.get("mediaType") == "book"), None)
-        if not lib:
-            return False
-        req = urllib.request.Request(f"{url}/api/libraries/{lib['id']}/scan", method="POST",
-                                     headers={"Authorization": f"Bearer {token}"})
-        with urllib.request.urlopen(req, timeout=10):
-            return True
-    except Exception:
-        return False
-
-
-def trigger_abs_scan(target=None) -> bool:
-    """Ask Audiobookshelf to rescan its book library after an import.
-
-    Fans out to every configured server — the primary plus any in
-    ``ABS_SERVERS`` (see `_abs_extra_servers`) — so a second instance with its
-    file watcher off still picks the import up. True if the primary scanned.
-
-    Per-target library selection via ABS_LIBRARY_<TARGET> (falls back to
-    ABS_LIBRARY, then the first book-type library).
-    """
-    url, token, want = _abs_cfg(target)
-    if not url or not token:
-        return False
-    ok = _scan_one(url, token, want)
-    for xurl, xtoken in _abs_extra_servers(target):
-        _scan_one(xurl, xtoken, want)
-    return ok
 
 
 def is_youtube(uri: str) -> bool:
@@ -251,8 +155,8 @@ def start_fetch_many(urls: Sequence[str], *, play: bool = False, target=None) ->
     `start_fetch_many`). False without it, or when it cannot start.
 
     With `play=True` the last one plays on the book channel when it has
-    arrived. With `target`, it lands in that target's ABS library dir and
-    the add-on's `media book play` / `media abs-scan` calls name it.
+    arrived. With `target`, it lands in that target's audiobook folder and
+    the add-on's `media book play` / `media library-scan` calls name it.
     """
     from . import youtube_addon
     addon = youtube_addon.get("youtube-downloads")

@@ -148,7 +148,7 @@ def test_a_tapped_agent_chip_goes_out_named_and_keeps_it(rig):
     r = rig.room
     room_delegate.hand(r.thread, "kit")
     room_delegate.reply(r.thread, "Hi, I'm Kit, David's assistant.")
-    ok, d = send.reply("", "Hi, I'm Kit, David's assistant.", "tok", session=r.thread,
+    ok, d = send.reply("Hi, I'm Kit, David's assistant.", "tok", session=r.thread,
                        from_chip=room_delegate.CHIP_MARK)
     assert ok, d
     assert rig.put[-1]["body"] == "Kit: Hi, I'm Kit, David's assistant."
@@ -158,7 +158,7 @@ def test_a_tapped_agent_chip_goes_out_named_and_keeps_it(rig):
 def test_david_writing_himself_takes_it_back_and_the_agent_is_told(rig):
     r = rig.room
     room_delegate.hand(r.thread, "kit")
-    ok, _ = send.reply("", "Sorry Sam, me here", "tok", session=r.thread)
+    ok, _ = send.reply("Sorry Sam, me here", "tok", session=r.thread)
     assert ok and rig.put[-1]["body"] == "Sorry Sam, me here"
     assert room_delegate.active(r.thread) is None
     (session, text), = rig.told

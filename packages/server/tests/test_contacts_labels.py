@@ -167,10 +167,7 @@ def test_the_routes(server, signed_in, phone):
 
 
 def test_the_routes_are_gated(server, monkeypatch):
-    from agent_media_server import auth_abs
 
-    monkeypatch.setattr(auth_abs, "abs_urls", lambda: ["http://abs"])
-    monkeypatch.setattr(auth_abs, "_abs_get", lambda *a, **k: (None, 401))
     res, _ = call(server, "GET", "/contacts/labels")
     assert res.status in (401, 403)
 

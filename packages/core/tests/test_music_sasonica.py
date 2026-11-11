@@ -29,11 +29,10 @@ class _Fake:
         return self._takes
 
 
-def _router(monkeypatch, *, sasonica, local, app=None, on=True):
+def _router(monkeypatch, *, sasonica, local, on=True):
     monkeypatch.setattr("agent_media_core.sinks.music_router._sasonica_configured", lambda: on)
-    monkeypatch.setattr("agent_media_core.sinks.music_router._app_configured", lambda: False)
     monkeypatch.setattr("agent_media_core.sinks.music_router._local_configured", lambda: True)
-    return SinkMusicRouter(mopidy=_Fake(), local=local, app=app or _Fake(), sasonica=sasonica)
+    return SinkMusicRouter(mopidy=_Fake(), local=local, sasonica=sasonica)
 
 
 def test_the_target_plays_in_sasonica(monkeypatch):

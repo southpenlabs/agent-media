@@ -1,6 +1,6 @@
 """One conversation: whether it can be replied to, and what was said in it.
 
-Moved out of the canvas's reply.py. `/conversation` (by item or by session),
+Moved out of the canvas's reply.py. `/conversation` (by session),
 `/conversation/log`, `/commands` and `/rename` answer from here.
 
 The log's pictures are the canvas's: it remembers what it drew for each reply
@@ -14,55 +14,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 from typing import Callable
 
-from . import auth, auth_abs, context, driver, git_state, recaps, send, sessions, transcript
+from . import auth, context, driver, git_state, recaps, send, sessions, transcript
 
 log = logging.getLogger("agent-media.server.threads")
-
-
-def item_for_session(session: str, bearer: str) -> tuple[str | None, bool]:
-    """`(item id, ready)` for `session` on the caller's own Audiobookshelf.
-
-    The caller's server and the caller's bearer, on purpose: this host
-    publishes to more than one ABS and each gives the same folder a different
-    id, so an id from "our" server is a 404 on the phone signed in to the
-    other. `ready` is whether ABS has built the item's tracks yet — the app's
-    item page cannot open one it has only just created (the first attempt
-    sent the phone to a trackless item and it bounced home with "Failed to
-    get library item"), so the caller should wait for both.
-    """
-    folder = sessions._folder_for_session(session)
-    if not folder:
-        return None, False
-    # A device token is never shown to ABS; a device asks under the host's
-    # own ABS login (see auth.abs_bearer).
-    bearer = auth.abs_bearer(bearer)
-    if not bearer:
-        return None, False
-    url = auth_abs.abs_home(bearer)
-    if not url:
-        return None, False
-    tail = sessions._tail(folder)
-    libs, _status = auth_abs._abs_get(url, bearer, "/api/libraries")
-    for lib in (libs or {}).get("libraries") or []:
-        if lib.get("mediaType") != "book":
-            continue
-        page, _status = auth_abs._abs_get(
-            url, bearer, f"/api/libraries/{lib.get('id')}/items?limit=1000&sort=addedAt&desc=1")
-        for item in (page or {}).get("results") or []:
-            if sessions._tail(item.get("path") or "") == tail and item.get("id"):
-                tracks = int(((item.get("media") or {}).get("numTracks")) or 0)
-                return str(item["id"]), tracks > 0
-    return None, False
 
 
 def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
     """`/conversation?session=`: where a session started from the phone got to.
 
-    Same gates as `conversation`. The answer is `ok` from the first poll —
-    the session is real — and `item` fills in when the library has it.
+    Gated like a reply. The answer is `ok` from the first poll — the session
+    is real. (`item` and `scanning`, the session's Audiobookshelf item, went
+    with Audiobookshelf on 11 Nov 2026.)
     """
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
@@ -75,7 +39,7 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
     if matrix.room(session) is not None:
         # A Matrix room: `resumable` (a reply goes in) when the owner's token
         # is set (matrix.owner_token).
-        return True, {"session": session, "item": None, "scanning": False,
+        return True, {"session": session,
                       "live": False, "pane": None,
                       "resumable": bool(matrix.owner_token()),
                       "suggestion": "", "source": "matrix"}
@@ -87,13 +51,10 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
             # A headless session: live while sessiond runs it, and resumable
             # whenever it has a record (a reply resumes it).
             live, resumable = hl["live"], True
-    item, ready = item_for_session(session, bearer)
-    return True, {"session": session, "item": item if ready else None,
-                  "scanning": bool(item) and not ready,
+    return True, {"session": session,
                   "live": live, "pane": pane or None,
                   "resumable": resumable,
-                  # The same ghost prompt `?item=` offers (§6.2.1), so a
-                  # client that only knows sessions draws the same box.
+                  # The ghost prompt (§6.2.1).
                   "suggestion": sessions.suggestion_for(session, pane)}
 
 
@@ -140,29 +101,7 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
     return True, got
 
 
-def conversation(item: str, bearer: str) -> tuple[bool, dict]:
-    """Whether `item` is a conversation this caller may reply to.
-
-    The app asks this before drawing the reply box, so it never has to know
-    what a conversation is or which library holds them — it shows the box when
-    the answer here is yes. Same two gates as `reply`, in the same order, so
-    the box cannot appear where the send would be refused.
-    """
-    user, err = auth.gate(bearer)
-    if not user:
-        return False, err
-    session, err = sessions.session_for_item(item, bearer)
-    if not session:
-        return False, {"error": err, "status": 404}
-    pane = sessions.live_sessions().get(session, "")
-    hl = None if pane else driver.headless_state(session)
-    return True, {"session": session,
-                  "live": bool(pane) or bool(hl and hl["live"]), "pane": pane or None,
-                  "resumable": sessions.session_exists(session) or hl is not None,
-                  "suggestion": sessions.suggestion_for(session, pane)}
-
-
-def commands_for(item: str, session: str, project: str, bearer: str,
+def commands_for(session: str, project: str, bearer: str,
                  cwd: str = "") -> tuple[bool, dict]:
     """The slash menu for a conversation, or for a project about to start one.
 
@@ -177,10 +116,6 @@ def commands_for(item: str, session: str, project: str, bearer: str,
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    if item and not session:
-        session, err = sessions.session_for_item(item, bearer)
-        if not session:
-            return False, {"error": err, "status": 404}
     where = cwd
     cwd = sessions.transcript_cwd(session) if session else ""
     if not cwd and project:
@@ -318,7 +253,7 @@ def name_unnamed(session: str) -> str:
     return book_tracks.rename(session, title)
 
 
-def rename_conversation(item: str, session: str, title: str, bearer: str,
+def rename_conversation(session: str, title: str, bearer: str,
                         auto: bool = False) -> tuple[bool, dict]:
     """Rename a conversation from the app. Gated like `/reply`.
 
@@ -331,10 +266,9 @@ def rename_conversation(item: str, session: str, title: str, bearer: str,
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    if item and not session:
-        session, err = sessions.session_for_item(item, bearer)
-        if not session:
-            return False, {"error": err, "status": 404}
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
     title = " ".join((title or "").split())
     if not title and auto:
         title = auto_title(session)
@@ -762,56 +696,16 @@ def _limit(raw) -> int:
     return max(1, min(MESSAGES_MAX, n))
 
 
-def log_for_item(item: str, bearer: str, *, limit=None, before: str = "") -> tuple[bool, dict]:
-    """The conversation behind `item`, as readable lines. Same gates as a reply.
-
-    Gated identically on purpose: the log is the words of the conversation, so
-    anyone who can read it could have read them by listening — but an account
-    that may not reply has no business being handed a transcript either.
-    """
-    user, err = auth.gate(bearer)
-    if not user:
-        return False, err
-    session, err = sessions.session_for_item(item, bearer)
-    if not session:
-        return False, {"error": err, "status": 404}
-    try:
-        from agent_media_core import book_tracks
-
-        data = _manifest_for(session)
-        if data is not None:
-            lines = book_tracks.conversation_log(
-                session, Path(str(data.get("folder") or "")),
-                target="conversations")
-            return True, _envelope(session, lines, limit=_limit(limit), before=before)
-    except Exception as e:  # noqa: BLE001
-        # Say so in the journal as well as to the caller: the app folds every
-        # failed fetch into an empty transcript, so this line is the only
-        # record on this side of what actually went wrong.
-        log.exception("conversation log for %s (session %s) failed: %s",
-                      item, session, e)
-        return False, {"error": f"could not read the conversation ({e})",
-                       "status": 500}
-    return False, {"error": "no manifest for that conversation", "status": 404}
-
-
 def log_for_session(session: str, bearer: str, *, limit=None,
                     before: str = "", around: str = "") -> tuple[bool, dict]:
     """`/conversation/log?session=`: the same lines, named by the thread's own
-    id (server-contract.md §10). Same envelope, same line shapes, same gate.
+    id (server-contract.md §10).
 
-    Two differences from the item form, both because nothing here asks ABS:
-
-    * **No positions.** `start`/`end` are always null: placing a line in the
-      audio item means reading the item's tracks from ABS, and this form is
-      the one that has to keep working when ABS is slow, down or gone. They
-      are ABS-shaped fields that go at the ABS exit anyway.
-    * **No manifest is not a 404 by itself.** A session gets its manifest on
-      its first publish, so one the phone started seconds ago has none — but
-      speech history already has the listener's turn, and the live tail and
-      the live line come from history and the player, not the manifest.
-      `conversation_log` reads the manifest by session and needs a folder only
-      for positions, so it is asked regardless. Only a session with no
+    No manifest is not a 404 by itself. A session gets its manifest on its
+    first publish, so one the phone started seconds ago has none — but speech
+    history already has the listener's turn, and the live tail and the live
+    line come from history and the player, not the manifest. So
+    `conversation_log` is asked regardless. Only a session with no
       manifest, nothing said, no pane and no transcript is 404 "no
       conversation for that session yet"; a real session with nothing said
       yet answers 200 with no lines, so a client polling a thread it just
@@ -847,9 +741,7 @@ def session_log(session: str, *, limit=None, before: str = "",
         from agent_media_core import book_tracks
 
         data = _manifest_for(session)
-        folder = Path(str((data or {}).get("folder") or ""))
-        lines = book_tracks.conversation_log(session, folder, target="conversations",
-                                             positions=False)
+        lines = book_tracks.conversation_log(session)
         if data is None and not lines \
                 and not sessions.live_sessions().get(session) \
                 and not sessions.session_exists(session) \

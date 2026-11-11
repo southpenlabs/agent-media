@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import auth, auth_abs, mailbox, panes, procmem, recaps
+from . import auth, mailbox, panes, procmem, recaps
 
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -39,66 +39,6 @@ def _manifest_dir() -> Path:
     from agent_media_core._paths import state_dir
 
     return state_dir() / "book-tracks"
-
-
-def _tail(path: str) -> str:
-    """The `<author>/<title>` tail two ABS and this host agree on.
-
-    ABS reports the path inside its own mount; we know the host's, and nothing
-    tells either how the other maps. `_find_item` in book_tracks matches on the
-    same tail going the other way.
-    """
-    parts = [p for p in str(path).replace("\\", "/").split("/") if p]
-    return "/".join(parts[-2:])
-
-
-def session_for_item(item_id: str, bearer: str) -> tuple[str | None, str]:
-    """The session uuid behind an ABS library item, or (None, why not).
-
-    Looked up with the *caller's* bearer, so an item they cannot see is an item
-    they cannot reply to, decided by ABS.
-    """
-    item_id = (item_id or "").strip()
-    if not item_id:
-        return None, "no item id"
-    # A device token is never shown to ABS; a device looks items up under the
-    # host's own ABS login (see auth.abs_bearer).
-    bearer = auth.abs_bearer(bearer)
-    url = auth_abs.abs_home(bearer)
-    if not url:
-        return None, "no Audiobookshelf configured on this host"
-    item, status = auth_abs._abs_get(url, bearer, f"/api/items/{item_id}")
-    if not item:
-        # The status is the difference between "that item is not there" and
-        # "Audiobookshelf did not answer", which were both reported as the
-        # first one — so an outage sent you looking for a missing item, and a
-        # reply that failed because the server blinked said the library was
-        # wrong. Only a real 404 is a missing item.
-        if status == 404:
-            return None, "no such item"
-        if not status:
-            return None, f"Audiobookshelf ({url}) did not answer"
-        return None, f"Audiobookshelf ({url}) said {status} for that item"
-    return session_for_path(item.get("path") or "")
-
-
-def session_for_path(path: str) -> tuple[str | None, str]:
-    """The session uuid behind an item's folder, or (None, why not).
-
-    The half of `session_for_item` that needs no server: a caller already
-    holding the item (the `/item` route does) can ask this directly.
-    """
-    tail = _tail(path or "")
-    if not tail:
-        return None, "item has no path"
-    for f in sorted(_manifest_dir().glob("*.json")):
-        try:
-            data = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
-        if _tail(data.get("folder") or "") == tail:
-            return str(data.get("session") or f.stem), ""
-    return None, "not a conversation (no session behind it)"
 
 
 # --- is that session live, and where ------------------------------------------
@@ -1105,13 +1045,6 @@ def activity_of(session: str, pane: str, *, with_draft: bool = False) -> dict:
 
 
 def _live_states() -> list[dict]:
-    tails = {}
-    for f in _manifest_dir().glob("*.json"):
-        try:
-            data = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
-        tails[str(data.get("session") or f.stem)] = _tail(data.get("folder") or "")
     from . import background
 
     out = []
@@ -1128,7 +1061,7 @@ def _live_states() -> list[dict]:
         state = activity_of(sid, pane)["state"] or "waiting"
         title = (_display_title(sid, titles[pane]) if pane in titles
                  else _live_title(sid))
-        row = {"session": sid, "tail": tails.get(sid, ""),
+        row = {"session": sid,
                "state": state, "mem_mb": mem.get(sid), "title": title}
         # A turn over with background agents still at work (§6.1).
         if state == "waiting":
@@ -1152,7 +1085,7 @@ def _live_states() -> list[dict]:
         hmem = procmem.tree_mem_mb({v["session"]: v.get("pid") for v in hl})
         for v in hl:
             sid = str(v["session"])
-            row = {"session": sid, "tail": tails.get(sid, ""),
+            row = {"session": sid,
                    "state": contract_state(v), "mem_mb": hmem.get(sid),
                    "title": _headless_title(sid, v), "driver": "headless"}
             if v.get("host"):

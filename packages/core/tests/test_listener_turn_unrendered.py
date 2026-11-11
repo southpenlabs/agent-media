@@ -69,7 +69,7 @@ def test_the_clipless_turn_is_in_the_conversation(isolated, monkeypatch):
     assert [(t.listener, t.text, t.clips) for t in ts] == [
         (True, "You: Can you check the build?", [])]
     monkeypatch.setattr(book_tracks, "_live_turn", lambda s: None)
-    lines = book_tracks.conversation_log(S, isolated / "nofolder", positions=False)
+    lines = book_tracks.conversation_log(S)
     assert [(l["who"], l["text"], l.get("id")) for l in lines] == [
         ("you", "Can you check the build?", row["id"])]
     # The thread's `pending` rule: the last line is the listener's.

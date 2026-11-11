@@ -11,14 +11,14 @@ from agent_media_core.sinks import speech as SP
 from agent_media_core.types import Target
 
 
-APP = Target(name="abs")
+APP = Target(name="tablet")
 
 
 @pytest.fixture(autouse=True)
 def _app_target(monkeypatch):
     # As red5 configures it.
-    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_ABS", "tcp://phone.example:6613")
-    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_ABS", "default")
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_TABLET", "tcp://phone.example:6613")
+    monkeypatch.setenv("MEDIA_SPEECH_DEVICE_TABLET", "default")
 
 
 @pytest.fixture

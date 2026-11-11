@@ -33,12 +33,12 @@ def test_a_reaction_is_shown_and_told_with_the_next_message(server, signed_in, p
     assert "reactions" not in msgs[0]
     # No turn of its own: nothing typed until the next message, which opens with it.
     assert not [a for n, a in typed if n == "_send_to_pane"]
-    send.reply("", "next thing", "tok", session=SID)
+    send.reply("next thing", "tok", session=SID)
     sent = [a for n, a in typed if n == "_send_to_pane"][-1][1]
     assert sent.startswith("(I reacted 👍 to your message, “Done: the tests pass.”.)")
     assert sent.endswith("next thing")
     # Told once; read back, the bubble loses the note and the reaction stays.
-    send.reply("", "and again", "tok", session=SID)
+    send.reply("and again", "tok", session=SID)
     assert [a for n, a in typed if n == "_send_to_pane"][-1][1] == "and again"
     msgs = _msgs() + [{"id": "u-2", "role": "user", "at": 3.0,
                        "parts": [{"type": "text", "text": sent}]}]
@@ -59,7 +59,7 @@ def test_another_emoji_replaces_it_and_none_takes_it_off_untold(server, signed_i
     msgs = _msgs()
     reactions.mark(SID, msgs)
     assert "reactions" not in msgs[1]
-    send.reply("", "plain", "tok", session=SID)
+    send.reply("plain", "tok", session=SID)
     assert [a for n, a in typed if n == "_send_to_pane"][-1][1] == "plain"
 
 

@@ -24,7 +24,6 @@ def _setup(tmp_path, monkeypatch):
     monkeypatch.setattr(seal, "staging_roots", lambda: [tmp_path / "incoming"])
     monkeypatch.setattr(seal, "SETTLE_S", 0)
     monkeypatch.setattr(seal, "_running", lambda s: False)
-    monkeypatch.setattr(book_tracks, "_abs_ready_all", lambda: [])
     proj = tmp_path / "claude" / "projects" / "-home-x-proj"
     proj.mkdir(parents=True)
     tr = proj / f"{A}.jsonl"
