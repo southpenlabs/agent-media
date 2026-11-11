@@ -147,7 +147,8 @@ moves.py), `release` (what is held for a restart goes now, and the restart
 lets the session through: the app's Send now), `run_now` and `slots` (above;
 `send` and `start` take `slot: "high"`), `hosts` (the other hosts that run
 sessions for this one). `start` with `host` starts the session on another
-host and every op on it goes there (sessiond_remote.py, roadmap 56). `send` with `keep_pending` is refused `pending` rather than
+host and every op on it goes there (sessiond_remote.py, roadmap 56); one
+naming none goes to MEDIA_SESSIOND_DEFAULT_HOST when that can take it now. `send` with `keep_pending` is refused `pending` rather than
 answer a waiting card the way typing does (another session's mail,
 headless_mail.py).
 

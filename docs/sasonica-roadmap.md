@@ -2493,6 +2493,20 @@ ahead.
       shows the workers, their slots and free memory. A restart here
       neither touches nor waits for their sessions; the worker's own restart
       drains its own. Rows carry `host`.
+    - **A default host BUILT 11 Nov 2026: new chats start on red2** (David,
+      11 Nov 2026: "Maybe we should just start using red 2 for everything
+      speed critical", "ok" to: new chats there with no switch, red5 when
+      red2 is down or full, running chats stay put, red5 keeps the front
+      door; whether red2 becomes primary is decided 25 Nov).
+      `MEDIA_SESSIOND_DEFAULT_HOST=red2` in the server's env file: a `start`
+      naming no host asks red2 first (`prepare`: connected, the folder
+      there, a free slot, memory) and starts there, else here at once — down,
+      full, short of memory, a folder not cloned there yet (its clone is
+      begun in the background, so the next chat in it goes to red2), an
+      old worker or a refused start. Only a plain new Claude chat goes: a
+      persona, a branch, a revived thread or another agent stays here, as
+      does a folder under `MEDIA_SESSIOND_DEFAULT_HOST_SKIP`; `--host local`
+      pins one here (server-contract §17.1 "The default host").
     - **Next:** the app's host label on a thread (the rows carry `host`
       already); the app's New chat naming a host (`/ask` with `host`); a
       persona, a branch or a move on another host; a worker's

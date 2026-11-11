@@ -60,6 +60,8 @@ class FakeHost:
                        {"seq": 2, "type": "assistant"},
                        {"seq": 3, "type": "result", "subtype": "success", "result": "Hi there."}]
         self.lines = ['{"type":"user"}\n', '{"type":"assistant"}\n']
+        #: What `prepare` answers (None: the folder is there, slots free).
+        self.prepare: dict | None = None
 
     def __call__(self, body: dict, timeout: float):
         self.seen.append(body)
@@ -86,6 +88,12 @@ class FakeHost:
         if op == "host":
             return 200, {"ok": True, "host": {"host": "red2", "cpus": 16, "max_live": 16,
                                               "live": 1, "sessiond": True}}
+        if op == "prepare":
+            if self.prepare is not None:
+                return 200, self.prepare
+            return 200, {"ok": True, "prepared": True, "exists": True, "cloning": False,
+                         "slots": {"max_live": 16, "live": 1, "free_mb": 20000,
+                                   "min_free_mb": 1500}}
         if op == "get":
             return 200, {"ok": True, **self.view}
         return 200, {"ok": True, "session": req.get("session"), "queued": False,
@@ -146,6 +154,114 @@ def test_no_persona_or_other_agent_on_another_host_yet(red5):
     assert _start(sup, work, agent="opencode")["code"] == "unsupported"
     assert _start(sup, work, system_prompt_file="/x")["code"] == "unsupported"
     assert not fake.seen
+
+
+class _LocalStart(Exception):
+    """Raised where the chat would have started here (the fake's stand-in
+    for spawning a real Claude)."""
+
+
+@pytest.fixture
+def default_red2(red5, monkeypatch):
+    sup, fake, said, work = red5
+    monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST", "red2")
+
+    def local(*a, **kw):
+        raise _LocalStart(kw.get("session") or "")
+
+    monkeypatch.setattr(sup, "start", local)
+    return sup, fake, work
+
+
+def _new_chat(sup, work, **kw):
+    """`start` naming no host: "here" when it would start on this host,
+    else the answer."""
+    try:
+        return sup.handle({"op": "start", "cwd": str(work), "text": "say hi",
+                           "workspace": "amux-scratch", **kw})
+    except _LocalStart:
+        return "here"
+
+
+def test_a_new_chat_goes_to_the_default_host(default_red2):
+    sup, fake, work = default_red2
+    got = _new_chat(sup, work)
+    assert got["ok"] and got["host"] == "red2" and got["default_host"]
+    ops = [b["request"]["op"] for b in fake.seen]
+    assert ops == ["prepare", "start"]
+    assert "_clone" not in fake.seen[-1]["request"]       # never a slow clone now
+    assert sessiond.read_record(SID, sup.root)["host"] == "red2"
+
+
+def test_with_no_default_host_a_new_chat_starts_here(red5, monkeypatch):
+    sup, fake, _said, work = red5
+    monkeypatch.setattr(sup, "start", lambda *a, **kw: (_ for _ in ()).throw(_LocalStart()))
+    assert _new_chat(sup, work) == "here" and not fake.seen
+
+
+@pytest.mark.parametrize("prepare", [
+    {"ok": False, "code": "host_down", "error": "red2 is offline"},
+    {"ok": True, "prepared": True, "exists": True,
+     "slots": {"max_live": 3, "live": 3, "free_mb": 9000, "min_free_mb": 1500}},
+    {"ok": True, "prepared": True, "exists": True,
+     "slots": {"max_live": 16, "live": 1, "free_mb": 900, "min_free_mb": 1500}},
+    {"ok": True, "prepared": True, "exists": False, "cloning": True, "slots": {}},
+    {"ok": False, "code": "bad_request", "error": "unknown op 'prepare'"},
+], ids=["down", "full", "short-of-memory", "no-folder-yet", "old-worker"])
+def test_a_new_chat_starts_here_when_the_default_host_cannot_take_it(default_red2, prepare):
+    sup, fake, work = default_red2
+    fake.prepare = prepare
+    assert _new_chat(sup, work) == "here"
+    assert [b["request"]["op"] for b in fake.seen] == ["prepare"]
+    assert sessiond.read_record(SID, sup.root) is None
+
+
+def test_the_whole_host_being_down_starts_it_here(default_red2):
+    sup, fake, work = default_red2
+    fake.down = True
+    assert _new_chat(sup, work) == "here"
+
+
+def test_a_missing_folder_is_sent_with_its_origin_to_clone(default_red2, monkeypatch):
+    sup, fake, work = default_red2
+    monkeypatch.setattr(sessiond_remote, "origin_of", lambda cwd: "git@example:me/work.git")
+    fake.prepare = {"ok": True, "prepared": True, "exists": False, "cloning": True}
+    assert _new_chat(sup, work) == "here"
+    assert fake.seen[0]["request"]["_clone"] == "git@example:me/work.git"
+
+
+def test_a_refused_start_there_starts_it_here(default_red2, monkeypatch):
+    sup, fake, work = default_red2
+    real = fake.__call__
+
+    def refuse(body, timeout):
+        if body.get("request", {}).get("op") == "start":
+            return 200, {"ok": False, "code": "quota_limited", "error": "limit"}
+        return real(body, timeout)
+
+    sup.remote.call = refuse
+    assert _new_chat(sup, work) == "here"
+
+
+@pytest.mark.parametrize("kw", [{"agent": "opencode"}, {"system_prompt_file": "/x"},
+                                {"fork_from": "a", "fork_at": "b"}, {"session": SID},
+                                {"host": "local"}])
+def test_only_a_plain_new_chat_goes_to_the_default_host(default_red2, kw):
+    sup, fake, work = default_red2
+    assert _new_chat(sup, work, **kw) == "here"
+    assert not fake.seen
+
+
+def test_a_skipped_folder_stays_here(default_red2, monkeypatch):
+    sup, fake, work = default_red2
+    monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST_SKIP", f"/nowhere:{work.parent}")
+    assert _new_chat(sup, work) == "here" and not fake.seen
+
+
+def test_this_hosts_own_name_is_local(monkeypatch):
+    monkeypatch.setattr(sessiond_remote.socket, "gethostname", lambda: "red5.lan")
+    assert sessiond_remote.is_local("red5") and sessiond_remote.is_local("local")
+    assert not sessiond_remote.is_local("red2") and not sessiond_remote.is_local("")
 
 
 def test_the_poll_brings_views_events_and_the_transcript_and_speaks_once(red5):
@@ -330,6 +446,22 @@ def test_a_missing_folder_with_nothing_to_clone_is_refused_plainly(red2):
          "timeout": 20}, 30)
     assert not got["ok"] and got["code"] == "bad_cwd" and "no folder" in got["error"]
     assert not any(r.get("op") == "start" for r in seen)
+
+
+def test_prepare_says_whether_the_folder_is_there_and_the_slots(red2, monkeypatch):
+    seen, home = red2
+    status, got = REAL_CALL(
+        {"host": "red2", "request": {"op": "prepare", "cwd": "~/work"}, "timeout": 10}, 20)
+    assert got["ok"] and got["prepared"] and got["exists"] and not got["cloning"]
+    assert got["slots"]["max_live"] == 16 and got["slots"]["live"] == 0
+    # A folder missing there, with an origin: cloned in the background, the
+    # answer at once (the clone of a path that cannot exist simply fails).
+    status, got = REAL_CALL(
+        {"host": "red2", "request": {"op": "prepare", "cwd": "~/new",
+                                     "_clone": str(home / "no-such-repo")},
+         "timeout": 10}, 20)
+    assert got["ok"] and not got["exists"] and got["cloning"]
+    assert not any(r.get("op") in ("start", "prepare") for r in seen)
 
 
 def test_a_host_that_takes_no_sessions_is_refused(server, monkeypatch):

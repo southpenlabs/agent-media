@@ -189,7 +189,11 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     model, mode = session_settings.clean_new("claude", model, "plan" if plan else "")
     persona, role = (persona or "").strip(), (role or "").strip()
     host = (host or "").strip()
-    if host and (persona or role):
+    from .sessiond_remote import is_local
+
+    if is_local(host):
+        host = "local"      # this host, never the default one (sessiond_remote)
+    if host and host != "local" and (persona or role):
         return RC_USAGE, {"error": "a persona cannot start on another host yet", "code": "persona"}
     prompt_file = None
     if persona or role:
@@ -208,15 +212,16 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
             text = personas.prepend(rendered, text)
     workspace = layout.workspace_for(layout.place_host(cwd), cwd)
     r = _call("start", cwd=cwd, text=text, agent="claude", workspace=workspace, model=model,
-              mode=mode, permissions=permissions, timeout=240.0 if host else 30.0,
+              mode=mode, permissions=permissions,
+              timeout=240.0 if host and host != "local" else 30.0,
               **({"host": host} if host else {}),
               **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
     if not r.get("ok"):
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
     sid = str(r.get("session") or "")
     out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
-    if host:
-        out["host"] = host
+    if r.get("host"):
+        out["host"] = r["host"]
     if persona or role:
         if prompt_file:
             from . import personas
@@ -265,7 +270,8 @@ def _parser() -> argparse.ArgumentParser:
                          "folder's own .claude/settings.json decides, the rest asks the phone")
     st.add_argument("--host", default="",
                     help="run it on that host (a session worker of this server: "
-                         "`media session hosts`), not this one")
+                         "`media session hosts`), or `local` for this one; with none "
+                         "it goes to MEDIA_SESSIOND_DEFAULT_HOST when that can take it")
     st.add_argument("--json", action="store_true")
     hs = sub.add_parser("hosts", help="the hosts that may run sessions for this one: "
                                       "connected, slots, free memory")

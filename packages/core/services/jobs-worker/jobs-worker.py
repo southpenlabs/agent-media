@@ -666,6 +666,55 @@ def session_sync(req: dict) -> dict:
     return out
 
 
+#: Folders being cloned in the background for `prepare`, so one is cloned once.
+_CLONING: set = set()
+_CLONING_LOCK = threading.Lock()
+
+
+def _clone_later(url: str, path: str) -> bool:
+    """Clone `url` into `path` on a thread; False when one is already going."""
+    with _CLONING_LOCK:
+        if path in _CLONING:
+            return False
+        _CLONING.add(path)
+
+    def run() -> None:
+        try:
+            why = _clone(url, path)
+            print(f"prepare: clone of {path}: {why or 'done'}", flush=True)
+        finally:
+            with _CLONING_LOCK:
+                _CLONING.discard(path)
+
+    threading.Thread(target=run, daemon=True, name="prepare-clone").start()
+    return True
+
+
+def session_prepare(req: dict) -> dict:
+    """The server asking whether a new chat can start here now (its default
+    host, roadmap 56): `{"prepared", "exists", "cloning", "slots"}`. A folder
+    missing here is cloned in the background when the server sent its origin
+    (`_clone`), for the next chat, never this one: the answer is at once."""
+    cwd = local_cwd(str(req.get("cwd") or ""))
+    if not cwd:
+        return {"ok": False, "code": "bad_cwd", "error": "no folder named"}
+    exists = os.path.isdir(cwd)
+    cloning = False
+    if not exists:
+        url = str(req.get("_clone") or "").strip()
+        with _CLONING_LOCK:
+            cloning = cwd in _CLONING
+        if url and not cloning:
+            cloning = _clone_later(url, cwd)
+    ping = sessiond_call({"op": "ping"}, timeout=5.0)
+    if not ping.get("ok"):
+        return {"ok": False, "code": ping.get("code") or "sessiond_down",
+                "error": ping.get("error") or "this host's sessiond is not answering"}
+    slots = {k: ping.get(k) for k in ("max_live", "live", "free_mb", "min_free_mb")}
+    return {"ok": True, "prepared": True, "cwd": cwd, "exists": exists,
+            "cloning": cloning, "slots": slots}
+
+
 def session_request(req) -> dict:
     """A session job's request, done here: sessiond's answer as a dict."""
     if not isinstance(req, dict) or not req.get("op"):
@@ -675,6 +724,8 @@ def session_request(req) -> dict:
         return session_sync(req)
     if op == "host":
         return {"ok": True, "host": host_facts()}
+    if op == "prepare":
+        return session_prepare(req)
     req = {k: v for k, v in req.items() if k not in ("clone", "token")}
     timeout = 30.0
     if op == "start":

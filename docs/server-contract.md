@@ -11537,6 +11537,24 @@ side), `phone_jobs.session` (the channel),
   sessions and does not wait for them (restart_services leaves views with
   `host` out); the host's own restart drains its own sessions there
   (`media restart-services --host red2`, down the same stream).
+- **The default host** (David, 11 Nov 2026: "start using red 2 for
+  everything speed critical"). With `MEDIA_SESSIOND_DEFAULT_HOST=red2` on the
+  server, a `start` that names no host (the app's New chat, `/ask`, agent
+  mail, `media session start`) goes to red2 when it can take it now, and
+  starts here otherwise, never waiting for it. sessiond first asks the host
+  (`prepare` down the same stream: `{"prepared", "exists", "cloning",
+  "slots": {"max_live", "live", "free_mb", "min_free_mb"}}`, ≤ 6 s), then
+  starts it there without cloning (≤ 18 s, inside the app's 30 s). It starts
+  here when the host is down, its slots are all busy, its free memory is
+  under its floor, the folder is not there yet (`prepare` begins its clone
+  from origin in the background, so the next chat in it goes there), the
+  worker is too old to answer `prepare`, or the start is refused. Only a
+  plain new Claude chat goes: another agent, a persona, a branch, a start
+  with `session` named, and a folder under
+  `MEDIA_SESSIOND_DEFAULT_HOST_SKIP` (folders, `:` between) stay here, as
+  does `host: "local"` (or this host's own name; `media session start
+  --host local`). The answer of one that went carries `host` and
+  `default_host: true`. Chats already running stay where they are.
 - **Rows.** `/targets` headless rows and `/sessions/state` rows carry `host`
   (and `host_down`) for a session on another host. The app does not show it
   yet.

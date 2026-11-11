@@ -42,8 +42,22 @@ out of restart_services' busy check (`host` on the view), and a drain here
 holds none of their messages. The other host's own restart drains its own
 sessions there (`media restart-services --host red2`, down the same stream).
 
+**The default host** (David, 11 Nov 2026, "start using red 2 for
+everything speed critical" — "ok"): with MEDIA_SESSIOND_DEFAULT_HOST set, a
+`start` that names no host goes there when it can and here when it cannot,
+never waiting: the host is asked first (`prepare`: is it connected, has it the
+folder, a free slot and memory), and a host that is down, full, short of
+memory or without the folder (its clone is begun there in the background, so
+the next chat in that folder goes there) leaves the chat here, as does a
+refused start. Only a plain new Claude chat goes: a persona, a branch, a
+revived thread (`session` named), another agent, or a folder under
+MEDIA_SESSIOND_DEFAULT_HOST_SKIP stays here; `host: "local"` (or this host's
+name) pins one here. Chats already running stay where they are.
+
 Config (env): MEDIA_SESSIOND_REMOTE_SYNC_S (2), MEDIA_SESSIOND_REMOTE_SPEECH
-(`0`: do not speak their replies here).
+(`0`: do not speak their replies here), MEDIA_SESSIOND_DEFAULT_HOST (a host
+for new chats, e.g. `red2`), MEDIA_SESSIOND_DEFAULT_HOST_SKIP (folders, `:`
+between, whose chats stay here).
 """
 
 from __future__ import annotations
@@ -52,6 +66,7 @@ import collections
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -73,6 +88,40 @@ RECENT_S = 900.0
 EVENTS_KEEP = 400
 #: A host's poll, at most this long.
 SYNC_TIMEOUT_S = 25.0
+#: A new chat tried on the default host: asking it, then starting there, each
+#: at most this long, inside the app's 30 s wait on the socket.
+DEFAULT_ASK_S = 6.0
+DEFAULT_START_S = 18.0
+#: `host` values that mean this host, not another.
+LOCAL_NAMES = frozenset({"local", "here", "this"})
+
+
+def default_host() -> str:
+    """The host new chats start on when they name none ("": here)."""
+    return (os.environ.get("MEDIA_SESSIOND_DEFAULT_HOST") or "").strip()
+
+
+def is_local(host: str) -> bool:
+    """Whether `host` names this host (`local`, or its own name)."""
+    h = (host or "").strip().lower()
+    if not h:
+        return False
+    me = socket.gethostname().split(".")[0].lower()
+    return h in LOCAL_NAMES or h == me
+
+
+def skipped(cwd: str) -> bool:
+    """A folder under MEDIA_SESSIOND_DEFAULT_HOST_SKIP: its chats stay here."""
+    raw = os.environ.get("MEDIA_SESSIOND_DEFAULT_HOST_SKIP") or ""
+    real = os.path.realpath(os.path.expanduser(cwd or ""))
+    for one in raw.split(":"):
+        one = one.strip()
+        if not one:
+            continue
+        top = os.path.realpath(os.path.expanduser(one)).rstrip("/") or "/"
+        if real == top or real.startswith(top + "/"):
+            return True
+    return False
 
 
 def sync_s() -> float:
@@ -233,8 +282,15 @@ class Remote:
     def handle(self, op: str, sid: str, req: dict) -> dict | None:
         """The answer when `req` is for another host (a start with `host`,
         `hosts`, or any op on a session held elsewhere), else None."""
-        if op == "start" and str(req.get("host") or "").strip():
-            return self.start(req)
+        if op == "start":
+            host = str(req.get("host") or "").strip()
+            if host and not is_local(host):
+                return self.start(req)
+            if not host:
+                got = self.start_default(req)
+                if got is not None:
+                    return got
+            return None
         if op == "hosts":
             return {"ok": True, "hosts": self.host_list()}
         if not sid or not self.owns(sid):
@@ -283,7 +339,74 @@ class Remote:
         return {"ok": False, "code": "unsupported",
                 "error": f"{op!r} is not supported for a session on another host ({host})"}
 
-    def start(self, req: dict) -> dict:
+    def default_for(self, req: dict) -> tuple[str, str]:
+        """`(host, "")` when this new chat should start on the default host,
+        else `("", why not)` (`("", "")` when there is none)."""
+        host = default_host()
+        if not host or is_local(host):
+            return "", ""
+        if str(req.get("agent") or "claude") != "claude":
+            return "", "not a Claude chat"
+        if req.get("system_prompt_file") or req.get("fork_from"):
+            return "", "a persona or a branch"
+        if req.get("session"):
+            return "", "a thread revived by its id"
+        if not str(req.get("text") or "").strip():
+            return "", "no first message"
+        cwd = str(req.get("cwd") or "")
+        if not os.path.isdir(cwd):
+            return "", "no such folder here"
+        if skipped(cwd):
+            return "", "its folder stays here (MEDIA_SESSIOND_DEFAULT_HOST_SKIP)"
+        return host, ""
+
+    def start_default(self, req: dict) -> dict | None:
+        """A new chat that names no host, on the default host when it can
+        take it now; None to start it here (see the module)."""
+        host, why = self.default_for(req)
+        if not host:
+            if why:
+                log.info("sessiond: a new chat stays here: %s", why)
+            return None
+        cwd = str(req.get("cwd") or "")
+        ask = {"op": "prepare", "cwd": home_relative(cwd)}
+        origin = origin_of(cwd)
+        if origin:
+            ask["_clone"] = origin
+        got = self.request(host, ask, DEFAULT_ASK_S)
+        why = ""
+        if not got.get("ok"):
+            why = (f"{host} is down" if got.get("code") == "host_down"
+                   else f"{host} said {got.get('error') or got.get('code') or 'no'}")
+        elif not got.get("prepared"):
+            why = f"{host}'s jobs worker is too old to be asked"
+        elif not got.get("exists"):
+            why = (f"{host} has no {ask['cwd']} yet"
+                   + (" (cloning it there now)" if got.get("cloning") else ""))
+        else:
+            slots = got.get("slots") if isinstance(got.get("slots"), dict) else {}
+            try:
+                live, most = int(slots.get("live") or 0), int(slots.get("max_live") or 0)
+            except (TypeError, ValueError):
+                live, most = 0, 0
+            free, floor = slots.get("free_mb"), slots.get("min_free_mb")
+            if most and live >= most:
+                why = f"{host}'s {most} slots are busy"
+            elif isinstance(free, (int, float)) and isinstance(floor, (int, float)) \
+                    and free < floor:
+                why = f"{host} is short of memory ({free:.0f} MB free)"
+        if why:
+            log.info("sessiond: a new chat starts here, not on %s: %s", host, why)
+            return None
+        made = self.start({**req, "host": host}, clone=False, timeout=DEFAULT_START_S)
+        if made.get("ok"):
+            made["default_host"] = True
+            return made
+        log.info("sessiond: a new chat starts here: %s refused it: %s", host,
+                 made.get("error") or made.get("code"))
+        return None
+
+    def start(self, req: dict, *, clone: bool = True, timeout: float = 200.0) -> dict:
         host = str(req.get("host") or "").strip()
         cwd = str(req.get("cwd") or "")
         agent = str(req.get("agent") or "claude")
@@ -304,10 +427,10 @@ class Remote:
                "slot": str(req.get("slot") or "")}
         if req.get("session"):
             fwd["session"] = str(req["session"])
-        origin = origin_of(cwd)
+        origin = origin_of(cwd) if clone else ""
         if origin:
             fwd["_clone"] = origin
-        got = self.request(host, fwd, 200.0)
+        got = self.request(host, fwd, timeout)
         if not got.get("ok"):
             return got
         sid = str(got.get("session") or "")

@@ -93,6 +93,9 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(sessiond_remote, "canvas_call", lambda body, timeout: (
         503, {"ok": False, "code": "host_down", "error": "no other host from a test"}))
     monkeypatch.setenv("MEDIA_SESSIOND_REMOTE_SPEECH", "0")
+    # No default host for new chats (red2 here), so a test's start stays local.
+    monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST", "")
+    monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST_SKIP", "")
     # Files a reply names are copied into the upload root as the thread is
     # read (file_links.py): never into the real ~/shared, and no copy
     # remembered from another test.
