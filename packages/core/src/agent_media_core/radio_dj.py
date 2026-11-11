@@ -153,6 +153,12 @@ def brief(st: dict) -> str:
 
     banned += [e["title"] for e in radio.disliked_everywhere().values()
                if isinstance(e, dict) and e.get("title")][-20:]
+    # Songs of mixes disliked (mix_songs), by "Artist – Song"; a song of a
+    # mix liked is on `liked` by that name too, so the DJ finds the song.
+    from . import mix_songs
+
+    banned += [e["title"] for e in mix_songs.disliked_all().values()
+               if isinstance(e, dict) and e.get("title")][-20:]
     struck = [c for c, n in st["strikes"].items() if n >= 2]
     out = {
         "moment": told(moment()),

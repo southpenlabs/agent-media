@@ -613,28 +613,34 @@ class StateStore:
             out.append(d)
         return out
 
-    def is_liked(self, channel: str, media_id: str, chapter: str = "") -> bool:
+    def is_liked(self, channel: str, media_id: str, chapter: str = "",
+                 whole: bool = False) -> bool:
         """Whether `media_id` was liked; with `chapter` (a mix's track), that
-        chapter of it."""
+        chapter of it; with `whole`, the clip itself (a like with no chapter)."""
         if not channel or not media_id:
             return False
         sql = "SELECT 1 FROM likes WHERE channel = ? AND media_id = ?"
         args: tuple = (channel, media_id)
-        if chapter:
+        if whole:
+            sql += " AND (chapter IS NULL OR chapter = '')"
+        elif chapter:
             sql += " AND chapter = ?"
             args += (chapter,)
         with self._cursor() as cur:
             cur.execute(sql + " LIMIT 1", args)
             return cur.fetchone() is not None
 
-    def remove_likes(self, channel: str, media_id: str, chapter: str = "") -> int:
-        """Take back the likes of `media_id` (with `chapter`, that chapter's);
-        how many went."""
+    def remove_likes(self, channel: str, media_id: str, chapter: str = "",
+                     whole: bool = False) -> int:
+        """Take back the likes of `media_id` (with `chapter`, that chapter's;
+        with `whole`, only the clip's own, its chapters' kept); how many went."""
         if not channel or not media_id:
             return 0
         sql = "DELETE FROM likes WHERE channel = ? AND media_id = ?"
         args: tuple = (channel, media_id)
-        if chapter:
+        if whole:
+            sql += " AND (chapter IS NULL OR chapter = '')"
+        elif chapter:
             sql += " AND chapter = ?"
             args += (chapter,)
         with self._cursor() as cur:

@@ -17,6 +17,14 @@ MEDIA_MUSIC_BED_FAVOURITES_MAX (60; 30 until 7 Nov 2026) by a score:
   recordings (a point a listen) and the ones he loved (five points). Public
   endpoints, no token.
 
+A song inside a mix liked (or turned up) as a song (mix_songs; David, 12
+Nov 2026) is a favourite of its own: named by its chapter's artist and
+song, its video the mix's with the chapter's `start` and `end`, its
+`song_key` the chapter's. Its official instrumental is searched for as any
+favourite's; vocals removed are removed from that chapter only (`_cut`),
+and Sing it out's original is that chapter (music_bed_vocal.normalise), so
+it plays just that song. A disliked one is never a favourite.
+
 Each is named by Mopidy's YouTube Music backend: a video id is looked up
 (`find file`), an artist and title from ListenBrainz searched for, and only
 a result with the same title and the artist kept (`_same_song`).
@@ -479,6 +487,9 @@ def credit(entry: dict) -> dict:
             # The original's video, with vocals: what "Play the song" plays
             # (music_bed_song).
             "original_id": vid,
+            # A song of a mix: where in the mix's video it is (mix_songs).
+            **({"original_start": entry.get("original_start"), "original_end": entry.get("original_end")}
+               if entry.get("original_start") is not None else {}),
             "made": entry.get("made") or ""}
 
 
@@ -576,7 +587,7 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
         from . import music_rotation
         turned = music_rotation.load()
         weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
-                   * music_rotation.weight(e.get("original_id") or e.get("id") or "", turned)
+                   * music_rotation.weight(e.get("song_key") or e.get("original_id") or e.get("id") or "", turned)
                    for e in have]
         if topic and len(have) > 1:
             i = topic_choice(have, topic)
@@ -834,7 +845,11 @@ def _from_store() -> dict[str, dict]:
     try:
         from .state import StateStore
         st = StateStore()
+        from . import mix_songs
         for r in st.list_likes(limit=500, channel="music"):
+            ch = mix_songs.from_like(r) if r.get("chapter") else None
+            if ch is not None and ch.get("start") is not None:
+                continue  # a song of a mix: a favourite of its own (_mix_songs)
             v = _vid(r.get("media_id") or "") or _vid(r.get("uri") or "")
             if v:
                 out.setdefault(v, {"likes": 0, "plays": 0})["likes"] += 1
@@ -844,6 +859,31 @@ def _from_store() -> dict[str, dict]:
                 out.setdefault(v, {"likes": 0, "plays": 0})["plays"] += 1
     except Exception as e:  # noqa: BLE001
         log.info("music-bed favourites: the state store: %s", e)
+    return out
+
+
+def _mix_songs() -> list[dict]:
+    """The songs of mixes liked or turned up (mix_songs), as favourites'
+    songs: `{id, artist, title, dur, start, end, song_key, liked}`; only
+    those with an artist, a song and an end known."""
+    try:
+        from . import mix_songs
+        rows = {}
+        for ch in mix_songs.liked():
+            rows[ch["key"]] = {**ch, "liked": True}
+        for ch in mix_songs.turned(1):
+            rows.setdefault(ch["key"], {**ch, "liked": False})
+    except Exception as e:  # noqa: BLE001
+        log.info("music-bed favourites: songs of mixes: %s", e)
+        return []
+    out = []
+    for ch in rows.values():
+        if not ch.get("artist") or not ch.get("song") or ch.get("end") is None:
+            continue
+        start, end = float(ch.get("start") or 0), float(ch["end"])
+        out.append({"id": ch["vid"], "artist": ch["artist"], "title": ch["song"],
+                    "dur": int(end - start), "start": start, "end": end,
+                    "song_key": ch["key"], "liked": ch["liked"]})
     return out
 
 
@@ -895,6 +935,9 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
             merged[k] = cur = {"key": k, "artist": song["artist"], "title": song["title"],
                                "id": song["id"], "dur": int(song["dur"]), "score": 0.0,
                                "from": []}
+            if song.get("song_key"):
+                # A song of a mix: just its chapter of the mix's video.
+                cur.update(start=song["start"], end=song["end"], song_key=song["song_key"])
         cur["score"] += score
         if where not in cur["from"]:
             cur["from"].append(where)
@@ -907,6 +950,9 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
             add(song, n["likes"] * LIKE_POINTS, "liked")
         if n["plays"]:
             add(song, n["plays"], "played")
+    # Songs of mixes liked (or turned up) as songs (mix_songs).
+    for song in _mix_songs():
+        add(song, LIKE_POINTS if song["liked"] else 1, "liked-mix-song")
     # His YouTube accounts (music_accounts: yt-profile's sign-ins, read
     # only): liked songs five points, a play or a music playlist's song one.
     try:
@@ -969,7 +1015,7 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
     for f in ranked:
         if "suggested" not in f["from"]:
             f["score"] = round(f["score"] * renown_factor(rated.get(f["key"]))
-                               * music_rotation.weight(f.get("id") or "", turned), 2)
+                               * music_rotation.weight(f.get("song_key") or f.get("id") or "", turned), 2)
     favs = sorted(ranked, key=lambda f: -f["score"])[: max_favourites()]
     data["favourites"] = favs
     data["favourites_at"] = now
@@ -1295,6 +1341,19 @@ def verdict(key: str, which: str, now: Optional[float] = None) -> dict:
     now = time.time() if now is None else now
     if which == "like":
         from .state import StateStore
+        if song.get("song_key"):
+            # A song of a mix: liked as that song (mix_songs).
+            from . import mix_songs
+            got = mix_songs.parse(song["song_key"])
+            start = song.get("original_start", song.get("start"))
+            ch = (mix_songs.find(got[0], start=start) if got else None) or (
+                {"vid": got[0], "key": song["song_key"], "start": start,
+                 "end": song.get("original_end", song.get("end")), "title": title,
+                 "artist": artist, "song": title} if got else None)
+            if ch is not None:
+                mix_songs.add_like(StateStore(), ch, backend="sasonica", note="sung out after a reply",
+                                   extras={"favourite": key})
+                return {"key": key, "verdict": which}
         StateStore().add_like(
             "music", vid or key,
             uri=f"yt:https://www.youtube.com/watch?v={vid}" if vid else "",
@@ -1304,7 +1363,15 @@ def verdict(key: str, which: str, now: Optional[float] = None) -> dict:
     gone = excluded()
     rec = {"title": title, "artist": artist, "video_id": vid, "at": now}
     gone[key] = rec
-    if vid:
+    if vid and song.get("song_key"):
+        # A song of a mix: that song kept from every pick, not the mix.
+        from . import mix_songs
+        got = mix_songs.parse(song["song_key"])
+        if got:
+            mix_songs.dislike({"vid": got[0], "key": song["song_key"], "title": title,
+                               "artist": artist, "song": title,
+                               "start": song.get("original_start", song.get("start")) or got[1]}, now=now)
+    elif vid:
         gone[f"id:{vid}"] = {**rec, "key": key}
     p = _excluded_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -1427,6 +1494,10 @@ def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
              "lufs_target": _lufs_target()}
     if karaoke:
         entry["karaoke"] = True
+    if fav.get("song_key"):
+        # A song of a mix: the original is that chapter of the mix's video.
+        entry.update(original_start=fav.get("start"), original_end=fav.get("end"),
+                     song_key=fav["song_key"])
     data["tracks"] = [e for e in data["tracks"] if e.get("key") != fav["key"]] + [entry]
     prune(data)
     return entry
@@ -1528,13 +1599,27 @@ def demucs_cmd(exe: str, src: Path, out: Path) -> list[str]:
             "-p", f"MemoryMax={memory_max_mb()}M", "-p", "MemorySwapMax=0"] + wrapped
 
 
-def _cut(src: Path, dst: Path) -> bool:
+def segment_args(start, end, keep: float) -> tuple[list[str], list[str]]:
+    """ffmpeg's arguments before and after `-i`: for a song of a mix
+    (`start`, `end` seconds into its video; mix_songs) a seek to its start
+    and its length, at most `keep` seconds; for a whole track (`start`
+    None) the first `keep` seconds."""
+    if start is None:
+        return [], ["-t", f"{keep:g}"]
+    start = max(0.0, float(start))
+    length = keep if end is None else max(1.0, min(keep, float(end) - start))
+    return ["-ss", f"{start:g}"], ["-t", f"{length:g}"]
+
+
+def _cut(src: Path, dst: Path, start=None, end=None) -> bool:
     """The original's first KEEP_S seconds as 44.1 kHz stereo wav, for
-    Demucs (shorter is cheaper, and a bed never needs more)."""
+    Demucs (shorter is cheaper, and a bed never needs more); for a song of
+    a mix, from its chapter's `start` and no further than its `end`."""
     keep = int(_num_env("MEDIA_MUSIC_BED_FAVOURITES_KEEP_S", DEFAULT_KEEP_S))
+    pre, post = segment_args(start, end, keep)
     try:
         r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-                            "-i", str(src), "-vn", "-t", str(keep), "-ar", "44100", "-ac", "2",
+                            *pre, "-i", str(src), "-vn", *post, "-ar", "44100", "-ac", "2",
                             str(dst)], stdin=subprocess.DEVNULL, capture_output=True,
                            timeout=600)
         return r.returncode == 0 and dst.is_file() and dst.stat().st_size > 1024
@@ -1551,7 +1636,8 @@ def separate_one(fav: dict, local: Path) -> Optional[Path]:
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
     src = work / "original.wav"
-    if not _cut(local, src):
+    cut = _cut(local, src) if fav.get("start") is None else _cut(local, src, fav["start"], fav.get("end"))
+    if not cut:
         return None
     threads = str(max(1, int(_num_env("MEDIA_MUSIC_BED_FAVOURITES_THREADS", DEFAULT_THREADS))))
     env = dict(os.environ, OMP_NUM_THREADS=threads, MKL_NUM_THREADS=threads,

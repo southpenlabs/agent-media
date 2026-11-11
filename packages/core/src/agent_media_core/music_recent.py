@@ -578,26 +578,57 @@ def _stations(limit: int) -> list[dict]:
 
 
 def _liked(store: StateStore, limit: int) -> list[dict]:
-    """The songs liked (`media music like`), newest first, one per track."""
+    """The songs liked (`media music like`), newest first: one per track,
+    and one per song of a mix liked (mix_songs; David, 12 Nov 2026: songs
+    inside a mix "liked ... as songs in their own right"). A song of a mix's
+    row is named by its song and artist (music_chapters), its `chapterOf`
+    the mix's name, its `start` and `end` where it is in the mix (a tap
+    plays the mix from its start), its `song_key` the chapter's key."""
+    from . import mix_songs
+
     seen: set[str] = set()
     out = []
     names = _titles()
-    for like in store.list_likes(500, channel="music"):
+    likes = store.list_likes(500, channel="music")
+    # A clip's name as its own like gave it: a song of the mix's second line.
+    clip_names = {_key(r.get("uri") or ""): (r.get("title") or "").strip()
+                  for r in likes if not r.get("chapter") and (r.get("title") or "").strip()}
+    for like in likes:
         uri = like.get("uri") or ""
         if not uri.startswith(("yt:", "http://", "https://")):
             continue
         k = _key(uri)
-        if k in seen:
-            continue
-        seen.add(k)
-        title = (like.get("title") or "").strip() or names.get(k) or None
         extras = like.get("extras") if isinstance(like.get("extras"), dict) else {}
-        out.append({"id": -int(like["id"]), "uri": uri, "title": title, "art": art(uri),
-                    "at": like.get("at") or 0, "session": extras.get("source_session") or None,
-                    "inferred": False, "kind": "music", **_music_meta(uri, title or "")})
+        ch = mix_songs.from_like(like) if like.get("chapter") else None
+        if ch is not None and ch.get("start") is not None:
+            sk = ch.get("key") or mix_songs.key(ch["vid"], ch["start"])
+            if sk in seen:
+                continue
+            seen.add(sk)
+            mix = (extras.get("mix_title") or "").strip() or names.get(k) or clip_names.get(k) \
+                or ("" if (like.get("title") or "") == mix_songs.label(ch) else (like.get("title") or "")) \
+                or _cached_title(ch["vid"]) or ""
+            out.append({"id": -int(like["id"]), "uri": uri, "title": mix_songs.label(ch),
+                        "art": art(uri), "at": like.get("at") or 0,
+                        "session": extras.get("source_session") or None, "inferred": False,
+                        "kind": "music", "artist": ch.get("artist"), "song": ch.get("song") or ch.get("title"),
+                        "album": ch.get("album"), "genre": ch.get("genre"),
+                        "start": float(ch["start"]), "end": ch.get("end"),
+                        "chapterOf": mix, "song_key": sk})
+        else:
+            # A whole clip's like (an older like of a chapter not known
+            # here counts as its clip's, as it always did).
+            if k in seen:
+                continue
+            seen.add(k)
+            title = (like.get("title") or "").strip() or names.get(k) or None
+            out.append({"id": -int(like["id"]), "uri": uri, "title": title, "art": art(uri),
+                        "at": like.get("at") or 0, "session": extras.get("source_session") or None,
+                        "inferred": False, "kind": "music", **_music_meta(uri, title or "")})
         if len(out) >= limit:
             break
-    media_meta.fill(_with_chapters(out))
+    whole = [r for r in out if "song_key" not in r]
+    media_meta.fill(_with_chapters(whole))
     return out
 
 

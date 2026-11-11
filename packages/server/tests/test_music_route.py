@@ -46,7 +46,7 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "rotation", "downloads", "mood"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "rotation", "downloads", "mood", "mix_song"}
     assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
     assert obj["downloads"] == []
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}

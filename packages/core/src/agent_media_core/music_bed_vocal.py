@@ -340,18 +340,21 @@ def _seconds(path: Path) -> float:
         return 0.0
 
 
-def normalise(src: Path, dst: Path, separated: bool) -> bool:
+def normalise(src: Path, dst: Path, separated: bool, start=None, end=None) -> bool:
     """The original as the handover plays it: trimmed and (for a separated
-    bed) cut as its bed was, loudnorm to MEDIA_MUSIC_BED_VOCAL_LUFS."""
+    bed) cut as its bed was, loudnorm to MEDIA_MUSIC_BED_VOCAL_LUFS. A song
+    of a mix (mix_songs) is its chapter alone, `start` to `end` seconds
+    into the mix, so Sing it out sings just that song."""
     from . import music_bed_favourites as fav
     from . import music_bed_library as lib
     keep = min(lib.KEEP_S, int(fav._num_env("MEDIA_MUSIC_BED_FAVOURITES_KEEP_S",
                                             fav.DEFAULT_KEEP_S))) if separated else lib.KEEP_S
+    pre, post = fav.segment_args(start, end, keep)
     af = f"{TRIM_AF},loudnorm=I={tunable('LUFS'):g}:TP=-1.5:LRA=11"
     tmp = dst.with_name(f".{dst.stem}.{os.getpid()}.mp3")
     try:
         r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-                            "-i", str(src), "-vn", "-t", str(keep), "-af", af, "-ar", "48000",
+                            *pre, "-i", str(src), "-vn", *post, "-af", af, "-ar", "48000",
                             "-ac", "2", "-c:a", "libmp3lame", "-q:a", "4", str(tmp)],
                            stdin=subprocess.DEVNULL, capture_output=True, timeout=900)
         if r.returncode != 0 or not tmp.is_file() or tmp.stat().st_size < 1024:
@@ -422,7 +425,8 @@ def upkeep(limit: Optional[int] = None) -> int:
         dst = _dir() / name
         dst.parent.mkdir(parents=True, exist_ok=True)
         separated = e.get("method") == "separated"
-        if not normalise(Path(local), dst, separated):
+        seg = () if e.get("original_start") is None else (e["original_start"], e.get("original_end"))
+        if not normalise(Path(local), dst, separated, *seg):
             log.info("music-bed vocal: normalising %s failed", key)
             continue
         sec = sections(dst)

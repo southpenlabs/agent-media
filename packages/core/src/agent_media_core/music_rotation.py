@@ -5,6 +5,9 @@ to increase or decrease a song's rotation?" — the song card's More often
 and Less often (`POST /music {"action": "rotation", "uri", "step"}`).
 
 One level per YouTube song, MIN_LEVEL to MAX_LEVEL, 0 (normal) not kept;
+a song inside a mix is one too, by its chapter's key (mix_songs.key:
+`<video id>@<start>`; David, 12 Nov 2026), its entry also keeping `vid`,
+`start`, `end`, `artist` and `song` so a pick can play just that song;
 `weight` is FACTOR to the level, how many times as often as normal it is
 picked. Kept in `<state_dir>/music-rotation.json` as `{video id: {"level",
 "title", "at"}}`; never raises into a caller for a missing or broken file.
@@ -33,7 +36,8 @@ from ._paths import state_dir
 MIN_LEVEL, MAX_LEVEL = -3, 3
 #: Each level up is this many times as often.
 FACTOR = 1.6
-_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+#: A video, or a chapter of one (mix_songs.key).
+_ID = re.compile(r"^[A-Za-z0-9_-]{11}(@\d+)?$")
 
 
 def _path():
@@ -61,18 +65,22 @@ def weight(vid: str, data: Optional[dict] = None) -> float:
     return FACTOR ** level(vid, data)
 
 
-def step(vid: str, by: int, title: str = "", now: Optional[float] = None) -> int:
+def step(vid: str, by: int, title: str = "", now: Optional[float] = None,
+         extra: Optional[dict] = None) -> int:
     """Turn a song up (`by` > 0) or down, within the levels; its new level.
-    ValueError for a bad id."""
+    `vid` a video id, or a mix's chapter's key with `extra` its `start`,
+    `end`, `artist` and `song`. ValueError for a bad id."""
     if not _ID.match(vid or ""):
-        raise ValueError("not a YouTube video id")
+        raise ValueError("not a YouTube video id or a chapter of one")
     data = load()
     new = max(MIN_LEVEL, min(MAX_LEVEL, level(vid, data) + int(by)))
     if new == 0:
         data.pop(vid, None)
     else:
         old = data.get(vid) if isinstance(data.get(vid), dict) else {}
-        data[vid] = {"level": new, "title": title or old.get("title") or "",
+        data[vid] = {**{k: v for k, v in old.items() if k not in ("level", "title", "at")},
+                     **(extra or {}),
+                     "level": new, "title": title or old.get("title") or "",
                      "at": time.time() if now is None else now}
     p = _path()
     p.parent.mkdir(parents=True, exist_ok=True)

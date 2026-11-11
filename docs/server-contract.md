@@ -4588,13 +4588,73 @@ cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
   every `/music` answer has `"rotation"`: what is playing's level (null
   when it is no YouTube song).
   With no station it is `next`.
+- **A song inside a mix** (12 Nov 2026; David, 11–12 Nov: songs inside a
+  YouTube mix "should be liked and rotated as songs in their own right";
+  `agent_media_core.mix_songs`, features `mix_songs`). A clip with two or
+  more chapters known (music_chapters: each an artist, song, `start` and
+  `end`) is songs: a chapter is named by its video and its start in whole
+  seconds (`<video id>@<start>`, its `key`), its title beside it.
+  - With no `uri`, `like`, `unlike`, `dislike`, `undislike` and `rotation`
+    act on the chapter playing (from the app's keys, `media music like`,
+    `media music dislike`); `"whole": true` acts on the clip itself (`media
+    music like --whole`). With a `uri`, `"start": <seconds>` names one of
+    its chapters (within two seconds of its start; 404 for none), else the
+    whole clip is meant. A chapter's like is kept on the likes list with
+    the chapter's title in `chapter` and its `start`, `end`, `artist`,
+    `song`, `key` and the mix's name in the like's extras; a whole clip's
+    like is one without a chapter, and `unlike` of the clip takes only that.
+    A chapter's rotation is kept in `music-rotation.json` under its key,
+    with its `start`, `end`, `artist` and `song`. A chapter's 👎 keeps that
+    song from every pick (`mix-songs-disliked.json`; the mix itself is not
+    disliked) and takes its like back; with no `uri` it also goes on to the
+    mix's next chapter (`media music chapter next`), or to the station's
+    next song when the station played just that song.
+  - Every `/music` answer has `"mix_song"`: the chapter song playing,
+    `{key, start, end, title, artist, song, label, liked, disliked,
+    rotation}`, null when none; `verdict` and `rotation` are then that
+    song's, and `"whole": {"verdict", "rotation"}` the clip's. `voted`, for
+    a chapter, adds `start` and `key` (`bed_suggested` false: the backing
+    music's suggestion is a whole video's).
+  - `GET /music/recent?list=liked` has one row per liked chapter, named by
+    its song and artist (`title` "Artist – Song", `song`, `artist`), with
+    `start`, `end`, `song_key` and `chapterOf` (the mix's name, the row's
+    second line); a tap plays `{"action": "play", "uri", "start", "end"}`.
+    A whole clip's like keeps its own row (with `chapters` and `mix`). An
+    older like of a chapter whose chapters are not known here is its
+    clip's row, as before.
+  - `{"action": "play", "uri", "start", "end"}` (`media music play
+    --start --end`) plays just that song: from `start` (a seek once it
+    plays) and, at `end`, the queue's next item or a stop. The end is kept
+    in `music-segment.json` and enforced by the server's radio loop
+    (`agent_media_core.music_segment`: a read of the live player every few
+    seconds while one is set, closer near the end, so within about a second
+    of it); it works the same on Sasonica's player, the Termux mpv and
+    Mopidy. A seek well before the start or past the end, or another play,
+    lets it go. 400 for an `end` not after `start`.
+  - Where likes and rotation feed choices, a chapter is picked as that
+    song. The backing-music favourites take a liked (or turned-up) chapter
+    with an artist, song and end as a favourite of its own: its official
+    instrumental is searched for by its name; vocals are removed from that
+    chapter alone (`-ss start -t length`), and Sing it out's original is
+    that chapter, cut the same, so both play just that song; "Play the
+    song" under a reply plays it with `start` and `end`. A Mix station's
+    refill brings back one liked or turned-up chapter of a mix the station
+    has played as a bounded item (`start`, `end`, `song_key`, `q` its
+    name): the tick puts it at its start as it comes up and moves to the
+    next song at its end, looking every second near either; the hand-off
+    player asks the listener's music app for it by name. The DJ is told a
+    chapter's like and rotation by its "Artist – Song" and avoids disliked
+    chapters, and finds the song itself. A disliked chapter is never
+    picked by any of them.
 - A `play` (not `add`) of something else ends the station, from here or
   `media music play`; so does `stop`. A song the station has no record of
   coming up is played on, not taken as the end. A song the player lost
   part-way (the app restarted) is put on again where it was.
 
 Pinned by `packages/server/tests/test_music_route.py`,
-`packages/core/tests/test_radio.py` and `packages/core/tests/test_radio_rooms.py`.
+`packages/server/tests/test_music_mix_songs.py`,
+`packages/core/tests/test_radio.py`, `packages/core/tests/test_radio_rooms.py`
+and `packages/core/tests/test_mix_songs.py`.
 
 Clients: S (the Media tab).
 
@@ -5345,6 +5405,7 @@ local look, never a network call:
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
+| `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
 | `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |

@@ -45,6 +45,12 @@ never a network call, so the app can ask on every start.
             GET /music/recent music rows carry `chapters` (artist, song,
             album, genre, start each) and `mix`, and POST /music
             {"action": "play"} takes `start`; always true here
+  mix_songs  a song inside a mix is liked, disliked and turned as a song
+            (mix_songs.py, 12 Nov 2026): with no `uri` the keys act on the
+            chapter playing (`whole: true` the clip), with `uri` and `start`
+            on that chapter; GET /music has `mix_song` and `whole`; the
+            liked list has a row per liked chapter (`start`, `end`,
+            `chapterOf`, `song_key`); `play` takes `end`; always true here
   music_search  GET /music/recent takes `q` (9 Nov 2026): the whole history
             searched on the server (title, artist, song, album, genre,
             channel, a chapter's artist or song); always true here
@@ -174,7 +180,7 @@ def _play_gate() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "music_sung": lambda: True, "music_chapters": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "music_sung": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch}

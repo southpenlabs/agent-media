@@ -51,6 +51,16 @@ like, dislike ... buttons"): a song disliked from its info page, not playing
 on a station, is kept off every station there is or will be — one list in
 ``radio-disliked.json`` (`dislike_song`, `undislike` takes it back), read
 wherever a station's own 👎s are (`_merge`, `disliked`, the DJ's brief).
+
+**A song of a mix** (mix_songs; David, 12 Nov 2026: songs inside a mix
+"liked and rotated as songs in their own right"): a Mix station's refill
+brings back a liked or turned-up song of a mix the station has played, as
+a *bounded* item — the mix's video with the chapter's `start` and `end`
+and its `song_key`. The tick puts it at its start when it comes up and
+moves to the next song at its end (`_bound`), looking every second near
+either (`wait`); its name goes to the hand-off player as `q`, so the
+listener's music app plays the song itself. A disliked song of a mix is
+never brought back.
 """
 
 from __future__ import annotations
@@ -103,7 +113,7 @@ def _blank() -> dict:
             "queue": [], "sent": [], "played": [], "banned": [],
             "strikes": {}, "ready": [], "fetching": None, "current": None, "mixed": [],
             "at": None, "tries": {}, "kind": "mix", "note": "", "fresh": False,
-            "refilled": 0.0}
+            "refilled": 0.0, "songs_played": [], "sought": None}
     # queue: songs to come, in order; sent: queued in the player; played: ids
     # heard; ready: queue ids already in the phone's cache; fetching: the
     # song downloading now; strikes: 👎 per channel; mixed: ids whose Mix
@@ -111,7 +121,9 @@ def _blank() -> dict:
     # at: {id, pos, dur} of the song playing, last seen; tries: failed
     # queueings per id; kind: "mix" (YouTube's) or "dj" (radio_dj); note:
     # the DJ's word on the mood; fresh: a DJ station whose first song is
-    # still to be picked and put on; refilled: when the DJ was last asked.
+    # still to be picked and put on; refilled: when the DJ was last asked;
+    # songs_played: the keys of the songs of mixes (bounded items) heard;
+    # sought: the bounded item last put at its start, so it is put there once.
 
 
 @contextlib.contextmanager
@@ -288,11 +300,21 @@ def _merge(st: dict, songs: list[dict]) -> int:
     from . import music_rotation
 
     turned = music_rotation.load()
-    songs = sorted(songs, key=lambda s: -music_rotation.level(s.get("id") or "", turned))
+    songs = sorted(songs, key=lambda s: -music_rotation.level(s.get("song_key") or s.get("id") or "", turned))
     added = 0
+    had = set(st.get("songs_played") or []) | {s.get("song_key") for s in st["queue"] + st["sent"]}
     for s in songs:
-        w = music_rotation.weight(s.get("id") or "", turned)
+        w = music_rotation.weight(s.get("song_key") or s.get("id") or "", turned)
         if w < 1 and random.random() >= w:
+            continue
+        if s.get("song_key"):
+            # A song of a mix (a bounded item): once a station, never a
+            # disliked one, its mix's own id no bar.
+            if s["song_key"] in had or s["id"] in st["banned"]:
+                continue
+            st["queue"].append(s)
+            had.add(s["song_key"])
+            added += 1
             continue
         name = _norm(s.get("title") or "")
         if s["id"] in seen or (name and name in names) or (s.get("channel") or "") in struck:
@@ -750,7 +772,9 @@ def tick(fetch_aside: bool = False) -> None:
             st["current"] = cur
             if cur not in st["played"]:
                 st["played"].append(cur)
-            came_up = next((s for s in st["sent"] if s["id"] == cur), None)
+            came_up = next((s for s in reversed(st["sent"]) if s["id"] == cur), None)
+            if came_up and came_up.get("song_key"):
+                st.setdefault("songs_played", []).append(came_up["song_key"])
         if cur and isinstance(t, (int, float)) and t > 0:
             st["at"] = {"id": cur, "pos": round(float(t), 1),
                         "dur": float(dur) if isinstance(dur, (int, float)) else None,
@@ -758,6 +782,8 @@ def tick(fetch_aside: bool = False) -> None:
     if came_up:
         _label(where, came_up)
         _note(came_up)
+    if cur and isinstance(t, (int, float)) and _bound(where, cur, float(t)):
+        return
 
     if ahead < 1:
         with _station() as st:
@@ -890,11 +916,113 @@ def _refill() -> None:
         up = {v for v in played if music_rotation.level(v, turned) > 0}
         base = next((v for v in reversed(played) if v in liked or v in up), played[-1])
         st["mixed"].append(base)
-    songs = mix(base)
+        heard = set(st["played"])
+    songs = _mix_song_picks(heard) + mix(base)
     with _station() as st:
         if st["on"]:
             n = _merge(st, songs)
             log.info("radio: +%d from the Mix of %s", n, base)
+
+
+#: Songs of mixes brought back by one refill.
+_MIX_SONGS_PER_REFILL = 1
+
+
+def _mix_song_picks(heard: set) -> list[dict]:
+    """Liked and turned-up songs of the mixes this station has played
+    (mix_songs), as bounded items: the mix's video with the song's `start`,
+    `end`, `song_key` and its name as `q`. One a refill, picked by rotation.
+    Never a disliked one (mix_songs.liked and .turned leave them out)."""
+    try:
+        from . import mix_songs, music_rotation
+
+        turned = music_rotation.load()
+        pool = {}
+        for ch in mix_songs.liked() + mix_songs.turned(1, turned):
+            if ch["vid"] in heard and ch.get("start") is not None and ch["key"] not in pool:
+                pool[ch["key"]] = ch
+        if not pool:
+            return []
+        rows = list(pool.values())
+        weights = [music_rotation.weight(ch["key"], turned) for ch in rows]
+        out = []
+        for ch in random.choices(rows, weights=weights, k=min(_MIX_SONGS_PER_REFILL, len(rows))):
+            name = mix_songs.label(ch)
+            out.append({"id": ch["vid"], "title": name, "channel": ch.get("artist") or "",
+                        "start": float(ch["start"]),
+                        "end": float(ch["end"]) if ch.get("end") is not None else None,
+                        "song_key": ch["key"], "q": name.replace(" – ", " - ")})
+        return out
+    except Exception as e:  # noqa: BLE001 — the Mix alone, then
+        log.info("radio: songs of mixes: %s", e)
+        return []
+
+
+def _cur_song(st: dict, cur: Optional[str]) -> Optional[dict]:
+    """The station's item playing: the latest sent with that id."""
+    return next((s for s in reversed(st.get("sent") or []) if s.get("id") == cur), None) if cur else None
+
+
+def bounded_current() -> bool:
+    """Whether the station on now is playing a song of a mix on its own."""
+    try:
+        st = read()
+    except OSError:
+        return False
+    song = _cur_song(st, st.get("current")) if st.get("on") else None
+    return bool(song and song.get("song_key"))
+
+
+def _bound(where: str, cur: str, t: float) -> bool:
+    """A bounded item (a song of a mix) kept to its song: put at its start
+    once as it comes up, and at its end on to the next song. Whether it
+    moved on (the tick's pass is then done)."""
+    with _station() as st:
+        song = _cur_song(st, cur)
+        if not song or not song.get("song_key"):
+            return False
+        start, end = float(song.get("start") or 0), song.get("end")
+        seek = st.get("sought") != song["song_key"] and t < start - 3
+        if seek:
+            st["sought"] = song["song_key"]
+    if seek:
+        _seek(where, int(start * 1000))
+        return False
+    if isinstance(end, (int, float)) and t >= float(end) - 0.4 and t < float(end) + 8:
+        with _station() as st:
+            st["sought"] = None
+        log.info("radio: %s ended at %.0fs; the next song", song.get("title") or cur, end)
+        _skip(where)
+        return True
+    return False
+
+
+def wait(default: float) -> float:
+    """How long the loop may wait before its next tick: a second or so near
+    a bounded item's start or end, else `default`."""
+    try:
+        st = read()
+    except OSError:
+        return default
+    if not st.get("on"):
+        return default
+    at = st.get("at") or {}
+    cur = st.get("current")
+    song = _cur_song(st, cur)
+    pos = at.get("pos") if at.get("id") == cur else None
+    if song and song.get("song_key"):
+        if st.get("sought") != song["song_key"]:
+            return min(default, 1.0)
+        end = song.get("end")
+        if isinstance(end, (int, float)) and isinstance(pos, (int, float)) and not at.get("paused"):
+            return max(0.5, min(default, float(end) - pos - 0.4))
+    # A bounded item queued next: watch for it coming up.
+    ids = [s.get("id") for s in st.get("sent") or []]
+    after = st["sent"][len(ids) - 1 - ids[::-1].index(cur) + 1:] if cur in ids else []
+    if after and after[0].get("song_key") and isinstance(pos, (int, float)) \
+            and isinstance(at.get("dur"), (int, float)) and at["dur"] - pos < default + 1:
+        return min(default, 1.0)
+    return default
 
 
 def _disliked_path() -> Path:

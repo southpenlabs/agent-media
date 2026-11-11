@@ -57,6 +57,20 @@ backing-music favourite with its tempo and energy measured has `moods`:
 the moods it is favoured under (music_mood.favoured); the radio's DJ goes
 by words, so no song has a rule there.
 
+A song inside a mix is a song in its own right (agent_media_core.mix_songs;
+David, 11–12 Nov 2026): with no `uri`, like, unlike, dislike, undislike and
+rotation act on the chapter playing when what plays is a clip with chapters
+(`"whole": true` for the clip itself); with a `uri`, `"start": <seconds>`
+names one of its chapters (the chapter starting there), else the whole clip.
+A 👎 on the chapter playing keeps that song from every pick and goes on to
+the mix's next chapter (a station's next song when the station played just
+that one). Every answer's `mix_song` is the chapter song playing (`{key,
+start, end, title, artist, song, label, liked, disliked, rotation}`, null
+for none), and `verdict` and `rotation` are its; `whole` (`{verdict,
+rotation}`) the clip's while one plays. `voted` carries `start` for a
+chapter. `{"action": "play", "uri", "start", "end"}` plays just that song:
+from `start`, stopped (or the queue's next) at `end` (music_segment).
+
 `mood` is the listening mood (agent_media_core.music_mood; David, 11 Nov
 2026): `{"id", "moods": [{"id", "label", "blurb"}, …]}`, auto, chill, focus,
 upbeat, sleep, party. `{"action": "mood", "mood": id}` sets it (400 for
@@ -334,8 +348,13 @@ def _answer() -> dict:
         out["move"] = move
     out["bed"] = _bed_state(now)
     out["mood"] = _mood_state()
-    out["verdict"] = _verdict(now)
-    out["rotation"] = _rotation_of(now.get("media_id") or "")
+    ch = _playing_chapter(now)
+    out["verdict"] = _verdict(now, ch)
+    out["rotation"] = _rotation_of(now.get("media_id") or "", ch)
+    out["mix_song"] = _mix_song_state(ch, out["verdict"], out["rotation"])
+    if ch is not None:
+        out["whole"] = {"verdict": _verdict(now, None, whole=True),
+                        "rotation": _rotation_of(now.get("media_id") or "")}
     held = _held_list()
     if held is not None:
         out["on_hold"] = held
@@ -432,8 +451,24 @@ def _mark_votes(items: list[dict]) -> None:
     except Exception as e:  # noqa: BLE001 — button states, never a failed list
         print(f"music: votes failed: {e}", file=sys.stderr)
         return
+    try:
+        from agent_media_core import mix_songs
+
+        gone_songs = mix_songs.disliked_keys()
+        chapter_likes = {mix_songs.key(c["vid"], c["start"]) for c in mix_songs.liked()}
+    except Exception as e:  # noqa: BLE001
+        print(f"music: votes of songs of mixes failed: {e}", file=sys.stderr)
+        gone_songs, chapter_likes = set(), set()
     for r in rows:
         vid = _row_vid(r["uri"])
+        if vid and isinstance(r.get("start"), (int, float)) and r.get("song_key"):
+            # A song of a mix (a liked chapter's row): its own keys' state.
+            k = r["song_key"]
+            r["liked"] = k in chapter_likes
+            r["disliked"] = k in gone_songs
+            r["rotation"] = music_rotation.level(k, turned)
+            r.pop("bed_suggested", None)
+            continue
         r["liked"] = _row_key(r["uri"]) in liked
         if vid:
             r["disliked"] = vid in off
@@ -443,14 +478,64 @@ def _mark_votes(items: list[dict]) -> None:
                 r["moods"] = measured[vid]
 
 
-def _rotation_of(vid: str):
-    """A YouTube song's rotation level (music_rotation), else null."""
+def _rotation_of(vid: str, ch: dict | None = None):
+    """A YouTube song's rotation level (music_rotation), the chapter song's
+    when `ch` is one; else null."""
     try:
         from agent_media_core import music_rotation, radio
 
+        if ch is not None:
+            return music_rotation.level(ch["key"])
         return music_rotation.level(vid) if radio._ID.match(vid or "") else None
     except Exception:  # noqa: BLE001 — a button state, never a failed read
         return None
+
+
+def _playing_chapter(now: dict) -> dict | None:
+    """The song of a mix playing (agent_media_core.mix_songs.playing), else None."""
+    try:
+        from agent_media_core import mix_songs
+
+        return mix_songs.playing(now)
+    except Exception as e:  # noqa: BLE001 — the whole clip, as before
+        print(f"music: chapter playing: {e}", file=sys.stderr)
+        return None
+
+
+def _mix_song_state(ch: dict | None, verdict, rotation) -> dict | None:
+    """`mix_song` in an answer: the chapter song playing and its keys."""
+    if ch is None:
+        return None
+    from agent_media_core import mix_songs
+
+    return {**mix_songs.shown(ch), "liked": verdict == "like", "disliked": verdict == "dislike",
+            "rotation": rotation}
+
+
+def _named_chapter(uri: str, body: dict) -> tuple[dict | None, dict | None]:
+    """`(chapter, None)` for a `start` naming one of the clip's chapters,
+    `(None, None)` without a `start`, `(None, error)` for a bad one."""
+    start = body.get("start")
+    if start is None:
+        return None, None
+    if isinstance(start, bool) or not isinstance(start, (int, float)) or start < 0:
+        return None, {"error": "start must be a number of seconds", "status": 400}
+    from agent_media_core import mix_songs
+
+    vid = _row_vid(uri)
+    ch = mix_songs.find(vid, start=float(start)) if vid else None
+    if ch is None:
+        return None, {"error": "no song of that clip starts there", "status": 404}
+    return ch, None
+
+
+def _target_chapter(body: dict) -> tuple[str, dict | None, dict | None]:
+    """What a key with no `uri` acts on: `(uri, chapter or None, error)` —
+    the chapter playing unless `whole`."""
+    now, _ = _now()
+    uri = now.get("uri") or ""
+    ch = None if body.get("whole") is True else _playing_chapter(now)
+    return uri, ch, None
 
 
 def _rotation_control(body: dict) -> tuple[bool, dict]:
@@ -464,16 +549,29 @@ def _rotation_control(body: dict) -> tuple[bool, dict]:
     if by not in (1, -1) or isinstance(by, bool):
         return False, {"error": "step must be 1 or -1", "status": 400}
     uri = body.get("uri")
+    ch = None
     if uri is None:
-        now, _ = _now()
-        uri = now.get("uri") or ""
+        uri, ch, _ = _target_chapter(body)
     if not isinstance(uri, str) or not uri.strip().startswith(("yt:", "http://", "https://")):
         return False, {"error": "uri must be a yt: or web address", "status": 400}
     uri = uri.strip()
+    if body.get("uri") is not None:
+        ch, err = _named_chapter(uri, body)
+        if err:
+            return False, err
     vid = _row_vid(uri)
     if not vid:
         return False, {"error": "only a YouTube song has a rotation", "status": 400}
     try:
+        if ch is not None:
+            # A song of a mix, by its chapter (mix_songs.key).
+            from agent_media_core import mix_songs
+
+            music_rotation.step(ch["key"], by, mix_songs.label(ch),
+                                extra={"vid": vid, "start": float(ch.get("start") or 0), "end": ch.get("end"),
+                                       "artist": ch.get("artist"), "song": ch.get("song")})
+            _reset_cache()
+            return True, {**_answer(), "voted": _voted(uri, ch)}
         music_rotation.step(vid, by, _title_of(uri, body.get("title")))
     except ValueError as e:
         return False, {"error": str(e), "status": 400}
@@ -483,8 +581,15 @@ def _rotation_control(body: dict) -> tuple[bool, dict]:
     return True, {**_answer(), "voted": _voted(uri)}
 
 
-def _voted(uri: str) -> dict:
-    """`{"uri", "liked", "disliked", "bed_suggested"}` for one song."""
+def _voted(uri: str, ch: dict | None = None) -> dict:
+    """`{"uri", "liked", "disliked", "bed_suggested"}` for one song; for a
+    song of a mix (`ch`), with its `start` and `key`."""
+    if ch is not None:
+        row = {"uri": uri, "start": float(ch.get("start") or 0), "song_key": ch["key"]}
+        _mark_votes([row])
+        return {"uri": uri, "start": row["start"], "key": ch["key"], "liked": bool(row.get("liked")),
+                "disliked": bool(row.get("disliked")), "bed_suggested": False,
+                "rotation": row.get("rotation"), "moods": None}
     row = {"uri": uri}
     _mark_votes([row])
     return {"uri": uri, "liked": bool(row.get("liked")), "disliked": bool(row.get("disliked")),
@@ -529,19 +634,24 @@ def _vote_by_uri(action: str, body: dict) -> tuple[bool, dict]:
     key, vid = _row_key(uri), _row_vid(uri)
     if action in ("dislike", "undislike") and not vid:
         return False, {"error": "only a YouTube song can be disliked", "status": 400}
+    ch, err = _named_chapter(uri, body)
+    if err:
+        return False, err
+    if ch is not None:
+        return _vote_chapter(action, uri, ch)
     try:
         store = StateStore()
         if action == "like":
-            if not store.is_liked("music", key):
+            if not store.is_liked("music", key, whole=True):
                 store.add_like("music", key, uri=uri, title=_title_of(uri, body.get("title")),
                                backend="media-tab", note="liked on its info page")
             if vid:
                 radio.undislike(vid)
                 fav.unban(vid)
         elif action == "unlike":
-            store.remove_likes("music", key)
+            store.remove_likes("music", key, whole=True)
         elif action == "dislike":
-            store.remove_likes("music", key)
+            store.remove_likes("music", key, whole=True)
             title = _title_of(uri, body.get("title"))
             radio.dislike_song(vid, title)
             fav.ban(vid, title)
@@ -556,7 +666,32 @@ def _vote_by_uri(action: str, body: dict) -> tuple[bool, dict]:
     return True, {**_answer(), "voted": _voted(uri)}
 
 
-def _verdict(now: dict) -> str | None:
+def _vote_chapter(action: str, uri: str, ch: dict, backend: str = "media-tab") -> tuple[bool, dict]:
+    """♥ / 👎 (or either taken back) on a song of a mix, by its chapter
+    (mix_songs). Nothing plays or skips."""
+    from agent_media_core import mix_songs
+    from agent_media_core.state import StateStore
+
+    try:
+        store = StateStore()
+        if action == "like":
+            mix_songs.add_like(store, ch, uri=uri, backend=backend, note="liked as a song of a mix",
+                               mix_title=_title_of(uri, None))
+            mix_songs.undislike(ch)
+        elif action == "unlike":
+            mix_songs.remove_like(store, ch)
+        elif action == "dislike":
+            mix_songs.remove_like(store, ch)
+            mix_songs.dislike(ch)
+        else:
+            mix_songs.undislike(ch)
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    return True, {**_answer(), "voted": _voted(uri, ch)}
+
+
+def _verdict(now: dict, ch: dict | None = None, whole: bool = False) -> str | None:
     """`"like"` or `"dislike"` for what is playing, else null: the player's
     ♥ and 👎 stay lit when the song is come back to (David, 1 Nov 2026:
     "the like or dislike is no longer highlighted. can we fix that so it
@@ -571,8 +706,17 @@ def _verdict(now: dict) -> str | None:
 
         from agent_media_core import music_bed_favourites as fav
 
+        if ch is not None:
+            # A song of a mix: its own ♥ or 👎 (mix_songs).
+            from agent_media_core import mix_songs
+
+            if mix_songs.is_disliked(ch):
+                return "dislike"
+            return "like" if mix_songs.is_liked(StateStore(), ch) else None
         if radio.disliked(vid) or fav.banned(vid):
             return "dislike"
+        if whole:
+            return "like" if StateStore().is_liked("music", vid, whole=True) else None
         if StateStore().is_liked("music", vid, chapter=now.get("chapter") or ""):
             return "like"
     except Exception:  # noqa: BLE001 — a button state, never a failed read
@@ -580,7 +724,7 @@ def _verdict(now: dict) -> str | None:
     return None
 
 
-def _unvote(action: str) -> tuple[bool, dict]:
+def _unvote(action: str, body: dict | None = None) -> tuple[bool, dict]:
     """`unlike` / `undislike`: the ♥ or 👎 on what is playing taken back
     (David, 1 Nov 2026: "let's add being able to remove an up or down
     vote"). A like goes from the likes list (on a mix, this chapter's); a
@@ -593,9 +737,14 @@ def _unvote(action: str) -> tuple[bool, dict]:
     vid = now.get("media_id") or ""
     if not vid:
         return False, {"error": "nothing playing", "status": 409, **_answer()}
+    whole = (body or {}).get("whole") is True
+    ch = None if whole else _playing_chapter(now)
+    if ch is not None:
+        return _vote_chapter(action, now.get("uri") or f"yt:https://www.youtube.com/watch?v={vid}", ch)
     try:
         if action == "unlike":
-            StateStore().remove_likes("music", vid, chapter=now.get("chapter") or "")
+            StateStore().remove_likes("music", vid, chapter="" if whole else (now.get("chapter") or ""),
+                                      whole=whole)
         else:
             from agent_media_core import music_bed_favourites as fav
 
@@ -872,6 +1021,11 @@ def _song_control(body: dict) -> tuple[bool, dict]:
     argv = ["play", uri]
     if label(song):
         argv.append(f"--title={label(song)}")
+    if isinstance(song.get("start"), (int, float)) and song["start"] > 0:
+        # A song of a mix: just its chapter (mix_songs, music_segment).
+        argv.append(f"--start={float(song['start']):g}")
+    if isinstance(song.get("end"), (int, float)) and song["end"] > float(song.get("start") or 0):
+        argv.append(f"--end={float(song['end']):g}")
     if body.get("force") is True:
         argv.append("--in-treatment")
     if _speaking():
@@ -894,6 +1048,10 @@ def _radio_control(body: dict) -> tuple[bool, dict]:
     from . import radio as loop
 
     if body.get("action") == "dislike":
+        if body.get("whole") is not True and _dislike_playing_chapter():
+            _reset_cache()
+            loop.wake()
+            return True, _answer()
         if radio.dislike() is None:
             # No station: 👎 is a skip.
             _run(["next"])
@@ -973,6 +1131,28 @@ def _radio_control(body: dict) -> tuple[bool, dict]:
     _reset_cache()
     loop.wake()
     return True, _answer()
+
+
+def _dislike_playing_chapter() -> bool:
+    """👎 with no uri on a song of a mix playing: that song kept from every
+    pick (mix_songs.dislike, its like taken back), and on to the mix's next
+    chapter — the station's next song when it played just that one. False
+    when no song of a mix is playing."""
+    from agent_media_core import mix_songs, radio
+    from agent_media_core.state import StateStore
+
+    _reset_cache()
+    now, _ = _now()
+    ch = _playing_chapter(now)
+    if ch is None:
+        return False
+    mix_songs.remove_like(StateStore(), ch)
+    mix_songs.dislike(ch)
+    if radio.bounded_current():
+        radio.skip()
+    else:
+        _run(["chapter", "next"])
+    return True
 
 
 #: The player a station from a sung-out song runs on: the app's own, where
@@ -1391,7 +1571,14 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
     if action == "bed":
         return _bed_control(body)
     if action in ("unlike", "undislike"):
-        return _unvote(action)
+        return _unvote(action, body)
+    if action == "like" and body.get("whole") is True:
+        # The whole clip, not the song of a mix playing.
+        done, said = _run(["like", "--whole"])
+        _reset_cache()
+        if not done:
+            return False, {"error": said or "like failed", "status": 502, **_answer()}
+        return True, _answer()
     argv = [ACTIONS[action]]
     if action in ("seek", "seek-by"):
         key = "to" if action == "seek" else "by"
@@ -1458,6 +1645,14 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
                 return False, {"error": "start must be a number of seconds", "status": 400}
             if start > 0 and action == "play":
                 argv.append(f"--start={float(start):g}")
+        end = body.get("end")
+        if end is not None:
+            # Just that song of a mix (mix_songs): stopped, or on to the
+            # queue's next, at `end` seconds (music_segment).
+            if isinstance(end, bool) or not isinstance(end, (int, float)) or end <= float(start or 0):
+                return False, {"error": "end must be a number of seconds after start", "status": 400}
+            if action == "play":
+                argv.append(f"--end={float(end):g}")
         if force:
             argv.append("--in-treatment")
     done, said = _run(argv)

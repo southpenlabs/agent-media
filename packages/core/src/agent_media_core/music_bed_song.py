@@ -11,7 +11,8 @@ What is kept, by source:
 
 - **favourites** (an instrumental of one of his favourite songs): the
   ORIGINAL, with its vocals — artist, title, its YouTube Music video id and
-  the `yt:<id>` the music player plays;
+  the `yt:<id>` the music player plays; for a song of a mix (mix_songs)
+  also its `start` and `end` in the mix, so just that song plays;
 - **streaming** (a song from his YouTube Music on Mopidy): the first track
   the bed put on — its video id, its Mopidy URI, the cached copy the bed
   played and `yt:<id>`;
@@ -52,10 +53,16 @@ def song_of(plan) -> Optional[dict]:
             vid = str(credit.get("original_id") or "") or _vid_of(credit.get("url") or "")
             if not _VID.match(vid):
                 return None
-            return {"source": source,
-                    "title": str(credit.get("original_title") or ""),
-                    "artist": str(credit.get("creator") or ""),
-                    "video_id": vid, "uri": f"yt:{vid}"}
+            out = {"source": source,
+                   "title": str(credit.get("original_title") or ""),
+                   "artist": str(credit.get("creator") or ""),
+                   "video_id": vid, "uri": f"yt:{vid}"}
+            if credit.get("original_start") is not None:
+                # A song of a mix (mix_songs): just its chapter of the video.
+                out["start"] = float(credit["original_start"])
+                if credit.get("original_end") is not None:
+                    out["end"] = float(credit["original_end"])
+            return out
         if source == "streaming":
             tracks = getattr(plan, "tracks", ()) or ()
             first = tracks[0] if tracks else {}

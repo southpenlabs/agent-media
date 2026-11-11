@@ -6769,6 +6769,8 @@ def _cmd_music_radio(m: "SinkMusic", a) -> int:
     from . import radio
 
     if a.action == "dislike":
+        if not getattr(a, "whole", False) and _music_dislike_chapter(m):
+            return 0
         if radio.dislike() is None:
             _music_live_backend(m).next()
         return 0
@@ -6829,7 +6831,40 @@ def _cmd_music_radio(m: "SinkMusic", a) -> int:
     return 0
 
 
-def _music_like(m: "SinkMusic", note: str = "", where: str = "") -> int:
+def _music_playing_chapter(snap: Optional[dict]) -> Optional[dict]:
+    """The song of a mix playing (mix_songs.playing), or None."""
+    if not snap:
+        return None
+    try:
+        from . import mix_songs
+        return mix_songs.playing(snap)
+    except Exception:  # noqa: BLE001 — the whole clip, as before
+        return None
+
+
+def _music_dislike_chapter(m: "SinkMusic", where: str = "") -> bool:
+    """👎 on the song of a mix playing (David, 12 Nov 2026: songs inside a
+    mix as songs in their own right): that chapter is never picked again
+    (mix_songs.dislike), and the mix goes on to its next chapter — or, when
+    a station played just that song, to the station's next. False when no
+    chapter song is playing (the whole clip's 👎 then)."""
+    from . import mix_songs, radio
+    snap = _music_snapshot(m, where=where)
+    ch = _music_playing_chapter(snap)
+    if ch is None:
+        return False
+    mix_songs.dislike(ch)
+    from .state import StateStore
+    mix_songs.remove_like(StateStore(), ch)
+    print(f"👎 {mix_songs.label(ch)} (a song of {snap.get('title') or ch['vid']})")
+    if radio.bounded_current():
+        radio.skip()
+    else:
+        _music_chapter_step(m, True)
+    return True
+
+
+def _music_like(m: "SinkMusic", note: str = "", where: str = "", whole: bool = False) -> int:
     """Keep what is playing, because it was good.
 
     Not a bookmark: a bookmark is a place to come back to in one item, keyed
@@ -6842,9 +6877,23 @@ def _music_like(m: "SinkMusic", note: str = "", where: str = "") -> int:
     if not snap:
         print("media music like: no music loaded", file=sys.stderr)
         return 1
+    # A song of a mix is liked as a song (mix_songs; David, 12 Nov 2026),
+    # its start and end kept so it can be played on its own; `--whole` likes
+    # the clip itself.
+    ch = None if whole else _music_playing_chapter(snap)
+    if ch is not None:
+        from . import mix_songs
+        n = mix_songs.add_like(StateStore(), ch, uri=snap.get("uri") or "",
+                               backend=snap.get("backend") or "", note=note,
+                               pos_ms=snap.get("pos_ms"), dur_ms=snap.get("dur_ms"),
+                               extras={"path": snap.get("path")} if snap.get("path") else None,
+                               mix_title=snap.get("title") or "")
+        print(f"♥ {mix_songs.label(ch)} (a song of {snap.get('title') or ch['vid']})"
+              + (f" — {note}" if note else "") + (f"  (#{n})" if n else "  (liked already)"))
+        return 0
     n = StateStore().add_like(
         "music", snap["media_id"], uri=snap.get("uri") or "",
-        title=snap.get("title") or "", chapter=snap.get("chapter") or "",
+        title=snap.get("title") or "", chapter="" if whole else (snap.get("chapter") or ""),
         pos_ms=snap.get("pos_ms"), dur_ms=snap.get("dur_ms"),
         backend=snap.get("backend") or "", note=note,
         extras={"path": snap.get("path")} if snap.get("path") else None)
@@ -7142,7 +7191,8 @@ def cmd_music(a) -> int:
     if a.action == "bookmarks":
         return _cmd_bookmarks(a.uri or "", channel="music")
     if a.action == "like":
-        return _music_like(m, a.uri or "", where=getattr(a, "where", "") or "")
+        return _music_like(m, a.uri or "", where=getattr(a, "where", "") or "",
+                           whole=bool(getattr(a, "whole", False)))
     if a.action == "likes":
         return _cmd_likes(a.uri or "", channel="music",
                           json_out=bool(getattr(a, "json", False)))
@@ -7317,14 +7367,28 @@ def _cmd_music_play(m, a) -> int:
     mix's chapter, from the Media tab's songs of a mix): the start is kept
     with a hold (play_gate), and once the track is playing it is seeked to."""
     start = max(0.0, float(getattr(a, "start", 0) or 0))
+    end = float(getattr(a, "end", 0) or 0)
+    if not a.add:
+        # A new play: a song of a mix played before it is done with.
+        from . import music_segment
+        music_segment.clear()
     if not start:
-        return _cmd_music_play_once(m, a)
-    from . import play_gate
-    with play_gate.request(start=start):
         rc = _cmd_music_play_once(m, a)
-    if rc == 0 and not a.add:
-        if not _music_start_at(m, start):
-            print(f"media music play: could not start at {start:g}s", file=sys.stderr)
+    else:
+        from . import play_gate
+        with play_gate.request(start=start):
+            rc = _cmd_music_play_once(m, a)
+        if rc == 0 and not a.add:
+            if not _music_start_at(m, start):
+                print(f"media music play: could not start at {start:g}s", file=sys.stderr)
+    if rc == 0 and not a.add and end > start:
+        # Just that song of a mix (mix_songs): the server's loop stops it,
+        # or moves to the queue's next, at `end` (music_segment).
+        u = a.uri or ""
+        vid = _music_media_id(u[3:] if u.startswith("yt:") else u)
+        if _YT_ID.match(vid or ""):
+            from . import music_segment
+            music_segment.set_segment(vid, start, end, getattr(a, "title", "") or "")
     return rc
 
 
@@ -10521,6 +10585,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         "(MEDIA_PLAY_GATE_CMD: a treatment under way)")
     s.add_argument("--start", type=float, default=0.0, metavar="SECONDS",
                    help="for 'play': start that many seconds in (a mix's chapter)")
+    s.add_argument("--end", type=float, default=0.0, metavar="SECONDS",
+                   help="for 'play': stop (or go on to the queue's next) that many "
+                        "seconds in — just one song of a mix (music_segment)")
+    s.add_argument("--whole", action="store_true",
+                   help="for 'like' / 'dislike': the whole clip, not the song of "
+                        "a mix playing")
     s.add_argument("--play", action="store_true",
                    help="for 'held': play the held start (the id given, else the newest) now")
     s.add_argument("--dismiss", action="store_true",
