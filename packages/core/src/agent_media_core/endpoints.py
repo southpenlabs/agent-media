@@ -91,7 +91,15 @@ class Endpoint:
     unit: str = ""
 
     def bind(self) -> str:
-        return (os.environ.get(self.bind_env) or "").strip() or self.default_bind
+        """The configured address, or this endpoint's default.
+
+        An empty `default_bind` means "ask the peer network" (clips and
+        speech-state, which the units resolved through tailnet-ip.service).
+        Reported as `tailnet` rather than resolved here, because resolving
+        can take ~45s and `media endpoints` must stay instant.
+        """
+        explicit = (os.environ.get(self.bind_env) or "").strip()
+        return explicit or self.default_bind or "tailnet"
 
     def port(self) -> int:
         raw = (os.environ.get(self.port_env) or "").strip()
@@ -101,13 +109,37 @@ class Endpoint:
             return self.default_port
 
 
+def tailnet_bind(explicit: str = "") -> str:
+    """An explicit address, else this host's peer-network one, else loopback.
+
+    The units these endpoints replace did not hardcode an address either:
+    `agent-media-clips.service` has `Requires=tailnet-ip.service` and binds
+    `${TS_IP}` out of the env file that unit writes. Copying the resolved IP
+    into agent-media.env instead would bake today's tailnet address into
+    config and break quietly the day it changes — so ask, as the unit did.
+
+    `speech_state.resolve_bind` already does exactly this, retries included,
+    so it is reused rather than reimplemented. It can take ~45s on a host
+    with no tailnet, which is why `start_all` must stay off any boot path.
+    """
+    from .entrypoints import speech_state
+    return speech_state.resolve_bind(explicit or None)
+
+
 def _clips(bind: str, port: int):
     from .entrypoints import clip_server
     from ._paths import cache_dir
     # The directory the phone fetches clips and book files out of. The unit
     # passed `--directory ~/.cache/agent-media`; asking cache_dir() keeps the
     # two from drifting apart.
-    return clip_server.make_server(bind, port, str(cache_dir()))
+    #
+    # Tailnet-bound like the unit: the phone fetches these over the tailnet
+    # (MEDIA_BOOK_BASEURL_PHONE=http://red5:8780), so loopback here would
+    # leave every clip and book file unreachable from the device that wants
+    # them — and silently, since the server would look perfectly healthy.
+    return clip_server.make_server(
+        tailnet_bind(os.environ.get("MEDIA_CLIPS_BIND") or ""),
+        port, str(cache_dir()))
 
 
 def _speech_state(bind: str, port: int):
@@ -151,14 +183,14 @@ def _completions_shim(bind: str, port: int):
 ENDPOINTS: "tuple[Endpoint, ...]" = (
     Endpoint("speech-state", "is speech playing here, and input claims",
              _speech_state, 8675, "MEDIA_SPEECH_STATE_BIND",
-             "MEDIA_SPEECH_STATE_PORT",
+             "MEDIA_SPEECH_STATE_PORT", default_bind="",
              unit="agent-media-speech-state.service"),
     Endpoint("share", "the app's share sheet, recent list and transport",
              _share, 8771, "MEDIA_SHARE_BIND", "MEDIA_SHARE_PORT",
              unit="agent-media-share.service"),
     Endpoint("clips", "the phone fetches rendered clips and book files",
              _clips, 8780, "MEDIA_CLIPS_BIND", "MEDIA_CLIPS_PORT",
-             unit="agent-media-clips.service"),
+             default_bind="", unit="agent-media-clips.service"),
     # The main shim only. red5's private second instance (8784) stays its
     # own process: see `make_server`'s docstring in the tts-shim package —
     # what makes it private is its environment, and two listeners here would
@@ -239,7 +271,10 @@ def start_one(ep: Endpoint) -> "Optional[str]":
         _serving[ep.name] = srv
     threading.Thread(target=srv.serve_forever, daemon=True,
                      name=f"endpoint-{ep.name}").start()
-    log.info("endpoint %s on %s:%d (%s)", ep.name, bind, port, ep.what)
+    # The address it really took, not `bind` — which is the placeholder
+    # "tailnet" for the two that resolve their own.
+    log.info("endpoint %s on %s (%s)", ep.name,
+             ":".join(str(x) for x in srv.server_address[:2]), ep.what)
     return None
 
 

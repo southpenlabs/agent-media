@@ -213,3 +213,34 @@ def test_the_server_does_not_start_endpoints_on_its_boot_path():
     assert "target=_endpoints.start_all" in src, \
         "start_all is on the boot path again; it can block for ~45s"
     assert "_endpoints.start_all()" not in src
+
+
+def test_clips_binds_the_tailnet_like_its_unit_did(monkeypatch):
+    """The unit had `Requires=tailnet-ip.service` and bound `${TS_IP}`,
+    because the phone fetches clips and book files over the tailnet
+    (MEDIA_BOOK_BASEURL_PHONE=http://red5:8780). Defaulting to loopback here
+    would leave every one of them unreachable from the device that wants
+    them, with the server looking perfectly healthy."""
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.64.0.9")
+    assert endpoints.tailnet_bind() == "100.64.0.9"
+    # And an explicit setting still wins, without asking the network.
+    monkeypatch.setattr(speech_state, "_peer_ip",
+                        lambda: pytest.fail("asked the peer network anyway"))
+    assert endpoints.tailnet_bind("10.1.2.3") == "10.1.2.3"
+
+
+def test_the_two_self_resolving_endpoints_say_so_rather_than_lying(monkeypatch):
+    """`media endpoints` must stay instant, so bind() reports the intent
+    rather than spending up to 45s resolving it."""
+    by = {e.name: e for e in endpoints.ENDPOINTS}
+    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
+    monkeypatch.delenv("MEDIA_SPEECH_STATE_BIND", raising=False)
+    assert by["clips"].bind() == "tailnet"
+    assert by["speech-state"].bind() == "tailnet"
+    monkeypatch.setenv("MEDIA_CLIPS_BIND", "127.0.0.1")
+    assert by["clips"].bind() == "127.0.0.1"
+    # The loopback-by-default ones are unchanged.
+    assert by["tts-shim"].bind() == "127.0.0.1"
