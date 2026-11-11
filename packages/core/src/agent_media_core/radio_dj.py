@@ -17,6 +17,11 @@ birth details. Reading the chart takes a few seconds, so it is kept half an
 hour (`moment`, which the music bed's Auto reads too). Without it the DJ
 goes by the clock and the weather.
 
+**The listening mood** (music_mood.py; David, 11 Nov 2026): chill, focus,
+upbeat, sleep or party is named first in the brief with what it means
+(tempo, beat, energy, vocals), and the SYSTEM prompt says it overrides the
+moment's reading; auto leaves the brief as it was.
+
 **The model** is the follow-up's (MEDIA_FOLLOWUP_MODEL, a small hosted one)
 through the summary gateway, unless MEDIA_RADIO_DJ_MODEL names another. It
 answers with song lines, "Artist - Title", and one NOTE: line on the mood,
@@ -52,6 +57,11 @@ SYSTEM = (
     "one already played. Flow from what just played: no jarring jumps, and "
     "no more than two songs by one artist. Only real, well-known recordings "
     "you are sure exist, so a YouTube search finds them.\n\n"
+    "When the brief names the listener's chosen mood, it overrides your own "
+    "reading of the moment: every song must fit what the mood means (tempo, "
+    "beat, energy, vocals), and the time, the weather and the reading only "
+    "shade the picks within it. A song that fits the hour but not the mood "
+    "is wrong. The NOTE then names the mood.\n\n"
     "Reply with exactly {n} lines, each 'Artist - Song title', nothing else "
     "on them, then one last line 'NOTE: ' and one short sentence on the mood "
     "you are going for."
@@ -137,14 +147,21 @@ def brief(st: dict) -> str:
     played = [titles[v] for v in st["played"] if v in titles][-15:]
     banned = [titles[v] for v in st["banned"] if v in titles]
     struck = [c for c, n in st["strikes"].items() if n >= 2]
-    return json.dumps({
+    out = {
         "moment": told(moment()),
         "just_played": played,
         "still_to_come": [titles[s["id"]] for s in st["queue"]][:5],
         "liked": _likes(),
         "avoid_songs": banned,
         "avoid_artists": struck,
-    }, ensure_ascii=False, indent=1)
+    }
+    from . import music_mood
+
+    chosen = music_mood.dj_means()
+    if chosen:
+        # The listener's mood (music_mood), over the moment's reading.
+        out = {"mood": chosen, **out}
+    return json.dumps(out, ensure_ascii=False, indent=1)
 
 
 def ask(st: dict, n: int = PICKS) -> tuple[list[str], str]:

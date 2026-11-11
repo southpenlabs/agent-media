@@ -459,6 +459,32 @@ def stop() -> None:
     downloads.cancel("radio:")
 
 
+def repick() -> bool:
+    """A DJ station's songs to come dropped, for the DJ to pick again at once
+    (music_mood: the listening mood changed). The song playing plays on;
+    what was queued in the player behind it goes, with the downloads. The
+    next pass of the loop asks the DJ. False when no DJ station is on."""
+    with _station() as st:
+        if not st["on"] or st.get("kind") != "dj":
+            return False
+        where, cur = st["where"], st.get("current")
+        ids = [s["id"] for s in st["sent"]]
+        behind = st["sent"][ids.index(cur) + 1:] if cur in ids else \
+            [s for s in st["sent"] if s["id"] not in st["played"]]
+        st["sent"] = [s for s in st["sent"] if s not in behind]
+        st["queue"] = []
+        st["ready"] = []
+        st["note"] = ""
+        st["refilled"] = 0.0
+        st["tries"].pop("_dj", None)
+    if behind:
+        with contextlib.suppress(Exception):
+            _clear(where)
+    from . import downloads
+    downloads.cancel("radio:")
+    return True
+
+
 def dislike() -> Optional[dict]:
     """👎: this song is off the station, a channel twice is too, and the
     next song plays. None when no station is on."""

@@ -46,7 +46,7 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "downloads"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "downloads", "mood"}
     assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
     assert obj["downloads"] == []
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
@@ -669,3 +669,24 @@ def test_back_to_a_station(server, signed_in, audio_host, player, monkeypatch):
     monkeypatch.setattr(radio, "resume", none)
     res, obj = call(server, "POST", "/music", {"action": "radio", "resume": True}, AUTH)
     assert res.status == 409 and "no such station" in obj["error"]
+
+
+def test_the_listening_mood_is_read_and_set(server, signed_in, audio_host, player, monkeypatch):
+    """The listening mood (David, 11 Nov 2026): in every answer, set by
+    `{"action": "mood"}`, 400 for a mood that is not one of the six."""
+    from agent_media_core import music_mood
+
+    monkeypatch.delenv("MEDIA_MUSIC_MOOD", raising=False)
+    told: list = []
+    monkeypatch.setattr(music_mood, "_follow", lambda mood, playing: told.append((mood, playing())))
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["mood"]["id"] == "auto"
+    assert [m["id"] for m in obj["mood"]["moods"]] == ["auto", "chill", "focus", "upbeat", "sleep", "party"]
+    assert all(keys(m) == {"id", "label", "blurb"} for m in obj["mood"]["moods"])
+    res, obj = call(server, "POST", "/music", {"action": "mood", "mood": "chill"}, headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["mood"]["id"] == "chill" and music_mood.current() == "chill"
+    assert told == [("chill", True)] and player == []
+    res, obj = call(server, "POST", "/music", {"action": "mood", "mood": "gloomy"}, headers=AUTH)
+    assert res.status == 400 and "mood must be one of" in obj["error"]
+    assert music_mood.current() == "chill"

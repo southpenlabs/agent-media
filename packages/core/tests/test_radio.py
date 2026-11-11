@@ -747,3 +747,84 @@ def test_kept_stations_are_capped_and_unknown_is_refused(station, monkeypatch):
         radio.start(SEED["id"], "sasonica", playing=True)
         radio.stop()
     assert len(radio._kept()) == radio.MAX_STATIONS
+
+
+# ---- the listening mood (music_mood; David, 11 Nov 2026) ------------------------
+
+@pytest.fixture()
+def mood_env(monkeypatch):
+    monkeypatch.delenv("MEDIA_MUSIC_MOOD", raising=False)
+    from agent_media_core import downloads
+    monkeypatch.setattr(downloads, "cancel", lambda prefix: None)
+
+
+def test_a_mood_change_drops_a_dj_stations_songs_to_come_and_asks_again(dj, mood_env):
+    from agent_media_core import music_mood
+
+    (player, sent, _, _), asked = dj
+    radio.start_dj("sasonica")
+    radio.tick()                   # first pick on
+    radio.tick()                   # one queued behind it
+    assert sent[-1] == ("dj001xxxxxx", False)
+    playing = radio.read()["current"]
+    out = music_mood.set_mood("chill", playing=lambda: True)
+    assert out == {"mood": "chill", "changed": True, "station": "repicked"}
+    st = radio.read()
+    assert st["queue"] == [] and st["current"] == playing and st["note"] == ""
+    assert [s["id"] for s in st["sent"]] == [playing]   # the queued one went
+    radio.tick()                   # the DJ is asked again at once
+    assert len(asked) == 2
+    assert radio.read()["note"] == "mood 1" and radio.read()["current"] == playing
+
+
+def test_a_mood_change_turns_a_mix_station_into_the_djs(station, mood_env):
+    from agent_media_core import music_mood
+
+    radio.start(SEED["id"], "sasonica", playing=True)
+    out = music_mood.set_mood("focus", playing=lambda: True)
+    assert out["station"] == "started"
+    st = radio.read()
+    assert st["kind"] == "dj" and st["fresh"] and st["where"] == "sasonica"
+
+
+def test_back_to_auto_leaves_a_mix_station_alone(station, mood_env):
+    from agent_media_core import music_mood
+
+    music_mood.set_mood("party", playing=lambda: False)
+    radio.start(SEED["id"], "sasonica", playing=True)
+    assert music_mood.set_mood("auto", playing=lambda: True)["station"] is None
+    assert radio.read()["kind"] == "mix"
+
+
+def test_a_mood_with_music_playing_and_no_station_starts_the_dj(station, mood_env, monkeypatch):
+    from agent_media_core import music_mood
+
+    monkeypatch.setattr(music_mood, "_default_where", lambda: "sasonica")
+    assert music_mood.set_mood("upbeat", playing=lambda: True)["station"] == "started"
+    assert radio.read()["kind"] == "dj" and radio.is_on()
+
+
+def test_a_mood_with_nothing_playing_is_only_stored(station, mood_env):
+    from agent_media_core import music_mood
+
+    out = music_mood.set_mood("sleep", playing=lambda: False)
+    assert out == {"mood": "sleep", "changed": True, "station": None}
+    assert not radio.is_on() and music_mood.current() == "sleep"
+    # Set again: nothing else happens.
+    assert music_mood.set_mood("sleep", playing=lambda: True)["changed"] is False
+    assert not radio.is_on()
+
+
+def test_the_djs_brief_names_a_chosen_mood(station, mood_env, monkeypatch):
+    import json
+
+    from agent_media_core import music_mood, radio_dj
+
+    monkeypatch.setattr(radio_dj, "moment", lambda: {"local_time": "Wednesday 21:00"})
+    monkeypatch.setattr(radio_dj, "_likes", lambda: [])
+    assert "mood" not in json.loads(radio_dj.brief(radio._blank()))   # auto: as before
+    music_mood.set_mood("chill", playing=lambda: False)
+    b = json.loads(radio_dj.brief(radio._blank()))
+    assert b["mood"]["id"] == "chill" and "90 BPM" in b["mood"]["means"]
+    assert "driving" in b["mood"]["means"]
+    assert "chosen mood, it overrides" in radio_dj.SYSTEM

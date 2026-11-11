@@ -36,6 +36,12 @@ them, each row's `uri` `radio:<sid>`, which `{"action": "play"}` resumes
 for the backing music under replies, or takes it back; `bed.suggested` in
 every answer says whether what is playing is suggested (1 Nov 2026).
 
+`mood` is the listening mood (agent_media_core.music_mood; David, 11 Nov
+2026): `{"id", "moods": [{"id", "label", "blurb"}, …]}`, auto, chill, focus,
+upbeat, sleep, party. `{"action": "mood", "mood": id}` sets it (400 for
+another id): a DJ station drops its songs to come and picks again, a Mix
+station or music playing without one becomes the DJ's.
+
 `{"action": "song", "id"}` plays the song the music bed played under reply
 `id` (its history row's `bed_song`, agent_media_core.music_bed_song): the
 reply's ⋯ "Play the song". The answer's `song` says what and `when` ("now",
@@ -92,6 +98,8 @@ ACTIONS = {
     # Suggest what is playing (or `uri`) for the backing music; `off` takes
     # it back (agent_media_core.music_bed_favourites.suggest).
     "bed": "bed",
+    # The listening mood (agent_media_core.music_mood): `mood` one of its ids.
+    "mood": "mood",
     # A start the play gate held (agent_media_core.play_gate): played now on
     # purpose, or forgotten.
     "held": "held",
@@ -302,6 +310,7 @@ def _answer() -> dict:
     if move:
         out["move"] = move
     out["bed"] = _bed_state(now)
+    out["mood"] = _mood_state()
     out["verdict"] = _verdict(now)
     held = _held_list()
     if held is not None:
@@ -924,6 +933,10 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         return False, {"error": "unknown action", "status": 400}
     if action == "held":
         return _held_control(body)
+    if action == "mood":
+        # Not a play: a station it starts is fed by the loop, which keeps
+        # to the play gate itself.
+        return _mood_control(body)
     from agent_media_core import play_gate
 
     # `force: true`: through the play gate on purpose (music in a treatment).
@@ -937,6 +950,42 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     if not ok and _was_held():
         return False, _held_answer(str(out.get("error") or ""))
     return ok, out
+
+
+def _mood_state() -> dict:
+    """`{"id", "moods": [{"id", "label", "blurb"}]}`: the listening mood
+    and the six, for the Media tab's chips and Settings → Music."""
+    try:
+        from agent_media_core import music_mood
+
+        return music_mood.shown()
+    except Exception as e:  # noqa: BLE001 — the tab can do without it
+        print(f"music: mood failed: {e}", file=sys.stderr)
+        return {"id": "auto", "moods": []}
+
+
+def _mood_control(body: dict) -> tuple[bool, dict]:
+    """`{"action": "mood", "mood": id}`: set the listening mood (music_mood.
+    set_mood: a DJ station picks again, music playing gets one)."""
+    from agent_media_core import music_mood
+
+    from . import radio as loop
+
+    mood = music_mood.normalise(body.get("mood"))
+    if mood is None:
+        return False, {"error": f"mood must be one of {', '.join(music_mood.IDS)}", "status": 400}
+
+    def playing() -> bool:
+        now, _ = _now()
+        return bool(now.get("uri") or now.get("media_id") or now.get("title")) and not now.get("paused")
+
+    try:
+        music_mood.set_mood(mood, playing=playing)
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    loop.wake()
+    return True, _answer()
 
 
 def _held_control(body: dict) -> tuple[bool, dict]:

@@ -78,6 +78,15 @@ why (`auto_why`: "dusk — low energy, warm (astrotunes)"). For favourites
 the ready tracks are weighted by how near their tempo and energy (BPM and
 loudness, measured once as each is made) are to the reading's.
 
+**The listening mood** (music_mood.py; David, 11 Nov 2026: "a mood setting
+that also dictates what kind of music is played ... including for backing
+music"): any mood but auto decides Auto's mood and genre in place of the
+hour, weather and astrotunes — chill dusk/bossa nova, focus calm/piano,
+sleep night/ambient, upbeat blend/jazz, party morning/lo-fi — and weights
+the favourites by its tempo and energy; `auto_why` says "dusk — mood:
+chill". Slow only still holds (upbeat's jazz and party's become bossa nova
+under blend); a fixed choice and Calm mode still win.
+
 **Slow only** (David, 30 Oct 2026: "I think the music should be restricted
 to slower variations"), on unless MEDIA_MUSIC_BED_SLOW=0 or Settings'
 "Slow music only" switch is off (`slow_on`; kept beside the choice): Auto
@@ -669,11 +678,21 @@ def auto_now(when: Optional[datetime] = None, weather: Optional[str] = "?",
     (`axes` "?" reads it; None: the clock alone), else by the hour and the
     weather."""
     when = when or datetime.now()
+    slow = slow_on()
+    try:
+        from . import music_mood
+        chosen = music_mood.bed_auto(slow)
+    except Exception as e:  # noqa: BLE001 — never into a reply
+        log.debug("music-bed: listening mood: %s", e)
+        chosen = None
+    if chosen:
+        # The listener's mood (music_mood) over the hour, weather and reading.
+        mood, genre, why = chosen
+        return Auto(mood, genre, why, music_mood.bed_axes())
     if weather == "?":
         weather = weather_label()
     if axes == "?":
         axes = astro_reading()
-    slow = slow_on()
     if axes:
         return astro_auto(axes, when.hour, is_rain(weather), slow)
     genres = SLOW_GENRE_FOR_MOOD if slow else GENRE_FOR_MOOD
@@ -685,6 +704,17 @@ def auto_now(when: Optional[datetime] = None, weather: Optional[str] = "?",
     if slow and mood not in SLOW_MOODS:
         return Auto("calm", genres[mood], f"calm — by the hour ({span}), kept slow")
     return Auto(mood, genres[mood], f"{mood} — by the hour ({span})")
+
+
+def _fit_axes() -> Optional[dict]:
+    """What the favourites are weighted towards: the listening mood's tempo
+    and energy (music_mood), else astrotunes' reading."""
+    try:
+        from . import music_mood
+        axes = music_mood.bed_axes()
+    except Exception:  # noqa: BLE001
+        axes = None
+    return axes or astro_reading()
 
 
 def mood_for(when: Optional[datetime] = None, weather: Optional[str] = "?",
@@ -1360,7 +1390,7 @@ def choose(pick, other_audio: Optional[bool], target=None,
                 if mixed is not None:
                     return mixed
             mine = {"topic": topic} if topic and topic_on() else {}
-            got = fav.track_for(pick.style, astro_reading(), **mine) if fav.enabled() else None
+            got = fav.track_for(pick.style, _fit_axes(), **mine) if fav.enabled() else None
             if got is not None:
                 return Plan("under", "favourites", pick.style, path=got[0], credit=got[1])
         elif pick.source == "streaming":
