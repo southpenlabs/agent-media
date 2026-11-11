@@ -117,10 +117,17 @@ is particular to red5 stays on red5.
 ## Order of work
 
 0. **Done (11 Nov):** red2 runs chats; new chats go there by default.
-1. **Built (11 Nov), red5 being switched unit by unit:** the release
-   layout, `media update` / `--rollback`, `media version`, the deploy log,
-   the server's `version` in `GET /features`, and `media-setup release-mode`
-   (`docs/reference/releases.md`, `release.py`). As planned:
+1. **Done (11 Nov):** red5's services run a release (the session host
+   from its next drained restart; `media version` says which units run
+   what). Built: the release layout, `media update` and `--rollback`,
+   `media version`, the deploy log, the server's `version` in
+   `GET /features`, and `media-setup release-mode`
+   (`docs/reference/releases.md`, `release.py`). Deploys are by hand
+   (`media update`) until step 2. Not moved yet: the agents' own hook
+   settings (`~/.claude/settings.json` still names the checkout), the web
+   app at `/app/` (step 2), unit files linked from the checkout (their
+   commands are overridden), and version-skew monitoring, which still
+   compares with the checkout. As planned:
    **Releases on red5.** A release folder and `current` link, the services
    started from it, `media version`, and a deploy log. Deploys still by
    hand at first (`media update`), to prove the layout and the step back.

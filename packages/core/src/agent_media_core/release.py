@@ -1353,8 +1353,8 @@ def finish(units: "list[str]", new: str, old: str, *, emit: Emit = print,
 
     rc, done, unmanaged = _restart(units, emit)
     if unmanaged:
-        emit("not restarted (not services restart-services manages; they take the "
-             "release at their next start): " + " ".join(unmanaged))
+        emit("left as they are (stopped units, and any restart-services does not "
+             "manage; they take the release at their next start): " + " ".join(unmanaged))
     if rc == rs.OK:
         log("restarted", sha=new, units=done)
         _alert("ok")
