@@ -1,4 +1,4 @@
-# Where things run: the server, the workshop and the build (draft, 11 Nov 2026)
+# Where things run: the server, the workshop and the build (decided 11 Nov 2026)
 
 David, 11 Nov 2026, after red2 became the first session worker and the
 question of which chats must stay on red5 came up: "there's got to be a
@@ -6,8 +6,8 @@ better way of doing this" … "I think we need to have a look at it as a whole
 and consider the long-term approach."
 
 This is that look. It describes how things run today, what is actually
-wrong, the shape to aim for, and the order to get there. Nothing here is
-built or decided.
+wrong, the shape to aim for, and the order to get there. Decided the same
+day (see "Decisions" at the end); step 1 is under way.
 
 ## Today
 
@@ -136,16 +136,20 @@ is particular to red5 stays on red5.
 Steps 1 and 2 are the heart of it and are a few days of careful work,
 because they change how every service starts.
 
-## Decisions for David
+## Decisions (David, 11 Nov 2026: "I think we go with those recommendations")
 
-- **Is the cloud machine the permanent server, with home machines as
-  workers?** Recommended: yes. The alternative, moving the server home onto
-  red2, makes everything depend on home power and internet.
-- **Deploy on every green push, or only when asked?** Recommended: every
-  green push, once step 1 has shown the step back works.
-- **What must be green first?** Recommended: the core and server test
-  suites (minutes), not the 80-minute app run.
-- **A bigger cloud machine instead?** Doubling red5 would lift the
-  three-chat limit by itself and is the cheapest thing to do, but it leaves
-  the running-copy-is-the-edited-copy problem untouched. It could still be
-  worth doing alongside, after step 5 shows what red5 really needs.
+His framing: "we're talking about moving all the agent stuff to red2".
+
+1. **red5, the cloud machine, is the permanent server; home machines (red2
+   now) are workers.** The server never depends on red2.
+2. **Deploy on every green push**, once step 1 has shown the step back
+   works.
+3. **Green first: the core and server test suites**, not the 80-minute app
+   run.
+4. **No bigger red5 for now**; revisit after step 5 shows what red5 really
+   needs.
+
+Step 4 is partly done already (11 Nov): sasonica-app's GitHub runners moved
+to red2 (`red2` for the end-to-end run, `red2-apk` for APKs; the repo
+variables point there, red5's two runners stay registered as the fallback).
+red2 also serves Ollama on the tailnet and the memory governor's rerank.
