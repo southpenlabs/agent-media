@@ -40,6 +40,19 @@ def set_pinned(session: str, flag: bool) -> bool:
     return PINS.drop(session)
 
 
+def _known(session: str) -> bool:
+    """A session these settings may be set on: live, with a transcript, in a
+    folder, or a new chat sessiond has an id for but is still holding for a
+    free session slot (its record, or `held.json`) — David, 11 Nov 2026: a
+    speech level set on a queued new chat was refused "no such session"."""
+    if (sessions.live_sessions().get(session) or sessions.session_exists(session)
+            or sessions._folder_for_session(session)):
+        return True
+    from . import sessiond
+
+    return session in sessiond.held_waits() or sessiond.record_path(session).exists()
+
+
 def session_pin(session: str, flag, bearer: str) -> tuple[bool, dict]:
     """`POST /session/pin {"session", "pinned"}`. Gated like `/session/archive`,
     and refused the same ways: 400 for a bad id or a non-boolean, 404 for a
@@ -54,8 +67,7 @@ def session_pin(session: str, flag, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
-            or sessions._folder_for_session(session)):
+    if not _known(session):
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
         set_pinned(session, flag)
@@ -90,8 +102,7 @@ def session_priority(session: str, flag, bearer: str, level=None) -> tuple[bool,
         return False, err
     from . import matrix
 
-    if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
-            or sessions._folder_for_session(session)
+    if not (_known(session)
             or matrix.room(session) is not None):     # a Matrix room's level
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:

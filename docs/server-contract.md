@@ -2070,10 +2070,12 @@ the book-tracks manifests, and only reads from ABS.
   nothing.
 - Rows carry it as `pinned` on `/targets` and `/conversations`.
 - 400 `"not a session id"`; 404 `"no such session <first 8>"`, as for
-  `/session/archive`.
+  `/session/archive` — except that a new chat sessiond holds for a free
+  session slot (its record, or `held.json`) is known too, so its pin and
+  speech level can be set while it is still queued (11 Nov 2026).
 - In `CORS_PATHS`.
 
-Pinned by `packages/server/tests/test_reap.py`.
+Pinned by `packages/server/tests/test_reap.py` and `test_queued_chat_level.py`.
 
 #### `POST /session/quiet` — gated (26 Oct 2026)
 
