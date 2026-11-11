@@ -509,6 +509,14 @@ def test_unit_runs_reads_the_release_from_the_command_line(rel, monkeypatch):
     monkeypatch.setattr(release, "_started", lambda pid: release.read_log()[0]["t"] + 1)
     r = release.unit_runs(unit["name"])
     assert (r["source"], r["sha"]) == ("release", rel.first)
+    # A program of neither (the run script ended in `exec mpv`): by when it
+    # started, against when the unit went into release mode.
+    cmds[unit["name"]] = ["mpv", "--idle=yes"]
+    monkeypatch.setattr(release, "_started", lambda pid: 1.0)
+    assert release.unit_runs(unit["name"])["source"] == "checkout"
+    monkeypatch.setattr(release, "_started", lambda pid: release.read_log()[-1]["t"] + 1)
+    r = release.unit_runs(unit["name"])
+    assert (r["source"], r["sha"]) == ("release", rel.first)
     monkeypatch.setattr(release, "_unit_show", lambda u: {"MainPID": "0"})
     assert release.unit_runs(unit["name"])["source"] == ""
 

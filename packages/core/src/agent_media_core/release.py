@@ -814,8 +814,8 @@ def release_mode(only: "Optional[list[str]]" = None, *, checkout: "Optional[Path
         if done:
             _daemon_reload()
             log("release-mode", units=done)
-            emit("they start from the release at their next start. Restart the running "
-                 "ones: media restart-services --only "
+            emit("they start from the release at their next start. A running one keeps "
+                 "its old code until restarted: media restart-services --only "
                  + " ".join(n.removesuffix(".service") for n in done) + " --after 10")
     return rc
 
@@ -1141,12 +1141,25 @@ def release_at(t: float) -> str:
     return sha
 
 
+def mode_since(unit: str) -> float:
+    """When `unit` last went into release mode, from the deploy log (0: it
+    is not in it, or the log does not say)."""
+    if unit not in read_manifest()["units"]:
+        return 0.0
+    for rec in reversed(read_log()):
+        if (rec.get("event") == "release-mode" and not rec.get("undo")
+                and unit in (rec.get("units") or [])):
+            return float(rec.get("t") or 0)
+    return 0.0
+
+
 def unit_runs(unit: str) -> dict:
     """What a unit's main process runs: `{"state", "pid", "source": "release"
     | "checkout" | "other" | "", "sha", "path"}`. The release is read from
     the process's command line (its interpreter is the release's own); a
-    command that names `current` without one (a bare script) is dated
-    against the deploy log instead. `source` is '' when nothing runs."""
+    command that names `current` without one (a bare script), or names
+    neither (a `run` script that ends in `exec mpv`), is dated against the
+    deploy log instead. `source` is '' when nothing runs."""
     show = _unit_show(unit)
     out = {"state": show.get("ActiveState", ""), "pid": 0, "source": "", "sha": "",
            "path": ""}
@@ -1174,7 +1187,17 @@ def unit_runs(unit: str) -> dict:
     if co and any(a.startswith(str(co) + "/") for a in args):
         out.update(source="checkout", path=str(co))
         return out
-    out["source"] = "other"
+    # A program of neither (a `run` script that ends in `exec mpv`): what
+    # started it is told by when. Since the unit went into release mode, it
+    # was the release then in use; before, the checkout.
+    since = mode_since(unit)
+    started = _started(pid)
+    if since and started >= since:
+        out.update(source="release", sha=release_at(started))
+    elif unit in read_manifest()["units"] or (co and plan_unit(unit, co).lines):
+        out.update(source="checkout", path=str(co or ""))
+    else:
+        out["source"] = "other"
     return out
 
 
