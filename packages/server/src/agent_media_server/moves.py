@@ -353,7 +353,14 @@ def move(session: str, project: str = "", cwd: str = "",
     project, dest, why = _destination(project, cwd)
     if why:
         return False, {"error": why, "status": 400}
-    if not sessions.session_exists(session):
+    from . import driver
+
+    # A new chat sessiond holds for a free slot has no transcript until it
+    # starts, yet it is a thread to move: sessiond starts it in the new
+    # directory (`relocate` on one not running), and there is no transcript
+    # to carry (David, 11 Nov 2026: "the same error as the previous no
+    # transcript found one when trying to change projects").
+    if not sessions.session_exists(session) and not driver.owned_headless(session):
         return False, {"error": f"session {session[:8]} has no transcript", "status": 404}
 
     # A new ask is a new start: an earlier one's failure is not news now.

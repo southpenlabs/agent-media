@@ -392,6 +392,29 @@ def test_a_headless_session_is_told_its_new_directory(
     assert (claude / moves.encoded_dir(dest) / f"{SID}.jsonl").exists()
 
 
+def test_a_new_chat_held_for_a_slot_moves_before_it_has_a_transcript(
+        server, shelf, signed_in, claude, dest, windows, headless, monkeypatch):
+    """A new chat queued for a free session slot has no transcript yet: the
+    move tells sessiond where to start it and files the thread there."""
+    log, _ = headless
+    for f in claude.glob(f"*/{SID}.jsonl"):
+        f.unlink()
+    monkeypatch.setattr(sessions, "session_exists", lambda s: False)
+    res, obj = call(server, "POST", "/session/move",
+                    {"session": SID, "project": "p-agent-mail"}, AUTH)
+    assert res.status == 200, obj
+    assert log == [(SID, dest)]
+    assert moves.moved(SID)["project"] == "p-agent-mail"
+
+
+def test_a_session_nothing_knows_is_still_refused(
+        server, shelf, signed_in, claude, dest, windows, headless, monkeypatch):
+    monkeypatch.setattr(sessions, "session_exists", lambda s: False)
+    res, obj = call(server, "POST", "/session/move",
+                    {"session": "0" * 8 + SID[8:], "project": "p-agent-mail"}, AUTH)
+    assert res.status == 404 and "no transcript" in obj["error"]
+
+
 def test_a_headless_session_sessiond_will_not_move_stays_put(
         server, shelf, signed_in, claude, dest, windows, headless):
     _, answer = headless
