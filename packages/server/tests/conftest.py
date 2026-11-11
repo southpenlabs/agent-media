@@ -160,6 +160,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # A podcast link saved from the Media tab downloads through the phone
     # (podcast_links.start_fetch): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
+    # The book library reads its folder (book_library): never this
+    # machine's own audiobooks (a slow mount on red5) — an empty one.
+    (tmp_path / "audiobooks").mkdir(exist_ok=True)
+    monkeypatch.setenv("MEDIA_AUDIOBOOK_ABS_DIR", str(tmp_path / "audiobooks"))
     monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "0")
     # A practice's length is looked up with yt-dlp or ffprobe in the
     # background (practice_library._fill_durations): never from a test.

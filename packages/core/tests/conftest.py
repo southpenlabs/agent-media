@@ -351,7 +351,7 @@ def _no_earcons(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_live_jobs_server(monkeypatch):
+def _no_live_jobs_server(monkeypatch, tmp_path_factory):
     """A device job (`media restart-services --host`, `media update --host`,
     `media doctor --fix`) asks this host's own canvas — by default
     127.0.0.1:8781 with the real ~/.amux token. On red5 that is the live
@@ -368,6 +368,9 @@ def _no_live_jobs_server(monkeypatch):
     # A podcast link saved from the Media tab downloads through the phone
     # (podcast_links.start_fetch): never from a test.
     monkeypatch.setenv("MEDIA_PODCAST_LINK_FETCH", "0")
+    # The book library reads its folder (book_library): never this
+    # machine's own audiobooks (a slow mount on red5) — an empty one.
+    monkeypatch.setenv("MEDIA_AUDIOBOOK_ABS_DIR", str(tmp_path_factory.mktemp("audiobooks")))
     monkeypatch.setenv("MEDIA_PODCAST_LINK_CHANNELS", "0")
 
 

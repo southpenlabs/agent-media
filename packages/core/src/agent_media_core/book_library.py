@@ -188,18 +188,20 @@ def scan() -> dict:
 
 
 def _catalogue() -> dict:
-    """The kept catalogue, a scan started in the background when it is
-    stale (the first one done here, so the list is never empty for long)."""
+    """The kept catalogue, a scan started in the background when there is
+    none yet or it is stale."""
     d = _load()
-    if not d.get("books"):
-        return scan()
-    if time.time() - float(d.get("at") or 0) > SCAN_TTL_S and not _SCANNING[0]:
+    # Never waits for a scan: the folder can be a slow mount (red5's first
+    # reading took a minute and a half), and a request must not hang on it.
+    if (not d.get("books") or time.time() - float(d.get("at") or 0) > SCAN_TTL_S) \
+            and not _SCANNING[0]:
         def run():
             _SCANNING[0] = True
             try:
                 scan()
             finally:
                 _SCANNING[0] = False
+        _SCANNING[0] = True
         threading.Thread(target=run, daemon=True, name="book-scan").start()
     return d
 
