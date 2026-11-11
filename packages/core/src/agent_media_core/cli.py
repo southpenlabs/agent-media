@@ -9407,9 +9407,20 @@ def cmd_endpoints(a) -> int:
     from . import endpoints as eps
 
     asked = set(eps.wanted())
+    # The two self-resolving endpoints report `tailnet` rather than spend up
+    # to 45s resolving. For display and probing we do need a real address,
+    # so ask once without the retry loop — `_peer_ip` is a single call. Get
+    # this wrong and the command says "off" for an endpoint whose unit is
+    # running, which is the one moment it is actually being read.
+    def _addr(bind: str) -> str:
+        if bind != "tailnet":
+            return bind
+        from .entrypoints.speech_state import _peer_ip
+        return _peer_ip() or "127.0.0.1"
+
     rows = []
     for ep in eps.ENDPOINTS:
-        bind, port = ep.bind(), ep.port()
+        bind, port = _addr(ep.bind()), ep.port()
         probe = "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
         try:
             with socket.create_connection((probe, port), timeout=0.4):

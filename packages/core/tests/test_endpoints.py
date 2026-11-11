@@ -244,3 +244,30 @@ def test_the_two_self_resolving_endpoints_say_so_rather_than_lying(monkeypatch):
     assert by["clips"].bind() == "127.0.0.1"
     # The loopback-by-default ones are unchanged.
     assert by["tts-shim"].bind() == "127.0.0.1"
+
+
+def test_media_endpoints_probes_a_real_address_not_the_placeholder(monkeypatch,
+                                                                   capsys):
+    """`bind()` reports `tailnet` for the two that resolve their own, and the
+    command has to turn that into an address before probing. It did not at
+    first, so it tried to connect to the literal host "tailnet" and printed
+    "off" for clips while the clips unit was up and serving — misleading at
+    exactly the moment the command is read, mid-migration."""
+    import socket as _socket
+    import types
+
+    from agent_media_core import cli
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.64.0.9")
+    probed = []
+
+    def _fake_connect(addr, timeout=None):
+        probed.append(addr)
+        raise OSError("nothing there")
+
+    monkeypatch.setattr(_socket, "create_connection", _fake_connect)
+    cli.cmd_endpoints(types.SimpleNamespace(json=False))
+    assert ("100.64.0.9", 8780) in probed, probed
+    assert not any(host == "tailnet" for host, _ in probed), probed
