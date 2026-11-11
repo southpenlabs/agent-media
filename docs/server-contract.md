@@ -4370,31 +4370,46 @@ each with its `uri`; kept an hour. `search` is not one of `lists`; 400 under
 two letters.
 
 **Podcasts: search, browse, follow** (11 Nov 2026; `podcasts.py`,
-`podcast_discover.py`), gated like `/music/recent`; Apple's in
-`MEDIA_MUSIC_REGION` (default AU), kept an hour.
+`podcast_discover.py`; David: "search and browse for everything", then
+"Can we have a similar kind of thing for podcasts?"), gated like
+`/music/recent`. Apple's public endpoints only, in `MEDIA_MUSIC_REGION`
+(default AU), kept an hour; a feed kept an hour.
 
-- `GET /podcasts/discover?list=top|following|search&q=&genre=&page=` →
-  `{"ok", "list", "lists", "page", "more", "items", "genres": [{"id",
-  "name"}], "q"?, "genre"?}`. `search`: Apple Podcasts' directory (the public
-  iTunes Search API, `media=podcast`); `top`: Apple's top podcasts chart
-  (iTunes' RSS `toppodcasts`, which takes a `genre`, one of `genres`' ids;
-  the newer RSS does not); `following`: the shows followed here. A show:
-  `{"id", "itunes", "title", "author", "feed", "art", "genre", "episodes",
-  "link", "following"}` (`feed` null on a chart row: it is looked up when the
-  show is opened). 20 a page. 400 for a list, genre or page that is not one,
-  or a search under two letters; 502 when Apple fails.
-- `GET /podcasts/show?itunes=<id>|feed=<url>` → `{"ok", "show": {"title",
-  "author", "art", "feed", "itunes", "genre", "link", "following"},
-  "episodes": [{"title", "url", "published", "duration"}]}`: the feed's
-  newest 20 (read as Practice reads a feed, kept six hours). 404 when Apple
-  has no such show or gives no feed.
+- `GET /podcasts/discover?list=top|following|new|search|author&q=&genre=&page=`
+  → `{"ok", "list", "lists", "page", "more", "items", "genres": [{"id",
+  "name"}], "episodes"?, "q"?, "genre"?}`, 20 a page.
+  - `search`: shows from the iTunes Search API (`media=podcast`,
+    `entity=podcast`) and, in `episodes`, up to 10 single episodes
+    (`entity=podcastEpisode`).
+  - `author` (`q` the host's name): their shows (`attribute=authorTerm`, those
+    whose author is the name when any is).
+  - `top`: Apple's top podcasts chart (iTunes' RSS `toppodcasts`, which takes
+    `genre`, one of `genres`' ids — Apple's top-level categories).
+  - `following`: the shows followed here; `new`: the newest 3 episodes of
+    each followed show (up to 15 shows), newest first, in `episodes`.
+  - A show: `{"id", "itunes", "genre_id", "title", "author", "feed", "art",
+    "genre", "episodes", "link", "following"}` (`feed` null on a chart row:
+    looked up when opened). An episode: `{"id"?, "title", "show", "feed",
+    "url", "published", "duration_s", "description", "art"}`.
+  - 400 for a list, genre or page that is not one, or words under two
+    letters; 502 when Apple fails.
+- `GET /podcasts/show?itunes=<id>|feed=<url>&q=&page=` → `{"ok", "show":
+  {"title", "author", "art", "feed", "itunes", "genre", "genre_id",
+  "categories", "description", "link", "episodes" (how many), "last_episode",
+  "every_days" (the median gap of the latest ten), "following"}, "episodes":
+  [{"title", "url", "published", "at", "duration_s", "description"}], "page",
+  "more", "q"?}`: every episode with audio in the feed, newest first, 20 a
+  page; `q` keeps those whose title or description has every word. More
+  like this is `list=top&genre=<genre_id>`. 404 when Apple has no such show
+  or gives no feed.
 - `POST /podcasts/show {"action": "follow", "feed", "title"?, "author"?,
   "art"?, "itunes"?}` | `{"action": "unfollow", "feed"}` → `{"ok",
   "following"}` (`podcast-follows.json`). `{"action": "play", "feed",
-  "url"}` saves that episode (it must be in the feed) as a saved podcast
-  link with its audio (`podcast_links.add_audio`: it stays in Saved) and
-  plays it as `POST /music {"action": "book"}` does → the music state and
-  `episode: {"uri", "title", "show"}`.
+  "url"}` saves that episode (it must be in the feed) as a saved podcast link
+  with its audio (`podcast_links.add_audio`: it stays in Saved) and plays it
+  as `POST /music {"action": "book"}` does → the music state and `episode:
+  {"uri", "title", "show"}`. The book player has no queue and a saved link
+  no played mark, so neither is offered.
 
 **MusicBrainz: artists and albums** (11 Nov 2026; `music_brainz.py`), gated
 like `/music/recent`. MusicBrainz is asked with the package's User-Agent, at

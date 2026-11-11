@@ -41,7 +41,10 @@ GENRES = {"1301": "Arts", "1321": "Business", "1303": "Comedy", "1304": "Educati
           "1310": "Music", "1489": "News", "1314": "Religion & Spirituality", "1533": "Science",
           "1324": "Society & Culture", "1545": "Sports", "1318": "Technology", "1488": "True Crime",
           "1309": "TV & Film"}
-LISTS = ("top", "following")
+LISTS = ("top", "following", "new")
+FEED_TTL_S = 3600.0
+FOLLOWED_NEWEST = 3
+FOLLOWED_MAX = 15
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, object]] = {}
@@ -129,9 +132,13 @@ def unfollow(feed: str) -> list[dict]:
 
 # ---- the directory --------------------------------------------------------------------------
 
+def _genre_id(r: dict) -> Optional[str]:
+    return next((str(g) for g in r.get("genreIds") or [] if str(g) in GENRES), None)
+
+
 def _show_row(r: dict) -> dict:
     cid = r.get("collectionId") or r.get("trackId")
-    return {"id": f"itunes:{cid}", "itunes": str(cid) if cid else None,
+    return {"id": f"itunes:{cid}", "itunes": str(cid) if cid else None, "genre_id": _genre_id(r),
             "title": str(r.get("collectionName") or r.get("trackName") or ""),
             "author": r.get("artistName") or None, "feed": r.get("feedUrl") or None,
             "art": r.get("artworkUrl600") or r.get("artworkUrl100") or None,
@@ -139,18 +146,53 @@ def _show_row(r: dict) -> dict:
             "link": r.get("collectionViewUrl") or None}
 
 
+def _itunes(params: dict) -> list[dict]:
+    url = f"{SEARCH}?{urllib.parse.urlencode({'media': 'podcast', 'country': region(), **params})}"
+    code, got = _get(url)
+    if code != 200 or not isinstance(got, dict):
+        raise OSError(f"Apple Podcasts answered HTTP {code}")
+    return [r for r in got.get("results") or [] if isinstance(r, dict)]
+
+
 def search(q: str, now: float) -> list[dict]:
     q = " ".join(str(q or "").split())[:200]
     if len(q) < 2:
         raise ValueError("search needs q, two letters or more")
+    return _cached(f"s:{region()}:{q.lower()}", lambda: [
+        _show_row(r) for r in _itunes({"term": q, "entity": "podcast", "limit": 50})
+        if r.get("collectionId") or r.get("trackId")], now)
+
+
+def _episode_row(r: dict) -> dict:
+    return {"id": f"ep:{r.get('trackId')}", "title": str(r.get("trackName") or ""),
+            "show": r.get("collectionName") or None, "itunes": str(r.get("collectionId") or "") or None,
+            "feed": r.get("feedUrl") or None, "url": r.get("episodeUrl") or None,
+            "published": r.get("releaseDate") or None,
+            "duration_s": round(r["trackTimeMillis"] / 1000) if isinstance(r.get("trackTimeMillis"), (int, float)) else None,
+            "description": _text(r.get("description") or r.get("shortDescription") or "")[:1000] or None,
+            "art": r.get("artworkUrl600") or r.get("artworkUrl160") or None}
+
+
+def search_episodes(q: str, now: float) -> list[dict]:
+    """Single episodes by words (entity=podcastEpisode), kept an hour."""
+    q = " ".join(str(q or "").split())[:200]
+    return _cached(f"se:{region()}:{q.lower()}", lambda: [
+        _episode_row(r) for r in _itunes({"term": q, "entity": "podcastEpisode", "limit": 25})
+        if r.get("episodeUrl")], now)
+
+
+def by_author(name: str, now: float) -> list[dict]:
+    """A host's shows: Apple's directory by author, those whose author is the name."""
+    name = " ".join(str(name or "").split())[:200]
+    if len(name) < 2:
+        raise ValueError("an author's name, two letters or more")
 
     def ask():
-        url = f"{SEARCH}?{urllib.parse.urlencode({'media': 'podcast', 'term': q, 'country': region(), 'limit': 50})}"
-        code, got = _get(url)
-        if code != 200 or not isinstance(got, dict):
-            raise OSError(f"Apple Podcasts answered HTTP {code}")
-        return [_show_row(r) for r in got.get("results") or [] if isinstance(r, dict) and (r.get("collectionId") or r.get("trackId"))]
-    return _cached(f"s:{region()}:{q.lower()}", ask, now)
+        rows = [_show_row(r) for r in _itunes({"term": name, "entity": "podcast", "attribute": "authorTerm", "limit": 50})
+                if r.get("collectionId")]
+        same = [r for r in rows if (r.get("author") or "").strip().lower() == name.lower()]
+        return same or rows
+    return _cached(f"au:{region()}:{name.lower()}", ask, now)
 
 
 def top(genre: str, now: float) -> list[dict]:
@@ -182,25 +224,138 @@ def top(genre: str, now: float) -> list[dict]:
     return _cached(f"t:{region()}:{genre}", ask, now)
 
 
-def _lookup(itunes: str, now: float) -> dict:
-    if not str(itunes).isdigit():
-        raise ValueError("itunes is a show's Apple id")
+_TAGS = re.compile(r"<[^>]+>")
 
-    def ask():
-        code, got = _get(f"{LOOKUP}?id={itunes}&entity=podcast")
-        if code != 200 or not isinstance(got, dict) or not got.get("results"):
-            raise LookupError("Apple Podcasts has no such show")
-        return _show_row(got["results"][0])
-    return _cached(f"l:{itunes}", ask, now, 86400.0)
+
+def _text(html: str) -> str:
+    import html as H
+    return " ".join(H.unescape(_TAGS.sub(" ", str(html or ""))).split())
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _seconds(d: str) -> Optional[int]:
+    d = str(d or "").strip()
+    if not d:
+        return None
+    try:
+        parts = [float(x) for x in d.split(":")]
+    except ValueError:
+        return None
+    total = 0.0
+    for x in parts:
+        total = total * 60 + x
+    return int(total)
+
+
+def _when(s: str) -> Optional[float]:
+    from email.utils import parsedate_to_datetime
+    try:
+        return parsedate_to_datetime(s).timestamp()
+    except (TypeError, ValueError, IndexError):
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+
+
+def parse(xml: bytes) -> dict:
+    """A feed's show and every episode with audio, newest first."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml)
+    ch = next((e for e in root.iter() if _local(e.tag) == "channel"), root)
+    show_: dict = {"title": "", "author": None, "description": None, "link": None, "art": None, "categories": []}
+    eps = []
+    for c in ch:
+        n = _local(c.tag)
+        if n == "title" and not show_["title"]:
+            show_["title"] = (c.text or "").strip()
+        elif n == "author" and not show_["author"]:
+            show_["author"] = (c.text or "").strip() or None
+        elif n in ("summary", "description") and not show_["description"]:
+            show_["description"] = _text(c.text)[:2000] or None
+        elif n == "link" and not show_["link"] and (c.text or "").startswith("http"):
+            show_["link"] = c.text.strip()
+        elif n == "image":
+            href = c.get("href") or next((x.text for x in c if _local(x.tag) == "url"), None)
+            if href and not show_["art"]:
+                show_["art"] = href.strip()
+        elif n == "category" and c.get("text"):
+            for name in [c.get("text")] + [x.get("text") for x in c if _local(x.tag) == "category" and x.get("text")]:
+                if name not in show_["categories"]:
+                    show_["categories"].append(name)
+        elif n == "item":
+            ep = {"title": "", "url": "", "published": None, "at": None, "duration_s": None, "description": None}
+            for f in c:
+                fn = _local(f.tag)
+                if fn == "title":
+                    ep["title"] = (f.text or "").strip()
+                elif fn == "enclosure" and (f.get("type", "").startswith("audio") or not f.get("type")):
+                    ep["url"] = f.get("url", "")
+                elif fn == "pubDate":
+                    ep["published"] = (f.text or "").strip() or None
+                    ep["at"] = _when(ep["published"] or "")
+                elif fn == "duration":
+                    ep["duration_s"] = _seconds(f.text or "")
+                elif fn in ("summary", "description") and not ep["description"]:
+                    ep["description"] = _text(f.text)[:1500] or None
+            if ep["url"].startswith(("http://", "https://")):
+                eps.append(ep)
+    eps.sort(key=lambda e: -(e["at"] or 0))
+    return {"show": show_, "episodes": eps}
+
+
+def _fetch_feed(url: str) -> bytes:
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "agent-media/1 ( https://github.com/southpenlabs/agent-media )"})
+    with urllib.request.urlopen(req, timeout=20) as r:   # noqa: S310 — http(s) only, checked
+        return r.read(20 * 1024 * 1024)
+
+
+def feed(url: str, now: Optional[float] = None) -> dict:
+    url = _feed_ok(url)
+    return _cached(f"f:{url}", lambda: parse(_fetch_feed(url)), time.time() if now is None else now, FEED_TTL_S)
+
+
+def _new_followed(now: float) -> list[dict]:
+    """The newest episodes of the shows followed, newest first."""
+    out = []
+    for f in follows()[:FOLLOWED_MAX]:
+        try:
+            got = feed(f["feed"], now)
+        except Exception:  # noqa: BLE001 — that show left out
+            continue
+        for e in got["episodes"][:FOLLOWED_NEWEST]:
+            out.append({**e, "show": f.get("title") or got["show"]["title"], "feed": f["feed"],
+                        "art": f.get("art") or got["show"].get("art")})
+    out.sort(key=lambda e: -(e.get("at") or 0))
+    return out
 
 
 def listing(which: str, q: str = "", genre: str = "", page: int = 1, now: Optional[float] = None) -> dict:
     """What GET /podcasts/discover answers (less `ok`)."""
     now = time.time() if now is None else now
-    if which not in LISTS + ("search",):
-        raise ValueError(f"list must be one of {', '.join(LISTS)}, or search")
+    if which not in LISTS + ("search", "author"):
+        raise ValueError(f"list must be one of {', '.join(LISTS)}, search or author")
+    genres = [{"id": k, "name": v} for k, v in sorted(GENRES.items(), key=lambda x: x[1])]
+    page = max(1, page)
+    start = (page - 1) * PAGE
+    if which == "new":
+        eps = _new_followed(now)
+        return {"list": which, "lists": list(LISTS), "page": page, "more": len(eps) > start + PAGE, "items": [],
+                "episodes": eps[start:start + PAGE], "genres": genres}
+    episodes = None
     if which == "search":
         rows = search(q, now)
+        try:
+            episodes = search_episodes(q, now)[:10]
+        except Exception:  # noqa: BLE001 — the shows without episodes
+            episodes = []
+    elif which == "author":
+        rows = by_author(q, now)
     elif which == "top":
         rows = top(genre, now)
     else:
@@ -209,47 +364,72 @@ def listing(which: str, q: str = "", genre: str = "", page: int = 1, now: Option
                  "episodes": None, "link": None} for r in follows()]
     followed = {r.get("feed") for r in follows()} | {r.get("itunes") for r in follows() if r.get("itunes")}
     rows = [{**r, "following": (r.get("feed") in followed) or (r.get("itunes") in followed)} for r in rows]
-    page = max(1, page)
-    start = (page - 1) * PAGE
     return {"list": which, "lists": list(LISTS), "page": page, "more": len(rows) > start + PAGE,
-            "items": rows[start:start + PAGE], "genres": [{"id": k, "name": v} for k, v in sorted(GENRES.items(), key=lambda x: x[1])],
-            **({"q": q} if which == "search" else {}), **({"genre": genre} if genre else {})}
+            "items": rows[start:start + PAGE], "genres": genres,
+            **({"q": q} if which in ("search", "author") else {}), **({"genre": genre} if genre else {}),
+            **({"episodes": episodes} if episodes is not None else {})}
 
 
-def show(itunes: str = "", feed: str = "", now: Optional[float] = None) -> dict:
-    """A show and its newest episodes: `{show: {title, author, art, feed,
-    itunes, genre, following}, episodes: [{title, url, published, duration}]}`."""
-    from . import practice_library
+def _lookup(itunes: str, now: float) -> dict:
+    if not str(itunes).isdigit():
+        raise ValueError("itunes is a show's Apple id")
 
+    def ask():
+        code, got = _get(f"{LOOKUP}?id={itunes}&entity=podcast&country={region()}")
+        if code != 200 or not isinstance(got, dict) or not got.get("results"):
+            raise LookupError("Apple Podcasts has no such show")
+        return _show_row(got["results"][0])
+    return _cached(f"l:{itunes}", ask, now, 86400.0)
+
+
+def show(itunes: str = "", feed_url: str = "", q: str = "", page: int = 1, now: Optional[float] = None) -> dict:
+    """A show's page: `{show: {title, author, art, feed, itunes, genre,
+    genre_id, categories, description, link, episodes, last_episode,
+    every_days, following}, episodes: [...], page, more, q?}` — every episode
+    of its feed, newest first, PAGE a page, those whose title or
+    description has the words `q`."""
     now = time.time() if now is None else now
     meta: dict = {}
     if itunes:
         meta = _lookup(itunes, now)
-        feed = meta.get("feed") or ""
-        if not feed:
+        feed_url = meta.get("feed") or ""
+        if not feed_url:
             raise LookupError("Apple Podcasts gives no feed for that show")
-    feed = _feed_ok(feed)
-    got = practice_library.read_feed(feed)
-    if not got:
-        raise OSError("couldn't read that show's feed")
-    eps = got.get("episodes") or []
-    kept = next((r for r in follows() if r.get("feed") == feed), None)
-    return {"show": {"title": meta.get("title") or got.get("title") or (kept or {}).get("title") or feed,
-                     "author": meta.get("author") or (kept or {}).get("author"), "art": meta.get("art") or (kept or {}).get("art"),
-                     "feed": feed, "itunes": meta.get("itunes") or (kept or {}).get("itunes"), "genre": meta.get("genre"),
-                     "link": meta.get("link"), "following": kept is not None},
-            "episodes": eps[:EPISODES]}
+    got = feed(feed_url, now)
+    eps = got["episodes"]
+    kept = next((r for r in follows() if r.get("feed") == feed_url), None)
+    ats = [e["at"] for e in eps[:11] if e.get("at")]
+    gaps = sorted(a - b for a, b in zip(ats, ats[1:]) if a > b)
+    every = round(gaps[len(gaps) // 2] / 86400.0, 1) if gaps else None
+    sh = got["show"]
+    words = " ".join(str(q or "").split()).lower()
+    shown = [e for e in eps if not words or all(w in f"{e['title']} {e.get('description') or ''}".lower() for w in words.split())]
+    page = max(1, page)
+    start = (page - 1) * PAGE
+    return {"show": {"title": meta.get("title") or sh["title"] or (kept or {}).get("title") or feed_url,
+                     "author": meta.get("author") or sh.get("author") or (kept or {}).get("author"),
+                     "art": meta.get("art") or sh.get("art") or (kept or {}).get("art"),
+                     "feed": feed_url, "itunes": meta.get("itunes") or (kept or {}).get("itunes"),
+                     "genre": meta.get("genre") or (sh["categories"][0] if sh["categories"] else None),
+                     "genre_id": meta.get("genre_id"), "categories": sh["categories"],
+                     "description": sh.get("description"), "link": sh.get("link") or meta.get("link"),
+                     "episodes": len(eps), "last_episode": eps[0].get("published") if eps else None,
+                     "every_days": every, "following": kept is not None},
+            "episodes": shown[start:start + PAGE], "page": page, "more": len(shown) > start + PAGE,
+            **({"q": words} if words else {})}
 
 
-def episode(feed: str, url: str) -> dict:
+def episode(feed_url: str, url: str) -> dict:
     """One of the show's episodes (by its audio address, which must be in
     the feed) saved as a podcast link: `{"uri", "title", "show"}`."""
     from . import podcast_links
 
-    got = show(feed=feed)
+    got = feed(feed_url)
     ep = next((e for e in got["episodes"] if e.get("url") == url), None)
     if not ep:
         raise ValueError("that episode is not in the show's feed")
-    podcast_links.add_audio(url, title=ep.get("title") or "", show=got["show"]["title"], art=got["show"].get("art"),
-                            published=ep.get("published") or None, page=feed)
-    return {"uri": url, "title": ep.get("title") or "", "show": got["show"]["title"]}
+    kept = next((r for r in follows() if r.get("feed") == feed_url), None)
+    title = (kept or {}).get("title") or got["show"]["title"]
+    podcast_links.add_audio(url, title=ep.get("title") or "", show=title, art=got["show"].get("art"),
+                            published=ep.get("published"), page=feed_url, duration_s=ep.get("duration_s"))
+    return {"uri": url, "title": ep.get("title") or "", "show": title}

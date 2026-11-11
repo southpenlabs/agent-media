@@ -1,8 +1,8 @@
 """Podcasts to find and follow (server-contract.md §6.9a "Podcasts: search,
 browse, follow"; agent_media_core.podcast_discover; David, 11 Nov 2026).
 
-  GET  /podcasts/discover?list=top|following|search&q=&genre=&page=   gated
-  GET  /podcasts/show?itunes=<id>|feed=<url>                           gated
+  GET  /podcasts/discover?list=top|following|new|search|author&q=&genre=&page=   gated
+  GET  /podcasts/show?itunes=<id>|feed=<url>&q=&page=                            gated
   POST /podcasts/show {"action": "follow", "feed", "title"?, "author"?, "art"?, "itunes"?}   gated
                       {"action": "unfollow", "feed"}
                       {"action": "play", "feed", "url"}   (as POST /music's gate: saved, then played)
@@ -39,7 +39,10 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                 raise ValueError("page is a number")
             send_json(h, 200, {"ok": True, **P.listing(_q(h, "list") or "top", _q(h, "q"), _q(h, "genre"), int(page))})
         elif method == "GET":
-            send_json(h, 200, {"ok": True, **P.show(_q(h, "itunes"), _q(h, "feed"))})
+            page = _q(h, "page") or "1"
+            if not page.isdigit():
+                raise ValueError("page is a number")
+            send_json(h, 200, {"ok": True, **P.show(_q(h, "itunes"), _q(h, "feed"), _q(h, "q"), int(page))})
         else:
             body = read_json(h)
             body = body if isinstance(body, dict) else {}

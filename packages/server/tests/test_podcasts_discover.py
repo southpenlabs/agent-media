@@ -16,9 +16,16 @@ from agent_media_server import music
 from test_contract import AUTH, audio_host, call, server, signed_in, typed  # noqa: F401
 
 FEED = "https://feeds.example.com/history.xml"
-RSS = b"""<?xml version="1.0"?><rss><channel><title>Hardcore History</title>
-<item><title>Ep 70</title><enclosure url="https://cdn.example.com/70.mp3" type="audio/mpeg"/><pubDate>Mon, 09 Nov 2026 00:00:00 GMT</pubDate></item>
-<item><title>Ep 69</title><enclosure url="https://cdn.example.com/69.mp3" type="audio/mpeg"/></item></channel></rss>"""
+_ITEMS = "".join(
+    f'<item><title>Ep {n}</title><enclosure url="https://cdn.example.com/{n}.mp3" type="audio/mpeg"/>'
+    f'<pubDate>{"Mon, 09 Nov 2026" if n == 70 else "Mon, 26 Oct 2026" if n == 69 else "Mon, 12 Oct 2026" if n == 68 else "Sun, 01 Jan 2023"} 00:00:00 GMT</pubDate>'
+    f'<itunes:duration>{"1:30:00" if n == 70 else "3600"}</itunes:duration>'
+    f'<description>&lt;p&gt;{"Rome burns" if n == 70 else "Other things"}&lt;/p&gt;</description></item>'
+    for n in range(70, 47, -1))
+RSS = ('<?xml version="1.0"?><rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>'
+       '<title>Hardcore History</title><itunes:author>Dan Carlin</itunes:author><link>https://www.dancarlin.com</link>'
+       '<itunes:image href="https://a/feed.jpg"/><itunes:category text="History"/><itunes:summary>Was history ever this good?</itunes:summary>'
+       + _ITEMS + "</channel></rss>").encode()
 
 
 @pytest.fixture()
@@ -29,9 +36,18 @@ def apple(monkeypatch):
         asked.append(url)
         u = urllib.parse.urlsplit(url)
         q = urllib.parse.parse_qs(u.query)
+        if u.path == "/search" and q.get("entity") == ["podcastEpisode"]:
+            return 200, {"results": [{"trackId": 9, "trackName": "Ep 70", "collectionName": "Dan Carlin's Hardcore History",
+                                      "collectionId": 173001861, "feedUrl": FEED, "episodeUrl": "https://cdn.example.com/70.mp3",
+                                      "releaseDate": "2026-11-09T00:00:00Z", "trackTimeMillis": 5400000,
+                                      "description": "<b>Rome</b> burns"}]}
+        if u.path == "/search" and q.get("attribute") == ["authorTerm"]:
+            return 200, {"results": [{"collectionId": 173001861, "collectionName": "Dan Carlin's Hardcore History", "artistName": "Dan Carlin"},
+                                     {"collectionId": 5, "collectionName": "Common Sense", "artistName": "Dan Carlin"},
+                                     {"collectionId": 6, "collectionName": "Not His", "artistName": "Dan Carlinsky"}]}
         if u.path == "/search":
             assert q["media"] == ["podcast"] and q["country"] == ["au"]
-            return 200, {"results": [{"collectionId": 173001861, "collectionName": "Dan Carlin's Hardcore History",
+            return 200, {"results": [{"collectionId": 173001861, "genreIds": ["1487", "26"], "collectionName": "Dan Carlin's Hardcore History",
                                       "artistName": "Dan Carlin", "feedUrl": FEED, "artworkUrl600": "https://a/600.jpg",
                                       "primaryGenreName": "History", "trackCount": 70}]}
         if u.path == "/lookup":
@@ -47,7 +63,7 @@ def apple(monkeypatch):
                                              "category": {"attributes": {"label": "History" if genre else "Comedy"}}}]}}
         return 404, None
     monkeypatch.setattr(P, "_get", get)
-    monkeypatch.setattr(practice_library, "_fetch", lambda url, timeout=15.0: RSS)
+    monkeypatch.setattr(P, "_fetch_feed", lambda url: RSS)
     P.clear_cache()
     yield asked
     P.clear_cache()
@@ -57,7 +73,11 @@ def test_search_top_and_genre(server, signed_in, apple):
     res, obj = call(server, "GET", "/podcasts/discover?list=search&q=hardcore%20history", headers=AUTH)
     assert res.status == 200, obj
     assert obj["items"][0]["title"] == "Dan Carlin's Hardcore History" and obj["items"][0]["feed"] == FEED
-    assert obj["items"][0]["following"] is False
+    assert obj["items"][0]["following"] is False and obj["items"][0]["genre_id"] == "1487"
+    assert obj["episodes"][0]["title"] == "Ep 70" and obj["episodes"][0]["description"] == "Rome burns"
+    assert obj["episodes"][0]["duration_s"] == 5400 and obj["episodes"][0]["feed"] == FEED
+    _, obj = call(server, "GET", "/podcasts/discover?list=author&q=Dan%20Carlin", headers=AUTH)
+    assert [i["title"] for i in obj["items"]] == ["Dan Carlin's Hardcore History", "Common Sense"]
     _, obj = call(server, "GET", "/podcasts/discover?list=top", headers=AUTH)
     assert obj["items"][0]["title"] == "Top Show" and obj["items"][0]["art"] == "https://a/x/600x600bb.jpg"
     _, obj = call(server, "GET", "/podcasts/discover?list=top&genre=1487", headers=AUTH)
@@ -75,12 +95,23 @@ def test_a_show_followed_and_an_episode_played(server, signed_in, audio_host, ap
     res, obj = call(server, "GET", "/podcasts/show?itunes=173001861", headers=AUTH)
     assert res.status == 200, obj
     assert obj["show"]["feed"] == FEED and obj["show"]["following"] is False
-    assert [e["title"] for e in obj["episodes"]] == ["Ep 70", "Ep 69"]
+    sh = obj["show"]
+    assert (sh["author"], sh["description"], sh["link"], sh["categories"], sh["episodes"]) == (
+        "Dan Carlin", "Was history ever this good?", "https://www.dancarlin.com", ["History"], 23)
+    assert sh["last_episode"].startswith("Mon, 09 Nov 2026") and sh["every_days"] == 14.0
+    assert [e["title"] for e in obj["episodes"][:2]] == ["Ep 70", "Ep 69"] and len(obj["episodes"]) == 20 and obj["more"]
+    assert obj["episodes"][0]["duration_s"] == 5400 and obj["episodes"][0]["description"] == "Rome burns"
+    _, more = call(server, "GET", "/podcasts/show?itunes=173001861&page=2", headers=AUTH)
+    assert [e["title"] for e in more["episodes"]] == ["Ep 50", "Ep 49", "Ep 48"] and not more["more"]
+    _, found = call(server, "GET", "/podcasts/show?itunes=173001861&q=rome", headers=AUTH)
+    assert [e["title"] for e in found["episodes"]] == ["Ep 70"]
     res, obj = call(server, "POST", "/podcasts/show", {"action": "follow", "feed": FEED, "title": "Hardcore History",
                                                         "itunes": "173001861"}, AUTH)
     assert obj == {"ok": True, "following": True}
     _, obj = call(server, "GET", "/podcasts/discover?list=following", headers=AUTH)
     assert [i["title"] for i in obj["items"]] == ["Hardcore History"]
+    _, obj = call(server, "GET", "/podcasts/discover?list=new", headers=AUTH)
+    assert [(e["title"], e["show"]) for e in obj["episodes"]] == [("Ep 70", "Hardcore History"), ("Ep 69", "Hardcore History"), ("Ep 68", "Hardcore History")]
     _, obj = call(server, "GET", "/podcasts/discover?list=search&q=hardcore", headers=AUTH)
     assert obj["items"][0]["following"] is True
     res, obj = call(server, "POST", "/podcasts/show", {"action": "play", "feed": FEED, "url": "https://cdn.example.com/70.mp3"}, AUTH)
