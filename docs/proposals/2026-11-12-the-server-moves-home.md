@@ -304,11 +304,14 @@ them:
 These are host setup — sam's dotfiles and provisioning — and they travel on
 their own schedule, before or after the cutover, in any order. None of them
 blocks the server move, and none of them belongs in `media server move`.
-The one that is urgent has nothing to do with the move at all: memory search
-is **broken on red2 today**, because `agent-memory-search` defaults to
-`127.0.0.1:54321` and red2 has no `~/.config/hippocampus.env`, so every chat
-started there since 11 Nov has searched nothing. That is one file, now, not
-a migration step.
+The one that was urgent had nothing to do with the move at all, and is
+already done: memory search was dead on red2 from 11 Nov, because
+`agent-memory-search` defaults to `127.0.0.1:54321` and red2 had no
+`~/.config/hippocampus.env` — every chat started there searched nothing.
+**Fixed 12 Nov 2026**: red5's client config copied across pointing at
+`red5:54321`, and searched from a red2 chat to confirm. A worked example of
+the split — one file on one host, fixed the same day, waiting on nothing
+here.
 
 The rule worth keeping: **what a backup carries is what a base is.** If
 moving a server needs something the backup does not hold, the backup is
@@ -380,10 +383,10 @@ the day of the cutover, not after it.
    read a file shared from the phone through the server rather than off a
    filesystem it is no longer on.
 5a. **The assistant's workspace, whenever** (sam, host setup, not part of
-   the base and not blocking any of the above): `~/.config/hippocampus.env`
-   on red2 *today*, agent-mail and `~/org` following the chats, `~/.claude`
-   brought to parity, the projects in use cloned. "What is not part of the
-   base".
+   the base and not blocking any of the above): agent-mail and `~/org`
+   following the chats, `~/.claude` brought to parity, the projects in use
+   cloned. `~/.config/hippocampus.env` on red2 is **done, 12 Nov 2026**.
+   "What is not part of the base".
 6. **Later, recommended**: `hippocampus`, `memory-governor`, `litellm` and
    `cli-proxy-api` to red2, so the two most-used paths stop crossing the
    world. Then look again at what red5 is for, and at whether the

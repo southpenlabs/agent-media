@@ -2704,11 +2704,14 @@ ahead.
       (forty-odd on red5, three on red2). agent-media does not own these,
       does not move them, and does not wait for them: they are host setup
       and travel on their own schedule. Keeping them out is what makes the
-      base a single command. The one urgent item among them has nothing to
-      do with the move: memory search is broken on red2 today
-      (`agent-memory-search` defaults to `127.0.0.1:54321`, no
-      `~/.config/hippocampus.env` there), so every chat started there since
-      11 Nov has searched nothing — one file, now.
+      base a single command. The one urgent item among them had nothing to
+      do with the move and is already closed: memory search was dead on red2
+      from 11 Nov (`agent-memory-search` defaults to `127.0.0.1:54321` and
+      red2 had no `~/.config/hippocampus.env`), so every chat started there
+      searched nothing — **fixed 12 Nov 2026**, red5's client config copied
+      across pointing at `red5:54321` and searched from a red2 chat to
+      confirm. One file on one host, fixed the same day, blocking nothing:
+      which is the point of keeping the workspace out of the base.
 
 ## Loose ends
 
