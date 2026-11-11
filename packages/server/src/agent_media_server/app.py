@@ -474,16 +474,19 @@ APP_UPDATE_PATHS = frozenset({"/app/update", "/app/update/apk"})
 CORS_PATHS = CORS_PATHS | APP_UPDATE_PATHS
 
 # Saved practice: meditations, yoga, any practice (practice.py, §6.45).
-PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher"})
+PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher", "/practice/discover"})
 # Peer to peer: practice shared with the owner over Matrix (shares.py, §6.48).
 SHARES_PATHS = frozenset({"/shares"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
+# Podcasts to find and follow (podcasts.py, §6.9a).
+PODCAST_PATHS = frozenset({"/podcasts/discover", "/podcasts/show"})
+CORS_PATHS = CORS_PATHS | PODCAST_PATHS
 # Movies and TV from Trakt, and its sign-in (watch.py, §6.54).
 WATCH_PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/accounts/trakt", "/accounts/trakt/start",
                          "/accounts/trakt/finish", "/accounts/trakt/signout"})
 CORS_PATHS = CORS_PATHS | WATCH_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
-MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people"})
+MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people", "/media/search"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
 
 # A chat with people handed to an agent (room_delegate.py, §6.53).
@@ -839,6 +842,10 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import spotify_auth
 
         return spotify_auth.handle(h, method, path, _bearer(h), _json)
+    if path in PODCAST_PATHS and method in ("GET", "POST"):
+        from . import podcasts
+
+        return podcasts.handle(h, method, path, _bearer(h), _json, _read_json)
     if path in WATCH_PATHS and method in ("GET", "POST"):
         # Movies and TV from Trakt, and signing in to it (watch.py, §6.54).
         # An OPTIONS preflight goes on to _options like every CORS path: the
@@ -867,6 +874,12 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         else:
             _json(h, 200, {"ok": True, "kind": kind, "places": media_people.places(kind, names)})
         return True
+    if path == "/media/search" and method == "GET":
+        # One search across the Media tabs (media_search.py, §6.46a).
+        from . import media_search
+        ok, detail = media_search.search((parse_qs(h.path.partition("?")[2]).get("q") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        return True
     if path == "/media/person" and method == "GET":
         # Who made it: an artist, an author, a podcast's show (media_people.py, §6.47).
         from agent_media_core import media_people
@@ -882,6 +895,25 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return True
     if path == "/shares" and method in ("GET", "POST"):
         return _shares(h, method)
+    if path == "/practice/discover" and method == "GET":
+        # YouTube's practices beyond those saved (practice_discover.py, §6.45 "Search and browse").
+        from agent_media_core import practice_discover as PD
+        q = parse_qs(h.path.partition("?")[2])
+        user, err = auth.gate(_bearer(h))
+        if not user:
+            _json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        words, style = (q.get("q") or [""])[0].strip(), (q.get("style") or [""])[0].strip()
+        try:
+            items = PD.search(words) if words else PD.style(style) if style else []
+            _json(h, 200, {"ok": True, "styles": PD.styles(), "items": items, **({"q": words} if words else {}),
+                           **({"style": style} if style and not words else {})})
+        except ValueError as e:
+            _json(h, 400, {"ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            print(f"practice: discover failed: {e}", file=sys.stderr)
+            _json(h, 502, {"ok": False, "error": f"YouTube search failed: {e}"})
+        return True
     if path == "/practice/teacher" and method == "GET":
         from . import practice
         ok, detail = practice.teacher((parse_qs(h.path.partition("?")[2]).get("name") or [""])[0], _bearer(h))

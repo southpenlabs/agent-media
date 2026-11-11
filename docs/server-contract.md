@@ -4369,6 +4369,48 @@ YouTube Music results, `artist`, `duration_s`; else the DJ's first result),
 each with its `uri`; kept an hour. `search` is not one of `lists`; 400 under
 two letters.
 
+**Podcasts: search, browse, follow** (11 Nov 2026; `podcasts.py`,
+`podcast_discover.py`; David: "search and browse for everything", then
+"Can we have a similar kind of thing for podcasts?"), gated like
+`/music/recent`. Apple's public endpoints only, in `MEDIA_MUSIC_REGION`
+(default AU), kept an hour; a feed kept an hour.
+
+- `GET /podcasts/discover?list=top|following|new|search|author&q=&genre=&page=`
+  → `{"ok", "list", "lists", "page", "more", "items", "genres": [{"id",
+  "name"}], "episodes"?, "q"?, "genre"?}`, 20 a page.
+  - `search`: shows from the iTunes Search API (`media=podcast`,
+    `entity=podcast`) and, in `episodes`, up to 10 single episodes
+    (`entity=podcastEpisode`).
+  - `author` (`q` the host's name): their shows (`attribute=authorTerm`, those
+    whose author is the name when any is).
+  - `top`: Apple's top podcasts chart (iTunes' RSS `toppodcasts`, which takes
+    `genre`, one of `genres`' ids — Apple's top-level categories).
+  - `following`: the shows followed here; `new`: the newest 3 episodes of
+    each followed show (up to 15 shows), newest first, in `episodes`.
+  - A show: `{"id", "itunes", "genre_id", "title", "author", "feed", "art",
+    "genre", "episodes", "link", "following"}` (`feed` null on a chart row:
+    looked up when opened). An episode: `{"id"?, "title", "show", "feed",
+    "url", "published", "duration_s", "description", "art"}`.
+  - 400 for a list, genre or page that is not one, or words under two
+    letters; 502 when Apple fails.
+- `GET /podcasts/show?itunes=<id>|feed=<url>&q=&page=` → `{"ok", "show":
+  {"title", "author", "art", "feed", "itunes", "genre", "genre_id",
+  "categories", "description", "link", "episodes" (how many), "last_episode",
+  "every_days" (the median gap of the latest ten), "following"}, "episodes":
+  [{"title", "url", "published", "at", "duration_s", "description"}], "page",
+  "more", "q"?}`: every episode with audio in the feed, newest first, 20 a
+  page; `q` keeps those whose title or description has every word. More
+  like this is `list=top&genre=<genre_id>`. 404 when Apple has no such show
+  or gives no feed.
+- `POST /podcasts/show {"action": "follow", "feed", "title"?, "author"?,
+  "art"?, "itunes"?}` | `{"action": "unfollow", "feed"}` → `{"ok",
+  "following"}` (`podcast-follows.json`). `{"action": "play", "feed",
+  "url"}` saves that episode (it must be in the feed) as a saved podcast link
+  with its audio (`podcast_links.add_audio`: it stays in Saved) and plays it
+  as `POST /music {"action": "book"}` does → the music state and `episode:
+  {"uri", "title", "show"}`. The book player has no queue and a saved link
+  no played mark, so neither is offered.
+
 **MusicBrainz: artists and albums** (11 Nov 2026; `music_brainz.py`), gated
 like `/music/recent`. MusicBrainz is asked with the package's User-Agent, at
 most once a second; lookups kept a week, searches a day
@@ -9572,6 +9614,22 @@ names the first time they are read.
 - Kept in `<state_dir>/practice.json`; feeds cached for 6 h in
   `<cache>/practice-feeds/`. Not a guest POST.
 
+#### Search and browse YouTube — gated (built 11 Nov 2026)
+
+`GET /practice/discover?q=<words>` | `?style=<name>` (`practice_discover.py`;
+David: "Can we also do search and browse for everything?") → `{"ok",
+"styles", "items": [{"id": "yt:<vid>", "youtube_id", "title", "channel",
+"duration_s", "art", "saved"}], "q"?, "style"?}`: the host's YouTube search
+(as Music's catalogue search; kept an hour) for the words, or for one of
+`styles` — the style tree's kinds as names ("Yin yoga", "Body scan",
+"Breathwork", …), each asked as "<name> practice" and kept a day. `saved`
+when the Practice list has it; saving is `POST /practice {"action": "add",
+"url"}` as a pasted link, and a saved one plays by its id (`yt:<vid>`).
+Neither: no items, the styles. 400 for a style not listed or words under
+two letters; 502 when the search fails.
+
+---
+
 ### 6.46 A link into a Media tab — gated (built 1 Nov 2026)
 
 Code: `agent_media_server/media_links.py`, the podcast links in
@@ -9687,6 +9745,26 @@ Code: `packages/server/src/agent_media_server/devices.py` (the store, the
 codes, the CLI's listing), `auth.py` (the gate), `app.py` (`POST /pair`).
 Pinned by `packages/server/tests/test_devices.py`.
 
+
+### 6.46a One search across the Media tabs — gated (built 11 Nov 2026)
+
+`GET /media/search?q=<words>` (`media_search.py`; David, 11 Nov 2026: "Can
+we also do search and browse for everything?") → `{"ok", "q", "groups":
+{"music"|"book"|"podcast"|"practice"|"movie"|"tv": {"mine": [...],
+"found": [...]}}}`, at most 5 of each, asked side by side (20 s at most):
+
+| group | `mine` | `found` |
+|---|---|---|
+| `music` | what was played (`/music/recent?q=`) | the catalogue (`/music/discover list=search`) |
+| `book` | books played, then the library (`list=all&q=`) | — |
+| `podcast` | episodes played | Apple Podcasts' shows (`/podcasts/discover list=search`) |
+| `practice` | saved practices naming the words | YouTube (`/practice/discover?q=`) |
+| `movie`, `tv` | Trakt's recently watched and watchlist (connected only) | Trakt's search (§6.54) |
+
+Rows are each source's own shapes. A part that fails, or is not set up, is
+empty. 400 under two letters.
+
+---
 
 ### 6.47 Who made it: artists, authors, shows — gated (built 1 Nov 2026)
 
