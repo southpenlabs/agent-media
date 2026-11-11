@@ -15,6 +15,10 @@ app sends its share token to 8771, OWUI posts OpenAI-shaped requests to
 gain. What goes away is the *process*, not the address, so nothing outside
 this host can tell the difference.
 
+`start_all` may be slow and must not be called on a boot path: see
+`_speech_state` below, which can spend ~45s asking a non-existent tailnet
+for an address. The canvas starts it on a thread.
+
 Nothing is folded in silently. Each endpoint is off until asked for, so a
 host still running the separate units does not end up with two processes
 fighting for one port:
@@ -111,6 +115,12 @@ def _speech_state(bind: str, port: int):
     # Its own bind resolution: the address is discovered from the peer
     # network at start-up rather than configured, and retried while
     # tailscaled comes up. Only an explicit setting overrides that.
+    #
+    # SLOW ON PURPOSE, and the reason `start_all` must not be on anyone's
+    # boot path: with no explicit bind this is six attempts at `tailscale ip`
+    # with a 5s timeout and 2.5s between, so up to ~45s on a host with no
+    # tailnet. Set MEDIA_SPEECH_STATE_BIND and it returns at once. The canvas
+    # starts endpoints on a thread for this.
     explicit = (os.environ.get("MEDIA_SPEECH_STATE_BIND") or "").strip()
     return speech_state.make_server(
         speech_state.resolve_bind(explicit or None), port)

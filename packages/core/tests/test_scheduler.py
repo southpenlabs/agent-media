@@ -288,3 +288,37 @@ def test_every_builtin_names_a_command_the_cli_accepts(job):
         pytest.skip("no `media` console script beside this interpreter")
     r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, f"{' '.join(job.argv)}: {r.stderr[-400:]}"
+
+
+def test_a_never_run_every_job_actually_runs_despite_its_jitter(monkeypatch):
+    """The bug a smoke boot found and `due_at` alone could not.
+
+    For an `every` job with no recorded run, `due_at` returns *now*. With a
+    jitter offset added, `now < due + jitter` was therefore true on every
+    tick for ever — so the job never ran, and `session-reap` (every 15m,
+    jitter 60) would silently never have started on a fresh host. Tested
+    through `tick`, because `due_at` on its own looked perfectly correct.
+    """
+    job = scheduler.Job("reaper", ["true"], every=900, jitter=60)
+    monkeypatch.setattr(scheduler, "jobs", lambda: [job])
+    ran = []
+    assert scheduler.tick(now=1_000_000.0, run=ran.append) == ["reaper"]
+
+    # And once it has run, the spread does apply: it is not due again until
+    # its period plus the offset has passed.
+    scheduler.record("reaper", started=1_000_000.0, rc=0, seconds=0.1)
+    assert scheduler.tick(now=1_000_000.0 + 900, run=ran.append) == []
+    assert scheduler.tick(now=1_000_000.0 + 900 + 61, run=ran.append) == ["reaper"]
+
+
+def test_every_builtin_with_a_cadence_is_reachable_from_a_cold_start():
+    """A cold start is the state every fresh install is in, and the jitter
+    bug above made it the one state in which nothing ran."""
+    import tempfile
+
+    for job in scheduler.JOBS:
+        if not job.every:
+            continue
+        due = scheduler.due_at(job, last=None, now=1_000_000.0)
+        offset = scheduler._jitter_for(job, due, first=True)
+        assert due + offset <= 1_000_000.0, f"{job.name} is never due"

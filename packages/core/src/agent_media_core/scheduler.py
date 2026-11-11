@@ -449,14 +449,25 @@ def _take_lock():
     return fh
 
 
-def _jitter_for(job: Job, when: float) -> float:
+def _jitter_for(job: Job, when: float, *, first: bool = False) -> float:
     """A stable offset in `[0, jitter)` for this job and this due time.
 
     Stable, not random: re-derived on every tick, so a job cannot be pushed
     further back each time round the loop and never run — which is what a
     fresh `random()` per tick would do.
+
+    `first` (the job has never run) gets no offset at all, and that is a bug
+    fix rather than a nicety. For an `every` job with no recorded run,
+    `due_at` returns *now* — so `now < due + jitter` was true on every tick
+    for ever, and a never-run `every` job never ran at all. `session-reap`
+    on a fresh host would simply never have started, silently. Found by
+    booting a server with the scheduler on and watching nothing happen.
+
+    Skipping the spread here costs nothing: jitter exists to stop a dozen
+    jobs firing at the same *scheduled* instant — the 03:20s — and a first
+    run has no such instant to collide on.
     """
-    if job.jitter <= 0:
+    if job.jitter <= 0 or first:
         return 0.0
     seed = hash((job.name, int(when // 86400))) & 0xFFFF
     return job.jitter * (seed / 0xFFFF)
@@ -476,7 +487,7 @@ def tick(now: "Optional[float]" = None, *,
         row = last_run(job.name)
         last = row.get("at") if row else None
         due = due_at(job, last=last, now=now)
-        if due is None or now < due + _jitter_for(job, due):
+        if due is None or now < due + _jitter_for(job, due, first=last is None):
             continue
         started.append(job.name)
         run(job)

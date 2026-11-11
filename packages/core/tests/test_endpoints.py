@@ -180,3 +180,36 @@ def test_starting_the_same_endpoint_twice_is_a_no_op(monkeypatch, tmp_path):
         for srv in endpoints.serving().values():
             srv.shutdown()
             srv.server_close()
+
+
+def test_speech_state_with_an_explicit_bind_does_not_ask_the_tailnet(monkeypatch):
+    """With no explicit bind, resolve_bind retries `tailscale ip` six times
+    at a 5s timeout — up to ~45s. That is why the canvas starts endpoints on
+    a thread; it is also why an explicit bind must short-circuit it, which
+    is the path every configured host takes."""
+    from agent_media_core.entrypoints import speech_state
+
+    called = []
+    monkeypatch.setattr(speech_state, "_peer_ip",
+                        lambda: called.append(1) or "10.0.0.1")
+    monkeypatch.setenv("MEDIA_SPEECH_STATE_BIND", "127.0.0.1")
+    assert speech_state.resolve_bind("127.0.0.1") == "127.0.0.1"
+    assert called == [], "an explicit bind must not probe the peer network"
+
+
+def test_the_server_does_not_start_endpoints_on_its_boot_path():
+    """Pins the fix for a bug folding them in introduced: `start_all` can
+    block for ~45s (speech-state's bind resolution against a host with no
+    tailnet), and on the boot path that held the canvas itself off the air.
+    It must be reached from a thread, never called inline in main().
+    """
+    import inspect
+
+    from agent_media_visual import canvas
+
+    src = inspect.getsource(canvas.main)
+    assert "_endpoints.start_all" in src, "the server still starts them"
+    # The call must appear as a thread target, not as a bare call.
+    assert "target=_endpoints.start_all" in src, \
+        "start_all is on the boot path again; it can block for ~45s"
+    assert "_endpoints.start_all()" not in src
