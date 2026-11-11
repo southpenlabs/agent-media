@@ -1042,3 +1042,39 @@ def test_a_codex_notify_of_your_own_is_left_alone(tmp_path, monkeypatch):
     assert state == "absent" and "my-notifier" in why
     assert config.read_text() == 'notify = ["my-notifier"]\n'
     assert not (tmp_path / "hooks.json").exists()
+
+
+def test_media_share_belongs_on_a_phone_and_on_a_server():
+    """`requires-any:` is an OR. The share endpoint serves the share sheet on
+    a phone (loopback) and the app's share/transport routes on a server (the
+    tailnet, with a token), so either role is enough.
+
+    It declared `requires: observe` until 12 Nov 2026 and was therefore
+    skipped on every server — invisible on red5 only because its unit
+    predates roles. See docs/proposals/2026-11-12-fewer-services.md §4e.
+    """
+    phone, server = {"observe", "render"}, {"origin", "render"}
+    assert setup.service_roles_any("media-share") == {"observe", "origin"}
+    assert setup.service_wanted("media-share", phone)[0] is True
+    assert setup.service_wanted("media-share", server)[0] is True
+    # A host that is neither — a render-only speaker — still has none.
+    wanted, why = setup.service_wanted("media-share", {"render"})
+    assert not wanted and "observe or origin" in why, why
+
+
+def test_requires_any_is_an_or_and_requires_stays_an_and(tmp_path, monkeypatch):
+    """Both keys in one file: every `requires:` role AND one `requires-any:`."""
+    d = tmp_path / "services" / "svc"
+    d.mkdir(parents=True)
+    (d / "run").write_text("#!/bin/sh\n")
+    (d / "roles").write_text("requires: render\nrequires-any: observe origin\n")
+    monkeypatch.setattr(setup, "service_templates_dir",
+                        lambda: tmp_path / "services")
+    assert setup.service_wanted("svc", {"render", "origin"})[0] is True
+    assert setup.service_wanted("svc", {"render", "observe"})[0] is True
+    # The AND still bites: one of the any-roles is not a substitute for it.
+    wanted, why = setup.service_wanted("svc", {"origin"})
+    assert not wanted and "needs role render" in why, why
+    # And so does the OR.
+    wanted, why = setup.service_wanted("svc", {"render"})
+    assert not wanted and "observe or origin" in why, why

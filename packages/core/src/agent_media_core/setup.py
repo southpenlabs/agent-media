@@ -538,6 +538,11 @@ def service_roles(name: str) -> tuple[set[str], set[str]]:
     Both empty when the file is absent or unreadable, which means "belongs
     anywhere" — the same fail-open default that keeps undeclared services
     installing as they always did.
+
+    `requires-any:` is read by `service_roles_any` rather than folded in
+    here: these two are an AND and that one is an OR, and a caller that
+    merged them would read "needs every role named" off a line that means
+    "needs one of them".
     """
     requires: set[str] = set()
     conflicts: set[str] = set()
@@ -556,6 +561,34 @@ def service_roles(name: str) -> tuple[set[str], set[str]]:
         elif key == "conflicts":
             conflicts |= _parse_roles(rest)
     return requires, conflicts
+
+
+def service_roles_any(name: str) -> set[str]:
+    """The `requires-any:` roles in services/<name>/roles — one is enough.
+
+    `requires:` is an AND, and some services belong on either of two kinds of
+    host for different reasons. `media-share` is the case that forced this:
+    it serves the share sheet on a phone (`observe`, bound to loopback) and
+    the app's share/transport endpoint on a server (`origin`, bound to the
+    tailnet with a token). Written as `requires: observe` it was skipped on
+    every server, which on red5 was invisible only because the unit predates
+    roles — a fresh install would have lost the endpoint with no error
+    anywhere.
+
+    Empty means "no such demand", not "impossible": a service that declares
+    only `requires:` is unaffected.
+    """
+    out: set[str] = set()
+    try:
+        text = (service_templates_dir() / name / "roles").read_text()
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        key, _, rest = line.partition(":")
+        if key.strip().lower() == "requires-any":
+            out |= _parse_roles(rest)
+    return out
 
 
 def service_wanted(name: str, roles: set[str] | None) -> tuple[bool, str]:
@@ -578,11 +611,14 @@ def service_wanted(name: str, roles: set[str] | None) -> tuple[bool, str]:
     if roles is None:
         return True, "no host roles declared"
     requires, conflicts = service_roles(name)
-    if not requires and not conflicts:
+    any_of = service_roles_any(name)
+    if not requires and not conflicts and not any_of:
         return True, "service declares no roles"
     missing = requires - roles
     if missing:
         return False, f"needs role {'+'.join(sorted(missing))}"
+    if any_of and not (any_of & roles):
+        return False, f"needs role {' or '.join(sorted(any_of))}"
     clash = conflicts & roles
     if clash:
         return False, f"conflicts with role {'+'.join(sorted(clash))}"

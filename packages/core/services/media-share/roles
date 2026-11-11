@@ -1,5 +1,19 @@
-# Takes shared links from the on-device share sheet. `observe` is the closest
-# role to "a device someone holds": it means a mic or a dialer is here, which
-# is the same set of hosts that have a share sheet at all. A rendering-only
-# speaker has nothing to share FROM, and would bind a port nothing knocks on.
-requires: observe
+# Takes shared links from the on-device share sheet, and answers the app's
+# recent list, channel state and transport.
+#
+# Two kinds of host, for two different reasons, which is why this is
+# `requires-any:` (one is enough) and not `requires:` (which is an AND):
+#
+#   observe  a device someone holds — a mic or a dialer is here, which is the
+#            same set of hosts that have a share sheet at all. Bound to
+#            127.0.0.1: the only client is an app on this same device.
+#   origin   the server the app talks to across the tailnet, with
+#            MEDIA_SHARE_BIND and MEDIA_SHARE_TOKEN set. The share sheet on
+#            the phone posts *here* when the app is paired to a server.
+#
+# It said `requires: observe` until 12 Nov 2026, which skipped it on every
+# server. red5 never noticed because its unit predates roles; a fresh install
+# would have come up without the endpoint the app shares and transports
+# through, and nothing would have said so. Found while counting red5's units
+# for the red2 move (docs/proposals/2026-11-12-fewer-services.md §4e).
+requires-any: observe origin
