@@ -3409,7 +3409,7 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         body = _read_json(h) or {}
         action = str(body.get("action") or "")
-        if action not in speech._APP_SPEECH_ACTIONS:
+        if action not in speech._APP_SPEECH_ACTIONS and action not in speech._APP_SERVER_SPEECH_ACTIONS:
             _json(h, 400, {"ok": False, "error": "unknown action"})
             return True
         # A key pressed here: on Automatic the speech comes here (speech_frames.used).

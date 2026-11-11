@@ -29,8 +29,13 @@ from . import audio, auth, mic_state, sessions, threads
 _APP_SPEECH_ACTIONS = frozenset({
     "toggle", "skip-", "skip+", "para-", "para+", "jump-end",
     "prev", "replay", "replay-unheard", "replay-id", "again", "speed-", "speed+", "speed0", "vol-", "vol+", "mute",
-    "goto-sentence", "stop", "keep-reading",
+    "goto-sentence", "stop",
 })
+
+#: Speech verbs the server answers itself, never a `media` command (so not in
+#: `_APP_SPEECH_ACTIONS`, every one of which the canvas turns into one):
+#: `keep-reading` lifts a send's `read` cut (`keep_reading`).
+_APP_SERVER_SPEECH_ACTIONS = frozenset({"keep-reading"})
 
 #: The highest sentence index a request may name. Far past any reply (the
 #: canvas keeps 120 lines of one); only here so a number is a number.
