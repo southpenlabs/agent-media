@@ -8,6 +8,8 @@ server-contract.md §6.9a. Step 1 of docs/proposals/2026-09-28-music-tab.md
                              → {"ok", "kind", "list", "items": [{"uri", "title", "at", "session", …}]}
   GET  /music/channel?name=…|url=…|vid=…
                              → {"ok", "channel": {"name", "key", "youtube", "details", "played", "uploads", …}}
+  GET  /music/versions?uri=…[&title=…]
+                             → {"ok", "uri", "query", "source", "versions": [{"uri", "title", "channel", "duration_s", "kind"}]}
   POST /music {"action", …}  → the same, after doing it
 
 `radio` is the station (agent_media_core.radio; docs/proposals/
@@ -1091,6 +1093,37 @@ def channel(bearer: str, name: str = "", url: str = "", vid: str = "") -> tuple[
         got = {"name": name, "key": music_channel.key(name), "url": url or None, "youtube": url or None,
                "details": None, "played": [], "uploads": [], "sources": {"details": None, "uploads": None}}
     return True, {"channel": got}
+
+
+def versions(bearer: str, uri: str = "", title: str = "") -> tuple[bool, dict]:
+    """`GET /music/versions?uri=…[&title=…]` — gated like /music/recent:
+    other recordings of the song (live, acoustic, remix, cover, remaster,
+    …; agent_media_core.music_versions; David, 11 Nov 2026: "Can we also
+    have a button for alternative versions of a song?"), searched by its
+    artist and song with the host's YouTube search, without the video
+    named."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    uri = (uri or "").strip()
+    if not uri.startswith(("yt:", "http://", "https://")):
+        return False, {"error": "uri must be a yt: or web address", "status": 400}
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_recent, music_versions
+
+    title = (title or "").strip()[:300] or _title_of(uri, None)
+    meta = music_recent._music_meta(uri, title)
+    artist, song = (meta.get("artist") or "").strip(), (meta.get("song") or "").strip()
+    if not song:
+        artist, song = fav.clean_original(artist, title)
+    if not song:
+        return False, {"error": "no name to look for: give a title", "status": 400}
+    try:
+        got = music_versions.versions(artist, song, exclude=_row_vid(uri))
+    except Exception as e:  # noqa: BLE001 — none found, not a 500
+        print(f"music: versions failed: {e}", file=sys.stderr)
+        got = {"query": f"{artist} {song}".strip(), "source": None, "versions": []}
+    return True, {"uri": uri, **got}
 
 
 def _played_book(uri: str) -> bool:

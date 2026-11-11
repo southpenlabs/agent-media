@@ -464,7 +464,7 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 
 # What is playing, and its controls: the Media tab (music.py). The same
 # arrangement.
-MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel"})
+MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # The phone app updating itself (app_update.py, §6.52): API routes under
@@ -4507,7 +4507,7 @@ def _audio(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
 # --- what is playing ------------------------------------------------------------
 
 def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
-    """`GET /music`, `POST /music`, `GET /music/recent` and `GET /music/channel` (§6.9a): the Media tab."""
+    """`GET /music`, `POST /music`, `GET /music/recent`, `GET /music/channel` and `GET /music/versions` (§6.9a): the Media tab."""
     if path == "/music/recent":
         if method != "GET":
             return False
@@ -4520,6 +4520,11 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         q = parse_qs(h.path.partition("?")[2])
         ok, detail = music.channel(_bearer(h), (q.get("name") or [""])[0], (q.get("url") or [""])[0],
                                    (q.get("vid") or [""])[0])
+    elif path == "/music/versions":
+        if method != "GET":
+            return False
+        q = parse_qs(h.path.partition("?")[2])
+        ok, detail = music.versions(_bearer(h), (q.get("uri") or [""])[0], (q.get("title") or [""])[0])
     elif path == "/music/radio":
         # `POST /music {"action": "radio", …}` by its own name, for radio
         # from a song sung out (`from_song`).

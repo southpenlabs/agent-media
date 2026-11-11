@@ -889,3 +889,81 @@ def test_a_favourites_moods_are_on_its_row(server, signed_in, audio_host, monkey
     assert rows[2]["moods"] == ["upbeat", "party"]
     assert "moods" not in rows[1]
     assert music_mood.favoured({"tempo": 0.5}) is None
+
+
+# Other versions of a song (David, 11 Nov 2026: "Can we also have a button
+# for alternative versions of a song?"): the host's YouTube search, faked.
+def _mopidy(monkeypatch, found):
+    from agent_media_core import music_bed_favourites as fav
+    asked = []
+    monkeypatch.setattr(fav, "_may_search", lambda: True)
+    monkeypatch.setattr(fav, "search", lambda q: (asked.append(q), found)[1])
+    return asked
+
+
+def test_versions_are_other_recordings_labelled_by_kind(server, signed_in, audio_host, monkeypatch):
+    from agent_media_core import media_meta
+    monkeypatch.setattr(media_meta, "known", lambda key: {"artist": "Chris Cornell", "song": "As Hope And Promise Fade", "album": None, "genre": None})
+    found = [
+        {"id": "Gkl8blLusFc", "title": "As Hope And Promise Fade", "artist": "Chris Cornell - Topic", "dur": 200},
+        {"id": "live0000001", "title": "Chris Cornell - As Hope And Promise Fade (Live at the Fillmore)", "artist": "ChrisCornellVEVO", "dur": 260},
+        {"id": "acou0000001", "title": "As Hope and Promise Fade - Acoustic", "artist": "Chris Cornell", "dur": 190},
+        {"id": "cove0000001", "title": "As Hope And Promise Fade", "artist": "Some Singer", "dur": 210},
+        {"id": "remx0000001", "title": "As Hope And Promise Fade (Night Remix)", "artist": "DJ X", "dur": None},
+        {"id": "lyrc0000001", "title": "Chris Cornell - As Hope And Promise Fade (Lyrics)", "artist": "Lyric Land", "dur": 200},
+        {"id": "live0000001", "title": "Chris Cornell - As Hope And Promise Fade (Live at the Fillmore)", "artist": "ChrisCornellVEVO", "dur": 260},
+        {"id": "othr0000001", "title": "Black Hole Sun", "artist": "Soundgarden", "dur": 300},
+    ]
+    asked = _mopidy(monkeypatch, found)
+    res, obj = call(server, "GET", "/music/versions?uri=" + OTHER, headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["source"] == "youtube-search" and obj["query"] == "Chris Cornell As Hope And Promise Fade"
+    got = [(v["id"], v["kind"]) for v in obj["versions"]]
+    assert got == [("lyrc0000001", "original"), ("live0000001", "live"), ("acou0000001", "acoustic"),
+                   ("remx0000001", "remix"), ("cove0000001", "cover")]
+    live = obj["versions"][1]
+    assert live == {"uri": "yt:https://www.youtube.com/watch?v=live0000001", "id": "live0000001",
+                    "title": "Chris Cornell - As Hope And Promise Fade (Live at the Fillmore)",
+                    "channel": "ChrisCornellVEVO", "duration_s": 260, "kind": "live"}
+    assert obj["versions"][3]["duration_s"] is None
+    # Kept: asked again, the search is not.
+    n = len(asked)
+    call(server, "GET", "/music/versions?uri=" + OTHER, headers=AUTH)
+    assert len(asked) == n
+
+
+def test_versions_without_a_search_or_a_name(server, signed_in, audio_host, monkeypatch):
+    from agent_media_core import music_bed_favourites as fav, youtube_addon
+    monkeypatch.setattr(fav, "_may_search", lambda: False)
+    monkeypatch.setattr(youtube_addon, "get", lambda name: None)
+    res, obj = call(server, "GET", "/music/versions?uri=" + OTHER + "&title=Teardrop%20%E2%80%94%20Massive%20Attack", headers=AUTH)
+    assert res.status == 200 and obj["versions"] == [] and obj["source"] is None
+    res, obj = call(server, "GET", "/music/versions?uri=file:///x", headers=AUTH)
+    assert res.status == 400
+
+
+def test_versions_are_gated(server, monkeypatch, audio_host):
+    monkeypatch.setattr(auth_abs, "abs_identity", lambda bearer: (None, 401))
+    res, obj = call(server, "GET", "/music/versions?uri=" + OTHER, headers=AUTH)
+    assert res.status == 401 and obj["ok"] is False
+
+
+def test_versions_from_the_djs_search_one_line_a_kind(server, signed_in, audio_host, monkeypatch):
+    from agent_media_core import music_bed_favourites as fav, radio_dj, youtube_addon
+    monkeypatch.setattr(fav, "_may_search", lambda: False)
+    monkeypatch.setattr(youtube_addon, "get", lambda name: object() if name == "youtube-radio" else None)
+    lines = []
+    monkeypatch.setattr(radio_dj, "search", lambda ls: (lines.extend(ls), [
+        {"id": "live0000002", "title": "Massive Attack - Teardrop (Live)", "channel": "Massive Attack", "dur": 330}])[1])
+    res, obj = call(server, "GET", "/music/versions?uri=yt:https://www.youtube.com/watch?v=u7K72X4eo_s&title=Massive%20Attack%20-%20Teardrop", headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["source"] == "youtube-radio" and lines[0] == "Massive Attack - Teardrop" and "Massive Attack - Teardrop live" in lines
+    assert [(v["id"], v["kind"]) for v in obj["versions"]] == [("live0000002", "live")]
+
+
+def test_a_versions_kind_leaves_the_songs_own_words_out():
+    from agent_media_core.music_versions import kind_of
+    assert kind_of("Oasis - Live Forever (Official Video)", "Oasis", "Oasis", "Live Forever") == "original"
+    assert kind_of("Oasis - Live Forever (Live at Knebworth)", "Oasis", "Oasis", "Live Forever") == "live"
+    assert kind_of("Wonderwall (Remastered 2014)", "Oasis", "Oasis", "Wonderwall") == "remaster"
+    assert kind_of("Wonderwall", "Ryan Adams", "Oasis", "Wonderwall") == "cover"

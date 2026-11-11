@@ -4334,6 +4334,34 @@ the rooms cache's `.title` sidecar holds only the title. `GET /music`'s
 mix under its channel as well as its chapters' artists, grouping by `key`
 and writing the name the Topic channel or the catalogue does.
 
+**Other versions of a song.** `GET /music/versions?uri=<a row's uri>[&title=…]`
+(11 Nov 2026, gated like `/music/recent`; David: "Can we also have a button
+for alternative versions of a song?") answers `{"ok", "uri", "query",
+"source", "versions": [{"uri", "id", "title", "channel", "duration_s",
+"kind"}]}`: other recordings of the song, searched by its artist and song
+(the row's looked-up `artist` and `song`, else the title cleaned; `title`
+names one the server has not seen), the video in `uri` left out.
+`agent_media_core.music_versions`:
+
+- `source`: the search used — `"youtube-search"` (Mopidy's YouTube search,
+  the personal-use add-on's method of that name: the song, and the song with
+  live/acoustic/remix and cover/remastered/extended), else `"youtube-radio"`
+  (the DJ's yt-dlp search, one line a kind, its first result each), else
+  `null` with no versions.
+- A result counts when its title has every word of the song and it is not a
+  video already listed or a title already listed.
+- `kind` from the title's words, the song's own aside ("Live Forever" is not
+  live), first match: `karaoke`, `instrumental`, `live`, `acoustic`,
+  `remix`, `cover`, `remaster`, `extended`, `demo`, `slowed`; else `cover`
+  when the artist is named neither in the title nor as the channel; else
+  `original` (another upload of the same recording). Listed in that order,
+  `original` first, at most 20.
+- `duration_s` null when the search does not say. Kept six hours by the
+  song's words (`music-versions.json`).
+- 400 for a `uri` that is not a `yt:` or web address, or with no name to
+  look for. A version plays as any row does (`{"action": "play", "uri"}`),
+  and starts a station (`{"action": "radio", "uri"}`).
+
 `GET /music/channel?name=<name>|url=<address>|vid=<video id>` (9 Nov 2026,
 gated like `/music/recent`; David: "Can we get to an info page for the
 channel too?") answers `{"ok", "channel": {"name", "key", "url",
