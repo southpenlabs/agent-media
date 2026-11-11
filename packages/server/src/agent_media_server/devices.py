@@ -364,6 +364,24 @@ def set_role(device_id: str, role: str) -> bool:
         return True
 
 
+
+def rename(device_id: str, name: str) -> str | None:
+    """Rename a paired device, from the shell (`devices --rename ID NAME`) or
+    an admin's app (`POST /devices/rename`): whitespace folded, at most 80
+    characters, as a name sent at pairing is. The new name, or None for an
+    unknown id; ValueError for an empty name."""
+    clean = " ".join((name or "").split())[:80]
+    if not clean:
+        raise ValueError("a name is needed")
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return None
+        if hit.get("name") != clean:
+            _save([{**d, "name": clean} if d is hit else d for d in rows])
+        return clean
+
 #: What a device may say of the app it runs (POST /device/app), each at most 64 chars.
 APP_FIELDS = ("build", "sha", "platform", "shell", "web")
 
@@ -723,8 +741,8 @@ def links(code: str, host: str, port: int, server: str = "",
 
 def cli_devices(argv: list[str]) -> int:
     """`media-visual-canvas devices [--revoke ID | --enrol ID | --no-enrol ID |
-    --role ID ROLE]` — list, forget one, give one the enrol bit (or take it
-    back), or set its role."""
+    --role ID ROLE | --rename ID NAME]` — list, forget one, give one the
+    enrol bit (or take it back), set its role, or rename it."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="media-visual-canvas devices",
@@ -737,6 +755,8 @@ def cli_devices(argv: list[str]) -> int:
     act.add_argument("--role", nargs=2, metavar=("ID", "ROLE"),
                      help="admin (sets the host up), member (chats) or guest (reads and "
                           "listens); a device without one is an admin")
+    act.add_argument("--rename", nargs=2, metavar=("ID", "NAME"),
+                     help="call this device NAME (as POST /devices/rename does)")
     act.add_argument("--jobs", metavar="ID",
                      help="make this device a jobs worker: restart/update jobs down "
                           "its own stream, and no other route (phone_jobs.py)")
@@ -753,6 +773,18 @@ def cli_devices(argv: list[str]) -> int:
             return 2
         if ok:
             print(f"{device_id} is {'an' if role == 'admin' else 'a'} {role}")
+            return 0
+        print(f"no device {device_id}", flush=True)
+        return 1
+    if args.rename:
+        device_id, name = args.rename
+        try:
+            got = rename(device_id, name)
+        except ValueError as e:
+            print(str(e), flush=True)
+            return 2
+        if got is not None:
+            print(f"{device_id} is now {got!r}")
             return 0
         print(f"no device {device_id}", flush=True)
         return 1
