@@ -2503,7 +2503,8 @@ ahead.
       11 Nov 2026: "Maybe we should just start using red 2 for everything
       speed critical", "ok" to: new chats there with no switch, red5 when
       red2 is down or full, running chats stay put, red5 keeps the front
-      door; whether red2 becomes primary is decided 25 Nov).
+      door; whether red2 becomes primary was decided 11 Nov: no, red5
+      stays the server).
       `MEDIA_SESSIOND_DEFAULT_HOST=red2` in the server's env file: a `start`
       naming no host asks red2 first (`prepare`: connected, the folder
       there, a free slot, memory) and starts there, else here at once — down,
