@@ -2819,7 +2819,7 @@ Pinned by `packages/core/tests/test_music_bed_replay.py`.
 `under_mix.py`, `music_bed_outro.py`; David: "DJ mixing" and a volume
 slider). `settings` gains a second kind, **`"range"`** — a slider, `{"id",
 "kind": "range", "label", "hint", "min", "max", "step", "unit", "value"
-(number), "set"}` — and lists, in order: `gain_db` (range, "Backing music level",
+(number), "set"}` — and lists, in order: `gain_db` (range, "Music under replies" ("Backing music level" until 11 Nov 2026),
 -34..-4 step 1 "dB" — against the voice since 31 Oct 2026: the value is how
 far under a reply's voice the music sits, roughly (`VOICE_REF_DB`, 10: a kept
 track at -30 LUFS under a voice measured near -20); stored, and used by the

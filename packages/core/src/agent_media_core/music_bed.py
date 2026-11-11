@@ -931,7 +931,7 @@ GAIN_RANGE = (-24.0, 6.0)
 #: he chose "Show it against the voice"): the stored -12 reads -22.
 #: Approximate: songs and generated beds differ in loudness.
 VOICE_REF_DB = 10.0
-GAIN_LABEL = "Backing music level"
+GAIN_LABEL = "Music under replies"
 GAIN_HINT = ("How far under the voice the music sits, in dB: -30 is 30 dB quieter "
              "than the voice. Approximate, as songs differ. It also sets how far "
              "your own music drops while a reply plays.")

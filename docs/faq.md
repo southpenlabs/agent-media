@@ -15,7 +15,7 @@ Device names, hosts and paths in commands are examples; use your own.
 - Why is text bigger in the app than in the browser?
 - How do I link to a thread?
 - What is the music under replies, and how do I change it?
-- What is the Backing music level relative to?
+- What is the Music under replies level relative to?
 - What can I do with the song after a long reply?
 - Why does my music go quiet, then swell, while a reply plays?
 
@@ -113,7 +113,7 @@ See also: `server-contract.md` §19, "Thread links".
 ### What is the music under replies, and how do I change it?
 
 Replies can play over quiet backing music, the way a radio host talks over
-a bed. **Settings → Music under long readings** picks the source: generated
+a bed. **Settings → Music with replies** picks the source: generated
 moods and styles (bossa nova, piano, lo-fi…), your streaming service
 (house speakers only), a free online library (archive.org and ccMixter), or
 **your favourites, instrumental**: official instrumental or karaoke
@@ -126,7 +126,7 @@ that follow each other.
 
 See also: `server-contract.md` §`/speech/music-bed` ("DJ mixing").
 
-### What is the Backing music level relative to?
+### What is the Music under replies level relative to?
 
 To the voice. The number is roughly how far under a reply's voice the music
 sits: -22 dB means the music is about 22 dB quieter than the voice (each 10
@@ -260,7 +260,7 @@ See also: `packages/core/src/agent_media_core/calm.py`.
 
 Your own music is ducked under a reply the way a DJ talks over a record: it
 slides down as the voice starts, rises a little in the pauses, and comes back
-up after the last word. How far down follows the **Backing music level**
+up after the last word. How far down follows the **Music under replies** level
 (above). A short notice only dips it; a question or a very long reply pauses
 it; books and podcasts always pause, since you can't half-hear narration.
 
