@@ -4092,6 +4092,19 @@ stop it. 400 for an id that is not a positive integer; 404 when the row is
 not a reply with a song (or `session` names another thread); 502 when the
 play failed. The app's reply ⋯ "Play the song" (David, 30 Oct 2026).
 
+**The listening mood** (11 Nov 2026; `agent_media_core.music_mood`; David:
+"some kind of a mood setting that also dictates what kind of music is
+played ... including for backing music"). Every answer carries
+`"mood": {"id", "moods": [{"id", "label", "blurb"}, …]}`, the moods in the
+order auto, chill, focus, upbeat, sleep, party — the Media tab's chips and
+Settings → Music. `{"action": "mood", "mood": id}` sets it (400 for another
+id) and answers the usual state. auto is the moment's reading as before;
+another mood steers the DJ (it overrides the moment) and the backing
+music's Auto. A DJ station drops its songs to come and picks again at once
+(the song playing plays on); a Mix station, or music playing with no
+station, becomes a DJ station; with nothing playing it is only stored. Also
+`media music mood [<id>]`.
+
 `{"action": "bed", "uri"?, "off"?}` (1 Nov 2026) suggests what is playing
 (or `uri`) for the music under long readings (§6.4's "your favourites,
 instrumental"; `agent_media_core.music_bed_favourites.suggest`; David: "an
