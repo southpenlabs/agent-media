@@ -7079,6 +7079,36 @@ def _cmd_music_held(a) -> int:
     return 0
 
 
+def _cmd_music_mood(a) -> int:
+    """`media music mood [<id>]`: the listening mood (music_mood), read or
+    set — set as POST /music sets it: a DJ station picks again, a Mix station
+    or music playing without one becomes the DJ's."""
+    from . import music_mood
+
+    want = (a.uri or "").strip()
+    if want:
+        try:
+            out = music_mood.set_mood(want)
+        except ValueError as e:
+            print(f"media music mood: {e}", file=sys.stderr)
+            return 2
+        if getattr(a, "json", False):
+            print(json.dumps({**out, **music_mood.shown()}))
+            return 0
+        said = {"repicked": "; the DJ is picking again for it",
+                "started": "; the DJ's station takes over"}.get(out["station"] or "", "")
+        print(f"mood: {out['mood']}{said}" if out["changed"] else f"mood: {out['mood']} (unchanged)")
+        return 0
+    shown = music_mood.shown()
+    if getattr(a, "json", False):
+        print(json.dumps(shown))
+        return 0
+    print(f"mood: {shown['id']}")
+    for m in shown["moods"]:
+        print(f"{'*' if m['id'] == shown['id'] else ' '} {m['id']:<7} {m['blurb']}")
+    return 0
+
+
 def cmd_music(a) -> int:
     from .route import coerce_content_type, detect_content_type
 
@@ -7137,6 +7167,8 @@ def cmd_music(a) -> int:
         return _music_bed_suggest(m, a.action, a.uri or "", where=getattr(a, "where", "") or "")
     if a.action == "held":
         return _cmd_music_held(a)
+    if a.action == "mood":
+        return _cmd_music_mood(a)
     if a.action == "play":
         return _cmd_music_play(m, a)
     # Everything below is transport — route to the live backend so the keys
@@ -10473,7 +10505,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
                             "chapters", "chapter", "radio", "dislike",
-                            "bed", "bed-off", "bed-list", "held"))
+                            "bed", "bed-off", "bed-list", "held", "mood"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "
@@ -10486,7 +10518,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         "1-based chapter number (see 'chapters'), or next / "
                         "prev to step one inside a mix; for 'bed' / "
                         "'bed-off': a yt: address, link or \"artist title\" "
-                        "(default: what is playing)")
+                        "(default: what is playing); for 'mood': auto, "
+                        "chill, focus, upbeat, sleep or party (none: show it)")
     s.add_argument("--lines", action="store_true",
                    help="for 'chapters': print display<TAB>number rows "
                         "for an external picker")

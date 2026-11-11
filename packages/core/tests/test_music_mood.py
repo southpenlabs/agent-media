@@ -81,3 +81,22 @@ def test_a_fixed_bed_choice_wins_over_the_mood():
 def test_settings_say_why():
     music_mood.set_mood("chill", playing=lambda: False)
     assert "mood: chill" in music_bed.status()["auto_why"]
+
+
+def test_the_cli_reads_and_sets_it(monkeypatch, capsys):
+    import json
+
+    from agent_media_core import cli
+
+    calls: list = []
+    monkeypatch.setattr(music_mood, "_follow", lambda mood, playing: calls.append(mood) or "repicked")
+    assert cli.main(["music", "mood"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("mood: auto") and "chill" in out and "party" in out
+    assert cli.main(["music", "mood", "chill"]) == 0
+    assert "mood: chill; the DJ is picking again" in capsys.readouterr().out
+    assert calls == ["chill"] and music_mood.current() == "chill"
+    assert cli.main(["music", "mood", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "chill"
+    assert cli.main(["music", "mood", "gloomy"]) == 2
+    assert "mood must be one of" in capsys.readouterr().err and music_mood.current() == "chill"
