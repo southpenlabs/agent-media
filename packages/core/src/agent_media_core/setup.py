@@ -996,11 +996,17 @@ def _template_units(name: str) -> "list[str]":
 
     Read from the template rather than from disk, so a job that has since
     lost its schedule still has its stale timer found and removed.
+
+    The timer comes FIRST, because the one caller is stopping them: disable
+    the service while its timer is still armed and systemd says so ("its
+    triggering units are still active") and the timer can fire the service
+    again in the window before its own turn comes. Taking the trigger away
+    first leaves nothing to fire.
     """
     unit = _systemd_unit_name(name)
     units = [unit]
     if (service_templates_dir() / name / "timer").is_file():
-        units.append(unit.removesuffix(".service") + ".timer")
+        units.insert(0, unit.removesuffix(".service") + ".timer")
     return units
 
 
