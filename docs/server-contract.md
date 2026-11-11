@@ -1641,7 +1641,10 @@ default — see below.
   resumed the same way. `auto`, `pocket` and `normal` are ordinary. A Run
   now from the message works on any thread. A thread parked for a slot
   never parks a Quiet one to come back, and a Quiet thread never parks
-  another Quiet one. A headless thread's level is its own or the default
+  another Quiet one. Resumed after such a park (its note asks it to
+  continue the background agents cut off), a Quiet thread is ranked as an
+  ordinary one only waiting for `MEDIA_SESSIOND_QUIET_GRACE_S` (300 s), so
+  what it restarted is not cut off again at the next wanted slot. A headless thread's level is its own or the default
   (a Matrix room is not a session-slot holder).
 - **Who holds the slots, and who waits**: `GET /sessions/slots` (gated,
   CORS) → `{"ok": true, "live", "max", "short" (low on memory), "free_mb",

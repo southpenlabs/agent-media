@@ -544,6 +544,10 @@ class Session:
         #: `at` of the last quota cut-off resumed: never twice (the backfill
         #: at start reads this).
         self.quota_resumed = 0.0
+        #: When it was last resumed after a park for its Quiet level (0 never):
+        #: for `quiet_grace_s` after that it is not parked for being Quiet
+        #: again, so the agents its resume restarted get somewhere.
+        self.quiet_resumed = 0.0
         #: The task count park_idle last logged holding this session for.
         self.park_held = 0
         #: A Run now (`slot: "high"`) message started its turn: never parked
@@ -876,6 +880,20 @@ def slot_reason(s: "Session", now: float | None = None) -> tuple[str, str]:
     if n:
         return "tasks", str(n)
     return "idle", ""
+
+
+def quiet_grace_s() -> float:
+    """How long a Quiet thread resumed after a park for its level is spared
+    another (`MEDIA_SESSIOND_QUIET_GRACE_S`, default 300 s): it is ranked as
+    any thread only waiting meanwhile. Without it a busy host parked one
+    every few seconds, each time killing the background agent its resume
+    had just restarted — five times in 11 minutes (David, 11 Nov 2026:
+    "background agents seem to be working in this thread but the status
+    says waiting"; asked, he chose pause-then-restart over sparing it)."""
+    try:
+        return max(0.0, float(os.environ.get("MEDIA_SESSIOND_QUIET_GRACE_S", "300")))
+    except ValueError:
+        return 300.0
 
 
 def _low_grace_s() -> float:
@@ -1687,6 +1705,8 @@ class Supervisor:
                 s.cut_off = None      # never resumed twice
                 if cut.get("why") == "quota":
                     s.quota_resumed = float(cut.get("at") or time.time())
+                elif cut.get("why") == "quiet":
+                    s.quiet_resumed = time.time()
                 self._save(s)
         if text:
             why = {"quota": "the usage limit", "drain": "the drain",
@@ -2732,7 +2752,8 @@ class Supervisor:
                 tier = 4 if gen else 3
             elif gen:
                 tier = 2
-            elif level == "quiet" or reason == "low":
+            elif reason == "low" or (level == "quiet"
+                                     and now - x.quiet_resumed >= quiet_grace_s()):
                 tier = 0
             else:
                 tier = 1

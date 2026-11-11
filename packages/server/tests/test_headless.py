@@ -810,6 +810,31 @@ def test_an_interrupt_thread_is_parked_for_a_run_now_only_as_a_last_resort(monke
     assert sup._run_now_victim([loud]) is loud
 
 
+def test_a_quiet_thread_just_resumed_is_not_parked_for_being_quiet_again(monkeypatch):
+    """Resumed after a park for its Quiet level, a thread is ranked as any
+    one only waiting for quiet_grace_s, so the agents its resume restarted
+    are not killed again at the next wanted slot (David, 11 Nov 2026: five
+    parks in 11 minutes, each killing its background agent)."""
+    import time as _time
+
+    from agent_media_core import speak_priority
+
+    sup = sessiond.Supervisor.__new__(sessiond.Supervisor)
+    S = sessiond.Session
+    quiet, card = S("quiet2", "/"), S("card2", "/")
+    for x in (quiet, card):
+        x.state = "approval"
+        x.pending["r"] = {"request": {"subtype": "can_use_tool", "tool_name": "Bash"}}
+    quiet.last_event_at, card.last_event_at = 4, 2
+    speak_priority.set_level("quiet2", "quiet")
+    tiers = lambda: {t[2].id: t[0] for t in sup._ranked([quiet, card])}  # noqa: E731
+    assert tiers() == {"quiet2": 0, "card2": 1}
+    quiet.quiet_resumed = _time.time()
+    assert tiers() == {"quiet2": 1, "card2": 1}, "in its grace: no longer first"
+    monkeypatch.setenv("MEDIA_SESSIOND_QUIET_GRACE_S", "0")
+    assert tiers()["quiet2"] == 0, "the grace over: first again"
+
+
 def test_held_work_goes_run_now_first_then_a_bumped_session_then_oldest():
     S = sessiond.Session
     old, high, bumped = S("old", "/"), S("high", "/"), S("bumped", "/")
