@@ -450,7 +450,7 @@ def busy(selected: list[Service], caller: str = "", *, now: bool = False,
 # A restart of sessiond refused as busy used to wait (10 min at most) while
 # new messages kept the sessions busy, and mostly gave up (David, 19 Oct
 # 2026). Drained, it is a pending restart on disk (`pending_path()`):
-# sessiond holds new messages and refuses new chats while it is there, the
+# sessiond holds new messages and new chats' first messages while it is there, the
 # busy sessions are told to end their turn (intake/context.py's restart
 # note), and the detached run restarts the moment none is busy, or gives up
 # at the deadline. Held messages are delivered after (sessiond.py).
@@ -646,7 +646,7 @@ def _start_drain(selected: list[Service], after: float, waits: list[dict],
         announce(f"Heads up: the session host will restart {when}. "
                  "New messages wait until it is back.")
     emit(f"draining until {_hhmm(rec['deadline'])}: new messages to sessiond's sessions "
-         "are held (delivered after the restart) and new chats refused; busy sessions "
+         "and new chats are held (delivered after the restart); busy sessions "
          "are asked to end their turn. It restarts as soon as none is busy "
          "(`media restart-services --cancel` drops it)")
     return res
@@ -1114,7 +1114,7 @@ def run(only: "Optional[list[str]]" = None, *, after: float = 0, force: bool = F
                    else "a detached child")
             emit(f"would schedule in {int(round(after))} s via {how}")
             if draining:
-                emit("would drain: new messages held and new chats refused until the "
+                emit("would drain: new messages and new chats held until the "
                      "restart; it fires when nothing above is busy (a session only "
                      "waiting on a question does not count), at most "
                      f"{drain_max_s() / 60:.0f} min")

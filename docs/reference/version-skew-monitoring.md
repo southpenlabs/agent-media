@@ -325,7 +325,7 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
   `$XDG_STATE_HOME/agent-media/restart-pending.json`, and exit 0:
   - sessiond **holds** every new message to its sessions (kept in the
     session's record, so it outlives the restart; the app is answered
-    `held: true`) and refuses new chats, so nothing becomes busy again.
+    `held: true`) and holds a new chat's first message too, so nothing becomes busy again.
     Answering a question card is not held.
   - each busy session is **told once** to finish the step it is on and
     end its turn, without starting background agents or commands

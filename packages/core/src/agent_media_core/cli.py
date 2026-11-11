@@ -10643,7 +10643,7 @@ def _build_parser() -> argparse.ArgumentParser:
                     "transient systemd unit (a detached child without systemd), "
                     "checks again before acting, and your turn ends first. With "
                     "sessiond selected it drains a busy host: new messages are "
-                    "held and new chats refused, busy sessions are told to end "
+                    "held (a new chat's first message too), busy sessions are told to end "
                     "their turn, and it restarts the moment none is busy (up to "
                     "30 min, then releases the held messages and alerts); held "
                     "messages are delivered and cut-off sessions resumed after. "
