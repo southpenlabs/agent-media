@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -305,6 +306,20 @@ def play_url(uri: str) -> Optional[str]:
     from .types import Target
 
     return http_url_for(p, Target(name="phone"))
+
+
+_PLAY_URL = re.compile(r"/podcasts/files/([A-Za-z0-9_-]{11})\.[A-Za-z0-9]+(?:\?|$)")
+
+
+def by_play_url(url: str) -> Optional[dict]:
+    """The saved link (an `items()` row) whose download `url` is, as
+    `play_url` made it for the phone's music player; else None. So a play of
+    it counts as a podcast's, not a song's (David, 11 Nov 2026: a saved
+    podcast listed under Recently played · Music as its bare address)."""
+    m = _PLAY_URL.search(url or "")
+    if not m:
+        return None
+    return next((i for i in items() if i["id"] == f"podcast-link:{m.group(1)}"), None)
 
 
 def served(name: str, sig: str) -> Optional[tuple[Path, str]]:

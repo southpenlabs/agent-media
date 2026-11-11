@@ -204,3 +204,18 @@ def test_new_episodes_newest_first(st, monkeypatch, tmp_path):
     monkeypatch.setattr(music_recent, "_abs_get", lambda path: answers.get(path))
     got = music_recent.listed(kind="podcast", which="new", store=st)
     assert [(r["title"], r["author"], r["published"]) for r in got] == [("Newer", "Calm Minutes", 2000.0), ("Older", "Calm Minutes", 1000.0)]
+
+
+def test_a_saved_podcast_on_the_music_player_is_a_podcasts_play(st, monkeypatch):
+    """David, 11 Nov 2026: a saved podcast, played by the phone's music player
+    through its signed link, was listed under Music as its bare address."""
+    from agent_media_core import podcast_links
+    saved = {"id": "podcast-link:AAAAAAAAAAA", "uri": "/c/Talk [AAAAAAAAAAA].opus", "title": "A talk",
+             "author": "Someone", "art": "https://i.ytimg.com/vi/AAAAAAAAAAA/hqdefault.jpg"}
+    monkeypatch.setattr(podcast_links, "items", lambda: [saved])
+    st.note_play("music", "https://red5.example/podcasts/files/AAAAAAAAAAA.opus?sig=abc")
+    st.note_play("music", "yt:https://www.youtube.com/watch?v=BBBBBBBBBBB", title="A song")
+    assert [r["title"] for r in music_recent.recent(store=st)] == ["A song"]
+    [row] = music_recent.recent(store=st, kind="podcast")
+    assert (row["title"], row["author"], row["uri"], row["art"]) == ("A talk", "Someone", saved["uri"], saved["art"])
+    assert podcast_links.by_play_url("https://x/podcasts/files/ZZZZZZZZZZZ.opus?sig=1") is None

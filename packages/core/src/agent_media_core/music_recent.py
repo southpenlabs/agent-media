@@ -259,8 +259,10 @@ def _music_rows(store: StateStore, window: int, limit: Optional[int],
     when None). `lookups`: ask oEmbed for a few names not known yet."""
     from . import music_channel
 
+    # A saved podcast played by the phone's music player is a podcast's play
+    # (podcast_links.play_url), listed under Podcasts.
     rows = [r for r in store.recent_history(sink="music", limit=window, requested=True)
-            if _asked(r)]
+            if _asked(r) and _PODCAST_FILE not in (r.get("uri") or "")]
     plays: dict[str, int] = {}
     for r in rows:
         plays[_key(r["uri"])] = plays.get(_key(r["uri"]), 0) + 1
@@ -422,8 +424,18 @@ def kind_of(uri: str, title: str, genres: list) -> str:
     return "book" if not g or "audiobook" in g else "podcast"
 
 
+_PODCAST_FILE = "/podcasts/files/"
+
+
 def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -> list[dict]:
     rows = store.recent_history(sink="book", limit=window)
+    if kind == "podcast":
+        # Saved podcasts the phone's music player played (podcast_links.play_url).
+        extra = [r for r in store.recent_history(sink="music", limit=window)
+                 if _PODCAST_FILE in (r.get("uri") or "")]
+        if extra:
+            rows = sorted(rows + extra, key=lambda r: -float(r.get("started_at") or 0))[:window]
+    saved_art: dict[str, Optional[str]] = {}
     items = _abs_by_file()
     seen: set[str] = set()
     plays: dict[str, int] = {}
@@ -431,6 +443,22 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
     for r in rows:
         uri = r.get("uri") or ""
         extras = r.get("extras") if isinstance(r.get("extras"), dict) else {}
+        if _PODCAST_FILE in uri:
+            from . import podcast_links
+            saved = podcast_links.by_play_url(uri)
+            if saved is None or kind != "podcast":
+                continue
+            uri = saved["uri"]
+            saved_art[uri] = saved.get("art")
+            plays[uri] = plays.get(uri, 0) + 1
+            if uri in seen:
+                continue
+            seen.add(uri)
+            picked.append((dict(r, uri=uri, extras={**extras, "author": saved.get("author")}),
+                           None, {"authorName": saved.get("author") or ""}, saved.get("title") or uri, []))
+            if len(picked) >= limit:
+                break
+            continue
         if not uri.startswith(("/", "http://", "https://", "yt:")) or any(p in uri for p in _SPOKEN) \
                 or extras.get("player") == "sasonica":
             continue
@@ -489,7 +517,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
                 wanted.append((key, "book", {"title": title, "author": author or ""}))
         vid = _YT_ID.search(r["uri"])
         out.append({"id": r["id"], "uri": r["uri"], "title": title,
-                    "art": art(vid.group(1)) if vid else None,
+                    "art": saved_art.get(r["uri"]) or (art(vid.group(1)) if vid else None),
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
                     "plays": plays.get(r["uri"], 1), "kind": kind, "author": author,
                     "series": media_meta.series_of(title, meta.get("seriesName") or ""),
