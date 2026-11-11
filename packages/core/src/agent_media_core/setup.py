@@ -990,6 +990,91 @@ def _install_one_systemd(name: str, *, dry_run: bool, root: Path) -> str | None:
     return unit
 
 
+def _template_units(name: str) -> "list[str]":
+    """The unit files `name` would have been installed as: the service, plus
+    its `.timer` when the template carries a `timer` file.
+
+    Read from the template rather than from disk, so a job that has since
+    lost its schedule still has its stale timer found and removed.
+    """
+    unit = _systemd_unit_name(name)
+    units = [unit]
+    if (service_templates_dir() / name / "timer").is_file():
+        units.append(unit.removesuffix(".service") + ".timer")
+    return units
+
+
+def prune_services(roles: "set[str] | None", *, dry_run: bool,
+                   backend: str, root: "Optional[Path]" = None) -> int:
+    """Remove the services this host is installed with but no longer wants.
+
+    `install-services` installs what the roles want and has never removed
+    what they stop wanting, so every role change, retired feature and
+    switched-off integration leaves its unit enabled forever. red5 is the
+    worked example: it still carried a `call-guard` — the mic watcher — six
+    weeks after declaring itself `render, origin`, because roles were added
+    after that host was set up and nothing reconciled it. Counting its units
+    for the red2 move is how it was found
+    (docs/proposals/2026-11-12-fewer-services.md §4a).
+
+    Only templates are considered, so a unit of yours that merely starts with
+    `agent-media-` is never touched. Nothing is deleted: the unit is disabled
+    and moved under `media_share_dir()/units-pruned/` (runit: the service
+    directory, under `services-pruned/`), which is outside the service root
+    and off PATH.
+
+    A host that declares no roles wants everything, so this is a no-op there
+    — the same fail-open default as installing.
+    """
+    unwanted = [(n, why) for n in service_template_names()
+                for wanted, why in [service_wanted(n, roles)] if not wanted]
+    removed = 0
+    for name, why in unwanted:
+        if backend == "systemd":
+            sd = root or systemd_user_dir()
+            present = [u for u in _template_units(name) if (sd / u).exists()]
+            if not present:
+                continue
+            if dry_run:
+                print(f"# would prune {name} ({why}): "
+                      f"disable --now and move aside {', '.join(present)}")
+                removed += 1
+                continue
+            # --now before the move: systemd cannot stop a unit whose file
+            # has already gone, and a running daemon left behind by a
+            # "successful" prune is the failure this is meant to end.
+            _systemctl_user("disable", "--now", *present)
+            for u in present:
+                dest = _backup_aside(sd / u, "units-pruned", u)
+                print(f"media-setup: pruned {u} ({why}) -> {dest}")
+            removed += 1
+        else:  # runit
+            sv = root or services_dir()
+            live = (sv / name) if sv else None
+            if live is None or not (live.exists() or live.is_symlink()):
+                continue
+            if dry_run:
+                print(f"# would prune {name} ({why}): remove {live}")
+                removed += 1
+                continue
+            # A symlink to the template is ours to drop; a real directory is
+            # someone's local service and is kept, moved aside rather than
+            # deleted. Either way runsvdir stops supervising it once it
+            # leaves the root.
+            if live.is_symlink():
+                live.unlink()
+                print(f"media-setup: pruned {name} ({why}): unlinked {live}")
+            else:
+                dest = _backup_aside(live, "services-pruned", name)
+                print(f"media-setup: pruned {name} ({why}) -> {dest}")
+            removed += 1
+    if backend == "systemd" and removed and not dry_run:
+        _systemctl_user("daemon-reload")
+    if not removed:
+        print("media-setup: nothing to prune")
+    return removed
+
+
 def _install_services_systemd(args: argparse.Namespace,
                               names: list[str]) -> int:
     root = systemd_user_dir()
@@ -1058,8 +1143,23 @@ def cmd_install_services(args: argparse.Namespace) -> int:
         print(f"media-setup: set {', '.join(added)} in agent-media.env")
 
     backend = _service_backend(getattr(args, "backend", None))
+
+    # After the install, not before: a prune that ran first would stop a
+    # service for a moment even when the very next step reinstalls it.
+    def _prune(rc: int) -> int:
+        if not getattr(args, "prune", False):
+            return rc
+        if explicit:
+            print("media-setup: --prune sweeps every template, so it cannot "
+                  "be combined with named services", file=sys.stderr)
+            return 2
+        prune_services(host_roles(), dry_run=getattr(args, "dry_run", False),
+                       backend=backend,
+                       root=Path(args.root) if getattr(args, "root", None) else None)
+        return rc
+
     if backend == "systemd":
-        return _install_services_systemd(args, names)
+        return _prune(_install_services_systemd(args, names))
 
     # runit
     root = Path(args.root) if args.root else services_dir()
@@ -1072,7 +1172,7 @@ def cmd_install_services(args: argparse.Namespace) -> int:
         ok = _install_one_service(name, dry_run=args.dry_run, root=root,
                                   force=getattr(args, "force", False)) and ok
     ok = _link_entrypoints(dry_run=args.dry_run) and ok
-    return 0 if ok else 1
+    return _prune(0 if ok else 1)
 
 
 def cmd_link_services(args: argparse.Namespace) -> int:
@@ -2271,6 +2371,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--now", action="store_true",
                     help="systemd: enable --now the units after writing")
     sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--prune", action="store_true",
+                    help="Also remove the services this host's roles and "
+                         "gates no longer want: disabled and moved aside, "
+                         "never deleted. Sweeps every template, so it cannot "
+                         "be combined with named services")
     sp.add_argument("--force", action="store_true",
                     help="runit: replace a real service dir that differs from "
                          "its template (backed up first); without it, reported "

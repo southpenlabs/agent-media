@@ -1078,3 +1078,128 @@ def test_requires_any_is_an_or_and_requires_stays_an_and(tmp_path, monkeypatch):
     # And so does the OR.
     wanted, why = setup.service_wanted("svc", {"render"})
     assert not wanted and "observe or origin" in why, why
+
+
+def _prune_fixture(tmp_path, monkeypatch):
+    """Two templates — one the host wants, one it does not — and an empty
+    systemd unit dir to install into."""
+    tpl = tmp_path / "services"
+    for name, roles in (("wanted", "requires: origin\n"),
+                        ("unwanted", "requires: observe\n")):
+        d = tpl / name
+        d.mkdir(parents=True)
+        (d / "run").write_text("#!/bin/sh\n")
+        (d / "roles").write_text(roles)
+    monkeypatch.setattr(setup, "service_templates_dir", lambda: tpl)
+    units = tmp_path / "units"
+    units.mkdir()
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: units)
+    monkeypatch.setattr(setup, "media_share_dir", lambda: tmp_path / "share")
+    calls = []
+    monkeypatch.setattr(setup, "_systemctl_user",
+                        lambda *a: calls.append(a) or 0)
+    return units, calls
+
+
+def test_prune_removes_a_service_the_host_stopped_wanting(tmp_path, monkeypatch,
+                                                          capsys):
+    """install-services installed what the roles wanted and never removed
+    what they stopped wanting — which is why red5 still carried a call-guard
+    six weeks after declaring itself render+origin. See
+    docs/proposals/2026-11-12-fewer-services.md §4a."""
+    units, calls = _prune_fixture(tmp_path, monkeypatch)
+    for u in ("agent-media-wanted.service", "agent-media-unwanted.service"):
+        (units / u).write_text("[Unit]\n")
+
+    assert setup.prune_services({"origin"}, dry_run=False, backend="systemd") == 1
+
+    assert (units / "agent-media-wanted.service").exists()
+    assert not (units / "agent-media-unwanted.service").exists()
+    # Moved aside, not deleted, and outside the unit directory.
+    aside = tmp_path / "share" / "units-pruned" / "agent-media-unwanted.service"
+    assert aside.read_text() == "[Unit]\n"
+    # Stopped before its file went: systemd cannot stop a unit it can no
+    # longer read, and a daemon left running by a "successful" prune is the
+    # failure this exists to end.
+    assert ("disable", "--now", "agent-media-unwanted.service") in calls
+    assert calls.index(("disable", "--now", "agent-media-unwanted.service")) \
+        < calls.index(("daemon-reload",))
+    assert "pruned agent-media-unwanted.service (needs role observe)" \
+        in capsys.readouterr().out
+
+
+def test_prune_takes_the_timer_with_the_service(tmp_path, monkeypatch):
+    """A timer job is two unit files. Leaving the .timer behind would leave
+    systemd trying to start a service whose file has gone."""
+    units, calls = _prune_fixture(tmp_path, monkeypatch)
+    (setup.service_templates_dir() / "unwanted" / "timer").write_text(
+        "OnCalendar=daily\n")
+    for u in ("agent-media-unwanted.service", "agent-media-unwanted.timer"):
+        (units / u).write_text("[Unit]\n")
+
+    setup.prune_services({"origin"}, dry_run=False, backend="systemd")
+
+    assert not list(units.iterdir())
+    assert ("disable", "--now", "agent-media-unwanted.service",
+            "agent-media-unwanted.timer") in calls
+
+
+def test_prune_is_a_no_op_on_a_host_that_declares_no_roles(tmp_path, monkeypatch,
+                                                           capsys):
+    """None is not the empty set: unconfigured means "filter nothing", the
+    same fail-open default that keeps an old rollout installing as before."""
+    units, calls = _prune_fixture(tmp_path, monkeypatch)
+    (units / "agent-media-unwanted.service").write_text("[Unit]\n")
+
+    assert setup.prune_services(None, dry_run=False, backend="systemd") == 0
+
+    assert (units / "agent-media-unwanted.service").exists()
+    assert calls == []
+    assert "nothing to prune" in capsys.readouterr().out
+
+
+def test_prune_never_touches_a_unit_that_is_not_a_template(tmp_path, monkeypatch):
+    """Only templates are considered. A unit of David's that merely starts
+    with `agent-media-` — the Map's timers, the audio prune — is not ours to
+    remove."""
+    units, _ = _prune_fixture(tmp_path, monkeypatch)
+    (units / "agent-media-map-vic.service").write_text("[Unit]\n")
+    (units / "agent-media-unwanted.service").write_text("[Unit]\n")
+
+    setup.prune_services({"origin"}, dry_run=False, backend="systemd")
+
+    assert (units / "agent-media-map-vic.service").exists()
+    assert not (units / "agent-media-unwanted.service").exists()
+
+
+def test_prune_dry_run_says_what_it_would_do_and_does_nothing(tmp_path,
+                                                              monkeypatch, capsys):
+    units, calls = _prune_fixture(tmp_path, monkeypatch)
+    (units / "agent-media-unwanted.service").write_text("[Unit]\n")
+
+    assert setup.prune_services({"origin"}, dry_run=True, backend="systemd") == 1
+
+    assert (units / "agent-media-unwanted.service").exists()
+    assert calls == []
+    assert "# would prune unwanted (needs role observe)" in capsys.readouterr().out
+
+
+def test_prune_runit_unlinks_ours_and_moves_a_local_service_aside(tmp_path,
+                                                                  monkeypatch):
+    """A symlink to the template is ours to drop. A real directory is
+    somebody's own service: kept, moved out of the root so runsvdir stops
+    supervising it."""
+    _prune_fixture(tmp_path, monkeypatch)
+    sv = tmp_path / "sv"
+    (sv / "unwanted").mkdir(parents=True)
+    (sv / "unwanted" / "run").write_text("#!/bin/sh\n# hand-written\n")
+
+    setup.prune_services({"origin"}, dry_run=False, backend="runit", root=sv)
+    assert not (sv / "unwanted").exists()
+    assert (tmp_path / "share" / "services-pruned" / "unwanted" / "run").is_file()
+
+    (sv / "unwanted").symlink_to(setup.service_templates_dir() / "unwanted")
+    setup.prune_services({"origin"}, dry_run=False, backend="runit", root=sv)
+    assert not (sv / "unwanted").is_symlink()
+    # The template itself survives being unlinked from the service root.
+    assert (setup.service_templates_dir() / "unwanted" / "run").is_file()
