@@ -11554,7 +11554,10 @@ side), `phone_jobs.session` (the channel),
   `MEDIA_SESSIOND_DEFAULT_HOST_SKIP` (folders, `:` between) stay here, as
   does `host: "local"` (or this host's own name; `media session start
   --host local`). The answer of one that went carries `host` and
-  `default_host: true`. Chats already running stay where they are.
+  `default_host: true`. Chats already running stay where they are. A
+  worker that reconnects supersedes its older stream (`phone_jobs.serve`):
+  the old one, left open by the proxy until a ping fails, takes no more
+  jobs, so none is handed to a dead stream and lost.
 - **Rows.** `/targets` headless rows and `/sessions/state` rows carry `host`
   (and `host_down`) for a session on another host. The app does not show it
   yet.

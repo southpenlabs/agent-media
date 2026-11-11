@@ -611,6 +611,29 @@ def test_a_restart_goes_to_the_device_it_names_and_no_other(pn, host, fake_py):
     assert _empty()
 
 
+def test_a_reconnected_worker_takes_the_jobs_not_its_stale_stream(server, host, fake_py,
+                                                                   monkeypatch, tmp_path):
+    """A worker that reconnected after a blip leaves its old stream open on
+    the proxy until a ping fails; a job handed to it was lost (11 Nov 2026:
+    every other request to red2 timed out after its worker's restart)."""
+    import http.client
+
+    _, dev, token = _jobs_device("pn jobs")
+    stale = http.client.HTTPConnection(*server, timeout=10)
+    stale.request("GET", "/jobs/events?kinds=restart,update",
+                  headers={"Authorization": f"Bearer {token}"})
+    assert stale.getresponse().status == 200       # open, and never read again
+    assert _wait(lambda: phone_jobs.connected(dev))
+    _generic_worker(server, tmp_path, token, monkeypatch)
+    assert _wait(lambda: len([w for w in phone_jobs._WORKERS.values()
+                              if w["device"] == dev]) == 2)
+    for _ in range(3):
+        res = rs.run_device("pn", ["canvas"])
+        assert res["rc"] == 0, res
+    assert fake_py().count("argv --json --only canvas") == 3
+    stale.close()
+
+
 def test_a_jobs_only_device_never_gets_a_command(server, host, monkeypatch, tmp_path):
     _, dev, token = _jobs_device("pn jobs")
     monkeypatch.setenv("MEDIA_PHONE_JOBS_DEVICE", "d_phone_not_here")

@@ -547,6 +547,13 @@ def workers() -> list[dict]:
             for i, k in sorted(ids.items(), key=lambda kv: str(names.get(kv[0]) or kv[0]))]
 
 
+def _superseded(token: int, device: str, kinds: set) -> bool:
+    """Whether a newer stream of the same device takes the same kinds (the
+    worker reconnected): this one then takes no more jobs. Under `_COND`."""
+    return any(t > token and w.get("device") == device and w.get("kinds") == kinds
+               for t, w in _WORKERS.items())
+
+
 def serve(h, device: str, kinds=()) -> bool:
     """The worker's stream: each queued job once, as a `job` frame. A
     command goes to any worker; another kind only to a stream that named it
@@ -566,6 +573,13 @@ def serve(h, device: str, kinds=()) -> bool:
                            | {k for k in kinds if k in (*KINDS, SESSION_KIND)
                               and k in allowed}}
         mine = _WORKERS[token]["kinds"]
+        # Its older stream, if any, is superseded (below): it takes no more
+        # jobs, this one does. A worker that
+        # reconnected after a blip leaves one behind that the proxy keeps
+        # open until a ping fails, and a job handed to it is lost (11 Nov
+        # 2026: every other request to red2 timed out after its worker's
+        # restart).
+        _COND.notify_all()
     h.close_connection = True
     try:
         h.send_response(200)
@@ -579,14 +593,18 @@ def serve(h, device: str, kinds=()) -> bool:
         last = time.monotonic()
         while True:
             with _COND:
-                _COND.wait_for(lambda: bool(_CANCELS.get(device)) or bool(_pick(device, mine, peek=True)),
+                _COND.wait_for(lambda: not _superseded(token, device, mine) and (
+                    bool(_CANCELS.get(device)) or bool(_pick(device, mine, peek=True))),
                                timeout=max(0.01, PING_S - (time.monotonic() - last)))
                 # No longer a jobs worker (the setting moved, the device was
                 # revoked): take nothing more, and let the stream go.
                 if device not in jobs_devices():
                     return True
-                out = [("job", _frame(j)) for j in _pick(device, mine)]
-                out += [("cancel", {"id": jid}) for jid in _CANCELS.pop(device, [])]
+                # Superseded: it stays open (pinged, so a dead one is found)
+                # but takes nothing; the newest stream does.
+                out = [] if _superseded(token, device, mine) else (
+                    [("job", _frame(j)) for j in _pick(device, mine)]
+                    + [("cancel", {"id": jid}) for jid in _CANCELS.pop(device, [])])
             for event, j in out:
                 h.wfile.write(f"event: {event}\ndata: {json.dumps(j)}\n\n".encode())
                 last = time.monotonic()
