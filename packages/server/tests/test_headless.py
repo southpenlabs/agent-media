@@ -858,6 +858,12 @@ def test_run_now_and_slots_over_http(app_host, server, signed_in, typed, monkeyp
     st, r = req(server, "POST", "/session/run-now", {"session": b}, AUTH)
     assert st == 200 and r["bumped"] == a and r["held"] == 0, r
     wait_for(lambda: last_text(app_host, b) == "queued one")
+    # The parked one is named as any thread is, not "Untitled chat" (David,
+    # 11 Nov 2026, screenshot: a titled chat listed untitled under "Paused").
+    wait_for(lambda: req(server, "GET", "/sessions/slots", headers=AUTH)[1]["bumped"])
+    st, got = req(server, "GET", "/sessions/slots", headers=AUTH)
+    p = got["bumped"][0]
+    assert p["session"] == a and p["title"] and "first_text" not in p, got
     st, r = req(server, "POST", "/session/run-now", {"session": "nope"}, AUTH)
     assert st == 400
 

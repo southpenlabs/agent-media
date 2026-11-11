@@ -1649,8 +1649,8 @@ default — see below.
   "speech", "run_now", "next"}], "held": [{"session", "title", "since",
   "count", "slot": "high" | "normal", "slot_from": "message" | "speech" |
   null, "speech", "for": "slot" | "restart" | "quota"}], "bumped":
-  [{"session", "for", "why": "run_now" | "quiet", "reason", "level",
-  "for_from", "at", "first_text"}]}`. `holders` are the live sessions,
+  [{"session", "title", "for", "why": "run_now" | "quiet", "reason",
+  "level", "for_from", "at"}]}`. `holders` are the live sessions,
   least recently active first; `reason` is `card` (`detail`: "question" or
   the tool asking), `command` (`detail`: the command), `tasks` (`detail`:
   how many), `low` (only low-priority agents; `detail`: how many),

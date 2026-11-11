@@ -201,4 +201,4 @@ def session_slots(bearer: str) -> tuple[bool, dict]:
                   "short": bool(r.get("short")), "free_mb": r.get("free_mb"),
                   "holders": [titled(x) for x in r.get("holders") or [] if isinstance(x, dict)],
                   "held": [titled(x) for x in r.get("held") or [] if isinstance(x, dict)],
-                  "bumped": [x for x in r.get("bumped") or [] if isinstance(x, dict)]}
+                  "bumped": [titled(x) for x in r.get("bumped") or [] if isinstance(x, dict)]}
