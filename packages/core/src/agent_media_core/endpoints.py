@@ -93,13 +93,14 @@ class Endpoint:
     def bind(self) -> str:
         """The configured address, or this endpoint's default.
 
-        An empty `default_bind` means "ask the peer network" (clips and
-        speech-state, which the units resolved through tailnet-ip.service).
-        Reported as `tailnet` rather than resolved here, because resolving
-        can take ~45s and `media endpoints` must stay instant.
+        Whatever is configured, else this endpoint's default — loopback for
+        all of them now (`resolve_bind`, and the off-the-tailnet decision).
+        A configured `tailnet` is returned as that word rather than resolved,
+        because resolving can take ~45s and `media endpoints` must be
+        instant; the command resolves it itself for display.
         """
         explicit = (os.environ.get(self.bind_env) or "").strip()
-        return explicit or self.default_bind or "tailnet"
+        return explicit or self.default_bind
 
     def port(self) -> int:
         raw = (os.environ.get(self.port_env) or "").strip()
@@ -109,21 +110,48 @@ class Endpoint:
             return self.default_port
 
 
-def tailnet_bind(explicit: str = "") -> str:
-    """An explicit address, else this host's peer-network one, else loopback.
+#: What a bind setting says to go and find this host's mesh address, rather
+#: than naming one. A word, not an address: `decisions/2026-10-18-off-the-tailnet`
+#: makes a literal `100.x.y.z` in config a thing that breaks the day the mesh
+#: renumbers.
+TAILNET = "tailnet"
 
-    The units these endpoints replace did not hardcode an address either:
-    `agent-media-clips.service` has `Requires=tailnet-ip.service` and binds
-    `${TS_IP}` out of the env file that unit writes. Copying the resolved IP
-    into agent-media.env instead would bake today's tailnet address into
-    config and break quietly the day it changes — so ask, as the unit did.
 
-    `speech_state.resolve_bind` already does exactly this, retries included,
-    so it is reused rather than reimplemented. It can take ~45s on a host
-    with no tailnet, which is why `start_all` must stay off any boot path.
+def resolve_bind(explicit: str = "") -> str:
+    """The address to listen on: what was configured, else loopback.
+
+    **Loopback is the default, and that is the rule rather than a
+    preference.** `decisions/2026-10-18-off-the-tailnet.md`: "A tailnet
+    address in code or a default (`100.x.y.z`, a MagicDNS name) is a bug;
+    hostnames belong in the server's config." These endpoints are reached
+    through the server's public route, not by a mesh address, so binding a
+    mesh by default would be designing the thing that decision forbids.
+
+    An install that does want a mesh address says so — `MEDIA_CLIPS_BIND`
+    set to an address, or to the word `tailnet` to have this host's one
+    looked up (which is what `agent-media-clips.service` did through
+    `Requires=tailnet-ip.service`, and the reason the word exists: the
+    address is not written down anywhere it can go stale).
+
+    Looking one up can take ~45s on a host with no mesh, which is why
+    `start_all` must stay off any boot path.
     """
+    want = (explicit or "").strip()
+    if not want:
+        return "127.0.0.1"
+    if want.lower() != TAILNET:
+        return want
     from .entrypoints import speech_state
-    return speech_state.resolve_bind(explicit or None)
+    found = speech_state.resolve_bind(None)
+    if found == "127.0.0.1":
+        log.warning("bind: asked for the %s address and this host has none; "
+                    "listening on loopback", TAILNET)
+    return found
+
+
+#: Kept as the old name for one release: `tailnet_bind("")` used to mean
+#: "find the mesh address", and now means "loopback".
+tailnet_bind = resolve_bind
 
 
 def _clips(bind: str, port: int):
@@ -133,29 +161,28 @@ def _clips(bind: str, port: int):
     # passed `--directory ~/.cache/agent-media`; asking cache_dir() keeps the
     # two from drifting apart.
     #
-    # Tailnet-bound like the unit: the phone fetches these over the tailnet
-    # (MEDIA_BOOK_BASEURL_PHONE=http://red5:8780), so loopback here would
-    # leave every clip and book file unreachable from the device that wants
-    # them — and silently, since the server would look perfectly healthy.
+    # Loopback unless MEDIA_CLIPS_BIND says otherwise. The unit bound the
+    # mesh address because the phone's *fallback* clip and book URLs name
+    # this port — but the paths actually in use are off the mesh already
+    # (signed https for speech, a file copy for books), and in the seven days
+    # before it moved in here the port served two requests, both of them a
+    # test of mine. A host that still wants the fallback reachable sets
+    # MEDIA_CLIPS_BIND=tailnet; the default does not assume a mesh exists.
     return clip_server.make_server(
-        tailnet_bind(os.environ.get("MEDIA_CLIPS_BIND") or ""),
+        resolve_bind(os.environ.get("MEDIA_CLIPS_BIND") or ""),
         port, str(cache_dir()))
 
 
 def _speech_state(bind: str, port: int):
     from .entrypoints import speech_state
-    # Its own bind resolution: the address is discovered from the peer
-    # network at start-up rather than configured, and retried while
-    # tailscaled comes up. Only an explicit setting overrides that.
-    #
-    # SLOW ON PURPOSE, and the reason `start_all` must not be on anyone's
-    # boot path: with no explicit bind this is six attempts at `tailscale ip`
-    # with a 5s timeout and 2.5s between, so up to ~45s on a host with no
-    # tailnet. Set MEDIA_SPEECH_STATE_BIND and it returns at once. The canvas
-    # starts endpoints on a thread for this.
-    explicit = (os.environ.get("MEDIA_SPEECH_STATE_BIND") or "").strip()
+    # Unlike the standalone service, this does NOT go looking for a mesh
+    # address by default. `media-speech-state` run as its own unit still
+    # does, and that stays — changing it would move a host's listener out
+    # from under the peers posting to it. In here the default is loopback and
+    # MEDIA_SPEECH_STATE_BIND (an address, or `tailnet`) asks for more, so
+    # folding it in cannot quietly publish a port on a mesh.
     return speech_state.make_server(
-        speech_state.resolve_bind(explicit or None), port)
+        resolve_bind(os.environ.get("MEDIA_SPEECH_STATE_BIND") or ""), port)
 
 
 def _share(bind: str, port: int):
@@ -183,14 +210,14 @@ def _completions_shim(bind: str, port: int):
 ENDPOINTS: "tuple[Endpoint, ...]" = (
     Endpoint("speech-state", "is speech playing here, and input claims",
              _speech_state, 8675, "MEDIA_SPEECH_STATE_BIND",
-             "MEDIA_SPEECH_STATE_PORT", default_bind="",
+             "MEDIA_SPEECH_STATE_PORT",
              unit="agent-media-speech-state.service"),
     Endpoint("share", "the app's share sheet, recent list and transport",
              _share, 8771, "MEDIA_SHARE_BIND", "MEDIA_SHARE_PORT",
              unit="agent-media-share.service"),
     Endpoint("clips", "the phone fetches rendered clips and book files",
              _clips, 8780, "MEDIA_CLIPS_BIND", "MEDIA_CLIPS_PORT",
-             default_bind="", unit="agent-media-clips.service"),
+             unit="agent-media-clips.service"),
     # The main shim only. red5's private second instance (8784) stays its
     # own process: see `make_server`'s docstring in the tts-shim package —
     # what makes it private is its environment, and two listeners here would

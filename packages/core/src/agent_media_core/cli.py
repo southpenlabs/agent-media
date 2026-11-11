@@ -9413,7 +9413,7 @@ def cmd_endpoints(a) -> int:
     # this wrong and the command says "off" for an endpoint whose unit is
     # running, which is the one moment it is actually being read.
     def _addr(bind: str) -> str:
-        if bind != "tailnet":
+        if bind.lower() != eps.TAILNET:
             return bind
         from .entrypoints.speech_state import _peer_ip
         return _peer_ip() or "127.0.0.1"

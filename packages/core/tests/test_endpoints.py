@@ -215,35 +215,64 @@ def test_the_server_does_not_start_endpoints_on_its_boot_path():
     assert "_endpoints.start_all()" not in src
 
 
-def test_clips_binds_the_tailnet_like_its_unit_did(monkeypatch):
-    """The unit had `Requires=tailnet-ip.service` and bound `${TS_IP}`,
-    because the phone fetches clips and book files over the tailnet
-    (MEDIA_BOOK_BASEURL_PHONE=http://red5:8780). Defaulting to loopback here
-    would leave every one of them unreachable from the device that wants
-    them, with the server looking perfectly healthy."""
+def test_no_endpoint_binds_a_mesh_address_by_default(monkeypatch):
+    """`decisions/2026-10-18-off-the-tailnet.md`: "A tailnet address in code
+    or a default is a bug; hostnames belong in the server's config." These
+    endpoints are reached through the server's public route, so a mesh
+    default would be designing the thing that decision forbids.
+
+    It WAS the default here for a few hours on 12 Nov 2026, copied from the
+    unit (`Requires=tailnet-ip.service`, bind `${TS_IP}`) without asking
+    whether the unit was still right. It was not: the paths in use are off
+    the mesh already, and in the seven days before the port moved into the
+    server it served two requests, both a test.
+    """
     from agent_media_core.entrypoints import speech_state
 
-    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
-    monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.64.0.9")
-    assert endpoints.tailnet_bind() == "100.64.0.9"
-    # And an explicit setting still wins, without asking the network.
     monkeypatch.setattr(speech_state, "_peer_ip",
-                        lambda: pytest.fail("asked the peer network anyway"))
-    assert endpoints.tailnet_bind("10.1.2.3") == "10.1.2.3"
+                        lambda: pytest.fail("went looking for a mesh"))
+    for key in ("MEDIA_CLIPS_BIND", "MEDIA_SPEECH_STATE_BIND",
+                "MEDIA_SHARE_BIND", "MEDIA_SHIM_BIND"):
+        monkeypatch.delenv(key, raising=False)
+    for ep in endpoints.ENDPOINTS:
+        assert ep.bind() == "127.0.0.1", ep.name
+    assert endpoints.resolve_bind("") == "127.0.0.1"
 
 
-def test_the_two_self_resolving_endpoints_say_so_rather_than_lying(monkeypatch):
-    """`media endpoints` must stay instant, so bind() reports the intent
-    rather than spending up to 45s resolving it."""
+def test_a_host_that_wants_its_mesh_address_asks_by_name(monkeypatch):
+    """An install that does want one says `tailnet` rather than writing an
+    address down, because the address is exactly what goes stale."""
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.64.0.9")
+    assert endpoints.resolve_bind("tailnet") == "100.64.0.9"
+    assert endpoints.resolve_bind("TAILNET") == "100.64.0.9", "case-insensitive"
+    # A literal address is used as written, without asking anything.
+    monkeypatch.setattr(speech_state, "_peer_ip",
+                        lambda: pytest.fail("asked anyway"))
+    assert endpoints.resolve_bind("10.1.2.3") == "10.1.2.3"
+
+
+def test_asking_for_a_mesh_this_host_has_not_got_falls_back_and_says_so(
+        monkeypatch, caplog):
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: None)
+    monkeypatch.setattr(speech_state, "_BIND_RETRIES", 1)
+    with caplog.at_level("WARNING"):
+        assert endpoints.resolve_bind("tailnet") == "127.0.0.1"
+    assert "this host has none" in caplog.text
+
+
+def test_bind_reports_the_word_rather_than_resolving_it(monkeypatch):
+    """`media endpoints` must be instant; resolving can take ~45s."""
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.setattr(speech_state, "_peer_ip",
+                        lambda: pytest.fail("resolved during a listing"))
+    monkeypatch.setenv("MEDIA_CLIPS_BIND", "tailnet")
     by = {e.name: e for e in endpoints.ENDPOINTS}
-    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
-    monkeypatch.delenv("MEDIA_SPEECH_STATE_BIND", raising=False)
     assert by["clips"].bind() == "tailnet"
-    assert by["speech-state"].bind() == "tailnet"
-    monkeypatch.setenv("MEDIA_CLIPS_BIND", "127.0.0.1")
-    assert by["clips"].bind() == "127.0.0.1"
-    # The loopback-by-default ones are unchanged.
-    assert by["tts-shim"].bind() == "127.0.0.1"
 
 
 def test_media_endpoints_probes_a_real_address_not_the_placeholder(monkeypatch,
@@ -259,7 +288,8 @@ def test_media_endpoints_probes_a_real_address_not_the_placeholder(monkeypatch,
     from agent_media_core import cli
     from agent_media_core.entrypoints import speech_state
 
-    monkeypatch.delenv("MEDIA_CLIPS_BIND", raising=False)
+    # Only reachable when a host has asked for its mesh address by name.
+    monkeypatch.setenv("MEDIA_CLIPS_BIND", "tailnet")
     monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.64.0.9")
     probed = []
 
