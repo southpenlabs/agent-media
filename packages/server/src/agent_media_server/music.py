@@ -1126,6 +1126,55 @@ def versions(bearer: str, uri: str = "", title: str = "") -> tuple[bool, dict]:
     return True, {"uri": uri, **got}
 
 
+def _find(find: dict) -> tuple[str | None, dict]:
+    artist = str(find.get("artist") or "").strip()[:200]
+    title = str(find.get("title") or "").strip()[:300]
+    if not title:
+        return None, {"error": "find needs a title", "status": 400}
+    from agent_media_core import music_discover
+
+    try:
+        uri = music_discover.resolve(artist, title)
+    except Exception as e:  # noqa: BLE001
+        print(f"music: finding {artist} - {title} failed: {e}", file=sys.stderr)
+        uri = None
+    if not uri:
+        return None, {"error": "couldn't find that on YouTube here", "status": 404}
+    return uri, {}
+
+
+def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = True, genre: str = "",
+             playlist: str = "") -> tuple[bool, dict]:
+    """`GET /music/discover` — gated like /music/recent: music not played
+    here yet (agent_media_core.music_discover; David, 11 Nov 2026: "Can we
+    add a discover section for music too?")."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from agent_media_core import music_discover
+
+    if not str(page or "1").isdigit():
+        return False, {"error": "page is a number", "status": 400}
+    vid = ""
+    if (which or "") == "like_playing":
+        try:
+            now, _ = _now()
+            vid = _row_vid(str(now.get("uri") or ""))
+        except Exception:  # noqa: BLE001
+            vid = ""
+    try:
+        got = music_discover.listing(which or "for_you", int(page or 1), hide_played, (genre or "").strip()[:60],
+                                     (playlist or "").strip(), vid)
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except Exception as e:  # noqa: BLE001 — the source failed
+        print(f"music: discover {which} failed: {e}", file=sys.stderr)
+        return False, {"error": f"couldn't reach the list's source: {e}", "status": 502}
+    if got.get("items"):
+        _mark_votes([i for i in got["items"] if i.get("uri")])
+    return True, got
+
+
 def _played_book(uri: str) -> bool:
     """Whether `uri` is one the book and podcast lists hold (what was
     played, the library, new episodes) — the only books this route will
@@ -1171,6 +1220,13 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     action = str(body.get("action") or "")
     if action not in ACTIONS:
         return False, {"error": "unknown action", "status": 400}
+    if action in ("play", "add", "like") and not body.get("uri") and isinstance(body.get("find"), dict):
+        # A Discover row by name (music_discover.resolve): found with the
+        # host's YouTube search, then played, queued or liked as any song.
+        found, why = _find(body["find"])
+        if not found:
+            return False, why
+        body = {**{k: v for k, v in body.items() if k != "find"}, "uri": found}
     if action == "held":
         return _held_control(body)
     if action == "mood":

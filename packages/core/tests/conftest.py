@@ -91,7 +91,7 @@ def _no_live_trakt_or_tmdb(monkeypatch):
     Movies/TV listing would call them for real with the user's signed-in
     token. Scrubbed by prefix; a test that wants them sets its own and
     stubs the HTTP (trakt._request, tmdb._request)."""
-    for key in [k for k in os.environ if k.startswith(("MEDIA_TRAKT_", "MEDIA_TMDB_"))]:
+    for key in [k for k in os.environ if k.startswith(("MEDIA_TRAKT_", "MEDIA_TMDB_", "MEDIA_MUSIC_REGION"))]:
         monkeypatch.delenv(key, raising=False)
 
 

@@ -4362,6 +4362,53 @@ names one the server has not seen), the video in `uri` left out.
   look for. A version plays as any row does (`{"action": "play", "uri"}`),
   and starts a station (`{"action": "radio", "uri"}`).
 
+**Discover: music not played here yet.** `GET /music/discover?list=<list>&page=&hide_played=0|1&genre=&playlist=`
+(11 Nov 2026, gated like `/music/recent`; David: "Can we add a discover
+section for music too?"; `music_discover.py`) → `{"ok", "list", "lists",
+"page", "more", "hide_played", "items", "genres", "user", "playlists"?,
+"playlist"?, "playlist_title"?, "reason"?}`. Lists (`lists` names those
+this server has):
+
+- `for_you`: ListenBrainz's recommendations for the ListenBrainz name set in
+  Settings (`listenbrainz.user`; `GET /1/cf/recommendation/user/{user}/recording`,
+  public), named a page at a time through `GET /1/metadata/recording`
+  (names kept in `music-discover-names.json`).
+- `created_for`: ListenBrainz's playlists made for that name (`GET
+  /1/user/{user}/playlists/createdfor`: Weekly Exploration, Weekly Jams…)
+  as `playlists: [{"id", "title", "date", "kind", "expires_at"}]` and no
+  items; with `playlist=<id>`, that playlist's tracks (`GET /1/playlist/{id}`).
+- `fresh`: new releases by artists the name listens to (`GET
+  /1/user/{user}/fresh_releases?days=30`), else everyone's (`GET
+  /1/explore/fresh-releases/`, `sitewide: true` on each); newest first,
+  albums and singles (`kind: "album"`, `type`, `genres` from its tags).
+- `top_songs`, `top_albums`: Apple Music's most played in
+  `MEDIA_MUSIC_REGION` (default AU; Apple's public RSS, 100 of each).
+  Apple's RSS has no new-releases feed now and no genre feeds, so a genre
+  is filtered here from each item's own `genres`.
+- `like_playing`: YouTube's Mix of what is playing (the radio's own
+  source, the "youtube-radio" add-on), without starting a station; with
+  nothing playing, no items and a `reason`.
+
+`for_you` and `created_for` need the ListenBrainz name (400 without it,
+and not in `lists`). Each list is kept whole (ListenBrainz six hours,
+Apple and the Mix an hour; ListenBrainz asked at most once a second, with a
+User-Agent) and paged here, 20 a page, `more` when there is another.
+`genres` is the list's genres (where its source has any); `genre` keeps
+those items. An item: `{"id", "kind": "song"|"album", "source":
+"listenbrainz"|"apple"|"youtube", "title", "artist", "album", "year",
+"art", "played", "genres"?, "link"?, "uri"?, "mbid"?}`. `played` is true
+when the music history has it (its artist and song, or a played title
+naming both; a Mix item by its uri), and those are left out unless
+`hide_played=0`. 400 for a list or page that is not one; 502 when the
+list's source fails.
+
+A row plays, queues or is liked by name: `POST /music {"action":
+"play"|"add"|"like", "find": {"artist", "title"}}` finds it with the host's
+YouTube search (Mopidy's, else the DJ's, as versions do; kept in
+`music-discover-found.json`) and goes on as that `uri` would; 404 when
+nothing is found, 400 without a title. A Mix item has its `uri` and plays
+as any row.
+
 `GET /music/channel?name=<name>|url=<address>|vid=<video id>` (9 Nov 2026,
 gated like `/music/recent`; David: "Can we get to an info page for the
 channel too?") answers `{"ok", "channel": {"name", "key", "url",

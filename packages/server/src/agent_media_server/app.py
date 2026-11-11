@@ -464,7 +464,8 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 
 # What is playing, and its controls: the Media tab (music.py). The same
 # arrangement.
-MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions"})
+MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions",
+                         "/music/discover"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # The phone app updating itself (app_update.py, §6.52): API routes under
@@ -4520,6 +4521,13 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         q = parse_qs(h.path.partition("?")[2])
         ok, detail = music.channel(_bearer(h), (q.get("name") or [""])[0], (q.get("url") or [""])[0],
                                    (q.get("vid") or [""])[0])
+    elif path == "/music/discover":
+        if method != "GET":
+            return False
+        q = parse_qs(h.path.partition("?")[2])
+        one = lambda k, d="": (q.get(k) or [d])[0]  # noqa: E731
+        ok, detail = music.discover(_bearer(h), one("list", "for_you"), one("page", "1"), one("hide_played", "1") != "0",
+                                    one("genre"), one("playlist"))
     elif path == "/music/versions":
         if method != "GET":
             return False
