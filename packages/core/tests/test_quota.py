@@ -280,3 +280,16 @@ def test_allowed_warning_below_threshold_is_quiet():
     quota.clear_warnings()
     assert quota.check_rate_limit_info({"status": "allowed_warning",
                                         "rateLimitType": "seven_day"}) is not None
+
+
+def test_codex_used_percent_is_already_percent():
+    # 11 Nov 2026: Codex's week had just reset, `used_percent: 1.0` (1%) read
+    # as a fraction became "Codex usage is at 100% (secondary)".
+    reset = time.time() + 7 * 86400
+    for low in (1.0, 0.5, 2.0):
+        assert quota.check_rate_limit_info(
+            {"used_percent": low, "resetsAt": reset, "window": "secondary"}, agent="codex") is None
+    assert quota.below_warning({"status": "allowed", "used_percent": 1.0})
+    w = quota.check_rate_limit_info(
+        {"used_percent": 91.0, "resetsAt": reset, "window": "secondary"}, agent="codex")
+    assert w is not None and w["utilization"] == 91.0 and w["step"] == 90

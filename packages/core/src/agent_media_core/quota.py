@@ -584,14 +584,18 @@ def _warn_step(pct: float) -> int:
     return 0
 
 
-def _normalize_pct(val: object) -> Optional[float]:
+def _normalize_pct(val: object, *, percent: bool = False) -> Optional[float]:
+    """A reading as a percentage. Claude's `utilization` is a fraction (0.82);
+    `used_percent` / `used_percentage` (Codex, the status line) are already
+    percent, so `percent=True` for those: guessing from the size turned
+    Codex's 1% just after the week's reset into "100%" (11 Nov 2026)."""
     try:
         f = float(val)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
     if f <= 0:
         return 0.0
-    return round(f * 100.0 if f <= 1.0 else f, 1)
+    return round(f * 100.0 if f <= 1.0 and not percent else f, 1)
 
 
 def _update_warnings(fn: "Callable[[dict], Optional[dict]]") -> Optional[dict]:
@@ -628,13 +632,14 @@ def note_warning(
     session: str = "",
     cwd: str = "",
     now: Optional[float] = None,
+    percent: bool = False,
 ) -> Optional[dict]:
     """Record a quota-approaching warning when utilization >= threshold or
     the harness explicitly signalled `allowed_warning`. Deduplicated per
     `(agent, kind)` and step band (80%, 90%, 95%) until `resets_at` passes."""
     now = time.time() if now is None else now
     agent = str(agent or "claude").strip().lower() or "claude"
-    pct = _normalize_pct(utilization)
+    pct = _normalize_pct(utilization, percent=percent)
     thresh = warn_pct_threshold()
     if pct is not None and pct < thresh and not text:
         return None
@@ -691,14 +696,12 @@ def check_rate_limit_info(
     status = str(info.get("status") or "").lower()
     if status == "rejected":
         return None
-    raw_pct = (
-        info.get("utilization")
-        if info.get("utilization") is not None
-        else info.get("used_percent")
-        if info.get("used_percent") is not None
-        else info.get("used_percentage")
-    )
-    pct = _normalize_pct(raw_pct)
+    if info.get("utilization") is not None:
+        pct = _normalize_pct(info.get("utilization"))
+    else:
+        pct = _normalize_pct(
+            info.get("used_percent") if info.get("used_percent") is not None
+            else info.get("used_percentage"), percent=True)
     resets_at = reset_from_info(info)
     kind = str(info.get("rateLimitType") or info.get("limit_name") or info.get("window") or "")
     thresh = warn_pct_threshold()
@@ -716,6 +719,7 @@ def check_rate_limit_info(
         return note_warning(
             agent=agent,
             utilization=pct if pct is not None else thresh,
+            percent=True,
             resets_at=resets_at,
             kind=kind,
             text=msg,
@@ -812,8 +816,8 @@ def below_warning(info: Optional[dict]) -> bool:
         return False
     if status == "allowed_warning" and info.get("rateLimitType") == "seven_day":
         return False  # the week's pace warning stands (check_rate_limit_info)
-    pcts = [_normalize_pct(info.get(k)) for k in ("utilization", "used_percent", "used_percentage")
-            if info.get(k) is not None]
+    pcts = [_normalize_pct(info.get(k), percent=k != "utilization")
+            for k in ("utilization", "used_percent", "used_percentage") if info.get(k) is not None]
     windows = info.get("unifiedWindows")
     if isinstance(windows, dict):
         pcts += [_normalize_pct(w.get("utilization")) for w in windows.values()
