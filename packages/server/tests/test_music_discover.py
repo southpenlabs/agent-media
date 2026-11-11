@@ -189,3 +189,19 @@ def test_playing_and_liking_a_row_by_name(server, signed_in, audio_host, web, mo
 def test_discover_is_gated(server, web):
     res, _ = call(server, "GET", "/music/discover?list=top_songs")
     assert res.status in (401, 403)
+
+
+def test_search_is_the_catalogue_by_name(server, signed_in, web, monkeypatch):
+    asked = []
+    monkeypatch.setattr(fav, "_may_search", lambda: True)
+    monkeypatch.setattr(fav, "search", lambda q: (asked.append(q), [
+        {"id": "kerala00000", "title": "Kerala", "artist": "Bonobo", "dur": 230},
+        {"id": "played1xxxx", "title": "Teardrop", "artist": "Massive Attack", "dur": 330}])[1])
+    _, obj = call(server, "GET", "/music/discover?list=search&q=bonobo&hide_played=0", headers=AUTH)
+    assert obj["q"] == "bonobo" and [(i["title"], i["artist"], i["uri"]) for i in obj["items"]] == [
+        ("Kerala", "Bonobo", "yt:kerala00000"), ("Teardrop", "Massive Attack", "yt:played1xxxx")]
+    assert obj["items"][1]["played"] is True and "search" not in obj["lists"]
+    call(server, "GET", "/music/discover?list=search&q=Bonobo&hide_played=0", headers=AUTH)
+    assert asked == ["bonobo"], "kept an hour"
+    res, _ = call(server, "GET", "/music/discover?list=search&q=b", headers=AUTH)
+    assert res.status == 400

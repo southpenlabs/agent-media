@@ -168,7 +168,7 @@ def _inferred(speakers: list[tuple[float, str]], at: float) -> Optional[str]:
 KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
 LISTS = {"music": ("recent", "liked", "most", "stations", "albums", "sung"),
-         "book": ("recent", "progress", "finished", "all", "most"),
+         "book": ("recent", "progress", "finished", "all", "most", "added", "unstarted"),
          "podcast": ("recent", "new", "most", "saved")}
 
 
@@ -531,8 +531,11 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
         return rows[:limit]
     if which == "liked":
         return _liked(store or StateStore(), limit)
-    if which in ("progress", "finished", "all"):
-        return _library_books(which)[:limit if which != "all" else 500]
+    if which in ("progress", "finished", "all", "added", "unstarted"):
+        # `added` and `unstarted` (11 Nov 2026, David: "search and browse for
+        # everything"): the whole library newest added first, and the books
+        # not started yet, by title.
+        return _library_books(which)[:limit if which == "progress" or which == "finished" else 500]
     if which == "new":
         return _new_episodes(limit)
     if which == "albums":
@@ -647,6 +650,8 @@ def _library_books(which: str) -> list[dict]:
             continue
         if which == "finished" and not (p and p["finished"]):
             continue
+        if which == "unstarted" and p and (p["finished"] or p["progress"] > 0):
+            continue
         meta = (it.get("media") or {}).get("metadata") or {}
         title = meta.get("title") or os.path.splitext(os.path.basename(path))[0]
         genre = next((g for g in meta.get("genres") or [] if g.lower() != "audiobook"), None)
@@ -660,9 +665,12 @@ def _library_books(which: str) -> list[dict]:
                     "narrator": (meta.get("narratorName") or "").strip() or None,
                     "genre": genre,
                     "progress": round((p or {}).get("progress", 0.0), 3),
-                    "finished": bool((p or {}).get("finished"))})
-    if which == "all":
+                    "finished": bool((p or {}).get("finished")),
+                    "added": float(it.get("addedAt") or 0) / 1000.0 or None})
+    if which in ("all", "unstarted"):
         out.sort(key=lambda r: (r["title"] or "").lower())
+    elif which == "added":
+        out.sort(key=lambda r: -(r["added"] or 0))
     else:
         out.sort(key=lambda r: -r["at"])
     return out

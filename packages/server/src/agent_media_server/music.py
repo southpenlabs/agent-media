@@ -1144,7 +1144,7 @@ def _find(find: dict) -> tuple[str | None, dict]:
 
 
 def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = True, genre: str = "",
-             playlist: str = "") -> tuple[bool, dict]:
+             playlist: str = "", q: str = "") -> tuple[bool, dict]:
     """`GET /music/discover` — gated like /music/recent: music not played
     here yet (agent_media_core.music_discover; David, 11 Nov 2026: "Can we
     add a discover section for music too?")."""
@@ -1164,7 +1164,7 @@ def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = 
             vid = ""
     try:
         got = music_discover.listing(which or "for_you", int(page or 1), hide_played, (genre or "").strip()[:60],
-                                     (playlist or "").strip(), vid)
+                                     (playlist or "").strip(), vid, q=q or "")
     except ValueError as e:
         return False, {"error": str(e), "status": 400}
     except Exception as e:  # noqa: BLE001 — the source failed
@@ -1173,6 +1173,74 @@ def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = 
     if got.get("items"):
         _mark_votes([i for i in got["items"] if i.get("uri")])
     return True, got
+
+
+def brainz(bearer: str, search: str = "", artist: str = "", album: str = "", name: str = "") -> tuple[bool, dict]:
+    """`GET /music/brainz` — gated like /music/recent: MusicBrainz's
+    artists and albums (agent_media_core.music_brainz): `?search=`,
+    `?artist=<mbid>`, `?album=<mbid>`, or `?name=` (the artist a name surely
+    is, or null)."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    from agent_media_core import music_brainz as mb
+
+    try:
+        if search:
+            return True, mb.search(search)
+        if artist:
+            return True, mb.artist(artist)
+        if album:
+            return True, mb.album(album)
+        if name:
+            return True, {"artist": mb.artist_by_name(name[:200])}
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except LookupError as e:
+        return False, {"error": str(e), "status": 404}
+    except Exception as e:  # noqa: BLE001
+        print(f"music: musicbrainz failed: {e}", file=sys.stderr)
+        return False, {"error": f"MusicBrainz didn't answer: {e}", "status": 502}
+    return False, {"error": "say search, artist, album or name", "status": 400}
+
+
+def brainz_play(body: dict, bearer: str) -> tuple[bool, dict]:
+    """`POST /music/brainz {"album": <mbid>, "from"?: n}`: the album in
+    order — its first track (or track `from`) found and played as a
+    Discover row is, the rest found and queued one by one in the background."""
+    ok, err = auth.may_control_speech(bearer)
+    if not ok:
+        return False, err
+    from agent_media_core import music_brainz as mb
+
+    try:
+        got = mb.album(str(body.get("album") or ""))
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except LookupError as e:
+        return False, {"error": str(e), "status": 404}
+    except Exception as e:  # noqa: BLE001
+        return False, {"error": f"MusicBrainz didn't answer: {e}", "status": 502}
+    start = body.get("from") or 1
+    tracks = [t for t in got["tracks"] if isinstance(start, int) and t["n"] >= start]
+    if not tracks:
+        return False, {"error": "that album has no tracks listed", "status": 404}
+    first, rest = tracks[0], tracks[1:]
+    ok, out = control({"action": "play", "find": {"artist": first["artist"] or got["album"]["artist"] or "",
+                                                   "title": first["title"]}}, bearer)
+    if not ok:
+        return False, out
+
+    def queue():
+        for t in rest:
+            try:
+                control({"action": "add", "find": {"artist": t["artist"] or got["album"]["artist"] or "",
+                                                    "title": t["title"]}}, bearer)
+            except Exception as e:  # noqa: BLE001 — one missing, the rest still queued
+                print(f"music: queueing {t['title']} failed: {e}", file=sys.stderr)
+    if rest:
+        _spawn(queue)
+    return True, {**out, "queued": len(rest)}
 
 
 def _played_book(uri: str) -> bool:

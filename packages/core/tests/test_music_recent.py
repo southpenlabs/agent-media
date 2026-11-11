@@ -181,6 +181,10 @@ def test_a_book_library_by_progress(st, monkeypatch, tmp_path):
     every = music_recent.listed(kind="book", which="all", store=st)
     assert [r["title"] for r in every] == ["Alpha", "Bravo", "Charlie"], "not one whose file is not here"
     assert every[1]["finished"] is True and every[2]["progress"] == 0
+    # Browsing (11 Nov 2026): newest added first, and the ones not started; a search over the library.
+    assert [r["title"] for r in music_recent.listed(kind="book", which="added", store=st)] == ["Charlie", "Bravo", "Alpha"]
+    assert [r["title"] for r in music_recent.listed(kind="book", which="unstarted", store=st)] == ["Charlie"]
+    assert [r["title"] for r in music_recent.listed(kind="book", which="added", store=st, q="brav")] == ["Bravo"]
     monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
     assert music_recent.playable_book(str(lib / "Charlie.m4b"), store=st)
     assert not music_recent.playable_book("/etc/passwd", store=st)

@@ -253,7 +253,7 @@ def test_recent_is_the_played_list(server, signed_in, audio_host, monkeypatch):
                                          "lists": ["recent", "liked", "most", "stations", "albums", "sung"], "items": items}
     res, obj = call(server, "GET", "/music/recent?kind=book", headers=AUTH)
     assert res.status == 200 and obj["kind"] == "book" and obj["items"] == []
-    assert obj["lists"] == ["recent", "progress", "finished", "all", "most"]
+    assert obj["lists"] == ["recent", "progress", "finished", "all", "most", "added", "unstarted"]
     res, obj = call(server, "GET", "/music/recent?list=liked", headers=AUTH)
     assert res.status == 200 and obj["list"] == "liked" and obj["items"] == items[:1]
     res, obj = call(server, "GET", "/music/recent?kind=video", headers=AUTH)

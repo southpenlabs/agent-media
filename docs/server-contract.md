@@ -4267,7 +4267,7 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 | kind | lists |
 |---|---|
 | `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs, and from 3 Nov YouTube videos and playlists (`source` `youtube`, `link`), saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved); `sung` (8 Nov 2026: every song sung out after a long reply, taken up or not, newest first — "Singing it out: the song and its controls"; `uri` the original's `yt:` link, `session` the reply's thread, `key` the favourite's, `engaged` what was done with it: any of `"kept"`, `"like"`, `"radio"`) |
-| `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most` |
+| `book` | `recent`, `progress` and `finished` (Audiobookshelf's books with this listener's progress, latest listened first), `all` (every book whose file is on the host, by title), `most`, and to browse the library (11 Nov 2026): `added` (every book, newest added first; each row's `added`, epoch seconds) and `unstarted` (the books not begun, by title). `q` searches each over its own rows |
 | `podcast` | `recent`, `new` (the newest episodes of Audiobookshelf's podcast libraries whose file is on the host, `published` epoch seconds), `most`, `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
 A library book adds `progress` (0–1) and `finished`; its `id` is the
@@ -4361,6 +4361,43 @@ names one the server has not seen), the video in `uri` left out.
 - 400 for a `uri` that is not a `yt:` or web address, or with no name to
   look for. A version plays as any row does (`{"action": "play", "uri"}`),
   and starts a station (`{"action": "radio", "uri"}`).
+
+**Search the catalogue.** `GET /music/discover?list=search&q=<words>&hide_played=0`
+(11 Nov 2026; David: "search and browse for everything") answers as the
+lists below do, its items the host's YouTube search for the words (Mopidy's
+YouTube Music results, `artist`, `duration_s`; else the DJ's first result),
+each with its `uri`; kept an hour. `search` is not one of `lists`; 400 under
+two letters.
+
+**MusicBrainz: artists and albums** (11 Nov 2026; `music_brainz.py`), gated
+like `/music/recent`. MusicBrainz is asked with the package's User-Agent, at
+most once a second; lookups kept a week, searches a day
+(`music-brainz.json`).
+
+- `GET /music/brainz?search=<words>` → `{"ok", "artists": [{"id", "name",
+  "type", "disambiguation", "area", "begin", "end", "ended", "score"}],
+  "albums": [{"id", "title", "artist", "type", "date", "year", "art"}]}`
+  (release groups). `art` is the Cover Art Archive's
+  `https://coverartarchive.org/release-group/<id>/front-250`, which is
+  missing for some (the app hides a picture that does not load).
+- `GET /music/brainz?artist=<mbid>` → `{"ok", "artist": {…, "tags"},
+  "sections": [{"type": "album"|"ep"|"single"|"live"|"compilation",
+  "albums": [...]}]}`: the discography by date; release groups of other
+  secondary types (soundtracks, remixes, …) are left out.
+- `GET /music/brainz?album=<mbid>` → `{"ok", "album": {…, "release"},
+  "tracks": [{"n", "disc", "title", "artist", "length_s"}]}` from the most
+  canonical release (official, earliest; else the first), its own cover
+  when the archive has one.
+- `GET /music/brainz?name=<artist name>` → `{"ok", "artist": {…} | null}`:
+  the artist a name surely is (the top match, scored 95 or more, the same
+  name folded), for the song page's link.
+- `POST /music/brainz {"album": <mbid>, "from"?: n}` (as `POST /music`'s
+  gate) plays the album in order: its first track (or track `from`) found and
+  played as a Discover row is (`find`), the rest found and queued one by one
+  in the background → the usual music state and `queued`.
+- 400 for a malformed id or no question, 404 when MusicBrainz has no such
+  entry, 502 when it fails. A track plays or queues by name: `POST /music
+  {"action": "play"|"add", "find": {"artist", "title"}}`.
 
 **Discover: music not played here yet.** `GET /music/discover?list=<list>&page=&hide_played=0|1&genre=&playlist=`
 (11 Nov 2026, gated like `/music/recent`; David: "Can we add a discover

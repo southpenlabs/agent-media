@@ -465,7 +465,7 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 # What is playing, and its controls: the Media tab (music.py). The same
 # arrangement.
 MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions",
-                         "/music/discover"})
+                         "/music/discover", "/music/brainz"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # The phone app updating itself (app_update.py, §6.52): API routes under
@@ -4527,7 +4527,15 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         q = parse_qs(h.path.partition("?")[2])
         one = lambda k, d="": (q.get(k) or [d])[0]  # noqa: E731
         ok, detail = music.discover(_bearer(h), one("list", "for_you"), one("page", "1"), one("hide_played", "1") != "0",
-                                    one("genre"), one("playlist"))
+                                    one("genre"), one("playlist"), one("q"))
+    elif path == "/music/brainz":
+        if method == "POST":
+            body = _read_json(h)
+            ok, detail = music.brainz_play(body if isinstance(body, dict) else {}, _bearer(h))
+        else:
+            q = parse_qs(h.path.partition("?")[2])
+            one = lambda k: (q.get(k) or [""])[0].strip()  # noqa: E731
+            ok, detail = music.brainz(_bearer(h), one("search"), one("artist"), one("album"), one("name"))
     elif path == "/music/versions":
         if method != "GET":
             return False

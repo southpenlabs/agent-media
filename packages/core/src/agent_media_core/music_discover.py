@@ -21,6 +21,9 @@ server already has:
   top_albums   and albums (Apple's public RSS; its new-releases feed is
                gone, and it has no genre feeds, so a genre is filtered here
                from each item's own genres)
+  search       (`q`, not one of `lists`) the catalogue by name: the
+               host's YouTube search, Mopidy's YouTube Music where it has it
+               (11 Nov 2026, David: "search and browse for everything")
   like_playing YouTube's Mix of what is playing (radio.mix, the station's
                own source: the "youtube-radio" add-on), so like the radio
                without starting it
@@ -348,12 +351,42 @@ def was_played(item: dict, played: tuple) -> bool:
 
 # ---- the listing ----------------------------------------------------------------------------
 
+SEARCH_TTL_S = 3600.0
+
+
+def _search(q: str, now: float) -> list[dict]:
+    """The catalogue by name: the host's YouTube search (Mopidy's YouTube
+    Music results, else the DJ's first result), kept an hour."""
+    from . import music_bed_favourites as fav
+
+    def ask():
+        out = []
+        if fav._may_search():
+            for s_ in fav.search(q)[:40]:
+                out.append({"id": f"yt:{s_['id']}", "kind": "song", "source": "youtube", "uri": f"yt:{s_['id']}",
+                            "title": str(s_.get("title") or ""), "artist": s_.get("artist") or None,
+                            "album": None, "year": None, "duration_s": s_.get("dur") or None,
+                            "art": f"https://i.ytimg.com/vi/{s_['id']}/mqdefault.jpg"})
+        else:
+            from . import radio_dj, radio_io
+            for s_ in radio_dj.search([q]):
+                _line, artist, title = radio_io.query(s_)
+                out.append({"id": f"yt:{s_['id']}", "kind": "song", "source": "youtube", "uri": f"yt:{s_['id']}",
+                            "title": title or str(s_.get("title") or ""), "artist": artist or None, "album": None,
+                            "year": None, "art": f"https://i.ytimg.com/vi/{s_['id']}/mqdefault.jpg"})
+        return out
+    return _cached(f"search:{q.lower()}", SEARCH_TTL_S, ask, now)
+
+
 def listing(which: str, page: int = 1, hide_played: bool = True, genre: str = "", playlist: str = "",
-            now_vid: str = "", now: Optional[float] = None) -> dict:
+            now_vid: str = "", now: Optional[float] = None, q: str = "") -> dict:
     """What GET /music/discover answers (less `ok`). ValueError for a list
     that is not one or not available here; OSError when its source fails."""
-    if which not in LISTS:
-        raise ValueError(f"list must be one of {', '.join(LISTS)}")
+    if which not in LISTS + ("search",):
+        raise ValueError(f"list must be one of {', '.join(LISTS)}, or search")
+    q = " ".join(str(q or "").split())[:200]
+    if which == "search" and len(q) < 2:
+        raise ValueError("search needs q, two letters or more")
     now = time.time() if now is None else now
     user = lb_user()
     available = [x for x in LISTS if (x not in LB_LISTS or user or x == "fresh")]
@@ -367,7 +400,10 @@ def listing(which: str, page: int = 1, hide_played: bool = True, genre: str = ""
     if which == "like_playing" and not now_vid:
         out["reason"] = "nothing is playing that has a Mix"
         return out
-    if which == "for_you":
+    if which == "search":
+        items = _search(q, now)
+        out["q"] = q
+    elif which == "for_you":
         items = _for_you(user, now)
     elif which == "created_for":
         if not all(c.isalnum() or c == "-" for c in playlist) or len(playlist) > 64:
