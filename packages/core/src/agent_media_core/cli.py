@@ -9426,6 +9426,22 @@ def cmd_session(a) -> int:
     return mail.main(a.args or ["--help"])
 
 
+def cmd_test_failure(a) -> int:
+    """`media test-failure notify` (test_failures.py): a red test's cause told
+    to the thread of the commit that brought it."""
+    from . import test_failures
+    try:
+        r = test_failures.notify(a.test, a.commit, why=a.why, sender=a.sender, repo=a.repo)
+    except ValueError as e:
+        print(f"media test-failure: {e}", file=sys.stderr)
+        return 2
+    if r["sent"]:
+        print(f"told thread {r['thread']}")
+        return 0
+    print(f"not sent: {r.get('reason')}" + (f" (thread {r['thread']})" if r.get("thread") else ""))
+    return 0 if r.get("reason") == "already told" else 1
+
+
 def cmd_feedback(a) -> int:
     """`media feedback answer|poll|status` (agent_media_server.feedback)."""
     fb = _server_module("feedback")
@@ -10588,6 +10604,16 @@ def _build_parser() -> argparse.ArgumentParser:
              "[--wait S] <text> (queued behind a turn, never over a question card)")
     session.add_argument("args", nargs=argparse.REMAINDER)
     session.set_defaults(func=cmd_session)
+
+    tf = sub.add_parser("test-failure", help="a failing test told to the thread whose commit broke it")
+    tfs = tf.add_subparsers(dest="tf_cmd", required=True)
+    tfn = tfs.add_parser("notify", help="message the commit's Thread: (once per test and commit)")
+    tfn.add_argument("test", help="the test, e.g. packages/visual/tests/test_speech_ctl.py::test_x")
+    tfn.add_argument("--commit", required=True, help="the commit that broke it")
+    tfn.add_argument("--why", default="", help="what is wrong, in a sentence")
+    tfn.add_argument("--from", dest="sender", default="", help="who is telling (a session name)")
+    tfn.add_argument("--repo", default=".", help="the repository the commit is in (default: here)")
+    tfn.set_defaults(func=cmd_test_failure)
 
     feedback = sub.add_parser(
         "feedback", add_help=False,

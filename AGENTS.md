@@ -130,6 +130,14 @@ real players, phones and history. These have all happened.
   main's sources. Put the worktree first:
   `PYTHONPATH=<wt>/packages/server/src:<wt>/packages/core/src .venv/bin/pytest -q --rootdir=<wt>/packages/server <wt>/packages/server/tests`,
   or merge first and test on main.
+- **A red test someone else's commit broke goes to that commit's thread.**
+  Find the cause first (the step, the actual output, the commit), then
+  `media test-failure notify <test> --commit <sha> --why "<cause>" --from
+  <you>`: it reads the commit's `Thread:` line and messages that thread
+  through the session host (an ended one is woken with its own history),
+  once per test and commit whoever finds it. Say in your reply that you
+  did; a commit with no thread line, tell David. (David, 12 Nov 2026:
+  "ensure that notification is sent about these failed tests from now on".)
 
 ## Branches and the shared checkout
 
