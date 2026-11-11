@@ -54,7 +54,9 @@ SYSTEM = (
     "moment as six axes from 0 to 1 (tempo, energy, warmth, brightness, "
     "lyric density, texture); on an amplified axis do not go to extremes. "
     "Songs they liked show their taste; never pick an avoided song or artist, or "
-    "one already played. Flow from what just played: no jarring jumps, and "
+    "one already played. Songs to play more often are welcome again "
+    "(and others like them); songs to play less often come rarely, if at all. "
+    "Flow from what just played: no jarring jumps, and "
     "no more than two songs by one artist. Only real, well-known recordings "
     "you are sure exist, so a YouTube search finds them.\n\n"
     "When the brief names the listener's chosen mood, it overrides your own "
@@ -146,6 +148,11 @@ def brief(st: dict) -> str:
     titles = {s["id"]: f"{s.get('channel') or '?'} - {s.get('title')}" for s in st["sent"] + st["queue"]}
     played = [titles[v] for v in st["played"] if v in titles][-15:]
     banned = [titles[v] for v in st["banned"] if v in titles]
+    # Songs kept off every station (radio.dislike_song), by their names.
+    from . import radio
+
+    banned += [e["title"] for e in radio.disliked_everywhere().values()
+               if isinstance(e, dict) and e.get("title")][-20:]
     struck = [c for c, n in st["strikes"].items() if n >= 2]
     out = {
         "moment": told(moment()),
@@ -155,6 +162,14 @@ def brief(st: dict) -> str:
         "avoid_songs": banned,
         "avoid_artists": struck,
     }
+    # His rotation (music_rotation): songs to bring round more, and less.
+    from . import music_rotation
+
+    turned = music_rotation.load()
+    if music_rotation.titled(1, turned):
+        out["play_more_often"] = music_rotation.titled(1, turned)
+    if music_rotation.titled(-1, turned):
+        out["play_less_often"] = music_rotation.titled(-1, turned)
     from . import music_mood
 
     chosen = music_mood.dj_means()

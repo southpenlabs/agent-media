@@ -190,6 +190,32 @@ def bed_axes(mood: Optional[str] = None) -> Optional[dict]:
     return dict(m.axes) if m.id != "auto" and m.axes else None
 
 
+#: How near (tempo plus energy apart, each 0-1) a song is to a mood to be
+#: favoured under it: 1/(0.15 + 0.3) is about 3x the weight of a song far off
+#: (music_bed_favourites.features_fit).
+NEAR = 0.3
+
+
+def favoured(features: Optional[dict]) -> Optional[list[str]]:
+    """The moods a backing-music favourite is favoured under (David, 11 Nov
+    2026: "Can we also display the mood or moods that a song will play
+    under?"), by the one per-song rule there is: the favourites are weighted
+    by how near a track's measured tempo and energy are to the mood's
+    (`bed_axes`, music_bed_favourites.features_fit). The nearest mood, and
+    any other within NEAR, in MOODS' order. None for a track not measured.
+    Weighting, not a gate: under another mood it comes up less often. The
+    DJ is steered by words (`dj_means`), so a station has no per-song rule."""
+    f = features or {}
+    if not isinstance(f.get("tempo"), (int, float)) or not isinstance(f.get("energy"), (int, float)):
+        return None
+    apart = {m.id: abs(f["tempo"] - m.axes.get("tempo", 0.5)) + abs(f["energy"] - m.axes.get("energy", 0.5))
+             for m in MOODS if m.axes}
+    if not apart:
+        return None
+    best = min(apart.values())
+    return [k for k, d in apart.items() if d <= NEAR or d == best]
+
+
 # ---- changing it ------------------------------------------------------------------
 
 def _playing_now() -> bool:

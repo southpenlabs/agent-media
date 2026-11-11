@@ -571,7 +571,12 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
         hour = (when or datetime.now()).hour
         late = hour >= 21 or hour < 6
         rated, mine = data_renown(), suggested()
+        # A song's rotation (music_rotation, the song card's More often /
+        # Less often), by its original's video.
+        from . import music_rotation
+        turned = music_rotation.load()
         weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
+                   * music_rotation.weight(e.get("original_id") or e.get("id") or "", turned)
                    for e in have]
         if topic and len(have) > 1:
             i = topic_choice(have, topic)
@@ -959,9 +964,12 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
     ranked = sorted(merged.values(), key=lambda f: -f["score"])
     rate_renown(data, ranked[: max_favourites() * 2])
     rated = data.get("renown") or {}
+    from . import music_rotation
+    turned = music_rotation.load()
     for f in ranked:
         if "suggested" not in f["from"]:
-            f["score"] = round(f["score"] * renown_factor(rated.get(f["key"])), 2)
+            f["score"] = round(f["score"] * renown_factor(rated.get(f["key"]))
+                               * music_rotation.weight(f.get("id") or "", turned), 2)
     favs = sorted(ranked, key=lambda f: -f["score"])[: max_favourites()]
     data["favourites"] = favs
     data["favourites_at"] = now
@@ -1325,6 +1333,54 @@ def verdict(key: str, which: str, now: Optional[float] = None) -> dict:
         log.info("music-bed favourites: the original of %s: %s", key, e)
     log.info("music-bed favourites: %s — %s disliked, off the favourites", title, artist)
     return {"key": key, "verdict": which}
+
+
+def ban(vid: str, title: str = "", now: Optional[float] = None) -> dict:
+    """A song disliked from its info page on the Media tab (David, 11 Nov
+    2026: "the like, dislike, sing it out and those other type of buttons
+    to the song card"), by its video: never a favourite, so never under a
+    reply nor sung out. A suggestion of it is taken back; a favourite of it
+    goes as `verdict` "dislike" takes one (its files too); else its
+    `id:<video>` goes on `excluded`, so no later gather takes it. `{"id",
+    "key"}` (key null when it was no favourite). ValueError for no id."""
+    if not vid or not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+        raise ValueError("not a YouTube video id")
+    now = time.time() if now is None else now
+    key = suggested_key(vid)
+    if key:
+        unsuggest(key)
+    data = load()
+    fav = next((e for e in list(data["tracks"]) + list(data["favourites"])
+                if vid in (e.get("id"), e.get("original_id"))), None)
+    key = fav.get("key") if fav else None
+    if key:
+        verdict(key, "dislike", now=now)
+    gone = excluded()
+    if f"id:{vid}" not in gone:
+        gone[f"id:{vid}"] = {"title": title, "artist": "", "video_id": vid, "at": now,
+                             **({"key": key} if key else {})}
+        _write_json(_excluded_path(), gone)
+    return {"id": vid, "key": key}
+
+
+def unban(vid: str) -> bool:
+    """`ban` taken back: the video off `excluded`, and the favourite it
+    named with it (it may be gathered again). Whether there was one."""
+    gone = excluded()
+    rec = gone.pop(f"id:{vid}", None) if vid else None
+    if rec is None:
+        return False
+    key = rec.get("key") if isinstance(rec, dict) else None
+    if key:
+        gone.pop(key, None)
+    _write_json(_excluded_path(), gone)
+    return True
+
+
+def banned(vid: str, gone: Optional[dict] = None) -> bool:
+    """Whether this video is kept off the favourites (`ban`, or a sung-out
+    song's dislike)."""
+    return bool(vid) and f"id:{vid}" in (excluded() if gone is None else gone)
 
 
 def _has_track(data: dict, key: str) -> bool:

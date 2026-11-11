@@ -45,6 +45,12 @@ at the same spot (``_resume``, as after an app restart), then the same list,
 topped up from its Mix (or the DJ) as it runs. The newest is the Media tab's
 "Back to radio" (`snapshot`'s ``last`` while off, for a day); all of them
 are Music's Show → Stations (`stations`).
+
+**Off every station** (David, 11 Nov 2026, the Media tab's song card: "the
+like, dislike ... buttons"): a song disliked from its info page, not playing
+on a station, is kept off every station there is or will be — one list in
+``radio-disliked.json`` (`dislike_song`, `undislike` takes it back), read
+wherever a station's own 👎s are (`_merge`, `disliked`, the DJ's brief).
 """
 
 from __future__ import annotations
@@ -53,6 +59,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -269,14 +276,24 @@ def _norm(title: str) -> str:
 def _merge(st: dict, songs: list[dict]) -> int:
     """Add the songs the station has not had, and may have; how many."""
     seen = {s["id"] for s in st["queue"]} | {s["id"] for s in st["sent"]} \
-        | set(st["played"]) | set(st["banned"])
+        | set(st["played"]) | set(st["banned"]) | set(disliked_everywhere())
     if st.get("seed"):
         seen.add(st["seed"]["id"])
     names = {_norm(s.get("title") or "") for s in st["queue"] + st["sent"]}
     names.discard("")
     struck = {c for c, n in st["strikes"].items() if n >= _CHANNEL_STRIKES}
+    # A song's rotation (music_rotation; David, 11 Nov 2026): one turned up
+    # goes to the front of the batch, one turned down is left out of it
+    # that often (kept 1.6^level of the time).
+    from . import music_rotation
+
+    turned = music_rotation.load()
+    songs = sorted(songs, key=lambda s: -music_rotation.level(s.get("id") or "", turned))
     added = 0
     for s in songs:
+        w = music_rotation.weight(s.get("id") or "", turned)
+        if w < 1 and random.random() >= w:
+            continue
         name = _norm(s.get("title") or "")
         if s["id"] in seen or (name and name in names) or (s.get("channel") or "") in struck:
             continue
@@ -867,7 +884,11 @@ def _refill() -> None:
         if not played:
             return
         liked = _liked_ids()
-        base = next((v for v in reversed(played) if v in liked), played[-1])
+        from . import music_rotation
+
+        turned = music_rotation.load()
+        up = {v for v in played if music_rotation.level(v, turned) > 0}
+        base = next((v for v in reversed(played) if v in liked or v in up), played[-1])
         st["mixed"].append(base)
     songs = mix(base)
     with _station() as st:
@@ -876,12 +897,60 @@ def _refill() -> None:
             log.info("radio: +%d from the Mix of %s", n, base)
 
 
+def _disliked_path() -> Path:
+    return state_dir() / "radio-disliked.json"
+
+
+def disliked_everywhere() -> dict:
+    """The songs kept off every station: `{video id: {"title", "at"}}`. {}
+    on any failure."""
+    try:
+        d = json.loads(_disliked_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_disliked(d: dict) -> None:
+    p = _disliked_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(d, ensure_ascii=False))
+    os.replace(tmp, p)
+
+
+def dislike_song(vid: str, title: str = "") -> None:
+    """👎 on a song that is not playing on a station (its info page): kept
+    off every station, this one's list to come included. Nothing is
+    skipped. ValueError for a bad id."""
+    if not _ID.match(vid or ""):
+        raise ValueError("not a YouTube video id")
+    with _station() as st:
+        d = disliked_everywhere()
+        d[vid] = {"title": title or (d.get(vid) or {}).get("title") or "", "at": time.time()}
+        _write_disliked(d)
+        st["queue"] = [s for s in st["queue"] if s.get("id") != vid]
+
+
 def disliked(vid: str) -> bool:
-    """Whether a station was given 👎 on `vid`: this one or a kept one."""
+    """Whether a station was given 👎 on `vid`: this one or a kept one, or
+    every station (`dislike_song`)."""
+    if vid and vid in disliked_everywhere():
+        return True
     with _station() as st:
         if vid in st["banned"]:
             return True
     return any(vid in (e.get("banned") or []) for e in _kept())
+
+
+def disliked_ids() -> set:
+    """Every video `disliked` says yes to, read once (a list's rows)."""
+    out = set(disliked_everywhere())
+    with _station() as st:
+        out |= set(st["banned"])
+    for e in _kept():
+        out |= set(e.get("banned") or [])
+    return out
 
 
 def _unban(st: dict, vid: str) -> bool:
@@ -906,6 +975,11 @@ def undislike(vid: str) -> bool:
     refill. Whether there was one to take back."""
     with _station() as st:
         found = _unban(st, vid)
+        every = disliked_everywhere()
+        if vid in every:
+            every.pop(vid)
+            _write_disliked(every)
+            found = True
         kept = _kept()
         changed = [e for e in kept if _unban(e, vid)]
         if changed:

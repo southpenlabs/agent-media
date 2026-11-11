@@ -4239,6 +4239,26 @@ Audiobookshelf item is never handed on — its file on the host stands in.
 Every item also has `plays` (31 Oct 2026): how often it was played, in
 the stretch of history read.
 
+A music row whose `uri` is a `yt:` or web address also has its song card's
+button states (11 Nov 2026, every list and a search): `liked` (on the likes
+list — on a mix, any of its chapters), and for a YouTube song `disliked`
+(given 👎 on a station, kept or live, or from its card — off every station
+and the backing music) and `bed_suggested` (suggested for the backing
+music, which Sing it out also sings from) and `rotation` (its level, -3 to
+3, 0 normal: "A song's rotation"). A row that is a ready backing-music
+favourite whose tempo and energy have been measured also has `moods` (11
+Nov 2026; David: "Can we also display the mood or moods that a song will
+play under?"): the listening moods it is favoured under, in the moods'
+order — the nearest by tempo plus energy to the mood's (`music_mood`'s
+`bed_axes`, the weighting `music_bed_favourites.features_fit` picks
+favourites by), and any other within 0.3 (`music_mood.favoured`). It is a
+weighting, not a gate: under another mood it comes up less often. The
+radio's DJ is steered by words, so no song has a rule there, and a song
+that is no measured favourite has no `moods`. A key left out means the button
+does not apply (a `radio:` or `album:` row, a 👎 on a non-YouTube file); a
+client hides it. Set by `POST /music` with the row's `uri` ("A song by its
+uri").
+
 `?list=` (31 Oct 2026; default `recent`, one the kind does not have is
 400) picks one of the kind's lists; the answer says which (`"list"`) and
 which the kind has (`"lists"`), so a client offers only those (David, 31
@@ -4416,7 +4436,40 @@ cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
 - `{"action": "unlike"}` and `{"action": "undislike"}` take the ♥ or 👎 on
   what is playing back: a like leaves the likes list (on a mix, the chapter
   playing's), a 👎 leaves every station that has it, its channel's strike
-  with it. Nothing is played or skipped; 409 when nothing is playing.
+  with it, and the backing music's dislikes. Nothing is played or skipped;
+  409 when nothing is playing. `verdict` is also `"dislike"` for a song kept
+  off the backing music (a sung-out song's Dislike, or its card's).
+- **A song by its uri** (11 Nov 2026, the song card; David: "Can we add the
+  like, dislike, sing it out and those other type of buttons to the song
+  card?"): `{"action": "like" | "unlike" | "dislike" | "undislike", "uri",
+  "title"?}` act on the song named (a `GET /music/recent` row's `uri`, a
+  `yt:` or web address), playing or not; nothing is played or skipped and
+  no play gate is asked. `like` puts it on the likes list once (its title
+  the one given, else the one the rows show) and takes a 👎 back; `unlike`
+  takes every like of it (a mix's chapters too). `dislike` (a YouTube song
+  only, 400 otherwise) keeps it off every station, the one on now (its list
+  to come) and any to come (`radio-disliked.json`, read with the stations'
+  own 👎s and told to the DJ), and off the backing-music favourites for good
+  (`music_bed_favourites.ban`: a favourite of it goes with its files, as a
+  sung-out song's Dislike), so it is never under a reply nor sung out; it
+  takes the song's like and 🎼 back. `undislike` takes it off both. 400 for a
+  `uri` that is not a `yt:` or web address. The answer adds `"voted":
+  {"uri", "liked", "disliked", "bed_suggested", "rotation", "moods"}` for the song;
+  `bed` with a `uri` adds it too.
+- **A song's rotation** (11 Nov 2026; David: "As well as likes and
+  dislikes, can we have an option to increase or decrease a song's
+  rotation?"): `{"action": "rotation", "uri"?, "step": 1 | -1}` turns the
+  song named (or what is playing) up or down a level, -3 to 3 (0 is normal
+  and not kept; `agent_media_core.music_rotation`, `music-rotation.json`).
+  Each level is 1.6× as often: the backing music's favourite under a reply
+  is picked by it (and so the song Sing it out sings), favourites are
+  ranked by it, a station's refill puts a song turned up first in its batch
+  and leaves one turned down out 1.6^level of the time, a Mix station
+  refills from a song turned up as from a liked one, and the DJ is told the
+  songs to play more and less often. A YouTube song only; 400 for another
+  `step` or `uri`. Nothing plays or skips; the answer adds `voted`, and
+  every `/music` answer has `"rotation"`: what is playing's level (null
+  when it is no YouTube song).
   With no station it is `next`.
 - A `play` (not `add`) of something else ends the station, from here or
   `media music play`; so does `stop`. A song the station has no record of

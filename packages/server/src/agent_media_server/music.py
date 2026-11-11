@@ -36,6 +36,25 @@ them, each row's `uri` `radio:<sid>`, which `{"action": "play"}` resumes
 for the backing music under replies, or takes it back; `bed.suggested` in
 every answer says whether what is playing is suggested (1 Nov 2026).
 
+A song not playing gets its ♥, 👎 and 🎼 by its `uri` (a row's from GET
+/music/recent; David, 11 Nov 2026, the Media tab's song card: "Can we add
+the like, dislike, sing it out and those other type of buttons to the song
+card?"): `{"action": "like" | "unlike" | "dislike" | "undislike", "uri"}`.
+A like goes on the likes list (and takes a 👎 back); a 👎 keeps the song off
+every station (radio.dislike_song) and off the backing-music favourites, so
+it is never under a reply nor sung out (music_bed_favourites.ban), and takes
+a like and a 🎼 back; nothing plays or skips. The answer's `voted` is
+`{"uri", "liked", "disliked", "bed_suggested", "rotation"}` for that song,
+as `bed` with a `uri` answers too; music rows of GET /music/recent carry
+the same (`disliked`, `bed_suggested` and `rotation` on a YouTube song
+only). `{"action": "rotation", "uri"?, "step": 1 | -1}` turns a song (or
+what is playing) up or down a level, -3 to 3 (music_rotation: More often /
+Less often; David, 11 Nov 2026); every answer's `rotation` is what is
+playing's level (null for no YouTube song). A row that is a ready
+backing-music favourite with its tempo and energy measured has `moods`:
+the moods it is favoured under (music_mood.favoured); the radio's DJ goes
+by words, so no song has a rule there.
+
 `mood` is the listening mood (agent_media_core.music_mood; David, 11 Nov
 2026): `{"id", "moods": [{"id", "label", "blurb"}, …]}`, auto, chill, focus,
 upbeat, sleep, party. `{"action": "mood", "mood": id}` sets it (400 for
@@ -100,6 +119,8 @@ ACTIONS = {
     "bed": "bed",
     # The listening mood (agent_media_core.music_mood): `mood` one of its ids.
     "mood": "mood",
+    # A song's rotation, a step up or down (agent_media_core.music_rotation).
+    "rotation": "rotation",
     # A start the play gate held (agent_media_core.play_gate): played now on
     # purpose, or forgotten.
     "held": "held",
@@ -312,6 +333,7 @@ def _answer() -> dict:
     out["bed"] = _bed_state(now)
     out["mood"] = _mood_state()
     out["verdict"] = _verdict(now)
+    out["rotation"] = _rotation_of(now.get("media_id") or "")
     held = _held_list()
     if held is not None:
         out["on_hold"] = held
@@ -357,6 +379,181 @@ def _held_list() -> list | None:
     return [{k: e.get(k) for k in keep} for e in play_gate.held()]
 
 
+def _row_key(uri: str) -> str:
+    """One song, whether named as `yt:` or a link (music_recent._key)."""
+    from agent_media_core import music_recent
+
+    return music_recent._key(uri)
+
+
+def _row_vid(uri: str) -> str:
+    from agent_media_core import music_recent
+
+    return music_recent._vid(uri) or ""
+
+
+def _mark_votes(items: list[dict]) -> None:
+    """Give each music row its button states: `liked` (on the likes list),
+    and for a YouTube song `disliked` (kept off a station, every station,
+    or the backing music) and `bed_suggested` (suggested for the backing
+    music, which Sing it out sings from). Each store read once."""
+    rows = [r for r in items if isinstance(r.get("uri"), str)
+            and r["uri"].startswith(("yt:", "http://", "https://"))]
+    if not rows:
+        return
+    try:
+        from agent_media_core import music_bed_favourites as fav
+        from agent_media_core import radio
+        from agent_media_core.state import StateStore
+
+        liked = set()
+        for like in StateStore().list_likes(2000, channel="music"):
+            liked.add(like.get("media_id") or "")
+            if like.get("uri"):
+                liked.add(_row_key(like["uri"]))
+        liked.discard("")
+        gone = fav.excluded()
+        off = radio.disliked_ids() | {k[3:] for k in gone if k.startswith("id:")}
+        bed = {s.get("id") for s in fav.suggested().values()}
+        from agent_media_core import music_mood, music_rotation
+
+        turned = music_rotation.load()
+        # The moods a backing-music favourite is favoured under, by its
+        # measured tempo and energy (music_mood.favoured).
+        measured = {}
+        for e in fav.load().get("tracks") or []:
+            got = music_mood.favoured(e.get("features"))
+            if got is not None:
+                for v in (e.get("original_id"), e.get("id")):
+                    if v:
+                        measured.setdefault(v, got)
+    except Exception as e:  # noqa: BLE001 — button states, never a failed list
+        print(f"music: votes failed: {e}", file=sys.stderr)
+        return
+    for r in rows:
+        vid = _row_vid(r["uri"])
+        r["liked"] = _row_key(r["uri"]) in liked
+        if vid:
+            r["disliked"] = vid in off
+            r["bed_suggested"] = vid in bed
+            r["rotation"] = music_rotation.level(vid, turned)
+            if vid in measured:
+                r["moods"] = measured[vid]
+
+
+def _rotation_of(vid: str):
+    """A YouTube song's rotation level (music_rotation), else null."""
+    try:
+        from agent_media_core import music_rotation, radio
+
+        return music_rotation.level(vid) if radio._ID.match(vid or "") else None
+    except Exception:  # noqa: BLE001 — a button state, never a failed read
+        return None
+
+
+def _rotation_control(body: dict) -> tuple[bool, dict]:
+    """`{"action": "rotation", "uri"?, "step": 1 | -1}`: the song named (or
+    what is playing) comes round more or less often (music_rotation; David,
+    11 Nov 2026: "an option to increase or decrease a song's rotation").
+    Nothing plays or skips."""
+    from agent_media_core import music_rotation
+
+    by = body.get("step")
+    if by not in (1, -1) or isinstance(by, bool):
+        return False, {"error": "step must be 1 or -1", "status": 400}
+    uri = body.get("uri")
+    if uri is None:
+        now, _ = _now()
+        uri = now.get("uri") or ""
+    if not isinstance(uri, str) or not uri.strip().startswith(("yt:", "http://", "https://")):
+        return False, {"error": "uri must be a yt: or web address", "status": 400}
+    uri = uri.strip()
+    vid = _row_vid(uri)
+    if not vid:
+        return False, {"error": "only a YouTube song has a rotation", "status": 400}
+    try:
+        music_rotation.step(vid, by, _title_of(uri, body.get("title")))
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    return True, {**_answer(), "voted": _voted(uri)}
+
+
+def _voted(uri: str) -> dict:
+    """`{"uri", "liked", "disliked", "bed_suggested"}` for one song."""
+    row = {"uri": uri}
+    _mark_votes([row])
+    return {"uri": uri, "liked": bool(row.get("liked")), "disliked": bool(row.get("disliked")),
+            "bed_suggested": bool(row.get("bed_suggested")), "rotation": row.get("rotation"),
+            "moods": row.get("moods")}
+
+
+def _title_of(uri: str, given) -> str:
+    """A name for a song liked by its `uri`: the one sent, else the one the
+    Media tab's rows show (the titles kept, the rooms cache's, the play
+    history's)."""
+    if isinstance(given, str) and given.strip():
+        return given.strip()[:300]
+    from agent_media_core import music_recent
+    from agent_media_core.state import StateStore
+
+    key, vid = _row_key(uri), _row_vid(uri)
+    title = music_recent._titles().get(key) or (music_recent._cached_title(vid) if vid else "")
+    if title:
+        return title
+    try:
+        for r in StateStore().recent_history(sink="music", limit=2000, requested=True):
+            if (r.get("text") or "").strip() and _row_key(r.get("uri") or "") == key:
+                return r["text"].strip()
+    except Exception:  # noqa: BLE001 — a name is a nicety
+        pass
+    return ""
+
+
+def _vote_by_uri(action: str, body: dict) -> tuple[bool, dict]:
+    """`like` / `unlike` / `dislike` / `undislike` with a `uri`: the song
+    named, playing or not (the song card). Nothing plays or skips."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import radio
+    from agent_media_core.state import StateStore
+
+    uri = body.get("uri")
+    if not isinstance(uri, str) or not uri.strip() or uri.lstrip().startswith("-") \
+            or not uri.strip().startswith(("yt:", "http://", "https://")):
+        return False, {"error": "uri must be a yt: or web address", "status": 400}
+    uri = uri.strip()
+    key, vid = _row_key(uri), _row_vid(uri)
+    if action in ("dislike", "undislike") and not vid:
+        return False, {"error": "only a YouTube song can be disliked", "status": 400}
+    try:
+        store = StateStore()
+        if action == "like":
+            if not store.is_liked("music", key):
+                store.add_like("music", key, uri=uri, title=_title_of(uri, body.get("title")),
+                               backend="media-tab", note="liked on its info page")
+            if vid:
+                radio.undislike(vid)
+                fav.unban(vid)
+        elif action == "unlike":
+            store.remove_likes("music", key)
+        elif action == "dislike":
+            store.remove_likes("music", key)
+            title = _title_of(uri, body.get("title"))
+            radio.dislike_song(vid, title)
+            fav.ban(vid, title)
+        else:
+            radio.undislike(vid)
+            fav.unban(vid)
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    return True, {**_answer(), "voted": _voted(uri)}
+
+
 def _verdict(now: dict) -> str | None:
     """`"like"` or `"dislike"` for what is playing, else null: the player's
     ♥ and 👎 stay lit when the song is come back to (David, 1 Nov 2026:
@@ -370,7 +567,9 @@ def _verdict(now: dict) -> str | None:
         from agent_media_core import radio
         from agent_media_core.state import StateStore
 
-        if radio.disliked(vid):
+        from agent_media_core import music_bed_favourites as fav
+
+        if radio.disliked(vid) or fav.banned(vid):
             return "dislike"
         if StateStore().is_liked("music", vid, chapter=now.get("chapter") or ""):
             return "like"
@@ -396,7 +595,10 @@ def _unvote(action: str) -> tuple[bool, dict]:
         if action == "unlike":
             StateStore().remove_likes("music", vid, chapter=now.get("chapter") or "")
         else:
+            from agent_media_core import music_bed_favourites as fav
+
             radio.undislike(vid)
+            fav.unban(vid)
     except OSError as e:
         return False, {"error": f"could not save it ({e})", "status": 500}
     _reset_cache()
@@ -444,7 +646,10 @@ def _bed_control(body: dict) -> tuple[bool, dict]:
         return False, {"error": str(e), "status": 400, **_answer()}
     except OSError as e:
         return False, {"error": f"could not save it ({e})", "status": 500}
-    return True, {**_answer(), "suggested": done}
+    out = {**_answer(), "suggested": done}
+    if body.get("uri") is not None:
+        out["voted"] = _voted(uri.strip())
+    return True, out
 
 
 def _room_control(body: dict) -> tuple[bool, dict]:
@@ -855,6 +1060,8 @@ def recent(bearer: str, kind: str = "music", which: str = "recent", q: str = "")
     except Exception as e:  # noqa: BLE001 — an empty list, not a 500
         print(f"music: recent failed: {e}", file=sys.stderr)
         items = []
+    if kind == "music":
+        _mark_votes(items)
     out = {"kind": kind, "list": which, "lists": list(music_recent.LISTS[kind]), "items": items}
     if q:
         out["q"] = q
@@ -937,6 +1144,11 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         # Not a play: a station it starts is fed by the loop, which keeps
         # to the play gate itself.
         return _mood_control(body)
+    if action in ("like", "unlike", "dislike", "undislike") and "uri" in body:
+        # A song's ♥ or 👎 by its uri: nothing plays, so no play gate.
+        return _vote_by_uri(action, body)
+    if action == "rotation":
+        return _rotation_control(body)
     from agent_media_core import play_gate
 
     # `force: true`: through the play gate on purpose (music in a treatment).

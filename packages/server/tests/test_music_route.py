@@ -46,7 +46,7 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "downloads", "mood"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "rotation", "downloads", "mood"}
     assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
     assert obj["downloads"] == []
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
@@ -690,3 +690,202 @@ def test_the_listening_mood_is_read_and_set(server, signed_in, audio_host, playe
     res, obj = call(server, "POST", "/music", {"action": "mood", "mood": "gloomy"}, headers=AUTH)
     assert res.status == 400 and "mood must be one of" in obj["error"]
     assert music_mood.current() == "chill"
+
+
+# The song card (David, 11 Nov 2026: "Can we add the like, dislike, sing it
+# out and those other type of buttons to the song card?"): a song's ♥, 👎
+# and 🎼 by its uri, playing or not; its rows say which are on.
+OTHER = "yt:https://www.youtube.com/watch?v=Gkl8blLusFc"
+
+
+def test_a_song_not_playing_is_liked_and_unliked_by_its_uri(server, signed_in, audio_host, player):
+    from agent_media_core.state import StateStore
+    res, obj = call(server, "POST", "/music", {"action": "like", "uri": OTHER, "title": "As Hope"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["voted"] == {"uri": OTHER, "liked": True, "disliked": False, "bed_suggested": False, "rotation": 0, "moods": None}
+    likes = StateStore().list_likes(channel="music")
+    assert [(r["media_id"], r["uri"], r["title"]) for r in likes] == [("Gkl8blLusFc", OTHER, "As Hope")]
+    # Twice is still one like; what is playing keeps its own verdict.
+    call(server, "POST", "/music", {"action": "like", "uri": OTHER}, AUTH)
+    assert len(StateStore().list_likes(channel="music")) == 1 and obj["verdict"] is None
+    res, obj = call(server, "POST", "/music", {"action": "unlike", "uri": OTHER}, AUTH)
+    assert res.status == 200 and obj["voted"]["liked"] is False
+    assert StateStore().list_likes(channel="music") == []
+    assert player == []  # nothing was played or skipped
+
+
+def test_a_song_disliked_by_its_uri_is_off_every_station_and_the_backing_music(server, signed_in, audio_host, player, monkeypatch):
+    """👎 on a song not playing: kept off every station (one there is and
+    any to come) and never a backing-music favourite, so never sung out; its
+    like and its suggestion go. Nothing is skipped."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import radio
+    from agent_media_core.state import StateStore
+    StateStore().add_like("music", "Gkl8blLusFc", uri=OTHER, title="As Hope")
+    fav._write_json(fav._suggested_path(), {"k": {"id": "Gkl8blLusFc", "artist": "Chris Cornell", "title": "As Hope", "dur": 200, "at": 1}})
+    with radio._station() as st:
+        st.update(on=True, queue=[{"id": "Gkl8blLusFc", "title": "As Hope", "channel": "C"},
+                                  {"id": "aaaaaaaaaaa", "title": "Next", "channel": "C"}])
+    res, obj = call(server, "POST", "/music", {"action": "dislike", "uri": OTHER}, AUTH)
+    assert res.status == 200, obj
+    assert obj["voted"] == {"uri": OTHER, "liked": False, "disliked": True, "bed_suggested": False, "rotation": 0, "moods": None}
+    assert player == []
+    assert [s["id"] for s in radio.read()["queue"]] == ["aaaaaaaaaaa"]
+    assert radio.disliked("Gkl8blLusFc") and fav.banned("Gkl8blLusFc") and not fav.suggested()
+    assert StateStore().list_likes(channel="music") == []
+    # A station to come never takes it from a Mix.
+    with radio._station() as st:
+        assert radio._merge(st, [{"id": "Gkl8blLusFc", "title": "As Hope (Live)", "channel": "D"}]) == 0
+    res, obj = call(server, "POST", "/music", {"action": "undislike", "uri": OTHER}, AUTH)
+    assert res.status == 200 and obj["voted"]["disliked"] is False
+    assert not radio.disliked("Gkl8blLusFc") and not fav.banned("Gkl8blLusFc")
+    # A like takes a 👎 back too: one verdict a song.
+    call(server, "POST", "/music", {"action": "dislike", "uri": OTHER}, AUTH)
+    res, obj = call(server, "POST", "/music", {"action": "like", "uri": OTHER}, AUTH)
+    assert obj["voted"] == {"uri": OTHER, "liked": True, "disliked": False, "bed_suggested": False, "rotation": 0, "moods": None}
+
+
+def test_a_disliked_favourite_goes_with_its_files(server, signed_in, audio_host, player):
+    from agent_media_core import music_bed_favourites as fav
+    data = fav.load()
+    data["favourites"] = [{"key": "cornell-as-hope", "artist": "Chris Cornell", "title": "As Hope", "id": "Gkl8blLusFc", "dur": 200, "score": 5}]
+    fav.save(data)
+    res, obj = call(server, "POST", "/music", {"action": "dislike", "uri": OTHER}, AUTH)
+    assert res.status == 200, obj
+    assert fav.load()["favourites"] == [] and "cornell-as-hope" in fav.excluded()
+    call(server, "POST", "/music", {"action": "undislike", "uri": OTHER}, AUTH)
+    assert fav.excluded() == {}
+
+
+def test_a_vote_by_uri_refuses_what_it_cannot_name(server, signed_in, audio_host, player):
+    for body in ({"action": "like", "uri": "file:///etc/passwd"}, {"action": "like", "uri": 5},
+                 {"action": "unlike", "uri": "--help"},
+                 {"action": "dislike", "uri": "https://example.com/a.mp3"}):
+        res, obj = call(server, "POST", "/music", body, AUTH)
+        assert res.status == 400, (body, obj)
+    # A web address that is not YouTube can be liked, not disliked.
+    res, obj = call(server, "POST", "/music", {"action": "like", "uri": "https://example.com/a.mp3"}, AUTH)
+    assert res.status == 200 and obj["voted"]["liked"] is True
+    assert player == []
+
+
+def test_recent_rows_say_which_buttons_are_on(server, signed_in, audio_host, monkeypatch):
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_recent, radio
+    from agent_media_core.state import StateStore
+    items = [{"id": 3, "uri": OTHER, "title": "As Hope"},
+             {"id": 2, "uri": "yt:https://www.youtube.com/watch?v=gjuS3CS_9Bw", "title": "Spa"},
+             {"id": 1, "uri": "https://example.com/a.mp3", "title": "A file"},
+             {"id": -9, "uri": "radio:1730419200000", "title": "Radio: X"}]
+    monkeypatch.setattr(music_recent, "recent", lambda kind="music", **_: [dict(i) for i in items])
+    StateStore().add_like("music", "Gkl8blLusFc", uri=OTHER, title="As Hope")
+    fav._write_json(fav._suggested_path(), {"k": {"id": "gjuS3CS_9Bw", "artist": "A", "title": "Spa", "dur": 200, "at": 1}})
+    radio.dislike_song("gjuS3CS_9Bw", "Spa")
+    _, obj = call(server, "GET", "/music/recent", headers=AUTH)
+    rows = {r["id"]: r for r in obj["items"]}
+    assert (rows[3]["liked"], rows[3]["disliked"], rows[3]["bed_suggested"]) == (True, False, False)
+    assert (rows[2]["liked"], rows[2]["disliked"], rows[2]["bed_suggested"]) == (False, True, True)
+    assert rows[1]["liked"] is False and "disliked" not in rows[1] and "bed_suggested" not in rows[1]
+    assert "liked" not in rows[-9]
+
+
+def test_bed_by_uri_answers_the_songs_buttons(server, signed_in, audio_host, player, monkeypatch):
+    from agent_media_core import music_bed_favourites as fav
+    mine: dict = {}
+
+    def suggest(uri):
+        mine["k"] = {"id": fav._vid(uri)}
+        return {"key": "k", "title": "As Hope", "artist": "Chris Cornell", "id": "Gkl8blLusFc", "ready": False}
+    monkeypatch.setattr(fav, "suggest", suggest)
+    monkeypatch.setattr(fav, "suggested", lambda: dict(mine))
+    monkeypatch.setattr(fav, "chosen", lambda: False)
+    res, obj = call(server, "POST", "/music", {"action": "bed", "uri": OTHER}, AUTH)
+    assert res.status == 200, obj
+    assert obj["voted"] == {"uri": OTHER, "liked": False, "disliked": False, "bed_suggested": True, "rotation": 0, "moods": None}
+    assert obj["bed"] == {"suggested": False}  # what is playing is another song
+
+
+def test_a_song_disliked_from_its_card_shows_on_the_player(server, signed_in, audio_host, player):
+    res, _ = call(server, "POST", "/music", {"action": "dislike", "uri": NOW["uri"]}, AUTH)
+    assert res.status == 200
+    music._reset_cache()
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["verdict"] == "dislike"
+    res, obj = call(server, "POST", "/music", {"action": "undislike"}, AUTH)
+    assert res.status == 200 and obj["verdict"] is None
+    assert player == []
+
+
+def test_a_songs_rotation_is_turned_up_and_down(server, signed_in, audio_host, player):
+    """More often / Less often (David, 11 Nov 2026: "an option to increase
+    or decrease a song's rotation"): a level -3 to 3, on its rows and, for
+    what is playing, in every answer."""
+    from agent_media_core import music_rotation
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert obj["rotation"] == 0
+    res, obj = call(server, "POST", "/music", {"action": "rotation", "uri": OTHER, "step": 1}, AUTH)
+    assert res.status == 200, obj
+    assert obj["voted"]["rotation"] == 1 and obj["rotation"] == 0
+    for _ in range(5):
+        call(server, "POST", "/music", {"action": "rotation", "uri": OTHER, "step": 1}, AUTH)
+    assert music_rotation.level("Gkl8blLusFc") == 3
+    res, obj = call(server, "POST", "/music", {"action": "rotation", "step": -1}, AUTH)
+    assert res.status == 200 and obj["rotation"] == -1
+    res, obj = call(server, "POST", "/music", {"action": "rotation", "uri": OTHER, "step": -1}, AUTH)
+    assert obj["voted"]["rotation"] == 2
+    for body in ({"action": "rotation", "uri": OTHER, "step": 2}, {"action": "rotation", "uri": OTHER, "step": True},
+                 {"action": "rotation", "uri": "https://example.com/a.mp3", "step": 1},
+                 {"action": "rotation", "uri": "file:///x", "step": 1}):
+        res, obj = call(server, "POST", "/music", body, AUTH)
+        assert res.status == 400, (body, obj)
+    assert player == []
+
+
+def test_the_pickers_honour_a_songs_rotation(server, signed_in, monkeypatch):
+    """The backing music's favourite (and so Sing it out's song) and a
+    station's refill weigh a song by its rotation."""
+    import random
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_rotation, radio, radio_dj
+    for _ in range(3):
+        music_rotation.step("aaaaaaaaaaa", 1, "Up - Song")
+        music_rotation.step("bbbbbbbbbbb", -1, "Down - Song")
+    have = [{"key": "up", "id": "aaaaaaaaaaa"}, {"key": "down", "original_id": "bbbbbbbbbbb", "id": "ccccccccccc"}]
+    monkeypatch.setattr(fav, "playable", lambda style=None, data=None: have)
+    monkeypatch.setattr(fav, "_file", lambda e: fav._dir() / f"{e['key']}.mp3")
+    monkeypatch.setattr(fav, "_mark_played", lambda key: None)
+    seen = []
+    monkeypatch.setattr(random, "choices", lambda pop, weights, k: (seen.append(weights), [pop[0]])[1])
+    assert fav.track_for() is not None
+    up, down = seen[0]
+    assert up / down == pytest.approx(music_rotation.FACTOR ** 6)
+    # A station's refill: turned up first, turned down left out that often.
+    monkeypatch.setattr(radio.random, "random", lambda: 0.5)
+    with radio._station() as st:
+        radio._merge(st, [{"id": "ddddddddddd", "title": "Plain"}, {"id": "bbbbbbbbbbb", "title": "Down"},
+                          {"id": "aaaaaaaaaaa", "title": "Up"}])
+        assert [s["id"] for s in st["queue"]] == ["aaaaaaaaaaa", "ddddddddddd"]
+    monkeypatch.setattr(radio_dj, "moment", lambda: {"local_time": "Wednesday 10:00"})  # no weather asked
+    brief = radio_dj.brief(radio._blank())
+    assert "Up - Song" in brief and "Down - Song" in brief
+
+
+def test_a_favourites_moods_are_on_its_row(server, signed_in, audio_host, monkeypatch):
+    """The moods a song plays under (David, 11 Nov 2026): a backing-music
+    favourite's, by its measured tempo and energy against each mood's."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_mood, music_recent
+    data = fav.load()
+    data["tracks"] = [{"key": "slow", "id": "inst0000001", "original_id": "Gkl8blLusFc", "file": "x.mp3",
+                       "features": {"tempo": 0.2, "energy": 0.25}},
+                      {"key": "loud", "id": "gjuS3CS_9Bw", "file": "y.mp3", "features": {"tempo": 0.8, "energy": 0.8}}]
+    fav.save(data)
+    items = [{"id": 3, "uri": OTHER}, {"id": 2, "uri": "yt:https://www.youtube.com/watch?v=gjuS3CS_9Bw"},
+             {"id": 1, "uri": "yt:https://www.youtube.com/watch?v=aaaaaaaaaaa"}]
+    monkeypatch.setattr(music_recent, "recent", lambda kind="music", **_: [dict(i) for i in items])
+    _, obj = call(server, "GET", "/music/recent", headers=AUTH)
+    rows = {r["id"]: r for r in obj["items"]}
+    assert rows[3]["moods"] == ["chill", "sleep"]
+    assert rows[2]["moods"] == ["upbeat", "party"]
+    assert "moods" not in rows[1]
+    assert music_mood.favoured({"tempo": 0.5}) is None
