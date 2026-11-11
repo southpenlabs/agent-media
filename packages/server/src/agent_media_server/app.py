@@ -800,9 +800,13 @@ def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
 
 def _read_json(h: BaseHTTPRequestHandler) -> dict | None:
     try:
-        # Never read past the cap even if a caller reached here without the
-        # POST guard (defence in depth for the #139 OOM).
-        n = min(int(h.headers.get("Content-Length", "0")), MAX_BODY)
+        # Never read past the route's cap even if a caller reached here
+        # without the POST guard (defence in depth for the #139 OOM). The
+        # route's own cap, not MAX_BODY: a session worker's poll answer on
+        # /jobs/result is up to 512 KiB of transcript, and cut at 64 KiB it
+        # was no JSON, so a chat on red2 never showed here (11 Nov 2026).
+        path = urlsplit(h.path or "").path
+        n = min(int(h.headers.get("Content-Length", "0")), body_limit(path))
         return json.loads(h.rfile.read(n) or b"{}")
     except (ValueError, json.JSONDecodeError):
         return None

@@ -448,6 +448,24 @@ def test_a_missing_folder_with_nothing_to_clone_is_refused_plainly(red2):
     assert not any(r.get("op") == "start" for r in seen)
 
 
+def test_a_poll_with_a_real_sized_transcript_comes_back_whole(red2, monkeypatch):
+    """A real chat's transcript is far over 64 KiB: /jobs/result read only
+    that much, so the answer was no JSON (400) and a chat on red2 never
+    showed here (11 Nov 2026)."""
+    _seen, home = red2
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    proj = home / ".claude" / "projects" / "-x"
+    proj.mkdir(parents=True)
+    line = json.dumps({"type": "assistant", "text": "y" * 2000}) + "\n"
+    (proj / f"{SID}.jsonl").write_text(line * 200)          # ~400 KB
+    status, got = REAL_CALL(
+        {"host": "red2", "request": {"op": "sync", "sessions": {SID: {"seq": 0, "offset": 0}}},
+         "timeout": 20}, 30)
+    assert status == 200 and got["ok"], got
+    chunk = got["transcripts"][SID]
+    assert chunk["data"] == line * 200 and chunk["size"] == len(line) * 200
+
+
 def test_prepare_says_whether_the_folder_is_there_and_the_slots(red2, monkeypatch):
     seen, home = red2
     status, got = REAL_CALL(
