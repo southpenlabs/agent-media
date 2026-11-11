@@ -837,6 +837,44 @@ def _entrypoint_bindir() -> Path:
     return Path(sysconfig.get_path("scripts"))
 
 
+def _release_stable(path: Path) -> Path:
+    """`path` through the `current` link when it lies inside the release in
+    use (release.py); unchanged for a checkout or any other install."""
+    from . import release
+
+    cur = release.current()
+    if not cur:
+        return path
+    try:
+        rel = Path(os.path.realpath(path)).relative_to(os.path.realpath(cur["path"]))
+    except ValueError:
+        try:
+            # The venv's own `bin` is not a real path of its files' targets.
+            rel = Path(os.path.abspath(path)).relative_to(os.path.realpath(cur["path"]))
+        except ValueError:
+            return path
+    return release.current_link() / rel
+
+
+def cmd_release_mode(args: argparse.Namespace) -> int:
+    """`media-setup release-mode`: this host's units (and, `--links`, its
+    commands on PATH) start from the release in use instead of the checkout
+    they name. release.py has the how and the why."""
+    from . import release
+
+    checkout = Path(args.checkout).expanduser() if args.checkout else None
+    emit = lambda line: print(line, flush=True)  # noqa: E731
+    try:
+        if args.links:
+            return release.link_mode(checkout=checkout, undo=args.undo,
+                                     dry_run=args.dry_run, emit=emit)
+        return release.release_mode(args.only or None, checkout=checkout,
+                                    undo=args.undo, dry_run=args.dry_run, emit=emit)
+    except release.ReleaseError as e:
+        print(f"media-setup: {e}", file=sys.stderr)
+        return 1
+
+
 def _systemd_unit_name(name: str) -> str:
     """Map a template dir name to a namespaced unit file name.
 
@@ -868,8 +906,11 @@ def _install_one_systemd(name: str, *, dry_run: bool, root: Path) -> str | None:
     # so the two can never disagree about which kind of thing this is.
     schedule = (src / "timer").read_text().strip() if (src / "timer").is_file() else ""
     template = SYSTEMD_ONESHOT_TEMPLATE if schedule else SYSTEMD_UNIT_TEMPLATE
+    # From a release, the unit names `current`, not the release it was written
+    # from: the next `media update` moves the link and the unit follows.
     content = template.format(
-        name=name, bindir=_entrypoint_bindir(), runscript=run)
+        name=name, bindir=_release_stable(_entrypoint_bindir()),
+        runscript=_release_stable(run))
     if dry_run:
         if dest.is_symlink():
             print(f"# would replace symlink {dest} -> {os.readlink(dest)} "
@@ -2203,6 +2244,35 @@ def _build_parser() -> argparse.ArgumentParser:
                          "phone's deploy/phone/service ones (phone-jobs, "
                          "say-http, music-files) only when named")
     sp.set_defaults(func=cmd_install_services)
+
+    sp = sub.add_parser(
+        "release-mode",
+        help="Start this host's systemd units from the release in use "
+             "(media update), not from the checkout they name",
+        description="For each systemd --user service with a command, PATH or "
+                    "working directory that names the dev checkout, write a "
+                    "drop-in that names the same file under the release in use "
+                    "(<data>/agent-media/current) instead. The unit files are "
+                    "not touched and nothing is restarted: a running service "
+                    "takes the release at its next restart (media "
+                    "restart-services --only NAME --after 10). --undo removes "
+                    "the drop-ins. A unit that would name a file the release "
+                    "lacks is skipped (exit 1).")
+    sp.add_argument("--only", nargs="+", metavar="NAME", default=None,
+                    help="just these units; short names work (sessiond, canvas)")
+    sp.add_argument("--links", action="store_true",
+                    help="instead of units: repoint the ~/.local/bin symlinks "
+                         "that lead into the checkout (media, the hooks, the "
+                         "tmux helpers) at the release")
+    sp.add_argument("--undo", action="store_true",
+                    help="back to the checkout: remove the drop-ins (or, with "
+                         "--links, restore the links)")
+    sp.add_argument("--checkout", metavar="PATH", default=None,
+                    help="the checkout the units name (default: "
+                         "MEDIA_RELEASE_CHECKOUT, the checkout this runs from, "
+                         "or ~/projects/agent-media)")
+    sp.add_argument("--dry-run", action="store_true")
+    sp.set_defaults(func=cmd_release_mode)
 
     sp = sub.add_parser("link-services",
                         help="replace service files that are copies of this "

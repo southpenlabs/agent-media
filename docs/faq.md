@@ -397,7 +397,14 @@ python3 -m pip install --user --pre --upgrade yt-dlp
 
 ### How do I update a Termux install?
 
-Pull the checkout, then restart the services:
+On a host that runs releases (`media version` says "release …"; see
+`docs/reference/releases.md`), push the change and run `media update`: it
+builds the new release beside the old, switches, restarts what changed and
+steps back if a service does not come up. `media update --rollback` goes
+back by hand. Restarting a service there loads the release, never an edited
+folder.
+
+On a host that runs from a checkout, pull it, then restart the services:
 
 ```sh
 git -C ~/projects/agent-media pull --ff-only

@@ -33,6 +33,11 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     # Quick chat is this server's own (quick.py): there on every one. No
     # personal-use method on a bare, public install (personal_use.py).
     from agent_media_core import personal_use
+    # What code answers (release.info): here a checkout, so its HEAD and no
+    # deploy time; a release says its commit and when it went live.
+    version = obj.pop("version")
+    assert version["mode"] == "checkout" and len(version["sha"]) == 40
+    assert version["short"] == version["sha"][:8] and version["deployed"] == 0.0
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": False, "signed_in": False, "stories": False, "personal": True, "app_update": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "music_sung": True, "music_chapters": True, "music_search": True, "music_channel": True, "room_delegate": False, "map": True,
                    "play_gate": False, "trakt": True, "watch": False,
@@ -78,6 +83,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     personal_use.register("messaging-bridges", type("MB", (), {"bridges": type("B", (), {
         "discover": staticmethod(lambda: [str(bridge / "config.yaml")])})})())
     _, obj = call(server, "GET", "/features", headers=AUTH)
+    assert obj.pop("version")["mode"] == "checkout"
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": True, "signed_in": True, "stories": True, "personal": True, "app_update": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "music_sung": True, "music_chapters": True, "music_search": True, "music_channel": True, "room_delegate": False, "map": True,
                    "play_gate": True, "trakt": True, "watch": False,

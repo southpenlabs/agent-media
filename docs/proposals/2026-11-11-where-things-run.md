@@ -117,7 +117,11 @@ is particular to red5 stays on red5.
 ## Order of work
 
 0. **Done (11 Nov):** red2 runs chats; new chats go there by default.
-1. **Releases on red5.** A release folder and `current` link, the services
+1. **Built (11 Nov), red5 being switched unit by unit:** the release
+   layout, `media update` / `--rollback`, `media version`, the deploy log,
+   the server's `version` in `GET /features`, and `media-setup release-mode`
+   (`docs/reference/releases.md`, `release.py`). As planned:
+   **Releases on red5.** A release folder and `current` link, the services
    started from it, `media version`, and a deploy log. Deploys still by
    hand at first (`media update`), to prove the layout and the step back.
    This is the step that separates running from editing.

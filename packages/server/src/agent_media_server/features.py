@@ -198,4 +198,19 @@ def features(bearer: str) -> tuple[bool, dict]:
         return False, detail
     from agent_media_core import personal_use
 
-    return True, {**detect(), "personal_use": personal_use.report()}
+    return True, {**detect(), "personal_use": personal_use.report(),
+                  "version": version()}
+
+
+def version() -> dict:
+    """What code this server runs (`release.info()`): a release's commit and
+    when it went live, or the checkout it was started from."""
+    try:
+        from agent_media_core import release
+
+        v = release.info()
+        return {k: v[k] for k in ("mode", "sha", "short", "ref", "built", "deployed")}
+    except Exception as e:  # noqa: BLE001 — never the reason /features fails
+        print(f"features: version: {e}", file=sys.stderr)
+        return {"mode": "", "sha": "", "short": "", "ref": "", "built": 0.0,
+                "deployed": 0.0}

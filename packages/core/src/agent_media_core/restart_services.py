@@ -599,9 +599,12 @@ def _hhmm(t: float) -> str:
 
 
 def _start_drain(selected: list[Service], after: float, waits: list[dict],
-                 caller: str, emit: Callable[[str], None], res: dict) -> dict:
+                 caller: str, emit: Callable[[str], None], res: dict,
+                 inline: bool = False) -> dict:
     """The non-fire half of a drained restart: join a pending one, or write
-    the record (holding starts now) and schedule the detached run."""
+    the record (holding starts now) and schedule the detached run. `inline`:
+    schedule nothing; the caller is itself outside every chat and goes on to
+    `_fire_drain` (`drain`)."""
     import uuid
 
     names = [s.name for s in selected]
@@ -628,7 +631,8 @@ def _start_drain(selected: list[Service], after: float, waits: list[dict],
         res["drain"] = rec
         return res
     try:
-        sch = schedule(selected, after, False, drain=True)
+        sch = ({"how": "inline", "unit": f"pid {os.getpid()}", "log": ""} if inline
+               else schedule(selected, after, False, drain=True))
     except (OSError, RuntimeError, subprocess.SubprocessError) as e:
         clear_pending(rec["id"])
         emit(f"could not schedule the restart: {e}")
@@ -710,6 +714,44 @@ def _fire_drain(emit: Callable[[str], None], res: dict) -> dict:
                                    "checked": round(now, 3)}
                         if r and r.get("id") == rid else r)
         _sleep(drain_poll_s())
+
+
+def drain(only: "list[str]", *, after: float = 10.0,
+          echo: "Optional[Callable[[str], None]]" = None) -> dict:
+    """A drained restart of `only` done in this process, start to finish:
+    the pending record is written (new messages held, busy sessions told to
+    end their turn), this waits for nothing to be busy, restarts, and checks
+    health. For a caller that must know how it went before it goes on
+    (`media update`, which steps back when a service does not come up), and
+    that is not a chat of the session holder: it would wait on itself.
+    `run()`'s dict; rc 3 when it gave up busy or joined a restart already
+    waiting (that one's run restarts, not this)."""
+    lines: list[str] = []
+
+    def emit(line: str) -> None:
+        lines.append(line)
+        if echo:
+            echo(line)
+
+    res = {"rc": OK, "lines": lines, "selected": [], "busy": [], "unknown": [],
+           "scheduled": None, "own": [], "after": after}
+    selected, unknown = resolve(only, services())
+    res["selected"] = [s.name for s in selected]
+    if unknown or not selected:
+        emit(f"unknown service(s): {', '.join(unknown or only)}")
+        res.update(rc=UNKNOWN, unknown=unknown)
+        return res
+    waits = waiting_on(selected, "", now=False, drain=True)
+    res["busy"] = [_reason(w) for w in waits]
+    res = _start_drain(selected, after, waits, "", emit, res, inline=True)
+    if res["rc"] != OK:
+        return res
+    if (res.get("scheduled") or {}).get("how") == "joined":
+        res["rc"] = BUSY
+        return res
+    if after > 0:
+        _sleep(after)
+    return _fire_drain(emit, res)
 
 
 # --- restarting, checking, alerting ------------------------------------------------
@@ -876,12 +918,14 @@ def host() -> str:
     return re.sub(r"[^a-z0-9-]", "-", h) or "host"
 
 
-def alert(level: str, title: str = "", detail: str = "", fix: str = "") -> None:
-    """Say on the host alert `restart-services.<host>` what is true now:
+def alert(level: str, title: str = "", detail: str = "", fix: str = "", *,
+          name: str = "restart-services") -> None:
+    """Say on the host alert `restart-services.<host>` (or `name`'s: a
+    release that failed is `release.<host>`) what is true now:
     `agent-alert` when it is installed (it has a fallback for a store that is
     down, and the canvas may be what just failed), else the store in-process,
     else only the journal (stderr), which always gets it."""
-    aid = f"restart-services.{host()}"
+    aid = f"{name}.{host()}"
     if level != "ok":
         print(f"restart-services: ALERT {level}: {title}\n{detail}", file=sys.stderr)
     tool = shutil.which("agent-alert")

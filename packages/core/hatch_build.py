@@ -43,6 +43,9 @@ TEMPLATE_DIRS = (
     ("pi", "agent_media_core/pi"),
 )
 
+# Tracked files inside the package that .gitignore's patterns would drop.
+FORCED_FILES = ("agent_media_core/defaults.env",)
+
 # Directory names never worth shipping: runit's live state, and the log
 # directories it creates beside it.
 SKIP_DIRS = {"supervise", "__pycache__"}
@@ -61,6 +64,14 @@ class TemplateHook(BuildHookInterface):
             for path in self._files(src_root):
                 rel = path.relative_to(src_root)
                 include[str(path)] = f"{dest_name}/{rel.as_posix()}"
+        # The shipped defaults (intake/_env.py's last layer). The repo ignores
+        # `*.env` (they hold tokens) and this one is tracked by force, but a
+        # wheel build leaves out what .gitignore names: every non-editable
+        # install ran without its defaults until a release was diffed against
+        # the checkout (11 Nov 2026).
+        for rel in FORCED_FILES:
+            if (root / "src" / rel).is_file():
+                include[str(root / "src" / rel)] = rel
 
     def _files(self, root: Path):
         """Every regular file under `root`, skipping live-state directories.

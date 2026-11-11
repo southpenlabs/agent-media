@@ -281,6 +281,10 @@ snapclient, and never a runit service parked with a `down` file.
 
 ### Restarting safely, and from inside a chat
 
+On a host that runs releases (`docs/reference/releases.md`), a restart loads
+the release in use, not the checkout: a change goes live with `media update`,
+which calls what is described here for the units whose code changed.
+
 `media restart-services` is safe for an agent to run unattended (David,
 18 Oct 2026). Its logic is `agent_media_core.restart_services.run()`, a plain
 function that a server route on any host could call as well.

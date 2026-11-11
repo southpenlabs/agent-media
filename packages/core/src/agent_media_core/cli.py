@@ -9051,12 +9051,50 @@ def cmd_restart_services(a) -> int:
     return int(res["rc"])
 
 
+def cmd_version(a) -> int:
+    """`media version`: the release this host runs, since when, and each
+    unit that runs something else (release.py)."""
+    from . import release
+
+    if a.log:
+        for rec in release.read_log(a.log):
+            rest = {k: v for k, v in rec.items() if k not in ("t", "at", "event")}
+            if a.json:
+                print(json.dumps(rec))
+                continue
+            print(f"{rec.get('at')}  {rec.get('event'):<12} "
+                  + " ".join(f"{k}={' '.join(map(str, v)) if isinstance(v, list) else v}"
+                             for k, v in rest.items()))
+        return 0
+    st = release.status()
+    if a.json:
+        print(json.dumps(st, indent=1))
+        return 0
+    for line in release.status_lines(st):
+        print(line)
+    return 0
+
+
 def cmd_update(a) -> int:
-    """`media update --host NAME`: pull and restart a host down its own
+    """`media update`: this host to the newest release (release.update:
+    fetch, build beside the one in use, switch, restart what changed, step
+    back when a unit does not come up); `--rollback` back to the one before.
+
+    `media update --host NAME`: pull and restart a host down its own
     connection to this host's server (restart_services.update_device,
     contract §6.21a). The device refuses a dirty checkout; it restarts only
     when HEAD moved, with the busy checks, 10 s out unless --after says."""
     from . import restart_services
+
+    if not a.host:
+        from . import release
+
+        emit = lambda line: print(line, flush=True)  # noqa: E731
+        if a.rollback:
+            return release.rollback(restart=not a.no_restart, dry_run=a.dry_run, emit=emit)
+        return release.update(a.to or "", remote=a.remote or "", only=a.only or None,
+                              restart=not a.no_restart, every=a.all,
+                              dry_run=a.dry_run, emit=emit)
 
     res = restart_services.update_device(a.host, a.only or None,
                                          after=float(a.after or 0), force=a.force,
@@ -10640,11 +10678,35 @@ def _build_parser() -> argparse.ArgumentParser:
                          "answer runs in restarts detached, after 10 s")
     rs.set_defaults(func=cmd_restart_services)
 
+    ve = sub.add_parser(
+        "version",
+        help="the release this host runs, since when, and which units run "
+             "something else",
+        description="The release in use (its commit, when it went live), the "
+                    "one before it, and every unit that does not run it: one "
+                    "not restarted since the switch, or one still started "
+                    "from the checkout. --log shows the deploy log.")
+    ve.add_argument("--log", type=int, nargs="?", const=20, default=0, metavar="N",
+                    help="the last N lines of the deploy log (default 20)")
+    ve.add_argument("--json", action="store_true")
+    ve.set_defaults(func=cmd_version)
+
     up = sub.add_parser(
         "update",
-        help="pull and restart another host down its own connection to this "
-             "host's server (its jobs worker): no ssh, no Tailscale",
-        description="On the device: git pull --ff-only of its agent-media "
+        help="this host to the newest release (or --rollback to the one "
+             "before); with --host, pull and restart another host down its own "
+             "connection to this host's server",
+        description="Without --host: fetch the configured remote "
+                    "(MEDIA_RELEASE_REMOTE, branch MEDIA_RELEASE_BRANCH, default "
+                    "main), build the release for its newest commit (or --to) in "
+                    "its own folder beside the one in use, point `current` at it, "
+                    "and restart the units in release mode whose code changed, "
+                    "through restart-services (busy checks; the session host "
+                    "drained, last). A unit that does not come up sends the host "
+                    "back to the release before. --rollback steps back by hand. "
+                    "Exit 0 done, 1 failed (and stepped back), 3 switched but "
+                    "the host stayed busy. See docs/reference/releases.md. "
+                    "With --host, on the device: git pull --ff-only of its agent-media "
                     "checkout (refused when the checkout has uncommitted "
                     "changes; a pull is bounded at 90 s), then, when HEAD "
                     "moved, media restart-services there (the services its "
@@ -10654,8 +10716,22 @@ def _build_parser() -> argparse.ArgumentParser:
                     "codes: the restart's (0 done or scheduled, 1 failed, 2 "
                     "unknown name, 3 busy); 1 also for a refused or failed "
                     "pull, an offline device, or no answer.")
-    up.add_argument("--host", metavar="NAME", required=True,
-                    help="the device: its id, its name or the first word of its "
+    up.add_argument("--to", metavar="REF", default=None,
+                    help="a branch, tag or commit of the remote (default: the "
+                         "configured branch)")
+    up.add_argument("--rollback", action="store_true",
+                    help="point `current` back at the previous release and "
+                         "restart what differs")
+    up.add_argument("--remote", metavar="URL", default=None,
+                    help="the git remote to fetch releases from; needed once "
+                         "when MEDIA_RELEASE_REMOTE is unset, kept after")
+    up.add_argument("--all", action="store_true",
+                    help="restart every unit in release mode, changed or not")
+    up.add_argument("--no-restart", action="store_true",
+                    help="build and switch only; units take the release when "
+                         "they are next restarted")
+    up.add_argument("--host", metavar="NAME", default=None,
+                    help="another host instead of this one. The device: its id, its name or the first word of its "
                          "name (p8a for 'p8a Termux jobs', pn for 'pn jobs')")
     up.add_argument("--only", nargs="+", metavar="NAME", default=None,
                     help="restart just these after the pull (short names work)")
