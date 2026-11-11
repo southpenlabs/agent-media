@@ -4,32 +4,46 @@ agent-media is the agent's audio/music stack: it gives coding agents a voice,
 whole-house playback control and music awareness, on any Linux box or Termux.
 See README.md for the packages and docs/server-contract.md for the server.
 
-## Restarting services
+## Getting a change live
 
-- Restart with `media restart-services --only <name> --after 10`, e.g.
-  `media restart-services --only sessiond --after 10` (short names: `sessiond`,
-  `canvas`, `tts-shim`). It refuses while the service is busy (a session
-  working, a reply being spoken), runs detached so it outlives your turn,
-  re-checks before acting, health-checks each unit and raises the
-  `restart-services.<host>` alert on failure. Add `--dry-run` to see the busy
-  checks. With `--after`, a busy sessiond is drained rather than refused:
-  new messages are held, busy sessions are told to end their turn, it
-  restarts once none is busy, and cut-off sessions are resumed. If you are
-  told "A restart of the session host is waiting", end your turn (a
-  background agent told so hands back a status report instead). Use the
-  `low-priority` agent type for non-critical background work only. Details: docs/reference/version-skew-monitoring.md ("Restarting
-  safely, and from inside a chat") and
-  packages/core/src/agent_media_core/restart_services.py.
+- On a host that runs releases (`media version` says "release …"; red5
+  does), the services run a copy of a pushed commit that no chat edits, not
+  this folder. A change goes live by **push, then `media update`**: it
+  builds the new release beside the old one, switches, restarts only the
+  units whose code changed (safely, the session host drained and last),
+  checks them, and steps back by itself if one does not come up.
+  `media update --dry-run` says what it would restart; `media update
+  --rollback` goes back by hand; `media version` says what runs, and
+  `media version --log` what was deployed. docs/reference/releases.md.
+- Restarting a service does not pick up an edit in this folder, committed
+  or not. To try something before pushing, run the tests, or a private
+  server from your own checkout.
+- A canvas page change (static/canvas.{html,css,js}, view.html) is no
+  longer live on save there: it ships with the next `media update` like any
+  other change.
+- If you are told "A restart of the session host is waiting", end your turn
+  (a background agent told so hands back a status report instead). After
+  `media update` from a chat says the restarts run outside it, end your
+  turn too.
+- To restart without a new release: `media restart-services --only <name>
+  --after 10` (short names: `sessiond`, `canvas`, `tts-shim`). It refuses
+  while the service is busy, runs detached, health-checks each unit and
+  raises the `restart-services.<host>` alert on failure; a busy sessiond is
+  drained rather than refused. `--dry-run` shows the busy checks. Details:
+  docs/reference/version-skew-monitoring.md ("Restarting safely, and from
+  inside a chat").
 - Never `systemctl restart agent-media-sessiond` (or any direct restart of
   sessiond) from inside a chat: a phone-started chat is a sessiond child and
   is killed mid-turn.
-- A canvas page-only change (static/canvas.{html,css,js}, view.html) needs no
-  restart: the page is re-read when its files change. A Python change does.
 - `--force` skips the busy checks: use it only when David asks.
+- Use the `low-priority` agent type for non-critical background work only.
+- On a host that still runs from a checkout (a dev box, the phone), the old
+  way holds: pull, then `media restart-services`.
 
 ## Git
 
 - No `Co-Authored-By` trailers or other AI-attribution lines in commits.
+- `main` is what gets deployed: push only what is tested and finished.
 - Parallel sessions share this working tree: stage by path (check
   `git diff --cached`), never `git add -A` or `git commit -a`.
 - Staging by path is not enough when another session is editing the same
@@ -40,9 +54,11 @@ See README.md for the packages and docs/server-contract.md for the server.
   zero-context hunks by stale line numbers.
 - Never `git pull --rebase --autostash` (or stash at all) over another
   session's uncommitted work. `git fetch` and look first.
-- The runtime is shared too. Before restarting a shared service or
-  installing an APK, check who else is active (next section), batch your
-  changes into one restart or install, and say in your reply what you
+- A dirty shared folder no longer blocks a deploy: releases are built from
+  what was pushed, never from this folder.
+- The runtime is shared too. Before a `media update`, a restart of a shared
+  service or installing an APK, check who else is active (next section),
+  batch your changes into one, and say in your reply what you deployed,
   restarted or installed.
 
 ## Is another session live?
