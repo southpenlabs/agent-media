@@ -162,7 +162,9 @@ What this costs: every Snapcast client has to be repointed at red2 —
 `hpo`, `sp4r`, `p8a`, `tvr` on the `am`/`am-music` groups today — and the
 Spotify and ListenBrainz logins move with `spotifyd` and the env file.
 
-**Stays on red5** (his choice 2): the six `mautrix-*` bridges,
+**Stays on red5** (his choice 2) — but see "The agents' own tools": agent-mail
+is one of these that cannot stay, and `~/org`, which the server itself reads,
+is missing from both lists. The rest: the six `mautrix-*` bridges,
 `hippocampus` (the memory store) with `memory-governor`, the AI gateways
 `litellm` and `cli-proxy-api`, agent-mail, `sasonica-shell`,
 `herdr-mobile-relay`, `sillytavern`, `hummingbot-gateway`, `meridian`,
@@ -253,6 +255,69 @@ work lands on red2's clone from here. That suits step 3 of where-things-run
 ("chats in their own copies everywhere") and the shared-tree rules in
 `CLAUDE.md` get shorter, not longer.
 
+## The agents' own tools
+
+The plan above moves the services, the state and the audio. The other thing
+that moves is **where the assistant itself stands**: after the flip every
+chat runs on red2, so every tool a chat reaches for has to work from there.
+Checked on red2 on 12 Nov 2026, from a chat running there — these are what
+is actually broken or missing, not a list of what might be.
+
+- **Files shared from the phone: the move fixes this one.** `POST /upload`
+  writes them to `~/shared/<date>/` on the *server* host (`uploads.py`), so
+  today a chat on red2 cannot open a screenshot David has just shared — it
+  is on red5. (Hit live on 12 Nov: the screenshot for a restart-card fix had
+  to be copied across before the chat could read it.) After the move they
+  land where the chats are. The inverse case remains for a chat on the red5
+  worker, and `GET /upload?path=` already serves a file back, so the answer
+  there is a `media shared get <path>` through the server — not a sync, and
+  not the filesystem.
+- **Memory search is dead on red2 today, and the move does not fix it.**
+  `agent-memory-search` defaults to `http://127.0.0.1:54321`, and red2 has
+  no `~/.config/hippocampus.env` to point it anywhere else; `red5:54321`
+  answers `/health` 200 over the tailnet. Every new chat has started on red2
+  since 11 Nov, so every new chat has been searching nothing. That env file
+  is wanted now, as a stopgap, not at the cutover — and moving `hippocampus`
+  to red2 (step 6 below) is the real answer, the one that also takes the
+  memory path off the tailnet.
+- **agent-mail cannot be left on red5.** "What moves, what stays" leaves it
+  there because latency does not matter to it, but the test is reachability,
+  not latency: agent-mail is a CLI over a SQLite file
+  (`~/.local/state/agent-mail/mail.sqlite3`) with no daemon, and
+  `agent-mail-deliver` on red2 is a wrapper pointing at
+  `~/projects/agent-mail`, which is not cloned there. A chat on red2 cannot
+  read or send mail at all. Delivery breaks in the other direction too:
+  `agent-mail-deliver` hands a letter to a tmux pane or to `media session
+  send`, and after the flip both the panes and the front-door sessiond are
+  on red2. So agent-mail moves to red2 with the chats. It then reaches a
+  chat on either host, because the front door forwards every op on a remote
+  session (§17.1).
+- **`~/org` moves with the server, and is missing from the list above.**
+  The server reads it, not just the person: `related_threads.py`
+  (`MEDIA_ORG_DIR`, `~/org/roam/notes`), `docs.py`'s roots, and the
+  `org-paragtd` package already named in `MEDIA_RELEASE_PACKAGES`. 60 MB on
+  red5. The chats read the same tree (the org-todo skill), and red2 has no
+  `~/org` at all. One tree, and it belongs beside both.
+- **The agent's own home config is not at parity.** red2 has no
+  `~/.claude/RTK.md`, though the global `CLAUDE.md` ends with `@RTK.md`, and
+  its `settings.json` is missing `statusLine`, `autoMode`,
+  `agentPushNotifEnabled` and `switchModelsOnFlag`. A chat on red2 runs with
+  different standing instructions from one on red5 and says nothing about
+  it. The rehearsal should diff `~/.claude` across the two hosts, not only
+  check the hooks that name a checkout.
+- **Every project folder needs a clone on red2.** red5 has about forty under
+  `~/projects`; red2 has three. A folder that is not there falls back to
+  red5 and is cloned in the background for next time (§17.1, "The default
+  host") — fine one chat at a time, but it means the first chat in each
+  project lands on the wrong machine for the rest of the evening. Clone the
+  ones in use before the cutover. `CLAUDE.md`'s shared-checkout rules then
+  describe red2's tree.
+
+The shape of all six: the cutover plan treats red5 as a machine that keeps
+some services, but for the assistant red5 is also *where its tools are*.
+Anything an agent runs — not just anything the app calls — has to be counted
+in what moves.
+
 ## Backups flip
 
 This is mail #246, claimed by session 9d6d2397 (`red2-media-backup`), so it
@@ -279,6 +344,10 @@ the day of the cutover, not after it.
 0. **The migration feature**, points 1–3 above (`media server rename`, the
    `moved_to`/`server_moved` answers, the `media doctor` check), and
    `docs/reference/server-address.md`. Before anything is moved.
+0a. **Today, before any of it**: `~/.config/hippocampus.env` on red2 with
+   `HIPPOCAMPUS_URL=http://red5:54321`, so the chats already running there
+   can search memory again ("The agents' own tools"). One line, and it is
+   broken now.
 1. **red2 becomes a release host.** `MEDIA_RELEASE_*` in its env file with
    the same `MEDIA_RELEASE_PACKAGES` red5 has (core, server, visual,
    tts-shim, completions-shim, engine-openai, engine-piper, the four intakes,
@@ -297,6 +366,9 @@ the day of the cutover, not after it.
    traps live here, not on the night: the env file's absolute paths, the
    `~/.claude/settings.json` hooks that name a checkout (releases.md, "What
    still reads a checkout"), and anything that assumed the hostname `red5`.
+   Diff `~/.claude` between the hosts while here (`RTK.md`, the
+   `settings.json` keys), and clone the projects in use into red2's
+   `~/projects` so the first chat in each does not fall back.
 4. **The cutover evening.** Quiet the house. Let red5's chats finish
    (`restart-services --after 10`). Stop red5's agent-media units and the
    audio stack. Final `rsync` of the state. `media server rename --to
@@ -309,7 +381,10 @@ the day of the cutover, not after it.
    `MEDIA_SESSIOND_DEFAULT_HOST` unset on red2), backups running from red5
    against red2, red5's agent-media units left installed but disabled for a
    fortnight, and the roadmap and `CLAUDE.md` updated to say where the
-   server is.
+   server is. With them the agents' own tools: **agent-mail and `~/org` to
+   red2** ("The agents' own tools" — mail is unreachable from a chat on
+   red2, and the server itself reads `~/org`), and `media shared get` for a
+   chat on the red5 worker that needs a file shared from the phone.
 6. **Later, recommended**: `hippocampus`, `memory-governor`, `litellm` and
    `cli-proxy-api` to red2, so the two most-used paths stop crossing the
    world. Then look again at what red5 is for, and at whether the

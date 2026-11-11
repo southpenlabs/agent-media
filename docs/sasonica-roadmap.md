@@ -2506,7 +2506,11 @@ ahead.
       door; whether red2 becomes primary was decided 11 Nov — no, red5
       stays the server — and **reversed on 12 Nov: red2 becomes the
       server** the app pairs with, red5 the remote worker and backup
-      target, `docs/proposals/2026-11-12-the-server-moves-home.md`).
+      target, item 63 and
+      `docs/proposals/2026-11-12-the-server-moves-home.md`. At that
+      cutover this default is unset: chats run where the server is, and
+      red5 is named in `media session hosts` as the overflow, paired the
+      other way round).
       `MEDIA_SESSIOND_DEFAULT_HOST=red2` in the server's env file: a `start`
       naming no host asks red2 first (`prepare`: connected, the folder
       there, a free slot, memory) and starts there, else here at once — down,
@@ -2636,6 +2640,60 @@ ahead.
     rather than a hope. Supersedes dotfiles `red5-backup-pull` for
     agent-media's own state; the script keeps `~/.claude`, mail, org,
     dotfiles and the other repos, and runs in reverse after the cutover.
+
+63. **The server moves home: the app pairs with red2** (David, 12 Nov 2026,
+    thread a4e12d56, via agent-mail #248: "I think I'm going to pair the
+    sasonica app with red2 rather than run it through red5. after all, it
+    was designed to run on a personal computer, right?").
+    `docs/proposals/2026-11-12-the-server-moves-home.md`. **Planned 12 Nov
+    2026, not started.** This **reverses decision 1 of
+    `2026-11-11-where-things-run.md`** — red5 was named the permanent server
+    on 11 Nov and item 56 above recorded red2 as a worker only; from 12 Nov
+    red2 is the server the app pairs with, at
+    **`red2-ryer.sasonica.com`** behind its own Cloudflare Tunnel, and red5
+    is the remote session worker and the off-site backup target. The 450 ms
+    to Germany on every tap is what the move removes. His four choices that
+    day: the user in the public name (`<host>-<user>.sasonica.com`, the
+    convention from here, with `docs/reference/server-address.md` owed for
+    it and a `media server rename` / `media server move` migration feature
+    built *before* the cutover); red5 keeps its non-agent-media services
+    rather than being evacuated; a dress rehearsal then one evening's
+    switch; and the house audio (Snapcast, Mopidy, Spotify) moving in the
+    same cutover — which also drops the yt-dlp client workaround red5's
+    datacenter IP needs for YouTube's `403`s. Old thread links keep working:
+    `red5.sasonica.com` stays as a second ingress on red2's tunnel.
+    Depends on releases (item above, done 11 Nov — "new machine = release +
+    restore" is the drill) and on item 62's `media backup` / `media restore`,
+    whose destination must be a setting because after the move red2 holds
+    the data.
+    - **What it does to the agents' own tools** (checked on red2, 12 Nov
+      2026, from a chat running there; the proposal's "The agents' own
+      tools"). The cutover plan counted the services, the state and the
+      audio; the other thing that moves is where the assistant stands, and
+      every tool a chat reaches for has to work from red2.
+      **Fixed by the move:** a file shared from the phone, which `POST
+      /upload` writes under `~/shared/<date>/` on the *server* host — today
+      a chat on red2 cannot open the screenshot David just shared. A chat
+      left on the red5 worker still can't, so `media shared get <path>`
+      through the server (`GET /upload?path=` already serves one) is owed.
+      **Broken now and not fixed by the move:** memory search —
+      `agent-memory-search` defaults to `127.0.0.1:54321` and red2 has no
+      `~/.config/hippocampus.env`, so every chat started there since 11 Nov
+      has searched nothing; one line pointing at `red5:54321` is the
+      stopgap, moving `hippocampus` to red2 the answer.
+      **Cannot stay on red5:** agent-mail, which the plan leaves there on a
+      latency argument when the problem is reachability — it is a CLI over a
+      SQLite file with no daemon, uncloned on red2, and after the flip the
+      tmux panes and the front-door sessiond it delivers through are both
+      on red2; and `~/org`, which is on neither list although the server
+      itself reads it (`related_threads.py`, `docs.py`, `org-paragtd`).
+      **Parity to check at the rehearsal:** `~/.claude` differs between the
+      hosts (no `RTK.md` on red2 though the global `CLAUDE.md` `@`-includes
+      it; `statusLine`, `autoMode`, `agentPushNotifEnabled` and
+      `switchModelsOnFlag` missing from its `settings.json`), so a red2 chat
+      runs on quieter instructions and says nothing about it; and red5's
+      forty-odd `~/projects` clones against red2's three, which decide
+      whether the first chat in a project lands on the right machine.
 
 ## Loose ends
 
