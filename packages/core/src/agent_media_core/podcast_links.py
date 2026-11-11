@@ -203,6 +203,23 @@ def _add_episode(url: str, text: str) -> dict:
             "show": got.get("show"), "fetching": False}
 
 
+def add_audio(audio: str, title: str = "", show: str = "", art=None, published=None, page: str = "",
+              duration_s=None) -> dict:
+    """Save one episode by its audio address (a show found in the Podcasts
+    tab's search or chart, podcast_discover.episode): kept as a resolved
+    episode is, so it plays from its audio and stays in Saved."""
+    import hashlib
+    if not str(audio or "").startswith(("http://", "https://")):
+        raise ValueError("an episode's audio must be an http(s) address")
+    ep = hashlib.sha256(audio.encode()).hexdigest()[:12]
+    links = [x for x in _load() if x.get("ep") != ep]
+    links.append({"ep": ep, "url": page or audio, "audio": audio, "title": title or audio, "show": show or None,
+                  "art": art or None, "published": published, "duration_s": duration_s, "added": time.time()})
+    _save(links)
+    return {"added": "podcast", "id": f"podcast-link:ep-{ep}", "title": title or audio, "show": show or None,
+            "fetching": False}
+
+
 def remove(key: str, keep_link: bool = False) -> bool:
     """Forget a link (``podcast-link:<vid>`` or the bare id) and delete its
     download; with `keep_link`, delete only the download."""
