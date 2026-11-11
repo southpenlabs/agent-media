@@ -140,7 +140,7 @@ def test_quiet_past_the_stale_window_is_stopped(th, monkeypatch):
 
 
 @pytest.mark.parametrize("status,want", [("failed", "failed"), ("killed", "stopped"),
-                                         ("completed", "done")])
+                                         ("stopped", "stopped"), ("completed", "done")])
 def test_notification_statuses(th, status, want):
     a = th.spawn("a0000000003", "toolu_A", "Try")
     a.prompt("Do it.")

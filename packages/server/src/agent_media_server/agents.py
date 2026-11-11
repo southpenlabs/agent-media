@@ -20,7 +20,7 @@ harness's own word, and only "running" while something says it could be:
    (by task-id = its id, or by tool-use-id), in the thread's transcript or
    any subagent's (a child's lands in its parent agent's file, and as a
    `queue-operation` in the thread's): `completed` → `done`, `failed` →
-   `failed`, `killed` → `stopped`. Failing that, the Agent tool's own
+   `failed`, `killed` or `stopped` → `stopped`. Failing that, the Agent tool's own
    `tool_result` when it is not the "launched in the background" answer (a
    foreground agent's result is its end): `is_error` → `failed` (an
    interrupt → `stopped`), else `done`.
@@ -71,7 +71,11 @@ GRACE_S = 5.0
 #: Files whose scan is kept (a thread can have dozens of agents).
 _CACHE_MAX = 512
 
-_NOTE_STATUS = {"completed": "done", "failed": "failed", "killed": "stopped"}
+#: `stopped` is a background agent cut off with its session (a park, an
+#: interrupt, an exit): without it a stopped agent read as running for
+#: STALE_S beside a thread that said waiting (David, 11 Nov 2026).
+_NOTE_STATUS = {"completed": "done", "failed": "failed", "killed": "stopped",
+                "stopped": "stopped"}
 _TID = re.compile(rb'"tool_use_id":"(toolu_[A-Za-z0-9_-]+)"')
 _TS = re.compile(rb'"timestamp":"([^"]{10,40})"')
 _TAG = {k: re.compile(rf"<{k}>\s*([^<]*?)\s*</{k}>") for k in ("task-id", "tool-use-id", "status")}
