@@ -20,9 +20,11 @@ Where things live:
   (`sasonica-chat-preview`, from that checkout's `build/`). Its history came
   across from the fork's `chat-prototype`/`android-next`, which are frozen —
   commit hashes below that name them are from there.
-- **Sasonica ABS:** the Audiobookshelf app fork, kept for books —
-  `com.sasonica.abs`, branch `sasonica`, `agent-phone-adb sasonica-abs`. Book
-  control on :8772 (loopback) and :8773 (tokened).
+- **Sasonica ABS and sasonica-web: retired 11 Nov 2026** with Audiobookshelf
+  (David: "I'd like to move away from audiobookshelf" — "All the way").
+  `com.sasonica.abs` (the Audiobookshelf app fork, branch `sasonica`) and its
+  book control on :8772/:8773 are no longer used; books are the server's own
+  (`book_library`) and play on the book channel.
 - **Sasonica Shell:** `~/projects/sasonica-shell` (formerly Runlet).
 - **Licences:** agent-media, the chat app + its Android shell, and Sasonica Shell are
   Apache-2.0, copyright South Pen Labs. The Audiobookshelf forks (the old
@@ -37,12 +39,10 @@ Where things live:
   add it to the top entry of sasonica-app `app/lib/whatsNew.ts` (a new entry,
   id = the day, when the top one has shipped), in plain words — what they can
   now do, not how. Internals and fixes nobody saw stay out.
-- **Sasonica ABS stays for books; Sasonica took its id** (David, 26 Sep 2026).
-  Everything but the book is Sasonica's: speech (:6614), the holds, and the
-  readouts `/mic` `/ringer` `/state` on loopback **:8774** (call_guard,
-  ringer.py and `media doctor` read them there; the old app's :8772 is book
-  control only). Keep publishing conversations to Audiobookshelf while the
-  books app plays them.
+- **Sasonica took Sasonica ABS's id** (David, 26 Sep 2026): speech (:6614),
+  the holds, and the readouts `/mic` `/ringer` `/state` on loopback **:8774**
+  (call_guard, ringer.py and `media doctor` read them there). Sasonica ABS,
+  which kept the book, was retired with Audiobookshelf on 11 Nov 2026.
 - Idle sessions close after 12 h (6 h when memory is tight); closed is not
   archived.
 - Headless sessions are on, with normal permissions.

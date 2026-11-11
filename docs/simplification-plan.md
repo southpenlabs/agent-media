@@ -58,6 +58,17 @@ Keep: the book *channel* (listening to actual audiobooks), which does not
 depend on ABS being the conversation store. Decide separately whether books
 stay in ABS or move to the same native player.
 
+**Done 11 Nov 2026** (David: "I'd like to move away from audiobookshelf" —
+"All the way"; docs/decisions/2026-11-11-audiobookshelf-exit.md). Went:
+`abs-bridge` and its services, `book_tracks`' ABS half (chapters, covers,
+tags, progress), `library.py`'s scan helpers, the server's ABS bearer
+(`auth_abs.py`), `GET /item` and the item-keyed forms and fields
+(`item`, `scanning`, `tail`, `player_item`, `start`/`end`), the phone's
+Sasonica ABS player (`phone_player`, the `abs` target), `session-archive-import`.
+Stayed: the conversation shelf folder and its manifest (`media feed tracks`),
+local files the transcript and thread list read. Books moved to the server's
+own library (`book_library`).
+
 ## 3. Split `cli.py`
 
 8,201 lines, 106 subcommands. Split by channel into a `cli/` package

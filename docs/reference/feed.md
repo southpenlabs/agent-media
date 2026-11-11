@@ -125,32 +125,29 @@ overrides that (for a reverse proxy) and is also what the *publishing* commands
 use to regenerate `feed.xml` — a host without it still publishes; it just does
 not rewrite the served XML.
 
-## The same conversations, as books
+## The same conversations, on a shelf
 
-Audiobookshelf navigates chapters properly for **books** and badly for podcast
-episodes — on the Android app, a conversation's chapter list does not navigate
-at all. A conversation is nothing but chapters, so the same episodes are also
-laid out as a library ABS can scan:
+Each conversation's clips are also hardlinked into a folder of its own,
+one track per sentence, appended as turns land (`media feed tracks`, run by
+`agent-media-feed-publish`):
 
 ```
-~/conversations/<workspace>/<title>/<title>.mp3      # media feed books
+~/conversations/<workspace>/<title>/0001 - <sentence>.mp3
 ```
 
-Author is the workspace, title is the conversation — the grouping the feeds
-already use, in the only vocabulary a book library has. **Hardlinks, not
-copies**: one inode with two names, so the library and the spool cannot drift
-and deleting either never takes the audio with it. An episode that retention
-has pruned takes its folder with it, so the library is a mirror rather than a
-scrapbook.
+**Hardlinks, not copies**: one inode with two names, so the shelf costs no
+disk and deleting either name never takes the audio with it. A manifest per
+conversation (`<state_dir>/book-tracks/<session>.json`) records which turns
+were placed; the transcript and the server's thread list read it.
+`MEDIA_BOOK_TRACKS_ROOT` moves the tree; `MEDIA_CONVERSATIONS_LIBRARY=0`
+turns it off.
 
-It needs a library of its own (`MEDIA_BOOK_EXPORT_ROOT`, default
-`~/conversations`, mounted into the container separately) because a subfolder
-of the audiobook root would be swept into that library as well. Point the scan
-at it with `ABS_LIBRARY_CONVERSATIONS=Conversations` and
-`media abs-scan --target conversations`; the publisher does both on every run.
-
-Feeds remain the delivery mechanism — they are what arrives on its own. The
-book library is for navigating what arrived.
+This shelf was built for Audiobookshelf, which served it as a
+"Conversations" library with a chapter per turn, covers, live/archived tags
+and re-opened progress. Audiobookshelf was left on 11 Nov 2026 (David: "I'd
+like to move away from audiobookshelf"); the chapters, tags, covers,
+progress and `media abs-scan --target conversations` went with it. Feeds
+remain the delivery mechanism.
 
 ## Retention
 
@@ -178,8 +175,7 @@ Installed by `media-setup feed`, or by role with
 | unit | what | when |
 |---|---|---|
 | `agent-media-feed` | serves the feed | always |
-| `agent-media-feed-publish` | publishes finished conversations, then syncs ABS | on silence, + every 30 min |
-| `agent-media-abs-sync` | subscribes Audiobookshelf to every feed | hourly (safety net) |
+| `agent-media-feed-publish` | puts new turns on the shelf (`media feed tracks`) | on silence, + every 30 min |
 | `agent-media-feed-gc` | applies retention, rewrites the XML | daily |
 
 `MEDIA_FEED_QUIET_MIN` (default 60, set to 10 on red5) is how much silence
@@ -188,9 +184,8 @@ hour after you stop talking is a different thing from one waiting when you
 pick up the phone — but too short publishes a conversation you were only
 pausing, and no client ever re-fetches, so that half is the half you keep.
 
-The publisher chains straight into `media-abs-sync` rather than leaving it to
-the hourly timer: three hourly stages (publish, subscribe, download) meant a
-conversation could take most of an afternoon to reach the phone.
+`agent-media-abs-sync`, which subscribed Audiobookshelf to every feed, went
+with Audiobookshelf on 11 Nov 2026.
 
 **It is triggered by silence, not by a clock.** The end of every turn arms a
 one-shot for the quiet window and cancels the one before it, so a finished
@@ -224,34 +219,9 @@ ssh <phone> "am start -a android.intent.action.VIEW \
   -d 'antennapod-subscribe://host:8782/feed/talks.xml?k=<token>'"
 ```
 
-**Audiobookshelf** can be kept in step automatically:
-
-```sh
-media-abs-sync            # subscribe every feed, fetch what is missing
-```
-
-Installed as `agent-media-abs-sync`, hourly, on a host that has both feeds and
-an `abs-bridge.env`. It reconciles rather than migrates, so it is safe to run
-repeatedly: feeds ABS does not have are subscribed, feeds that have grown are
-topped up, and an empty or unreadable one is skipped with a line rather than
-ending the run. Feed URLs are compared without their query string, so rotating
-the token does not subscribe everything twice.
-
-Doing it by hand the first time, **Audiobookshelf** needs a `podcast`-type
-library, and refuses tailnet URLs
-until the host is allow-listed — 100.64.0.0/10 is CGNAT space and its SSRF
-filter blocks it. The symptom is a bare 404 ("Podcast RSS feed request failed")
-with the real reason only in the container log. Add to its unit:
-
-```
-Environment=SSRF_REQUEST_FILTER_WHITELIST=<feed host>
-```
-
-not `DISABLE_SSRF_REQUEST_FILTER=1`, which turns the filter off for every URL.
-ABS also does not backfill — `autoDownloadEpisodes` only catches episodes that
-appear *after* subscribing, so existing ones need
-`POST /api/podcasts/<id>/download-episodes`. It keeps its own copy of every
-episode, so published audio then exists twice on the host.
+Audiobookshelf used to be kept in step by `media-abs-sync`; it was left on
+11 Nov 2026, and the sync and its notes (the SSRF allow-list, backfilling)
+went with it.
 
 ## What the spool is, and why it is not a table
 

@@ -95,16 +95,16 @@ written — it is phrased to be put on screen. The status carries the class:
 | 200 | done (`ok: true`) |
 | 300 | `/ask` only: the words named more than one conversation; pick one (§6.1) |
 | 400 | the request is wrong (not a session id, empty text, unknown action) — **and the default for any failure that set no status of its own** (see §15) |
-| 401 | the credential was rejected. **Only this.** The app answers a 401 by refreshing its ABS token, and logs out if that fails |
+| 401 | the credential was rejected (not a paired device). **Only this.** |
 | 403 | signed in, but not allowed (`may_reply` said no) |
-| 404 | the thing named is not there (item, session, directory, setup window) |
+| 404 | the thing named is not there (session, directory, setup window) |
 | 409 | the state moved (the question changed, nothing is being asked, a setup is already running) |
 | 410 | a setup window has gone |
 | 413 | body too large |
 | 422 | a share the pipeline refused |
 | 500 | something broke here (a draft could not be written, the log could not be read) |
-| 502 | ABS answered with something unexpected, **or** the words were typed but the session never took them (`submitted: false`) |
-| 503 | ABS did not answer. **Never 401** — an outage must not log anybody out |
+| 502 | something upstream answered unexpectedly, **or** the words were typed but the session never took them (`submitted: false`) |
+| 503 | something upstream did not answer. **Never 401** — an outage must not log anybody out |
 | 504 | an answer was pressed and the dialog is still on screen |
 
 **Headers.** Every JSON answer carries `Cache-Control: no-store`. The app
@@ -113,8 +113,7 @@ routes (the `_CORS_PATHS` set, §3.1) also carry
 Content-Encoding` — on refusals too, or a browser shows "network error"
 instead of the server's own sentence.
 
-**Compression.** `GET /item` and (since 22 Sep 2026) `GET
-/conversation/log` compress: gzip, when `Accept-Encoding` allows and the
+**Compression.** `GET /conversation/log` (since 22 Sep 2026) compresses: gzip, when `Accept-Encoding` allows and the
 body is over 4 KiB. Nothing else does.
 
 **Picture URLs** come back canvas-relative (`/img/<name>`); the client
@@ -129,10 +128,11 @@ any other path it answers 405. The token routes (`/input`, `/show`, `/ctl`,
 `/say`, `/play`) are deliberately absent: their credential is ours, not the
 caller's, and CORS is what stops a page someone happens to be visiting from
 spending it. The Capacitor app never needed CORS (native HTTP); sasonica-web
-does, because it is served from the ABS port.
+did, because it was served from the ABS port (retired with Audiobookshelf,
+11 Nov 2026).
 
 The app routes: `/conversation`, `/conversation/log`, `/conversations`,
-`/targets`, `/item`, `/reply`, `/ask`, `/focus`, `/session/resume`,
+`/targets`, `/reply`, `/ask`, `/focus`, `/session/resume`,
 `/session/close`, `/session/answer`, `/session/stop`, `/draft`, `/drafts/saved` (2 Nov 2026), `/speech/now`, `/speech/ctl`,
 `/sessions/state`, `/commands`, `/rename`, `/harnesses`, `/harnesses/run`,
 `/harnesses/screen`, `/harnesses/keys`, `/harnesses/apikey` (28 Sep 2026), `/harnesses/close`,
@@ -154,43 +154,18 @@ amux token out of the answer — so it never carries one.
 Three credentials, and which one a route takes is the route's, not the
 caller's, choice.
 
-**Since 22 Sep 2026 every app route takes a fourth, first:** a paired
-device token (§9) in the same `Authorization: Bearer` header. It is checked
-locally before anything below, in one place (`agent_media_server/auth.py`),
-and only a bearer that is not a known device token reaches §4.1. What §4.1
-says about ABS is therefore the fallback, unchanged.
+### 4.1 A paired device token — every app route
 
-### 4.1 The caller's ABS bearer — every app route
+`Authorization: Bearer <device token>` (§9), checked locally in one place
+(`agent_media_server/auth.py`). An unknown or revoked token is 401
+`{"ok": false, "error": "not a paired device (unknown or revoked token)"}`;
+auth never produces a 503.
 
-`Authorization: Bearer <the token the client already holds for
-Audiobookshelf>`. No secret of ours is on the phone.
-
-1. **Who is it?** `reply.abs_identity` hands the bearer to ABS's own
-   `POST /api/authorize`, trying each server in `abs_urls()` (the configured
-   one, plus `ABS_URLS` in `~/.config/agent-media/abs-bridge.env` or
-   `MEDIA_ABS_URLS`) until one recognises it. This list is an allow-list
-   that the caller cannot extend — otherwise we would be forwarding their
-   login to a host of their choosing. Successes are cached per token for 60 s.
-   Refusals are not cached.
-2. **May they?** `reply.may_reply`: the ABS root account (unless
-   `MEDIA_REPLY_ROOT=0`), or a username listed in `MEDIA_REPLY_USERS`. Admin
-   is not enough — managing a library is not the same as being trusted with
-   a keyboard.
-
-Failure mapping (`reply._identity_error`):
-
-| ABS said | We answer |
-| --- | --- |
-| no bearer at all | 401 `{"ok": false, "error": "Audiobookshelf rejected that login"}` |
-| 401 from every server | 401, same |
-| nothing (unreachable), 502, 503, 504 | 503 `"Audiobookshelf did not answer"` |
-| anything else | 502 `"Audiobookshelf answered <n>"` |
-| a user, but not allowed | 403 `"<name> is not allowed to reply"` |
-
-Item lookups (`/conversation?item=`, `/conversation/log`, `/reply`,
-`/commands?item=`) also use the *caller's* bearer, so ABS enforces its own
-library permissions: an item the caller cannot see is an item they cannot
-reply to.
+Until 11 Nov 2026 a bearer that was not a device token fell through to
+Audiobookshelf (`auth_abs`: `POST /api/authorize`, `MEDIA_REPLY_USERS`,
+`MEDIA_REPLY_ROOT`, `ABS_URLS`). Audiobookshelf was left on 11 Nov 2026
+(David: "I'd like to move away from audiobookshelf"), and that fallback went
+with it: device tokens are the only app credential.
 
 ### 4.2 The amux token — desk routes
 
@@ -200,7 +175,7 @@ With no token configured, those routes are closed. `MEDIA_VISUAL_TRUST_TAILNET=1
 drops the check entirely (a testing switch). The only way a browser gets
 this token is `GET /pair` (appendix). **It is never an app credential.**
 
-`/focus` accepts either the amux token or an allowed ABS bearer.
+`/focus` accepts either the amux token or a device token.
 
 ### 4.3 `MEDIA_SHARE_TOKEN` — media-share only
 
@@ -216,7 +191,6 @@ media-share refuses to start otherwise.
 | --- | --- | --- |
 | **session** | a uuid (Claude Code, Codex, pi, Gemini CLI, Grok), or Hermes's `YYYYMMDD_HHMMSS_hex` | `reply._SESSION`. The thread id. Every session-taking route rejects anything else with 400 `"not a session id"` |
 | **pane** | tmux `%23`, or herdr `herdr:<id>` | where a live session runs. Display and `/focus` only — never a key; panes are recycled |
-| **item** | an ABS library item id — a plain uuid on red5's server (the `li_…` in examples here is illustrative) | **ABS-specific; goes in v1** (§10). Resolved to a session through the item's folder tail and the book-tracks manifest |
 | **key** (line) | a reply's dedup key | joins a line to its pictures. `""` on listener lines |
 | **key** (approval) | 12 hex chars, sha1 of the dialog text | fingerprints a question so an answer can only land on the question that was read |
 | **id** (line) | an integer speech-history row id | only on lines that were spoken; used for `replay-id` |
@@ -653,9 +627,8 @@ What each live session is doing.
   its first message while Claude still calls it "Claude Code"; a headless
   row's §17 title). So a notice can name a chat started since the app last
   fetched `/targets`; before this it fell back to the id's first 8 characters.
-- `tail`: the item folder's `<project>/<title>` — **ABS-specific**, there so
-  the shelf can match items without asking for each. `""` when the session
-  has no shelf entry yet.
+- `tail` (the shelf folder's `<project>/<title>`, for Audiobookshelf) went
+  with Audiobookshelf on 11 Nov 2026.
 - `background` (20 Oct 2026): `{"agents": N, "commands": M}` on a
   `waiting` row whose background work is still running — subagents started
   in the background, background commands — and absent otherwise (and on
@@ -708,42 +681,28 @@ Clients: S (`mixins/sasonicaArchive.js`, `pages/ask.vue`), **polled every 5 s**.
 
 ### 6.2 One conversation
 
-#### `GET /conversation?item=<item>` — gated
-
-"Is this item a conversation I can reply to?" — the app asks before it
-draws the reply box.
-
-```json
-{"ok": true, "session": "6c73…", "live": false, "pane": null,
- "resumable": true, "suggestion": ""}
-```
-
-- `resumable`: some harness still has the transcript, so a reply will revive it.
-- `suggestion`: the next prompt to offer (§6.2.1).
-- 404 `"no such item"` (ABS 404), `"not a conversation (no session behind it)"`,
-  `"item has no path"`. ABS failing on the item lookup is a 404 whose
-  error names the status ("Audiobookshelf (…) did not answer"), not a 503 —
-  see §15.
+The item-keyed form, `GET /conversation?item=<item>`, went with
+Audiobookshelf on 11 Nov 2026 (David: "I'd like to move away from
+audiobookshelf"); without a `session` the route answers 400.
 
 #### `GET /conversation?session=<session>` — gated
 
-The same question from the other side — a session the phone just started,
-and whether the library has an item for it yet.
+"Is this a conversation I can reply to?" — for a session the phone just
+started, or one it opens.
 
 ```json
-{"ok": true, "session": "0f1e…", "item": null, "scanning": false,
+{"ok": true, "session": "0f1e…",
  "live": true, "pane": "%42", "resumable": true, "suggestion": ""}
 ```
 
-- `suggestion` (§6.2.1) since 22 Sep 2026 (§10), as `?item=` has it.
-- `ok` from the first poll (the session is real). `item` fills in once ABS
-  has the item **and has built its tracks**. `scanning: true` means the item
-  exists but ABS has no tracks for it yet — don't navigate to it.
-- `session` takes precedence only when `item` is absent.
+- `resumable`: some harness still has the transcript, so a reply will revive it.
+- `suggestion` (§6.2.1) since 22 Sep 2026 (§10).
+- `ok` from the first poll (the session is real).
+- `item` and `scanning` (the Audiobookshelf item and whether it had tracks
+  yet) went with Audiobookshelf on 11 Nov 2026.
 
 Clients: S (`pages/ask.vue`) and W (`NewChat.tsx`) after an `/ask`, **every
-3 s for up to 5 min**. S and W both call `?item=` (`ReplyBox.vue`,
-`useConversationSession.ts`) on page open.
+3 s for up to 5 min**.
 
 #### 6.2.1 The suggestion
 
@@ -860,20 +819,20 @@ with an error saying so. 400 a bad session or no text, 413 text over 20000
 characters, 404 an unknown pattern, 503 `reason: "no_answer"` when no model
 answered. The text is never logged.
 
-#### `GET /conversation/log?item=<item>` · `?session=<session>` — gated
+#### `GET /conversation/log?session=<session>` — gated
 
 The conversation — the chat itself — as **messages** read from the agent's
 transcript (§6.2.2, 22 Sep 2026) and as the older **lines** built from
-speech. The `?session=` form (22 Sep 2026, §10) answers the same envelope
-with the same shapes and wins when both are given; it never asks ABS, so
-`start`/`end` are always `null` on it.
+speech. The `?item=` form went with Audiobookshelf on 11 Nov 2026 (David:
+"I'd like to move away from audiobookshelf"); without a `session` the route
+answers 400.
 
 `looking=1` (6 Nov 2026; session form): the poll of a client that shows the
 thread without holding its stream (the phone's light speech bubble). The
 thread counts as open for 12 s after it (watching.look), so a Normal reply
 plays as it would with the thread on screen.
 
-Query (both forms): `limit` — how many messages, newest first page
+Query: `limit` — how many messages, newest first page
 (default 60, at most 500); `before` — a message `id`: only messages before
 it (the next page back). Neither touches `lines`.
 
@@ -958,7 +917,6 @@ newest page, as without it. Other harnesses' threads find their line ids
 | `text` | yes | the words. For an ask, the question(s) alone |
 | `at` | yes | epoch seconds, 3 dp. The line's identity |
 | `key` | yes | the reply's dedup key, `""` for the listener |
-| `start`, `end` | yes | seconds into the ABS audio item, or `null` until the next publish places it — **ABS-specific** |
 | `id` | spoken lines | speech-history row id, for `replay-id` |
 | `ask` | asks | `[{"question", "options": [{"label", "description"}], "multiSelect"}]` — an AskUserQuestion, as asked |
 | `command` | slash commands | `{"name": "review", "args": "123", "text": "/review 123"}` — the chip for a slash command typed from the box (`agent_media_core/slash.py`); `text` on the line is `command.text`. Settings commands (`/model`, …) never become lines |
@@ -1040,11 +998,11 @@ line. When a live line ends, it becomes an ordinary line **with the same
 really harness asides (task notifications, system reminders) are filtered
 out.
 
-**Errors:** as `/conversation?item=`, plus 404 `"no manifest for that
-conversation"` and 500 `"could not read the conversation (…)"` (logged).
-The `?session=` form: 400 `"not a session id"`, and 404 `"no conversation
-for that session yet"` only for a session with no manifest, nothing said, no
-pane and no transcript (§10).
+**Errors:** 400 `"not a session id"` (or no `session`), 500 `"could not
+read the conversation (…)"` (logged), and 404 `"no conversation for that
+session yet"` only for a session with no manifest, nothing said, no pane and
+no transcript (§10). Lines no longer carry `start`/`end` (seconds into the
+Audiobookshelf item; gone 11 Nov 2026).
 
 Clients: S (`ConversationLog.vue`), W (`useConversationLog.ts`). **Adaptive
 poll, by `setTimeout`:** 1 s while a line is live or just after, 2 s while
@@ -1390,7 +1348,7 @@ before the old offset differ) is read again from the end.
 #### `GET /commands` — gated
 
 The slash menu for the reply box. It belongs to a directory, so the query
-names one of: `item`, `session`, `project` (a series name) or `cwd` (a
+names one of: `session`, `project` (a series name) or `cwd` (a
 `place` from `/targets`; anything else is ignored). With none of them, the
 home directory.
 
@@ -1400,8 +1358,8 @@ home directory.
 ```
 
 Built from `claude -p --output-format stream-json`'s init event and cached
-per directory until Claude Code's version changes (`slash_menu.menu`). 404
-when an `item` resolves to no session.
+per directory until Claude Code's version changes (`slash_menu.menu`). The
+`item` form went with Audiobookshelf (11 Nov 2026).
 
 Clients: S (`mixins/sasonicaSlash.js`).
 
@@ -1444,7 +1402,7 @@ Clients: A (`routes/new.tsx`, Show → Drafts).
 
 Type into the session behind a conversation, reviving it if it has ended.
 
-Request: `{"session": "<session>" | "item": "<item>", "text": "…", "quote"?: "…", "mode"?: "continue" | "branch", "refs"?: {"<title>": "<session>"}, "keep_reading"?: bool, "voice"?: bool, "nudge"?: bool}`
+Request: `{"session": "<session>", "text": "…", "quote"?: "…", "mode"?: "continue" | "branch", "refs"?: {"<title>": "<session>"}, "keep_reading"?: bool, "voice"?: bool, "nudge"?: bool}`
 
 `from_chip` (8 Nov 2026, §6.53): `"agent"` when the words are a tapped
 chip with `source: "agent"` in a room handed to an agent; the room is sent
@@ -1720,8 +1678,7 @@ Request:
 | --- | --- |
 | `text` | required |
 | `target` | a session id the picker chose, or `"new"` to force a fresh session |
-| `player_session` | the thread in the player, by session id (22 Sep 2026, §10). Wins over `player_item`; 400 if it is not a session id; a session that is gone (no pane, no transcript) is skipped, not an error |
-| `player_item` | the ABS item in the player — **ABS-specific** |
+| `player_session` | the thread in the player, by session id (22 Sep 2026, §10); 400 if it is not a session id; a session that is gone (no pane, no transcript) is skipped, not an error. (`player_item`, the Audiobookshelf item in the player, went with Audiobookshelf on 11 Nov 2026.) |
 | `sticky` | the session this device last spoke to (S keeps it in `sasonica.askLast`) |
 | `parse` | default `true`: read a target from the words ("reply to drones, …", "new codex chat, …") |
 | `dry` | `true`: say where it would go, send nothing |
@@ -1743,7 +1700,7 @@ Request:
 Routing, first match wins:
 1. `target`: a session id (`how: "picked"`), or `"new"` (`how: "asked"`).
 2. A target spoken at the start of the words (`how: "spoken"`).
-3. The player's thread — `player_session`, else `player_item` (`how: "player"`).
+3. The player's thread — `player_session` (`how: "player"`).
 4. `sticky`, if it still exists (`how: "sticky"`).
 5. A fresh session (`how: "default"`), in `cwd`, `project`, or the layout's
    fresh target (§18): the scratch amux registration (`MEDIA_ASK_SESSION`)
@@ -1755,11 +1712,11 @@ Responses (`mode` tells them apart):
 // dry run
 {"ok": true, "dry": true, "mode": "new" | "continued", "how": "…",
  "agent": "claude",               // only when mode is "new"
- "session": null | "…", "title": "", "item": null | "li_…", "text": "…"}
+ "session": null | "…", "title": "", "text": "…"}
 
 // a spoken name and nothing else: switch to it, send nothing
 {"ok": true, "mode": "switched", "how": "spoken", "session": "…", "title": "…",
- "pane": "%42" | null, "item": null | "li_…", "text": ""}
+ "pane": "%42" | null, "text": ""}
 
 // sent to a fresh session
 {"ok": true, "mode": "new", "how": "…", "session": "…" | null, "pane": "%51",
@@ -1769,7 +1726,7 @@ Responses (`mode` tells them apart):
 
 // sent to an existing session
 {"ok": true, "mode": "continued", "how": "…", "session": "…", "pane": "%42",
- "opened": false, "submitted": true, "title": "…", "item": null | "li_…", "text": "…"}
+ "opened": false, "submitted": true, "title": "…", "text": "…"}
 ```
 
 `session` can be `null` on a fresh Claude session whose id had not
@@ -1937,7 +1894,7 @@ thread only).
 
 #### `POST /rename` — gated
 
-`{"item"? , "session"?, "title"}` → `{"ok": true, "session", "title",
+`{"session", "title"}` → `{"ok": true, "session", "title",
 "terminal": bool, "why": null | "…"}`.
 
 The name is kept by agent-media (`book_tracks.rename`) and typed into the
@@ -2055,10 +2012,9 @@ Pinned by `packages/server/tests/test_discard.py`.
 Pinned by `packages/server/tests/test_archive_and_memory.py`.
 
 Old archive marks — the `archived` tag on the conversation's ABS item, which
-is what archiving was before this flag — are carried over once by `media
-session-archive-import` (dry run; `--apply` to set the flags). It maps each
-tagged item to its session by the folder's `<project>/<title>` tail against
-the book-tracks manifests, and only reads from ABS.
+is what archiving was before this flag — were carried over once by `media
+session-archive-import`; that command went with Audiobookshelf on 11 Nov
+2026.
 
 #### `POST /session/pin` — gated (22 Sep 2026)
 
@@ -3319,7 +3275,7 @@ The speech bar.
 
 ```json
 {"ok": true, "live": true, "speaking": true, "paused": false,
- "sentence": "…", "session": "6c73…" | null, "title": "…", "item": "li_…" | null,
+ "sentence": "…", "session": "6c73…" | null, "title": "…",
  "pos": 12.0, "dur": 40.0, "speed": 1.6, "muted": false, "target": "sasonica" | null,
  "replay": false, "turn": {"at": 1790031449.7, "id": 91},
  "queued": [{"session": "5f8c…" | null, "title": "…", "urgent": false, "at": 1790031449.7}],
@@ -3418,8 +3374,9 @@ The speech bar.
   its now-playing row — a reply moved mid-way by §6.9 still names where it
   started); when quiet, where the next reply will play. `null` only if the
   host could not say. Names are §6.9's.
-- `session`, `title` and `item` are filled only while live and only for a
-  valid session id. Title and item are cached per session for 60 s.
+- `session` and `title` are filled only while live and only for a valid
+  session id. The title is cached per session for 60 s. (`item`, the
+  Audiobookshelf item, went with Audiobookshelf on 11 Nov 2026.)
 - `turn` (23 Sep 2026) names which turn is being spoken, keyed the way the
   log's lines are: `at` is the line's `at`, and `id` the history row on a
   replay. Present only while live; absent when the host could not say.
@@ -3827,7 +3784,7 @@ before.
 
 `POST /share {"text", "channel"?: "music" | "book"}` → `{"ok", "url",
 "channel", "title", "line"}`. It is media-share's pipeline, called with the
-ABS bearer. The verdict comes back for the toast while the fetch runs
+caller's device token. The verdict comes back for the toast while the fetch runs
 behind it. 400 `"nothing shared"`; 422 when the share pipeline refuses.
 A podcast episode's link (1 Nov 2026; David: "I tried to share a podcast
 with sasonica but it came through as music") is played as a podcast on
@@ -3887,11 +3844,11 @@ then, and `read_page: true` when `/read` takes a page.
 
 Clients: S (`routes/share.tsx`, Read it; the reader opens on `doc`).
 
-### 6.8 ABS-only — not part of the contract
+### 6.8 ABS-only — gone
 
-`GET /item?id=` — the ABS library item trimmed to what Sasonica's item
-page reads, gzipped (1267 KB → 25 KB). It exists to get the payload across
-the WebView bridge. W does not use it. It leaves with ABS.
+`GET /item?id=` (the ABS library item, trimmed for Sasonica ABS's item
+page) went with Audiobookshelf on 11 Nov 2026 (David: "I'd like to move
+away from audiobookshelf").
 
 ### 6.9 Audio destinations — gated (built 22 Sep 2026)
 
@@ -3902,15 +3859,16 @@ core (`agent_media_core/audio_targets.py`) and is the same one
 Target names changed on 27 Sep 2026: `sasonica` was `next` and `abs` was
 `app`[^next-rename]. A name from before (a history row's `target`, a saved
 choice, an env value) still resolves to the new one; the per-target env
-keys moved with it (`MEDIA_SPEECH_SOCKET_SASONICA`, `…_ABS`).
+keys moved with it (`MEDIA_SPEECH_SOCKET_SASONICA`). The `abs` target
+(Sasonica ABS, `com.sasonica.abs`) went when that app was retired with
+Audiobookshelf on 11 Nov 2026.
 
 #### `GET /audio/targets` — gated (`auth.gate`)
 
 ```json
 {"ok": true, "channels": {
   "speech": {"current": "sasonica", "default": "sasonica", "overridden": false,
-             "options": [{"name": "abs",   "label": "Phone (Sasonica ABS)",  "available": true,  "why": null},
-                         {"name": "phone", "label": "Phone (Termux player)", "available": true,  "why": "was slow or unreachable a moment ago"},
+             "options": [{"name": "phone", "label": "Phone (Termux player)", "available": true,  "why": "was slow or unreachable a moment ago"},
                          {"name": "rooms", "label": "House speakers",        "available": true,  "why": null},
                          {"name": "local", "label": "red5",                  "available": false, "why": "no speech player running on red5"},
                          {"name": "sasonica", "label": "Phone (Sasonica)",   "available": true,  "why": null}]},
@@ -3918,8 +3876,7 @@ keys moved with it (`MEDIA_SPEECH_SOCKET_SASONICA`, `…_ABS`).
              "options": [{"name": "auto",  "label": "Automatic", …},
                          {"name": "rooms", "label": "House speakers", …},
                          {"name": "sasonica", "label": "Phone (Sasonica)", …},
-                         {"name": "phone", "label": "Phone (Termux player)", …},
-                         {"name": "abs",   "label": "Phone (Sasonica ABS)", …}]}}}
+                         {"name": "phone", "label": "Phone (Termux player)", …}]}}}
 ```
 
 Speech:
@@ -4170,8 +4127,8 @@ like the speech gate. red5: dotfiles' `phs-treatment-guard now`.
 
 - **What counts as a start**: every player's own play — Mopidy
   (`sinks/music.py`), the Termux mpv (`music_local`), Sasonica's player
-  (`music_sasonica`), the ABS app (`music_app`), the book channel
-  (`sinks/book.py`, `phone_player.play`), Spotify (`spotify_remote.play`),
+  (`music_sasonica`), the book channel
+  (`sinks/book.py`), Spotify (`spotify_remote.play`),
   the hand-off app (`radio_io.HandoffPlayer.send`) and the radio's rooms
   queue — an append included; so every route that reaches one: these
   controls, `/music/radio`, the MCP `music_play`/`book_play`, `media music
@@ -4229,12 +4186,12 @@ things someone asked for: a player loading a file is not listed.
 `kind`. A music item adds `artist`, `album`, `song`, `genre`; a book or
 podcast item adds `author`, `series`, `narrator`, `genre` — any of them null
 until known. Music's come from the YouTube channel and title and the iTunes
-catalogue; books' and podcasts' from the Audiobookshelf item the file is,
-a book's genre from iTunes' audiobooks. Lookups run in the background and
+catalogue; books' and podcasts' from the file's own tags (`book_library`,
+since Audiobookshelf was left on 11 Nov 2026), a book's genre from iTunes'
+audiobooks. Lookups run in the background and
 are kept (`media-meta.json`), so a later visit knows more. Books and
 podcasts are the book player's history less what Threads already holds (a
-conversation read back, the agenda, a note sent to the phone); a link to an
-Audiobookshelf item is never handed on — its file on the host stands in.
+conversation read back, the agenda, a note sent to the phone).
 
 Every item also has `plays` (31 Oct 2026): how often it was played, in
 the stretch of history read.
@@ -4270,8 +4227,8 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 | `book` | `recent`, `progress` and `finished` (the book library's books with how far through each is, latest listened first; since 11 Nov 2026 the library is this server's own, `book_library`: the audiobook folder's files read for their tags, length and cover, how far through from the book channel's positions, finished within the last minute or 98%), `all` (every book whose file is on the host, by title); a library book's row has `id` `b-<hash>`, `duration` in seconds and `art`, its cover by signed link (`GET /books/covers/<id>.jpg?sig=`, no bearer), `most`, and to browse the library (11 Nov 2026): `added` (every book, newest added first; each row's `added`, epoch seconds) and `unstarted` (the books not begun, by title). `q` searches each over its own rows |
 | `podcast` | `recent`, `most` (`new` went with Audiobookshelf on 11 Nov 2026: the followed shows' new episodes are `GET /podcasts/discover?list=new`), `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
-A library book adds `progress` (0–1) and `finished`; its `id` is the
-Audiobookshelf item's (a string), a liked song's a negative number. A
+A library book adds `progress` (0–1) and `finished`; its `id` is
+`b-<hash>` (a string), a liked song's a negative number. A
 server before this ignores `list` and answers without `"list"`: the
 client then has only what was played.
 
@@ -6404,7 +6361,7 @@ An **ask**:
 ```
 
 - `id`: 8 hex. `device` / `device_id`: the asking device's name and id (§9);
-  an ABS login (not a device) asks as its username with `device_id` null.
+  (An ABS login, before 11 Nov 2026, asked as its username.)
 - `session`: the thread the TV is showing; null is a new chat. `title`: that
   thread's title when a live session has one (the `/sessions/state` sweep),
   else null.
@@ -6964,7 +6921,7 @@ task), each its own device:
   one with `media-visual-canvas devices --jobs ID`. `MEDIA_JOBS_DEVICES`
   (ids) also counts. It takes `restart` and `update` jobs and never a
   command, and its token is refused by every other route (the gate leaves it
-  out, so it falls through to ABS, which refuses it).
+  out, so it is refused as an unknown device).
 - `MEDIA_PHONE_JOBS_DEVICE` stays the phone: the one device that takes
   commands (`/jobs/run`), and restarts and updates too.
 - Every job names its device. A stream takes only its own device's jobs,
@@ -7359,8 +7316,8 @@ contact id from another book is 404, as an unknown one is). Pinned by
 `packages/server/tests/test_contacts_accounts.py`.
 
 - **The owner's book** is the paths above, unchanged — no migration. It is
-  the book of a code-paired device (`pair`, someone at the desk), of ABS's
-  root, and of the owner's account: `MEDIA_OWNER_ACCOUNT`
+  the book of a code-paired device (`pair`, someone at the desk) and of the
+  owner's account: `MEDIA_OWNER_ACCOUNT`
   (`MEDIA_OIDC_ALLOW`'s form, `<iss>|<sub>` or `<iss>|email=<addr>`), or,
   unset, any account whose device may enrol others (an admin, who has the
   store from a shell anyway). The host's `MEDIA_*` settings, the phone over
@@ -7369,7 +7326,7 @@ contact id from another book is 404, as an unknown one is). Pinned by
   `iss` and `sub`) — is the same files under
   `<state_dir>/accounts/<key>/` and `~/.config/agent-media/accounts/<key>/`,
   `<key>` being `acct-` and 20 hex digits of the SHA-256 of `<iss>|<sub>`
-  (an ABS login that is not root: `abs-…` of its username). Its settings
+  (`abs-…` keys, for ABS logins, went with Audiobookshelf). Its settings
   are its `contacts.json` there (`{sources, self, timeline}`), its Google
   sign-in and CRM connection (§ "The CRM") its own files there; Google's
   OAuth client is shared. It never reads the phone, and no Matrix room is
@@ -9657,7 +9614,7 @@ downloaded version has been removed to save space".
   to mono Opus (32 kb/s, about 15 MB an hour); listed in
   `GET /music/recent?kind=podcast&list=saved` (§6.9a). `practice`: as
   §6.45's add (`added` `youtube` or `podcast`). `book`: a YouTube video or
-  playlist imported into Audiobookshelf (`items`); 503 when the download
+  playlist imported into the book folder (`items`); 503 when the download
   helper is not installed. `music` (2 Nov 2026; David: "Is there a way to
   share a link to an album from Spotify?"): a Spotify album, playlist or
   song (`music_links`), read from Spotify's public embed page (no account:
@@ -9734,8 +9691,9 @@ per-thread stream copies its conventions.
 | Stop | none | `POST /session/stop` (§12) | **built 22 Sep 2026**, speech marker included |
 | Errors | `ok` + `error`, status as §3 | the same, plus a machine `code`; every error has `ok` (§13) | specified (`/pair` already answers with `code`) |
 
-The v0 routes keep working through the migration. v1 adds; it removes
-nothing until the ABS exit (plan step 2).
+The v0 routes kept working through the migration. The ABS exit came on
+11 Nov 2026 (David: "I'd like to move away from audiobookshelf"): the ABS
+bearer and the item-keyed forms went with it.
 
 ---
 
@@ -9790,8 +9748,8 @@ podcaster" … "yeah let's do the other profiles too".
   English Wikipedia page MusicBrainz links through Wikidata, never a page
   found by name. Links: Website, Bandcamp, Wikipedia, MusicBrainz.
 - **author**: the English Wikipedia page of that name only when its short
-  description says a writer (author, novelist, poet, teacher, …), else the
-  description Audiobookshelf keeps for the author; `facts` the short
+  description says a writer (author, novelist, poet, teacher, …) (the
+  Audiobookshelf fallback went with it on 11 Nov 2026); `facts` the short
   description.
 - **show**: the iTunes directory's podcast of that exact name: artwork,
   `facts` by whom, genre, episode count; the words from its feed; an
@@ -10450,25 +10408,18 @@ headers (§3.1).
 
 ### Use
 
-`Authorization: Bearer <device token>` on every app route, exactly where
-the ABS bearer goes today. The server looks the token up locally — a sha256
+`Authorization: Bearer <device token>` on every app route, where the ABS
+bearer went until Audiobookshelf was left on 11 Nov 2026. The server looks the token up locally — a sha256
 and a constant-time compare against each stored hash — with no network
 call, so there is no "ABS did not answer" and **auth never produces a 503**
 for a device.
 
 The single choke point is `agent_media_server/auth.py`:
 `gate(bearer)`, `may_control_speech(bearer)`, `identity(bearer)` and
-`may_reply(user)`. Every route that asked `auth_abs` directly now asks
-these. Each tries the device store first and falls through to `auth_abs`
-unchanged. A device stands for the owner, `{"username": "device:<name>",
-"type": "root", "device": "<id>"}`. `may_reply` admits it whatever
-`MEDIA_REPLY_ROOT` says: that switch is about who ABS's root is.
-
-**A device token is never sent to ABS.** Item lookups made for a device
-caller (`?item=`, the `item` field of `/conversation?session=`, `/ask` and
-`/speech/now`, and `GET /item`) go out under the host's own ABS login
-(`auth.abs_bearer`), since a device is the owner. With no ABS configured
-they find nothing, and the item fields stay `null`.
+`may_reply(user)`. They answer from the device store only (until 11 Nov
+2026 they fell through to `auth_abs`, which went with Audiobookshelf). A
+device stands for the owner, `{"username": "device:<name>", "type":
+"root", "device": "<id>"}`.
 
 ### Storage and revocation
 
@@ -10479,13 +10430,10 @@ they find nothing, and the item fields stay `null`.
   updated at most once a minute. The pairing codes file is mode 600 too.
 - `media-visual-canvas devices` lists them (id, name, when paired, last
   seen, from where); `devices --revoke <id>` removes one.
-- **A revoked token is simply unknown**, so it falls through to the ABS
-  check like any other bearer, and ABS refuses it: 401 `{"ok": false,
-  "error": "Audiobookshelf rejected that login"}`, as in §4.1. It does
+- **A revoked token is simply unknown**: 401 `{"ok": false, "error":
+  "not a paired device (unknown or revoked token)"}`, as in §4.1. It does
   **not** carry `code: "bad_token"` yet. That arrives with §13's codes,
-  which this pass did not add to the shared envelope, and `test_contract`'s
-  key sets are unchanged. It is also not a 503 unless ABS is down, in which
-  case the §4.1 mapping applies to it as to any unknown bearer.
+  which this pass did not add to the shared envelope.
 - A device token carries the rights `may_reply` grants the owner, plus one
   bit of its own: `enrol` (below), and a role ("Roles", below).
 
@@ -10512,7 +10460,7 @@ shell does: list, mint, revoke.
 Three routes, all gated by `auth.may_enrol` (the §9 gate, then the bit).
 A bearer that is nobody gets **401**; a good token without the bit gets
 **403** `{"code": "not_enrolled"}` — the token is fine, the right is not
-there, and an ABS login is not a way round it.
+there.
 
 ```
 GET  /devices
@@ -10574,7 +10522,7 @@ for nothing.
   `{"code": "not_admin"}` for a member or guest. A guest's POST is 403 `{"code": "guest"}` on every route
   but `/pair`, `/enrol`, `/me/signout`, `/speech/ctl`, `/speech/balance`,
   `/follow/trace`, the phone's `/speech|music|handoff|book/state` reports,
-  `/audio/target(s)` and `/music*`. An ABS login is as it was.
+  `/audio/target(s)` and `/music*`.
 - **Not yet** (the proposal's steps 2 and 3): harnesses, presets, personas,
   bridges and contacts setup still take any member; a member's chats are not
   yet permission-checked, so a member's agent can do what the owner's can.
@@ -10656,10 +10604,10 @@ an account enrolled. The issuer decided on is Drupal (cms.sasonica.com).
 
 ### Migration
 
-The gate is "a known device token, **or** an ABS bearer that passes §4.1".
-The device token is checked first, since it is local and cheap. The ABS
-branch (the fallback lines in `auth.py`, and `auth_abs.py`) is deleted at
-the ABS exit. Both clients keep working throughout.
+The gate was "a known device token, **or** an ABS bearer that passed the old
+§4.1". The ABS branch (the fallback lines in `auth.py`, and `auth_abs.py`)
+was deleted at the ABS exit, 11 Nov 2026 (David: "I'd like to move away
+from audiobookshelf"); the gate is now a known device token only.
 
 Over the Cloudflare link, device tokens must travel over https only. The
 tunnel terminates TLS; the canvas itself stays plain http on the tailnet.
@@ -10669,22 +10617,23 @@ tunnel terminates TLS; the canvas itself stays plain http on the tailnet.
 - A failed redemption does not burn the code (above). Failures are
   rate-limited instead: 10 per source address per 10 minutes, then 429
   `rate_limited`.
-- A revoked or unknown device token answers the ABS fallback's 401, with no
-  `code: "bad_token"` (above).
+- A revoked or unknown device token answers 401 (the ABS fallback's, until
+  11 Nov 2026; now "not a paired device"), with no `code: "bad_token"`
+  (above).
 - The pairing window has its own knob, `MEDIA_DEVICE_PAIR_TTL`, which
   defaults to the canvas's.
 - The browser link carries `&device=1` and is for reference only. There is
   no browser flow for device pairing.
 - The desk's name wins over the device's own `device` field.
-- Device callers' ABS item lookups use the host's ABS login rather than
-  failing, so the `item` fields keep filling until the ABS exit.
+- Device callers' ABS item lookups used the host's ABS login until the ABS
+  exit (11 Nov 2026), when the lookups and the `item` fields went.
 
 ---
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 
-Every route that takes `item` has a `session` form, and the session form
-is the contract. Pinned by `packages/server/tests/test_session_keys.py`
+Every route that took `item` had a `session` form, and the session form
+is the contract; since the ABS exit (11 Nov 2026) it is the only form. Pinned by `packages/server/tests/test_session_keys.py`
 (and `test_contract.py`'s `/conversation?session=` key set, which gained
 `suggestion` on purpose).
 
@@ -10701,17 +10650,14 @@ Every session-taking form rejects a malformed id with 400 `"not a session
 id"` (the `_SESSION` pattern, §5).
 
 **`/conversation/log?session=` never asks ABS.** It finds the manifest by
-session in the book-tracks dir and calls `book_tracks.conversation_log(…,
-positions=False)`. `positions=False` is new: it skips `_abs_ready` entirely,
-so `start`/`end` are `null` on every line of this form, even while ABS is
-up. They are ABS-shaped and go at the exit anyway, and the point of this
-form is to answer when ABS is slow or gone. (The item form still asks for
-positions, as before.)
+session in the book-tracks dir and calls `book_tracks.conversation_log(session)`.
+(Until 11 Nov 2026 it passed `positions=False`, leaving `start`/`end`
+`null`; those fields went with Audiobookshelf.)
 
 **No manifest yet is not, by itself, a 404.** A session gets its manifest on
 its first publish, which is debounced, so a session the phone started
 seconds ago has none. But `conversation_log` reads the manifest *by
-session* and needs the folder only for positions. The listener's turn is
+session*. The listener's turn is
 already in speech history, and the live line comes from the player. So it
 is asked regardless, and:
 - lines, or a live pane, or a transcript → 200 (possibly `"lines": []` for
@@ -10727,16 +10673,16 @@ particular directory.
 
 **`POST /ask {player_session}`** only counts when the session is real (live
 or has a transcript). One that is gone is skipped, and routing falls
-through to `sticky`, then a fresh session, as a `player_item` with no
-session behind it does.
+through to `sticky`, then a fresh session.
 
-The ABS-shaped fields go with the ABS exit:
+The ABS-shaped fields went with the ABS exit on 11 Nov 2026 (David: "I'd
+like to move away from audiobookshelf"):
 - `start`/`end` on lines;
 - `item` and `scanning` in `/conversation?session=`, `/ask` and `/speech/now`;
 - `tail` in `/sessions/state`;
-- `GET /item`.
-
-Until then they stay, and are `null` or `""` where nothing fills them.
+- `GET /item`;
+- the item forms in the table above (`?item=`, `{item}`, `player_item`).
+`/conversation` and `/conversation/log` without a `session` answer 400.
 
 ### Deviations from the 21 Sep draft
 
@@ -10744,9 +10690,9 @@ Until then they stay, and are `null` or `""` where nothing fills them.
   only "where nothing fills them": this form never asks ABS for positions.
 - A session with no manifest answers from history (200) rather than 404,
   and the 404's words are `"no conversation for that session yet"`.
-- When both are sent, `session` wins over `item` on `/conversation/log`
-  and `/reply`, and `player_session` over `player_item` on `/ask`.
-  `/conversation` keeps its v0 rule (`session` only when `item` is absent).
+- When both were sent, `session` won over `item` on `/conversation/log`
+  and `/reply`, and `player_session` over `player_item` on `/ask`, until
+  the item forms went (11 Nov 2026).
 
 ---
 
@@ -10767,7 +10713,7 @@ clients use a fetch-based reader that can (e.g.
 fetch). `?access_token=` is accepted as a fallback for a plain
 `EventSource`. It is never logged: nothing prints the query, and the
 canvas's request log (`MEDIA_VISUAL_DEBUG=1`) redacts it. Gated by
-`auth.gate` like every app route (a device token, or an ABS bearer).
+`auth.gate` like every app route (a device token).
 
 **Frames.** Named events (`event: <type>`), JSON `data`, a per-connection
 increasing `id`, and `retry: 2000` first.
@@ -11254,9 +11200,8 @@ request_id: approval.id, decision, answers?, message?}`. No desk needed.
   within 45s", "session … is already running outside tmux") reach the
   client as 400 — the client's fault — when they are ours. v1 makes the
   default 500 (§13).
-- **An ABS outage on an item lookup is a 404.** `session_for_item` turns
-  "ABS did not answer" into a 404 whose *text* names the outage, where
-  identity failures get a 503.
+- **An ABS outage on an item lookup was a 404** (`session_for_item`); the
+  item lookups went with Audiobookshelf on 11 Nov 2026.
 - **`/focus`** answers `{"ok", "detail"}` instead of `{"ok", "error"}`, and
   refuses with `{"error"}` and no `ok`. The desk-token routes do the same.
 - **Two lists of sessions.** `/conversations` and `/targets.sessions`
@@ -11817,8 +11762,8 @@ That is a later decision, not part of this contract.
   recorder.
 - `test_devices.py` (§9) and `test_session_keys.py` (§10) pin the built v1
   parts with the same rig, imported from `test_contract`. Among other things,
-  every gated GET passes on a device token without ABS being asked, and the
-  device token never reaches ABS.
+  every gated GET passes on a device token (the only credential since the
+  ABS exit, 11 Nov 2026).
 - `test_transcript.py` pins messages (§6.2.2) against small synthetic
   transcripts: every record type, redacted and visible thinking, tool
   pairing and summaries (no file contents), turns, incremental reads,
