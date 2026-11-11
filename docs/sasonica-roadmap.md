@@ -2606,6 +2606,37 @@ ahead.
     music, else the book or episode whose file it is). Now playing and the
     kind's tab are separate tabs, so the two lists never show together.
 
+62. **Backup and restore, built in** (David, 12 Nov 2026: "agent-media
+    should have a backup system built in", thread a4e12d56, via agent-mail
+    #246; follows an outside review's point that backups were the biggest
+    gap, #245). `docs/proposals/2026-11-12-backup-and-restore.md`.
+    **Designed 12 Nov 2026, not built; two questions open for David**
+    (deploy cadence, and whether the nightly carries the speech clips and
+    transcripts). On the critical path for the server moving home (item
+    above, `2026-11-12-the-server-moves-home.md`): "new machine = release +
+    restore + switch" is the cutover drill, and the destination is a
+    **setting**, never the machine holding the data — after the move red2
+    holds it and red5 is the off-site target. A feature of the product, not
+    a fix for this fleet: `media backup` / `media restore` /
+    `media backup list|show|verify|where`. State in three tiers — the crown
+    jewels (~105K: the config dir, `agent-media.env`, `clip-sign.key`, the
+    paired devices' identities), the record (~65M: `state.db`,
+    `contacts.db`, `timeline.db`, `alerts.db` and the small JSON state) and
+    the bulk (~1.9G: `sessiond/` transcripts, `audio/`'s 20,692 clips —
+    the only copy of what was said in that voice — `visual/`, `feed/`) —
+    with `search.db`, `app-dl/`, `fastembed/` and all of
+    `~/.local/share/agent-media` named as never backed up because they are
+    derived or re-fetchable. Databases are dumped with `VACUUM INTO`, never
+    copied live: `state.db` carries a 32M WAL beside it, so an rsync of the
+    pair can be torn. Encrypted before it leaves the machine, with the
+    recovery phrase printed once to keep off the server. `backup.<host>`
+    alerts on a failed run and `backup.<host>.stale` on a schedule that
+    quietly stopped; `media backup verify` restores into a throwaway HOME
+    and runs `integrity_check`, which is what makes the drill a drill
+    rather than a hope. Supersedes dotfiles `red5-backup-pull` for
+    agent-media's own state; the script keeps `~/.claude`, mail, org,
+    dotfiles and the other repos, and runs in reverse after the cutover.
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)
