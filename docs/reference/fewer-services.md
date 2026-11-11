@@ -152,6 +152,45 @@ Two things worth knowing from doing it:
   restart. A full `media update` restarts sessiond, which ends every chat it
   holds — on red5 that was five live sessions, three of them mid-approval.
 
+### The mesh, and what these endpoints bind
+
+`decisions/2026-10-18-off-the-tailnet.md` is the rule: nothing new relies on
+a tailnet, and "a tailnet address in code or a default is a bug". So **every
+endpoint binds loopback unless told otherwise**. A host that wants its mesh
+address says so — an address, or the word `tailnet` to have this host's one
+looked up, which is the spelling that does not go stale when the mesh
+renumbers.
+
+The units did bind the mesh (`agent-media-clips.service` had
+`Requires=tailnet-ip.service`), and copying that into the endpoints was the
+first thing written here. It was wrong, because the paths actually in use
+had already moved:
+
+| what | how it reaches the phone now |
+| --- | --- |
+| speech clips | `https://<server>/speech/clips/<name>?sig=` — an HMAC per clip (`clip_sign.py`), through the tunnel |
+| book files | copied to the device (`book-stage.json`), not streamed |
+| the share sheet | `POST /share` with the device token, an app route |
+
+Measured on red5, 12 Nov 2026: in the seven days before the clip port moved
+into the server it served **two** requests, both a test of mine that day.
+Its own log is the evidence — `SimpleHTTPRequestHandler` logs every request,
+which is why those two show up.
+
+**What is not yet known.** `agent-media-share` and
+`agent-media-speech-state` do not log their requests at all, so the absence
+of log lines for them says nothing either way. Do not read it as "unused":
+measuring those properly needs a counter or a packet count first. The
+public `/share` route exists and is the app's path, but whether anything
+still posts to 8771 is an open question.
+
+**The one real mesh dependency left on red5** is
+`MEDIA_BOOK_BASEURL_PHONE=http://red5:8780`, for `media book play --target
+phone`, which fetches book files over HTTP. There are signed public routes
+for clips, book *covers*, podcast files and practice videos; a fifth, for
+book media, would retire it — and with it `MEDIA_CLIPS_BIND=tailnet`, the
+only reason that port still asks for a mesh address.
+
 ### Moving one in
 
 Empty by default. Per endpoint, reversible, and in this order — the opposite
