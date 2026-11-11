@@ -8158,14 +8158,13 @@ def cmd_focus(a) -> int:
     return _ok(_srv().focus(a.channel, target=getattr(a, "target", "") or ""))
 
 
-def cmd_abs_scan(a) -> int:
-    from . import library
-    tgt = getattr(a, "target", "") or None
-    if library.trigger_abs_scan(tgt):
-        print("Audiobookshelf scan started")
-        return 0
-    print("media abs-scan: failed to start Audiobookshelf scan", file=sys.stderr)
-    return 1
+def cmd_library_scan(a) -> int:
+    """Read the book folder again (book_library.scan): after an import."""
+    from . import book_library
+    d = book_library.scan()
+    n = len(book_library.items())
+    print(f"book library: {n} books in {d.get('root') or book_library.root()}")
+    return 0
 
 
 def cmd_search(a) -> int:
@@ -10638,10 +10637,10 @@ def _build_parser() -> argparse.ArgumentParser:
     search.add_argument("query", nargs="*")
     search.set_defaults(func=cmd_search)
 
-    abs_scan = sub.add_parser("abs-scan", help="trigger an Audiobookshelf library scan")
-    abs_scan.add_argument("--target", default="",
-                          help="per-target ABS library (ABS_LIBRARY_<TARGET>); empty = default")
-    abs_scan.set_defaults(func=cmd_abs_scan)
+    lscan = sub.add_parser("library-scan", aliases=["abs-scan"],
+                           help="read the book folder again (after an import); abs-scan is its old name")
+    lscan.add_argument("--target", default="", help="ignored (the old Audiobookshelf library)")
+    lscan.set_defaults(func=cmd_library_scan)
 
     sub.add_parser("channels", help="both channels at a glance (focus, bed, what's on)"
                    ).set_defaults(func=cmd_channels)

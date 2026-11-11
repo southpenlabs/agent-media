@@ -267,7 +267,6 @@ def test_a_book_is_played_only_from_the_list(server, signed_in, audio_host, monk
     books = [{"uri": "/home/u/audiobooks/Hounded.m4b", "kind": "book"}]
     monkeypatch.setattr(music_recent, "recent", lambda kind="music", **_: books if kind == "book" else [])
     monkeypatch.setattr(music_recent, "_library_books", lambda which: [])
-    monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
     ran = []
     monkeypatch.setattr(music, "_run_book", lambda uri, *_: (ran.append(uri), (True, ""))[1])
     monkeypatch.setattr(music, "_answer", lambda: {"now": None})

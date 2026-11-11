@@ -19,7 +19,7 @@ def st(tmp_path, monkeypatch):
     from agent_media_core import music_chapters
     monkeypatch.setattr(music_chapters, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(music_chapters, "fill", lambda vids: None)
-    monkeypatch.setattr(music_recent, "_abs_by_file", lambda: {})
+    monkeypatch.setattr(music_recent, "_library_by_file", lambda: {})
     for k in ("MEDIA_SOURCE_SESSION", "CLAUDE_CODE_SESSION_ID", "MEDIA_SESSIOND_SESSION"):
         monkeypatch.delenv(k, raising=False)
     return StateStore(tmp_path / "state.db")
@@ -125,10 +125,10 @@ def test_series_from_a_title(title, want):
 
 
 def test_books_and_podcasts_are_their_own_lists(st, monkeypatch):
-    item = {"id": "i1", "relPath": "Hounded.m4b", "media": {"metadata": {
-        "title": "Hounded: The Iron Druid Chronicles, Book 1 (Unabridged)", "authorName": "Kevin Hearne",
-        "genres": ["Audiobook"], "narratorName": "Luke Daniels"}}}
-    monkeypatch.setattr(music_recent, "_abs_by_file", lambda: {"Hounded.m4b": item, "id:i1": item})
+    item = {"id": "b-000000000001", "rel": "Hounded.m4b", "path": "/home/u/audiobooks/Hounded.m4b",
+            "title": "Hounded: The Iron Druid Chronicles, Book 1 (Unabridged)", "author": "Kevin Hearne",
+            "genre": "Audiobook", "narrator": "Luke Daniels", "cover": False}
+    monkeypatch.setattr(music_recent, "_library_by_file", lambda: {"Hounded.m4b": item})
     st.add_history(sink="book", uri="/home/u/audiobooks/Hounded.m4b", started_at=1)
     st.add_history(sink="book", uri="https://traffic.libsyn.com/show/ep205.mp3", started_at=2,
                    extras={"title": "Episode 205"})
@@ -162,48 +162,32 @@ def test_liked_is_the_songs_liked_newest_first(st):
 
 
 def test_a_book_library_by_progress(st, monkeypatch, tmp_path):
+    """The library is this server's own (book_library; 11 Nov 2026), how far
+    through each from the book channel's positions."""
+    from agent_media_core import book_library
     lib = tmp_path / "audiobooks"
     lib.mkdir()
-    items = {}
-    for n, (iid, title) in enumerate((("a", "Alpha"), ("b", "Bravo"), ("c", "Charlie"), ("d", "Gone"))):
-        if iid != "d":
-            (lib / f"{title}.m4b").write_bytes(b"x")
-        items["id:" + iid] = {"id": iid, "relPath": f"{title}.m4b", "addedAt": n * 1000,
-                              "media": {"metadata": {"title": title, "authorName": "Someone"}}}
-    monkeypatch.setattr(music_recent, "_abs_by_file", lambda: items)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(music_recent, "_abs_progress", lambda: {
-        "a": {"progress": 0.4, "finished": False, "at": 50.0},
-        "b": {"progress": 1.0, "finished": True, "at": 60.0},
-        "d": {"progress": 0.2, "finished": False, "at": 70.0}})
+    books = []
+    for n, title in enumerate(("Alpha", "Bravo", "Charlie")):
+        (lib / f"{title}.m4b").write_bytes(b"x")
+        books.append({"id": f"b-00000000000{n}", "rel": f"{title}.m4b", "path": str(lib / f"{title}.m4b"),
+                      "title": title, "author": "Someone", "duration": 1000.0, "added": float(n), "cover": False})
+    monkeypatch.setattr(book_library, "items", lambda min_s=0: books)
+    st.set_resume_pos(str(lib / "Alpha.m4b"), 400_000)
+    st.set_resume_pos("/phone/cache/Bravo.m4b", 995_000)  # a copy on the phone, by its name
+    real = book_library.resume_positions
+    monkeypatch.setattr(book_library, "resume_positions", lambda store=None: real(st))
     assert [(r["title"], r["progress"]) for r in music_recent.listed(kind="book", which="progress", store=st)] == [("Alpha", 0.4)]
     assert [r["title"] for r in music_recent.listed(kind="book", which="finished", store=st)] == ["Bravo"]
     every = music_recent.listed(kind="book", which="all", store=st)
-    assert [r["title"] for r in every] == ["Alpha", "Bravo", "Charlie"], "not one whose file is not here"
+    assert [r["title"] for r in every] == ["Alpha", "Bravo", "Charlie"]
     assert every[1]["finished"] is True and every[2]["progress"] == 0
     # Browsing (11 Nov 2026): newest added first, and the ones not started; a search over the library.
     assert [r["title"] for r in music_recent.listed(kind="book", which="added", store=st)] == ["Charlie", "Bravo", "Alpha"]
     assert [r["title"] for r in music_recent.listed(kind="book", which="unstarted", store=st)] == ["Charlie"]
     assert [r["title"] for r in music_recent.listed(kind="book", which="added", store=st, q="brav")] == ["Bravo"]
-    monkeypatch.setattr(music_recent, "_new_episodes", lambda limit: [])
     assert music_recent.playable_book(str(lib / "Charlie.m4b"), store=st)
     assert not music_recent.playable_book("/etc/passwd", store=st)
-
-
-def test_new_episodes_newest_first(st, monkeypatch, tmp_path):
-    ep = tmp_path / "ep1.mp3"
-    ep.write_bytes(b"x")
-    answers = {
-        "/api/libraries": {"libraries": [{"id": "L1", "mediaType": "podcast"}, {"id": "B", "mediaType": "book"}]},
-        "/api/libraries/L1/recent-episodes?limit=40": {"episodes": [
-            {"id": "e1", "title": "Older", "publishedAt": 1000_000, "audioFile": {"metadata": {"path": str(ep)}},
-             "podcast": {"metadata": {"title": "Calm Minutes"}}},
-            {"id": "e2", "title": "Newer", "publishedAt": 2000_000, "audioFile": {"metadata": {"path": str(ep)}},
-             "podcast": {"metadata": {"title": "Calm Minutes"}}},
-            {"id": "e3", "title": "Not here", "publishedAt": 3000_000, "audioFile": {"metadata": {"path": "/nowhere/x.mp3"}}}]}}
-    monkeypatch.setattr(music_recent, "_abs_get", lambda path: answers.get(path))
-    got = music_recent.listed(kind="podcast", which="new", store=st)
-    assert [(r["title"], r["author"], r["published"]) for r in got] == [("Newer", "Calm Minutes", 2000.0), ("Older", "Calm Minutes", 1000.0)]
 
 
 def test_a_saved_podcast_on_the_music_player_is_a_podcasts_play(st, monkeypatch):

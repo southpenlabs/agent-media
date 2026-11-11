@@ -18,10 +18,11 @@ it does.
 Each kind has other lists beside what was played (`listed`; David, 31 Oct
 2026: "let's get some relevant show filters going for each tab"): music
 the songs liked and the most played; books the ones in progress, finished,
-or all of them (Audiobookshelf's, with this listener's progress) and the
-most played; podcasts the newest episodes of Audiobookshelf's podcast
-libraries, the most played and the YouTube links saved for the tab
-(podcast_links).
+or all of them (the book library, book_library, with how far he is
+through each) and the most played; podcasts the most played and the links
+saved for the tab (podcast_links). New episodes of the shows followed are
+the Podcasts browser's (podcast_discover; 11 Nov 2026, Audiobookshelf left:
+"I'd like to move away from audiobookshelf").
 """
 
 from __future__ import annotations
@@ -169,7 +170,7 @@ KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
 LISTS = {"music": ("recent", "liked", "most", "stations", "albums", "sung"),
          "book": ("recent", "progress", "finished", "all", "most", "added", "unstarted"),
-         "podcast": ("recent", "new", "most", "saved")}
+         "podcast": ("recent", "most", "saved")}
 
 
 def recent(limit: int = 40, store: Optional[StateStore] = None,
@@ -359,32 +360,29 @@ def _music_meta(uri: str, title: str) -> dict:
 #: Where the spoken things a book row can also be live — a conversation read
 #: back, the agenda, a note sent to the phone. Those are Threads', not books.
 _SPOKEN = ("/conversations/", "/.cache/agent-media/books/", "/agent-media/books/")
-_ABS_TTL_S = 600.0
-_ABS: list = [0.0, {}]
+def _meta(e: Optional[dict]) -> dict:
+    """A library entry's names as the lists read them."""
+    if not e:
+        return {}
+    return {"title": e.get("title") or "", "authorName": e.get("author") or "",
+            "seriesName": e.get("series") or "", "narratorName": e.get("narrator") or "",
+            "genres": [e["genre"]] if e.get("genre") else []}
 
 
-def _abs_by_file() -> dict:
-    """Audiobookshelf's book items by file name, kept ten minutes."""
-    if time.time() - _ABS[0] < _ABS_TTL_S:
-        return _ABS[1]
-    out: dict = {}
+def _cover(e: Optional[dict]) -> Optional[str]:
+    if not e:
+        return None
+    from . import book_library
+    return book_library.cover_url(e)
+
+
+def _library_by_file() -> dict:
+    """The book library (book_library) by file name, each with `path`."""
     try:
-        from . import book_tracks
-
-        ready = book_tracks._abs_ready()
-        if ready:
-            url, token, libs = ready
-            for lib in libs:
-                for it in book_tracks._abs_items(url, token, lib["id"]):
-                    name = os.path.basename(it.get("relPath") or it.get("path") or "")
-                    if name:
-                        out[name] = it
-                    if it.get("id"):
-                        out["id:" + it["id"]] = it
+        from . import book_library
+        return book_library.by_name()
     except Exception:  # noqa: BLE001 — books without their details
-        pass
-    _ABS[0], _ABS[1] = time.time(), out
-    return out
+        return {}
 
 
 _PODCASTY = re.compile(r"podcast|episode|#\d+|\bep\.?\s*\d+", re.I)
@@ -393,24 +391,12 @@ _YT_ID = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
 _UPLOAD = re.compile(r"(?:full )?audiobook\s*[-–|:]\s*(.+?)\s+[-–]\s+(.+)", re.I)
 #: Music that went through the book player (a long mix, a playlist).
 _MUSICY = re.compile(r"\bmix\b|\bmusic\b|playlist", re.I)
-#: The server's own link to an Audiobookshelf item (it can carry a token).
-_ABS_LINK = re.compile(r"^https?://(?:127\.0\.0\.1|localhost)(?::\d+)?/api/items/([0-9a-f-]{36})/")
 #: YouTube's categories: what a downloaded video's item says for its genre.
 #: Right enough for a podcast; never a book's.
 _YT_CATEGORIES = {"gaming", "entertainment", "people & blogs", "education", "music",
                   "film & animation", "science & technology", "news & politics",
                   "howto & style", "comedy", "sports", "travel & events",
                   "autos & vehicles", "pets & animals", "nonprofits & activism"}
-
-
-def _book_file(it: dict) -> Optional[str]:
-    """Where an Audiobookshelf item's file is on this host, if it is here."""
-    rel = it.get("relPath") or ""
-    for root in ("~/audiobooks", "~/media/audiobooks"):
-        p = os.path.join(os.path.expanduser(root), rel)
-        if rel and os.path.exists(p):
-            return p
-    return None
 
 
 def kind_of(uri: str, title: str, genres: list) -> str:
@@ -436,7 +422,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
         if extra:
             rows = sorted(rows + extra, key=lambda r: -float(r.get("started_at") or 0))[:window]
     saved_art: dict[str, Optional[str]] = {}
-    items = _abs_by_file()
+    items = _library_by_file()
     seen: set[str] = set()
     plays: dict[str, int] = {}
     picked = []
@@ -462,14 +448,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
         if not uri.startswith(("/", "http://", "https://", "yt:")) or any(p in uri for p in _SPOKEN) \
                 or extras.get("player") == "sasonica":
             continue
-        link = _ABS_LINK.match(uri)
-        if link:
-            # Never handed on (a token rides in it): the item's file stands in.
-            it = items.get("id:" + link.group(1))
-            uri = (_book_file(it) if it else None) or ""
-            if not uri:
-                continue
-        elif uri.startswith(("http://127.", "http://localhost")):
+        if uri.startswith(("http://127.", "http://localhost")):
             continue
         else:
             it = items.get(os.path.basename(urllib.parse.urlparse(uri).path if "://" in uri else uri))
@@ -477,7 +456,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
         if uri in seen:
             continue
         seen.add(uri)
-        meta = (it or {}).get("media", {}).get("metadata", {}) if it else {}
+        meta = _meta(it)
         title = meta.get("title") or extras.get("title") or (r.get("text") or "").strip() \
             or os.path.splitext(os.path.basename(uri))[0]
         genres = meta.get("genres") or []
@@ -509,7 +488,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
             author = urllib.parse.urlparse(r["uri"]).netloc or None
         genre = next((g for g in genres if g.lower() != "audiobook"
                       and (kind == "podcast" or g.lower() not in _YT_CATEGORIES)), None)
-        key = f"abs:{it['id']}" if it else None
+        key = f"book:{it['id']}" if it else None
         if kind == "book" and not genre and key:
             got = media_meta.known(key)
             genre = (got or {}).get("genre")
@@ -517,7 +496,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
                 wanted.append((key, "book", {"title": title, "author": author or ""}))
         vid = _YT_ID.search(r["uri"])
         out.append({"id": r["id"], "uri": r["uri"], "title": title,
-                    "art": saved_art.get(r["uri"]) or (art(vid.group(1)) if vid else None),
+                    "art": saved_art.get(r["uri"]) or _cover(it) or (art(vid.group(1)) if vid else None),
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
                     "plays": plays.get(r["uri"], 1), "kind": kind, "author": author,
                     "series": media_meta.series_of(title, meta.get("seriesName") or ""),
@@ -536,8 +515,7 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
     """One of a kind's lists (LISTS), in Recently played's shape. `recent`
     is what was played; `most` the same by how often (`plays`, then the
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
-    book library's (`progress` 0–1, `finished`); `new` podcast episodes,
-    newest first (`published`, epoch seconds); `saved` the YouTube links
+    book library's (`progress` 0–1, `finished`); `saved` the YouTube links
     saved for the Podcasts tab (podcast_links); `albums` the Spotify albums,
     playlists and songs saved for the Music tab (music_links); `sung` every
     song sung out after a long reply, taken up or not (music_sung).
@@ -564,8 +542,6 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
         # everything"): the whole library newest added first, and the books
         # not started yet, by title.
         return _library_books(which)[:limit if which == "progress" or which == "finished" else 500]
-    if which == "new":
-        return _new_episodes(limit)
     if which == "albums":
         from . import music_links
 
@@ -625,76 +601,36 @@ def _liked(store: StateStore, limit: int) -> list[dict]:
     return out
 
 
-_PROGRESS: list = [0.0, {}]
-_PROGRESS_TTL_S = 60.0
-
-
-def _abs_get(path: str):
-    """Audiobookshelf's answer to a GET, or None without one configured."""
-    from . import book_tracks
-
-    ready = book_tracks._abs_ready()
-    if not ready:
-        return None
-    url, token, _libs = ready
-    req = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read())
-
-
-def _abs_progress() -> dict:
-    """This listener's progress by Audiobookshelf item: `{id: {progress,
-    finished, at}}`, books only (no episode), kept a minute."""
-    if time.time() - _PROGRESS[0] < _PROGRESS_TTL_S:
-        return _PROGRESS[1]
-    out: dict = {}
-    try:
-        me = _abs_get("/api/me") or {}
-        for m in me.get("mediaProgress") or []:
-            if m.get("episodeId") or not m.get("libraryItemId"):
-                continue
-            out[m["libraryItemId"]] = {"progress": float(m.get("progress") or 0.0),
-                                       "finished": bool(m.get("isFinished")),
-                                       "at": float(m.get("lastUpdate") or 0) / 1000.0}
-    except Exception:  # noqa: BLE001 — no progress, not a failure
-        pass
-    _PROGRESS[0], _PROGRESS[1] = time.time(), out
-    return out
-
-
 def _library_books(which: str) -> list[dict]:
-    """The book library's items whose file is on this host: those in
-    progress or finished (latest listened first), or all (by title)."""
-    progress = _abs_progress()
+    """The book library's books (book_library): those in progress or
+    finished (latest listened first), not started or all (by title), or
+    newest added first."""
+    from . import book_library
+
+    positions = book_library.resume_positions()
     out = []
-    for key, it in _abs_by_file().items():
-        if not key.startswith("id:"):
+    for e in book_library.items():
+        p = book_library.progress(e, positions)
+        if which == "progress" and not (p["progress"] > 0 and not p["finished"]):
             continue
-        path = _book_file(it)
-        if not path:
+        if which == "finished" and not p["finished"]:
             continue
-        p = progress.get(it["id"])
-        if which == "progress" and not (p and not p["finished"] and p["progress"] > 0):
+        if which == "unstarted" and (p["finished"] or p["progress"] > 0):
             continue
-        if which == "finished" and not (p and p["finished"]):
-            continue
-        if which == "unstarted" and p and (p["finished"] or p["progress"] > 0):
-            continue
-        meta = (it.get("media") or {}).get("metadata") or {}
-        title = meta.get("title") or os.path.splitext(os.path.basename(path))[0]
-        genre = next((g for g in meta.get("genres") or [] if g.lower() != "audiobook"), None)
+        meta = _meta(e)
+        title = meta["title"] or os.path.splitext(os.path.basename(e["path"]))[0]
+        genre = next((g for g in meta["genres"] if g.lower() != "audiobook"), None)
         if not genre:
-            genre = (media_meta.known(f"abs:{it['id']}") or {}).get("genre")
-        out.append({"id": it["id"], "uri": path, "title": title, "art": None,
-                    "at": (p or {}).get("at") or float(it.get("addedAt") or 0) / 1000.0,
+            genre = (media_meta.known(f"book:{e['id']}") or {}).get("genre")
+        out.append({"id": e["id"], "uri": e["path"], "title": title, "art": _cover(e),
+                    "at": p["at"] or float(e.get("added") or 0),
                     "session": None, "inferred": False, "kind": "book",
-                    "author": (meta.get("authorName") or "").strip() or None,
-                    "series": media_meta.series_of(title, meta.get("seriesName") or ""),
-                    "narrator": (meta.get("narratorName") or "").strip() or None,
-                    "genre": genre,
-                    "progress": round((p or {}).get("progress", 0.0), 3),
-                    "finished": bool((p or {}).get("finished")),
-                    "added": float(it.get("addedAt") or 0) / 1000.0 or None})
+                    "author": meta["authorName"] or None,
+                    "series": media_meta.series_of(title, meta["seriesName"]),
+                    "narrator": meta["narratorName"] or None,
+                    "genre": genre, "progress": round(p["progress"], 3),
+                    "finished": bool(p["finished"]), "added": float(e.get("added") or 0) or None,
+                    "duration": float(e.get("duration") or 0) or None})
     if which in ("all", "unstarted"):
         out.sort(key=lambda r: (r["title"] or "").lower())
     elif which == "added":
@@ -702,45 +638,6 @@ def _library_books(which: str) -> list[dict]:
     else:
         out.sort(key=lambda r: -r["at"])
     return out
-
-
-def _episode_file(path: str) -> Optional[str]:
-    """An episode's file as this host has it: its own path, else by name in
-    the audiobook folder (Audiobookshelf reports its container's view)."""
-    if path and os.path.isfile(path):
-        return path
-    root = os.path.expanduser(os.environ.get("AUDIOBOOK_LIB") or os.environ.get("MEDIA_AUDIOBOOK_ABS_DIR")
-                              or "~/audiobooks")
-    p = os.path.join(root, os.path.basename(path or ""))
-    return p if path and os.path.isfile(p) else None
-
-
-def _new_episodes(limit: int) -> list[dict]:
-    """The newest episodes of Audiobookshelf's podcast libraries whose file
-    is on this host, newest first."""
-    out = []
-    try:
-        libs = (_abs_get("/api/libraries") or {}).get("libraries") or []
-        for lib in libs:
-            if lib.get("mediaType") != "podcast":
-                continue
-            got = _abs_get(f"/api/libraries/{lib['id']}/recent-episodes?limit={int(limit)}") or {}
-            for ep in got.get("episodes") or []:
-                path = _episode_file(((ep.get("audioFile") or {}).get("metadata") or {}).get("path") or "")
-                if not path:
-                    continue
-                show = ((ep.get("podcast") or {}).get("metadata") or {})
-                published = float(ep.get("publishedAt") or ep.get("addedAt") or 0) / 1000.0
-                out.append({"id": ep.get("id") or path, "uri": path, "title": ep.get("title") or None,
-                            "art": None, "at": published, "published": published,
-                            "session": None, "inferred": False, "kind": "podcast",
-                            "author": show.get("title") or show.get("author") or None,
-                            "series": None, "narrator": None,
-                            "genre": next(iter(show.get("genres") or []), None)})
-    except Exception:  # noqa: BLE001 — no episodes, not a failure
-        pass
-    out.sort(key=lambda r: -r["at"])
-    return out[:limit]
 
 
 def playable_book(uri: str, store: Optional[StateStore] = None) -> bool:
@@ -753,6 +650,4 @@ def playable_book(uri: str, store: Optional[StateStore] = None) -> bool:
         return True
     from . import podcast_links
 
-    if any(i["uri"] == uri for i in podcast_links.items()):
-        return True
-    return any(i["uri"] == uri for i in _new_episodes(100))
+    return any(i["uri"] == uri for i in podcast_links.items())

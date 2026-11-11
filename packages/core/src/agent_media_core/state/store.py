@@ -715,6 +715,12 @@ class StateStore:
             row = cur.fetchone()
         return int(row[0]) if row else None
 
+    def all_resume_pos(self) -> list[tuple[str, int, float]]:
+        """Every saved position: ``(uri, pos_ms, updated_at)`` (book_library)."""
+        with self._cursor() as cur:
+            cur.execute("SELECT uri, pos_ms, updated_at FROM resume_pos")
+            return [(str(u), int(p), float(a)) for u, p, a in cur.fetchall()]
+
     def set_book_last(self, uri: str, title: Optional[str] = None) -> None:
         """Remember the book to reopen when `book resume` finds nothing loaded.
 

@@ -953,6 +953,9 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A rendered clip by signed link, for a player off the tailnet (clip_sign.py).
         if path.startswith("/speech/clips/"):
             return _signed_clip(h, path.removeprefix("/speech/clips/"))
+        # A book's cover, the same way (book_library.served_cover).
+        if path.startswith("/books/covers/"):
+            return _signed_book_cover(h, path.removeprefix("/books/covers/"))
         # A saved podcast link's download, the same way (podcast_links.served).
         if path.startswith("/podcasts/files/"):
             return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
@@ -1001,6 +1004,20 @@ def _signed_clip(h: BaseHTTPRequestHandler, name: str) -> bool:
         return True
     f, ctype = found
     _send_file(h, f, f.stat().st_size, ctype)
+    return True
+
+
+def _signed_book_cover(h: BaseHTTPRequestHandler, name: str) -> bool:
+    """`GET /books/covers/<id>.jpg?sig=` — a book's cover for the Media tab
+    (book_library.cover_url); the link is the credential."""
+    from agent_media_core import book_library
+
+    sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
+    f = book_library.served_cover(name, sig)
+    if not f:
+        _json(h, 404, {"ok": False, "error": "no such cover"})
+        return True
+    _send_file(h, f, f.stat().st_size, "image/jpeg")
     return True
 
 
