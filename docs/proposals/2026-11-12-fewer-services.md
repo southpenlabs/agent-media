@@ -46,8 +46,10 @@ deleted), and `systemctl --user reset-failed`:
   `ryer-canvas-retry`, `sasonica-thinking-default-update`, three
   `not-found` timers).
 
-Net: 68 matched units → 54, with no behaviour change. Nothing running was
-touched; 22 agent-media services were running before and after.
+Net, on the grep this document opened with: 68 matched units (53 services +
+15 timers) → **53** (41 + 12), with no behaviour change. Nothing running was
+touched; 22 agent-media services were running before and after. Folding
+`clips` into the canvas later the same day took the running count to 21.
 
 ## 3. What is left, and whether it is needed
 
@@ -269,7 +271,9 @@ David, 12 Nov 2026: "Yes, let's do all of that."
    `[jobs.<name>]` in config.toml for an installation's own. The clip prune
    became `media audio prune` on the way (it was a `find` in a unit, with a
    hand-maintained `-not -name music-bed-*` that is now in code).
-4. **§4c, one process — built, not yet switched on.**
+4. **§4c, one process — built; `clips` switched on on red5, 12 Nov 2026**
+   (the canvas serves 8780 with everything else; same bytes before and
+   after; unit disabled, rollback one command). The rest are ready and off.
    `agent_media_core/endpoints.py` hosts speech-state, share, clips and the
    two shims in the server, each on its own port. `MEDIA_ENDPOINTS` names
    the ones to fold in and is empty by default, so a host still running the

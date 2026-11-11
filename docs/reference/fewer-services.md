@@ -131,6 +131,27 @@ for no gain.
 media endpoints        which are in the server, which are still a service
 ```
 
+### Done so far
+
+**clips, on red5, 12 Nov 2026.** The canvas now serves 8780 alongside 8781,
+8789 and the four frames hubs, all in one process. Verified by fetching the
+same clip before and after — `http://red5:8780/audio/<clip>` → 200, 13248
+bytes both times — and `media endpoints` says "in the server". The unit is
+disabled, not removed, so rollback is one `systemctl --user enable --now`
+plus dropping the name from `MEDIA_ENDPOINTS`.
+
+Two things worth knowing from doing it:
+
+- The unit bound `${TS_IP}`, not loopback, via `Requires=tailnet-ip.service`.
+  An endpoint that defaulted to 127.0.0.1 would have left every clip and
+  book file unreachable from the phone *silently* — the server healthy, the
+  phone quiet. clips and speech-state resolve the peer address themselves
+  now, which is why neither needs an address written into agent-media.env.
+- `media update --no-restart` is the right tool: it builds the release and
+  moves `current` without restarting anything, so only the canvas needed a
+  restart. A full `media update` restarts sessiond, which ends every chat it
+  holds — on red5 that was five live sessions, three of them mid-approval.
+
 ### Moving one in
 
 Empty by default. Per endpoint, reversible, and in this order — the opposite
