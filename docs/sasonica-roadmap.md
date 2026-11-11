@@ -2324,6 +2324,12 @@ ahead.
     track by track) and Play it plays one at once. Next: follow a YouTube
     channel as a show (its feed; the channel's id needs the phone, since
     red5 cannot read YouTube's pages).
+    Later (David, 11 Nov 2026: "The podcast starting position later. leave
+    it for now"): a saved YouTube podcast starts from the beginning each
+    time, since its download plays on the phone's music player, which keeps
+    no position (feed episodes play on the book channel and resume). Two ways
+    offered: Sasonica remembers each one's position (recommended), or the
+    downloads go into an Audiobookshelf podcast library, which keeps it.
 
 50. **Speech-to-text from your own server** (David, 3 Nov 2026: "we should
     also add a local option for red2 when it arrives next week ... for STT
