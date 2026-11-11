@@ -120,7 +120,12 @@ def transcript_path(session: str) -> str:
         return known
     hits = glob.glob(str(_claude_dir() / "projects" / "*" / f"{session}.jsonl"))
     if not hits:
-        return ""
+        # A session on another host (sessiond_remote.py, roadmap 56): its
+        # transcript as mirrored here from there.
+        from .sessiond_remote import mirror_path
+
+        mirror = mirror_path(session)
+        return str(mirror) if mirror.is_file() else ""
     # A session copied between project dirs (a moved checkout) is written to
     # in one of them: the one written last.
     path = max(hits, key=lambda p: os.path.getmtime(p))

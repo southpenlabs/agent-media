@@ -523,8 +523,29 @@ def is_jobs_worker(device: dict | None) -> bool:
     return bool((device or {}).get("jobs"))
 
 
+def set_sessions(device_id: str, on: bool = True) -> bool:
+    """Let a jobs worker take agent sessions (or not): roadmap 56, what
+    `pair --device NAME --jobs --sessions` does at pairing. False for an
+    unknown id. Taking it away leaves the device a jobs worker."""
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        if bool(hit.get("sessions")) != on:
+            _save([{**d, "sessions": on} if d is hit else d for d in rows])
+        return True
+
+
+def is_session_worker(device: dict | None) -> bool:
+    """A jobs worker that may also run agent sessions sent down its stream
+    (phone_jobs.session, roadmap 56): only with the jobs bit too, so the
+    token still opens no other route."""
+    return bool((device or {}).get("sessions")) and is_jobs_worker(device)
+
+
 def mint_code(name: str, enrol: bool = False, jobs: bool = False,
-              role: str = "") -> tuple[str, float]:
+              role: str = "", sessions: bool = False) -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
     Several may be outstanding at once (pairing a phone and a tablet in the
@@ -552,6 +573,8 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False,
             # Like `enrol`, granted by whoever mints: a device cannot make
             # itself a jobs worker any more than it can name itself.
             codes[code]["jobs"] = True
+            if sessions:
+                codes[code]["sessions"] = True
         if role:
             codes[code]["role"] = role
         _write(codes_path(), codes)
@@ -611,6 +634,8 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
                "enrol": bool(entry.get("enrol"))}
         if entry.get("jobs"):
             row["jobs"] = True
+            if entry.get("sessions"):
+                row["sessions"] = True
         if entry.get("role") in ROLES:
             row["role"] = entry["role"]
         _save(list(_load(fresh=True)) + [row])
@@ -761,6 +786,10 @@ def cli_devices(argv: list[str]) -> int:
                      help="make this device a jobs worker: restart/update jobs down "
                           "its own stream, and no other route (phone_jobs.py)")
     act.add_argument("--no-jobs", metavar="ID", help="no longer a jobs worker")
+    act.add_argument("--sessions", metavar="ID",
+                     help="let this jobs worker run agent sessions sent down its stream "
+                          "(media session start --host; roadmap 56)")
+    act.add_argument("--no-sessions", metavar="ID", help="no longer run agent sessions")
     act.add_argument("--revoke-account", metavar="WHO",
                      help="forget every device an account enrolled (its sub, or its email)")
     args = ap.parse_args(argv)
@@ -792,6 +821,16 @@ def cli_devices(argv: list[str]) -> int:
         n = revoke_account(args.revoke_account)
         print(f"revoked {n} device(s) of {args.revoke_account}" if n else f"no devices of {args.revoke_account}")
         return 0 if n else 1
+    if args.sessions or args.no_sessions:
+        device_id, on = (args.sessions, True) if args.sessions else (args.no_sessions, False)
+        if set_sessions(device_id, on):
+            print(f"{device_id} {'may' if on else 'may no longer'} run agent sessions"
+                  + ("" if not on or any(d.get("id") == device_id and d.get("jobs")
+                                         for d in _load(fresh=True))
+                     else " (once it is a jobs worker too: --jobs ID)"))
+            return 0
+        print(f"no device {device_id}", flush=True)
+        return 1
     if args.jobs or args.no_jobs:
         device_id, on = (args.jobs, True) if args.jobs else (args.no_jobs, False)
         if set_jobs(device_id, on):
@@ -826,6 +865,7 @@ def cli_devices(argv: list[str]) -> int:
               f"  {role_of(d)}"
               f"{'  [enrols]' if may_enrol(d) else ''}"
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
+              f"{'  [sessions]' if is_session_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}"
               f"{'  app ' + app_words(d) + ' (said ' + when(d.get('app_at')) + ')' if d.get('app') else ''}")
     return 0

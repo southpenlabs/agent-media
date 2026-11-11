@@ -145,7 +145,9 @@ Ops (request `{"op", …}` → `{"ok": true, …}` or `{"ok": false, "error",
 session_settings.py), `relocate` (the directory a moved thread resumes in;
 moves.py), `release` (what is held for a restart goes now, and the restart
 lets the session through: the app's Send now), `run_now` and `slots` (above;
-`send` and `start` take `slot: "high"`). `send` with `keep_pending` is refused `pending` rather than
+`send` and `start` take `slot: "high"`), `hosts` (the other hosts that run
+sessions for this one). `start` with `host` starts the session on another
+host and every op on it goes there (sessiond_remote.py, roadmap 56). `send` with `keep_pending` is refused `pending` rather than
 answer a waiting card the way typing does (another session's mail,
 headless_mail.py).
 
@@ -1297,6 +1299,10 @@ class Supervisor:
 
         #: The shared `opencode serve` (sessiond_opencode.py).
         self.oc = Host(self)
+        from .sessiond_remote import Remote
+
+        #: Sessions held on other hosts (sessiond_remote.py, roadmap 56).
+        self.remote = Remote(self.root)
 
     # -- start-up and shut-down --
 
@@ -1312,9 +1318,14 @@ class Supervisor:
         instance never parked: its record says what it was doing."""
         stopped_at = self._take_stop_mark()
         self._clear_fired_restart()
-        self._kill_orphans({r["session"] for r in records(self.root)})
+        self._kill_orphans({r["session"] for r in records(self.root) if not r.get("host")})
         with self.lock:
             for rec in records(self.root):
+                if rec.get("host"):
+                    # A session on another host (sessiond_remote.py): its
+                    # host holds it; this keeps only its record.
+                    self.remote.adopt(rec)
+                    continue
                 s = Session.from_record(rec)
                 if s.state in LIVE_STATES:
                     if s.cut_off is None:
@@ -3708,16 +3719,31 @@ class Supervisor:
     def handle(self, req: dict) -> dict:
         op = str(req.get("op") or "")
         sid = str(req.get("session") or "")
+        # A session on another host, a start with `host` named, or `hosts`
+        # (sessiond_remote.py, roadmap 56): its host answers.
+        if op not in ("ping", "list", "slots"):
+            got = self.remote.handle(op, sid, req)
+            if got is not None:
+                return got
         try:
             if op == "ping":
                 # `system_prompt`: `start` takes a `system_prompt_file`.
                 # `held`: messages are held while a restart is pending.
                 # `quota`: the usage limit's sessions are resumed at its reset.
                 # `run_now`: `slot: "high"`, the `run_now` and `slots` ops.
+                # `hosts`: `start` takes `host` (roadmap 56); `max_live`,
+                # `live` and `free_mb`: this host's slots, for the server
+                # asking a worker (`media session hosts`).
+                with self.lock:
+                    live = sum(1 for x in self.sessions.values() if x.live)
+                free = mem_available_mb()
                 return {"ok": True, "pid": os.getpid(), "system_prompt": True, "held": True,
-                        "quota": True, "run_now": True}
+                        "quota": True, "run_now": True, "hosts": True,
+                        "max_live": max_live(), "live": live,
+                        "free_mb": round(free) if free is not None else None,
+                        "min_free_mb": min_free_mb()}
             if op == "list":
-                return {"ok": True, "sessions": self.list()}
+                return {"ok": True, "sessions": self.list() + self.remote.views_all()}
             if op == "get":
                 return {"ok": True, **self.get(sid)}
             if op == "start":
@@ -3893,11 +3919,17 @@ def serve(path: Path | None = None, supervisor: Supervisor | None = None,
             except Exception:  # noqa: BLE001
                 log.exception("sessiond: delivering held work")
     threading.Thread(target=release, daemon=True, name="sessiond-release").start()
+    # Sessions on other hosts (sessiond_remote.py): their views, events and
+    # transcripts, polled while there are any.
+    threading.Thread(target=sup.remote.loop,
+                     args=(lambda: getattr(srv, "_stopped", False) or sup.stopping,),
+                     daemon=True, name="sessiond-remote").start()
     return srv, t
 
 
 def stop(srv: Server) -> None:
     srv._stopped = True  # type: ignore[attr-defined]
+    srv.supervisor.remote.wake.set()
     srv.shutdown()
     srv.server_close()
     try:

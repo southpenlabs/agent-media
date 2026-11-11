@@ -29,7 +29,8 @@ from . import HEADLESS, Caps
 _STATUS = {"not_found": 404, "not_live": 404, "bad_cwd": 404, "busy": 503, "down": 503,
            "spawn_failed": 500, "internal": 500, "empty_text": 400, "bad_request": 400,
            "unsupported": 400, "exists": 409, "not_pending": 409, "lost": 409,
-           "refused": 400, "restart_pending": 503, "quota_limited": 503}
+           "refused": 400, "restart_pending": 503, "quota_limited": 503,
+           "host_down": 503, "not_a_worker": 404}
 
 #: sessiond's states as the contract names them (§6.1 /sessions/state, §11).
 _CONTRACT_STATE = {"starting": "working", "working": "working", "waiting": "waiting",

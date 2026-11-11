@@ -88,6 +88,17 @@ needs a pull. Queuing one is `POST /jobs/restart`, an app route (so on the
 public listener too): the host's token, or a caller `auth.may_admin` lets
 in, as for `POST /services/restart` — a narrower door than `/jobs/run`,
 which stays the canvas's own.
+
+**Agent sessions on another host** (roadmap 56, David, 11 Nov 2026: "let's
+get our claude sessions running on red2 next"). A worker whose device may
+take sessions (`pair --device NAME --jobs --sessions`, devices.
+is_session_worker) and whose stream says so (`?kinds=…,session`, the host's
+`MEDIA_JOBS_SESSIONS=1`) takes jobs of kind `session`: `{id, kind:
+"session", session: <a sessiond request>, timeout}`, relayed to that host's
+own media-sessiond and answered with its reply as `result`. red5's sessiond
+asks through the canvas (`POST /jobs/session`, the host's token, never the
+public listener): `session(name, request, timeout)`. A worker that is not
+connected is answered at once (`host_down`), never queued.
 """
 
 from __future__ import annotations
@@ -126,6 +137,11 @@ MAX_PROGRESS = 20
 MAX_PROGRESS_LINE = 500
 #: The kinds a worker may say it takes besides a command (`?kinds=`).
 KINDS = ("restart", "update")
+#: A session job (roadmap 56): granted per device (devices.is_session_worker),
+#: never with the jobs bit alone.
+SESSION_KIND = "session"
+#: How long a session request may take, at most: a start may clone the folder.
+SESSION_MAX_TIMEOUT_S = 300.0
 #: A restart's fields, and nothing else.
 RESTART_KEYS = frozenset({"only", "after", "force", "dry_run"})
 #: A service name as restart_services matches it (unit stem, runit dir, a
@@ -162,6 +178,8 @@ def jobs_devices() -> dict[str, set[str]]:
     for d in devices.list_devices():
         if devices.is_jobs_worker(d) and d.get("id"):
             out.setdefault(str(d["id"]), set(KINDS))
+            if devices.is_session_worker(d):
+                out[str(d["id"])].add(SESSION_KIND)
     for i in os.environ.get("MEDIA_JOBS_DEVICES", "").replace(",", " ").split():
         out.setdefault(i, set(KINDS))
     return out
@@ -399,6 +417,9 @@ def result(device: str, body) -> tuple[bool, dict]:
             job["result"] = _clean_result(body.get("result"), job["rc"])
         elif job["kind"] == "update":
             job["result"] = _clean_update(body.get("result"))
+        elif job["kind"] == SESSION_KIND:
+            got = body.get("result")
+            job["result"] = got if isinstance(got, dict) else None
         job["done"] = True
         _COND.notify_all()
     return True, {}
@@ -496,7 +517,7 @@ def _clean_update(got) -> dict | None:
 
 
 def _frame(job: dict) -> dict:
-    if job["kind"] in ("restart", "update"):
+    if job["kind"] in ("restart", "update", SESSION_KIND):
         return {"id": job["id"], "kind": job["kind"], job["kind"]: job[job["kind"]],
                 "timeout": job["timeout"]}
     frame = {"id": job["id"], "cmd": job["cmd"], "timeout": job["timeout"]}
@@ -542,7 +563,8 @@ def serve(h, device: str, kinds=()) -> bool:
         token = _NEXT
         _WORKERS[token] = {"at": time.monotonic(), "device": device,
                            "kinds": ({"cmd"} & allowed)
-                           | {k for k in kinds if k in KINDS and k in allowed}}
+                           | {k for k in kinds if k in (*KINDS, SESSION_KIND)
+                              and k in allowed}}
         mine = _WORKERS[token]["kinds"]
     h.close_connection = True
     try:
@@ -579,6 +601,69 @@ def serve(h, device: str, kinds=()) -> bool:
             _WORKERS.pop(token, None)
             _COND.notify_all()
     return True
+
+
+# --- agent sessions on another host (roadmap 56) ---------------------------------
+
+
+def session_workers() -> list[dict]:
+    """The devices that may take session jobs, `{id, name, host, connected}`:
+    `host` is the first word of the device's name (`red2` for "red2 jobs"),
+    the name `media session start --host` takes."""
+    from . import devices
+
+    ids = {i for i, k in jobs_devices().items() if SESSION_KIND in k}
+    with _COND:
+        live = {w.get("device") for w in _WORKERS.values() if SESSION_KIND in w["kinds"]}
+    out = []
+    for d in devices.list_devices():
+        if d.get("id") in ids:
+            name = str(d.get("name") or d.get("id"))
+            out.append({"id": d["id"], "name": name,
+                        "host": (name.split() or [str(d["id"])])[0].lower(),
+                        "connected": d["id"] in live})
+    return out
+
+
+def session(name: str, request, timeout: float = 30.0) -> tuple[int, dict]:
+    """A sessiond request (`{"op", …}`) for the host NAME names, relayed by its
+    worker to its own media-sessiond: `(status, answer)`. 200 and sessiond's
+    own answer (`{"ok": …}`) when the worker answered; otherwise `ok: false`
+    with `code` `not_a_worker` (404: NAME takes no sessions here) or
+    `host_down` (503: not connected, too old, or no answer in time), and a
+    sentence that says which."""
+    if not isinstance(request, dict) or not str(request.get("op") or ""):
+        return 400, {"ok": False, "code": "bad_request", "error": "a sessiond request, please"}
+    dev = device_for(name)
+    if dev is None or SESSION_KIND not in jobs_devices().get(str(dev.get("id")), set()):
+        return 404, {"ok": False, "code": "not_a_worker",
+                     "error": f"{name!r} is not a session host of this server (pair it with "
+                              "`media-visual-canvas pair --device \"<host> jobs\" --jobs "
+                              "--sessions`)"}
+    did = str(dev["id"])
+    label = (str(dev.get("name") or did).split() or [did])[0]
+    timeout = max(1.0, min(float(timeout or 30.0), SESSION_MAX_TIMEOUT_S))
+    with _COND:
+        mine = [w for w in _WORKERS.values() if w.get("device") == did]
+        if not mine:
+            return 503, {"ok": False, "code": "host_down",
+                         "error": f"{label} is offline: its jobs worker is not connected to "
+                                  "this server, so nothing can start or answer there now"}
+        if not any(SESSION_KIND in w["kinds"] for w in mine):
+            return 503, {"ok": False, "code": "host_down",
+                         "error": f"{label}'s jobs worker does not take sessions: pull "
+                                  "agent-media there, set MEDIA_JOBS_SESSIONS=1 and restart "
+                                  "its jobs-worker service"}
+        job = _new(SESSION_KIND, timeout, device=did, session=request)
+        if _submit(job, timeout) is None:
+            return 503, {"ok": False, "code": "host_down",
+                         "error": f"{label}: {job['why']} (waited {timeout:g} s)"}
+    res = job.get("result")
+    if not isinstance(res, dict):
+        why = (job.get("err") or "").strip().splitlines()[-1:] or [f"rc {job.get('rc')}"]
+        return 503, {"ok": False, "code": "host_down",
+                     "error": f"{label}'s worker could not reach its session host: {why[0]}"}
+    return 200, res
 
 
 def _pick(device: str, kinds: set[str], peek: bool = False) -> list[dict]:

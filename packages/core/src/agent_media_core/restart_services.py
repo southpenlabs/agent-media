@@ -234,7 +234,9 @@ def sessiond_sessions() -> list[dict]:
     there = sessiond.use_tcp() or sessiond.socket_path().exists()
     r = headless.call("list", timeout=5.0) if there else {"ok": False}
     if r.get("ok"):
-        return [v for v in r.get("sessions") or [] if v.get("live")]
+        # A session on another host (`host`, roadmap 56) is that host's: a
+        # restart here does not touch it, so it never holds one up.
+        return [v for v in r.get("sessions") or [] if v.get("live") and not v.get("host")]
     from . import procinfo
 
     out = []

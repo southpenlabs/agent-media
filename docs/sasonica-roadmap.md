@@ -2475,7 +2475,31 @@ ahead.
       `media attach` go back through the server, never straight from the
       worker to a device; a restart drain counts the workers' sessions.
     - The first worker is whichever second machine is up; homer when its
-      NVMe connector is fixed. Not started.
+      NVMe connector is fixed.
+    - **Manual form BUILT 11 Nov 2026, red2 the first worker** (David, 11
+      Nov 2026: "let's get our claude sessions running on red2 next ... I'm
+      sick of only being able to run three at once"; server-contract §17.1,
+      `sessiond_remote.py`). The worker is the host's jobs worker (§6.21a)
+      taking a new job kind, `session`, relayed to the host's own
+      media-sessiond (its own slots: 16 on red2's 32 GB and 16 threads):
+      paired `pair --device "red2 jobs" --jobs --sessions`, opted in there
+      with `MEDIA_JOBS_SESSIONS=1`. `media session start <folder> --host red2
+      …` starts it there (the folder as `~/…`, cloned from origin when
+      missing); every op on it goes there; `get`/`list`/`events` come from a
+      2 s poll that also mirrors its transcript here, so the thread reads as
+      a local one; its replies are spoken by this host's Stop hook (the
+      worker's hooks are off), never from the worker to a device; a host
+      that is down says so at once (`host_down`). `media session hosts`
+      shows the workers, their slots and free memory. A restart here
+      neither touches nor waits for their sessions; the worker's own restart
+      drains its own. Rows carry `host`.
+    - **Next:** the app's host label on a thread (the rows carry `host`
+      already); the app's New chat naming a host (`/ask` with `host`); a
+      persona, a branch or a move on another host; a worker's
+      PreToolUse/notification hooks (thinking lines, several-question
+      cards) through the server; then automatic placement (most free slots
+      and memory among the hosts a folder allows), with `pin`/`anywhere` per
+      folder.
 57. **The canvas in the app's Now playing, then video beside audio**
     (David, 5 Nov 2026: "Can we include the canvas in the app?" — "Reply
     takes over"; "instead of album art it would be a video in now playing

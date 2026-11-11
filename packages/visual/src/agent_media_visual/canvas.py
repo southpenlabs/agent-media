@@ -629,7 +629,14 @@ def _cmd_pair(argv: list[str]) -> int:
                          "there), restarted and updated down its own connection "
                          "(media restart-services / media update --host). Its token "
                          "takes jobs and opens no other route")
+    ap.add_argument("--sessions", action="store_true",
+                    help="with --jobs: it may also run agent sessions sent down its "
+                         "stream (media session start --host <its first word>; "
+                         "roadmap 56)")
     args = ap.parse_args(argv)
+    if args.sessions and not args.jobs:
+        print("pair: --sessions goes with --jobs", file=sys.stderr)
+        return 2
     if args.role and args.device is None:
         print("pair: --role goes with --device NAME", file=sys.stderr)
         return 2
@@ -655,7 +662,7 @@ def _cmd_pair(argv: list[str]) -> int:
     if args.device is not None:
         return _cmd_pair_device(args.device, args.host, args.port, enrol=args.enrol,
                                 server=args.server, tunnelled=tunnelled, lookup=lookup,
-                                jobs=args.jobs, role=args.role)
+                                jobs=args.jobs, role=args.role, sessions=args.sessions)
 
     if not _amux_token():
         print("no amux token on this host (~/.amux/auth_token) — nothing to pair.",
@@ -676,7 +683,8 @@ def _cmd_pair(argv: list[str]) -> int:
 
 def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
                      server: str = "", tunnelled: bool = False,
-                     lookup: str = "", jobs: bool = False, role: str = "") -> int:
+                     lookup: str = "", jobs: bool = False, role: str = "",
+                     sessions: bool = False) -> int:
     """`pair --device NAME`: a code the app trades for a device token at
     `POST /pair`. The code lives in the server package's own store
     (agent_media_server.devices), NOT the spool's `pair-code` above — the two
@@ -688,7 +696,8 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
     if not name:
         print("--device needs a name, e.g. --device \"Pixel 8a\"", file=sys.stderr)
         return 2
-    code, _expires = _devices.mint_code(name, enrol=enrol, jobs=jobs, role=role)
+    code, _expires = _devices.mint_code(name, enrol=enrol, jobs=jobs, role=role,
+                                        sessions=sessions)
     app_link, web_link = _devices.links(code, host, port, server, lookup)
     if jobs:
         # Not the app: the host's own command line takes this one.
@@ -697,6 +706,10 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
         print(f"    media jobs pair '{app_link}'\n")
         print("  It pairs, installs the worker service for that host's init and starts\n"
               "  it. Then from here: media update --host <its first word> --dry-run\n")
+        if sessions:
+            print("  It may run agent sessions too (MEDIA_JOBS_SESSIONS=1 and a running\n"
+                  "  media-sessiond there): media session hosts, then\n"
+                  "  media session start <folder> --host <its first word> <message>\n")
         return 0
     # The app link first, on its own: it is what gets copied into the app's
     # pairing screen, and the http form below it was being copied instead.
@@ -2135,6 +2148,22 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
                 line(got)
             except OSError:
                 pass
+        elif path == "/jobs/session":
+            # A sessiond request for another host's session host, carried by
+            # its jobs worker (agent_media_server.phone_jobs.session; red5's
+            # sessiond is the caller, sessiond_remote.py): the host's token,
+            # never the public listener. `{"workers": true}` lists the hosts.
+            if not _desk_authorized(self):
+                self._json(401, {"error": "unauthorized"})
+                return
+            from agent_media_server import phone_jobs
+            body = self._read_json() or {}
+            if body.get("workers") is True:
+                self._json(200, {"ok": True, "workers": phone_jobs.session_workers()})
+                return
+            status, got = phone_jobs.session(str(body.get("host") or ""), body.get("request"),
+                                             body.get("timeout") or 30.0)
+            self._json(status, got)
         elif path == "/jobs/cancel":
             # Downloads on the phone no longer wanted (phone_jobs.cancel; core
             # phone_run.cancel): the host's token, never the public listener.

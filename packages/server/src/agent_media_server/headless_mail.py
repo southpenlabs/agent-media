@@ -24,6 +24,13 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   start a new chat"): the server's `/ask` wants a device's credential, so a
   session had been reaching into the driver by hand.
 
+  With `--host NAME` it runs on that host instead (roadmap 56: another
+  machine's sessiond, reached down its jobs worker's own connection;
+  sessiond_remote.py): its folder there is the same `~/…` path, cloned from
+  this checkout's origin when missing. A host that is down says so at once.
+* `hosts` lists the hosts that may run sessions for this one: connected or
+  not, their slots and free memory.
+
 * `wake` is a scheduled turn's way in (a timer's standing order, David,
   3 Nov 2026: agents that run day-to-day work on their own): the folder's
   live session is sent the order, and with none live a new one is started
@@ -97,7 +104,7 @@ def brief(view: dict) -> dict:
             "title": _title(view), "agent": str(view.get("agent") or "claude"),
             "card": bool(view.get("pending")) or view.get("state") == "approval",
             "tasks": int(view.get("tasks") or 0), "queued": len(view.get("queued") or []),
-            "last_event_at": view.get("last_event_at")}
+            "last_event_at": view.get("last_event_at"), "host": str(view.get("host") or "")}
 
 
 def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
@@ -156,7 +163,8 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
 
 
 def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
-          persona: str = "", role: str = "", permissions: str = "") -> tuple[int, dict]:
+          persona: str = "", role: str = "", permissions: str = "",
+          host: str = "") -> tuple[int, dict]:
     """A fresh headless Claude session in `cwd` with `text` as its first
     message; `(rc, answer)` with the session id and its thread link. Filed
     under the workspace a new chat from the app would get (send.ask), and
@@ -168,7 +176,8 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     before the first message by a sessiond that cannot take one. Always the
     public render: a session started from another, or from a timer, is never
     a private thread. `permissions` names its profile (permissions.py:
-    strict, normal, folder); empty is the host's."""
+    strict, normal, folder); empty is the host's. `host` runs it on that
+    host (roadmap 56; no persona there yet)."""
     from agent_media_core import layout
     from agent_media_core.intake.context import thread_link_base
 
@@ -179,6 +188,9 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         return RC_NONE, {"error": f"no folder {cwd}", "code": "none"}
     model, mode = session_settings.clean_new("claude", model, "plan" if plan else "")
     persona, role = (persona or "").strip(), (role or "").strip()
+    host = (host or "").strip()
+    if host and (persona or role):
+        return RC_USAGE, {"error": "a persona cannot start on another host yet", "code": "persona"}
     prompt_file = None
     if persona or role:
         from . import personas
@@ -194,14 +206,17 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
             prompt_file = personas.write(rendered)
         else:
             text = personas.prepend(rendered, text)
-    host = layout.workspace_for(layout.place_host(cwd), cwd)
-    r = _call("start", cwd=cwd, text=text, agent="claude", workspace=host, model=model,
-              mode=mode, permissions=permissions, timeout=30.0,
+    workspace = layout.workspace_for(layout.place_host(cwd), cwd)
+    r = _call("start", cwd=cwd, text=text, agent="claude", workspace=workspace, model=model,
+              mode=mode, permissions=permissions, timeout=240.0 if host else 30.0,
+              **({"host": host} if host else {}),
               **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
     if not r.get("ok"):
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
     sid = str(r.get("session") or "")
     out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
+    if host:
+        out["host"] = host
     if persona or role:
         if prompt_file:
             from . import personas
@@ -248,7 +263,13 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("--permissions", default="", choices=("", "strict", "normal", "folder"),
                     help="its permission profile (default: the host's); folder: the "
                          "folder's own .claude/settings.json decides, the rest asks the phone")
+    st.add_argument("--host", default="",
+                    help="run it on that host (a session worker of this server: "
+                         "`media session hosts`), not this one")
     st.add_argument("--json", action="store_true")
+    hs = sub.add_parser("hosts", help="the hosts that may run sessions for this one: "
+                                      "connected, slots, free memory")
+    hs.add_argument("--json", action="store_true")
     wk = sub.add_parser("wake", help="a scheduled turn: the folder's live session is sent "
                                      "the order, or one is started with it")
     wk.add_argument("cwd", help="the folder the agent works in")
@@ -285,6 +306,36 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as e:
         return RC_USAGE if e.code else 0
     views, up = rows()
+    if a.cmd == "hosts":
+        r = _call("hosts", timeout=60.0)
+        if not r.get("ok"):
+            msg = r.get("error") or "the session host did not answer"
+            print(json.dumps({"ok": False, **r}) if a.json else f"media session hosts: {msg}",
+                  file=sys.stdout if a.json else sys.stderr)
+            return RC_FAILED
+        hosts = list(r.get("hosts") or [])
+        if a.json:
+            print(json.dumps({"ok": True, "hosts": hosts}))
+            return 0
+        if not hosts:
+            print("no other host runs sessions for this one (pair one: media-visual-canvas "
+                  "pair --device \"<host> jobs\" --jobs --sessions)")
+        for h in hosts:
+            if not h.get("host"):
+                print(f"(?) {h.get('error')}")
+                continue
+            if not h.get("connected"):
+                print(f"{h['host']}  offline  ({h.get('sessions', 0)} session(s) there)")
+                continue
+            facts = [f"{h.get('live', '?')}/{h.get('max_live', '?')} slots busy"
+                     if h.get("sessiond") else "its sessiond is not running"]
+            if h.get("mem_available_mb") is not None:
+                facts.append(f"{h['mem_available_mb']} MB free of {h.get('mem_total_mb')}")
+            if h.get("cpus"):
+                facts.append(f"{h['cpus']} cores")
+            print(f"{h['host']}  connected  {', '.join(facts)}  "
+                  f"({h.get('sessions', 0)} session(s) from here)")
+        return 0
     if a.cmd == "list":
         out = [brief(v) for v in views if a.all or v.get("live")]
         if a.cwd:
@@ -299,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
             flags = [b["state"] or "?"] + (["card up"] if b["card"] else []) + (
                 [f"{b['tasks']} task(s)"] if b["tasks"] else [])
             print(f"{b['session']}  {'live' if b['live'] else 'parked'}  "
-                  f"{', '.join(flags):<24}  {b['cwd']}  {b['title']}")
+                  f"{', '.join(flags):<24}  {b['cwd']}"
+                  + (f" @{b['host']}" if b["host"] else "") + f"  {b['title']}")
         return 0
     text = " ".join(a.text).strip()
     if a.cmd == "wake" and a.order and not text:
@@ -325,11 +377,12 @@ def main(argv: list[str] | None = None) -> int:
         return RC_FAILED
     if a.cmd == "start":
         rc, ans = start(a.cwd, text, model=a.model, plan=a.plan, persona=a.persona,
-                        role=a.role, permissions=a.permissions)
+                        role=a.role, permissions=a.permissions, host=a.host)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:
-            print(f"started {ans['session']} in {ans['cwd']}\n{ans['link']}")
+            print(f"started {ans['session']} in {ans['cwd']}"
+                  + (f" on {ans['host']}" if ans.get("host") else "") + f"\n{ans['link']}")
         else:
             print(f"media session start: {ans.get('error')}", file=sys.stderr)
         return rc

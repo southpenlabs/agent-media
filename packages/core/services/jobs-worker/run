@@ -15,7 +15,8 @@
 # host whose venv is broken. MEDIA_JOBS_WORKER_PYTHON overrides.
 exec 2>&1
 [ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
-export MEDIA_JOBS_SERVER MEDIA_JOBS_TOKEN MEDIA_PHONE_JOBS_PYTHON MEDIA_JOBS_CHECKOUT
+export MEDIA_JOBS_SERVER MEDIA_JOBS_TOKEN MEDIA_PHONE_JOBS_PYTHON MEDIA_JOBS_CHECKOUT \
+       MEDIA_JOBS_SESSIONS MEDIA_SESSIOND_SOCKET
 here=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 for py in "${MEDIA_JOBS_WORKER_PYTHON:-}" /usr/bin/python3 "${PREFIX:-/nonexistent}/bin/python3" python3; do
   if [ -n "$py" ] && command -v "$py" >/dev/null 2>&1; then

@@ -11481,6 +11481,70 @@ writes nothing to tmux.
 `claude agents --json` lists headless sessions too (seen in the smoke run);
 nothing here reads it.
 
+### 17.1 Sessions on another host — BUILT 11 Nov 2026 (roadmap 56, the manual form)
+
+David, 11 Nov 2026: "let's get our claude sessions running on red2 next ...
+I'm sick of only being able to run three at once." The server's sessiond
+stays the front door; another host runs its own media-sessiond and its jobs
+worker (§6.21a), which dials out to this server, so nothing reaches the
+other host (the off-the-tailnet rule). Code: `sessiond_remote.py` (this
+side), `phone_jobs.session` (the channel),
+`packages/core/services/jobs-worker/jobs-worker.py` (the relay there).
+
+- **Pairing.** On the server, `media-visual-canvas pair --device "red2 jobs"
+  --jobs --sessions` (or `devices --sessions ID` for a jobs worker paired
+  already): a jobs-only device that may also take `session` jobs
+  (`devices.is_session_worker`; the jobs bit alone never does). On the host,
+  `media jobs pair '<link>'`, then `MEDIA_JOBS_SESSIONS=1` in its env file:
+  its stream then says `?kinds=restart,update,session`. The host's name for
+  `--host` is the first word of the device's name.
+- **Starting one.** `media session start <folder> --host red2 <text>` (or the
+  socket's `start` with `host`). The folder goes as `~/…`, the server's home
+  being not the host's; a folder missing there is cloned from the server
+  checkout's `origin`, or refused with a sentence (`bad_cwd`). Claude only;
+  no persona or branch yet (`unsupported`). The server keeps the session's
+  record (`<state>/sessiond/<id>.json` with `host`, `remote_cwd`,
+  `seq_seen`), so the canvas treats the thread as headless (§17) even while
+  either side is down.
+- **Talking to it.** Every op on such a session goes to its host
+  (`send`, `answer`, `interrupt`, `close`, `park`, `resume`, `configure`,
+  `rename`, `release`, `run_now`, `stop_task`); `relocate` is refused for now.
+  `get`, `list` and `events` without a wait answer from the last poll.
+  Views from another host carry `host`, `remote_cwd`, `remote_pid`, and
+  `pid: null` (never a process of this host's).
+- **The poll.** Every `MEDIA_SESSIOND_REMOTE_SYNC_S` (2 s), sooner after an
+  op, one `sync` per host brings each recent session's view, its events
+  since `seq_seen`, and its Claude transcript from the mirror's length, in
+  whole lines (≤ 512 KiB a time). The transcript is mirrored at
+  `<state>/sessiond/remote/<id>.jsonl`; `recaps.transcript_path` falls back
+  to it, so the thread's messages, recaps and stream read it as they read a
+  local one.
+- **Speech.** The host runs its sessions with `MEDIA_HOOK_ENABLED=0`: it
+  never speaks. A `result` heard in the poll runs *this* host's Stop hook
+  (media-hook-claude-code) with the reply, the mirror and the workspace, so
+  the reply is spoken, filed and notified as a local headless session's is
+  (`MEDIA_SESSIOND_REMOTE_SPEECH=0` turns that off). `media attach` and every
+  other route to a device stay this server's.
+- **A host that is down.** A start or message is answered at once:
+  `ok: false, code: "host_down"` (route status 503) and a sentence naming the
+  host ("red2 is offline: its jobs worker is not connected …"). Its sessions
+  show not live (`down`, `host_down`) until a poll reaches it again.
+- **Slots and restarts.** Each host counts its own slots (its sessiond's
+  `max_live`, sized to it; `ping` now says `max_live`, `live`, `free_mb`).
+  `media session hosts` (the socket's `hosts`) lists the hosts that may run
+  sessions here, connected or not, with slots, free memory and cores. A
+  restart of the server's sessiond does not touch the other host's
+  sessions and does not wait for them (restart_services leaves views with
+  `host` out); the host's own restart drains its own sessions there
+  (`media restart-services --host red2`, down the same stream).
+- **Rows.** `/targets` headless rows and `/sessions/state` rows carry `host`
+  (and `host_down`) for a session on another host. The app does not show it
+  yet.
+- **Canvas route.** `POST /jobs/session {"host", "request", "timeout"}` →
+  that host's sessiond answer; `{"workers": true}` → `{"workers": [{id,
+  name, host, connected}]}`. The host's token, never the public listener
+  (as `/jobs/run`).
+
 ## 18. Layouts — BUILT 22 Sep 2026
 
 Where a session started or revived from the app opens depends on the host's

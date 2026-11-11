@@ -84,6 +84,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # gate sets its own.
     monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "-")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # A session on another host (sessiond_remote.py, roadmap 56) is reached
+    # through this host's real canvas and its token: never from a test, which
+    # would start or message a session on red2. Its replies are never spoken
+    # here either. A test of it sets its own `call`.
+    from agent_media_server import sessiond_remote
+
+    monkeypatch.setattr(sessiond_remote, "canvas_call", lambda body, timeout: (
+        503, {"ok": False, "code": "host_down", "error": "no other host from a test"}))
+    monkeypatch.setenv("MEDIA_SESSIOND_REMOTE_SPEECH", "0")
     # Files a reply names are copied into the upload root as the thread is
     # read (file_links.py): never into the real ~/shared, and no copy
     # remembered from another test.

@@ -1155,6 +1155,8 @@ def _live_states() -> list[dict]:
             row = {"session": sid, "tail": tails.get(sid, ""),
                    "state": contract_state(v), "mem_mb": hmem.get(sid),
                    "title": _headless_title(sid, v), "driver": "headless"}
+            if v.get("host"):
+                row["host"] = str(v["host"])    # runs on another host (roadmap 56)
             # Its tasks sessiond still hears from, once the turn is over (§6.1).
             if row["state"] == "waiting":
                 bg = background.of_session(sid, tasks=v.get("task_list") or [])
@@ -1426,6 +1428,11 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
                     "harness": str(v.get("agent") or "claude"), "source": "sessiond",
                     # The model kept for it (session_model.chosen), popped before the list goes out.
                     "_chosen": str(v.get("model") or "")})
+        if v.get("host"):
+            # The host it runs on, when not this one (roadmap 56, §6.1).
+            row["host"] = str(v["host"])
+            if v.get("host_down"):
+                row["host_down"] = True
         out.append(row)
     return out
 

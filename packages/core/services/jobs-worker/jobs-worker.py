@@ -59,6 +59,25 @@ for the services the checkout owns (or `only`), 10 s out and detached, with
 the busy checks. Answered as `result: {pulled: {from, to}, moved, lines,
 restart}`. A dry run fetches and says what a pull would bring.
 
+**Agent sessions** (roadmap 56, David, 11 Nov 2026: "let's get our claude
+sessions running on red2 next ... I'm sick of only being able to run three
+at once"). With `MEDIA_JOBS_SESSIONS=1` here, and a device the server let
+take them (`pair --device NAME --jobs --sessions`), the stream also says
+`session`, and the server's sessiond sends jobs of kind `session`: `{id,
+kind: "session", session: <a sessiond request>, timeout}`. Each is relayed
+to this host's own media-sessiond (its unix socket, as the canvas talks to
+it) and its answer posted as `result`; nothing runs in a shell. The relay
+adds three things sessiond does not do itself:
+
+* `start`'s `cwd` comes as `~/…` (the server's home is not this one's) and
+  is made this host's; a folder missing here is cloned first from the `clone`
+  URL the server sent (its own checkout's origin), or refused plainly;
+* `sync` (the server's poll, every couple of seconds): the views of the
+  sessions named, each one's events since the `seq` given, and its Claude
+  transcript from the byte `offset` given (whole lines, at most
+  SESSION_CHUNK at a time), so the thread's log is served from here;
+* `host`: this host's name, cores, memory and sessiond's slots.
+
 Env, the phone's: MEDIA_PHONE_JOBS_SERVER (https://red5.sasonica.com),
 MEDIA_PHONE_JOBS_TOKEN (else the token file). Any host's: MEDIA_JOBS_SERVER
 and MEDIA_JOBS_TOKEN (else jobs-worker.json). Both: MEDIA_PHONE_JOBS_PYTHON
@@ -91,8 +110,17 @@ MAX_OUT = 1 << 20
 #: Cloudflare turns away Python's own "Python-urllib/x.y" (error 1010), so
 #: the worker names itself.
 UA = "sasonica-phone-jobs/1"
-#: The kinds of job besides a command this worker takes (`?kinds=`).
+#: The kinds of job besides a command this worker takes (`?kinds=`); `session`
+#: only where MEDIA_JOBS_SESSIONS=1 says this host runs agent sessions.
 KINDS = ("restart", "update")
+#: A transcript is sent at most this much at a time (whole lines; a longer
+#: line goes whole, up to SESSION_LINE_MAX).
+SESSION_CHUNK = 512 * 1024
+SESSION_LINE_MAX = 8 << 20
+#: A session id, as the relay will look one up on disk.
+SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,80}")
+#: How long a folder's clone may take before a start gives up.
+CLONE_TIMEOUT_S = 150
 #: A restart's fields, and nothing else (server phone_jobs.RESTART_KEYS). An
 #: update takes the same four: they are its restart's.
 RESTART_KEYS = frozenset({"only", "after", "force", "dry_run"})
@@ -475,9 +503,229 @@ def _update(job: dict, token: str) -> None:
                             "result": result}, token)
 
 
+# --- agent sessions: a relay to this host's media-sessiond --------------------------
+
+
+def sessions_on() -> bool:
+    return os.environ.get("MEDIA_JOBS_SESSIONS", "").strip() == "1"
+
+
+def kinds() -> tuple:
+    return KINDS + (("session",) if GENERIC and sessions_on() else ())
+
+
+def sessiond_socket() -> Path:
+    """Where this host's sessiond listens (agent_media_server.sessiond.socket_path)."""
+    env = (os.environ.get("MEDIA_SESSIOND_SOCKET") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    run = (os.environ.get("XDG_RUNTIME_DIR") or "").strip() or f"/run/user/{os.getuid()}"
+    return Path(run) / "agent-media" / "sessiond.sock"
+
+
+def sessiond_call(req: dict, timeout: float = 30.0) -> dict:
+    """One request to this host's sessiond; a sessiond that is not there
+    answers `code: "down"`, never raises."""
+    import socket
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        with sock:
+            sock.settimeout(timeout)
+            sock.connect(str(sessiond_socket()))
+            sock.sendall((json.dumps(req) + "\n").encode())
+            buf = b""
+            while not buf.endswith(b"\n"):
+                chunk = sock.recv(1 << 16)
+                if not chunk:
+                    break
+                buf += chunk
+        got = json.loads(buf or b"{}")
+    except (OSError, ValueError, AttributeError) as e:
+        return {"ok": False, "code": "down",
+                "error": f"the session host on {_hostname()} (media-sessiond) is not running ({e})"}
+    return got if isinstance(got, dict) else {"ok": False, "code": "internal",
+                                              "error": "sessiond answered nonsense"}
+
+
+def _hostname() -> str:
+    import socket
+
+    return socket.gethostname().split(".")[0]
+
+
+def host_facts() -> dict:
+    """This host as a session host: name, cores, memory, sessiond's slots."""
+    mem: dict = {}
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            k, _, v = line.partition(":")
+            if k in ("MemTotal", "MemAvailable"):
+                mem[k] = round(int(v.split()[0]) / 1024)
+    except (OSError, ValueError, IndexError):
+        pass
+    ping = sessiond_call({"op": "ping"}, timeout=5.0)
+    out = {"host": _hostname(), "cpus": os.cpu_count(), "mem_total_mb": mem.get("MemTotal"),
+           "mem_available_mb": mem.get("MemAvailable"), "sessiond": bool(ping.get("ok"))}
+    if ping.get("ok"):
+        for k in ("max_live", "live", "free_mb", "min_free_mb"):
+            if k in ping:
+                out[k] = ping[k]
+    else:
+        out["error"] = ping.get("error")
+    return out
+
+
+def local_cwd(cwd: str) -> str:
+    """The server's `~/…` folder as this host's."""
+    cwd = (cwd or "").strip()
+    if cwd == "~" or cwd.startswith("~/"):
+        cwd = str(Path.home()) + cwd[1:]
+    return os.path.normpath(cwd) if cwd else ""
+
+
+def _clone(url: str, path: str) -> str:
+    """Clone `url` into `path`; "" when done, else why not."""
+    if not url or url.startswith("-") or any(c in url for c in "\n\r\0"):
+        return "no clone URL"
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(["git", "clone", "--quiet", "--", url, path], capture_output=True,
+                           text=True, timeout=CLONE_TIMEOUT_S, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"git clone failed ({e})"
+    if r.returncode != 0:
+        return f"git clone failed: {(r.stderr or r.stdout).strip().splitlines()[-1:] or r.returncode}"
+    return ""
+
+
+def transcript_file(session: str) -> "Path | None":
+    """This host's Claude Code transcript of `session`, or None."""
+    if not SESSION_ID_RE.fullmatch(session or ""):
+        return None
+    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+    hits = list((root / "projects").glob(f"*/{session}.jsonl"))
+    if not hits:
+        return None
+    return max(hits, key=lambda p: p.stat().st_mtime)
+
+
+def transcript_chunk(session: str, offset: int) -> dict:
+    """`{"offset", "data", "size", "reset"}`: whole lines of the transcript
+    from byte `offset` (from 0 again, `reset`, when the file is shorter)."""
+    path = transcript_file(session)
+    if path is None:
+        return {"offset": 0, "data": "", "size": 0, "missing": True}
+    try:
+        size = path.stat().st_size
+        reset = offset > size or offset < 0
+        start = 0 if reset else offset
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            raw = fh.read(SESSION_CHUNK)
+            cut = raw.rfind(b"\n")
+            while cut < 0 and raw and start + len(raw) < size and len(raw) < SESSION_LINE_MAX:
+                more = fh.read(SESSION_CHUNK)
+                if not more:
+                    break
+                raw += more
+                cut = raw.rfind(b"\n")
+    except OSError as e:
+        return {"offset": offset, "data": "", "size": 0, "error": str(e)}
+    raw = raw[:cut + 1] if cut >= 0 else b""
+    return {"offset": start, "data": raw.decode("utf-8", "replace"), "size": size,
+            "reset": reset}
+
+
+def session_sync(req: dict) -> dict:
+    """The server's poll: views, new events and transcript lines of the
+    sessions it names (`{"sessions": {id: {"seq", "offset"}}}`)."""
+    want = req.get("sessions") if isinstance(req.get("sessions"), dict) else {}
+    listed = sessiond_call({"op": "list"}, timeout=10.0)
+    if not listed.get("ok"):
+        return {**listed, "host": host_facts()}
+    views = {str(v.get("session")): v for v in listed.get("sessions") or []
+             if isinstance(v, dict)}
+    out: dict = {"ok": True, "host": host_facts(), "sessions": [], "events": {},
+                 "transcripts": {}}
+    for sid, mark in list(want.items())[:64]:
+        mark = mark if isinstance(mark, dict) else {}
+        v = views.get(sid)
+        if v is None:
+            continue
+        out["sessions"].append(v)
+        try:
+            seq, offset = int(mark.get("seq") or 0), int(mark.get("offset") or 0)
+        except (TypeError, ValueError):
+            seq, offset = 0, 0
+        if int(v.get("seq") or 0) > seq:
+            ev = sessiond_call({"op": "events", "session": sid, "since": seq}, timeout=10.0)
+            if ev.get("ok"):
+                out["events"][sid] = ev.get("events") or []
+        out["transcripts"][sid] = transcript_chunk(sid, offset)
+    return out
+
+
+def session_request(req) -> dict:
+    """A session job's request, done here: sessiond's answer as a dict."""
+    if not isinstance(req, dict) or not req.get("op"):
+        return {"ok": False, "code": "bad_request", "error": "a sessiond request, please"}
+    op = str(req["op"])
+    if op == "sync":
+        return session_sync(req)
+    if op == "host":
+        return {"ok": True, "host": host_facts()}
+    req = {k: v for k, v in req.items() if k not in ("clone", "token")}
+    timeout = 30.0
+    if op == "start":
+        cwd = local_cwd(str(req.get("cwd") or ""))
+        if not cwd:
+            return {"ok": False, "code": "bad_cwd", "error": "no folder named"}
+        if not os.path.isdir(cwd):
+            url = str((req.get("_clone") or "")).strip()
+            if not url:
+                return {"ok": False, "code": "bad_cwd",
+                        "error": f"{_hostname()} has no folder {cwd}, and the server's has "
+                                 "no git remote to clone it from"}
+            why = _clone(url, cwd)
+            if why:
+                return {"ok": False, "code": "bad_cwd",
+                        "error": f"{_hostname()} has no folder {cwd}, and cloning it "
+                                 f"failed: {why}"}
+        req["cwd"] = cwd
+        timeout = 60.0
+    elif op == "events":
+        try:
+            timeout = min(float(req.get("wait") or 0), 30.0) + 10.0
+        except (TypeError, ValueError):
+            timeout = 30.0
+    req.pop("_clone", None)
+    return sessiond_call(req, timeout=timeout)
+
+
+def _session(job: dict, token: str) -> None:
+    if not sessions_on():
+        _answer(job.get("id"), {"rc": 2, "out": "", "err": "this host does not take agent "
+                                "sessions (MEDIA_JOBS_SESSIONS is not 1)"}, token)
+        return
+    t0 = time.monotonic()
+    try:
+        got = session_request(job.get("session"))
+    except Exception as e:  # noqa: BLE001 — answer, never leave the server waiting
+        got = {"ok": False, "code": "internal", "error": f"the relay failed ({e})"}
+    op = (job.get("session") or {}).get("op") if isinstance(job.get("session"), dict) else "?"
+    if op != "sync" or not got.get("ok"):
+        print(f"job {job.get('id')}: session {op}: "
+              f"{'ok' if got.get('ok') else got.get('code')} in {time.monotonic() - t0:.1f}s",
+              flush=True)
+    _answer(job.get("id"), {"rc": 0, "out": "", "err": "", "result": got}, token)
+
+
 def _handle(job: dict, token: str) -> None:
     kind = job.get("kind") or "cmd"
-    if kind == "cmd":
+    if kind == "session":
+        _session(job, token)
+    elif kind == "cmd":
         _run(job, token)
     elif kind == "restart":
         _restart(job, token)
@@ -489,7 +737,7 @@ def _handle(job: dict, token: str) -> None:
 
 
 def _stream(token: str) -> None:
-    req = urllib.request.Request(_server() + "/jobs/events?kinds=" + ",".join(KINDS), headers={
+    req = urllib.request.Request(_server() + "/jobs/events?kinds=" + ",".join(kinds()), headers={
         "Authorization": "Bearer " + token, "Accept": "text/event-stream",
         "User-Agent": UA})
     with urllib.request.urlopen(req, timeout=READ_TIMEOUT_S) as r:
