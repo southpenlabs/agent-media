@@ -151,8 +151,15 @@ because they change how every service starts.
 
 His framing: "we're talking about moving all the agent stuff to red2".
 
-1. **red5, the cloud machine, is the permanent server; home machines (red2
-   now) are workers.** The server never depends on red2.
+1. ~~**red5, the cloud machine, is the permanent server; home machines (red2
+   now) are workers.** The server never depends on red2.~~
+   **Reversed the next day.** David, 12 Nov 2026: "I think I'm going to pair
+   the sasonica app with red2 rather than run it through red5. after all, it
+   was designed to run on a personal computer, right?" red2 becomes the
+   server; red5 keeps what is not agent-media, becomes the remote session
+   worker and holds the backups. The plan is
+   `docs/proposals/2026-11-12-the-server-moves-home.md`; everything else
+   here stands, and step 1's releases are the drill the move uses.
 2. **Deploy on every green push**, once step 1 has shown the step back
    works.
 3. **Green first: the core and server test suites**, not the 80-minute app

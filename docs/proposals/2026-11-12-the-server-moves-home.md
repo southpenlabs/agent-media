@@ -1,0 +1,343 @@
+# The server moves home: Sasonica on red2 (12 Nov 2026)
+
+David, 12 Nov 2026 (thread
+https://red5.sasonica.com/app/t/a4e12d56-94f0-4435-84a3-05e8a8c4b789):
+
+> I think I'm going to pair the sasonica app with red2 rather than run it
+> through red5. after all, it was designed to run on a personal computer,
+> right?
+
+and earlier the same morning: "I think consistent connection and power will
+be fine for red2."
+
+This **reverses decision 1 of
+`docs/proposals/2026-11-11-where-things-run.md`** ("red5, the cloud machine,
+is the permanent server; home machines are workers"). He has heard the case
+against — home power, home internet, no public address — and is choosing the
+home machine anyway. The 450 ms to Germany on every tap is the cost he is
+removing. This document plans it; it does not re-argue it. Mail #248 from
+sam carried the direction.
+
+Everything else in the where-things-run proposal stands, and most of it
+helps: releases (step 1, done 11 Nov) are exactly the drill a new server
+needs, and "new machine = release + restore" is how red2 becomes the server.
+
+## What changes, in one line
+
+The Sasonica app pairs with **red2 at home**, which runs the full
+agent-media server from a release with red5's state restored onto it, behind
+its own Cloudflare Tunnel at **`red2-ryer.sasonica.com`**. red5 keeps
+everything that is not agent-media, becomes the remote session worker, and
+holds red2's backups off-site.
+
+## What David chose (12 Nov 2026)
+
+Four question cards, and his answer to each:
+
+1. **The public name**: not `red5.sasonica.com` moved across, and not a role
+   name. He asked for the user in the name — "it should include the
+   username … It should end up as `red2-ryer.sasonica.com`", and added:
+   "There should be some documentation about the pairing process regarding
+   this. I guess we should also build a migration feature that includes this
+   renaming." Both are in this plan ("The name" and "The migration
+   feature").
+2. **red5's role**: *keep the non-agent-media services, become a worker and
+   the backup target.* Not a full evacuation, not a second live server.
+3. **The cutover**: *dress rehearsal, then one evening's switch.* Not a
+   straight flip, not a week of both.
+4. **The house audio**: *moves in the same cutover.* Snapcast, Mopidy and
+   Spotify come home with the server.
+
+## The name
+
+`red2-ryer.sasonica.com`: `<host>-<user>.sasonica.com`, and that is the
+convention from here, not a one-off. The reasons it is the right shape:
+
+- **A server is per person, not per machine.** `2026-10-29-a-server-per-person.md`
+  decided that a second person on one box runs their own agent-media server
+  as their own Linux user. Two servers on one host would then both want the
+  host's name; the user half is what tells them apart. That proposal already
+  lists "the hostname as an identity" among the things that collide.
+- **The domain is shared.** `sasonica.com` carries names for every install
+  (`2026-10-03-off-the-tailnet.md`, "The long-term path: Sasonica does it"),
+  where the relay hands out `<id>.sasonica.com`. `<host>-<user>` is the
+  readable form of the same idea and will not collide with a stranger's
+  `red2`.
+- **It reads as what it is** at the moment it matters most: on the pairing
+  link and in Settings → Server address.
+
+So: red5, if it is ever given a public name again, is
+`red5-ryer.sasonica.com`. The old `red5.sasonica.com` does **not** die on
+the day of the move — see "The tunnel" below.
+
+**Documentation owed** (David asked for it): a new
+`docs/reference/server-address.md` that says, in one place, how a server
+gets its address and what the app keeps of it — the naming convention above,
+the three shapes of contract §19, the named tunnel, what pairing hands the
+app (`server.name`, `server.base`, `server_id`, `lookup` — contract §9), why
+the **device token survives an address change** and a rename is therefore
+not a re-pairing, and what `media server rename` does. Contract §19 gains a
+short "Naming a server" note pointing at it.
+
+## The migration feature
+
+David: "I guess we should also build a migration feature that includes this
+renaming. What do you think?" — yes, and it should be built *before* the
+cutover, because the cutover is its first user. A rename today means editing
+a dozen environment variables by hand and finding out a week later that
+speech clips still carry the old host. Most of what it needs already exists:
+
+- **`server_id`** is made once and kept in the state dir
+  (`servers_report.py: server_id()`). Restore the state on red2 and it is
+  *the same server* with a new address — not a new one.
+- **The device token holds across addresses.** Settings → Advanced → Server
+  address is all the app needed when p8a moved onto the tunnel on 3 Oct
+  2026.
+- **sasonica.com already knows where a server is.** `servers_report.py`
+  POSTs `{id, name, api, web}` to the account's issuer at sign-in and daily
+  (roadmap item 20). The app's `relocate()` already follows a moved address
+  through `server.lookup`.
+
+What to build, in `packages/server` plus a `media` subcommand:
+
+1. **`media server rename --to https://<name> [--also <old-url>…]`**
+   - checks the new name reaches *this* server (`/healthz` through the
+     tunnel) before changing anything;
+   - writes `MEDIA_PUBLIC_URL` and `MEDIA_SERVER_NAME`, **and every setting
+     derived from the address** — today that is at least
+     `MEDIA_SPEECH_CLIP_BASEURL_SASONICA`, `MEDIA_SPEECH_CLIP_SIGNED_SASONICA`,
+     `MEDIA_FEED_BASE_URL`, `MEDIA_SUMMARY_BASE_URL`, `MEDIA_BOOK_BASEURL_PHONE`,
+     `MEDIA_VISUAL_URL`, `MEDIA_RADIO_HANDOFF_ENDPOINT`,
+     `MEDIA_MUSIC_SASONICA_ENDPOINT`, `MEDIA_LISTEN_ENDPOINT`. Missing one of
+     these is the whole reason the command exists;
+   - reports the new address to sasonica.com **at once** (`report_soon`)
+     under the unchanged `server_id`;
+   - keeps the old names answering: `--also` adds them to the tunnel's
+     ingress and to `MEDIA_APP_LINKS_EXTRA`, so old `https://…/app/t/<id>`
+     thread links still open in the app.
+2. **The server says it moved.** `GET /features` carries `moved_to` once a
+   rename has happened, and a thread stream (`/sessions/events`) emits
+   `server_moved` with the new base. A device that is listening follows
+   without anyone opening Settings; one that is not picks it up on its next
+   `/me`.
+3. **`media doctor` check**: the public URL, the tunnel's ingress hostnames,
+   `/.well-known/assetlinks.json`'s hosts and the derived clip base URLs all
+   agree. This is the check that would have caught every rename bug.
+4. **`media server move --to <host>`** — the whole drill as one command, for
+   this move and for anyone else's: build a release on the target
+   (`media update --no-restart`), `media backup` here → `media restore`
+   there (session 9d6d2397's work, mail #246), stop the services here,
+   final sync, rename, start there, and `--rollback` to undo it. This is the
+   "new machine = release + restore" drill with a name.
+
+Points 1–3 are a day's work and are what the cutover uses. Point 4 can
+follow the cutover, written from what the cutover actually did; doing it the
+other way round means debugging a new command on the evening the server
+moves.
+
+## What moves, what stays
+
+**To red2 — agent-media's own server.** The `agent-media-*` user units:
+`visual-canvas`, `sessiond`, `sink-speech`, `sink-book`, `speech-state`,
+`clips`, `tts-shim`, `tts-shim-private`, `completions-shim`, `mcp`, `share`,
+`book-observer`, `intake-ha`. With them `sasonica-tunnel`, and the state:
+`~/.local/state/agent-media` (2.7 GB — `state.db` 50 MB, `search.db` 267 MB,
+`audio` 734 MB of speech clips, `sessiond` 941 MB of transcripts, `visual`,
+`feed`), `~/.local/share/agent-media` (1.4 GB), `~/.cache/agent-media`
+(140 MB), and `~/.config/agent-media.env` with its tokens and pairings.
+About 4.3 GB: minutes over the LAN, not a migration project.
+
+**To red2 — the house audio** (his choice 4): `snapserver` (a *system* unit
+on red5), the `am-snapfifo@am` and `@am-music` units, `filter-chain`,
+`mopidy`, `mopidy-mpv`, `mopidy-books`, `mpd-proto`, `spotifyd`, `beet-web`,
+and PipeWire/WirePlumber as user units. This one is more than a latency win:
+`docs/reference/music-local-and-snapcast.md` records that **red5's
+datacenter IP gets `403 Forbidden` from most YouTube CDN URLs**, which the
+rooms path papers over by forcing a `tv`/`android_vr` yt-dlp client and
+which breaks every time YouTube changes formats. red2 is on a residential
+connection: the workaround stops being needed. Speech and music also stop
+crossing the internet to reach speakers in the same house.
+
+What this costs: every Snapcast client has to be repointed at red2 —
+`hpo`, `sp4r`, `p8a`, `tvr` on the `am`/`am-music` groups today — and the
+Spotify and ListenBrainz logins move with `spotifyd` and the env file.
+
+**Stays on red5** (his choice 2): the six `mautrix-*` bridges,
+`hippocampus` (the memory store) with `memory-governor`, the AI gateways
+`litellm` and `cli-proxy-api`, agent-mail, `sasonica-shell`,
+`herdr-mobile-relay`, `sillytavern`, `hummingbot-gateway`, `meridian`,
+`astrology`, and the two GitHub runners it keeps as fallbacks.
+
+**The cross-host calls this creates, and what to do about them.** With the
+server at home, every memory search and every model call through the
+gateways would leave Melbourne for Germany and come back — the 450 ms this
+move exists to remove, put back into the two paths that are hit most often.
+So, as a step *after* the cutover has settled, and recommended rather than
+decided:
+
+- **Move `hippocampus` and `memory-governor` to red2.** red2 already serves
+  the governor's rerank and Ollama on `:11434`, so half of it is there. (Note
+  for whoever does it: homer's older store is still to be merged in — that
+  merge should land on red2, not red5.)
+- **Move `litellm` and `cli-proxy-api` to red2.** They are proxies with keys,
+  not data.
+- **Leave agent-mail and the Matrix bridges on red5.** Mail is fleet
+  coordination and a few hundred milliseconds is nothing to it; the bridges
+  talk to the outside world either way.
+
+Until they move, red2 reaches them over the tailnet. That is allowed —
+`docs/decisions/2026-10-18-off-the-tailnet.md` keeps a tailnet path as a
+*fallback* — but a host-to-host link that only works on the mesh is not
+something to settle for, which is the other reason to move them rather than
+to give each one a public name and a token.
+
+## The tunnel
+
+red5's shape is the template, and it is already proven: `cloudflared` as a
+user unit (`sasonica-tunnel.service`), a named tunnel, and
+`~/.cloudflared/config.yml` sending one hostname to **127.0.0.1:8789** —
+the canvas's second, app-routes-only listener (`MEDIA_VISUAL_PUBLIC`), which
+answers `app.dispatch`, `/img/` and `/healthz` and 404s everything else.
+The desk routes, `/input` among them, are not on it. red2's tunnel is the
+same file with a different hostname.
+
+For sam, who offered to do the host-side setup: a named tunnel on red2,
+`~/.cloudflared/config.yml` with
+
+```yaml
+ingress:
+  - hostname: red2-ryer.sasonica.com
+    service: http://127.0.0.1:8789
+  - hostname: red5.sasonica.com
+    service: http://127.0.0.1:8789
+  - service: http_status:404
+```
+
+and DNS for both names CNAME'd to red2's tunnel at cutover. The second
+hostname is deliberate: it is what makes every thread link already in
+David's history, and the app's current App Links claim, keep working with no
+rebuild and no reinstall. `MEDIA_VISUAL_PUBLIC=127.0.0.1:8789` goes in
+red2's env file; no inbound hole in the home router, and `ufw` stays as it
+is. Rolling back is moving the DNS records back to red5's tunnel.
+
+Two things to check on the way, both already known: Cloudflare replaces an
+origin's 502 and 504 with its own CORS-less page, which `app._status`
+already works around when `Cf-Ray` is present (contract §19); and
+`/sessions/events` caps `?ping=` at 60 s behind a tunnel because Cloudflare
+cuts an idle connection at 100 s.
+
+## Sessions: the flip
+
+Today red5's sessiond is the one the app talks to and red2 is a worker
+reached down its jobs worker's outbound connection
+(`MEDIA_JOBS_SESSIONS=1`, `pair --jobs --sessions`, contract §17.1). After
+the move that is the other way round:
+
+- **red2 runs the chats** — it is where the app is, and 8 cores and 32 GB
+  against red5's 4 and 8 is the reason this was wanted in the first place.
+  `MEDIA_SESSIOND_MAX` can be set generously there; "sick of only being
+  able to run three at once" (David, 11 Nov) stops being true.
+- **red5 becomes the remote worker**: its own media-sessiond, its jobs
+  worker opening the connection *to red2*, paired with
+  `pair --jobs --sessions` on red2 and `MEDIA_JOBS_SESSIONS=1` on red5. The
+  whole §17.1 machinery is symmetric; nothing new is needed but the pairing
+  in the other direction.
+- **`MEDIA_SESSIOND_DEFAULT_HOST` is unset on red2** (chats run where the
+  server is), with red5 named in `media session hosts` as the overflow.
+- Chats running on red2 at cutover keep running: they are already there.
+  Chats on red5 are the ones to let finish first — `media restart-services
+  --after 10` drains, and the cutover should start from a quiet house.
+
+One real consequence: a chat's own files live where the chat runs, so most
+work lands on red2's clone from here. That suits step 3 of where-things-run
+("chats in their own copies everywhere") and the shared-tree rules in
+`CLAUDE.md` get shorter, not longer.
+
+## Backups flip
+
+This is mail #246, claimed by session 9d6d2397 (`red2-media-backup`), so it
+is coordination, not a second design. The thing that changes: the state
+being backed up ends up **on red2**, so the target cannot be red2. It
+should be red5 — off-site, in another country, already running, and with
+the disk for it — or red3. Two asks for that design:
+
+- the target is a **setting**, not red2 by assumption, and `media backup`
+  can push to a host that is not the one holding the data;
+- sam's dotfiles `red5-backup-pull` (03:15 on red2) is pulling *from* red5
+  today; after the move the agent-media half of it is pulling the wrong way.
+  Whoever lands `media backup` should say where the line falls so sam can
+  cut his script down to what is not agent-media's (mail, org, dotfiles,
+  other agents' transcripts).
+
+Until `media backup` exists, the stopgap is sam's rsync + restic run in
+reverse: red5 pulling red2's `~/.local/state/agent-media`,
+`~/.local/share/agent-media` and `~/.config`. That is worth setting up on
+the day of the cutover, not after it.
+
+## Order of work
+
+0. **The migration feature**, points 1–3 above (`media server rename`, the
+   `moved_to`/`server_moved` answers, the `media doctor` check), and
+   `docs/reference/server-address.md`. Before anything is moved.
+1. **red2 becomes a release host.** `MEDIA_RELEASE_*` in its env file with
+   the same `MEDIA_RELEASE_PACKAGES` red5 has (core, server, visual,
+   tts-shim, completions-shim, engine-openai, engine-piper, the four intakes,
+   org-paragtd, voice-bridge), then `media update --no-restart`, then
+   `media-setup install-services` from the release so its units name
+   `current`. red2's existing sessiond and jobs worker move into release
+   mode at the same time (`media-setup release-mode`).
+2. **Host-side setup on red2** (sam): `cloudflared` and the named tunnel
+   above, PipeWire/WirePlumber for the audio, `snapserver`, `linger` on.
+   Nothing published in DNS yet — the rehearsal uses the tunnel's own
+   hostname or a scratch name.
+3. **The rehearsal.** A copy of red5's state restored onto red2 and the
+   stack brought up on a scratch public name, with red5 still serving: pair
+   a second device with it, send a message, hear a reply, play a song to one
+   room, open a thread link, check `media version` and `media doctor`. Known
+   traps live here, not on the night: the env file's absolute paths, the
+   `~/.claude/settings.json` hooks that name a checkout (releases.md, "What
+   still reads a checkout"), and anything that assumed the hostname `red5`.
+4. **The cutover evening.** Quiet the house. Let red5's chats finish
+   (`restart-services --after 10`). Stop red5's agent-media units and the
+   audio stack. Final `rsync` of the state. `media server rename --to
+   https://red2-ryer.sasonica.com --also https://red5.sasonica.com`. Move
+   both DNS records to red2's tunnel. Start red2. Repoint the Snapcast
+   clients. Check: a reply spoken, a song in a room, a thread link from the
+   phone, `/features` naming red2's release. Under an hour, and the way
+   back is the DNS records plus restarting red5's units.
+5. **The morning after.** Sessions flipped (red5 paired as red2's worker,
+   `MEDIA_SESSIOND_DEFAULT_HOST` unset on red2), backups running from red5
+   against red2, red5's agent-media units left installed but disabled for a
+   fortnight, and the roadmap and `CLAUDE.md` updated to say where the
+   server is.
+6. **Later, recommended**: `hippocampus`, `memory-governor`, `litellm` and
+   `cli-proxy-api` to red2, so the two most-used paths stop crossing the
+   world. Then look again at what red5 is for, and at whether the
+   where-things-run deployer (step 2 there) should now run on red2.
+
+## What to watch
+
+Not arguments against the move — he has made that call — but the things that
+will actually bite, and what already covers them.
+
+- **Power and an unattended reboot.** red2's root is LUKS, and it unlocks
+  itself: `clevis-tpm2` against PCR 7, so a power cut comes back without
+  anyone typing a passphrase. Worth knowing that PCR 7 is the Secure Boot
+  state — a firmware or shim update can invalidate the binding, and then the
+  box sits at a passphrase prompt until someone is home. Checking the
+  binding after a firmware update belongs in whatever watches red2. A UPS
+  would turn "the server is down" into "the internet is down" for short
+  cuts; his call whether that is worth it.
+- **Home internet.** The tunnel is outbound, so there is no port to forward
+  and nothing to do when the ISP changes the address. A dropped connection
+  is a dropped connection, though: the app says "Could not reach …" and
+  there is no second server answering. This is the cost he accepted.
+- **`unattended-upgrades` is on.** Fine for a worker, less fine for the
+  machine that answers the phone. Worth restricting to security updates and
+  excluding a reboot, or moving the window to a time he is awake.
+- **The GitHub runners are on red2 too.** An 80-minute end-to-end run now
+  competes with speech on the machine the phone talks to. 16 threads is a
+  lot of room, but the runners should be niced, or one moved back to red5,
+  if a reply is ever heard to stutter during a build.
+- **red5 at 79% disk** is now also the backup target. Check it has room for
+  restic snapshots of 4 GB of state before the first run.

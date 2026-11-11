@@ -2503,8 +2503,10 @@ ahead.
       11 Nov 2026: "Maybe we should just start using red 2 for everything
       speed critical", "ok" to: new chats there with no switch, red5 when
       red2 is down or full, running chats stay put, red5 keeps the front
-      door; whether red2 becomes primary was decided 11 Nov: no, red5
-      stays the server).
+      door; whether red2 becomes primary was decided 11 Nov — no, red5
+      stays the server — and **reversed on 12 Nov: red2 becomes the
+      server** the app pairs with, red5 the remote worker and backup
+      target, `docs/proposals/2026-11-12-the-server-moves-home.md`).
       `MEDIA_SESSIOND_DEFAULT_HOST=red2` in the server's env file: a `start`
       naming no host asks red2 first (`prepare`: connected, the folder
       there, a free slot, memory) and starts there, else here at once — down,
