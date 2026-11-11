@@ -2339,6 +2339,26 @@ def main() -> None:
     # Moves asked for mid-turn and left waiting by a restart (moves.py).
     from agent_media_server import moves as _moves
     _moves.start()
+    # The one scheduler (agent_media_core.scheduler): agent-media's own
+    # housekeeping and this install's `[jobs]`, in one thread here instead of
+    # a systemd timer and a oneshot unit per job — red5 spent 36 unit files
+    # on 18 jobs (docs/proposals/2026-11-12-fewer-services.md §4b).
+    # MEDIA_SCHEDULE=0 leaves it off, which is what a host still running the
+    # old timers wants so nothing runs twice.
+    from agent_media_core import scheduler as _scheduler
+    _scheduler.start()
+    # The small HTTP endpoints, in this process instead of a service each:
+    # speech-state, share, clips and the two shims, every one of them a
+    # ThreadingHTTPServer beside the six listeners already here
+    # (docs/proposals/2026-11-12-fewer-services.md §4c). Each keeps its own
+    # port, so no client changes. Off until MEDIA_ENDPOINTS names it, so a
+    # host still running the old units never has two processes on one port.
+    from agent_media_core import endpoints as _endpoints
+    _ep_started, _ep_problems = _endpoints.start_all()
+    for _line in _ep_problems:
+        print(f"endpoint {_line}", file=sys.stderr)
+    if _ep_started:
+        print(f"endpoints here: {', '.join(_ep_started)}")
     # The one Matrix /sync loop (agent_media_server.matrix), with the speech
     # intake reading from it; idle unless a token and a room are configured.
     from agent_media_server import matrix as _matrix

@@ -128,16 +128,26 @@ as a listeners table in config:
 speech-state 8675 ─┐
 share        8771  │
 clips        8780  ├─→ agent-media-server.service
-mcp-http     8765  │
-tts-shim     8782 ─┤   (tts-shim-private is the same code, other flags:
-completions  8783 ─┘    a second listener, not a second service)
+tts-shim     8782  │
+completions  8783 ─┘
+
+mcp-http     8765      not folded: the mcp library owns its event loop
+tts-shim     8784      not folded: private by its environment (see below)
 ```
 
-Each is a handful of routes over state the server already reads. `tts-shim`
-and `tts-shim-private` differing only by port and two flags is the clearest
-case of all — today that is two copies of one program, and if they must stay
-separate processes they should at least be `agent-media-tts-shim@.service`
-instances.
+Each is a handful of routes over state the server already reads.
+
+**Correction, 12 Nov 2026.** This section called the two TTS shims "the
+clearest case of all — two copies of one program". Wrong, and worth getting
+wrong in public: the private instance (8784, SillyTavern's household
+personas) is isolated *by its environment* — `MEDIA_SHIM_CANVAS=0`,
+`MEDIA_SPEECH_VISUAL=0`, and deliberately no `EnvironmentFile`, because
+agent-media.env turns visuals on. Its unit says so: "private scenes must
+never land there". Two listeners in one process share `os.environ`, which
+the handler reads per request, so folding it in would push private scenes to
+the canvas and wake the wall, the phone and the TV with precisely the
+content that must not reach them. It stays its own process. Only the main
+shim is foldable.
 
 **Stays separate, and why it matters:**
 
@@ -153,21 +163,27 @@ instances.
 13 running services → **5** (server, sessiond, sink-speech, sink-book, one
 intake), and 3 on a server that does not drive its own speakers.
 
-### 4d. Drop the runit layer on systemd hosts
+### 4d. Drop the runit layer on systemd hosts — **withdrawn, 12 Nov 2026**
 
-Every product unit today is a generated systemd unit wrapping a runit `run`
-script that carries a Termux shebang:
+The claim here was that eight of the twenty `run` scripts are nothing but a
+shebang, a comment and `exec media-<name>`, so the generated systemd unit
+could name the console script directly.
 
-```
-ExecStart=/bin/sh …/packages/core/services/speech-state/run
-   → run: exec media-speech-state
-```
+Measured before building it: **two are** — `speech-state` and
+`book-observer`. The rest do work that has to happen somewhere. Four export
+variables so they reach the process (redundant under systemd's
+`EnvironmentFile=`, required under runit, where the script sources the env
+file itself); `media-mcp` waits for a Tailscale address rather than
+crash-looping while the interface comes up; `sink-speech` probes the audio
+output; `state-gc` and `media-feed-publish` carry their own `sleep` because
+runit has no timers — which §4b now makes unnecessary, but only on a host
+running the scheduler.
 
-Two supervisors' worth of plumbing for an `exec`. Eight of the twenty `run`
-scripts are nothing but a shebang, a comment and `exec media-<name>`. Let
-the template put the console script in `ExecStart` directly, and keep a `run`
-only where it does real work (`sink-speech`'s audio-output probe,
-`media-mcp`'s wait-for-Tailscale). The Termux side keeps runit as it is.
+So the change would add a branch to the installer (detect a bare `exec`,
+emit a different `ExecStart`) and make the systemd and runit paths run
+different things, to save two `/bin/sh` processes. Not worth it. Left alone
+deliberately, recorded here so the next person does not re-derive the
+eight.
 
 ### 4e. Two gates to fix before red2
 
@@ -240,10 +256,27 @@ unconditionally, and never mentions ffmpeg.
 
 ## 7. Order of work
 
-1. §4e, the two gates — an hour, and it blocks a correct red2 install.
-2. §4a, `--prune` — small, and it is what keeps any of this from recurring.
-3. §4b, the scheduler — the biggest single reduction (36 unit files).
-4. §4c, one process — the biggest reduction in *processes*; do `tts-shim@`
-   first as the cheap half.
-5. §4d, drop the runit wrapper on systemd hosts — cosmetic until someone
-   else has to read a unit.
+David, 12 Nov 2026: "Yes, let's do all of that."
+
+1. **§4e, the two gates — done.** `requires-any: observe origin` for
+   media-share, and `MEDIA_FEED_BASE_URL` unset on red5, which takes the
+   three feed units out of a fresh install's set.
+2. **§4a, `--prune` — done.** `media-setup install-services --prune`. Run on
+   red5: call-guard and the three feed units gone, 40 `agent-media-*` unit
+   files down to 34, nothing running touched.
+3. **§4b, the scheduler — done.** `agent_media_core/scheduler.py`, started
+   by the server; `media schedule list` / `media schedule run <name>`;
+   `[jobs.<name>]` in config.toml for an installation's own. The clip prune
+   became `media audio prune` on the way (it was a `find` in a unit, with a
+   hand-maintained `-not -name music-bed-*` that is now in code).
+4. **§4c, one process — built, not yet switched on.**
+   `agent_media_core/endpoints.py` hosts speech-state, share, clips and the
+   two shims in the server, each on its own port. `MEDIA_ENDPOINTS` names
+   the ones to fold in and is empty by default, so a host still running the
+   old units can never have two processes on one port. `media endpoints`
+   says which is which. Migration is per-endpoint and reversible.
+5. **§4d — withdrawn.** The premise did not survive measurement; see above.
+
+Still to decide with David: which endpoints to switch on on red5, and in
+what order (§4c), and whether the 13 installation jobs move into
+`[jobs]` now or at the red2 cutover (§4b).

@@ -313,6 +313,13 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def make_server(bind: str, port: int) -> ThreadingHTTPServer:
+    """A listener ready to `serve_forever()`, not yet serving. Split out of
+    `main` so the server can host it on a thread rather than a unit of its
+    own (fewer-services §4c)."""
+    return ThreadingHTTPServer((bind, port), Handler)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -324,7 +331,7 @@ def main() -> int:
     if not _target():
         log.warning("MEDIA_COMPLETIONS_TARGET not set — requests will 502 until it is")
 
-    srv = ThreadingHTTPServer((args.bind, args.port), Handler)
+    srv = make_server(args.bind, args.port)
     log.info("completions-shim on http://%s:%d/v1  (target=%s, canvas=%s)",
              args.bind, args.port, _target() or "UNSET", _canvas())
     try:

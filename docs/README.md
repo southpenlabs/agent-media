@@ -28,6 +28,7 @@ than maintained by hand.
 - [claude-code-hooks](reference/claude-code-hooks.md) — what `media-setup profile` registers in Claude Code, and how asks, answers and slash commands reach a thread
 - [control-surface](reference/control-surface.md) — the control layer
 - [extensions](reference/extensions.md) — extending agent-media
+- [fewer-services](reference/fewer-services.md) — one scheduler and the in-process HTTP endpoints, instead of a unit each
 - [follow-along](reference/follow-along.md) — the highlight that follows speech, in tmux and in the app
 - [harnesses](reference/harnesses.md) — finding, reading and opening Claude Code, Codex, pi and the other agents' sessions
 - [hermes-voice](reference/hermes-voice.md)

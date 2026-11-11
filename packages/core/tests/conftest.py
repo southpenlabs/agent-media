@@ -494,3 +494,37 @@ def _no_practice_lookups(monkeypatch):
     monkeypatch.setattr(_pu, "_LOADED", [True])
     # The person's own embed index (practice_embed) never joins a test's list.
     monkeypatch.delenv("MEDIA_PRACTICE_EMBED_INDEX", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_endpoints_or_schedule_from_the_env_file(monkeypatch):
+    """Keep the suite from binding this host's real ports, or running its
+    jobs.
+
+    Both are new on 12 Nov 2026 and both are inherited-config hazards of
+    exactly the kind this file exists for
+    (docs/proposals/2026-11-12-fewer-services.md §4b, §4c):
+
+    * `MEDIA_ENDPOINTS` names the small HTTP endpoints the server hosts in
+      its own process. Inherited from ~/.config/agent-media.env, a test that
+      calls `endpoints.start_all()` would bind the live speech-state, share
+      and clip ports — on a working install, taking them from the running
+      services or failing depending on who got there first.
+    * `MEDIA_SCHEDULE` and the tick turn the scheduler thread on. A test that
+      started it would run this host's real jobs: `state-gc` against the real
+      state DB, `audio-prune` against the clips that are the only copy of
+      what was said in that voice.
+
+    A test that wants either sets its own, as test_endpoints.py and
+    test_scheduler.py do.
+    """
+    monkeypatch.delenv("MEDIA_ENDPOINTS", raising=False)
+    monkeypatch.setenv("MEDIA_SCHEDULE", "0")
+    monkeypatch.delenv("MEDIA_SCHEDULE_TICK_S", raising=False)
+    monkeypatch.delenv("MEDIA_AUDIO_KEEP_DAYS", raising=False)
+    # The per-endpoint binds and ports, by prefix: a test must never be able
+    # to reach, or displace, a listener the host is actually running.
+    for prefix in ("MEDIA_CLIPS_", "MEDIA_SPEECH_STATE_", "MEDIA_SHARE_",
+                   "MEDIA_SHIM_", "MEDIA_COMPLETIONS_"):
+        for key in [k for k in os.environ if k.startswith(prefix)]:
+            monkeypatch.delenv(key, raising=False)

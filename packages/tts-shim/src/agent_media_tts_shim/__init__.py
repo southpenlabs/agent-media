@@ -221,6 +221,27 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(audio)
 
 
+def make_server(bind: str, port: int) -> ThreadingHTTPServer:
+    """A listener ready to `serve_forever()`, not yet serving.
+
+    Split out of `main` so the server can host this on a thread instead of a
+    unit of its own (docs/proposals/2026-11-12-fewer-services.md §4c).
+
+    This applies to the MAIN shim only. red5's second instance
+    (`agent-media-tts-shim-private`, 8784, for SillyTavern's household
+    personas) is a separate process on purpose and must stay one: what makes
+    it private is its *environment* — `MEDIA_SHIM_CANVAS=0`,
+    `MEDIA_SPEECH_VISUAL=0`, and deliberately no `EnvironmentFile`, since
+    agent-media.env turns visuals on. The handler reads those per request
+    from `os.environ`, which two listeners in one process necessarily share,
+    so folding the private instance in would push private scenes to the
+    canvas and wake the wall, the phone and the TV with exactly the content
+    that must never land there. A per-listener settings object would be
+    needed first, and a separate process is the stronger guarantee anyway.
+    """
+    return ThreadingHTTPServer((bind, port), Handler)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -231,7 +252,7 @@ def main() -> int:
                     default=os.environ.get("MEDIA_SHIM_BIND", "127.0.0.1"))
     args = ap.parse_args()
 
-    srv = ThreadingHTTPServer((args.bind, args.port), Handler)
+    srv = make_server(args.bind, args.port)
     log.info("tts-shim: listening on http://%s:%d/v1  (engine=%s, canvas=%s)",
              args.bind, args.port, _engine(), _canvas_on())
     try:

@@ -296,6 +296,13 @@ def resolve_bind(explicit: str | None = None) -> str:
     return "127.0.0.1"
 
 
+def make_server(bind: str, port: int) -> "Server":
+    """A listener ready to `serve_forever()`, not yet serving. Split out of
+    `main` so this can run on a thread of the server's own process rather
+    than a service of its own (fewer-services §4c)."""
+    return Server((bind, port), Handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="media-speech-state",
@@ -308,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bind = resolve_bind(a.bind)
     try:
-        server = Server((bind, a.port), Handler)
+        server = make_server(bind, a.port)
     except OSError as e:
         print(f"media-speech-state: cannot bind {bind}:{a.port} — {e}",
               file=sys.stderr)
