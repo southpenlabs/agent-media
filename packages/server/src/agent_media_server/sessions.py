@@ -901,6 +901,12 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     if mail is not None:
         out["project_mail"] = mail
     out["project_groups"] = project_groups()
+    # Where a thread's link starts, up to its id, for the app's Copy link
+    # (David, 12 Nov 2026): the public web app's /app/t/ when this server has
+    # a public https address — a browser opens it, Android hands it to the
+    # app — else the app's own scheme.
+    pub = (os.environ.get("MEDIA_PUBLIC_URL") or "").strip().rstrip("/")
+    out["thread_link"] = f"{pub}/app/t/" if pub.startswith("https://") else "sasonica://t/"
     # The business agents' folders, for the app's Agents heading
     # (agent_workspaces.py; always there, [] on a host without any).
     from . import agent_workspaces

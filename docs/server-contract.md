@@ -239,6 +239,12 @@ Everything a message can be pointed at.
   `front` true for the one David talks to (`MEDIA_AGENT_FRONT`, default
   `nova`). Present means the server knows: the app stops guessing from
   folder paths (agent_workspaces.py).
+- **`thread_link`** (12 Nov 2026; always present): where a thread's link
+  starts, up to its session id — `<MEDIA_PUBLIC_URL>/app/t/` when the
+  server has a public https address (a browser opens the web app's thread,
+  Android hands it to the app), else `sasonica://t/`. The app's Copy link
+  (Share into…) appends the id; the hooks' thread link is built the same
+  way (intake/context.py `thread_link_base`).
 - **`restart_pending`** (19 Oct 2026; additive, only while there is one):
   a restart of the session host is waiting for its busy sessions to finish
   (§17 "Draining"): `{"since", "deadline": <epoch s>, "state": "waiting" |

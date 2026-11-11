@@ -175,8 +175,9 @@ def test_targets_shape(server, shelf, signed_in):
     # `spaces` on 26 Oct 2026: the Chats strip's spaces (spaces.py).
     # `agent_workspaces` on 6 Nov 2026: the business agents' folders, always
     # there ([] here: no agents folder), so the app stops guessing.
+    # `thread_link` on 12 Nov 2026: where a thread's link starts (Copy link).
     assert keys(obj) == {"ok", "sessions", "places", "project_groups", "spaces",
-                         "agent_workspaces"}
+                         "agent_workspaces", "thread_link"}
     assert obj["agent_workspaces"] == []
     live, shelved = obj["sessions"]
     # `recap` and `archived` joined on 22 Sep 2026, deliberately: Claude
