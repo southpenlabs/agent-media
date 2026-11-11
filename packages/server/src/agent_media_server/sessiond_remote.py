@@ -75,6 +75,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from . import permissions as _perms
+
 log = logging.getLogger("agent-media.sessiond")
 
 #: Ops on a session that go to its host as they are.
@@ -423,6 +425,8 @@ class Remote:
         fwd = {"op": "start", "cwd": home_relative(cwd), "text": req.get("text"),
                "agent": "claude", "workspace": str(req.get("workspace") or ""),
                "permissions": str(req.get("permissions") or ""),
+               # This server's own default, for a worker with none of its own.
+               "server_permissions": _perms.mode(""),
                "model": str(req.get("model") or ""), "mode": str(req.get("mode") or ""),
                "slot": str(req.get("slot") or "")}
         if req.get("session"):

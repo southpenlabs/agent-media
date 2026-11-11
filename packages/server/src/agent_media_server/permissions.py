@@ -33,7 +33,11 @@ strict as strict. Only ever asked for by name: never from the environment.
 `MEDIA_HEADLESS_PERMISSIONS=normal` switches a host back to the normal
 settings ("if it gets too busy"): no overlay, the user's own mode and rules.
 Pending requests still come to the phone either way
-(`--permission-prompt-tool stdio`); normal just asks less.
+(`--permission-prompt-tool stdio`); normal just asks less. A chat that took
+the host's default (no profile named at its start) follows it: resolved
+again at every spawn, so a changed setting reaches it at its next resume. A
+worker with no setting of its own takes the one the server sends with the
+start (`server_permissions`).
 
 The file is written per session, next to its record
 (`<state>/sessiond/<session>.settings.json`), each time it is spawned, so a
@@ -58,17 +62,28 @@ ASK_TOOLS = ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "
              "Task", "KillShell", "EnterWorktree", "CronCreate", "CronDelete")
 
 
-def mode(requested: str = "") -> str:
+def mode(requested: str = "", server_default: str = "") -> str:
     """The profile for a new session: `requested` if it names one, else
-    `MEDIA_HEADLESS_PERMISSIONS`, else strict. Anything unrecognised is
-    strict — a typo must not open things up. Folder only when requested."""
+    `MEDIA_HEADLESS_PERMISSIONS`, else `server_default` (the profile the
+    server that sent a start to this worker resolved: a worker set up with
+    no setting of its own behaves as the server does), else strict.
+    Anything unrecognised is strict — a typo must not open things up.
+    Folder only when requested."""
     if (requested or "").strip().lower() == FOLDER:
         return FOLDER
-    for raw in (requested, os.environ.get("MEDIA_HEADLESS_PERMISSIONS") or ""):
+    for raw in (requested, os.environ.get("MEDIA_HEADLESS_PERMISSIONS") or "", server_default):
         m = (raw or "").strip().lower()
         if m in (STRICT, NORMAL):
             return m
     return STRICT
+
+
+def named(requested: str = "") -> bool:
+    """`requested` names a profile: the session keeps it. Otherwise it took
+    the host's default, and follows that default when it changes — at its
+    next start or resume (David, 12 Nov 2026: red2 switched to normal, and a
+    chat made there before went on asking for every step)."""
+    return (requested or "").strip().lower() in (STRICT, NORMAL, FOLDER)
 
 
 def _claude_dir() -> Path:

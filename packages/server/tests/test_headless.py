@@ -1081,6 +1081,62 @@ def test_folder_permissions_load_only_the_folders_rules_and_keep_the_users_hooks
     assert sessiond.read_record(sid)["permissions"] == "folder"
 
 
+def _park_and_resume(host, sid, monkeypatch, text):
+    monkeypatch.setenv("MEDIA_SESSIOND_IDLE", "0")
+    assert host.sup.park_idle(time.time() + 5) == [sid]
+    wait_for(lambda: state(host, sid) == "parked")
+    ok, _ = driver.headless_driver().send(sid, "", f"reply: {text}")
+    assert ok
+    wait_for(lambda: last_text(host, sid) == text)
+    return starts(host)[-1]["argv"]
+
+
+def test_a_chat_on_the_hosts_default_follows_it_when_it_changes(host, monkeypatch):
+    # David, 12 Nov 2026: red2 switched to normal, and a chat made there
+    # before went on asking for every step.
+    monkeypatch.delenv("MEDIA_HEADLESS_PERMISSIONS", raising=False)
+    sid = start(host, "reply: a")
+    wait_for(lambda: state(host, sid) == "waiting")
+    assert "--settings" in starts(host)[0]["argv"]
+    assert sessiond.read_record(sid)["permissions_default"] is True
+    monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "normal")
+    argv = _park_and_resume(host, sid, monkeypatch, "b")
+    assert "--settings" not in argv and "--permission-mode" not in argv
+    assert sessiond.read_record(sid)["permissions"] == "normal"
+
+
+def test_a_profile_asked_for_by_name_is_kept_when_the_default_changes(host, monkeypatch):
+    monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "normal")
+    from agent_media_server.driver import headless
+
+    r = headless.call("start", cwd=str(host.work), text="reply: a", agent="claude",
+                      workspace="p-work", permissions="strict", timeout=30.0)
+    assert r.get("ok"), r
+    sid = r["session"]
+    wait_for(lambda: state(host, sid) == "waiting")
+    assert sessiond.read_record(sid)["permissions_default"] is False
+    argv = _park_and_resume(host, sid, monkeypatch, "b")
+    assert argv[argv.index("--permission-mode") + 1] == "default"
+    assert sessiond.read_record(sid)["permissions"] == "strict"
+
+
+def test_a_record_from_before_follows_the_default_unless_it_is_folder():
+    old = {"session": "s1", "cwd": "/tmp", "permissions": "strict"}
+    assert sessiond.Session.from_record(old).permissions_default is True
+    assert sessiond.Session.from_record({**old, "permissions": "folder"}).permissions_default is False
+
+
+def test_a_worker_with_no_setting_takes_the_servers_default(monkeypatch):
+    monkeypatch.delenv("MEDIA_HEADLESS_PERMISSIONS", raising=False)
+    assert permissions.mode("", "normal") == "normal"
+    assert permissions.mode("strict", "normal") == "strict"      # asked for by name
+    monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "strict")
+    assert permissions.mode("", "normal") == "strict"            # the worker's own wins
+    monkeypatch.delenv("MEDIA_HEADLESS_PERMISSIONS")
+    assert permissions.mode("", "folder") == "strict"            # never folder by default
+    assert permissions.mode("", "yolo") == "strict"
+
+
 def test_folder_is_never_taken_from_the_environment(monkeypatch):
     monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "folder")
     assert permissions.mode() == "strict"

@@ -193,6 +193,17 @@ def test_a_new_chat_goes_to_the_default_host(default_red2):
     assert sessiond.read_record(SID, sup.root)["host"] == "red2"
 
 
+def test_a_start_there_carries_this_servers_default_profile(red5, monkeypatch):
+    # A worker set up with no MEDIA_HEADLESS_PERMISSIONS of its own behaves as
+    # the server does from its first chat (David, 12 Nov 2026: red2's chats
+    # were strict while red5's were normal).
+    sup, fake, _said, work = red5
+    monkeypatch.setenv("MEDIA_HEADLESS_PERMISSIONS", "normal")
+    assert _start(sup, work)["ok"]
+    req = fake.seen[-1]["request"]
+    assert req["server_permissions"] == "normal" and req["permissions"] == ""
+
+
 def test_with_no_default_host_a_new_chat_starts_here(red5, monkeypatch):
     sup, fake, _said, work = red5
     monkeypatch.setattr(sup, "start", lambda *a, **kw: (_ for _ in ()).throw(_LocalStart()))

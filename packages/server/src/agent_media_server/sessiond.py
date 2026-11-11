@@ -157,7 +157,8 @@ MEDIA_SESSIOND_MIN_FREE_MB, MEDIA_SESSIOND_BACKGROUND_AFTER, MEDIA_SESSIOND_TASK
 MEDIA_SESSIOND_LONG_COMMAND_S,
 MEDIA_SESSIOND_CLOSE_GRACE, MEDIA_SESSIOND_ELICIT_TIMEOUT, MEDIA_SESSIOND_CLAUDE (the binary; default
 `harnesses.program("claude")`), MEDIA_HEADLESS_MODEL (`--model`),
-MEDIA_HEADLESS_PERMISSIONS (`strict` | `normal`, see permissions.py),
+MEDIA_HEADLESS_PERMISSIONS (`strict` | `normal`, see permissions.py; a chat on the default
+follows a change at its next resume, and a worker without it takes the server's),
 MEDIA_HEADLESS_EXTRA_ARGS (more `claude` flags; debugging and smoke runs),
 MEDIA_SESSIOND_SPARE_AGENTS (`0`: no `perTaskStopAffordance` declaration).
 """
@@ -480,6 +481,13 @@ class Session:
         self.agent = agent
         self.workspace = workspace
         self.permissions = permissions
+        #: The profile was the host's default, not asked for by name: it is
+        #: resolved again at each spawn, so a change to the host's setting
+        #: reaches the chats it already has (permissions.named).
+        self.permissions_default = False
+        #: The default the server that sent this start resolved (a worker's
+        #: fallback when it has no setting of its own; permissions.mode).
+        self.server_permissions = ""
         #: Chosen from the phone (session_settings.py): a model alias, and
         #: "plan" or "" — passed again at every resume, since a respawned
         #: process starts from its flags, not from what it was told.
@@ -632,6 +640,8 @@ class Session:
     def record(self) -> dict:
         return {"session": self.id, "agent": self.agent, "cwd": self.cwd,
                 "workspace": self.workspace, "permissions": self.permissions,
+                "permissions_default": self.permissions_default,
+                "server_permissions": self.server_permissions,
                 "model": self.model, "mode": self.mode, "native_session": self.native_session,
                 "system_prompt_file": self.system_prompt_file,
                 "init_model": self.init_model, "init_mode": self.init_mode,
@@ -658,6 +668,12 @@ class Session:
                 workspace=str(rec.get("workspace") or ""),
                 permissions=str(rec.get("permissions") or "strict"),
                 model=str(rec.get("model") or ""), mode=str(rec.get("mode") or ""))
+        # A record from before the field: strict or normal then always came
+        # from the host's default (a profile asked for by name was only ever
+        # folder), so it follows the default too.
+        s.permissions_default = bool(rec.get("permissions_default",
+                                             s.permissions in ("strict", "normal")))
+        s.server_permissions = str(rec.get("server_permissions") or "")
         s.native_session = str(rec.get("native_session") or "")
         s.system_prompt_file = str(rec.get("system_prompt_file") or "")
         s.init_model = str(rec.get("init_model") or "")
@@ -2125,6 +2141,8 @@ class Supervisor:
             return argv
         argv = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                 "--verbose", "--permission-prompt-tool", "stdio"]
+        if s.permissions_default:
+            s.permissions = permissions.mode("", s.server_permissions)
         argv += permissions.cli_args(s.permissions, s.cwd, s.id, self.root)
         model = s.model or (os.environ.get("MEDIA_HEADLESS_MODEL") or "").strip()
         if model:
@@ -2852,7 +2870,7 @@ class Supervisor:
     def start(self, cwd: str, text: str, *, session: str = "", agent: str = "claude",
               workspace: str = "", permissions: str = "", model: str = "",
               mode: str = "", system_prompt_file: str = "", fork_from: str = "",
-              fork_at: str = "", slot: str = "") -> dict:
+              fork_at: str = "", slot: str = "", server_permissions: str = "") -> dict:
         """`fork_from`/`fork_at` (§6.34): start as a copy of that Claude
         session up to that record, not afresh. `slot: "high"` (Run now):
         with every slot busy, another session is parked for it
@@ -2905,8 +2923,10 @@ class Supervisor:
                         raise
                     full = e.error
             s = Session(session, cwd, agent=agent, workspace=workspace,
-                        permissions=perms.mode(permissions), model=model,
+                        permissions=perms.mode(permissions, server_permissions), model=model,
                         mode="plan" if mode == "plan" else "")
+            s.permissions_default = not perms.named(permissions)
+            s.server_permissions = server_permissions
             s.system_prompt_file = system_prompt_file
             s.first_text = " ".join(text.split())[:200]
             if fork_from and fork_at:
@@ -3757,7 +3777,8 @@ class Supervisor:
                     system_prompt_file=str(req.get("system_prompt_file") or ""),
                     fork_from=str(req.get("fork_from") or ""),
                     fork_at=str(req.get("fork_at") or ""),
-                    slot=str(req.get("slot") or ""))}
+                    slot=str(req.get("slot") or ""),
+                    server_permissions=str(req.get("server_permissions") or ""))}
             if op == "antigravity_hook":
                 from .antigravity_adapter import approval
                 return {"ok": True, "hook": approval(self, sid, req.get("payload") or {}, stage=str(req.get("stage") or "pre"))}

@@ -11470,6 +11470,12 @@ writes nothing to tmux.
   the phone. `normal` drops the overlay: the user's own settings decide, and
   whatever still asks comes to the phone. Verified end to end on 22 Sep 2026:
   a project `allow: Bash(*)` did not pre-approve a Bash call under strict.
+  A chat whose start named no profile follows the host's: it is resolved
+  again at each start and resume (`permissions_default` in its record), so
+  changing the setting and restarting sessiond reaches the chats a host
+  already has; one named at its start keeps it. A start a server sends to a
+  worker carries the server's own default (`server_permissions`), which a
+  worker with no setting of its own takes (12 Nov 2026).
   `folder` (3 Nov 2026; per session, only when a start names it, never from
   the environment; `media session start|wake --permissions folder`) is for
   an agent working on its own in a folder of its own: `--setting-sources
