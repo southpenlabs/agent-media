@@ -10411,7 +10411,16 @@ POST /devices/code {"device": "Pixel Tablet", "enrol": false}
   → 400 {"code": "no_device_name"} for a blank name
 POST /devices/revoke {"id": "d_…"}
   → {"ok": true, "id", "devices": [ … ]}   → 404 {"code": "no_such_device"}
+POST /devices/rename {"id": "d_…", "name": "hpo (Firefox)"}
+  → {"ok": true, "id", "name", "devices": [ … ]}
+  → 400 {"code": "bad_name"} for a blank name   → 404 {"code": "no_such_device"}
 ```
+
+**Renaming a device** (11 Nov 2026): `POST /devices/rename` or the desk's
+`devices --rename ID NAME` (whitespace folded, at most 80 characters, as a
+name sent at pairing). Asked of a device that may manage devices
+(`auth.may_enrol`), never of a device for itself: the name is whoever
+enrolls it deciding, as above.
 
 The minted code is the same code in the same store with the same TTL as the
 desk's — `POST /devices/code` is `pair --device` with a device's token where

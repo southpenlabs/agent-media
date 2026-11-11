@@ -454,7 +454,7 @@ CORS_PATHS = frozenset({
 
 # Device management spends the caller's bearer, like the other app routes.
 # Both successful answers and refusals must be readable by Capacitor's webview.
-DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role"})
+DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role", "/devices/rename"})
 CORS_PATHS = CORS_PATHS | DEVICE_PATHS
 
 # Where the audio goes (audio.py). Its own set, joined here, so the block
@@ -3077,6 +3077,31 @@ def _devices_role(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "role": role, "devices": devices.list_devices()})
 
 
+def _devices_rename(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/rename {"id", "name"}` — rename a paired device (§9
+    "Renaming a device"), as `devices --rename ID NAME` does at the desk.
+    Asked of a device that may manage devices, like a role: a device does
+    not get to rename itself, the desk's name winning (devices.redeem)."""
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    try:
+        name = devices.rename(device_id, str(body.get("name") or ""))
+    except ValueError:
+        _json(h, 400, {"ok": False, "code": "bad_name", "error": "a name is needed"})
+        return
+    if name is None:
+        _json(h, 404, {"ok": False, "code": "no_such_device",
+                       "error": "no device with that id"})
+        return
+    print(f"devices: {user.get('device')} renamed {device_id} {name!r}", file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "name": name, "devices": devices.list_devices()})
+
+
 def _devices_pause(h: BaseHTTPRequestHandler) -> None:
     """`POST /devices/pause {"id", "on", "for"?}` — whether a device pauses
     what is playing on it while someone talks to the assistant or a reply is
@@ -3157,6 +3182,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_revoke(h)
     elif path == "/devices/role":
         _devices_role(h)
+    elif path == "/devices/rename":
+        _devices_rename(h)
     elif path == "/devices/pause":
         _devices_pause(h)
     elif path == "/devices/follow":
