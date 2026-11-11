@@ -61,29 +61,6 @@ jobs:
       - name: Run tests
         run: pytest -q packages/server/tests packages/sasonica/tests
 
-  abs-bridge:
-    # The Audiobookshelf bridges spent months as untracked files on one host,
-    # with no tests and no CI. Running them here is half of what moving them
-    # into the repo was for.
-    name: pytest (abs-bridge)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install core + abs-bridge + pytest
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e packages/core -e packages/abs-bridge
-          pip install pytest
-
-      - name: Run tests
-        run: pytest -q packages/abs-bridge/tests
-
   server-macos:
     # Only when run by hand (Actions → CI → Run workflow): macOS minutes count 10x and Windows 2x against the org's free 2,000, and these used them up in October 2026 (28 Oct: every job refused for billing).
     if: github.event_name == 'workflow_dispatch'

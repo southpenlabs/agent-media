@@ -242,29 +242,29 @@ def test_reinstalling_a_periodic_service_rewrites_nothing(tmp_path, monkeypatch,
 
 
 # --- optional integrations --------------------------------------------------
-# Roles say what a host *is*, in three words. "Has an Audiobookshelf" is not
-# that: it is something somebody configured, and a service that needs one is
+# Roles say what a host *is*, in three words. "Is a jobs worker" is not that:
+# it is something somebody configured, and a service that needs it is
 # unwanted — not merely idle — everywhere it was never set up.
 
 
 def test_a_service_needing_config_is_skipped_without_it(tmp_path, monkeypatch):
     templates = tmp_path / "services"
-    d = templates / "abs-book-bridge"
+    d = templates / "jobs-worker"
     d.mkdir(parents=True)
     (d / "run").write_text("#!/bin/sh\nexec true\n")
-    (d / "roles").write_text("requires: render\nrequires-config: abs-bridge.env\n")
+    (d / "roles").write_text("requires: render\nrequires-config: jobs-worker.json\n")
     monkeypatch.setattr(setup, "service_templates_dir", lambda: templates)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(setup.Path, "home", lambda: tmp_path / "home")
 
-    wanted, why = setup.service_wanted("abs-book-bridge", {"render"})
+    wanted, why = setup.service_wanted("jobs-worker", {"render"})
     assert wanted is False
-    assert "abs-bridge.env" in why          # the reason names the fix
+    assert "jobs-worker.json" in why          # the reason names the fix
 
     cfg = tmp_path / "home" / ".config" / "agent-media"
     cfg.mkdir(parents=True)
-    (cfg / "abs-bridge.env").write_text("ABS_URL=http://x\n")
-    assert setup.service_wanted("abs-book-bridge", {"render"}) == (True, "roles match")
+    (cfg / "jobs-worker.json").write_text("{}\n")
+    assert setup.service_wanted("jobs-worker", {"render"}) == (True, "roles match")
 
 
 def test_the_config_gate_applies_to_a_host_with_no_roles_at_all(tmp_path,
@@ -273,14 +273,14 @@ def test_the_config_gate_applies_to_a_host_with_no_roles_at_all(tmp_path,
     is the one most likely to have no config, and least wanting a daemon that
     logs "not configured" forever."""
     templates = tmp_path / "services"
-    d = templates / "abs-cast-watcher"
+    d = templates / "jobs-worker"
     d.mkdir(parents=True)
     (d / "run").write_text("#!/bin/sh\nexec true\n")
-    (d / "roles").write_text("requires-config: abs-bridge.env\n")
+    (d / "roles").write_text("requires-config: jobs-worker.json\n")
     monkeypatch.setattr(setup, "service_templates_dir", lambda: templates)
     monkeypatch.setattr(setup.Path, "home", lambda: tmp_path / "home")
 
-    assert setup.service_wanted("abs-cast-watcher", None)[0] is False
+    assert setup.service_wanted("jobs-worker", None)[0] is False
 
 
 def test_a_service_without_the_gate_is_unaffected(tmp_path, monkeypatch):

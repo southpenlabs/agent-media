@@ -459,14 +459,14 @@ def service_config_gate(name: str) -> str:
     """The config file `services/<name>/roles` says this service needs, or "".
 
     Roles say what a host *is* — a mic, some speakers, a place replies come
-    from — and that vocabulary is deliberately three words long. "Has an
-    Audiobookshelf to talk to" is not a property of the host in that sense; it
+    from — and that vocabulary is deliberately three words long. "Is a jobs
+    worker for another server" is not a property of the host in that sense; it
     is a thing somebody configured. Expressing it as a fourth role would put a
     machine's software inventory into a list that describes its hardware.
 
     So an optional integration declares the file that proves it was set up:
 
-        requires-config: abs-bridge.env
+        requires-config: jobs-worker.json
 
     resolved under ~/.config/agent-media/. Absent, the service is skipped with
     a reason — never installed-and-idle, which is how a host ends up running a
