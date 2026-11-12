@@ -104,8 +104,14 @@ MEDIA_DIRS = ("audio", "visual", "feed", "sealed", "photos")
 #: The `transcripts` tier: sessiond's thread records and the workers' mirrors.
 TRANSCRIPT_DIRS = ("sessiond",)
 
+#: The passphrase restic is given, by name here because EXCLUDE needs it
+#: before the repository section defines the rest. Mode 600, and genuinely
+#: never inside a backup (see EXCLUDE below).
+KEY_NAME = "backup.key"
+
 #: Never backed up, with the reason, which `media backup show` prints. Matched
-#: against names directly under the state root (fnmatch).
+#: against names directly under the state root, and passed to the folder
+#: copies, so a name listed here is excluded wherever it appears.
 EXCLUDE: dict[str, str] = {
     "search.db": "an index rebuilt from state.db and the content",
     "search.db-wal": "the index's write-ahead log",
@@ -120,6 +126,15 @@ EXCLUDE: dict[str, str] = {
     "*-shm": "SQLite shared memory",
     "*.part": "a half-written file",
     "*.bak-*": "a hand-made backup of a config file",
+    # A key inside the thing it encrypts. Useless there -- you would need it
+    # to read the backup that holds it -- and actively wrong: it put the key
+    # to the off-machine history into the plain, readable snapshot, so anyone
+    # who could read the store could read the history it was protecting.
+    # Found on red5's first real run, 13 Nov 2026, against a comment two
+    # hundred lines up that already claimed this was excluded. The copies that
+    # matter are the phrase kept off the machine and the one on the other
+    # paired host.
+    KEY_NAME: "the backup's own encryption key, which never belongs in a backup",
 }
 
 #: Settings a restore carries across unchanged but must not be trusted on the
@@ -606,8 +621,6 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
 
 #: Where the encrypted history lives, if anywhere. Unset means plain files only.
 REPO_ENV = "MEDIA_BACKUP_REPO"
-#: The passphrase restic is given. Mode 600, and never inside a backup.
-KEY_NAME = "backup.key"
 #: What the repository keeps. Matches the dotfiles script this replaces.
 KEEP = ("--keep-daily", "14", "--keep-weekly", "8", "--keep-monthly", "12")
 
@@ -1340,6 +1353,16 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"{res['id']}  tier {res['tier']}  "
                       f"{res['totals']['files']} files  {_human(res['totals']['bytes'])}  -> {res['dest']}")
+                # Said out loud because the nightly's journal is the only
+                # record anyone sees: "success" without this cannot be told
+                # from a run that quietly never encrypted anything.
+                kept = res.get("repo")
+                if kept and not kept.get("skipped"):
+                    print(f"  encrypted history: "
+                          f"{'written' if kept.get('ok') else 'FAILED'} to {kept.get('repo')}"
+                          + (f" ({kept['error']})" if kept.get("error") else ""))
+                elif repo():
+                    print(f"  encrypted history: not written")
                 for w in res["warnings"]:
                     print(f"  ! {w}")
                 for g in res.get("pruned") or []:
@@ -1355,6 +1378,13 @@ def main(argv: list[str] | None = None) -> int:
                 for r in res["snapshots"]:
                     print(f"  {r['id']}  {r.get('tier') or '?':<12} {r.get('created') or '':<21}"
                           f"{_human(r.get('bytes')):>8}  {r.get('host') or ''}")
+                if repo():
+                    kept = repo_snapshots()
+                    print(f"\n{repo()}  {len(kept)} kept, encrypted")
+                    for s in kept[-12:]:
+                        tags = ",".join(s.get("tags") or [])
+                        print(f"  {str(s.get('short_id') or '')[:8]}  "
+                              f"{str(s.get('time') or '')[:19]}  {tags}")
             return 0
 
         if cmd == "show":

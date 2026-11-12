@@ -704,3 +704,27 @@ def test_the_phrase_is_not_printed_when_nothing_human_is_watching(
     assert phrase, "the key was still written"
     assert phrase not in said, "the phrase must not reach a non-terminal"
     assert "NOT printed" in said and "cat " in said, "and it says how to read it"
+
+
+@pytest.mark.skipif(NO_RESTIC or NO_RSYNC, reason="needs restic and rsync")
+def test_the_encryption_key_is_never_inside_a_backup(install, monkeypatch, tmp_path):
+    """A key inside the thing it encrypts is useless — you would need it to
+    read the backup that holds it — and worse than useless: on red5's first
+    real run it put the key to the off-machine history into the plain,
+    readable snapshot, so anyone who could read the store could read the
+    history it was supposed to protect. Found 13 Nov 2026 against a comment
+    that already claimed it was excluded.
+    """
+    key = install["home"] / ".config" / "agent-media" / bk.KEY_NAME
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", str(tmp_path / "repo"))
+    monkeypatch.setenv("MEDIA_BACKUP_KEY", str(key))
+    bk.init_repo()
+    assert key.exists(), "the key is where the config lives"
+
+    res = bk.backup(tier="core")
+    assert res["ok"], res["warnings"]
+    held = Path(res["path"]) / "data" / "home" / ".config" / "agent-media"
+    assert (held / "config.toml").exists(), "the rest of the config still comes"
+    assert not (held / bk.KEY_NAME).exists(), \
+        "the key to the encrypted history must not be in the plain snapshot"
+    assert bk.excluded_reason(bk.KEY_NAME), "and it is excluded by name, with a reason"
