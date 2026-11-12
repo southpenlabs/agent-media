@@ -173,9 +173,41 @@ be able to push to a host that is not the one holding the data:
 - **a paired host over its jobs connection** (§6.21a pairing,
   `pair --jobs --backups`). This reuses a connection the other host opens
   outbound, so it needs no tailnet and no inbound port, per
-  `docs/decisions/2026-10-18-off-the-tailnet.md`. After the cutover that host
-  is **red5** — off-site, in another country, already running — or red3.
+  `docs/decisions/2026-10-18-off-the-tailnet.md`.
 - a bucket or any rclone remote
+
+**Decided 12 Nov 2026** (David: "let's just use red five then", mail #251/#264
+via session 105d7f90): the destination is **red5, at
+`/mnt/data/agent-media-backups`** — its second disk, not its root. The
+directory exists already (`ryer:ryer`, mode 700), so no sudo is needed to
+start.
+
+Why that disk and not the others, and what it costs:
+
+| | size | free | note |
+|---|---|---|---|
+| red5 `/mnt/data` | 49G | **21G** | the target. ext4, `nofail` in fstab |
+| red5 `/` | 75G | 12G (84%) | too thin for history plus the stopgap mirror |
+| red4 | — | 28G | shared with the audiobooks and media red5 mounts, and the sasonica.com Matrix server |
+
+**`/mnt/data` is not empty and not inert.** It carries 18G under
+`/mnt/data/ryer` and — the part worth knowing — **an 8G swapfile**
+(`/mnt/data/swapfile`, priority -3). red5 is a machine that swaps: 4.9G of
+zram and 1.5G of `/swapfile` are in use right now. The swapfile is
+preallocated, so a full filesystem cannot starve it directly, but filling the
+disk that holds a server's swap and 18G of personal files is not a failure
+mode to discover at 03:15. So:
+
+- **A size cap on the backup store**, `backup.max_size` in `config.toml`,
+  default **10G** — about ten nightly runs' worth of restic history at the
+  `daily` tier, and it leaves 11G of the 21G alone. Oldest snapshots are
+  pruned to stay under it; the cap is never exceeded in order to finish a run.
+- **Two space alerts, well before it bites**: `backup.<host>.space` when the
+  store passes 70% of its cap, and again when the *filesystem* drops below
+  5G free whatever the store is using — because the risk is the disk, not
+  just the backup.
+- A run that would breach either stops and alerts rather than filling the
+  disk and half-writing a snapshot.
 
 **Anything leaving the machine is encrypted** (age, or restic if the
 destination is already a restic repo). The one trap worth naming: the key
@@ -251,8 +283,9 @@ worth setting up on the day of the cutover rather than after it.
    `sessiond/` (943M) — about **1G a night**, though restic will dedupe most
    of it, since transcripts are append-mostly. Two things follow:
 
-   - *Check red5's disk before the first run.* It is at **79%**, and it is
-     the off-site destination after the move.
+   - *The destination disk was chosen for it.* red5's root turned out to be
+     at 84% with 12G free — too thin — so the target is red5's second disk
+     `/mnt/data`, with 21G free, under a 10G cap (above).
    - *The speech clips are left unprotected, and that is a real consequence,
      not a rounding error.* `audio/` is 734M across 20,692 clips and each is
      the only copy of what was said in that voice; under this choice, losing
@@ -268,6 +301,7 @@ worth setting up on the day of the cutover rather than after it.
    they stay in sam's script — which already backs them up. Either reading of
    his answer is covered.
 
-Settled earlier, not asked: where it goes (red5 off-site over its jobs
-connection, per the move plan — a bucket can be added later as a second
-destination, and the design takes any number).
+3. **Where it goes: red5.** "Let's just use red five then" —
+   `/mnt/data/agent-media-backups`, off-site and in another country, over
+   red5's jobs connection rather than the tailnet. A bucket can be added
+   later as a second destination; the design takes any number.

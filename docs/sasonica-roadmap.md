@@ -2620,7 +2620,13 @@ ahead.
     to the machine that answers the phone); and the nightly carries the
     core plus the session transcripts ("I think transcripts should be
     included in the daily backup"), about 1G a night, with the 734M of
-    speech clips left to `--tier full` and so, for now, unprotected. On the critical path for the server moving home (item
+    speech clips left to `--tier full` and so, for now, unprotected; and
+    it goes to **red5** ("let's just use red five then"), at
+    `/mnt/data/agent-media-backups` on its second disk — 21G free, where
+    the root had only 12G — under a 10G cap, with `backup.<host>.space`
+    alerting at 70% of the cap and again under 5G free on the
+    filesystem, because that disk also carries red5's 8G swapfile and
+    18G of personal files. On the critical path for the server moving home (item
     above, `2026-11-12-the-server-moves-home.md`): "new machine = release +
     restore + switch" is the cutover drill, and the destination is a
     **setting**, never the machine holding the data — after the move red2
