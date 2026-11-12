@@ -180,6 +180,11 @@ def step_check(st: dict, run) -> None:
                    f"run `media update --no-restart` there first")
     st["there_bin"] = where
     st["there_store"] = f"{st['there_home']}/{STORE}"
+    # rsync makes the last folder of a destination, not its parents (the
+    # first rehearsal's push failed on it, 13 Nov 2026).
+    rc, got = run(f"mkdir -p {shlex.quote(st['there_store'] + '/store')} && "
+                  f"chmod 700 {shlex.quote(st['there_store'])}", to, 30)
+    _need(rc, got, f"making {st['there_store']} on {to}")
 
 
 def step_keep(st: dict, run) -> None:
