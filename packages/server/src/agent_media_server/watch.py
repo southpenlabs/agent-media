@@ -14,6 +14,13 @@ agent_media_core.tmdb; David, 9 Nov 2026).
   GET  /watch/discover?kind=movie|tv&list=trending|popular|recommended|anticipated&genre=&year=&page=
        &hide_watched=0|1   gated → {"ok", "kind", "list", "lists", "page", "more", "hide_watched",
                            "signed_in", "items", "genres": [{slug, name}]}
+  GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
+  GET  /watch/title?kind=movie|tv&id=       gated → a title's page (facts, cast, crew, related, seasons)
+  GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
+  GET  /watch/person?id=                    gated → {"ok", "person", "movies": {cast, crew}, "shows": {cast, crew}}
+  GET  /watch/lists?which=trending|popular|mine&page=    gated → {"ok", "lists", …}
+  GET  /watch/list?id=&mine=0|1&page=       gated → {"ok", "items", "page", "more"}
+  GET  /watch/calendar?kind=tv|movie&days=  gated → {"ok", "items", "from", "days"}
   GET  /watch/show?id=<trakt id>            gated → {"ok", "seasons": [{number, aired, completed}], "left"}
   GET  /accounts/trakt              admins → {"ok", "set_up", "signed_in", "user", "flow", "pending", "reason"?}
   POST /accounts/trakt/start        admins → device {"ok", "flow", "user_code", "verification_url",
@@ -32,8 +39,14 @@ from http.server import BaseHTTPRequestHandler
 
 from . import auth
 
-PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/accounts/trakt", "/accounts/trakt/start",
+PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/watch/title",
+                   "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/accounts/trakt", "/accounts/trakt/start",
                    "/accounts/trakt/finish", "/accounts/trakt/signout"})
+
+
+#: Pages, people, lists and the calendar (trakt_browse.py), all GET and gated.
+BROWSE = ("/watch/title", "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar")
+FILTERS = ("rating", "runtime", "language", "country", "certification", "network", "status")
 
 
 def _q(h: BaseHTTPRequestHandler, name: str) -> str:
@@ -69,6 +82,46 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             return True
         send_json(h, 200, {"ok": True, **got})
         return True
+    if path in BROWSE:
+        if method != "GET":
+            return False
+        user, err = auth.gate(bearer)
+        if not user:
+            send_json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        from agent_media_core import trakt_browse as B
+        page = _q(h, "page") or "1"
+        try:
+            if not page.isdigit():
+                raise ValueError("page is a number")
+            if path == "/watch/title":
+                got = B.title(_q(h, "kind"), _q(h, "id"))
+                got["tmdb"] = tmdb.set_up()
+            elif path == "/watch/season":
+                got = B.season(_q(h, "id"), _q(h, "season"))
+            elif path == "/watch/person":
+                got = B.person(_q(h, "id"))
+            elif path == "/watch/lists":
+                got = B.lists(_q(h, "which") or "trending", int(page))
+            elif path == "/watch/list":
+                got = B.list_items(_q(h, "id"), _q(h, "mine") == "1", int(page))
+            else:
+                days = _q(h, "days") or "14"
+                if not days.isdigit():
+                    raise ValueError("days is a number")
+                got = B.calendar(_q(h, "kind"), int(days))
+        except ValueError as e:
+            send_json(h, 400, {"ok": False, "error": str(e)})
+            return True
+        except LookupError as e:
+            send_json(h, 404, {"ok": False, "error": str(e)})
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"watch: {path}: {e}", file=sys.stderr)
+            send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
+            return True
+        send_json(h, 200, {"ok": True, **got})
+        return True
     if path in ("/watch/search", "/watch/show", "/watch/discover"):
         if method != "GET":
             return False
@@ -77,14 +130,18 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             send_json(h, err.pop("status", 401), {"ok": False, **err})
             return True
         try:
-            if path == "/watch/search":
+            if path == "/watch/search" and _q(h, "kind") == "all":
+                from agent_media_core import trakt_browse as B
+                got = B.search_all(_q(h, "query"))
+            elif path == "/watch/search":
                 got = {"items": trakt.search(_q(h, "kind"), _q(h, "query"))}
             elif path == "/watch/discover":
                 page = _q(h, "page") or "1"
                 if not page.isdigit():
                     raise ValueError("page is a number")
                 got = trakt.discover(_q(h, "kind"), _q(h, "list"), _q(h, "genre"), _q(h, "year"),
-                                     int(page), _q(h, "hide_watched") != "0")
+                                     int(page), _q(h, "hide_watched") != "0",
+                                     filters={k: _q(h, k) for k in FILTERS if _q(h, k)})
             else:
                 got = trakt.show(int(_q(h, "id") or "x"))
         except ValueError as e:

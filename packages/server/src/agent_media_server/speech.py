@@ -529,6 +529,66 @@ def _recent_kind(row: dict, ex: dict) -> str:
     return ""
 
 
+#: How long `unheard_counts` is reused: the list polls /sessions/state every
+#: few seconds, from every open app.
+_UNHEARD_TTL_S = 3.0
+_UNHEARD_LOCK = threading.Lock()
+_UNHEARD_CACHE: tuple[float | None, dict[str, int]] = (None, {})
+
+
+def unheard_counts() -> dict[str, int]:
+    """`/sessions/state` `unheard`: each thread's replies held and never
+    played, by session id; threads with none are left out. The same test
+    as `/speech/recent`'s `unheard` (a held copy of a reply heard in another
+    copy is not counted; private threads are left out), so the thread
+    list's Play key shows only where `replay-unheard` has something to read
+    (David, 12 Nov 2026: "The play button on the threadlist should only
+    display for unheard replies. not necessarily those marked unread")."""
+    global _UNHEARD_CACHE
+    with _UNHEARD_LOCK:
+        at, counts = _UNHEARD_CACHE
+        if at is not None and time.monotonic() - at <= _UNHEARD_TTL_S:
+            return counts
+        counts = _count_unheard()
+        _UNHEARD_CACHE = (time.monotonic(), counts)
+        return counts
+
+
+def _count_unheard() -> dict[str, int]:
+    from agent_media_core import reply_position
+    from agent_media_core.private import hidden
+    from agent_media_core.session_feed import _resume_of
+    from agent_media_core.state import StateStore
+
+    try:
+        rows = StateStore().recent_history(sink="speech", limit=400)
+    except Exception as e:  # noqa: BLE001 — none counted, not a 500
+        print(f"unheard counts: {e}", file=sys.stderr)
+        return {}
+    counts: dict[str, int] = {}
+    seen: set[tuple[str, str]] = set()
+    secret: dict[str, bool] = {}
+    for row in rows:    # newest first
+        ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
+        if not ex.get("held") or ex.get("heard") or not _recent_kind(row, ex):
+            continue
+        session = str(ex.get("source_session") or ex.get("session") or "")
+        if not sessions._SESSION.fullmatch(session):
+            continue
+        key = str(ex.get("dedup_key") or "")
+        if key:
+            if (session, key) in seen:
+                continue
+            seen.add((session, key))
+        if reply_position.heard_to_any(row, rows) != 0 or _resume_of(ex):
+            continue
+        if session not in secret:
+            secret[session] = hidden(session)
+        if not secret[session]:
+            counts[session] = counts.get(session, 0) + 1
+    return counts
+
+
 def speech_recent(bearer: str, limit=None) -> tuple[bool, dict]:
     """`GET /speech/recent`: the replies read aloud lately, every thread's,
     newest first — the full player's Recent replies (David, 8 Nov 2026:

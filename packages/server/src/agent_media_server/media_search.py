@@ -88,6 +88,11 @@ def _watch_found(kind):
     return run
 
 
+def _people_found(q):
+    from agent_media_core import trakt, trakt_browse
+    return trakt_browse.people(q)[:LIMIT] if trakt.set_up() else []
+
+
 PARTS = {
     "music": (_music_mine, _music_found),
     "book": (_book_mine, None),
@@ -95,6 +100,8 @@ PARTS = {
     "practice": (_practice_mine, _practice_found),
     "movie": (_watch_mine("movie"), _watch_found("movie")),
     "tv": (_watch_mine("tv"), _watch_found("tv")),
+    # Actors, directors, writers (Trakt; 12 Nov 2026): rows {id, name, known_for, photo?}.
+    "person": (lambda q: [], _people_found),
 }
 
 

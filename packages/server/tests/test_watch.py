@@ -368,7 +368,7 @@ def test_discover_trending_hides_what_was_watched(server, signed_in, fake, creds
     res, obj = call(server, "GET", "/watch/discover?kind=movie&list=trending&genre=science-fiction&year=2010-2029",
                     headers=AUTH)
     assert res.status == 200 and obj["list"] == "trending"
-    assert obj["lists"] == ["trending", "popular", "recommended", "anticipated"]
+    assert obj["lists"][:4] == ["trending", "popular", "recommended", "anticipated"]
     assert [i["title"] for i in obj["items"]] == ["Dune"], "Arrival is watched: left out"
     assert obj["items"][0]["watched"] is False and obj["items"][0]["on_watchlist"] is False
     assert obj["genres"] == [{"slug": "action", "name": "Action"}, {"slug": "science-fiction", "name": "Science Fiction"}]

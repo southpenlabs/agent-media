@@ -86,3 +86,28 @@ def test_limit_and_refusals(monkeypatch):
     _as(monkeypatch, user=None, status=401)
     ok, out = speech.speech_recent("")
     assert not ok and out.get("status") in (401, 403)
+
+
+def test_unheard_counts_for_the_thread_list(monkeypatch):
+    """/sessions/state `unheard`: the list's Play key shows only where a
+    reply is held and never played (12 Nov 2026)."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 80
+    _add("Heard already.", at=t, kind="stop", heard=True)
+    _add("Held one.", at=t + 1, kind="stop", held=True)
+    _add("Held two.", at=t + 2, kind="stop", held=True)
+    _add("Held, then played.", session=B, at=t + 3, kind="stop", held=True, heard=True)
+    _add("Copy.", session=B, at=t + 4, kind="stop", held=True, dedup_key="k2")
+    _add("Copy.", session=B, at=t + 5, kind="stop", heard=True, dedup_key="k2")
+    _add("Stopped part-way.", session=B, at=t + 6, kind="stop", held=True,
+         stopped_at={"sentence": 1, "at": t + 7}, clip_durations_s=[1.0, 2.0])
+    _add("Claude is waiting.", session=B, kind="notif", held=True)
+    assert speech.unheard_counts() == {A: 2}
+
+
+def test_sessions_state_carries_unheard(monkeypatch):
+    _as(monkeypatch)
+    monkeypatch.setattr(sessions, "cached_states", lambda: ([], {}))
+    monkeypatch.setattr(speech, "unheard_counts", lambda: {A: 1})
+    ok, out = sessions.session_states("tok")
+    assert ok and out["unheard"] == {A: 1}

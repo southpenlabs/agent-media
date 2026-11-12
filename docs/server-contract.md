@@ -669,6 +669,13 @@ What each live session is doing.
   one): the same object as `/targets`' (§6.1), so the app's 5-second poll
   can put "Restart waiting" on any thread while it holds. Older servers
   leave it out.
+- `unheard` (12 Nov 2026; additive, top level): `{session: count}`, each
+  thread's replies held and never played, live or not, by the same test as
+  `/speech/recent`'s `unheard` (§6.5; a held copy of a reply heard in
+  another copy is not counted, private threads are left out); threads with
+  none are left out, `{}` when none waits. The thread list's Play key shows
+  where it is above zero and sends `replay-unheard` (§6.5). Counted at most
+  every 3 s (`speech.unheard_counts`). Older servers leave it out.
 - `mem_mb` (22 Sep 2026): resident memory of the session's agent process
   (the claude / codex / pi / hermes process `live_sessions` found) **and all
   its descendants** — MCP servers, sandboxes — in whole MB (`procmem.py`).
@@ -10425,6 +10432,66 @@ it at once.
   "aired", "completed"}], "left"}`: the show's seasons as watched so far
   (`/shows/{id}/progress/watched`, specials left out), for its sheet's
   Mark a season watched.
+
+**Pages, people, lists** (12 Nov 2026; `trakt_browse.py`; David: "Can we
+have full Discovery and search for movies and shows too?"). All `GET`,
+gated as `GET /watch`, in `WATCH_PATHS`. What is the same for everyone is
+asked with the client ID only and kept (a title's and a person's pages a
+day, lists and searches an hour), through a write; what is this account's
+(watched, watchlist, progress, own lists, the calendar) a quarter of an hour
+and forgotten by a write. Every movie and show row here is §6.54's item,
+now with `rating` (0–10, one place) and `votes` where Trakt gives them, and
+signed in `watched` and `on_watchlist`. TMDb only adds `poster` and a
+person's `photo`.
+
+- `GET /watch/search?kind=all&query=` → `{"ok", "q", "movies", "shows",
+  "people", "lists"}` (Trakt's `/search/movie,show,person,list`), up to 10
+  of each; a private list is left out. A person: `{"id" (slug), "name",
+  "ids", "known_for", "url", "photo"?}`; a list: `{"id", "name",
+  "description", "item_count", "likes", "user", "url"}`.
+- `GET /watch/title?kind=movie|tv&id=<trakt id or slug>` → `{"ok", "kind",
+  "title", "cast", "crew", "related", "tmdb", "seasons"?, "next_episode"?}`.
+  `title` is the item with its whole `overview` and `tagline`,
+  `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
+  `released`, and for a show `network` and `aired_episodes`. `cast`:
+  people with `character` (a show's also `episodes`), at most 30; `crew`:
+  people with `job` and `department`, directing and writing first, one row a
+  person. `related`: up to 12 more like it. A show's `seasons`: `[{"number",
+  "title", "episodes", "aired", "completed", "first_aired"}]` (specials left
+  out; `completed` this account's), and `next_episode` `{"season", "number",
+  "title", "first_aired"}` when one is to air. Trailer and where to watch
+  stay `GET /watch/item`. 404 when Trakt has no such title.
+- `GET /watch/season?id=<show>&season=<n>` → `{"ok", "season", "episodes":
+  [{"season", "number", "title", "overview", "first_aired", "runtime",
+  "rating"?, "ids", "watched"?}]}`. One is marked watched with `POST /watch
+  {"action": "watched", "kind": "episode", "ids"}`.
+- `GET /watch/person?id=<trakt id or slug>` → `{"ok", "person": {…,
+  "biography", "birthday", "death", "birthplace", "homepage",
+  "known_titles", "photo"?}, "movies": {"cast", "crew"}, "shows": {"cast",
+  "crew"}}`: each row an item with `role` (the character, or the jobs), a
+  crew row its `department`, a show's cast row `episodes`; newest first.
+- `GET /watch/lists?which=trending|popular|mine&page=` → `{"ok", "which",
+  "kinds", "page", "more", "lists"}` (Trakt's `/lists/trending|popular`,
+  20 a page; `mine`: `/users/me/lists`, signed in only, each `mine: true`).
+  `GET /watch/list?id=<list>&mine=0|1&page=` → `{"ok", "id", "page",
+  "more", "items"}`: its movies and shows in its order, 20 a page.
+- `GET /watch/calendar?kind=tv|movie&days=<1–31, 14>` (signed in) → `{"ok",
+  "kind", "from", "days", "items"}`: for `tv` the episodes airing for the
+  shows watched (`/calendars/my/shows`; episode items with `first_aired`),
+  for `movie` the watchlist's movies coming out (`/calendars/my/movies`;
+  `released`), soonest first.
+- `GET /watch/discover` also takes the lists `watched_week`,
+  `watched_month`, `watched_all` (most watched), `played`, `collected` and,
+  for movies, `boxoffice` (ten, no more pages), and the filters `rating`,
+  `runtime`, `language`, `country`, `certification`, and for shows `network`
+  and `status`, passed to Trakt as its filters (recommendations filtered
+  here). Its answer carries `filters`: `[{"id", "label", "options":
+  [{"value", "label"}]}]`, the choices the server takes (the app draws
+  them as they are; another value is 400). Trakt's lists have no sort of
+  their own: the app orders what it has loaded.
+- `GET /media/search` (§6.46a) has a `person` group: `found` the people.
+- 400 for an id, kind, list, page or filter that is not one, or a personal
+  list or calendar when not connected; 502 when Trakt fails.
 
 **TMDb, optional.** With `MEDIA_TMDB_TOKEN` (TMDb's v4 read access token,
 sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
