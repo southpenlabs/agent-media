@@ -608,3 +608,99 @@ def test_the_nightly_mirrors_rather_than_quick_pushing(install, monkeypatch):
     seen.clear()
     bk.main(["run", "--tier", "core"])
     assert seen == [False], "the nightly mirrors, so the far side gets pruned too"
+
+
+# --- the encrypted history --------------------------------------------------
+
+NO_RESTIC = shutil.which("restic") is None
+
+
+@pytest.mark.skipif(NO_RESTIC or NO_RSYNC, reason="needs restic and rsync")
+def test_the_repository_holds_no_readable_secret(install, monkeypatch, tmp_path):
+    """The whole point. `age` was the other candidate and lost on arithmetic:
+    encrypting a snapshot as one blob defeats the hardlink dedup, so every
+    night would cost its full size. restic encrypts and still dedupes."""
+    repo = tmp_path / "repo"
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", str(repo))
+    monkeypatch.setenv("MEDIA_BACKUP_KEY", str(tmp_path / "k"))
+    got = bk.init_repo()
+    assert got.get("ok") and got["created_repo"] and got["phrase"]
+    assert (tmp_path / "k").stat().st_mode & 0o777 == 0o600, "a key is not world-readable"
+
+    res = bk.backup(tier="core")
+    assert res["ok"], res["warnings"]
+    assert res["repo"]["ok"]
+
+    blob = b""
+    for f in repo.rglob("*"):
+        if f.is_file():
+            blob += f.read_bytes()
+    assert b"topsecret" not in blob, "the signing key is readable in the repository"
+    assert b"srv-abc123" not in blob
+    assert bk.repo_check()["ok"]
+
+
+@pytest.mark.skipif(NO_RESTIC or NO_RSYNC, reason="needs restic and rsync")
+def test_what_the_repository_holds_comes_back_out(install, monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", str(repo))
+    monkeypatch.setenv("MEDIA_BACKUP_KEY", str(tmp_path / "k"))
+    bk.init_repo()
+    bk.backup(tier="core")
+    out = bk.from_repo("latest", tmp_path / "out")
+    assert out["ok"], out.get("error")
+    found = list((tmp_path / "out").rglob("clip-sign.key"))
+    assert found and found[0].read_text() == "topsecret\n", \
+        "an encrypted backup nobody can decrypt is not a backup"
+
+
+@pytest.mark.skipif(NO_RESTIC, reason="needs restic")
+def test_init_does_not_reprint_an_existing_phrase(install, monkeypatch, tmp_path):
+    """A secret on a terminal for no reason. The key file is still readable
+    where it sits, and the second copy is what a lost file is for."""
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", str(tmp_path / "repo"))
+    monkeypatch.setenv("MEDIA_BACKUP_KEY", str(tmp_path / "k"))
+    first = bk.init_repo()
+    again = bk.init_repo()
+    assert first["phrase"] and again["phrase"] is None
+    assert any("already exists" in w for w in again["warnings"])
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync")
+def test_a_plain_mirror_to_another_machine_is_called_out(install, monkeypatch):
+    """Plain snapshots on the machine holding the originals grant nobody
+    anything new. Pushed to another machine they are a second readable copy of
+    every secret and transcript, so that combination has to say so."""
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", "/somewhere/repo")
+    monkeypatch.setenv("MEDIA_BACKUP_DEST", "red5:/mnt/data/agent-media-backups")
+    monkeypatch.setattr(bk, "to_repo", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(bk, "_push", lambda *a, **k: {"ok": True})
+    res = bk.backup(tier="jewels")
+    assert any("unencrypted" in w for w in res["warnings"])
+    assert any("sftp:red5:" in w for w in res["warnings"]), "and it says what to do"
+
+
+def test_no_repository_means_plain_files_and_no_complaint(install):
+    """Not every install wants an encrypted history, and the plain store is
+    what `media server move` reads."""
+    assert bk.repo() == ""
+    assert bk.to_repo(Path("/nope"), "core") == {"ok": True,
+                                                 "skipped": "no repository configured"}
+    assert bk.repo_check()["ok"]
+
+
+@pytest.mark.skipif(NO_RESTIC, reason="needs restic")
+def test_the_phrase_is_not_printed_when_nothing_human_is_watching(
+        install, monkeypatch, tmp_path, capsys):
+    """A phrase printed into a log, a CI job or an agent's transcript is a
+    phrase leaked — and this project's transcripts are themselves backed up
+    and searchable. pytest captures stdout, so this is the non-TTY case.
+    """
+    monkeypatch.setenv("MEDIA_BACKUP_REPO", str(tmp_path / "repo"))
+    monkeypatch.setenv("MEDIA_BACKUP_KEY", str(tmp_path / "k"))
+    bk.main(["init"])
+    said = capsys.readouterr().out
+    phrase = (tmp_path / "k").read_text().strip()
+    assert phrase, "the key was still written"
+    assert phrase not in said, "the phrase must not reach a non-terminal"
+    assert "NOT printed" in said and "cat " in said, "and it says how to read it"

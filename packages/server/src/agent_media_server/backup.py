@@ -490,6 +490,18 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     data = snap / "data"
     data.mkdir(parents=True, exist_ok=True)
 
+    # The plain snapshot is readable by anyone who can read the store. On the
+    # machine that holds the originals that grants nobody anything new, which
+    # is why it is allowed at all. Pushed to ANOTHER machine it is a second
+    # readable copy of the secrets and every transcript -- so if there is an
+    # encrypted history, that is what should travel, and restic speaks sftp
+    # itself (`MEDIA_BACKUP_REPO=sftp:host:/path`).
+    if host and repo():
+        out["warnings"].append(
+            f"the plain snapshot is being mirrored to {host} unencrypted while an "
+            f"encrypted history is configured: point {REPO_ENV} at "
+            f"sftp:{host}:/path and keep {('MEDIA_BACKUP_DEST')} local instead")
+
     free = shutil.disk_usage(store).free
     if free < FLOOR_BYTES:
         out["warnings"].append(
@@ -546,6 +558,16 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     out["manifest"] = str(snap / "manifest.json")
     out["path"] = str(snap)
 
+    # The encrypted history, when one is configured. After the snapshot is
+    # built and before the local prune, so a snapshot is never dropped here
+    # until it is safely in the repository.
+    if out["ok"] and repo():
+        kept = to_repo(snap, tier)
+        out["repo"] = kept
+        if not kept.get("ok"):
+            out["ok"] = False
+            out["warnings"].append(f"encrypted history: {kept.get('error')}")
+            _alert("", f"backup {sid}: could not write the encrypted history", level="error")
     if out["ok"]:
         _mark_good(store, man)
     if prune:
@@ -566,6 +588,182 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     if failed:
         _alert("", f"backup {sid}: {len(failed)} item(s) failed", level="error")
     return out
+
+
+# --- encrypted history, in a restic repository -------------------------------
+#
+# David, 13 Nov 2026, asked which way to encrypt and chose restic "for the
+# off-machine copy". The reason it wins over `age` here is arithmetic, not
+# taste: encrypting a snapshot as one blob defeats the hardlink trick that
+# makes a nightly run cost only what changed, so every night would cost its
+# full ~1G and a 10G cap would hold ten nights instead of months. restic
+# encrypts AND dedupes at block level, so the history stays cheap.
+#
+# It sits on top of the plain-file snapshot rather than replacing it: the
+# snapshot is still built as a readable directory (which `media server move`
+# pushes and restores), and then handed to restic for the kept, encrypted
+# history. Nothing about the move's path changes.
+
+#: Where the encrypted history lives, if anywhere. Unset means plain files only.
+REPO_ENV = "MEDIA_BACKUP_REPO"
+#: The passphrase restic is given. Mode 600, and never inside a backup.
+KEY_NAME = "backup.key"
+#: What the repository keeps. Matches the dotfiles script this replaces.
+KEEP = ("--keep-daily", "14", "--keep-weekly", "8", "--keep-monthly", "12")
+
+
+def repo() -> str:
+    """The restic repository, or "" for none."""
+    raw = os.environ.get(REPO_ENV, "").strip()
+    if raw:
+        return raw
+    try:
+        from agent_media_core import config
+        return str((config.load().get("backup") or {}).get("repo") or "")
+    except Exception:
+        return ""
+
+
+def key_path() -> Path:
+    raw = os.environ.get("MEDIA_BACKUP_KEY", "").strip()
+    if raw:
+        return Path(raw)
+    return Path.home() / ".config" / "agent-media" / KEY_NAME
+
+
+def _restic(argv: list[str], *, repo_url: str | None = None,
+            timeout: float = 3600.0) -> subprocess.CompletedProcess:
+    """restic, with the repository and its password file supplied."""
+    url = repo_url or repo()
+    env = dict(os.environ)
+    env["RESTIC_REPOSITORY"] = url
+    env["RESTIC_PASSWORD_FILE"] = str(key_path())
+    return subprocess.run(["restic", *argv], capture_output=True, text=True,
+                          env=env, timeout=timeout)
+
+
+def init_repo(*, repo_url: str | None = None, copy_to: str | None = None) -> dict:
+    """Make the key and the repository, and print the phrase **once**.
+
+    The trap this exists to avoid: a key that lives only on the machine being
+    backed up means losing that machine loses every backup with it. So the
+    phrase is shown once for the owner to keep somewhere else, and
+    `copy_to` puts a second copy on another paired host -- which is what
+    David chose on 13 Nov 2026 ("printed once, plus a copy on the other
+    machine"), so a restore does not wait on a human finding a piece of paper.
+
+    Never re-prints an existing key: that would be a secret on a terminal for
+    no reason. A lost phrase with the key file intact is recoverable by
+    reading the file; a lost key file is what the second copy is for.
+    """
+    url = repo_url or repo()
+    out: dict = {"repo": url, "key": str(key_path()), "created_key": False,
+                 "created_repo": False, "phrase": None, "copied_to": None,
+                 "warnings": []}
+    if not url:
+        out["error"] = f"no repository: set {REPO_ENV}"
+        return out
+
+    kp = key_path()
+    if kp.exists():
+        out["warnings"].append(
+            f"{kp} already exists; it is not re-printed. Read it there if the "
+            f"phrase was lost, and keep a copy off this machine.")
+    else:
+        import secrets
+        phrase = secrets.token_urlsafe(32)
+        kp.parent.mkdir(parents=True, exist_ok=True)
+        # Written 600 before anything goes in it, never 644-then-chmod.
+        fd = os.open(kp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(phrase + "\n")
+        out["created_key"] = True
+        out["phrase"] = phrase
+
+    r = _restic(["cat", "config"], repo_url=url, timeout=120)
+    if r.returncode != 0:
+        r = _restic(["init"], repo_url=url, timeout=300)
+        if r.returncode != 0:
+            out["error"] = f"restic init failed: {r.stderr.strip()[:300]}"
+            return out
+        out["created_repo"] = True
+
+    if copy_to:
+        c = subprocess.run(["ssh", copy_to, "mkdir", "-p",
+                            str(kp.parent)], capture_output=True, text=True)
+        if c.returncode == 0:
+            c = subprocess.run(["scp", "-q", str(kp), f"{copy_to}:{kp}"],
+                               capture_output=True, text=True)
+        if c.returncode == 0:
+            subprocess.run(["ssh", copy_to, "chmod", "600", str(kp)],
+                           capture_output=True, text=True)
+            out["copied_to"] = copy_to
+        else:
+            out["warnings"].append(
+                f"could not copy the key to {copy_to}: {c.stderr.strip()[:200]}")
+    out["ok"] = "error" not in out
+    return out
+
+
+def to_repo(snap: Path, tier: str, *, repo_url: str | None = None) -> dict:
+    """Put a built snapshot into the encrypted history, and apply retention."""
+    url = repo_url or repo()
+    if not url:
+        return {"ok": True, "skipped": "no repository configured"}
+    if not key_path().exists():
+        return {"ok": False, "error": f"no key at {key_path()}: run `media backup init`"}
+    r = _restic(["backup", "--tag", f"tier:{tier}", "--tag", f"snapshot:{snap.name}",
+                 str(snap)])
+    out = {"ok": r.returncode in (0, 3), "repo": url,
+           "error": r.stderr.strip()[:400] or None}
+    if r.returncode == 3:
+        out["warning"] = "some files could not be read"
+    if not out["ok"]:
+        return out
+    f = _restic(["forget", *KEEP, "--prune"], repo_url=url)
+    out["forget_ok"] = f.returncode == 0
+    if f.returncode != 0:
+        out["error"] = f"restic forget failed: {f.stderr.strip()[:300]}"
+    return out
+
+
+def repo_snapshots(*, repo_url: str | None = None) -> list[dict]:
+    url = repo_url or repo()
+    if not url:
+        return []
+    r = _restic(["snapshots", "--json"], repo_url=url, timeout=300)
+    if r.returncode != 0:
+        return []
+    try:
+        return json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+
+
+def repo_check(*, read_data: bool = False, repo_url: str | None = None) -> dict:
+    """`restic check` -- the repository's own integrity.
+
+    `read_data` re-reads and re-verifies every pack, which is the honest check
+    and also reads the whole repository, so it is not the default.
+    """
+    url = repo_url or repo()
+    if not url:
+        return {"ok": True, "skipped": "no repository configured"}
+    argv = ["check"] + (["--read-data"] if read_data else [])
+    r = _restic(argv, repo_url=url, timeout=7200)
+    return {"ok": r.returncode == 0, "repo": url, "read_data": read_data,
+            "error": (r.stderr or r.stdout).strip()[:400] if r.returncode else None}
+
+
+def from_repo(which: str, target: Path, *, repo_url: str | None = None) -> dict:
+    """Pull a snapshot out of the encrypted history into `target`."""
+    url = repo_url or repo()
+    if not url:
+        return {"ok": False, "error": "no repository configured"}
+    target.mkdir(parents=True, exist_ok=True)
+    r = _restic(["restore", which, "--target", str(target)], repo_url=url)
+    return {"ok": r.returncode == 0, "target": str(target),
+            "error": (r.stderr or r.stdout).strip()[:400] if r.returncode else None}
 
 
 #: A daily backup older than this is wrong, not merely late. Two days leaves
@@ -1076,6 +1274,7 @@ def _human(n: int | None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    import sys as _sys
 
     ap = argparse.ArgumentParser(prog="media backup", description=__doc__ and __doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd")
@@ -1102,6 +1301,17 @@ def main(argv: list[str] | None = None) -> int:
     sy.add_argument("--tier", default="full")
     sy.add_argument("--to", default=None)
     sy.add_argument("--json", action="store_true")
+
+    ini = sub.add_parser("init", help="make the encryption key and the repository")
+    ini.add_argument("--repo", default=None)
+    ini.add_argument("--copy-to", default=None,
+                     help="another host to keep a second copy of the key on")
+    ini.add_argument("--json", action="store_true")
+
+    chk = sub.add_parser("check", help="the encrypted history's own integrity")
+    chk.add_argument("--read-data", action="store_true",
+                     help="re-read every pack (slow, and the honest check)")
+    chk.add_argument("--json", action="store_true")
 
     stl = sub.add_parser("stale", help="is the schedule still running?")
     stl.add_argument("--to", default=None)
@@ -1164,6 +1374,57 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  ! {b}")
             return 0 if res["ok"] else 1
 
+        if cmd == "init":
+            res = init_repo(repo_url=a.repo, copy_to=a.copy_to)
+            if as_json:
+                print(json.dumps(res, indent=2))
+            else:
+                if res.get("error"):
+                    print(f"media backup init: {res['error']}", file=_sys.stderr)
+                    return 2
+                print(f"repository: {res['repo']}"
+                      + ("  (created)" if res["created_repo"] else "  (already there)"))
+                print(f"key:        {res['key']}")
+                if res.get("copied_to"):
+                    print(f"copied to:  {res['copied_to']}")
+                for w in res["warnings"]:
+                    print(f"  ! {w}")
+                if res.get("phrase"):
+                    print("")
+                    if _sys.stdout.isatty():
+                        print("  Recovery phrase — shown once, and never again:")
+                        print("")
+                        print(f"      {res['phrase']}")
+                        print("")
+                        print("  Keep it somewhere that is not this machine. Without it,")
+                        print("  and without the key file, no backup can ever be read.")
+                    else:
+                        # Not a terminal: this is a script, a log, or an agent
+                        # running it, and every one of those keeps what it is
+                        # given. A recovery phrase in a transcript that is
+                        # itself backed up and searchable is worse than no
+                        # phrase printed at all.
+                        print("  Recovery phrase NOT printed: output is not a terminal,")
+                        print("  and a phrase in a log or a transcript is a phrase")
+                        print("  leaked. Read it yourself when you are ready to put it")
+                        print("  somewhere safe:")
+                        print("")
+                        print(f"      cat {res['key']}")
+            return 0
+
+        if cmd == "check":
+            res = repo_check(read_data=a.read_data)
+            if as_json:
+                print(json.dumps(res, indent=2))
+            elif res.get("skipped"):
+                print(f"no encrypted history configured ({REPO_ENV} unset)")
+            else:
+                print(f"{res['repo']}: {'sound' if res['ok'] else 'PROBLEMS'}"
+                      + ("  (packs re-read)" if res["read_data"] else ""))
+                if res.get("error"):
+                    print(f"  ! {res['error']}")
+            return 0 if res.get("ok") else 1
+
         if cmd == "stale":
             st = check_stale(a.to, alert=not a.quiet)
             if as_json:
@@ -1184,7 +1445,8 @@ def main(argv: list[str] | None = None) -> int:
             # staleness reads the local store, which is the real history even
             # when the destination is another machine (it holds the mirror).
             info = {"dest": store, "remote": host, "max_bytes": max_bytes(),
-                    "schedule": schedule_state(), "staleness": staleness(a.to)}
+                    "schedule": schedule_state(), "staleness": staleness(a.to),
+                    "repo": repo(), "key": key_path().exists()}
             if host is None:
                 p = Path(path)
                 info["exists"] = p.is_dir()
@@ -1201,6 +1463,11 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"store:       {_human(info.get('store_bytes'))}")
                     print(f"free:        {_human(info['free'])}"
                           + ("  ! under the floor" if info.get("under_floor") else ""))
+                print("encrypted:   " + (
+                    f"{info['repo']}" + ("" if info["key"] else "  ! no key — `media backup init`")
+                    if info["repo"] else
+                    "NO — snapshots are plain files "
+                    f"({REPO_ENV} unset; `media backup init`)"))
                 sch = info["schedule"]
                 print(f"schedule:    " + (
                     f"{sch['unit']} {sch['active'] or '?'}"
@@ -1214,7 +1481,7 @@ def main(argv: list[str] | None = None) -> int:
                     + ("  ! " + st["why"] if st["stale"] else ""))
             return 0
     except (ValueError, FileNotFoundError, RuntimeError) as e:
-        print(f"media backup: {e}", file=__import__("sys").stderr)
+        print(f"media backup: {e}", file=_sys.stderr)
         return 2
 
     ap.print_help()
