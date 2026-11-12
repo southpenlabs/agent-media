@@ -10701,13 +10701,21 @@ sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
   JustWatch). 404 without a TMDb credential, 400 for a bad kind or id, 502
   when TMDb fails.
 
-**Signing in** (admins, `auth.may_admin`). Two ways, by whether the
-server has a client secret (`flow`): `device` (Trakt's device code: a code
-typed at Trakt's address) with one, `pkce` (authorization code with PKCE,
-S256: Trakt's sign-in page, then the address it lands on pasted back)
-without. Trakt's PKCE guide: "Do not send a client_secret"; whether its
-device flow works without a secret is not documented, so it is used only
-with one.
+**Signing in** (admins, `auth.may_admin`). Two ways (`flow`): `device`
+(Trakt's device code: a code typed at Trakt's address), the default with or
+without a client secret, and `pkce` (authorization code with PKCE, S256:
+Trakt's sign-in page, then the address it lands on pasted back) when
+`MEDIA_TRAKT_FLOW=pkce` says so or Trakt gives an app with no secret no
+code. Until 13 Nov 2026 an app with no secret always went by PKCE, whose
+redirect for a development app is a localhost page that does not load
+(David: "redirect to a non-existent localhost"); Trakt's device flow turned
+out to take such an app (a code given, the poll answered 400 "waiting"
+without a secret), though its docs do not say so. No secret is ever sent
+when there is none. A token refresh is done by one process at a time (a
+lock file beside `trakt-token.json`), reads the file again inside the lock,
+and a refusal wipes the sign-in only when the file still holds the token
+that was refused: Trakt's refresh token is good once, and two refreshes at
+the same moment had signed the server out (13 Nov 2026).
 
 - `GET /accounts/trakt` → `{"ok", "set_up", "signed_in", "user", "flow",
   "pending", "reason"?}`. `pending` is the sign-in under way, or null:

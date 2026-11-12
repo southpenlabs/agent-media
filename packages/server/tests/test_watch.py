@@ -30,6 +30,7 @@ class FakeTrakt:
     def __init__(self):
         self.calls = []
         self.token_bodies = []
+        self.device_bodies = []
         self.writes = []
         self.public = []
         self.device = [(400, {}), (200, {"access_token": "acc", "refresh_token": "ref",
@@ -42,6 +43,7 @@ class FakeTrakt:
             return 200, {"device_code": "dev", "user_code": "ABCD1234",
                          "verification_url": "https://trakt.tv/activate", "expires_in": 600, "interval": 5}
         if p == "/oauth/device/token":
+            self.device_bodies.append(body)
             return self.device.pop(0)
         if p == "/oauth/token":
             self.token_bodies.append(body)
@@ -169,9 +171,46 @@ def test_the_device_sign_in_then_sign_out(server, signed_in, fake, creds):
     assert res.status == 400, "no sign-in waiting"
 
 
-def test_pkce_without_a_secret(server, signed_in, fake, monkeypatch):
+def test_a_code_without_a_secret(server, signed_in, fake, monkeypatch):
+    # Trakt gives an app with no secret a device code too (13 Nov 2026): no localhost redirect.
+    monkeypatch.setenv("MEDIA_TRAKT_CLIENT_ID", "cid")
+    res, obj = call(server, "POST", "/accounts/trakt/start", {}, AUTH)
+    assert res.status == 200 and obj["flow"] == "device" and obj["user_code"] == "ABCD1234"
+    call(server, "POST", "/accounts/trakt/finish", {}, AUTH)
+    res, obj = call(server, "POST", "/accounts/trakt/finish", {}, AUTH)
+    assert obj["signed_in"] is True
+    assert fake.device_bodies and all("client_secret" not in b for b in fake.device_bodies), \
+        "no secret is sent, not even an empty one"
+    trakt._save({**trakt._load(), "expires_at": 0})
+    call(server, "GET", "/watch?kind=movie", headers=AUTH)
+    assert fake.token_bodies[-1]["grant_type"] == "refresh_token" and "client_secret" not in fake.token_bodies[-1]
+    assert fake.token_bodies[-1]["redirect_uri"] == trakt.OOB
+
+
+def test_a_refresh_another_process_already_did_signs_nobody_out(server, signed_in, fake, creds, monkeypatch):
+    # Trakt's refresh token is good once: this one is refused, but the file has moved on (13 Nov 2026).
+    call(server, "POST", "/accounts/trakt/start", {}, AUTH)
+    call(server, "POST", "/accounts/trakt/finish", {}, AUTH)
+    call(server, "POST", "/accounts/trakt/finish", {}, AUTH)
+    trakt._save({**trakt._load(), "expires_at": 0})
+    real = fake.__call__
+
+    def refused(method, path, body=None, token="", timeout=20.0):
+        if path == "/oauth/token" and (body or {}).get("grant_type") == "refresh_token":
+            trakt._save({**trakt._load(), "access_token": "theirs", "refresh_token": "theirs-r",
+                         "expires_at": 9e12})
+            return 401, {"error": "invalid_grant"}
+        return real(method, path, body, token, timeout)
+    monkeypatch.setattr(trakt, "_request", refused)
+    import time as _t
+    assert trakt._access(_t.time()) == "theirs"
+    assert trakt._load()["refresh_token"] == "theirs-r", "nothing wiped"
+
+
+def test_pkce_when_asked_for(server, signed_in, fake, monkeypatch):
     import urllib.parse
     monkeypatch.setenv("MEDIA_TRAKT_CLIENT_ID", "cid")
+    monkeypatch.setenv("MEDIA_TRAKT_FLOW", "pkce")
     res, obj = call(server, "POST", "/accounts/trakt/start", {}, AUTH)
     assert res.status == 200 and obj["flow"] == "pkce" and obj["redirect_uri"] == "http://localhost"
     url = urllib.parse.urlsplit(obj["url"])

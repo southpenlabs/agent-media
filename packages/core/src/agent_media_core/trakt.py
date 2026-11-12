@@ -88,8 +88,14 @@ def set_up() -> bool:
 
 
 def flow() -> str:
-    """"device" with a client secret, else "pkce"."""
-    return "device" if client_secret() else "pkce"
+    """How a sign-in starts: "device" (a code typed at trakt.tv/activate),
+    or "pkce" when MEDIA_TRAKT_FLOW says so. Trakt gives an app with no
+    secret a device code too and takes the poll without one (checked 13 Nov
+    2026: 200, then 400 "waiting"), which spares the listener the PKCE
+    redirect to a localhost page that does not load (David, 13 Nov 2026:
+    "The trakt login from settings seems to redirect to a non-existent
+    localhost"). begin() still falls back to PKCE when no code is given."""
+    return "pkce" if (os.environ.get("MEDIA_TRAKT_FLOW") or "").strip().lower() == "pkce" else "device"
 
 
 def redirect_uri() -> str:
@@ -200,7 +206,18 @@ def begin(now: Optional[float] = None) -> dict:
     if not set_up():
         raise ValueError(NOT_SET_UP)
     now = time.time() if now is None else now
-    if flow() == "pkce":
+    p = None
+    if flow() == "device":
+        code, got = _request("POST", "/oauth/device/code", {"client_id": client_id()})
+        if code == 200 and isinstance(got, dict) and got.get("device_code"):
+            p = {"flow": "device", "device_code": got["device_code"], "user_code": str(got.get("user_code") or ""),
+                 "verification_url": str(got.get("verification_url") or "https://trakt.tv/activate"),
+                 "expires_at": now + float(got.get("expires_in") or 600),
+                 "interval": int(got.get("interval") or 5)}
+        elif client_secret():
+            raise TraktError(f"Trakt gave no sign-in code (HTTP {code})")
+        # No code and no secret: an app Trakt only lets sign in by PKCE.
+    if p is None:
         import base64
         import hashlib
         import secrets
@@ -213,14 +230,6 @@ def begin(now: Optional[float] = None) -> dict:
                                     "code_challenge": challenge, "code_challenge_method": "S256"})
         p = {"flow": "pkce", "verifier": verifier, "state": state, "redirect_uri": redirect_uri(),
              "url": f"{AUTHORIZE}?{q}", "expires_at": now + PKCE_PENDING_S}
-    else:
-        code, got = _request("POST", "/oauth/device/code", {"client_id": client_id()})
-        if code != 200 or not isinstance(got, dict) or not got.get("device_code"):
-            raise TraktError(f"Trakt gave no sign-in code (HTTP {code})")
-        p = {"flow": "device", "device_code": got["device_code"], "user_code": str(got.get("user_code") or ""),
-             "verification_url": str(got.get("verification_url") or "https://trakt.tv/activate"),
-             "expires_at": now + float(got.get("expires_in") or 600),
-             "interval": int(got.get("interval") or 5)}
     d = _load()
     d["pending"] = p
     _save(d)
@@ -302,16 +311,19 @@ def finish(address: str = "", now: Optional[float] = None) -> dict:
                              {"code": code_, "client_id": client_id(), "code_verifier": p["verifier"],
                               "redirect_uri": p["redirect_uri"], "grant_type": "authorization_code"})
         if code == 200 and isinstance(got, dict) and got.get("access_token"):
+            d["redirect_uri"] = p["redirect_uri"]
             return _signed_in_now(d, got, now)
         if code in (400, 401):
             d.pop("pending", None)
             _save(d)
             raise ValueError("Trakt did not take that code (used, or too old); start again")
         raise TraktError(f"Trakt answered HTTP {code}")
-    code, got = _request("POST", "/oauth/device/token",
-                         {"code": p["device_code"], "client_id": client_id(),
-                          "client_secret": client_secret()})
+    body = {"code": p["device_code"], "client_id": client_id()}
+    if client_secret():
+        body["client_secret"] = client_secret()
+    code, got = _request("POST", "/oauth/device/token", body)
     if code == 200 and isinstance(got, dict) and got.get("access_token"):
+        d["redirect_uri"] = OOB
         return _signed_in_now(d, got, now)
     if code in (400, 429):
         interval = int(p.get("interval") or 5)
@@ -344,28 +356,69 @@ def sign_out() -> None:
     clear_cache()
 
 
+def _refresh_lock():
+    """One refresh at a time across every process on the host (the server,
+    a `media` command, a test of the release): Trakt's refresh token is
+    good once, so two at the same moment left the second refused and this
+    server signed out (13 Nov 2026, 00:01)."""
+    import contextlib
+    import fcntl
+
+    @contextlib.contextmanager
+    def held():
+        p = token_path().with_name(token_path().name + ".lock")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    return held()
+
+
 def _access(now: float, force: bool = False) -> str:
     d = _load()
     if not d.get("refresh_token"):
         raise ValueError("not signed in to Trakt")
     if not force and d.get("access_token") and float(d.get("expires_at") or 0) - now > REFRESH_EARLY_S:
         return d["access_token"]
-    body = {"refresh_token": d["refresh_token"], "client_id": client_id(),
-            "redirect_uri": redirect_uri() if flow() == "pkce" else OOB, "grant_type": "refresh_token"}
-    if client_secret():
-        body["client_secret"] = client_secret()
-    code, got = _request("POST", "/oauth/token", body)
-    if code == 200 and isinstance(got, dict) and got.get("access_token"):
-        _keep_tokens(d, got, now)
-        _save(d)
-        return d["access_token"]
-    if code in (400, 401):
-        # The refresh token is gone (revoked, or used twice): signed out.
-        for k in ("access_token", "refresh_token", "expires_at"):
-            d.pop(k, None)
-        _save(d)
-        raise ValueError("Trakt signed this server out; connect Trakt again in Settings")
-    raise TraktError(f"Trakt answered HTTP {code} to a token refresh")
+    had = d.get("access_token")
+    with _refresh_lock():
+        # Read again inside the lock: another process may have just refreshed.
+        d = _load()
+        if not d.get("refresh_token"):
+            raise ValueError("not signed in to Trakt")
+        if d.get("access_token") and d["access_token"] != had \
+                and float(d.get("expires_at") or 0) - now > REFRESH_EARLY_S:
+            return d["access_token"]
+        if not force and d.get("access_token") and float(d.get("expires_at") or 0) - now > REFRESH_EARLY_S:
+            return d["access_token"]
+        sent = d["refresh_token"]
+        # The redirect the tokens were first given for (kept at sign-in; an
+        # older file has none: PKCE's when no secret, as it was then).
+        redirect = d.get("redirect_uri") or (OOB if client_secret() else redirect_uri())
+        body = {"refresh_token": sent, "client_id": client_id(),
+                "redirect_uri": redirect, "grant_type": "refresh_token"}
+        if client_secret():
+            body["client_secret"] = client_secret()
+        code, got = _request("POST", "/oauth/token", body)
+        if code == 200 and isinstance(got, dict) and got.get("access_token"):
+            _keep_tokens(d, got, now)
+            _save(d)
+            return d["access_token"]
+        if code in (400, 401):
+            # Refused. If the file moved on meanwhile (a writer without the
+            # lock), its tokens are the live ones: use them, wipe nothing.
+            cur = _load()
+            if cur.get("refresh_token") and cur["refresh_token"] != sent and cur.get("access_token"):
+                return cur["access_token"]
+            # The refresh token is gone (revoked, or used twice): signed out.
+            for k in ("access_token", "refresh_token", "expires_at"):
+                d.pop(k, None)
+            _save(d)
+            raise ValueError("Trakt signed this server out; connect Trakt again in Settings")
+        raise TraktError(f"Trakt answered HTTP {code} to a token refresh")
 
 
 def _get(path: str, now: float) -> object:
