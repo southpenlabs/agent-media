@@ -9407,8 +9407,9 @@ def cmd_hits(a) -> int:
     rows = []
     for name in names:
         rec = hits.read(name)
+        local = hits.local_addresses()
         remote = {c: n for c, n in (rec["clients"] or {}).items()
-                  if c not in hits.LOCAL}
+                  if c not in local}
         rows.append({"endpoint": name, **rec, "remote_clients": remote})
     if getattr(a, "json", False):
         print(json.dumps({"hits": rows, "counting": hits.enabled()}, indent=2))

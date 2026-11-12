@@ -176,3 +176,44 @@ def test_the_first_request_of_a_process_always_lands(monkeypatch):
         hits._last_flush.clear()          # a fresh process
         hits.record("speech-state", "100.64.0.9", "/speech")
     assert hits.read("speech-state")["total"] == 3
+
+
+def test_this_hosts_own_mesh_address_counts_as_local(monkeypatch):
+    """A process ON red5 that dials `red5:8675` reaches it through MagicDNS,
+    so the source address is red5's own 100.x.y.z — not 127.0.0.1. Counting
+    that as "from elsewhere" would answer the question backwards, which is
+    what the first live counts did: my own probes looked like the phone.
+    """
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.setattr(hits, "_own", None)
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: "100.103.43.93")
+    assert "100.103.43.93" in hits.local_addresses()
+
+    hits.record("speech-state", "100.103.43.93", "/speech", flush=True)
+    hits.record("speech-state", "100.64.0.9", "/speech", flush=True)
+    rec = hits.read("speech-state")
+    assert rec["local"] == 1, "our own mesh address is this host"
+    assert rec["remote"] == 1, "another host's is not"
+
+
+def test_a_host_with_no_mesh_just_has_the_loopback_names(monkeypatch):
+    from agent_media_core.entrypoints import speech_state
+
+    monkeypatch.setattr(hits, "_own", None)
+    monkeypatch.setattr(speech_state, "_peer_ip", lambda: None)
+    assert hits.local_addresses() == hits.LOCAL
+
+
+def test_the_mesh_address_is_resolved_once(monkeypatch):
+    """It costs a subprocess; a counter in a request path must not pay that
+    per request."""
+    from agent_media_core.entrypoints import speech_state
+
+    calls = []
+    monkeypatch.setattr(hits, "_own", None)
+    monkeypatch.setattr(speech_state, "_peer_ip",
+                        lambda: calls.append(1) or "100.0.0.1")
+    for _ in range(5):
+        hits.record("share", "127.0.0.1", "/share", flush=True)
+    assert len(calls) == 1, calls

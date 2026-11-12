@@ -60,6 +60,33 @@ FLUSH_S = 30.0
 #: the report: they are the ones that do not need a routable bind.
 LOCAL = ("127.0.0.1", "::1", "localhost")
 
+_own: "Optional[tuple[str, ...]]" = None
+
+
+def local_addresses() -> "tuple[str, ...]":
+    """`LOCAL`, plus this host's own mesh address.
+
+    The mesh one matters and is easy to miss: a process ON red5 that dials
+    `red5:8675` reaches it through MagicDNS, so the connection's source
+    address is red5's own `100.x.y.z` — which lands under "from elsewhere"
+    and makes a purely local caller look like remote traffic. That is the
+    one distinction this whole counter exists to draw, so getting it wrong
+    would answer the question backwards. Found by reading the first live
+    counts: my own probes from red5 showed up as remote.
+
+    Resolved once per process and cached, because it costs a `tailscale ip`
+    subprocess; `()` extra on a host with no mesh.
+    """
+    global _own
+    if _own is None:
+        try:
+            from .entrypoints.speech_state import _peer_ip
+            ip = _peer_ip()
+        except Exception:
+            ip = None
+        _own = LOCAL + ((ip,) if ip else ())
+    return _own
+
 
 def enabled() -> bool:
     return (os.environ.get("MEDIA_HITS") or "1") != "0"
@@ -173,7 +200,7 @@ def record(endpoint: str, client: str = "", path: str = "",
         rec["clients"][client] = rec["clients"].get(client, 0) + 1
         seg = segment(path)
         rec["paths"][seg] = rec["paths"].get(seg, 0) + 1
-        if client in LOCAL:
+        if client in local_addresses():
             rec["local"] += 1
         else:
             rec["remote"] += 1

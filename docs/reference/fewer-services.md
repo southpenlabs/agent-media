@@ -240,6 +240,12 @@ can bind loopback and the mesh address was never needed; anything from the
 phone or another host means it is load-bearing and stays. `MEDIA_HITS=0`
 turns counting off.
 
+"Local" includes **this host's own mesh address**, which is easy to miss and
+inverts the answer if you do: a process on red5 that dials `red5:8675`
+reaches it through MagicDNS, so the connection's source address is red5's
+own `100.x.y.z`, not `127.0.0.1`. The first live counts showed my own
+probes as remote traffic for exactly that reason.
+
 Written at most every 30s and merged with what is on disk, so a release
 restart does not reset it, and flushed on a clean exit. A kill loses at
 most one window — which cannot hide a used port, because the first request
