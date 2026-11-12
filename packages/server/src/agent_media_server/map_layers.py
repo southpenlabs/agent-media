@@ -267,3 +267,23 @@ def alerts(near: str, radius_km: str, bearer: str, host: bool = False) -> tuple[
                           "lines": lines})
     return True, {"at": round(time.time(), 3), "near": [lat, lon], "radius_km": r,
                   "points": points, "roads": roads}
+
+
+def speed_limit(near: str, heading: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/speed_limit?near=lat,lon[&heading=deg]` (map_limits.py)."""
+    from . import map_limits
+
+    ok, err = _gate(bearer, host)
+    if not ok:
+        return False, err
+    try:
+        lat, lon = (float(x) for x in (near or "").split(","))
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError
+    except ValueError:
+        return False, {"status": 400, "error": "near is lat,lon"}
+    try:
+        hd = float(heading) % 360 if heading not in (None, "") else None
+    except ValueError:
+        hd = None
+    return True, map_limits.nearest(lat, lon, hd)

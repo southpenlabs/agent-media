@@ -377,3 +377,39 @@ def test_reported_cameras_kept_shown_and_alerted_only_on_personal_use(server, mo
         assert map_reports.refresh(force=True) == {"reports": 2, "asked": "timeout", "http": None}
     finally:
         personal_use.register("camera-reports", None)
+
+
+ROADS_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6">
+ <node id="1" lat="-37.8100" lon="144.9600" version="1"/>
+ <node id="2" lat="-37.8100" lon="144.9620" version="1"/>
+ <node id="3" lat="-37.8090" lon="144.9610" version="1"/>
+ <node id="4" lat="-37.8110" lon="144.9610" version="1"/>
+ <node id="5" lat="-37.8200" lon="144.9700" version="1"/>
+ <node id="6" lat="-37.8200" lon="144.9720" version="1"/>
+ <way id="10" version="1"><nd ref="1"/><nd ref="2"/><tag k="highway" v="primary"/><tag k="maxspeed" v="60"/><tag k="name" v="Collins Street"/></way>
+ <way id="11" version="1"><nd ref="3"/><nd ref="4"/><tag k="highway" v="residential"/><tag k="maxspeed" v="AU:urban"/><tag k="name" v="Cross Lane"/></way>
+ <way id="12" version="1"><nd ref="5"/><nd ref="6"/><tag k="highway" v="residential"/><tag k="name" v="No Limit Road"/></way>
+</osm>
+"""
+
+
+def test_speed_limits_from_the_extract(server, tmp_path):
+    import pytest
+
+    pytest.importorskip("osmium")
+    from agent_media_server import map_limits
+
+    assert [map_limits.kmh_of(v) for v in ("60", "80 km/h", "40 mph", "AU:urban", "signals", "")] == [60, 80, 64, 50, None, None]
+    osm = tmp_path / "roads.osm"
+    osm.write_text(ROADS_XML)
+    assert map_limits.build(str(osm)) == {"roads": 2, "segments": 2}
+    # On Collins Street (east-west) at the crossing: heading east picks it, north picks the lane.
+    assert map_limits.nearest(-37.8100, 144.9610, 90)["kmh"] == 60
+    got = map_limits.nearest(-37.8100, 144.9610, 0)
+    assert got["kmh"] == 50 and got["road"] == "Cross Lane"
+    assert map_limits.nearest(-37.8200, 144.9710)["kmh"] is None   # no maxspeed: no limit
+    pixel, _ = _device("Pixel 8a")
+    got = call(server, "GET", "/map/speed_limit?near=-37.81002,144.9605&heading=270", headers=pixel)[1]
+    assert got["kmh"] == 60 and got["road"] == "Collins Street" and got["distance_m"] < 5
+    assert call(server, "GET", "/map/speed_limit?near=x", headers=pixel)[0].status == 400

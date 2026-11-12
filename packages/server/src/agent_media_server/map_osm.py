@@ -303,6 +303,15 @@ def refresh(url: str | None = None) -> dict:
             while chunk := res.read(1 << 20):
                 f.write(chunk)
         elements = _elements(str(tmp))
+        # The roads' speed limits from the same download (map_limits.py),
+        # unless switched off; a failure there leaves the cameras be.
+        if (os.environ.get("MEDIA_MAP_SPEED_LIMITS") or "").lower() not in ("off", "0", "no"):
+            try:
+                from . import map_limits
+
+                print(json.dumps({"speed_limits": map_limits.build(str(tmp))}), flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"speed limits not built: {e}", flush=True)
     finally:
         tmp.unlink(missing_ok=True)
     try:

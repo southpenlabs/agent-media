@@ -10252,6 +10252,17 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   URL through the phone (§6.21 `fetch`; the site refuses a cloud host) and
   keeps `camera-reports.json` in the state dir, doing nothing while it is
   under 20 h old, and keeping what it had when the phone does not answer.
+- **`GET /map/speed_limit?near=lat,lon[&heading=deg]`** (12 Nov 2026; David:
+  "let's add speed limits"; `map_limits.py`) → `{kmh, road, distance_m}`,
+  the limit of the road nearest the point within 30 m, a road running the
+  way of `heading` first (a one-way road only its own way); `{kmh: null}`
+  when no road with a limit is that near, `missing: true` before the first
+  build. From OSM `maxspeed` (numbers, km/h or mph, and `AU:urban` 50,
+  `AU:rural` 100, `AU:living_street` 10); a road with none has no limit,
+  never a guess. Built by the weekly camera refresh from the same download
+  (`speed-limits.db` in the state dir, node locations kept on disk while it
+  runs); `MEDIA_MAP_SPEED_LIMITS=off` skips it. 400 for a bad `near`; the
+  map's gate.
 - **`GET /map/alerts?near=lat,lon[&radius_km=25]`** (10 Nov 2026; David:
   "let's organise alerts for when approaching them"): the cameras the
   phone alerts on while moving fast, around where it is (1–50 km, default
