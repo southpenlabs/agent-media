@@ -101,6 +101,27 @@ def test_state_is_kept_by_rule_not_by_name(install):
     assert got["a-new-thing.json"].tier == "record"
 
 
+def test_a_socket_beside_the_state_is_not_state(install):
+    """A running service's socket in the state dir (`sink-speech.sock`)
+    cannot be copied and stopped the first full backup of red5 (13 Nov
+    2026): it is left out, top level and inside a tree, and the backup is good."""
+    import socket
+
+    socks = []
+    for where in (install["state"] / "sink-speech.sock",
+                  install["state"] / "context" / "inner.sock"):
+        s = socket.socket(socket.AF_UNIX)
+        s.bind(str(where))
+        socks.append(s)
+    try:
+        assert "sink-speech.sock" not in {i.rel for i in bk.manifest()}
+        got = bk.backup(tier="full")
+        assert got["ok"], got["warnings"]
+    finally:
+        for s in socks:
+            s.close()
+
+
 def test_tiers_nest_and_daily_stops_before_the_clips(install):
     core = {i.rel for i in bk.selected("core")}
     daily = {i.rel for i in bk.selected("daily")}

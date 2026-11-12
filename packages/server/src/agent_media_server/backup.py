@@ -220,6 +220,13 @@ def manifest(roots: dict[str, Path] | None = None) -> list[Item]:
         for entry in sorted(os.scandir(state), key=lambda e: e.name):
             if entry.name in named or excluded_reason(entry.name):
                 continue
+            # A socket or a pipe a running service keeps beside its state
+            # (`sink-speech.sock`) is not state and cannot be copied: the
+            # first full backup of red5 stopped on two (13 Nov 2026).
+            if not (entry.is_dir(follow_symlinks=False)
+                    or entry.is_file(follow_symlinks=False)
+                    or entry.is_symlink()):
+                continue
             items.append(Item("state", entry.name,
                               "tree" if entry.is_dir(follow_symlinks=False) else "file",
                               "record", "state, kept by rule rather than by name"))
