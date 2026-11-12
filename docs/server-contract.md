@@ -5863,9 +5863,16 @@ memory as its own section when this host has agent-memory. Code:
   wants; `filters` holds only the operators the query used. `terms` stays
   what it was: every positive term, flat, to highlight.
 - **`translate=1`** (12 Nov 2026): a question in plain English, turned into
-  those operators by the summary gateway (Haiku; the follow-up's call
-  style, `MEDIA_SEARCH_TRANSLATE_MODEL` / `_TIMEOUT`,
-  `MEDIA_SEARCH_TRANSLATE=0` switches it off) and then searched for. Never
+  those operators by whichever fast model answers first (`intake.fast`: the
+  models of `MEDIA_FAST_MODELS` in order inside one deadline,
+  `MEDIA_SEARCH_TRANSLATE_MODEL` before them and `MEDIA_FOLLOWUP_MODEL`
+  after, a model that errors skipped for a cooldown) and then searched for.
+  The deadline is 8 s on the search's own path and 15 s for
+  `/search/compose`, or `MEDIA_SEARCH_TRANSLATE_TIMEOUT` where it is set;
+  `MEDIA_SEARCH_TRANSLATE=0` switches it off. It was one model on the
+  summary gateway's own timeout to begin with, which is a minute on this
+  host — too long for a search box to wait when the first fast model answers
+  in about two seconds. Never
   silent: the answer carries `"translated": {"from": "<what was typed>",
   "to": "<the query that ran>"}`, and `q` stays what was typed, so the app
   can show the operators as chips with an "as typed" undo (ask again

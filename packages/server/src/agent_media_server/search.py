@@ -1858,6 +1858,38 @@ _NL_CACHE: dict[str, tuple[float, str]] = {}
 _NL_MAX = 64
 
 
+#: How long a question read on the search's own path may take. A search box
+#: cannot wait on the summary gateway's own timeout (60 s on this host): the
+#: fast models answer in seconds or not at all, and a question that is not
+#: answered is searched as it was typed.
+TRANSLATE_TIMEOUT_S = 8
+#: The query builder's own deadline: longer, because somebody asked for it and
+#: is watching the sheet, but still not a minute.
+COMPOSE_TIMEOUT_S = 15
+
+
+def _ask_model(system: str, user: str, seconds: int) -> str:
+    """One turn to whichever fast model answers first (`intake.fast`), inside
+    `seconds` — or MEDIA_SEARCH_TRANSLATE_TIMEOUT when that is set.
+
+    `fast.chat` is the engine the other few-second asks use (a thread's name,
+    the voice check): the models in MEDIA_FAST_MODELS are tried in order
+    inside one deadline, MEDIA_SEARCH_TRANSLATE_MODEL first where it is set
+    and MEDIA_FOLLOWUP_MODEL last, and one that errors is skipped for a
+    cooldown — so a gateway that is down costs one try, not one per search.
+    Before 12 Nov 2026 this was a single model (MEDIA_FOLLOWUP_MODEL,
+    claude-haiku-4-5 here: 12–19 s) on the summary gateway's timeout, which
+    is 60 s on this host — a minute of a search box waiting on one model
+    when gemini-3-flash answers in about two seconds.
+    """
+    from agent_media_core.intake import fast
+    from agent_media_core.intake._summary import _int_env
+
+    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT", seconds)
+    return fast.chat(system, user, timeout,
+                     purpose_env="MEDIA_SEARCH_TRANSLATE_MODEL") or ""
+
+
 def translate_enabled() -> bool:
     return (os.environ.get("MEDIA_SEARCH_TRANSLATE", "1") or "1").strip() != "0"
 
@@ -1900,13 +1932,7 @@ def translate(q: str) -> str | None:
     got = _NL_CACHE.get(key)
     if got and now - got[0] < _NL_TTL_S:
         return got[1] or None
-    from agent_media_core.intake._summary import _chat, _int_env, DEFAULT_TIMEOUT
-
-    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT",
-                       _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    model = (os.environ.get("MEDIA_SEARCH_TRANSLATE_MODEL")
-             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
-    out = _chat(_translate_prompt(), (q or "").strip()[:500], timeout, model=model) or ""
+    out = _ask_model(_translate_prompt(), (q or "").strip()[:500], TRANSLATE_TIMEOUT_S)
     line = next((ln.strip().strip("`").strip() for ln in out.splitlines() if ln.strip()), "")
     line = line[:300]
     try:
@@ -1956,17 +1982,13 @@ def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
             said.append(f"You wrote: {q}")
         if note:
             said.append(f"They said: {note}")
-    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT",
-                       _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    model = (os.environ.get("MEDIA_SEARCH_TRANSLATE_MODEL")
-             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
     system = _translate_prompt() + (
         " If they say what was wrong with the query you wrote, change that "
         "query rather than starting again, and keep the rest of it. After the "
         "query you may add one short line, starting with 'note: ', for "
         "something they asked for that the query language cannot say — "
         "nothing else, and nothing when the query says it all.")
-    out = _chat(system, "\n".join(said), timeout, model=model) or ""
+    out = _ask_model(system, "\n".join(said), COMPOSE_TIMEOUT_S) or ""
     query, note = "", ""
     for raw in out.splitlines():
         line = raw.strip().strip("`").strip()

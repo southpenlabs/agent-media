@@ -953,3 +953,46 @@ def test_the_compose_route_reads_a_malformed_exchange_as_none(server, signed_in,
                       {"ask": "the gauge", "tried": tried}, headers=AUTH)
         assert res.status == 200, tried
     assert all(u.splitlines() == ["the gauge"] for u in seen)
+
+
+def test_a_question_goes_to_whichever_fast_model_answers_first(home, gate, monkeypatch):
+    """A search box cannot wait on the summary gateway's 60 s and one model
+    (12 Nov 2026): `intake.fast` tries the fast list in order inside one
+    deadline, the purpose's own model first."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    tried = []
+
+    def fake_chat(system, user, timeout, model=None):
+        tried.append((model, timeout))
+        return None if model == "slow-one" else "gauge from:me"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "slow-one,quick-two")
+    monkeypatch.delenv("MEDIA_SEARCH_TRANSLATE_MODEL", raising=False)
+    search._NL_CACHE.clear()
+    assert search.translate("what did I say about the gauge") == "gauge from:me"
+    assert [m for m, _ in tried] == ["slow-one", "quick-two"], "in order, until one answers"
+    # Inside the search's own deadline, not the summary gateway's.
+    assert all(t <= search.TRANSLATE_TIMEOUT_S for _, t in tried), tried
+
+    # The purpose's own model goes first, and the builder gets a longer one.
+    fast._reset_for_tests()
+    tried.clear()
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE_MODEL", "chosen")
+    search._NL_CACHE.clear()
+    search.translate("what did I say about the gauge")
+    assert tried[0][0] == "chosen"
+    tried.clear()
+    search.compose("what did I say about the gauge")
+    assert tried[0][0] == "chosen"
+    assert tried[0][1] > search.TRANSLATE_TIMEOUT_S and tried[0][1] <= search.COMPOSE_TIMEOUT_S
+
+    # A deadline of one's own still wins over both.
+    fast._reset_for_tests()
+    tried.clear()
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE_TIMEOUT", "3")
+    search._NL_CACHE.clear()
+    search.translate("what did I say about the gauge")
+    assert tried[0][1] <= 3
