@@ -285,17 +285,40 @@ def test_a_trailer_is_searched_for_when_neither_has_one(server, signed_in, fake,
     assert obj["trailer"].endswith("ccccccccccc") and len(fake.searched) == 1
     item = {"title": "Severance", "year": 2022, "ids": {"trakt": 7}}
     import time
-    assert trakt_browse._searched_trailer("tv", item, time.time() + 8 * 86400) is None and len(fake.searched) == 2
-    # No result with "trailer": the first that names the title; none naming it: none.
+    assert trakt_browse._searched_trailer("tv", item, time.time() + 8 * 86400) == (None, False) and len(fake.searched) == 2
+    # No result with "trailer": the first video that names the title, never a song that does; none naming it: none.
     fake.videos = [{"id": "aaaaaaaaaaa", "title": "Unrelated"}, {"id": "bbbbbbbbbbb", "title": "Severance: the theme"}]
-    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 8}}, time.time()).endswith("bbbbbbbbbbb")
+    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 8}}, time.time())[0].endswith("bbbbbbbbbbb")
+    fake.videos = [{"id": "bbbbbbbbbbb", "title": "Severance", "video": False}]
+    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 10}}, time.time()) == (None, False)
     fake.videos = [{"id": "aaaaaaaaaaa", "title": "Unrelated trailer"}]
-    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 9}}, time.time()) is None
+    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 9}}, time.time()) == (None, False)
     # A list never searches: only a title's page does.
     n = len(fake.searched)
     call(server, "GET", "/watch/discover?kind=tv&list=trending&hide_watched=0", headers=AUTH)
     call(server, "GET", "/watch/search?kind=all&query=severance", headers=AUTH)
     assert len(fake.searched) == n
+
+
+def test_a_slow_trailer_search_does_not_hold_the_page(server, signed_in, fake, creds, monkeypatch, tmp_path):
+    import threading
+    monkeypatch.setattr(trakt_browse, "_trailers_path", lambda: tmp_path / "watch-trailers.json")
+    monkeypatch.setattr(trakt_browse, "TRAILER_WAIT_S", 0.05)
+    go, asked = threading.Event(), []
+
+    def slow(q):
+        asked.append(q)
+        go.wait(10)
+        return [{"id": "ccccccccccc", "title": "Severance — Official Trailer"}]
+    monkeypatch.setattr(trakt_browse, "_youtube_search", slow)
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["trailer"] is None and obj["trailer_pending"] is True
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["trailer_pending"] is True and len(asked) == 1, "asked again while it runs: one search"
+    go.set()
+    trakt_browse._searching["tv:7"].join(5)
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["trailer"].endswith("ccccccccccc") and obj["trailer_source"] == "youtube_search" and "trailer_pending" not in obj
 
 
 def test_ratings_leave_out_what_has_no_number():

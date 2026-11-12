@@ -10506,8 +10506,8 @@ person's `photo`.
   "ids", "known_for", "url", "photo"?}`; a list: `{"id", "name",
   "description", "item_count", "likes", "user", "url"}`.
 - `GET /watch/title?kind=movie|tv&id=<trakt id or slug>` → `{"ok", "kind",
-  "title", "trailer", "trailer_source", "ratings", "cast", "crew",
-  "related", "tmdb", "seasons"?, "next_episode"?}`.
+  "title", "trailer", "trailer_source", "trailer_pending"?, "ratings",
+  "cast", "crew", "related", "tmdb", "seasons"?, "next_episode"?}`.
   `title` is the item with its whole `overview` and `tagline`,
   `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
   `released`, and for a show `network` and `aired_episodes`. `cast`:
@@ -10519,14 +10519,17 @@ person's `photo`.
   "title", "first_aired"}` when one is to air. `trailer`: the address of
   its trailer or null, and `trailer_source` which it is: `tmdb` (TMDb's,
   when TMDb is set up and has one), else `trakt` (Trakt's own,
-  `title.trailer`: no TMDb credential needed), else `youtube_search`: the
-  host's own YouTube search (the one `/music/versions` uses, when the host
-  has one) asked for "<title> <year> official trailer", the first result
-  with "trailer" in its title that names the title, else the first that
-  names it. A searched one may be the wrong video, so the app says where it
-  came from. It is searched for only here, when the page is opened and
-  neither other source has one, never for a list's rows, and kept by title
-  a week (nothing found: a day). `ratings`: what
+  `title.trailer`: no TMDb credential needed), else `youtube_search`: a
+  YouTube search the host already has (those `/music/versions` uses: the
+  yt-dlp one first, as it searches videos; else the music one) asked for
+  "<title> <year> official trailer", the first result with "trailer" in
+  its title that names the title, else the first video that names it. A
+  searched one may be the wrong video, so the app says where it came from.
+  It is searched for only here, when the page is opened and neither other
+  source has one, never for a list's rows, and kept by title a week
+  (nothing found: a day). The search takes seconds, so the page waits
+  three for it and then answers without, `"trailer_pending": true`: the
+  search goes on, and the page asked again a few seconds later has it. `ratings`: what
   Trakt carries from elsewhere (`/movies|shows/<id>/ratings?extended=all`,
   kept a day with the page), formatted here so the app draws each as given:
   `[{"source", "label", "value", "out_of"?, "votes"?, "state"?, "link"?}]`,

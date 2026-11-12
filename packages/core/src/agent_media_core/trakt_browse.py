@@ -27,6 +27,10 @@ person's photo); without it everything here still answers.
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import threading
 import time
 import urllib.parse
 from typing import Optional
@@ -253,21 +257,27 @@ def _tmdb_trailer(kind: str, item: dict) -> Optional[str]:
 TRAILER_FOUND_TTL_S = 7 * 86400.0
 TRAILER_NONE_TTL_S = 86400.0
 TRAILER_KEEP = 500
+#: How long a title's page waits for its trailer search before answering
+#: without it (`trailer_pending`); the search goes on and is kept.
+TRAILER_WAIT_S = 3.0
+_searching: dict[str, threading.Thread] = {}
+_searching_lock = threading.Lock()
 
 
 def _youtube_search(q: str) -> list[dict]:
-    """`[{id, title}]` for the words, from whichever YouTube search the host
-    already has (music_versions' two: Mopidy's "youtube-search" add-on, else
-    the "youtube-radio" add-on's yt-dlp search); [] with neither. The seam
-    the tests stub."""
+    """`[{id, title, video}]` for the words, from a YouTube search the host
+    already has (music_versions' two), videos first: the "youtube-radio"
+    add-on's yt-dlp search (YouTube itself, its first result: `video` true),
+    else Mopidy's "youtube-search" add-on (YouTube Music: songs, so `video`
+    false); [] with neither. The seam the tests stub."""
     from . import music_bed_favourites as fav
     from . import youtube_addon
 
-    if fav._may_search():
-        return [{"id": r.get("id"), "title": r.get("title") or ""} for r in fav.search(q)]
     if youtube_addon.get("youtube-radio") is not None:
         from . import radio_dj
-        return [{"id": r.get("id"), "title": r.get("title") or ""} for r in radio_dj.search([q])]
+        return [{"id": r.get("id"), "title": r.get("title") or "", "video": True} for r in radio_dj.search([q])]
+    if fav._may_search():
+        return [{"id": r.get("id"), "title": r.get("title") or "", "video": False} for r in fav.search(q)]
     return []
 
 
@@ -276,67 +286,98 @@ def _trailers_path():
     return state_dir() / "watch-trailers.json"
 
 
-def _searched_trailer(kind: str, item: dict, now: float) -> Optional[str]:
-    """A trailer by search, for a title neither TMDb nor Trakt has one for:
-    "<title> <year> official trailer" asked of the host's YouTube search, the
-    first result with "trailer" in its title that names the title, else the
-    first that names it. Kept by title (a week; a day when nothing was
-    found), so only a title page's first opening searches."""
-    import json
-    import os
-    import re
-
-    name = str(item.get("title") or "").strip()
-    key = f"{kind}:{(item.get('ids') or {}).get('trakt') or item.get('id')}"
-    if not name:
-        return None
-    path = _trailers_path()
+def _trailers_kept() -> dict:
     try:
-        kept = json.loads(path.read_text())
-        kept = kept if isinstance(kept, dict) else {}
+        kept = json.loads(_trailers_path().read_text())
+        return kept if isinstance(kept, dict) else {}
     except (OSError, ValueError):
-        kept = {}
-    hit = kept.get(key)
+        return {}
+
+
+def _kept_trailer(key: str, now: float) -> tuple[bool, Optional[str]]:
+    """(known, address): what an earlier search for this title found, while kept."""
+    hit = _trailers_kept().get(key)
     if isinstance(hit, dict):
         ttl = TRAILER_FOUND_TTL_S if hit.get("url") else TRAILER_NONE_TTL_S
         if now - float(hit.get("at") or 0) < ttl:
-            return hit.get("url") or None
-    try:
-        rows = _youtube_search(" ".join(x for x in (name, str(item.get("year") or ""), "official trailer") if x))
-    except Exception:  # noqa: BLE001 — asked again next time
-        return None
+            return True, hit.get("url") or None
+    return False, None
 
-    def fold(x: str) -> str:
+
+def _search_trailer(key: str, name: str, year, now: float) -> None:
+    """Search for the title's trailer and keep what was found (or that
+    nothing was): "<title> <year> official trailer", the first result with
+    "trailer" in its title that names the title, else the first video that
+    names it (a song that merely shares the name is not a trailer)."""
+    try:
+        rows = _youtube_search(" ".join(x for x in (name, str(year or ""), "official trailer") if x))
+    except Exception:  # noqa: BLE001 — asked again next time
+        return
+
+    def fold(x) -> str:
         return re.sub(r"[^a-z0-9]+", " ", str(x).lower()).strip()
 
     want = fold(name)
     rows = [r for r in rows if isinstance(r, dict) and re.fullmatch(r"[A-Za-z0-9_-]{11}", str(r.get("id") or ""))
             and want and want in fold(r.get("title") or "")]
-    best = next((r for r in rows if "trailer" in fold(r["title"])), rows[0] if rows else None)
-    url = f"https://www.youtube.com/watch?v={best['id']}" if best else None
-    kept[key] = {"url": url, "at": now}
-    if len(kept) > TRAILER_KEEP:
-        kept = dict(sorted(kept.items(), key=lambda kv: -float(kv[1].get("at") or 0))[:TRAILER_KEEP])
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}")
-        tmp.write_text(json.dumps(kept))
-        os.replace(tmp, path)
-    except OSError:
-        pass
-    return url
+    best = (next((r for r in rows if "trailer" in fold(r["title"])), None)
+            or next((r for r in rows if r.get("video", True)), None))
+    with _searching_lock:
+        kept = _trailers_kept()
+        kept[key] = {"url": f"https://www.youtube.com/watch?v={best['id']}" if best else None, "at": now}
+        if len(kept) > TRAILER_KEEP:
+            kept = dict(sorted(kept.items(), key=lambda kv: -float(kv[1].get("at") or 0))[:TRAILER_KEEP])
+        try:
+            path = _trailers_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(kept))
+            os.replace(tmp, path)
+        except OSError:
+            pass
 
 
-def _trailer(kind: str, item: dict, now: float) -> tuple[Optional[str], Optional[str]]:
-    """(address, source) of a title's trailer: TMDb's when it is set up and
-    has one, else Trakt's own, else one found by search; (None, None)."""
+def _searched_trailer(kind: str, item: dict, now: float, wait: Optional[float] = None) -> tuple[Optional[str], bool]:
+    """(address, pending) of a trailer by search, for a title neither TMDb
+    nor Trakt has one for. Kept by title (a week; a day when nothing was
+    found), so only a title page's first opening searches. A search is
+    seconds (yt-dlp: ten or more), so it runs beside the page: waited for
+    `wait` seconds (TRAILER_WAIT_S), then the page answers without it,
+    `pending` true, and the next asking has it."""
+    name = str(item.get("title") or "").strip()
+    key = f"{kind}:{(item.get('ids') or {}).get('trakt') or item.get('id')}"
+    if not name:
+        return None, False
+    known, url = _kept_trailer(key, now)
+    if known:
+        return url, False
+    with _searching_lock:
+        th = _searching.get(key)
+        if th is None or not th.is_alive():
+            th = threading.Thread(target=_search_trailer, args=(key, name, item.get("year"), now),
+                                  name="watch-trailer-search", daemon=True)
+            _searching[key] = th
+            th.start()
+    th.join(TRAILER_WAIT_S if wait is None else wait)
+    if th.is_alive():
+        return None, True
+    with _searching_lock:
+        if _searching.get(key) is th:
+            del _searching[key]
+    return _kept_trailer(key, now)[1], False
+
+
+def _trailer(kind: str, item: dict, now: float) -> tuple[Optional[str], Optional[str], bool]:
+    """(address, source, pending) of a title's trailer: TMDb's when it is
+    set up and has one, else Trakt's own, else one found by search (pending:
+    still being searched for); (None, None, False) with none."""
     got = _tmdb_trailer(kind, item)
     if got:
-        return got, "tmdb"
+        return got, "tmdb", False
     if item.get("trailer"):
-        return item["trailer"], "trakt"
-    got = _searched_trailer(kind, item, now)
-    return (got, "youtube_search") if got else (None, None)
+        return item["trailer"], "trakt", False
+    got, pending = _searched_trailer(kind, item, now)
+    return (got, "youtube_search", False) if got else (None, None, pending)
 
 
 def title(kind: str, ident, now: Optional[float] = None) -> dict:
@@ -362,7 +403,9 @@ def title(kind: str, ident, now: Optional[float] = None) -> dict:
     except T.TraktError:
         got = None
     out["ratings"] = _ratings(got, o)
-    out["trailer"], out["trailer_source"] = _trailer(kind, item, now)
+    out["trailer"], out["trailer_source"], pending = _trailer(kind, item, now)
+    if pending:
+        out["trailer_pending"] = True
     try:
         out["cast"], out["crew"] = _credits(_pub(f"tp:{what}:{tid}", f"/{what}/{tid}/people", now))
     except T.TraktError:
