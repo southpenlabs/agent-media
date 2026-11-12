@@ -12,6 +12,9 @@ is that app's business.
                        link, and the same page on web.stremio.com)
   apps() / set_app()   which "open in <app>" keys this host's owner turned
                        on (`<state_dir>/watch-open-in.json`); none by default
+  set_mode()           how an app's key opens: `app` (its link, the default)
+                       or `page` (its own web app shown inside ours, where
+                       this install may: personal_use "stremio-page")
 
 TMDb's provider data (JustWatch's) has no address for a title at a
 service, only JustWatch's own page (`where.link`, still shown and
@@ -93,9 +96,36 @@ APPS = {"stremio": "Stremio"}
 _IMDB = re.compile(r"tt\d{5,10}")
 
 
+#: How an app's key opens. `page`: the app's own web app, as it is, in a
+#: view of ours whose controls are a remote for the video on that page
+#: (David, 13 Nov 2026: "can we do the same media controls as we did with
+#: YouTube and Spotify and insight timer?" — "Yes, please"). Showing a
+#: service's site inside another product is the kind of method only an
+#: owner's own install runs (docs/decisions/2026-11-02-personal-use.md), so
+#: `page` is offered only where personal_use allows PAGE_METHODS[app].
+MODES = ("app", "page")
+PAGE_METHODS = {"stremio": "stremio-page"}
+
+
+def modes(app: str) -> list[str]:
+    """The ways `app`'s key may open on this install: `app`, and `page`
+    where personal use allows it."""
+    from . import personal_use
+    method = PAGE_METHODS.get(app)
+    return ["app", "page"] if method and personal_use.allowed(method) else ["app"]
+
+
+def mode(app: str) -> str:
+    """How `app`'s key opens: the owner's choice where it is still allowed, else `app`."""
+    kept = _stored().get("modes")
+    want = kept.get(app) if isinstance(kept, dict) else None
+    return want if want in modes(app) else "app"
+
+
 def stremio(kind: str, imdb, season=None, episode=None) -> Optional[dict]:
     """Stremio's page for a title, by its IMDb id: `{"id", "label", "url",
-    "fallback"}`, or None without one. `url` is Stremio's documented deep
+    "fallback", "mode"}`, or None without one. `mode` is how the owner has
+    it open (`app`; or `page`, which adds `page`: the address to show). `url` is Stremio's documented deep
     link (stremio-addon-sdk docs/deep-links.md:
     `stremio:///detail/{type}/{id}/{videoId}`; a movie's video id is its
     id, an episode's `{id}:{season}:{episode}`, a series alone has none);
@@ -114,8 +144,11 @@ def stremio(kind: str, imdb, season=None, episode=None) -> Optional[dict]:
                 path += f"/{imdb}:{s}:{e}"
         except (TypeError, ValueError):
             pass
-    return {"id": "stremio", "label": APPS["stremio"], "url": f"stremio:///{path}",
-            "fallback": f"https://web.stremio.com/#/{path}"}
+    out = {"id": "stremio", "label": APPS["stremio"], "url": f"stremio:///{path}",
+           "fallback": f"https://web.stremio.com/#/{path}", "mode": mode("stremio")}
+    if out["mode"] == "page":
+        out["page"] = out["fallback"]
+    return out
 
 
 def _path():
@@ -136,9 +169,26 @@ def app_on(app: str) -> bool:
 
 
 def apps() -> list[dict]:
-    """`[{"id", "label", "on"}]`: every app in APPS and whether its key shows."""
+    """`[{"id", "label", "on", "mode", "modes"}]`: every app in APPS, whether
+    its key shows, how it opens and the ways it may here."""
     kept = _stored()
-    return [{"id": a, "label": label, "on": kept.get(a) is True} for a, label in APPS.items()]
+    return [{"id": a, "label": label, "on": kept.get(a) is True, "mode": mode(a), "modes": modes(a)}
+            for a, label in APPS.items()]
+
+
+def _save(change) -> None:
+    with _lock:
+        got = _stored()
+        kept: dict = {k: v for k, v in got.items() if k in APPS}
+        kept_modes = got.get("modes")
+        if isinstance(kept_modes, dict):
+            kept["modes"] = {k: v for k, v in kept_modes.items() if k in APPS and v in MODES}
+        change(kept)
+        path = _path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}")
+        tmp.write_text(json.dumps(kept), encoding="utf-8")
+        os.replace(tmp, path)
 
 
 def set_app(app: str, on: bool) -> None:
@@ -147,14 +197,17 @@ def set_app(app: str, on: bool) -> None:
         raise ValueError(f"no such app to open titles in: {app!r} (one of {', '.join(APPS)})")
     if not isinstance(on, bool):
         raise ValueError("on is true or false")
-    with _lock:
-        kept = {k: v for k, v in _stored().items() if k in APPS}
-        kept[app] = on
-        path = _path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}")
-        tmp.write_text(json.dumps(kept), encoding="utf-8")
-        os.replace(tmp, path)
+    _save(lambda kept: kept.__setitem__(app, on))
+
+
+def set_mode(app: str, how: str) -> None:
+    """Choose how an app's key opens. ValueError for an unknown app, or a
+    way this install does not offer for it."""
+    if app not in APPS:
+        raise ValueError(f"no such app to open titles in: {app!r} (one of {', '.join(APPS)})")
+    if how not in modes(app):
+        raise ValueError(f"{app} opens as one of {', '.join(modes(app))} here, not {how!r}")
+    _save(lambda kept: kept.setdefault("modes", {}).__setitem__(app, how))
 
 
 def open_in(kind: str, ids: dict, where: Optional[dict], season=None, episode=None) -> list[dict]:

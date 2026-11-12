@@ -17,8 +17,8 @@ agent_media_core.tmdb; David, 9 Nov 2026).
   GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
   GET  /watch/title?kind=movie|tv&id=&season=&episode=   gated → a title's page (facts, trailer, ratings, cast,
                                             crew, related, seasons, `open_in`: links that open it elsewhere)
-  GET  /watch/settings                      gated → {"ok", "open_in": [{"id", "label", "on"}]}
-  POST /watch/settings {"open_in": {id: bool}}   admins → the same
+  GET  /watch/settings                      gated → {"ok", "open_in": [{"id", "label", "on", "mode", "modes"}]}
+  POST /watch/settings {"open_in"?: {id: bool}, "open_in_mode"?: {id: "app"|"page"}}   admins → the same
   GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
   GET  /watch/person?id=                    gated → {"ok", "person", "movies": {cast, crew}, "shows": {cast, crew}}
   GET  /watch/lists?which=trending|popular|mine&page=    gated → {"ok", "lists", …}
@@ -93,15 +93,25 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             send_json(h, err.pop("status", 401 if method == "GET" else 403), {"ok": False, **err})
             return True
         if method == "POST":
-            want = _body(h).get("open_in")
+            body = _body(h)
+            want, how = body.get("open_in"), body.get("open_in_mode")
             try:
-                if not isinstance(want, dict) or not want:
-                    raise ValueError('send {"open_in": {"<app>": true|false}}')
+                if not (isinstance(want, dict) and want) and not (isinstance(how, dict) and how):
+                    raise ValueError('send {"open_in": {"<app>": true|false}} or {"open_in_mode": {"<app>": "app"|"page"}}')
+                if not isinstance(want or {}, dict) or not isinstance(how or {}, dict):
+                    raise ValueError("open_in and open_in_mode are objects")
+                want, how = want or {}, how or {}
                 for app, on in want.items():
                     if app not in watch_open.APPS or not isinstance(on, bool):
                         raise ValueError(f"open_in: {app!r} is not one of {', '.join(watch_open.APPS)}, or not true|false")
+                for app, m in how.items():
+                    if app not in watch_open.APPS or m not in watch_open.modes(app):
+                        raise ValueError(f"open_in_mode: {app!r} is not one of {', '.join(watch_open.APPS)}, "
+                                         f"or {m!r} is not a way it opens here")
                 for app, on in want.items():
                     watch_open.set_app(app, on)
+                for app, m in how.items():
+                    watch_open.set_mode(app, m)
             except ValueError as e:
                 send_json(h, 400, {"ok": False, "error": str(e)})
                 return True

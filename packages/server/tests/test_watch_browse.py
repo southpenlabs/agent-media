@@ -388,8 +388,10 @@ def test_without_tmdb_a_title_has_no_service_keys(server, signed_in, fake, creds
 
 
 def test_open_in_stremio_is_the_owners_choice(server, signed_in, fake, creds, monkeypatch):
+    monkeypatch.delenv("MEDIA_PERSONAL_USE", raising=False)
     res, obj = call(server, "GET", "/watch/settings", headers=AUTH)
-    assert res.status == 200 and obj["open_in"] == [{"id": "stremio", "label": "Stremio", "on": False}]
+    assert res.status == 200 and obj["open_in"] == [
+        {"id": "stremio", "label": "Stremio", "on": False, "mode": "app", "modes": ["app"]}]
     for bad in ({}, {"open_in": {}}, {"open_in": {"kodi": True}}, {"open_in": {"stremio": "yes"}}):
         res, _ = call(server, "POST", "/watch/settings", bad, AUTH)
         assert res.status == 400, bad
@@ -398,7 +400,8 @@ def test_open_in_stremio_is_the_owners_choice(server, signed_in, fake, creds, mo
     # A movie: Stremio's documented deep link by IMDb id, and the same page on the web.
     _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
     assert obj["open_in"] == [{"id": "stremio", "label": "Stremio", "url": "stremio:///detail/movie/tt2543164/tt2543164",
-                               "fallback": "https://web.stremio.com/#/detail/movie/tt2543164/tt2543164"}]
+                               "fallback": "https://web.stremio.com/#/detail/movie/tt2543164/tt2543164",
+                               "mode": "app"}]
     # A show without an IMDb id has no key; with one, the series, or the episode asked for.
     _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
     assert obj["open_in"] == []
@@ -419,6 +422,44 @@ def test_open_in_stremio_is_the_owners_choice(server, signed_in, fake, creds, mo
     assert obj["open_in"][0]["on"] is False
     _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
     assert [o["id"] for o in obj["open_in"]] == ["netflix", "prime", "appletv"]
+
+
+def test_stremio_opens_inside_the_app_only_on_the_owners_own_install(server, signed_in, fake, creds, monkeypatch):
+    """`open_in_mode`: "page" shows Stremio's web app inside ours. Only an
+    install that says it is its owner's own offers it (personal_use
+    "stremio-page"); the default everywhere is the app link."""
+    monkeypatch.delenv("MEDIA_PERSONAL_USE", raising=False)
+    monkeypatch.delenv("MEDIA_WATCH_STREMIO_PAGE", raising=False)
+    call(server, "POST", "/watch/settings", {"open_in": {"stremio": True}}, AUTH)
+    res, obj = call(server, "POST", "/watch/settings", {"open_in_mode": {"stremio": "page"}}, AUTH)
+    assert res.status == 400 and "page" in obj["error"], "a public install has no page mode"
+    for bad in ({"open_in_mode": {}}, {"open_in_mode": {"kodi": "app"}}, {"open_in_mode": {"stremio": "tab"}},
+                {"open_in_mode": "page"}, {"open_in": {"stremio": True}, "open_in_mode": {"stremio": True}}):
+        res, _ = call(server, "POST", "/watch/settings", bad, AUTH)
+        assert res.status == 400, bad
+    monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
+    _, obj = call(server, "GET", "/watch/settings", headers=AUTH)
+    assert obj["open_in"] == [{"id": "stremio", "label": "Stremio", "on": True, "mode": "app", "modes": ["app", "page"]}]
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"][0]["mode"] == "app" and "page" not in obj["open_in"][0], "the app link until chosen"
+    res, obj = call(server, "POST", "/watch/settings", {"open_in_mode": {"stremio": "page"}}, AUTH)
+    assert res.status == 200 and obj["open_in"][0]["mode"] == "page" and obj["open_in"][0]["on"] is True
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"] == [{"id": "stremio", "label": "Stremio", "url": "stremio:///detail/movie/tt2543164/tt2543164",
+                               "fallback": "https://web.stremio.com/#/detail/movie/tt2543164/tt2543164",
+                               "mode": "page", "page": "https://web.stremio.com/#/detail/movie/tt2543164/tt2543164"}]
+    # Turning the key off and on keeps the choice; both can be sent at once.
+    res, obj = call(server, "POST", "/watch/settings", {"open_in": {"stremio": False}}, AUTH)
+    assert obj["open_in"][0] == {"id": "stremio", "label": "Stremio", "on": False, "mode": "page", "modes": ["app", "page"]}
+    res, obj = call(server, "POST", "/watch/settings", {"open_in": {"stremio": True}, "open_in_mode": {"stremio": "app"}}, AUTH)
+    assert obj["open_in"][0]["on"] is True and obj["open_in"][0]["mode"] == "app"
+    call(server, "POST", "/watch/settings", {"open_in_mode": {"stremio": "page"}}, AUTH)
+    # The method's own switch turns it off on a personal install; the kept choice then reads as the link.
+    monkeypatch.setenv("MEDIA_WATCH_STREMIO_PAGE", "0")
+    _, obj = call(server, "GET", "/watch/settings", headers=AUTH)
+    assert obj["open_in"][0]["mode"] == "app" and obj["open_in"][0]["modes"] == ["app"]
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"][0]["mode"] == "app" and "page" not in obj["open_in"][0]
 
 
 def test_open_in_settings_are_gated(server, fake, creds):
