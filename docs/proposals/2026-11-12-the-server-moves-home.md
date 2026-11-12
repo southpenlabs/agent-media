@@ -454,7 +454,27 @@ the day of the cutover, not after it.
    still to install.
    Nothing published in DNS yet — the rehearsal uses the tunnel's own
    hostname or a scratch name.
-3. **The rehearsal — and the command's own test.** `media server move --to
+3. **The rehearsal, first half RUN 13 Nov 2026** as a fenced copy (David:
+   "Sandbox on red2"; `media server move --rehearse`,
+   `docs/reference/server-address.md` "The rehearsal"). A restored copy
+   beside the live server would have resumed its chats twice, spent
+   one-use sign-ins and been a second David on Matrix, so the practice copy
+   runs in a throwaway folder on red2 with every chat ended and every
+   outside credential deleted. Result, third run: full backup of red5 with
+   everything up 913 s (2.8 GB, 33,500 files), second pass **133 s** (the
+   real move's downtime floor; worth shortening), sandbox up in 12 s, the
+   copy answers on red2 with red5's `server-id`, all 679 thread records
+   there, nothing resumed, a new chat started and answered in it, red2's
+   own sessiond and jobs worker untouched. Found and fixed on the way: the
+   backup stopped on sockets in the state dir (1635b873, 007a0f16), the
+   store's folder did not exist on red2 (c872b6f0, ce3c7394), `media` is
+   not on an ssh shell's PATH there, a second session host's orphan sweep
+   (off under `MEDIA_REHEARSAL=1`). **Still to do:** the DNS record for
+   `red2-ryer.sasonica.com` (→ red2's tunnel `6aaf956d-…`), then pair a
+   second device with the copy and send it a message; not rehearsed at
+   all: `media-setup install-services` for the server's units, the house
+   audio, any outside service. The original plan for this step:
+   **The rehearsal — and the command's own test.** `media server move --to
    red2` onto a scratch public name, with red5 still serving, then pair a
    second device with it, send a message, hear a reply, play a song to one
    room, open a thread link, check `media version` and `media doctor`, and
@@ -472,7 +492,10 @@ the day of the cutover, not after it.
    song in a room, a thread link from the phone, `/features` naming red2's
    release. Under an hour, and the way back is `--rollback` plus the DNS
    records.
-5. **The morning after.** Sessions flipped (red5 paired as red2's worker,
+5. **The morning after** (and: install `agent-media-backup.timer` on red2
+   with `MEDIA_BACKUP_DEST` pointing back at red5, or nothing runs nightly
+   on the new server; `backup.staleness()` says so, 2b721e9f).
+   **The morning after.** Sessions flipped (red5 paired as red2's worker,
    `MEDIA_SESSIOND_DEFAULT_HOST` unset on red2), backups running from red5
    against red2, red5's agent-media units left installed but disabled for a
    fortnight, and the roadmap and `CLAUDE.md` updated to say where the
