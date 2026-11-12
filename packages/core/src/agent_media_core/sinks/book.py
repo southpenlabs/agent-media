@@ -196,6 +196,17 @@ def http_url_for(path: Path, target: Target) -> Optional[str]:
         rel = path.resolve().relative_to(Path(root).expanduser().resolve())
     except (ValueError, OSError):
         return None
+    # Signed: the base is the server's public route, whose files need `?sig=`
+    # (book_files.py), the same arrangement the clip links have. That route is
+    # what took this off the mesh — the base used to be the tailnet-only clip
+    # port. Off by default so a host serving from its own LAN is unaffected.
+    #
+    # The unquoted path goes to `signed`, which quotes it and signs the
+    # unquoted form: one place decides what was signed. Quoting here and
+    # signing there is what made the first attempt 404 every link.
+    if os.environ.get(_env_key("MEDIA_BOOK_SIGNED", target.name)) == "1":
+        from .. import book_files
+        return book_files.signed(base, "/".join(rel.parts))
     return base.rstrip("/") + "/" + "/".join(quote(p) for p in rel.parts)
 
 

@@ -85,6 +85,12 @@ with months of history kept.
   (`_paths.py`, moved out of `~/.cache` on 18 Oct 2026 for exactly this
   reason). Without it, replay and the feed lose every past reply.
 - `visual/` (116M), `feed/` (91M), `sealed/` (15M), `photos/` (12M)
+- **`~/shared/` (269M on red5, 26 days of it)** — the files David shares from
+  the phone's share sheet, which `POST /upload` writes to a folder per day
+  (`uploads.py`, `MEDIA_UPLOAD_DIR`). It sits outside the state dir, so it
+  was in no tier here and on no list in the move plan until 12 Nov 2026.
+  It is not a cache: the thread that discussed a photo holds its path, and
+  the original is only here.
 
 ### Never backed up (~690M in state, 1.4G in share)
 
@@ -97,6 +103,24 @@ Derived or re-fetchable, and saying so explicitly is half the value:
 - all of `~/.local/share/agent-media` (1.4G): `releases/`, `current`,
   `previous`, `repo.git` (it is a clone of origin), `demucs-venv`
 - every `*.lock`, and the `*.bak-*` files cluttering the config dir
+
+### This list is also the definition of a paired base
+
+What a backup carries is exactly what *is* the server the app is paired
+with, so one manifest serves three commands: `media backup`, `media
+restore`, and `media server move` (the move plan's point 4,
+`2026-11-12-the-server-moves-home.md`). A move is this list plus the
+address, and nothing else should be hand-carried on the night. When
+something is found to be missing — `~/shared` was, above — it is added
+here once and all three gain it.
+
+**What is deliberately not part of the base**, however much a particular
+installation keeps beside it: the person's and the assistant's own
+workspace — agent-mail, `~/org`, `~/.claude`, the git clones under
+`~/projects`, the dotfiles. agent-media does not own those, must not move
+them, and must not be blocked by them. They are host setup, they travel on
+their own schedule, and keeping them out of the base is what makes
+migrating a base a single command instead of a project.
 
 ## The commands
 

@@ -1140,8 +1140,11 @@ def test_prune_takes_the_timer_with_the_service(tmp_path, monkeypatch):
     setup.prune_services({"origin"}, dry_run=False, backend="systemd")
 
     assert not list(units.iterdir())
-    assert ("disable", "--now", "agent-media-unwanted.service",
-            "agent-media-unwanted.timer") in calls
+    # The timer first: disabling the service while its trigger is still
+    # armed makes systemd complain, and leaves a window in which the timer
+    # can start the service again.
+    assert ("disable", "--now", "agent-media-unwanted.timer",
+            "agent-media-unwanted.service") in calls
 
 
 def test_prune_is_a_no_op_on_a_host_that_declares_no_roles(tmp_path, monkeypatch,

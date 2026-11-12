@@ -2630,7 +2630,13 @@ ahead.
     the only copy of what was said in that voice — `visual/`, `feed/`) —
     with `search.db`, `app-dl/`, `fastembed/` and all of
     `~/.local/share/agent-media` named as never backed up because they are
-    derived or re-fetchable. Databases are dumped with `VACUUM INTO`, never
+    derived or re-fetchable. Tier 3 gained **`~/shared/`** (269M) on 12 Nov
+    2026 — the files shared from the phone's share sheet, outside the state
+    dir and so in no tier until the server move was checked against this
+    list. That check is the standing rule: **what a backup carries is what
+    a paired base is**, so this manifest is also what `media server move`
+    (item 63) carries, and anything a move needs that the backup lacks is a
+    bug here. Databases are dumped with `VACUUM INTO`, never
     copied live: `state.db` carries a 32M WAL beside it, so an rsync of the
     pair can be torn. Encrypted before it leaves the machine, with the
     recovery phrase printed once to keep off the server. `backup.<host>`
@@ -2666,34 +2672,58 @@ ahead.
     restore" is the drill) and on item 62's `media backup` / `media restore`,
     whose destination must be a setting because after the move red2 holds
     the data.
-    - **What it does to the agents' own tools** (checked on red2, 12 Nov
-      2026, from a chat running there; the proposal's "The agents' own
-      tools"). The cutover plan counted the services, the state and the
-      audio; the other thing that moves is where the assistant stands, and
-      every tool a chat reaches for has to work from red2.
-      **Fixed by the move:** a file shared from the phone, which `POST
-      /upload` writes under `~/shared/<date>/` on the *server* host — today
-      a chat on red2 cannot open the screenshot David just shared. A chat
-      left on the red5 worker still can't, so `media shared get <path>`
-      through the server (`GET /upload?path=` already serves one) is owed.
-      **Broken now and not fixed by the move:** memory search —
-      `agent-memory-search` defaults to `127.0.0.1:54321` and red2 has no
-      `~/.config/hippocampus.env`, so every chat started there since 11 Nov
-      has searched nothing; one line pointing at `red5:54321` is the
-      stopgap, moving `hippocampus` to red2 the answer.
-      **Cannot stay on red5:** agent-mail, which the plan leaves there on a
-      latency argument when the problem is reachability — it is a CLI over a
-      SQLite file with no daemon, uncloned on red2, and after the flip the
-      tmux panes and the front-door sessiond it delivers through are both
-      on red2; and `~/org`, which is on neither list although the server
-      itself reads it (`related_threads.py`, `docs.py`, `org-paragtd`).
-      **Parity to check at the rehearsal:** `~/.claude` differs between the
-      hosts (no `RTK.md` on red2 though the global `CLAUDE.md` `@`-includes
-      it; `statusLine`, `autoMode`, `agentPushNotifEnabled` and
-      `switchModelsOnFlag` missing from its `settings.json`), so a red2 chat
-      runs on quieter instructions and says nothing about it; and red5's
-      forty-odd `~/projects` clones against red2's three, which decide
-      whether the first chat in a project lands on the right machine.
+    - **Migrating a paired base is one command** (David, 12 Nov 2026,
+      reading the list this entry first carried: "migrating a paired base
+      needs to be a simple process. this is getting far too messy").
+      `media server move --to <host> --name https://<name>` — build a
+      release there, back up here, restore there, stop here, final sync,
+      rename every address-derived setting, start there, verify,
+      `--rollback` — is therefore **on the critical path, before the
+      cutover, not after it**. The rehearsal is the command's own test run
+      and the cutover is the same command for real, so a trap found on the
+      way is a fix to the command rather than a line in a runbook; and
+      anyone else moving their base gets the same one command. What it
+      carries is **the single manifest in item 62's proposal** ("What
+      counts as agent-media's state"), shared by `media backup`,
+      `media restore` and `media server move`: if a move needs something
+      the backup does not hold, the backup is wrong and is fixed there,
+      once. Checking that manifest against this move found **`~/shared/`**
+      missing — 269 MB on red5 of the files David shares from the phone's
+      share sheet, written outside the state dir by `POST /upload`
+      (`uploads.py`) while the threads that discussed them hold their
+      paths; now in tier 3.
+    - **What is not part of the base, and must not block the move.** The
+      assistant's own workspace — agent-mail (a CLI over a SQLite file with
+      no daemon, uncloned on red2, so unreachable from a chat there, and
+      after the flip the tmux panes and front-door sessiond it delivers
+      through are on red2 too), `~/org` (60 MB, read by the person and by
+      the server: `related_threads.py`, `docs.py`, `org-paragtd`),
+      `~/.claude` (no `RTK.md` on red2 though the global `CLAUDE.md`
+      `@`-includes it, four `settings.json` keys missing, so a red2 chat
+      runs on quieter instructions silently) and the `~/projects` clones
+      (forty-odd on red5, three on red2). agent-media does not own these,
+      does not move them, and does not wait for them: they are host setup
+      and travel on their own schedule. Keeping them out is what makes the
+      base a single command. The one urgent item among them had nothing to
+      do with the move and is already closed: memory search was dead on red2
+      from 11 Nov (`agent-memory-search` defaults to `127.0.0.1:54321` and
+      red2 had no `~/.config/hippocampus.env`), so every chat started there
+      searched nothing — **fixed 12 Nov 2026**, red5's client config copied
+      across pointing at `red5:54321` and searched from a red2 chat to
+      confirm. One file on one host, fixed the same day, blocking nothing:
+      which is the point of keeping the workspace out of the base. When
+      `hippocampus` and `memory-governor` do follow to red2 (step 6) they
+      are **renamed on the way**: one `agent-memory-*` prefix for a
+      subsystem that answers to four today (`hippocampus*`,
+      `memory-governor*`, `governor-digest*`, `agent-memory-*`) — the units
+      becoming `agent-memory-store` and `agent-memory-policy`, each saying
+      what it does while the code keeps Hippocampus and Memory Governor —
+      with
+      `HIPPOCAMPUS_*` and `GOVERNOR_*` kept readable for good and the
+      Python package, tests and HTTP paths left alone — agent-memory
+      `docs/NAMING.md` (David, 12 Nov 2026: "hippocampus probably needs to
+      be renamed something more agent-memory like"). Unit names cannot
+      alias, so it rides the provisioning rather than being a sweep.
 
 ## Loose ends
 

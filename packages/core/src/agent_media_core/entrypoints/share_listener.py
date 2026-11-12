@@ -429,6 +429,28 @@ class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
 
 
+def make_server(bind: str, port: int) -> "_Server":
+    """A listener ready to `serve_forever()`, not yet serving.
+
+    Takes the token with it, because the token IS the check: this endpoint
+    starts playback, so a non-loopback bind without MEDIA_SHARE_TOKEN raises
+    PermissionError rather than coming up as an open control port on the
+    tailnet that reports itself healthy. Both callers — `main` and the
+    server's in-process listener (fewer-services §4c) — must fail the same
+    way, which is why the check lives here and not in `main`.
+    """
+    global TOKEN
+    TOKEN = (os.environ.get("MEDIA_SHARE_TOKEN") or "").strip()
+    if not _loopback(bind) and not TOKEN:
+        log.error(
+            "media-share: refusing to bind %s with no MEDIA_SHARE_TOKEN — "
+            "this endpoint starts playback. Set it in "
+            "~/.config/agent-media.env, or bind 127.0.0.1.", bind)
+        raise PermissionError(
+            f"media-share: {bind} needs MEDIA_SHARE_TOKEN")
+    return _Server((bind, port), Handler)
+
+
 def main(argv=None) -> int:
     from ..intake._env import load_env_file
     load_env_file("media-share")
@@ -441,19 +463,12 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv if argv is not None else sys.argv[1:])
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    global TOKEN
-    TOKEN = (os.environ.get("MEDIA_SHARE_TOKEN") or "").strip()
-    if not _loopback(a.bind) and not TOKEN:
-        # Fail closed, and say which of the two knobs to turn. A listener that
-        # started anyway would be an open control port on the tailnet that
-        # reported itself healthy.
-        log.error(
-            "media-share: refusing to bind %s with no MEDIA_SHARE_TOKEN — "
-            "this endpoint starts playback. Set it in "
-            "~/.config/agent-media.env, or bind 127.0.0.1.", a.bind)
+    try:
+        srv_ = make_server(a.bind, a.port)
+    except PermissionError:
         return 2
 
-    with _Server((a.bind, a.port), Handler) as srv:
+    with srv_ as srv:
         log.info("media-share: %s:%d/share%s", a.bind, a.port,
                  " (token required)" if TOKEN else "")
         try:

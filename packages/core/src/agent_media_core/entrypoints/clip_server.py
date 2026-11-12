@@ -118,14 +118,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pass   # a player that seeks hangs up mid-body; that is normal
 
 
+DEFAULT_PORT = 8780
+
+
+def make_server(bind: str, port: int, directory: "str | None" = None):
+    """A listener ready to `serve_forever()`, not yet serving.
+
+    Split out of `main` so this endpoint can run on a thread of the server's
+    process instead of a service of its own
+    (docs/proposals/2026-11-12-fewer-services.md §4c). `main` is unchanged in
+    behaviour: it builds the same server and serves it.
+    """
+    handler = functools.partial(Handler,
+                                directory=directory or os.getcwd())
+    return http.server.ThreadingHTTPServer((bind, port), handler)
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("port", type=int, nargs="?", default=8780)
+    ap.add_argument("port", type=int, nargs="?", default=DEFAULT_PORT)
     ap.add_argument("--bind", "-b", default="127.0.0.1")
     ap.add_argument("--directory", "-d", default=os.getcwd())
     a = ap.parse_args(argv)
-    handler = functools.partial(Handler, directory=a.directory)
-    with http.server.ThreadingHTTPServer((a.bind, a.port), handler) as srv:
+    with make_server(a.bind, a.port, a.directory) as srv:
         srv.serve_forever()
 
 

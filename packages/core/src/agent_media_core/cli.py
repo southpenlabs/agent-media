@@ -9378,6 +9378,155 @@ def cmd_share(a) -> int:
     return rc
 
 
+def audio_prune_default() -> float:
+    """The clip keep-days, for the `--days` help text."""
+    from . import audio_prune
+    return audio_prune.keep_days()
+
+
+def cmd_audio(a) -> int:
+    """`media audio prune`: age rendered clips out of the state dir."""
+    from . import audio_prune
+    res = audio_prune.prune(a.days, dry_run=a.dry_run)
+    if getattr(a, "json", False):
+        print(json.dumps(res))
+        return 0
+    verb = "would free" if a.dry_run else "freed"
+    print(f"clips: {res['removed']} older than {res['days']:g} days, "
+          f"{verb} {res['bytes'] / 1e6:.1f}MB"
+          + (f"; kept {res['kept_protected']} built artefact(s)"
+             if res["kept_protected"] else ""))
+    return 0
+
+
+def cmd_endpoints(a) -> int:
+    """`media endpoints`: which small HTTP endpoints run in the server's own
+    process, which are still a service of their own, and which are off."""
+    import socket
+
+    from . import endpoints as eps
+
+    asked = set(eps.wanted())
+    # The two self-resolving endpoints report `tailnet` rather than spend up
+    # to 45s resolving. For display and probing we do need a real address,
+    # so ask once without the retry loop — `_peer_ip` is a single call. Get
+    # this wrong and the command says "off" for an endpoint whose unit is
+    # running, which is the one moment it is actually being read.
+    def _addr(bind: str) -> str:
+        if bind.lower() != eps.TAILNET:
+            return bind
+        from .entrypoints.speech_state import _peer_ip
+        return _peer_ip() or "127.0.0.1"
+
+    rows = []
+    for ep in eps.ENDPOINTS:
+        bind, port = _addr(ep.bind()), ep.port()
+        probe = "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+        try:
+            with socket.create_connection((probe, port), timeout=0.4):
+                listening = True
+        except OSError:
+            listening = False
+        gaps = eps.missing_env(ep)
+        rows.append({
+            "name": ep.name, "what": ep.what, "addr": f"{bind}:{port}",
+            "in_server": ep.name in asked, "listening": listening,
+            "needs": gaps, "unit": ep.unit,
+        })
+    if getattr(a, "json", False):
+        print(json.dumps({"endpoints": rows, "MEDIA_ENDPOINTS":
+                          os.environ.get(eps.ENV, "")}, indent=2))
+        return 0
+    for r in rows:
+        if r["needs"]:
+            state = "off: needs " + ", ".join(r["needs"])
+        elif r["in_server"]:
+            state = "in the server" + ("" if r["listening"] else " (NOT listening)")
+        elif r["listening"]:
+            state = "its own service"
+        else:
+            state = "off"
+        print(f"{r['name']:18} {r['addr']:24} {state}")
+        print(f"{'':18} {r['what']}")
+    if not asked:
+        print(f"\n{eps.ENV} is unset: every endpoint stays a service of its "
+              f"own. Name one to move it into the server, e.g.\n"
+              f"  {eps.ENV}=clips,speech-state")
+    return 0
+
+
+def cmd_schedule(a) -> int:
+    """`media schedule`: the one scheduler's job table (scheduler.py)."""
+    from . import scheduler
+
+    all_jobs = scheduler.jobs()
+    by_name = {j.name: j for j in all_jobs}
+
+    if a.schedule_cmd == "run":
+        job = by_name.get(a.name)
+        if job is None:
+            print(f"media: no job {a.name!r}; `media schedule list` shows them",
+                  file=sys.stderr)
+            return 2
+        why = scheduler.skip_reason(job)
+        if why and not a.force:
+            print(f"media: {job.name} is not wanted here ({why}); "
+                  f"--force runs it anyway", file=sys.stderr)
+            return 1
+        print(f"media: {job.name}: {' '.join(job.argv)}")
+        rc = scheduler.run_job(job, timeout=a.timeout)
+        if rc == -1:
+            print("media: already running", file=sys.stderr)
+        elif rc != 0:
+            print(f"media: exited {rc}; output in {scheduler.log_path(job.name)}",
+                  file=sys.stderr)
+        return 0 if rc == 0 else 1
+
+    # list
+    now = time.time()
+    rows = []
+    for job in all_jobs:
+        last = scheduler.last_run(job.name)
+        why = scheduler.skip_reason(job)
+        due = None if why else scheduler.due_at(
+            job, last=last.get("at") if last else None, now=now)
+        rows.append({
+            "name": job.name, "what": job.what, "cadence": job.cadence(),
+            "source": job.source, "argv": job.argv,
+            "skipped": why, "last": last,
+            "next": due, "in_s": None if due is None else round(due - now),
+        })
+    if getattr(a, "json", False):
+        print(json.dumps({"jobs": rows}, indent=2))
+        return 0
+    if not rows:
+        print("no scheduled jobs")
+        return 0
+    for r in rows:
+        when = "-"
+        if r["last"]:
+            ago = now - r["last"]["at"]
+            when = f"{_ago(ago)} ago"
+            if r["last"].get("rc"):
+                when += f" (rc {r['last']['rc']})"
+        nxt = ("skipped: " + r["skipped"] if r["skipped"]
+               else "never" if r["next"] is None
+               else "due now" if r["in_s"] <= 0
+               else f"in {_ago(r['in_s'])}")
+        print(f"{r['name']:18} {r['cadence']:18} last {when:22} {nxt}")
+        if r["what"]:
+            print(f"{'':18} {r['what']} [{r['source']}]")
+    return 0
+
+
+def _ago(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m")):
+        if seconds >= size:
+            return f"{seconds / size:.0f}{unit}"
+    return f"{seconds:.0f}s"
+
+
 def cmd_state_gc(a) -> int:
     """Apply the state DB's retention policy. See StateStore.gc for the rules."""
     res = StateStore().gc(errors_days=a.errors_days, other_days=a.days,
@@ -10882,6 +11031,43 @@ def _build_parser() -> argparse.ArgumentParser:
                          "http://<peer host>:8781)")
     pe_sub.add_parser("list", help="configured peers and which are paired")
     pe.set_defaults(func=cmd_peer)
+
+    au = sub.add_parser("audio",
+                        help="agent-media's rendered speech clips on disk")
+    asub = au.add_subparsers(dest="audio_cmd", required=True)
+    ap_ = asub.add_parser("prune",
+                          help="delete clips older than --days (built "
+                               "artefacts like the music beds are kept)")
+    ap_.add_argument("--days", type=float, default=None,
+                     help=f"keep clips newer than this "
+                          f"(default {audio_prune_default():g}, "
+                          f"MEDIA_AUDIO_KEEP_DAYS)")
+    ap_.add_argument("--dry-run", action="store_true",
+                     help="count what would go, delete nothing")
+    ap_.add_argument("--json", action="store_true")
+    au.set_defaults(func=cmd_audio)
+
+    ep = sub.add_parser("endpoints",
+                        help="the small HTTP endpoints: which run inside the "
+                             "server, which are still a service each")
+    ep.add_argument("--json", action="store_true")
+    ep.set_defaults(func=cmd_endpoints)
+
+    sc = sub.add_parser("schedule",
+                        help="the one scheduler's jobs: agent-media's own "
+                             "housekeeping and this install's, run by the "
+                             "server instead of a systemd timer each")
+    scsub = sc.add_subparsers(dest="schedule_cmd", required=True)
+    scl = scsub.add_parser("list",
+                           help="each job: cadence, last run, next due")
+    scl.add_argument("--json", action="store_true")
+    scr = scsub.add_parser("run", help="run one job now, in the foreground")
+    scr.add_argument("name")
+    scr.add_argument("--timeout", type=float, default=None,
+                     help="kill it after this many seconds")
+    scr.add_argument("--force", action="store_true",
+                     help="run it even where its gate says it is not wanted")
+    sc.set_defaults(func=cmd_schedule)
 
     sg = sub.add_parser("state-gc",
                         help="apply the state DB's retention policy "

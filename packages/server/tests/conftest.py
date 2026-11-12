@@ -323,3 +323,29 @@ def _clean_media_env(monkeypatch, tmp_path, request):
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_agent_check: use the real send._agent_unready "
                             "(the machine's harnesses), not the conftest's ready stub")
+
+
+@pytest.fixture(autouse=True)
+def _a_hostname_no_real_machine_has(monkeypatch):
+    """Pin `socket.gethostname()`, so no test's result depends on the name
+    of the machine running it.
+
+    `sessiond_remote.is_local()` decides a chat is for this host by
+    comparing the name it was given with `gethostname()`. Several tests name
+    a remote worker `red2` — and on the machine actually called red2, every
+    one of them took the local branch and failed: 17 of them, green in CI
+    and on every other host, red on exactly one. Found while counting units
+    for the red2 move (docs/proposals/2026-11-12-fewer-services.md), and
+    about to matter a great deal more, since red2 is becoming the server
+    these tests describe.
+
+    Pinned rather than renamed because the name is not the bug: `red5`,
+    `p8a` and `red4` appear as remote hosts across these files too, and
+    renaming them all would leave the next person to pick a real machine's
+    name with the same trap. A test that wants to be local says `local`,
+    which `is_local` accepts outright, or this name.
+    """
+    import socket
+
+    monkeypatch.setattr(socket, "gethostname",
+                        lambda: "a-host-under-test.invalid")

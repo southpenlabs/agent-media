@@ -2339,6 +2339,31 @@ def main() -> None:
     # Moves asked for mid-turn and left waiting by a restart (moves.py).
     from agent_media_server import moves as _moves
     _moves.start()
+    # The one scheduler (agent_media_core.scheduler): agent-media's own
+    # housekeeping and this install's `[jobs]`, in one thread here instead of
+    # a systemd timer and a oneshot unit per job — red5 spent 36 unit files
+    # on 18 jobs (docs/proposals/2026-11-12-fewer-services.md §4b).
+    # MEDIA_SCHEDULE=0 leaves it off, which is what a host still running the
+    # old timers wants so nothing runs twice.
+    from agent_media_core import scheduler as _scheduler
+    _scheduler.start()
+    # The small HTTP endpoints, in this process instead of a service each:
+    # speech-state, share, clips and the two shims, every one of them a
+    # ThreadingHTTPServer beside the six listeners already here
+    # (docs/proposals/2026-11-12-fewer-services.md §4c). Each keeps its own
+    # port, so no client changes. Off until MEDIA_ENDPOINTS names it, so a
+    # host still running the old units never has two processes on one port.
+    # On a thread, and that is not tidiness: speech-state's bind resolution
+    # asks the peer network for this host's address and RETRIES while
+    # tailscaled comes up — six attempts, a 5s subprocess timeout each, up
+    # to ~45s. In a unit of its own that wait cost nothing. On the boot path
+    # here it would hold the canvas itself off the air for all of it, which
+    # is a worse failure than the one folding it in was meant to fix.
+    # start_all logs its own problems; `media endpoints` shows what is up.
+    from agent_media_core import endpoints as _endpoints
+    if _endpoints.wanted():
+        threading.Thread(target=_endpoints.start_all, daemon=True,
+                         name="endpoints").start()
     # The one Matrix /sync loop (agent_media_server.matrix), with the speech
     # intake reading from it; idle unless a token and a room are configured.
     from agent_media_server import matrix as _matrix

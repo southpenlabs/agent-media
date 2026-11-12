@@ -947,6 +947,10 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # A book's cover, the same way (book_library.served_cover).
         if path.startswith("/books/covers/"):
             return _signed_book_cover(h, path.removeprefix("/books/covers/"))
+        # A book's media file, the same way (book_files.served). Checked after
+        # /books/covers/ so a cover is never reached by this one.
+        if path.startswith("/books/files/"):
+            return _signed_book_file(h, path.removeprefix("/books/files/"))
         # A saved podcast link's download, the same way (podcast_links.served).
         if path.startswith("/podcasts/files/"):
             return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
@@ -1009,6 +1013,29 @@ def _signed_book_cover(h: BaseHTTPRequestHandler, name: str) -> bool:
         _json(h, 404, {"ok": False, "error": "no such cover"})
         return True
     _send_file(h, f, f.stat().st_size, "image/jpeg")
+    return True
+
+
+def _signed_book_file(h: BaseHTTPRequestHandler, rel: str) -> bool:
+    """`GET /books/files/<rel>?sig=` — a book's audio for a player off the
+    mesh (`media book play --target phone`); the link is the credential.
+
+    `rel` is a relative path with directories in it, not a flat name, so
+    `book_files.served` does the containment check; this only unquotes it.
+    404 for a bad path, signature or missing file alike — a player learns
+    nothing from which.
+    """
+    from urllib.parse import unquote
+
+    from agent_media_core import book_files
+
+    sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
+    found = book_files.served(unquote(rel), sig)
+    if not found:
+        _json(h, 404, {"ok": False, "error": "no such file"})
+        return True
+    f, ctype = found
+    _send_file(h, f, f.stat().st_size, ctype)
     return True
 
 
