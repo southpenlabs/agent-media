@@ -357,10 +357,16 @@ down rather than glossed:
   so it is a fact in `selfcheck_facts()` that `media doctor` and the status
   bar's warning read. 105d7f90 argued for this order over encryption, on the
   grounds that nothing of ours ran on a timer at all; that was right.
-- **No encryption at rest.** The push to red5 is over ssh and the destination
-  is mode 700, but the snapshot is plain files there. `age` is installed on
-  both machines; wiring it, with the recovery phrase printed once to keep off
-  the server, is the next piece.
+- ~~**No encryption at rest.**~~ **Closed 13 Nov 2026.** David chose restic
+  over `age` — `age` loses on arithmetic, since encrypting a snapshot as one
+  blob defeats the hardlink dedup and would cost a full 1.4G a night — with
+  the key "printed once, plus a copy on the other machine". The repository is
+  off-machine (`sftp:red2:…`, a LUKS disk) while the plain store stays local,
+  so the ciphertext travels and the key does not. Two things building it
+  taught: the phrase must never be printed to anything but a terminal, since
+  this project's own transcripts are backed up and searchable; and the key
+  must be excluded from the backup, which a comment claimed it already was
+  and red5's first real run disproved.
 
 One design claim corrected by building it: the cap cannot always be honoured.
 Pruning stops at the last snapshot, because deleting the only backup to

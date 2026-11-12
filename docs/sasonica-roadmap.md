@@ -2617,8 +2617,8 @@ ahead.
     **BUILT 13 Nov 2026** (`media backup` / `media restore`,
     `agent_media_server/backup.py`, 30 tests, reference at
     `docs/reference/backup-and-restore.md`; the nightly timer and the
-    stale alert followed the same day, encryption at rest is still to
-    come, so sam's `red5-backup-pull` still runs). Decided 12 Nov;
+    stale alert and the encrypted history followed the same day, so the
+    gaps the first version named are closed). Decided 12 Nov;
     David's two answers:
     deploy cadence is **batch when idle**, not every green push (revising
     where-things-run decision 2, from #245's push-back — 16 agents pushing
@@ -2677,7 +2677,18 @@ ahead.
     (`agent-media-backup.timer`, 03:40 with jitter and `Persistent=true`,
     the `daily` tier), gated on `MEDIA_BACKUP_DEST` so it is never
     installed without somewhere to go; `media backup where` and
-    `media backup stale` say when nothing is running.
+    `media backup stale` say when nothing is running. The kept history is
+    encrypted in a restic repository (David, 13 Nov 2026, choosing it over
+    `age`, which would have cost a full 1.4G a night by defeating the
+    hardlink dedup): off-machine at `sftp:red2:…` while the plain store
+    stays local, so the ciphertext travels and the key does not;
+    `media backup init --copy-to <host>` makes the key and the second copy
+    David asked for, the recovery phrase is printed **only** to a terminal
+    (a phrase in an agent's transcript is a phrase leaked, and these
+    transcripts are themselves backed up), and the key is excluded from
+    every backup — which a comment claimed and red5's first real run
+    disproved. Running nightly on red5 since 13 Nov; first run 7,640
+    files and 1.4G in three minutes, the second in one.
 
 63. **The server moves home: the app pairs with red2** (David, 12 Nov 2026,
     thread a4e12d56, via agent-mail #248: "I think I'm going to pair the

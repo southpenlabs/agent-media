@@ -159,6 +159,72 @@ like a whole one.
 Decided 12 Nov 2026 (David: "let's just use red five then"):
 **`red5:/mnt/data/agent-media-backups`**.
 
+## The encrypted history
+
+David chose restic for this on 13 Nov 2026. `age` was the other candidate and
+lost on arithmetic rather than taste: encrypting a snapshot as one blob
+defeats the hardlink trick that makes a nightly cost only what changed, so
+every night would cost its full ~1.4G and a 10G cap would hold ten nights
+instead of months. restic encrypts **and** dedupes at block level.
+
+It sits on top of the plain snapshot rather than replacing it. The snapshot is
+still built as a readable directory — that is what `media server move` pushes
+and restores — and is then handed to restic *before* the local prune, so
+nothing is dropped here until it is safely in the repository. With
+`MEDIA_BACKUP_REPO` unset there is no repository and no complaint.
+
+```
+media backup init [--copy-to <host>]   # the key and the repository
+media backup check [--read-data]       # the repository's own integrity
+media backup list                      # the kept snapshots, under the store's
+```
+
+Retention matches the dotfiles script this replaces: 14 daily, 8 weekly, 12
+monthly, pruned.
+
+### Two copies of the key, and neither in a backup
+
+A key that lives only on the machine being backed up means losing that machine
+loses every backup with it. So `init` makes the key (mode 600, *written* 600
+rather than chmod-ed afterwards) and `--copy-to <host>` puts a second copy on
+another paired host — David's choice on 13 Nov: "printed once, plus a copy on
+the other machine".
+
+**The key is excluded from every backup**, by name, with its reason in the
+manifest. A key inside the thing it encrypts is useless on its face — you
+would need it to read the backup that holds it — and the harm is the plain
+store: red5's first real run put the key to the off-machine history into the
+readable snapshot, so anyone who could read the disk could read the history it
+was protecting. (That ran against a comment in the source that already claimed
+the key was excluded. It was not. Checked, not trusted, is the lesson.)
+
+### The phrase is never printed to anything but a terminal
+
+`init` shows the recovery phrase once, and **only when stdout is a tty**.
+Otherwise it prints `cat <keyfile>` instead. A phrase in a log, a CI job or an
+agent's transcript is a phrase leaked — and this project's transcripts are
+themselves backed up and searchable, so an agent setting this up would
+otherwise have written the key to every backup into something that gets backed
+up. A test asserts the phrase does not reach a non-terminal.
+
+### Plain here, encrypted there
+
+The readable snapshot grants nobody anything new on the machine that holds the
+originals, which is why it is allowed at all. Mirrored to **another** machine
+it is a second readable copy of every secret and transcript, so that
+combination is called out at run time and names the fix: restic speaks sftp
+itself, so the repository is what should travel.
+
+As configured on red5, 13 Nov 2026:
+
+| | where | why |
+|---|---|---|
+| `MEDIA_BACKUP_DEST` | `/mnt/data/agent-media-backups` | local: the hardlink base, and the move's path |
+| `MEDIA_BACKUP_REPO` | `sftp:red2:~/.local/share/agent-media-restic` | off-machine, encrypted, on a LUKS disk |
+
+At the cutover this flips: red2 holds the data, and the repository becomes
+`sftp:red5:/mnt/data/agent-media-restic`.
+
 ## Restoring onto another machine
 
 This is the case the server's move depends on: red5's state onto red2.
@@ -229,10 +295,6 @@ what happened rather than parsing output.
 
 Honest about the edges, as of 13 Nov 2026:
 
-- **No encryption at rest.** The push to red5 goes over ssh, so it is
-  encrypted in flight, and the destination is mode 700 — but the snapshot sits
-  as plain files there. `age` is on both machines; wiring it, and printing a
-  recovery phrase once, is the next piece.
 - **The destination is reached with rsync over ssh**, not down the jobs
   worker's outbound connection as the design sketched. That matters for a
   machine that cannot be reached inbound; red5 can be.
