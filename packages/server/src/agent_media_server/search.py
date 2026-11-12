@@ -164,13 +164,20 @@ def _connect() -> sqlite3.Connection:
 
 
 def _wipe(conn: sqlite3.Connection) -> None:
+    """Start the index over at the current `SCHEMA_VERSION`.
+
+    The tables are **dropped and made again**, not emptied: `CREATE TABLE IF
+    NOT EXISTS` leaves an existing table's columns as they are, so a bump
+    that adds one (`docs.names`, version 2) kept the old definition and every
+    insert into it then failed — `table docs has no column named names`, an
+    index that answered nothing at all (red5, 12 Nov 2026).
+    """
     conn.execute("BEGIN IMMEDIATE")
-    for t in ("files", "threads", "docs", "rooms"):
-        conn.execute(f"DELETE FROM {t}")
-    conn.execute("INSERT INTO text_fts(text_fts) VALUES('delete-all')")
-    conn.execute("INSERT INTO tool_fts(tool_fts) VALUES('delete-all')")
-    conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+    for t in ("text_fts", "tool_fts", "files", "threads", "docs", "rooms"):
+        conn.execute(f"DROP TABLE IF EXISTS {t}")
     conn.execute("COMMIT")
+    conn.executescript(_SCHEMA)
+    conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
     _MATRIX_REV.clear()
     _MATRIX_GAPS.clear()
 

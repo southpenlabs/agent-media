@@ -331,6 +331,40 @@ def test_rebuild_and_schema_bump(home, gate, monkeypatch):
     assert ask("heron")["messages"]
 
 
+def test_a_bump_that_adds_a_column_remakes_the_tables(home, gate, monkeypatch):
+    """An index built before a column existed is made again, not emptied.
+
+    `CREATE TABLE IF NOT EXISTS` keeps an existing table's columns, so a
+    version 1 index kept a `docs` with no `names` and every insert into it
+    failed — "table docs has no column named names", an index that answered
+    nothing (red5, 12 Nov 2026).
+    """
+    s = claude(home, SID)
+    s.prompt("look for the wombat")
+    s.tool("Bash", {"command": "grep -r wombat notes/"}, "t1")
+    s.result("t1", "none")
+    s.end_turn()
+    assert ask("wombat")["messages"]
+    # An older index, as it was on disk: docs without `names`, version 1.
+    conn = search._connect()
+    conn.executescript(
+        "DROP TABLE text_fts; DROP TABLE tool_fts; DROP TABLE docs;"
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, session TEXT, msg TEXT, role TEXT,"
+        " at REAL, pos INTEGER, kind INTEGER, body TEXT);"
+        "CREATE VIRTUAL TABLE text_fts USING fts5(body, content='docs',"
+        " content_rowid='id', tokenize='unicode61 remove_diacritics 2');"
+        "CREATE VIRTUAL TABLE tool_fts USING fts5(body, content='docs',"
+        " content_rowid='id', tokenize='unicode61 remove_diacritics 2');"
+        "DELETE FROM files; UPDATE meta SET v='1' WHERE k='schema';")
+    search._reset_for_tests()
+    assert [r[1] for r in search._connect().execute("PRAGMA table_info(docs)")] \
+        == ["id", "session", "msg", "role", "at", "pos", "kind", "body", "names"]
+    # And it indexes again, tool names and all.
+    assert ask("wombat")["messages"]
+    assert ask("wombat tool:bash")["messages"]
+    assert search.stats()["messages"] >= 1
+
+
 def test_the_index_lives_under_the_state_dir(home, gate, tmp_path):
     claude(home, SID).prompt("x")
     ask("x")
