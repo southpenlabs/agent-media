@@ -172,3 +172,8 @@ per clone with `git config core.hooksPath .githooks`).
   docs/decisions/2026-09-22-licensing.md
 - The canvas carries the reply's words, not ambient art.
   docs/decisions/2026-09-21-canvas-carries-words.md
+- A new setting or address naming an outside service gets a row in
+  docs/reference/outside-services.md in the same change, saying whose
+  credential it uses, what its terms ask of us, and whether the personal-use
+  switch gates it (David, 13 Nov 2026: "do you have a record of all those
+  services?").
