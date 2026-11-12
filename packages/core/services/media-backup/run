@@ -11,8 +11,16 @@
 # stops firing is caught by `media backup stale` from selfcheck, which is not
 # on this timer and so survives its death.
 exec 2>&1
-[ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
-export MEDIA_BACKUP_DEST MEDIA_BACKUP_MAX_BYTES MEDIA_BACKUP_STAGE MEDIA_BACKUP_STALE_DAYS
+# systemd has already loaded the env file (EnvironmentFile= in the unit), so
+# sourcing it again is both pointless and noisy: `sh` reads a value containing
+# `|` -- MEDIA_OIDC_ALLOW=https://...|1 -- as a pipeline into a command named
+# `1`, and logs "1: not found" for every such line. Only runit, the phone's
+# supervisor, needs this done by hand.
+if [ -z "$INVOCATION_ID" ] && [ -f "$HOME/.config/agent-media.env" ]; then
+  . "$HOME/.config/agent-media.env"
+fi
+export MEDIA_BACKUP_DEST MEDIA_BACKUP_MAX_BYTES MEDIA_BACKUP_STAGE
+export MEDIA_BACKUP_STALE_DAYS MEDIA_BACKUP_REPO MEDIA_BACKUP_KEY
 media backup run --tier daily
 rc=$?
 # systemd runs this from a nightly timer (`timer`; it sets INVOCATION_ID).
