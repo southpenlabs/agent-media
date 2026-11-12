@@ -432,7 +432,15 @@ the day of the cutover, not after it.
    no release yet (step 1), so today it would use red2's checkout. Open for
    the rehearsal: records of chats that ran on red2 as red5's worker (the
    restore brings red5's record, `host: red2`).
-1. **red2 becomes a release host.** `MEDIA_RELEASE_*` in its env file with
+1. **red2 becomes a release host. DONE 13 Nov 2026** (David: "OK let's do
+   it"): `MEDIA_RELEASE_*` in its env file (red5's packages and a copy of
+   its `release-requirements.txt`; that file names
+   `~/projects/sasonica-personal-use` by path, so that repo is cloned on
+   red2 too), first release 3c51671c built, its sessiond and jobs worker in
+   release mode and restarted through `restart-services`, `media` and
+   `media-setup` linked into `~/.local/bin` (there were no links to
+   repoint). `media-setup install-services` for the server's own units is
+   the move's step. As planned: `MEDIA_RELEASE_*` in its env file with
    the same `MEDIA_RELEASE_PACKAGES` red5 has (core, server, visual,
    tts-shim, completions-shim, engine-openai, engine-piper, the four intakes,
    org-paragtd, voice-bridge), then `media update --no-restart`, then
