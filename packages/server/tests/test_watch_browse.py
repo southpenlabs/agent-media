@@ -354,7 +354,8 @@ def _providers(monkeypatch, name="Arrival"):
              "flatrate": [{"provider_id": 8, "provider_name": "Netflix", "logo_path": "/n.jpg"},
                           {"provider_id": 1796, "provider_name": "Netflix Standard with Ads"},
                           {"provider_id": 21, "provider_name": "Stan"},
-                          {"provider_name": "HBO Max Amazon Channel"}],
+                          {"provider_name": "HBO Max Amazon Channel"},
+                          {"provider_id": 385, "provider_name": "BINGE"}],
              "rent": [{"provider_id": 2, "provider_name": "Apple TV Store"},
                       {"provider_id": 10, "provider_name": "Amazon Video"}]}
     monkeypatch.setattr(tmdb, "_request", lambda path, params=None, timeout=15.0: (
@@ -365,11 +366,12 @@ def _providers(monkeypatch, name="Arrival"):
 
 def test_a_title_opens_in_its_services(server, signed_in, fake, creds, monkeypatch):
     """`open_in`: each known service once, at its own search for the title;
-    an unknown one (Stan: no confirmed search address) has no key."""
+    an unknown one (Binge: no confirmed search address) has no key."""
     _providers(monkeypatch, "Arrival & Departure")
     _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
     assert obj["open_in"] == [
         {"id": "netflix", "label": "Netflix", "url": "https://www.netflix.com/search?q=Arrival%20%26%20Departure", "kind": "stream"},
+        {"id": "stan", "label": "Stan", "url": "https://play.stan.com.au/search?q=Arrival%20%26%20Departure", "kind": "stream"},
         {"id": "prime", "label": "Prime Video", "url": "https://www.primevideo.com/search/?phrase=Arrival%20%26%20Departure", "kind": "stream"},
         {"id": "appletv", "label": "Apple TV", "url": "https://tv.apple.com/search?term=Arrival%20%26%20Departure", "kind": "rent"}], obj["open_in"]
     assert not [o for o in obj["open_in"] if o["id"] == "stremio"], "off until the owner turns it on"
@@ -378,7 +380,9 @@ def test_a_title_opens_in_its_services(server, signed_in, fake, creds, monkeypat
     rows = item["where"]["stream"]
     assert rows[0] == {"name": "Netflix", "logo": "https://image.tmdb.org/t/p/w92/n.jpg", "service": "netflix",
                        "label": "Netflix", "url": "https://www.netflix.com/search?q=Arrival%20%26%20Departure"}
-    assert rows[2] == {"name": "Stan", "logo": None}
+    assert rows[2] == {"name": "Stan", "logo": None, "service": "stan", "label": "Stan",
+                       "url": "https://play.stan.com.au/search?q=Arrival%20%26%20Departure"}
+    assert rows[4] == {"name": "BINGE", "logo": None}
     assert item["where"]["link"].startswith("https://www.themoviedb.org/") and "JustWatch" in item["attribution"]
 
 
@@ -414,11 +418,11 @@ def test_open_in_stremio_is_the_owners_choice(server, signed_in, fake, creds, mo
     # Stremio first, then the services.
     _providers(monkeypatch)
     _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
-    assert [o["id"] for o in obj["open_in"]] == ["stremio", "netflix", "prime", "appletv"]
+    assert [o["id"] for o in obj["open_in"]] == ["stremio", "netflix", "stan", "prime", "appletv"]
     res, obj = call(server, "POST", "/watch/settings", {"open_in": {"stremio": False}}, AUTH)
     assert obj["open_in"][0]["on"] is False
     _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
-    assert [o["id"] for o in obj["open_in"]] == ["netflix", "prime", "appletv"]
+    assert [o["id"] for o in obj["open_in"]] == ["netflix", "stan", "prime", "appletv"]
 
 
 def test_open_in_settings_are_gated(server, fake, creds):

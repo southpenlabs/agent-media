@@ -14,6 +14,9 @@ agent_media_core.tmdb; David, 9 Nov 2026).
   GET  /watch/discover?kind=movie|tv&list=trending|popular|recommended|anticipated&genre=&year=&page=
        &hide_watched=0|1   gated → {"ok", "kind", "list", "lists", "page", "more", "hide_watched",
                            "signed_in", "items", "genres": [{slug, name}]}
+  GET  /watch/discover?kind=movie|tv&list=service&service=<TMDb provider id>|free&genre=&year=&page=   gated,
+       only with TMDb set → the same, and {"service", "services": [{id, name, logo}], "region", "ignored",
+       "attribution"}: what a streaming service has (watch_services.py); without `service`, the services alone
   GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
   GET  /watch/title?kind=movie|tv&id=&season=&episode=   gated → a title's page (facts, trailer, ratings, cast,
                                             crew, related, seasons, `open_in`: links that open it elsewhere)
@@ -167,7 +170,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                     raise ValueError("page is a number")
                 got = trakt.discover(_q(h, "kind"), _q(h, "list"), _q(h, "genre"), _q(h, "year"),
                                      int(page), _q(h, "hide_watched") != "0",
-                                     filters={k: _q(h, k) for k in FILTERS if _q(h, k)})
+                                     filters={k: _q(h, k) for k in FILTERS if _q(h, k)},
+                                     service=_q(h, "service"))
             else:
                 got = trakt.show(int(_q(h, "id") or "x"))
         except ValueError as e:
@@ -175,7 +179,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             return True
         except Exception as e:  # noqa: BLE001
             print(f"watch: {e}", file=sys.stderr)
-            send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
+            who = "TMDb" if path == "/watch/discover" and _q(h, "list") == "service" else "Trakt"
+            send_json(h, 502, {"ok": False, "error": f"{who} didn't answer: {e}"})
             return True
         send_json(h, 200, {"ok": True, **got})
         return True
@@ -196,7 +201,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                 print(f"watch: {e}", file=sys.stderr)
                 send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
                 return True
-            send_json(h, 200, {"ok": True, **got, "tmdb": tmdb.set_up()})
+            # `by_service`: Discover has the "service" list (what a streaming service has; TMDb's).
+            send_json(h, 200, {"ok": True, **got, "tmdb": tmdb.set_up(), "by_service": tmdb.set_up()})
             return True
         try:
             tid = int(_q(h, "tmdb"))

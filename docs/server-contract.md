@@ -10480,7 +10480,9 @@ Shows tabs). An older server says neither: no card, no tabs.
 **The lists.**
 
 - `GET /watch?kind=movie|tv&list=<list>` → `{"ok", "kind", "list",
-  "lists", "set_up", "signed_in", "items", "genres", "tmdb", "reason"?}`.
+  "lists", "set_up", "signed_in", "items", "genres", "tmdb", "by_service",
+  "reason"?}` (`by_service`: Discover has the `service` list, "By
+  service" below).
   `lists` is what `kind` offers, in the funnel's order: movie `recent`,
   `watchlist`; tv `recent`, `next`, `watchlist`. `list` defaults to
   `recent`; one not in `lists`, or another kind, is 400. Not set up
@@ -10580,6 +10582,9 @@ person's `photo`.
   → `{"ok", "kind", "title", "trailer", "trailer_source",
   "trailer_pending"?, "ratings", "cast", "crew", "related", "open_in",
   "tmdb", "seasons"?, "next_episode"?}`.
+  `id` may also be `tmdb:<TMDb id>` (a row from "By service" below, which
+  has no Trakt id): Trakt's `GET /search/tmdb/<id>?type=movie|show` finds
+  the title (kept a day), 404 when it has none.
   `title` is the item with its whole `overview` and `tagline`,
   `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
   `released`, and for a show `network` and `aired_episodes`. `cast`:
@@ -10641,11 +10646,14 @@ person's `photo`.
     data has no address for a title at a service, so a search is as close
     as it gets. Known services are one best-effort table
     (`watch_open.SERVICES`, by TMDb provider id, else name): Netflix,
-    Prime Video, Apple TV, HBO Max, SBS On Demand, ABC iview, 9Now,
-    YouTube, Google Play, Tubi, MUBI, Plex, Crunchyroll, Curiosity Stream;
-    a channel sold inside Prime Video or Apple TV opens that service's
-    search. Any other provider has no key and is reached through
-    `where.link` (JustWatch's page, credited as before).
+    Prime Video, Apple TV, HBO Max, SBS On Demand, ABC iview, 9Now, Stan,
+    10, YouTube, Google Play, Tubi, MUBI, Plex, Crunchyroll, Curiosity
+    Stream; a channel sold inside Prime Video or Apple TV opens that
+    service's search. Any other provider has no key and is reached through
+    `where.link` (JustWatch's page, credited as before). Stan and 10 were
+    added on 13 Nov 2026, read from an Australian address; Disney+, Binge,
+    Paramount+, Foxtel Now, BritBox, Kanopy, 7plus and DocPlay still have
+    none, as no search address of theirs could be confirmed.
 - `GET /watch/season?id=<show>&season=<n>` → `{"ok", "season", "episodes":
   [{"season", "number", "title", "overview", "first_aired", "runtime",
   "rating"?, "ids", "watched"?}]}`. One is marked watched with `POST /watch
@@ -10674,6 +10682,52 @@ person's `photo`.
   [{"value", "label"}]}]`, the choices the server takes (the app draws
   them as they are; another value is 400). Trakt's lists have no sort of
   their own: the app orders what it has loaded.
+- **By service** (`watch_services.py`; David, 13 Nov 2026: "add tubi
+  too"). `GET /watch/discover?kind=movie|tv&list=service&service=<id>|free
+  &genre=&year=&page=&hide_watched=0|1`: what a streaming service has in
+  this server's region (`MEDIA_TMDB_REGION`), most popular first. Only
+  with TMDb set up: `service` is then the last of `lists`, and `GET
+  /watch` says `by_service: true`; without TMDb the list is 400 like any
+  unknown one. Trakt has no such list, so this one is TMDb's `GET
+  /discover/movie|tv?watch_region=&with_watch_providers=<id>
+  &with_watch_monetization_types=flatrate|free|ads|rent|buy
+  &sort_by=popularity.desc&page=`; `service=free` is everything free or
+  with ads, whoever has it (`free|ads`, no provider). The answer is
+  Discover's, and also carries:
+  - `services`: `[{"id", "name", "logo"}]`, the region's services to offer
+    (TMDb's `GET /watch/providers/movie|tv?watch_region=`, in the region's
+    display order, at most 25; a channel sold inside another service,
+    JustWatch's own entries and a "with Ads" second tier are left out).
+    `id` is TMDb's provider id as a string. The app draws this list and
+    adds "free" itself.
+  - `service`: the one asked for (`{"id", "name", "logo"?}`; `free`:
+    `{"id": "free", "name": "Free to watch"}`), or null. Without
+    `service` the answer has `services` and no items, and TMDb's discover
+    is not asked. An id TMDb does not list for the region is 400.
+  - `items`: movies or shows made from TMDb's rows: `id`
+    `movie|show:tmdb:<id>`, `ids` `{"tmdb"}` only, `title`, `year`,
+    `genres` (TMDb's names), `rating` and `votes` (TMDb's), `overview`,
+    `poster`, `url` (the title at themoviedb.org), `runtime` null. No
+    Trakt id is looked up per row: `GET /watch/title?id=tmdb:<id>` finds
+    it when the row is opened (the app then has the title's Trakt ids and
+    address), and `POST /watch` takes `ids: {"tmdb"}` as it is. Signed
+    in, `watched` and `on_watchlist` are told by TMDb id from the sets
+    already kept, and what was watched is left out unless
+    `hide_watched=0`. 20 a page (TMDb's), `more` while a page follows.
+  - `genres`: Trakt's genres that TMDb has too (a slug is matched to
+    TMDb's genre of that name, from `GET /genre/movie|tv/list`, kept a
+    day; a double name such as "Sci-Fi & Fantasy" answers for both
+    halves). `year` becomes a release (shows: first air) date range.
+    `filters`: only `rating`, `runtime`, `language` and `country`, which
+    TMDb can answer (`vote_average`, `with_runtime`,
+    `with_original_language`, `with_origin_country`; `rating` is then
+    TMDb's, not Trakt's).
+  - `ignored`: the names of what was asked and could not be applied
+    (`certification`, `network`, `status`, or `genre` for one TMDb has no
+    word for): the list is answered without them.
+  - `region`, and `attribution` (TMDb's and JustWatch's credit, which the
+    app shows under the list).
+  Kept an hour. 502 `TMDb didn't answer` when TMDb fails.
 - `GET /media/search` (§6.46a) has a `person` group: `found` the people.
 - 400 for an id, kind, list, page or filter that is not one, or a personal
   list or calendar when not connected; 502 when Trakt fails.

@@ -17,7 +17,7 @@ TMDb's provider data (JustWatch's) has no address for a title at a
 service, only JustWatch's own page (`where.link`, still shown and
 credited). So a service's key opens that service's search for the title.
 SERVICES below is best-effort: search addresses checked by hand on
-12 Nov 2026, which a service may change without notice. A provider that is
+12 and 13 Nov 2026, which a service may change without notice. A provider that is
 not in it gets no key of its own and is reached through the JustWatch link.
 """
 
@@ -39,6 +39,10 @@ SERVICES: tuple[tuple[str, str, tuple[int, ...], str, str], ...] = (
     ("sbs", "SBS On Demand", (132,), r"^sbs on demand", "https://www.sbs.com.au/ondemand/search?query={q}"),
     ("iview", "ABC iview", (135,), r"^abc iview", "https://iview.abc.net.au/search?query={q}"),
     ("9now", "9Now", (378,), r"^9now$", "https://www.9now.com.au/search?q={q}"),
+    # Read from an Australian address on 13 Nov 2026: Stan's /search route takes `q` (its page's own
+    # code), and 10's page answers the words back (`searchTerm`) for `query` and for nothing else.
+    ("stan", "Stan", (21,), r"^stan$", "https://play.stan.com.au/search?q={q}"),
+    ("10", "10", (82,), r"^10( play)?$", "https://10.com.au/search?query={q}"),
     ("youtube", "YouTube", (192, 188, 235), r"^youtube( premium| free)?$",
      "https://www.youtube.com/results?search_query={q}"),
     ("google", "Google Play", (3,), r"^google (play|tv)", "https://play.google.com/store/search?q={q}&c=movies"),
@@ -53,11 +57,14 @@ SERVICES: tuple[tuple[str, str, tuple[int, ...], str, str], ...] = (
     ("prime", "Prime Video", (9, 10, 119, 613, 2100), r"^amazon (prime )?video|amazon channel",
      "https://www.primevideo.com/search/?phrase={q}"),
 )
-#: Looked at on 12 Nov 2026 and left out, as no search address could be
-#: confirmed (a page that answers the same for any address, a 404, or a
-#: wall for the region asked from): Stan, Disney+, Binge, Paramount+,
-#: Foxtel Now, BritBox, Kanopy, 7plus, 10, DocPlay. Kayo is not in TMDb's
-#: providers. They are reached through the JustWatch link.
+#: Looked at on 12 Nov 2026, and again from an Australian address on
+#: 13 Nov 2026, and left out, as no search address could be confirmed:
+#: Disney+ (/search and /browse/search are 404 where /home answers) and
+#: DocPlay (no search page outside a sign-in); Binge, Foxtel Now,
+#: Paramount+, BritBox, Kanopy and 7plus each answer the same page for any
+#: words and nothing in the page or its scripts could be shown to read
+#: them from the address. Kayo is not in TMDb's providers. They are
+#: reached through the JustWatch link.
 
 _BY_ID = {pid: row for row in SERVICES for pid in row[2]}
 _lock = threading.Lock()

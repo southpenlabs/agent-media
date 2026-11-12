@@ -394,12 +394,33 @@ def _open_in(kind: str, item: dict, season=None, episode=None) -> list[dict]:
     return watch_open.open_in(kind, item.get("ids") or {}, where, season, episode)
 
 
+_TMDB_ID = re.compile(r"tmdb:(\d{1,10})")
+
+
+def _from_tmdb(kind: str, ident, now: float):
+    """`tmdb:<id>` as the title's Trakt slug (or id): a row that came from
+    TMDb (watch_services.py) has no Trakt id until it is opened. Anything
+    else is given back as it is. LookupError when Trakt has no such title."""
+    m = _TMDB_ID.fullmatch(str(ident or "").strip().lower())
+    if not m:
+        return ident
+    one = "movie" if kind == "movie" else "show"
+    rows = _pub(f"x:{one}:{m.group(1)}", f"/search/tmdb/{m.group(1)}?type={one}", now)
+    for r in rows if isinstance(rows, list) else []:
+        ids = ((r.get(one) if isinstance(r, dict) else None) or {}).get("ids") or {}
+        if ids.get("slug") or ids.get("trakt"):
+            return str(ids.get("slug") or ids["trakt"])
+    raise LookupError("Trakt has no title with that TMDb id")
+
+
 def title(kind: str, ident, now: Optional[float] = None, season=None, episode=None) -> dict:
     """A movie's or a show's page (what GET /watch/title answers, less `ok`).
-    `season` and `episode`: the episode an "open in" link should go to."""
-    what, tid, now = _one(kind), _id(ident), _now(now)
+    `ident`: its Trakt id or slug, or `tmdb:<id>`. `season` and `episode`:
+    the episode an "open in" link should go to."""
+    what, now = _one(kind), _now(now)
     if not T.set_up():
         raise ValueError(T.NOT_SET_UP)
+    tid = _id(_from_tmdb(kind, ident, now))
     o = _pub(f"t:{what}:{tid}", f"/{what}/{tid}?extended=full", now)
     if not isinstance(o, dict) or not o.get("ids"):
         raise LookupError("Trakt has no such title")

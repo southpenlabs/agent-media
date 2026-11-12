@@ -811,6 +811,8 @@ RECOMMENDED_TTL_S = 900.0
 GENRES_TTL_S = 86400.0
 WATCHED_TTL_S = 900.0
 PAGE_SIZE = 20
+#: Discover's list of what a streaming service has (only with TMDb set up).
+SERVICE = "service"
 
 
 def _public_get(path: str) -> object:
@@ -832,14 +834,15 @@ def genres(kind: str, now: Optional[float] = None) -> list[dict]:
     return sorted(out, key=lambda g: g["name"])
 
 
-def _watched_ids(kind: str, now: float) -> set:
+def _watched_ids(kind: str, now: float, by: str = "trakt") -> set:
     """The Trakt ids of every movie (or show, any episode of it) this account
-    has watched: GET /sync/watched/movies|shows, kept a quarter of an hour."""
+    has watched: GET /sync/watched/movies|shows, kept a quarter of an hour.
+    `by="tmdb"`: their TMDb ids, from the same answer (watch_services.py)."""
     what = "movies" if kind == "movie" else "shows"
     path = f"/sync/watched/{what}" + ("?extended=noseasons" if what == "shows" else "")
     rows = _cached(f"wd:{what}", now, lambda: _get(path, now), WATCHED_TTL_S)
     one = "movie" if kind == "movie" else "show"
-    return {((r.get(one) or {}).get("ids") or {}).get("trakt") for r in rows if isinstance(r, dict)} \
+    return {((r.get(one) or {}).get("ids") or {}).get(by) for r in rows if isinstance(r, dict)} - {None} \
         if isinstance(rows, list) else set()
 
 
@@ -928,20 +931,28 @@ def _obj_matches(o: dict, fq: dict) -> bool:
 
 
 def discover(kind: str, which: str, genre: str = "", year: str = "", page: int = 1,
-             hide_watched: bool = True, now: Optional[float] = None, filters: Optional[dict] = None) -> dict:
+             hide_watched: bool = True, now: Optional[float] = None, filters: Optional[dict] = None,
+             service: str = "") -> dict:
     """What GET /watch/discover answers (less `ok`). ValueError for a bad
     kind, list, genre or year, or recommendations when not signed in;
-    TraktError when Trakt fails."""
+    TraktError when Trakt fails. `service`: which one, for list "service"."""
     if kind not in KINDS:
         raise ValueError("kind must be movie or tv")
     which = which or "trending"
+    from . import tmdb
     every = DISCOVER + tuple(k for k in DISCOVER_MORE if k != "boxoffice" or kind == "movie")
+    if tmdb.set_up():
+        every += (SERVICE,)  # what a streaming service has: TMDb's, so only with it (watch_services.py)
     if which not in every:
         raise ValueError(f"list must be one of {', '.join(every)}")
     fq = _filter_query(kind, filters)
     if not set_up():
         raise ValueError(NOT_SET_UP)
     me = signed_in()
+    if which == SERVICE:
+        from . import watch_services
+        return watch_services.discover(kind, service, genre, year, page, hide_watched, now, filters,
+                                       lists=[d for d in every if d != "recommended" or me])
     if which == "recommended" and not me:
         raise ValueError("recommendations need Trakt connected: connect it in Settings")
     genre = str(genre or "").strip().lower()
@@ -991,7 +1002,6 @@ def discover(kind: str, which: str, genre: str = "", year: str = "", page: int =
         _mark_watchlist(kind, items, now)
         if hide_watched:
             items = [i for i in items if not i["watched"]]
-    from . import tmdb
     if tmdb.set_up():
         try:
             tmdb.add_posters(items)
