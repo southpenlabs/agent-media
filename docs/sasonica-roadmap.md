@@ -2656,6 +2656,16 @@ ahead.
     rather than a hope. Supersedes dotfiles `red5-backup-pull` for
     agent-media's own state; the script keeps `~/.claude`, mail, org,
     dotfiles and the other repos, and runs in reverse after the cutover.
+    Built for the server's move: `manifest()` is importable so `media
+    server move` carries the one list, every command returns a result dict
+    to Python, roles and relative paths mean a restore lands on a machine
+    whose home is elsewhere, `server-id` and the device tokens survive so
+    it is the same server at a new address, the addresses are deliberately
+    **not** rewritten (every one that came back naming the old machine is
+    printed; `media server rename` changes them), hand-made systemd
+    drop-ins are kept but held back from a restore, and `media backup
+    verify --deep` restores into a throwaway HOME and checks the databases
+    there.
 
 63. **The server moves home: the app pairs with red2** (David, 12 Nov 2026,
     thread a4e12d56, via agent-mail #248: "I think I'm going to pair the

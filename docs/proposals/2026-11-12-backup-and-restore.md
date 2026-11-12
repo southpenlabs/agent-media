@@ -3,8 +3,13 @@
 David, 12 Nov 2026, after being told the red5 backup runs from a dotfiles
 script on red2: "agent-media should have a backup system built in" (thread
 a4e12d56, relayed as agent-mail #246; follows point 4 of #245, an outside
-review of the where-things-run plan). Status: **designed and decided
-12 Nov 2026, not built** (his two answers below).
+review of the where-things-run plan). Status: **BUILT 13 Nov 2026**, his
+answers below — `media backup` / `media restore`,
+`packages/server/src/agent_media_server/backup.py`, 19 tests in
+`packages/server/tests/test_backup.py`, reference at
+`docs/reference/backup-and-restore.md`. What is not in the first version is
+listed at the end of that reference: no schedule yet, and no encryption at
+rest.
 
 So this is a feature of the product, not a fix for this fleet: anyone who
 installs agent-media should be able to back up its state and restore it onto
@@ -305,3 +310,55 @@ worth setting up on the day of the cutover rather than after it.
    `/mnt/data/agent-media-backups`, off-site and in another country, over
    red5's jobs connection rather than the tailnet. A bucket can be added
    later as a second destination; the design takes any number.
+
+## What the first version does, and does not (13 Nov 2026)
+
+Built because the server's move home waits on it: `media server move` is
+backup here -> restore there -> rename -> start, and its rehearsal cannot run
+without these two commands (session 105d7f90, 13 Nov).
+
+Done, and tested:
+
+- `media backup [run|list|show|verify|sync|where]` and `media restore`, with
+  every one returning a result dict from Python as well as printing, so
+  `media server move` calls `backup()`, `sync()` and `restore()` and reads
+  what happened instead of parsing output.
+- `manifest()` as the single importable answer to what state is, roles and
+  relative paths throughout, so **a restore lands on a machine whose home is
+  not where this one's is** — the move's actual case.
+- Databases dumped with `VACUUM INTO` under a read transaction, proven against
+  a live writer holding an open WAL with an uncommitted insert — and measured
+  against red5's real `state.db` with every service up: 51.0M plus a 31.5M
+  live WAL became a 46.1M checkpointed dump in **0.1s**, `integrity_check` ok,
+  no WAL beside it. The thing the old script got wrong costs a tenth of a
+  second to get right.
+- `server-id`, the device tokens and the `sessiond` records carried, so the
+  restored install is the same server at a new address and nothing pairs again.
+- Addresses **not** rewritten on restore, and every setting that came back
+  naming the old machine printed as a warning — `media server rename` is what
+  changes them.
+- Hand-made systemd drop-ins (`servers.conf`, `local.conf`) backed up but held
+  back from a restore, since they name the old machine's paths; the generated
+  `zz-agent-media-release.conf` is not carried at all, because
+  `install-services` writes it.
+- Hardlinked snapshots (`rsync --link-dest`), the 10G cap with pruning, and
+  the space alerts. restic is not used: it is not installed on red5.
+- `media backup verify --deep` restores into a throwaway HOME, checks the
+  databases there and throws the roots away — the drill, not just a checksum.
+
+Two things the design promised that the first version does not have, written
+down rather than glossed:
+
+- **No schedule.** Nothing runs nightly yet, so there is no
+  `backup.<host>.stale` alert either. Until that lands, sam's
+  `red5-backup-pull` is still what protects this data on a timer, and should
+  keep running.
+- **No encryption at rest.** The push to red5 is over ssh and the destination
+  is mode 700, but the snapshot is plain files there. `age` is installed on
+  both machines; wiring it, with the recovery phrase printed once to keep off
+  the server, is the next piece.
+
+One design claim corrected by building it: the cap cannot always be honoured.
+Pruning stops at the last snapshot, because deleting the only backup to
+respect a configured size is the wrong trade. A cap too small for one snapshot
+now raises `backup.<host>.space` at error level instead.

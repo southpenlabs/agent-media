@@ -9709,6 +9709,24 @@ def cmd_server(a) -> int:
     return mod.main(a.args or ["--help"])
 
 
+def cmd_backup(a) -> int:
+    """`media backup [run|list|show|verify|sync|where]`: agent-media's state
+    carried off this machine (agent_media_server.backup)."""
+    mod = _server_module("backup")
+    if mod is None:
+        return 1
+    return mod.main(a.args or [])
+
+
+def cmd_restore(a) -> int:
+    """`media restore <id|path>`: a snapshot put back, here or onto another
+    machine. A dry run until --apply (agent_media_server.backup)."""
+    mod = _server_module("backup")
+    if mod is None:
+        return 1
+    return mod.restore_main(a.args or [])
+
+
 def cmd_session(a) -> int:
     """`media session list|send`: headless sessions (sessiond) seen and
     messaged from another session (agent_media_server.headless_mail)."""
@@ -10924,6 +10942,20 @@ def _build_parser() -> argparse.ArgumentParser:
              "[--also https://<old>] [--dry-run] (agent_media_server.server_address)")
     srv.add_argument("args", nargs=argparse.REMAINDER)
     srv.set_defaults(func=cmd_server)
+
+    bk = sub.add_parser(
+        "backup", add_help=False,
+        help="agent-media's state carried off this machine: run, list, show, "
+             "verify, sync, where (agent_media_server.backup)")
+    bk.add_argument("args", nargs=argparse.REMAINDER)
+    bk.set_defaults(func=cmd_backup)
+
+    rs = sub.add_parser(
+        "restore", add_help=False,
+        help="a backup put back, here or onto another machine; a dry run "
+             "until --apply (agent_media_server.backup)")
+    rs.add_argument("args", nargs=argparse.REMAINDER)
+    rs.set_defaults(func=cmd_restore)
 
     tf = sub.add_parser("test-failure", help="a failing test told to the thread whose commit broke it")
     tfs = tf.add_subparsers(dest="tf_cmd", required=True)

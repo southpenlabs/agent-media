@@ -89,3 +89,19 @@ command: a release built there, `media backup` here and `media restore`
 there, the services stopped here, a final sync, `media server rename` there,
 start, verify, `--rollback`. It is built on this rename and on backup and
 restore (roadmap 62).
+
+Backup and restore are built: `docs/reference/backup-and-restore.md`,
+`agent_media_server.backup`. What matters here is the division of labour —
+**a restore deliberately does not touch the addresses.** The env file and the
+canvas drop-in come back naming the old server exactly as they were, because a
+restore that guessed an address would break the very thing the move depends
+on; the restore output lists every setting it found pointing at the old
+machine, and this rename is the step that changes them. `MEDIA_PUBLIC_URL`,
+the clip and book base URLs, and `MEDIA_SESSIOND_DEFAULT_HOST` are the ones it
+names. Hand-made drop-ins are kept in the backup but not written on restore:
+`media-setup install-services` and then this rename is the way to get them
+onto the new machine.
+
+`server_id` survives a restore, which is what makes the restored install the
+same server at a new address rather than a new one — so the id above, and the
+`moved_to` answers, keep working across the move.
