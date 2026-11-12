@@ -196,6 +196,69 @@ Until they move, red2 reaches them over the tailnet. That is allowed —
 something to settle for, which is the other reason to move them rather than
 to give each one a public name and a token.
 
+## The house audio: what is on red2 today, and the cutover evening
+
+Host-side setup is done (sam, 12 Nov 2026, mail #253) and the rooms units
+are generated (this session, mail #253's leftovers). What is on red2 now:
+
+- `pipewire`, `pipewire-pulse` and `wireplumber` as user units, active.
+- `snapserver` 0.31 with red5's `/etc/snapserver.conf` (Debian's kept as
+  `.debian-orig`), **disabled and stopped on purpose**, so snapclients on
+  the LAN do not find it before the cutover.
+- `am-sinks.service` and `am-snapfifo@.service` in
+  `~/.config/systemd/user`, written by `media-setup server` and
+  **byte-identical to red5's** (same md5 for both). Disabled and stopped,
+  for the same reason. agent-media owns these two units — not dotfiles
+  (`docs/reference/rooms-unit-ownership.md`).
+- `linger` is on.
+
+**Held back deliberately: the four rooms env keys.** `media-setup server`
+also appends `MEDIA_SPEECH_DEFAULT_TARGET=rooms`, `MEDIA_ROOMS_SINK=am`,
+`MEDIA_SPEECH_AO=pulse` and `MEDIA_RENDER_ENGINE=edge` to
+`~/.config/agent-media.env`. They were kept out of red2's env file today:
+they only matter once the sinks run, and pointing red2's speech default at
+`rooms` while snapserver is down aims it at a feed nobody is listening to.
+Re-running `media-setup server` (without `--now`) on the evening adds them;
+the units themselves are then already in place and up to date.
+
+**Still missing on red2, and a package install, so sam's or David's:**
+`pulseaudio-utils` (`pactl` *and* `parec` — both units are built entirely
+on them; without it `am-sinks` fails at its first `ExecStart`), `mpv`
+(`sink-speech`) and `mpc` (the `sink-music` helper). `media-setup check`
+names the last two. This is the one thing that must land before the units
+can start.
+
+**Root-side snapserver bits to confirm** (printed by `media-setup server`,
+and already true of red5): `/etc/snapserver.conf` `[stream]` with
+`pipe:///tmp/snapfifo-am?name=am&codec=pcm&sampleformat=48000:16:2` and the
+same for `am-music`; a `snapserver.service` override with `User=ryer
+Group=ryer` (the FIFO has to be read by the same user that writes it); and
+`/etc/tmpfiles.d/snapfifo.conf` pre-creating both FIFOs owned by `ryer`.
+
+### The evening, in order
+
+1. Quiet the house; let red5's chats finish (`restart-services --after 10`).
+2. `sudo apt install pulseaudio-utils mpv mpc` on red2, if it has not
+   happened before the day.
+3. `media-setup server` (no `--now`) — adds the four env keys, confirms the
+   units are up to date.
+4. `systemctl --user enable --now am-sinks.service am-snapfifo@am.service
+   am-snapfifo@am-music.service`.
+5. Check the sinks did not collapse: `pactl list short sinks` lists **both**
+   `am` and `am-music`, and `pactl list short source-outputs` shows **two
+   different** source ids. The same id twice is the 2026-07-26 failure in
+   `docs/reference/rooms-unit-ownership.md` — both streams then carry
+   identical audio and nothing logs an error.
+6. `sudo systemctl enable --now snapserver`; confirm it runs as `ryer` and
+   reads both pipes.
+7. Repoint the snapclients — `hpo`, `sp4r`, `p8a`, `tvr` — at red2 and
+   re-create the `am` / `am-music` groups.
+8. Prove it: a reply spoken to a room, and a song to one room.
+
+The way back is small and separate from the server's `--rollback`: stop
+`snapserver` on red2, enable it again on red5, repoint the clients. The
+units on red2 can stay where they are.
+
 ## The tunnel
 
 red5's shape is the template, and it is already proven: `cloudflared` as a
@@ -356,6 +419,9 @@ the day of the cutover, not after it.
    mode at the same time (`media-setup release-mode`).
 2. **Host-side setup on red2** (sam): `cloudflared` and the named tunnel
    above, PipeWire/WirePlumber for the audio, `snapserver`, `linger` on.
+   **Done, 12 Nov 2026**, with the rooms units beside it — see "The house
+   audio" above for what is in place, what was held back, and the packages
+   still to install.
    Nothing published in DNS yet — the rehearsal uses the tunnel's own
    hostname or a scratch name.
 3. **The rehearsal — and the command's own test.** `media server move --to
@@ -371,7 +437,8 @@ the day of the cutover, not after it.
    move --to red2 --name https://red2-ryer.sasonica.com --also
    https://red5.sasonica.com`, which does the stop, the final sync, the
    rename and the start. By hand, around it: move both DNS records to
-   red2's tunnel, and repoint the Snapcast clients. Check: a reply spoken, a
+   red2's tunnel, and the house audio in the order given above (packages,
+   env keys, the sinks, snapserver, then the clients repointed). Check: a reply spoken, a
    song in a room, a thread link from the phone, `/features` naming red2's
    release. Under an hour, and the way back is `--rollback` plus the DNS
    records.
