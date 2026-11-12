@@ -528,3 +528,15 @@ def _no_endpoints_or_schedule_from_the_env_file(monkeypatch):
                    "MEDIA_SHIM_", "MEDIA_COMPLETIONS_"):
         for key in [k for k in os.environ if k.startswith(prefix)]:
             monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_hit_counting_into_the_real_state(monkeypatch):
+    """The request counter (hits.py) writes under the state dir, and the
+    suite drives both handlers it is wired into — so without this, a test run
+    would pad the very counts being collected to decide whether `share` and
+    `speech-state` are still used. Off here; a test of the counter turns it
+    on with its own state dir.
+    """
+    monkeypatch.setenv("MEDIA_HITS", "0")
+    monkeypatch.delenv("MEDIA_HITS_FLUSH_S", raising=False)

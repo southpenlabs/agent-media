@@ -218,9 +218,33 @@ Three, all still their own units, none of them measured:
 | `share` | 8771 | `MEDIA_SHARE_BIND` is set explicitly; the public `/share` app route exists and is what the app uses |
 | the canvas page | 8781 | the tailnet-only canvas, separate from the app routes on 8789 |
 
-Neither `share` nor `speech-state` logs its requests, so there is no
-evidence either way about whether anything still reaches them — see the
-note above. Retiring them wants a counter first, not a journal.
+Both deliberately silence `log_message` ("A share is worth a line; the
+request line is not"), which is why seven days of empty journals said
+nothing about them. So they count instead, as of 12 Nov 2026:
+
+```
+media hits                 every endpoint: how many, from where, since when
+media hits speech-state
+media hits --json
+```
+
+`hits.py` replaces that `pass` with one dict update per answered request —
+still nothing in the service log. What it keeps is deliberately thin: the
+client address, the **first path segment only** (`/speech`, not
+`/sessions/<id>/events`), and nothing else. No query strings, no bodies, no
+user agents: a counter must not quietly become a record of which
+conversations happened when, and the signed links are credentials.
+
+The number to read is **"from elsewhere"**. Only-local means the listener
+can bind loopback and the mesh address was never needed; anything from the
+phone or another host means it is load-bearing and stays. `MEDIA_HITS=0`
+turns counting off.
+
+Written at most every 30s and merged with what is on disk, so a release
+restart does not reset it, and flushed on a clean exit. A kill loses at
+most one window — which cannot hide a used port, because the first request
+of any process always writes immediately. It can undercount a busy one, and
+if a port is busy at all the answer is already "keep it".
 
 ### Moving one in
 

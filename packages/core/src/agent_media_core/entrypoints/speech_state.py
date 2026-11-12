@@ -52,6 +52,7 @@ import time
 from pathlib import Path
 from urllib.parse import unquote
 
+from .. import hits
 from .._paths import state_dir
 from ..capture import input_claim
 
@@ -231,8 +232,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             speech_hold(owner, release=True)
         self._json({"ok": True, "cleared": cleared})
 
-    def log_message(self, *a) -> None:
-        pass
+    # Silent as it always was — nothing goes to the service log — but counted,
+    # so "does anything still ask this?" has an answer. This endpoint binds a
+    # mesh address, and seven days of empty journal said nothing about whether
+    # it is used, because this method used to be `pass` (hits.py).
+    log_message = hits.counter("speech-state")
 
 
 class Server(socketserver.ThreadingTCPServer):

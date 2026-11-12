@@ -61,6 +61,7 @@ import threading
 import time
 from typing import Optional
 
+from .. import hits
 from .. import share as sharemod
 from . import share_control as control
 
@@ -91,9 +92,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "agent-media-share/1"
 
     # The default logger writes every request to stderr, which under runit is
-    # the service log. A share is worth a line; the request line is not.
-    def log_message(self, fmt, *args) -> None:  # noqa: A003
-        pass
+    # the service log. A share is worth a line; the request line is not — but
+    # it is worth COUNTING, which is the difference between this and the
+    # `pass` it replaced. This endpoint binds a mesh address and the silence
+    # here is exactly why nobody could say whether it is still used (hits.py).
+    log_message = hits.counter("share")
 
     def _authorised(self) -> bool:
         """Is this request allowed to be here?

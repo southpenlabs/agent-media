@@ -9399,6 +9399,44 @@ def cmd_audio(a) -> int:
     return 0
 
 
+def cmd_hits(a) -> int:
+    """`media hits`: who still asks these endpoints anything (hits.py)."""
+    from . import hits
+
+    names = [a.name] if getattr(a, "name", None) else hits.known()
+    rows = []
+    for name in names:
+        rec = hits.read(name)
+        remote = {c: n for c, n in (rec["clients"] or {}).items()
+                  if c not in hits.LOCAL}
+        rows.append({"endpoint": name, **rec, "remote_clients": remote})
+    if getattr(a, "json", False):
+        print(json.dumps({"hits": rows, "counting": hits.enabled()}, indent=2))
+        return 0
+    if not rows:
+        print("no counts yet"
+              + ("" if hits.enabled() else " (counting is off: MEDIA_HITS=0)")
+              + f"\n{hits.dir_()}")
+        return 0
+    now = time.time()
+    for r in rows:
+        when = (f"{_ago(now - r['last'])} ago" if r["last"] else "never")
+        span = (f", over {_ago(r['last'] - r['first'])}"
+                if r["first"] and r["last"] and r["last"] > r["first"] else "")
+        print(f"{r['endpoint']:14} {r['total']:>6} request(s)  last {when}{span}")
+        print(f"{'':14} {r['local']:>6} from this host, {r['remote']} from elsewhere")
+        if r["remote_clients"]:
+            for c, n in sorted(r["remote_clients"].items(),
+                               key=lambda kv: -kv[1]):
+                print(f"{'':14}        {c}: {n}")
+        elif r["total"]:
+            print(f"{'':14}        nothing off this host — it could bind loopback")
+        if r["paths"]:
+            top = sorted(r["paths"].items(), key=lambda kv: -kv[1])[:5]
+            print(f"{'':14} {', '.join(f'{k} x{v}' for k, v in top)}")
+    return 0
+
+
 def cmd_endpoints(a) -> int:
     """`media endpoints`: which small HTTP endpoints run in the server's own
     process, which are still a service of their own, and which are off."""
@@ -11046,6 +11084,14 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="count what would go, delete nothing")
     ap_.add_argument("--json", action="store_true")
     au.set_defaults(func=cmd_audio)
+
+    hi = sub.add_parser("hits",
+                        help="who still asks an endpoint anything — counts "
+                             "per client, for deciding whether a listener "
+                             "can be retired or bound to loopback")
+    hi.add_argument("name", nargs="?", help="one endpoint (default: all)")
+    hi.add_argument("--json", action="store_true")
+    hi.set_defaults(func=cmd_hits)
 
     ep = sub.add_parser("endpoints",
                         help="the small HTTP endpoints: which run inside the "
