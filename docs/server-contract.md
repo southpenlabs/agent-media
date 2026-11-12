@@ -268,6 +268,20 @@ Everything a message can be pointed at.
   "high" | "normal"}` on its row; `high` when it is marked Run now. Not
   while a restart is pending (`restart_pending`) or for the usage limit
   (`quota`). The app's Queued filter is these rows.
+- **`changes`** (12 Nov 2026; every row, `null` on most): what the thread
+  holds in its folder's checkout that is not in origin yet — `{"files":
+  <uncommitted files it wrote>, "commits": <commits of its own not pushed>,
+  "at": <epoch s, the last of them>}`. The same attribution as the git
+  sheet's "Which chats made these" (§6.49 `who=1`, `git_who.py`), counted
+  rather than listed. The app marks the row ("±3 ↑1") and its Show →
+  Changes lists only these rows (David, 12 Nov 2026: "add an indicator on
+  the chat list when there are changes to the repository made by that
+  thread and add a status to the filter to list only them"). Served from a
+  snapshot per checkout kept for 90 s, which a list refreshes in the
+  background rather than in its own answer: the marks appear a few seconds
+  after the first list of a checkout, so a client must not read `null` as
+  "nothing to commit" until it has polled once more. `null` for a row
+  outside a checkout, and for one whose changes no transcript accounts for.
 - `sessions` is `sessions_index()`. Live sessions come first, titled from the
   pane (Claude's terminal title with the spinner stripped; Codex, pi and
   Hermes from their own session files, cut to 60 chars). A live session

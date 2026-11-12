@@ -128,3 +128,66 @@ def test_a_heredoc_whose_lines_are_gone_is_not_counted(repo):
 
 def test_outside_a_checkout(tmp_path):
     assert git_who.who(str(tmp_path)) is None
+
+
+def test_add_changes_marks_the_rows_from_a_snapshot(repo, monkeypatch):
+    """The list's `changes`: counted, from the snapshot, refreshed behind it."""
+    r, proj = repo
+    proj.mkdir(parents=True)
+    now = time.time()
+    cwd = str(r)
+    (r / "a.py").write_text("one = 1\nadded_by_chat_a = 'hello there'\n")
+    (proj / "aaaaaaaa-0000-0000-0000-000000000001.jsonl").write_text(
+        _use(_iso(now - 60), cwd, "t1", "Edit", {"file_path": str(r / "a.py"), "old_string": "one = 1",
+                                                 "new_string": "one = 1\nadded_by_chat_a = 'hello there'"}))
+    git_who._snapshots.clear()
+    git_who._tops.clear()
+    done = []
+    monkeypatch.setattr(git_who, "_read_soon", lambda cwd, top: done.append((cwd, top)))
+    rows = [{"session": "aaaaaaaa-0000-0000-0000-000000000001", "cwd": cwd},
+            {"session": "bbbbbbbb-0000-0000-0000-000000000002", "cwd": cwd},
+            {"session": "cccccccc-0000-0000-0000-000000000003", "cwd": None}]
+    # Nothing looked up yet: no mark, no git in the answer's own time, and the
+    # folder queued to be read behind it.
+    git_who.add_changes(rows, now=now)
+    assert [row["changes"] for row in rows] == [None, None, None]
+    assert done == [(cwd, None)]
+    # Once read, the chat that wrote the file carries its count; the others none.
+    assert git_who.top_of(cwd) == str(r)
+    git_who.refresh(str(r))
+    git_who.add_changes(rows, now=now)
+    assert rows[0]["changes"]["files"] == 1 and rows[0]["changes"]["commits"] == 0
+    assert rows[1]["changes"] is None and rows[2]["changes"] is None
+    # A fresh snapshot is not read again; a stale one is.
+    assert done == [(cwd, None)]
+    git_who.add_changes(rows, now=now + git_who.SNAPSHOT_S + 1)
+    assert done == [(cwd, None), ("", str(r))]
+
+
+def test_add_changes_counts_a_chats_unpushed_commits(repo):
+    r, proj = repo
+    proj.mkdir(parents=True)
+    now = time.time()
+    cwd = str(r)
+    (r / "d.py").write_text("four = 4\n")
+    _git(r, "add", "d.py")
+    _git(r, "commit", "-q", "-m", "add d")
+    sha = _git(r, "rev-parse", "--short", "HEAD").strip()
+    (proj / "bbbbbbbb-0000-0000-0000-000000000002.jsonl").write_text(
+        _use(_iso(now - 40), cwd, "t4", "Bash", {"command": "git add d.py && git commit -m 'add d'"})
+        + _result(_iso(now - 39), cwd, "t4", f"[main {sha}] add d\n 1 file changed"))
+    git_who._snapshots.clear()
+    git_who._tops.clear()
+    assert git_who.top_of(cwd) == cwd
+    held = git_who.refresh(cwd)
+    rows = [{"session": "bbbbbbbb-0000-0000-0000-000000000002", "cwd": cwd}]
+    git_who.add_changes(rows, now=now)
+    assert held["bbbbbbbb-0000-0000-0000-000000000002"]["commits"] == 1
+    assert rows[0]["changes"] == {"files": 0, "commits": 1, "at": held["bbbbbbbb-0000-0000-0000-000000000002"]["at"]}
+
+
+def test_add_changes_outside_a_checkout(tmp_path):
+    git_who._tops.clear()
+    assert git_who.top_of(str(tmp_path)) is None
+    rows = [{"session": "aaaaaaaa-0000-0000-0000-000000000001", "cwd": str(tmp_path)}]
+    assert git_who.add_changes(rows)[0]["changes"] is None

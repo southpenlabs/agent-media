@@ -20,6 +20,10 @@ what git lists:
 What no transcript accounts for (another harness, a person at a terminal,
 an edit made from a folder outside the checkout) is listed as unclaimed.
 
+`add_changes(rows)` puts the same answer on the chat list's rows, counted
+rather than listed (`changes: {"files", "commits", "at"}`), from a snapshot
+per checkout that a list refreshes behind itself.
+
 Each transcript is read once and then only from where it was read up to,
 so asking again costs only what was appended since.
 """
@@ -348,3 +352,129 @@ def warm(cwd: str | None) -> None:
                 _warming.discard(cwd)
 
     threading.Thread(target=run, name="git-who-warm", daemon=True).start()
+
+
+# ── The list's mark: which chats hold changes, by session ────────────────
+#
+# David, 12 Nov 2026: "add an indicator on the chat list when there are
+# changes to the repository made by that thread and add a status to the
+# filter to list only them". The list polls every few seconds and a who()
+# over a fortnight of transcripts is not a thing to do in that request, so
+# the rows are served from the last snapshot per checkout and a stale one is
+# refreshed in the background: a chat's mark appears a few seconds after the
+# first list, and follows it from then on.
+
+#: How old a checkout's snapshot may be before the next list refreshes it.
+SNAPSHOT_S = 90.0
+#: How long a folder's checkout top is remembered (a `git rev-parse`).
+TOP_S = 600.0
+#: Checkouts refreshed at once; the rest wait for a later list.
+MAX_REFRESH = 2
+
+#: `{top: (at, {session: {"files", "commits", "at"}})}`
+_snapshots: dict[str, tuple[float, dict[str, dict]]] = {}
+#: `{cwd: (at, top | None)}` — None for a folder outside a checkout.
+_tops: dict[str, tuple[float, str | None]] = {}
+#: "not looked up yet", which None (outside a checkout) is not.
+_UNKNOWN = object()
+_refreshing: set[str] = set()
+
+
+def top_of(cwd: str | None, now: float | None = None) -> str | None:
+    """The checkout `cwd` is in, remembered for TOP_S; None outside one. Runs
+    `git rev-parse` when it does not know yet, so only a background read or a
+    test calls it: a list reads `_cached_top`."""
+    if not cwd:
+        return None
+    now = time.time() if now is None else now
+    got = _cached_top(cwd, now)
+    if got is not _UNKNOWN:
+        return got
+    top = None
+    if os.path.isdir(cwd):
+        top = (git_state._git(cwd, "rev-parse", "--show-toplevel") or "").strip() or None
+    with _lock:
+        _tops[cwd] = (now, top)
+    return top
+
+
+def _cached_top(cwd: str, now: float):
+    """The remembered checkout for `cwd` (None outside one), `_UNKNOWN` when
+    it has not been looked up, or has not been for TOP_S."""
+    with _lock:
+        got = _tops.get(cwd)
+    return got[1] if got and now - got[0] < TOP_S else _UNKNOWN
+
+
+def _snapshot(top: str) -> dict[str, dict]:
+    """who(top) as `{session: {"files", "commits", "at"}}`."""
+    got = who(top)
+    rows: dict[str, dict] = {}
+    for row in (got or {}).get("threads", []):
+        rows[row["session"]] = {"files": len(row["files"]), "commits": len(row["commits"]),
+                                "at": row["at"]}
+    return rows
+
+
+def refresh(top: str) -> dict[str, dict]:
+    """Read the checkout now and keep the answer (the tests' way in)."""
+    rows = _snapshot(top)
+    with _lock:
+        _snapshots[top] = (time.time(), rows)
+    return rows
+
+
+def _read_soon(cwd: str, top: str | None) -> None:
+    """Read it behind the list: find the checkout first when `top` is not
+    known yet, then its chats. One go per folder, MAX_REFRESH at once."""
+    key = top or cwd
+    with _lock:
+        if key in _refreshing or len(_refreshing) >= MAX_REFRESH:
+            return
+        _refreshing.add(key)
+
+    def run():
+        try:
+            found = top or top_of(cwd)
+            if found:
+                refresh(found)
+        except Exception:  # a mark missing from one list, not a broken list
+            pass
+        finally:
+            with _lock:
+                _refreshing.discard(key)
+
+    threading.Thread(target=run, name="git-who-list", daemon=True).start()
+
+
+def add_changes(rows: list[dict], now: float | None = None) -> list[dict]:
+    """`changes` on every row: `{"files", "commits", "at"}` for a thread
+    holding changes in its folder's checkout, else None (§6.1). Never runs
+    git or reads a transcript in the caller's time: what is known is served,
+    and a folder whose checkout or chats are unknown or stale is read behind
+    the answer, for the next list."""
+    now = time.time() if now is None else now
+    tops: dict[str, str] = {}
+    later: list[tuple[str, str | None]] = []
+    for row in rows:
+        cwd = str(row.get("cwd") or "")
+        if not cwd or cwd in tops:
+            continue
+        top = _cached_top(cwd, now)
+        if top is _UNKNOWN:
+            if not any(c == cwd for c, _ in later):
+                later.append((cwd, None))
+        elif top:
+            tops[cwd] = top
+    with _lock:
+        held = {top: _snapshots.get(top) for top in set(tops.values())}
+    for top, got in held.items():
+        if got is None or now - got[0] >= SNAPSHOT_S:
+            later.append(("", top))
+    for row in rows:
+        top = tops.get(str(row.get("cwd") or ""))
+        got = held.get(top) if top else None
+        row["changes"] = (got[1].get(str(row.get("session") or "")) if got else None) or None
+    for cwd, top in later:
+        _read_soon(cwd, top)
+    return rows
