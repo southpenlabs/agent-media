@@ -296,6 +296,104 @@ def after_for(bed_path) -> Optional[dict]:
             "rise_ms": max(0.0, tunable("RISE_MS")), "start_db": min(0.0, tunable("START_DB"))}
 
 
+# ---- singing it in, before a long reply -------------------------------------------------------
+# (David, 12 Nov 2026: "Sing it in", the mirror of Sing it out.) Before a long
+# reply over a favourite whose original is kept, a few seconds of the original,
+# vocals and all, timed to its hook: it fades in from IN_START_DB over
+# IN_FADE_MS ("it probably also should fade in at a low volume first"), a
+# smoothstep in dB, sings IN_LEN_MS in all (the fade included) and then hands
+# over to the bed over IN_OUT_MS as the first word comes: a separated bed at
+# the same position (the vocals simply leave), a karaoke or official one at
+# the mapped position (`bed_pos`). The phone plays it (Media3Speech, the
+# `before` object in the mix), holding its first sentence until the handover;
+# this host's own players skip it. A switch, "Sing it in before long replies"
+# (`sing_in`, music_bed_mix, off by default); long replies only, by the same
+# test and sliders as Sing it out; never before the answer to a message David
+# has just sent (`may_sing_in`).
+
+IN_DEFAULTS = {"IN_LEN_MS": 3500.0, "IN_FADE_MS": 1500.0, "IN_START_DB": -18.0,
+               "IN_OUT_MS": 1000.0, "IN_OWNER_S": 1800.0}
+
+
+def in_tunable(name: str) -> float:
+    """MEDIA_MUSIC_BED_VOCAL_<name> for Sing it in, else its default."""
+    d = IN_DEFAULTS[name]
+    try:
+        return float(os.environ.get(f"MEDIA_MUSIC_BED_VOCAL_{name}", "") or d)
+    except ValueError:
+        return d
+
+
+def in_start(orig_s: float, bounds: Optional[list] = None, choruses: Optional[list] = None,
+             fade_s: float = 1.5, len_s: float = 3.5) -> float:
+    """Where in the original Sing it in starts: so the first chorus begins as
+    the fade in peaks (`fade_s` before it); without choruses, so the first
+    section after the top does; without sections, the top (the bed's own
+    start). Never so late that the snippet runs off the end."""
+    orig_s = max(0.0, float(orig_s or 0))
+    starts = sorted(float(c[0]) for c in (choruses or []) if len(c) > 1)
+    if not starts:
+        starts = sorted(float(b) for b in (bounds or []) if float(b) > 0)
+    at = max(0.0, starts[0] - max(0.0, fade_s)) if starts else 0.0
+    return max(0.0, min(at, orig_s - len_s - 1.0)) if orig_s > len_s + 1.0 else 0.0
+
+
+def bed_pos(song_s: float, inst_s: float, orig_s: float, aligned: bool) -> float:
+    """Where in the bed the song at `song_s` is (the phone's
+    VocalHandover.bedPos): the same point when aligned, else the same
+    fraction; never later than a second before the bed's end."""
+    at = max(0.0, float(song_s or 0))
+    if not aligned and inst_s and inst_s > 0 and orig_s and orig_s > 0:
+        at = min(1.0, at / orig_s) * inst_s
+    if inst_s and inst_s > 1:
+        at = min(at, inst_s - 1.0)
+    return max(0.0, at)
+
+
+def before_for(bed_path) -> Optional[dict]:
+    """Sing it in for a long reply over favourites bed `bed_path`, as the
+    bed's mix carries it (`before`; `uri` a path here, the sink makes it a
+    phone's clip URI), or None when its original is not kept."""
+    rec = record_for(bed_path)
+    if rec is None:
+        return None
+    aligned = bool(rec.get("aligned"))
+    orig_s, inst_s = float(rec.get("orig_s") or 0), float(rec.get("inst_s") or 0)
+    if orig_s <= 1:
+        return None
+    len_ms = max(500.0, in_tunable("IN_LEN_MS"))
+    fade_ms = min(max(0.0, in_tunable("IN_FADE_MS")), len_ms)
+    start = in_start(orig_s, rec.get("bounds"), rec.get("choruses"), fade_ms / 1000.0,
+                     len_ms / 1000.0)
+    return {"uri": str(_file(rec)), "aligned": aligned, "key": str(rec.get("key") or ""),
+            "start_s": round(start, 2), "len_ms": len_ms, "fade_in_ms": fade_ms,
+            "start_db": min(0.0, in_tunable("IN_START_DB")),
+            "out_ms": max(0.0, in_tunable("IN_OUT_MS")),
+            "bed_s": round(bed_pos(start + len_ms / 1000.0, inst_s, orig_s, aligned), 2),
+            "inst_s": inst_s, "orig_s": orig_s}
+
+
+def may_sing_in(metadata) -> bool:
+    """Whether a reply may be sung in, by what began its turn (the Claude
+    Code stop hook's `turn_by` and `turn_at`, hook_claude_code.turn_opener):
+    another agent's mail or a harness notice (a background task finishing)
+    yes; David's own message — the answer to what he just sent — never,
+    unless he sent it more than MEDIA_MUSIC_BED_VOCAL_IN_OWNER_S (30 min)
+    before; anything not known (the session host's note, another harness,
+    `media say`) never."""
+    md = metadata or {}
+    by = str(md.get("turn_by") or "")
+    if by in ("mail", "notice"):
+        return True
+    if by == "owner":
+        try:
+            at = float(md.get("turn_at"))
+        except (TypeError, ValueError):
+            return False
+        return time.time() - at > in_tunable("IN_OWNER_S")
+    return False
+
+
 def _python() -> Optional[str]:
     named = (os.environ.get("MEDIA_MUSIC_BED_VOCAL_PYTHON") or "").strip()
     if named:

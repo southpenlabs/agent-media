@@ -599,6 +599,75 @@ def _turn_prompt(transcript_path: Path) -> str:
     return ""
 
 
+def _iso_ts(v) -> Optional[float]:
+    """A transcript entry's ISO `timestamp` as epoch seconds, else None."""
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def turn_opener(transcript_path: Path) -> tuple[str, Optional[float]]:
+    """Who began the turn now ending, and when (Sing it in: never before the
+    answer to a message David has just sent; music_bed_vocal.may_sing_in).
+    The transcript's latest user entry with words of its own (a tool result
+    is not one; a message queued mid-turn counts, so the reply answers it):
+
+    - "notice": a harness notice (`<task-notification>`, a background task
+      finishing) — the turn is not his;
+    - "mail": another agent's mail ("[From Sam] …");
+    - "host": the session host's own note ("[From the session host] …",
+      e.g. resuming a turn a restart cut off);
+    - "owner": anything else in words, his message (a slash command he
+      typed, `<command-name>`, included);
+    - "" when it cannot be read.
+
+    A meta entry or another harness note in angle brackets (a system
+    reminder, a local command's output) is passed over."""
+    try:
+        with open(transcript_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - _PROMPT_TAIL_BYTES))
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return "", None
+    for raw in reversed(lines):
+        raw = raw.strip()
+        if not raw or '"user"' not in raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        msg = obj.get("message") or {}
+        if msg.get("role") != "user" or obj.get("isMeta"):
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            texts = [content]
+        else:
+            texts = [c.get("text") or "" for c in content or []
+                     if isinstance(c, dict) and c.get("type") == "text"]
+        text = "\n".join(t for t in texts if t).strip()
+        if not text:
+            continue
+        at = _iso_ts(obj.get("timestamp"))
+        if text.startswith("<task-notification>"):
+            return "notice", at
+        if text.startswith(("<command-name>", "<command-message>")):
+            return "owner", at
+        if text.startswith("<"):
+            continue
+        if text.startswith("[From the session host]"):
+            return "host", at
+        if _MAIL_PREFIX.match(text):
+            return "mail", at
+        return "owner", at
+    return "", None
+
+
 def mail_from(prompt: str) -> str:
     """Who sent `prompt`, when it is another agent's mail ("[From Sam] …"),
     else "". (earcons.py: the `mail` tone opens the reply to it.)"""
@@ -1458,6 +1527,14 @@ def _handle_stop(payload: dict) -> int:
     sender = mail_from(_turn_prompt(Path(tpath))) if tpath else ""
     if sender:
         metadata["mail_from"] = sender
+    # What began the turn, and when: Sing it in never comes before the
+    # answer to his own message (music_bed_vocal.may_sing_in).
+    if tpath:
+        by, at = turn_opener(Path(tpath))
+        if by:
+            metadata["turn_by"] = by
+            if at is not None:
+                metadata["turn_at"] = at
     # `[[sound: done]]` / `[[sound: fail]]`: its earcon before the voice
     # (strip_markdown already took the marker out of the words), and the
     # reply's blockquotes, said in a small room (submit.py, 25 Oct 2026).

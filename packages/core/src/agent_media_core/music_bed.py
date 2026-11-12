@@ -1186,7 +1186,8 @@ def warm_needed() -> bool:
                 if any(lib.needs(g) for g in _mix_genres()[:1]):
                     return True
             return (fav.upkeep_due() or fav.needs()
-                    or (music_bed_mix.on("vocal") and music_bed_vocal.due()))
+                    or ((music_bed_mix.on("vocal") or music_bed_mix.on("sing_in"))
+                        and music_bed_vocal.due()))
     except Exception as e:  # noqa: BLE001
         log.info("music-bed: %s", e)
     return False
@@ -1274,9 +1275,10 @@ def warm() -> int:
                 except Exception as e:  # noqa: BLE001
                     log.warning("music-bed: fetching to mix in failed: %s", e)
             try:
-                # The originals a long reply sings out into (music_bed_vocal).
+                # The originals a long reply sings out into, or is sung in
+                # with (music_bed_vocal).
                 from . import music_bed_mix, music_bed_vocal
-                if music_bed_mix.on("vocal"):
+                if music_bed_mix.on("vocal") or music_bed_mix.on("sing_in"):
                     done += music_bed_vocal.upkeep()
             except Exception as e:  # noqa: BLE001
                 log.warning("music-bed: keeping originals failed: %s", e)
@@ -1476,6 +1478,8 @@ def play_under(p: Path, target=None, sink=None, mix: Optional[dict] = None) -> b
                 extra.append(Path(mix["outro"]))
             if mix and (mix.get("after") or {}).get("uri"):
                 extra.append(Path(mix["after"]["uri"]))
+            if mix and (mix.get("before") or {}).get("uri"):
+                extra.append(Path(mix["before"]["uri"]))
             pre([p] + extra, target)
         if mix:
             # The DJ mix (music_bed_mix): told to a phone beside the clip,
@@ -1493,7 +1497,9 @@ def play_under(p: Path, target=None, sink=None, mix: Optional[dict] = None) -> b
                  "" if not mix else " (mix: level %+.1f dB, swell %g, carve %g, intro %g ms%s)" % (
                      float(mix.get("gain_db") or 0) - float(mix.get("breathe_db") or 0),
                      mix.get("breathe_db") or 0, mix.get("carve_db") or 0,
-                     mix.get("intro_ms") or 0, ", sings out" if mix.get("after") else ""))
+                     mix.get("intro_ms") or 0,
+                     (", sung in" if mix.get("before") else "")
+                     + (", sings out" if mix.get("after") else "")))
         return True
     except Exception as e:  # noqa: BLE001 — a bed must never cost a reply
         log.warning("music-bed: playing failed: %s", e)
@@ -1524,8 +1530,8 @@ def _note_now(plan: Optional[Plan], playing: bool) -> None:
         pass
 
 
-def start(plan: Plan, target=None, sink=None,
-          long: bool = False) -> tuple[bool, Optional[Callable[[], None]]]:
+def start(plan: Plan, target=None, sink=None, long: bool = False,
+          sing_in: bool = False) -> tuple[bool, Optional[Callable[[], None]]]:
     """Start `plan` under the reading about to begin on `target`.
 
     Returns (looping under-player started, stop): the first says the speech
@@ -1570,9 +1576,10 @@ def start(plan: Plan, target=None, sink=None,
             return False, done
         from . import music_bed_mix
         # `long`: a long reply (music_bed_vocal.is_long), which a favourite
-        # sings out after.
+        # sings out after; with `sing_in` (music_bed_vocal.may_sing_in), and
+        # is sung in with before its first word.
         if plan.path is None or not play_under(plan.path, target, sink,
-                                               music_bed_mix.for_plan(plan, long)):
+                                               music_bed_mix.for_plan(plan, long, sing_in)):
             return False, None
         _note_now(plan, True)
         return True, lambda quick=False: _note_now(None, False)

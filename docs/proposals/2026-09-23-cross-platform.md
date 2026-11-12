@@ -377,6 +377,50 @@ upgrades either way:
 On Windows CI, the real Task Scheduler takes an old-style task, upgrades it in
 place, and accepts a service's XML as made.
 
+## A rooms hub's system packages: the Windows side (proposed 12 Nov 2026)
+
+Roadmap 64 built the Linux half: `media-setup check` on a rooms hub (or
+with `--rooms`), the profile's `rooms` row and `media-setup server` report
+pactl, parec, pipewire-pulse, snapserver and mpv, and print the one
+apt/dnf/pacman line for the distro, installing nothing (agent-mail #261;
+David, 12 Nov 2026: "Linux only for now" — "add the Windows side to the
+cross platform proposal though", after asking "Can it also link to an
+installer for Windows?").
+
+**What Windows cannot be.** A rooms *hub* needs null sinks whose monitors
+are read into a FIFO, and a Snapcast server reading those FIFOs. Windows
+has neither half: the audio seam above already says so (`sink_plumbing` is
+false, `media-setup server` skips with a message, the picker drops
+`rooms`), and Snapcast ships no server for Windows, only its client. So
+there is no list of Windows packages that would make a hub, and a check
+that printed one would be lying.
+
+**What a Windows machine can be, and what to link.**
+
+- **A client of a hub elsewhere.** It joins the way it joins now, through
+  **Sasonica Shell's Windows installer** (`install.mjs`, tested on hpo and
+  in CI). That is the link the setup page should give a Windows machine
+  that asks about rooms: "the speaker rooms are served from a Linux host;
+  this machine joins through Sasonica Shell" and the installer's address,
+  from the server (the app stays generic: the server knows where its
+  installer lives and says so, it is not a constant in the app).
+- **A room itself.** Snapcast's Windows client can play a hub's stream on
+  this machine's speakers. Optional and the user's own install: the check
+  names it and links its release page, it does not fetch it.
+- **A render host for its own speech.** Only mpv is needed (`wasapi`
+  through the seam above). The check reports it and prints
+  `winget`/`scoop`/`choco` lines for whichever of them is present, found the
+  way `package_manager()` reads `/etc/os-release` on Linux, still installing
+  nothing.
+
+**The shape in code, when it is built.** `ROOMS_PREREQS` stays Linux;
+a Windows host answers the `rooms` row with state `absent` and a detail
+that is the join route rather than a missing list, so the setup page draws
+it as "not this machine's job" instead of a failure. `media-setup check
+--rooms` on Windows exits 0 with the same words. Nothing here waits on the
+herdr/WezTerm question: it is a client path, which is the part of Windows
+that already ships.
+
 ## What this costs if we never do it
 
 Little, today — everything runs on red5 and a phone. The reason to do step 1

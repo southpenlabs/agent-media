@@ -230,3 +230,87 @@ def test_the_two_sliders_in_settings(monkeypatch):
             B.set_settings(bad)
     B.set_settings({"vocal_min_s": None, "vocal_min_sentences": None})
     assert V.min_seconds() == 10 and V.min_sentences() == 12
+
+
+# ---- Sing it in, before a long reply (David, 12 Nov 2026) ---------------------------------------
+
+def test_sing_it_in_lands_on_the_first_chorus_else_a_section_else_the_top():
+    # The chorus at 30 s begins as the 1.5 s fade in peaks.
+    assert V.in_start(240, [12.0, 30.0], [[30.0, 55.0], [90.0, 115.0]], 1.5, 3.5) == 28.5
+    assert V.in_start(240, [12.0, 30.0], [], 1.5, 3.5) == 10.5          # a section start
+    assert V.in_start(240, [], [], 1.5, 3.5) == 0.0                     # the bed's own start
+    assert V.in_start(240, [], [[1.0, 20.0]], 1.5, 3.5) == 0.0          # never before the top
+    assert V.in_start(20, [], [[19.0, 20.0]], 1.5, 3.5) == 15.5         # never off the end
+
+
+def test_the_bed_resumes_where_the_song_is():
+    assert V.bed_pos(33.0, 240, 240, aligned=True) == 33.0
+    assert V.bed_pos(60.0, 200, 240, aligned=False) == pytest.approx(50.0)
+    assert V.bed_pos(300.0, 200, 240, aligned=False) == 199.0
+
+
+def test_sing_it_in_is_off_by_default_and_needs_a_long_reply_it_may_sing_in(tmp_path):
+    bed = _keep_original(tmp_path)
+    assert {s["id"]: s for s in B.settings()}["sing_in"]["value"] is False
+    assert "before" not in M.params("favourites", "auto", bed, long=True, sing_in=True)
+    B.set_settings({"sing_in": True})
+    got = {s["id"]: s for s in B.settings()}["sing_in"]
+    assert got["value"] is True and got["set"] is True and got["kind"] == "bool"
+    p = M.params("favourites", "auto", bed, long=True, sing_in=True)
+    b = p["before"]
+    assert b["uri"].endswith("music-bed-vocal-k1.mp3") and b["aligned"] is True
+    assert b["start_s"] == 28.5 and b["len_ms"] == 3500.0 and b["fade_in_ms"] == 1500.0
+    assert b["start_db"] == -18.0 and b["out_ms"] == 1000.0
+    assert b["bed_s"] == 32.0                     # aligned: where the song has got to
+    assert "after" in p                           # Sing it out is its own switch
+    json.dumps(p)
+    assert "before" not in M.params("favourites", "auto", bed, long=False, sing_in=True)
+    assert "before" not in M.params("favourites", "auto", bed, long=True, sing_in=False)
+    assert "before" not in M.params("library", "jazz", bed, long=True, sing_in=True)
+    assert "before" not in M.params("favourites", "question", bed, long=True, sing_in=True)
+
+
+def test_sing_it_in_switched_on_by_the_env(monkeypatch):
+    assert M.on("sing_in") is False
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SING_IN", "1")
+    assert M.on("sing_in") is True
+    monkeypatch.setenv("MEDIA_MUSIC_BED_SING_IN", "off")
+    assert M.on("sing_in") is False
+
+
+def test_never_before_the_answer_to_his_own_message(monkeypatch):
+    import time as _t
+    now = _t.time()
+    assert V.may_sing_in({"turn_by": "mail", "turn_at": now})
+    assert V.may_sing_in({"turn_by": "notice", "turn_at": now})
+    assert not V.may_sing_in({"turn_by": "owner", "turn_at": now - 60})
+    assert not V.may_sing_in({"turn_by": "owner"})
+    assert V.may_sing_in({"turn_by": "owner", "turn_at": now - 3600})   # long since
+    assert not V.may_sing_in({"turn_by": "host", "turn_at": now})
+    assert not V.may_sing_in({}) and not V.may_sing_in(None)
+
+
+def test_the_stop_hook_says_who_began_the_turn(tmp_path):
+    from agent_media_core.intake import hook_claude_code as H
+
+    def transcript(*entries):
+        p = tmp_path / "t.jsonl"
+        p.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+        return p
+
+    def user(content, ts="2026-11-12T01:57:42.851Z", **kw):
+        return {"type": "user", "timestamp": ts, "message": {"role": "user", "content": content}, **kw}
+
+    tool = user([{"type": "tool_result", "content": "ok"}])
+    by, at = H.turn_opener(transcript(user("why did it stop?"), tool, tool))
+    assert by == "owner" and at == pytest.approx(1794448662.851)
+    assert H.turn_opener(transcript(user("hi"), user("<task-notification>done</task-notification>"),
+                                    tool))[0] == "notice"
+    assert H.turn_opener(transcript(user([{"type": "text", "text": "[From sam] the tests"}])))[0] == "mail"
+    assert H.turn_opener(transcript(user("[From the session host] carry on")))[0] == "host"
+    # A system reminder or a meta line is passed over; his message queued mid-turn counts.
+    assert H.turn_opener(transcript(user("<task-notification>x</task-notification>"),
+                                    user("and also this"), tool,
+                                    user("<system-reminder>r</system-reminder>"),
+                                    user("caveat", isMeta=True)))[0] == "owner"
+    assert H.turn_opener(tmp_path / "missing.jsonl") == ("", None)

@@ -2890,6 +2890,54 @@ repeated section is the chorus), run out of process with the Demucs venv's
 Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
 fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
 
+**Singing it in before a long reply (12 Nov 2026)** (`music_bed_vocal.before_for`,
+`may_sing_in`; David: "Sing it in", the mirror of Sing it out — "it probably
+also should fade in at a low volume first"). One more switch, **`sing_in`**
+("Sing it in before long replies", `kind` bool, **off** by default; listed
+just before `vocal`; `MEDIA_MUSIC_BED_SING_IN=1` turns it on for a host with
+no Settings). With it on, a reply that is long by Sing it out's test
+(`music_bed_vocal.is_long`, the `vocal_min_s` / `vocal_min_sentences`
+sliders), over a favourites bed whose original is kept, whose bed `kind` is
+`"reply"` and which **may be sung in**, gets a **`before`** object in its mix
+(absent otherwise): `{"uri", "aligned", "key", "start_s", "len_ms",
+"fade_in_ms", "start_db", "out_ms", "bed_s", "inst_s", "orig_s"}` — `uri`
+the original's clip URI as for `after` (prefetched with the bed); `start_s`
+where in the original it starts, so that the first chorus (`choruses[0]`)
+begins as the fade in peaks (`fade_in_ms` before it), else the first section
+boundary after the top, else 0 (the bed's own start), never so late it runs
+off the end; it fades in from `start_db` (`MEDIA_MUSIC_BED_VOCAL_IN_START_DB`,
+-18) to full over `fade_in_ms` (`_IN_FADE_MS`, 1500; a smoothstep of the
+level in dB), sings `len_ms` in all (`_IN_LEN_MS`, 3500, the fade included),
+and then, as the first word is let go, crossfades (equal power) over
+`out_ms` (`_IN_OUT_MS`, 1000) to the bed, which comes in at the song's
+position when `aligned` (a separated bed: the same recording, so the vocals
+simply leave) or at the mapped position otherwise (the same fraction of
+`inst_s`, VocalHandover.bedPos / `music_bed_vocal.bed_pos`); `bed_s` is that
+position as planned, for a player that cannot read the song's. The phone
+plays it as part of the bed's lead-in (`intro_ms`): it holds the first
+sentence as it does for the intro, but until the handover, so the snippet
+overlaps the first sentence's rendering and the wait added is only what the
+snippet needs beyond it (about 2 s over the plain 1.5 s intro at most). The
+bed is fetched as usual and waits silent; an original not in hand within
+1.5 s, or not playing, is given up: the bed comes up at once and the first
+word goes. A stop, a clear or a new reply fades the snippet quickly. No song
+bar and no `song` event: it is not a song played, so Sung out
+(`music_sung`) never lists it. A bed carried on from the reading before (or
+from a song still singing out) is never sung in. **May be sung in**
+(`may_sing_in`, read from the event's `turn_by` and `turn_at`, which the
+Claude Code stop hook sets from the transcript's latest user entry with
+words, `hook_claude_code.turn_opener`): a turn begun by another agent's mail
+(`"[From …]"`, `turn_by` `"mail"`) or a harness notice (`<task-notification>`,
+`"notice"`) yes; a turn begun by his own words (`"owner"`, a message queued
+mid-turn and a slash command included) — the answer to a message he has
+just sent — never, unless it was sent more than
+`MEDIA_MUSIC_BED_VOCAL_IN_OWNER_S` (1800) before the reply; the session
+host's note (`"host"`), another harness, `media say` and anything not known:
+never. This host's own players (`under_mix`, rooms, local) skip `before`:
+their intro is the plain one. Pinned by
+`packages/core/tests/test_music_bed_vocal.py` and sasonica-app
+`SingInTest.java`.
+
 **A tune after some replies, and Sing it out on the full player (4 Nov
 2026)** (`reply_tune.py`; David: "let's put the sing it out feature as an
 option on the full size media player" — "Use the speech versus music slider

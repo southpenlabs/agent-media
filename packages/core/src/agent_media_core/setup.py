@@ -1344,6 +1344,72 @@ def _merge_env_defaults(env_path: Path, defaults, *, dry_run: bool) -> list[str]
     return [k for k, _ in add]
 
 
+# The system packages a rooms hub runs on. The install puts no system
+# packages on a host, so these are checked and the distro's install line is
+# printed, never installed (agent-mail #261, 12 Nov 2026: red2 passed
+# `media-setup check` without pactl or parec and its rooms units would have
+# failed at their first ExecStart). Linux only for now (David, 12 Nov 2026).
+#: binary, what it is for, and its package under apt / dnf / pacman.
+ROOMS_PREREQS: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("pactl", "makes the rooms' null sinks (am-sinks)",
+     {"apt": "pulseaudio-utils", "dnf": "pulseaudio-utils", "pacman": "libpulse"}),
+    ("parec", "copies each sink into its Snapcast pipe (am-snapfifo@)",
+     {"apt": "pulseaudio-utils", "dnf": "pulseaudio-utils", "pacman": "libpulse"}),
+    ("pipewire-pulse", "the PulseAudio server pactl and parec talk to",
+     {"apt": "pipewire-pulse", "dnf": "pipewire-pulseaudio", "pacman": "pipewire-pulse"}),
+    ("snapserver", "the Snapcast server the rooms play from",
+     {"apt": "snapserver", "dnf": "snapcast", "pacman": "snapcast"}),
+    ("mpv", "plays the speech into the rooms (sink-speech)",
+     {"apt": "mpv", "dnf": "mpv", "pacman": "mpv"}),
+)
+
+_PM_INSTALL = {"apt": "sudo apt install", "dnf": "sudo dnf install",
+               "pacman": "sudo pacman -S"}
+
+
+def package_manager(os_release: Path = Path("/etc/os-release")) -> str | None:
+    """apt, dnf or pacman, from /etc/os-release's ID and ID_LIKE; None when
+    neither names a family this knows."""
+    try:
+        text = os_release.read_text()
+    except OSError:
+        return None
+    ids: list[str] = []
+    for line in text.splitlines():
+        key, _, val = line.partition("=")
+        if key in ("ID", "ID_LIKE"):
+            ids += val.strip().strip('"').lower().split()
+    for i in ids:
+        if i in ("debian", "ubuntu"):
+            return "apt"
+        if i in ("fedora", "rhel", "centos"):
+            return "dnf"
+        if i == "arch":
+            return "pacman"
+    return None
+
+
+def rooms_missing() -> list[tuple[str, str, dict[str, str]]]:
+    """The rooms' system prerequisites not on PATH."""
+    return [r for r in ROOMS_PREREQS if shutil.which(r[0]) is None]
+
+
+def rooms_install_line(missing, pm: str | None) -> str:
+    """The one command that installs what is missing, or the package names
+    when the distro is not one this knows."""
+    if not missing:
+        return ""
+    if pm in _PM_INSTALL:
+        pkgs = list(dict.fromkeys(m[2][pm] for m in missing))
+        return f"{_PM_INSTALL[pm]} {' '.join(pkgs)}"
+    return "install: " + ", ".join(dict.fromkeys(m[2]["apt"] for m in missing)) + " (Debian names)"
+
+
+def rooms_hub() -> bool:
+    """This host was wired as a rooms hub (`media-setup server` wrote its units)."""
+    return (systemd_user_dir() / "am-sinks.service").exists()
+
+
 def cmd_server(args: argparse.Namespace) -> int:
     """Wire this host as a Snapcast rooms render hub (PipeWire/systemd only)."""
     from . import audio_backend
@@ -1362,6 +1428,15 @@ def cmd_server(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
+    # Written anyway (a package can come after), but said loudly: a unit
+    # whose binary is absent fails at its first start and says little.
+    missing = rooms_missing()
+    if missing:
+        print("media-setup server: WARNING — the rooms need system packages "
+              "this host lacks:\n"
+              + "".join(f"  * {b}: {what}\n" for b, what, _ in missing)
+              + f"  {rooms_install_line(missing, package_manager())}",
+              file=sys.stderr)
     sinks = [ROOMS_SPEECH_SINK] + ([ROOMS_MUSIC_SINK] if args.music else [])
     root = systemd_user_dir()
     execstarts = "\n".join(
@@ -1471,7 +1546,7 @@ PREREQS: tuple[tuple[str, str], ...] = (
 )
 
 
-def cmd_check(_: argparse.Namespace) -> int:
+def cmd_check(args: argparse.Namespace) -> int:
     missing = []
     for bin_, label in PREREQS:
         if shutil.which(bin_) is None:
@@ -1479,6 +1554,16 @@ def cmd_check(_: argparse.Namespace) -> int:
             print(f"  MISSING  {bin_:12} ({label})")
         else:
             print(f"  ok       {bin_}")
+    # A rooms hub (or `--rooms`, before wiring one) also needs its system packages.
+    if getattr(args, "rooms", False) or rooms_hub():
+        print("rooms:")
+        gone = rooms_missing()
+        for bin_, what, _ in ROOMS_PREREQS:
+            mark = "MISSING " if any(g[0] == bin_ for g in gone) else "ok      "
+            print(f"  {mark} {bin_:14} ({what})")
+        if gone:
+            missing += gone
+            print(f"  {rooms_install_line(gone, package_manager())}")
     return 0 if not missing else 1
 
 
@@ -2226,6 +2311,19 @@ def _row_jobs(args, *, check_only: bool):
     return jobs_worker.row(check_only=check_only, dry_run=getattr(args, "dry_run", False))
 
 
+def _row_rooms(args, *, check_only: bool):
+    """A rooms hub's system packages: absent on a host that is not one; never
+    installed here (root's to do), so wiring reports what is missing and the
+    line that installs it."""
+    if not rooms_hub():
+        return "absent", "not a rooms hub"
+    gone = rooms_missing()
+    if not gone:
+        return "ok", f"{len(ROOMS_PREREQS)} packages"
+    detail = f"{', '.join(g[0] for g in gone)} missing: {rooms_install_line(gone, package_manager())}"
+    return ("missing" if check_only else "failed"), detail
+
+
 #: name, one line for a person, kind, and the function that checks or installs.
 PROFILE_ROWS = (
     ("speech", "the hooks that speak a reply and record the turn", "core", _row_speech),
@@ -2241,6 +2339,8 @@ PROFILE_ROWS = (
      "core", _row_restart),
     ("services", "this host's services, by its roles", "core", _row_services),
     ("shell", "the tmux popup and control surface on PATH", "core", _row_shell),
+    ("rooms", "the system packages the speaker rooms play through (pactl, parec, "
+     "PipeWire's PulseAudio server, Snapcast)", "extra", _row_rooms),
     ("jobs", "this host restarted and updated down its own connection to a server "
      "(its jobs worker)", "extra", _row_jobs),
     ("mail", "agent mail announced at the top of a turn", "extra",
@@ -2323,6 +2423,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("check", help="Verify prereq binaries")
+    sp.add_argument("--rooms", action="store_true",
+                    help="Also check a rooms hub's system packages (checked "
+                         "anyway once `media-setup server` has wired one)")
     sp.set_defaults(func=cmd_check)
 
     sp = sub.add_parser("install-hooks",

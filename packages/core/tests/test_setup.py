@@ -65,6 +65,91 @@ def test_server_dry_run_systemd(tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "user").exists()
 
 
+
+# --- a rooms hub's system packages (agent-mail #261) -------------------------
+# red2 passed `media-setup check` without pactl or parec: the rooms units
+# would have failed at their first ExecStart.
+
+def _which_without(monkeypatch, *gone):
+    monkeypatch.setattr(setup.shutil, "which",
+                        lambda b, *a, **k: None if b in gone else f"/usr/bin/{b}")
+
+
+@pytest.mark.parametrize("text,pm", [
+    ('ID=debian\n', "apt"),
+    ('ID=pop\nID_LIKE="ubuntu debian"\n', "apt"),
+    ('ID=fedora\n', "dnf"),
+    ('ID="rocky"\nID_LIKE="rhel centos fedora"\n', "dnf"),
+    ('ID=endeavouros\nID_LIKE=arch\n', "pacman"),
+    ('ID=alpine\n', None),
+])
+def test_package_manager_from_os_release(tmp_path, text, pm):
+    f = tmp_path / "os-release"
+    f.write_text(text)
+    assert setup.package_manager(f) == pm
+
+
+def test_package_manager_without_os_release(tmp_path):
+    assert setup.package_manager(tmp_path / "none") is None
+
+
+def test_install_line_names_each_package_once(monkeypatch):
+    _which_without(monkeypatch, "pactl", "parec", "snapserver")
+    gone = setup.rooms_missing()
+    assert [g[0] for g in gone] == ["pactl", "parec", "snapserver"]
+    assert setup.rooms_install_line(gone, "apt") == "sudo apt install pulseaudio-utils snapserver"
+    assert setup.rooms_install_line(gone, "dnf") == "sudo dnf install pulseaudio-utils snapcast"
+    assert setup.rooms_install_line(gone, "pacman") == "sudo pacman -S libpulse snapcast"
+    assert "pulseaudio-utils" in setup.rooms_install_line(gone, None)
+    assert setup.rooms_install_line([], "apt") == ""
+
+
+def test_check_reports_a_hubs_missing_packages(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: tmp_path)
+    (tmp_path / "am-sinks.service").write_text("")
+    monkeypatch.setattr(setup, "package_manager", lambda *a: "apt")
+    _which_without(monkeypatch, "parec")
+    assert setup.cmd_check(argparse.Namespace(rooms=False)) == 1
+    out = capsys.readouterr().out
+    assert "MISSING  parec" in out
+    assert "sudo apt install pulseaudio-utils" in out
+
+
+def test_check_leaves_rooms_alone_on_a_host_that_is_not_a_hub(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: tmp_path)
+    _which_without(monkeypatch, "parec", "snapserver")
+    assert setup.cmd_check(argparse.Namespace(rooms=False)) == 0
+    assert "rooms:" not in capsys.readouterr().out
+    # …unless asked, before wiring one.
+    assert setup.cmd_check(argparse.Namespace(rooms=True)) == 1
+
+
+def test_rooms_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: tmp_path)
+    monkeypatch.setattr(setup, "package_manager", lambda *a: "apt")
+    _which_without(monkeypatch, "snapserver")
+    assert setup._row_rooms(None, check_only=True)[0] == "absent"
+    (tmp_path / "am-sinks.service").write_text("")
+    state, detail = setup._row_rooms(None, check_only=True)
+    assert state == "missing" and "sudo apt install snapserver" in detail
+    assert setup._row_rooms(None, check_only=False)[0] == "failed"
+    _which_without(monkeypatch)
+    assert setup._row_rooms(None, check_only=True)[0] == "ok"
+
+
+def test_server_warns_before_writing_units_without_their_packages(tmp_path, monkeypatch, capsys):
+    _linux_audio(monkeypatch)
+    monkeypatch.setattr(setup, "_service_backend", lambda *a, **k: "systemd")
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: tmp_path / "user")
+    monkeypatch.setattr(setup, "_agent_media_env_path", lambda: tmp_path / "am.env")
+    monkeypatch.setattr(setup, "package_manager", lambda *a: "dnf")
+    _which_without(monkeypatch, "pactl", "parec")
+    args = argparse.Namespace(backend="systemd", music=True, now=False, dry_run=True)
+    assert setup.cmd_server(args) == 0
+    err = capsys.readouterr().err
+    assert "WARNING" in err and "sudo dnf install pulseaudio-utils" in err
+
+
 # --- host roles -------------------------------------------------------------
 # The regression these guard against is concrete: the phone ran both
 # `call-guard` and `call-hold-consumer` for a fortnight, two processes pausing

@@ -164,8 +164,19 @@ radio, a single press stops it. By voice (hands-free or the mic key): "keep
 playing", "start the radio", "stop the music". Only on the phone; the song
 after a reply on house speakers has no controls yet.
 
-See also: `server-contract.md` §`/speech/music-bed` ("Singing it out"),
-`POST /speech/music-bed/song`, `POST /music/radio`.
+**Sing it in before long replies** (off until you turn it on, in Settings →
+Music or under Sing it out on the full player) is the same thing the other
+way round: before a long reply over one of your favourites, about three and
+a half seconds of the original fade in from quiet at its chorus, then the
+vocals drop away as the first word comes and the backing carries on under
+the reply. It never plays before the answer to a message you have just sent
+(only before replies that follow another agent's mail or a background task
+finishing), and the first word waits for it, about two seconds more than
+usual at most, since the phone renders the first sentence meanwhile. Only on
+the phone; it shows no song bar and is not listed in Sung out.
+
+See also: `server-contract.md` §`/speech/music-bed` ("Singing it out",
+"Singing it in"), `POST /speech/music-bed/song`, `POST /music/radio`.
 
 ### Can it guide me through a meditation?
 
