@@ -77,7 +77,7 @@ Sorted with what blocks a public release first. 47 rows.
 | 34 | Cover Art Archive | album covers | none | public | check current terms on showing covers in a paid product | no |
 | 35 | ListenBrainz | recommendations, likes, fresh releases | the listener's own name (and token) | public API, 1 request a second | as MusicBrainz | no |
 | 36 | Wikipedia and Wikidata | profiles of artists, authors, shows | none | public APIs | credit Wikipedia text (CC BY-SA) where shown: to confirm it is | no |
-| 37 | Internet Archive | free recordings for the music bed | none (named client) | public APIs | nothing; licences are filtered and kept | no |
+| 37 | Internet Archive | free recordings for the music bed; free films that play in the app (`watch_free.py`, §6.54 "Free films") | none (named client) | public APIs | nothing; licences are filtered and kept (films: only items stating public domain or Creative Commons, streamed by the device from archive.org) | no |
 | 38 | ccMixter | CC BY instrumentals for the music bed | none | public query API | show each track's credit where it plays: to confirm | no |
 | 39 | Podcast RSS feeds | episodes of followed shows | none | each publisher's own feed | nothing | no |
 | 40 | YouTube embeds, oEmbed and thumbnails | trailers, video cards, link titles | none | the official player and oEmbed | follow the player rules (size, no overlay, no background play) | no |
