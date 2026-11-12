@@ -1374,7 +1374,12 @@ class Supervisor:
         instance never parked: its record says what it was doing."""
         stopped_at = self._take_stop_mark()
         self._clear_fired_restart()
-        self._kill_orphans({r["session"] for r in records(self.root) if not r.get("host")})
+        # A practice copy beside a machine's own session host
+        # (server_sandbox.py, MEDIA_REHEARSAL=1) ends no process: the agents
+        # running there are the real host's, and an opencode server is ended
+        # whoever's it is.
+        if os.environ.get("MEDIA_REHEARSAL") != "1":
+            self._kill_orphans({r["session"] for r in records(self.root) if not r.get("host")})
         with self.lock:
             for rec in records(self.root):
                 if rec.get("host"):

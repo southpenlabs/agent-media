@@ -96,6 +96,8 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # No default host for new chats (red2 here), so a test's start stays local.
     monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST", "")
     monkeypatch.setenv("MEDIA_SESSIOND_DEFAULT_HOST_SKIP", "")
+    # Never a practice copy (server_sandbox.py) from this machine's settings.
+    monkeypatch.setenv("MEDIA_REHEARSAL", "")
     # Files a reply names are copied into the upload root as the thread is
     # read (file_links.py): never into the real ~/shared, and no copy
     # remembered from another test.

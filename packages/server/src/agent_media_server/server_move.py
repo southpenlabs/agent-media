@@ -277,6 +277,93 @@ def _do(st: dict, steps: tuple[str, ...], run, out) -> int:
     return 0
 
 
+# --- the rehearsal: a fenced copy beside the other machine's own install -----------------
+
+
+def rehearse(to: str, name: str, *, yes: bool = False, run=sh, out=print) -> int:
+    """The practice move (server_sandbox.py): backup and sync as the real
+    one, then a fenced copy started on `to` in a throwaway folder. Nothing
+    here is stopped, nothing of `to`'s own is overwritten."""
+    new = server_address.origin(name)
+    if not to or not new:
+        out("server move: --to <host> and --name https://<address>, please")
+        return 2
+    for line in (f"1 check    {to}: ssh, a release with `media server sandbox`",
+                 f"2 backup   here → {to}:~/{STORE}/store, services up (minutes)",
+                 "3 sync     the second pass, timed (nothing here is stopped)",
+                 f"4 sandbox  {to}: restore into a throwaway folder, fence it (no chat resumed, "
+                 "no outside credential kept), start its own session host and server",
+                 f"5 verify   the copy answers as this server on {to}, and at {new} if its "
+                 "DNS is there",
+                 f"after      `media server move --to {to} --rehearse-stop` removes it"):
+        out(line)
+    if not yes:
+        out("nothing done: add --yes to run the rehearsal.")
+        return 0
+    st = {"to": to, "name": new, "rehearsal": True, "started": round(time.time())}
+
+    def sandbox(st: dict, run) -> None:
+        rc, got = run(_there(st, "media server sandbox start --from "
+                             f"{shlex.quote(st['there_store'] + '/store')} "
+                             f"--name {shlex.quote(new)}"), to)
+        try:
+            st["sandbox"] = json.loads(got[got.index("{"):])
+        except ValueError:
+            st["sandbox"] = {"ok": False, "error": got[-400:]}
+        if rc != 0 or not st["sandbox"].get("ok"):
+            raise Stop(f"the sandbox on {to} did not start: "
+                       f"{st['sandbox'].get('error') or got[-300:]}")
+
+    def local(st: dict, run) -> None:
+        import secrets as _secrets
+
+        from . import server_sandbox
+
+        nonce = _secrets.token_hex(8)
+        rc, got = run(f"curl -fsS 'http://{server_sandbox.PUBLIC}/server/probe?nonce={nonce}'",
+                      to, 30)
+        try:
+            proof = json.loads(got[got.index("{"):]).get("proof")
+        except ValueError:
+            proof = None
+        if rc != 0 or proof != server_address.proof(nonce):
+            raise Stop(f"the copy on {to} does not answer as this server "
+                       f"({got[-200:] or 'no answer'})")
+        ok, why = server_address.reaches_here(new)
+        st["public"] = {"ok": ok, "why": why}
+
+    RUN.update(sandbox=sandbox, local=local)
+    try:
+        rc = _do(st, ("check", "backup", "sync", "sandbox", "local"), run, out)
+    finally:
+        RUN.pop("sandbox", None)
+        RUN.pop("local", None)
+    if rc:
+        return rc
+    f = (st.get("sandbox") or {}).get("fenced") or {}
+    out(f"fenced: {f.get('chats_ended', 0)} chats ended, {f.get('resumes_dropped', 0)} resumes "
+        f"dropped, {len(f.get('credentials_deleted') or [])} credential files deleted, "
+        f"{f.get('refresh_tokens_blanked', 0)} refresh tokens blanked")
+    out(f"final sync took {st.get('sync_seconds')} s")
+    pub = st.get("public") or {}
+    out(f"{new}: answers as this server" if pub.get("ok")
+        else f"{new}: not reachable yet ({pub.get('why')}); the copy answers on {to} itself")
+    return 0
+
+
+def rehearse_stop(to: str, *, run=sh, out=print) -> int:
+    st = {"to": to}
+    try:
+        step_check(st, run)
+    except Stop as e:
+        out(f"✗ {e}")
+        return 1
+    rc, got = run(_there(st, "media server sandbox stop"), to)
+    out(f"{'✓' if rc == 0 else '✗'} {to}: the practice copy is stopped and removed"
+        + ("" if rc == 0 else f": {got[-300:]}"))
+    return 0 if rc == 0 else 1
+
+
 # --- move, rollback, status ---------------------------------------------------------------
 
 

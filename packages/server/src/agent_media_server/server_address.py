@@ -423,12 +423,24 @@ def main(argv: list[str] | None = None) -> int:
     mv.add_argument("--status", action="store_true", help="how the last move went")
     mv.add_argument("--verify", action="store_true", help="check the new address again")
     mv.add_argument("--rollback", action="store_true", help="undo the last move")
+    mv.add_argument("--rehearse", action="store_true",
+                    help="the practice move: a fenced copy on the other machine, "
+                         "nothing stopped here (server_sandbox.py)")
+    mv.add_argument("--rehearse-stop", action="store_true",
+                    help="stop and remove the practice copy")
+    sb = sub.add_parser("sandbox", add_help=False,
+                        help="the practice copy on this machine: start, stop, status")
+    sb.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("check", help="whether every setting agrees on this server's address")
     sub.add_parser("status", help="the address, the previous ones and the server's id")
     a = ap.parse_args(argv)
     if a.cmd == "rename":
         return rename(a.to, a.also, check=not a.no_check, dry_run=a.dry_run,
                       restart=not a.no_restart)
+    if a.cmd == "sandbox":
+        from . import server_sandbox
+
+        return server_sandbox.main(a.args)
     if a.cmd == "move":
         from . import server_move
 
@@ -438,6 +450,10 @@ def main(argv: list[str] | None = None) -> int:
             return server_move.rollback()
         if a.verify:
             return server_move.verify()
+        if a.rehearse_stop:
+            return server_move.rehearse_stop(a.to)
+        if a.rehearse:
+            return server_move.rehearse(a.to, a.name, yes=a.yes)
         return server_move.move(a.to, a.name, a.also, yes=a.yes, dry_run=a.dry_run,
                                 foreground=a.foreground, fire=a.fire)
     if a.cmd == "check":

@@ -141,3 +141,27 @@ after.
 `server_id` survives a restore, which is what makes the restored install the
 same server at a new address rather than a new one — so the id above, and the
 `moved_to` answers, keep working across the move.
+
+## The rehearsal: a fenced copy (`--rehearse`)
+
+```
+media server move --to red2 --name https://red2-ryer.sasonica.com --rehearse --yes
+media server move --to red2 --rehearse-stop
+```
+
+A restored copy started while the real server runs is not harmless: its
+session host would resume every chat the snapshot caught working, a sign-in
+whose refresh token is good once (Trakt, Google) is spent by whichever copy
+refreshes first, and it would be a second you on Matrix and in reminders. So
+the practice move stops nothing here and overwrites nothing there: backup
+and sync as the real one, then on the other machine `media server sandbox
+start` restores into `~/.local/share/agent-media-move/sandbox`, **fences**
+the copy (every chat ended with nothing to resume or deliver, records of
+chats on other hosts dropped, every outside credential deleted, refresh
+tokens blanked, the restored env file kept but never loaded) and starts its
+own session host and server as two transient units
+(`agent-media-rehearsal-*`, `MEDIA_REHEARSAL=1`: that session host ends no
+process on the machine) on the public listener, so the machine's tunnel
+reaches it. It proves the restore on another machine, the same `server-id`
+at a new address, pairing and a new chat. It does not prove the real units,
+the house audio or any outside service (`server_sandbox.py`).
