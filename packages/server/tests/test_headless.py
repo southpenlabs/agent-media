@@ -606,7 +606,12 @@ def test_a_final_task_updated_ends_a_task(host, monkeypatch):
 
 
 def test_a_full_host_does_not_park_a_session_with_a_task(host, monkeypatch):
+    """...nor one whose task has just ended: the notification starts a turn
+    about a second behind it, and until that turn's first event arrives the
+    session reads as idle. Parking in that second cut one off mid-tool-call
+    (12 Nov 2026), so `MEDIA_SESSIOND_TASK_WAKE_GRACE` holds the slot."""
     monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    monkeypatch.setenv("MEDIA_SESSIOND_TASK_WAKE_GRACE", "3")
     a = start(host, "reply: a")
     wait_for(lambda: state(host, a) == "waiting")
     _task(host, a, "task_started", task_type="local_agent", is_backgrounded=True)
@@ -616,8 +621,47 @@ def test_a_full_host_does_not_park_a_session_with_a_task(host, monkeypatch):
     time.sleep(2.5)                         # a delivery tick: still no room
     assert host.sup.get(a)["live"] and not host.sup.get(b)["live"]
     _task(host, a, "task_notification", status="completed")
+    assert host.sup.sessions[a].waking() is True
+    time.sleep(1.5)                         # another tick, inside the grace
+    assert state(host, a) == "waiting" and host.sup.get(a)["live"]
+    # The turn never came: the grace passes and the slot goes as before.
     wait_for(lambda: state(host, a) == "parked", timeout=10)
     wait_for(lambda: last_text(host, b) == "b", timeout=10)
+
+
+def test_a_slot_park_that_cut_a_turn_off_brings_it_back(host, monkeypatch):
+    """A park for a slot and a turn starting can still cross, the grace being
+    a window and not a promise: parked while working, the session is noted
+    `why: "slot"` and due, so `deliver_due` resumes it with a note rather
+    than leaving the work stranded (12 Nov 2026)."""
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(host, "reply: a")
+    wait_for(lambda: state(host, a) == "waiting")
+    s = host.sup.sessions[a]
+    # The turn a task's notification started, as the CLI announces it: an
+    # `init`, which is all a notification's turn sends (no command_lifecycle).
+    host.sup._on_event(s, {"type": "system", "subtype": "init", "model": "m"})
+    assert state(host, a) == "working"
+    host.sup._park(s, why="slot")
+    wait_for(lambda: state(host, a) == "parked", timeout=20)
+    cut = sessiond.read_record(a)["cut_off"]
+    assert cut and cut["why"] == "slot" and cut["turn"] is True and cut["due"] is True
+    # Due: a delivery tick starts it again and the note goes in, once.
+    wait_for(lambda: host.sup.get(a)["live"], timeout=20)
+    assert sessiond.read_record(a)["cut_off"] is None
+
+
+def test_a_slot_park_of_an_idle_session_is_not_resumed(host, monkeypatch):
+    """The ordinary case is unchanged: nothing was cut off, so nothing is
+    noted and the session stays parked until it is wanted."""
+    monkeypatch.setenv("MEDIA_SESSIOND_MAX", "1")
+    a = start(host, "reply: a")
+    wait_for(lambda: state(host, a) == "waiting")
+    host.sup._park(host.sup.sessions[a], why="slot")
+    wait_for(lambda: state(host, a) == "parked", timeout=20)
+    time.sleep(2.5)                         # a delivery tick
+    assert sessiond.read_record(a)["cut_off"] is None
+    assert not host.sup.get(a)["live"]
 
 
 def test_a_full_host_parks_a_session_held_only_by_low_priority_agents(host, monkeypatch):

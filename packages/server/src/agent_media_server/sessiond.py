@@ -57,7 +57,12 @@ What it does per session:
   7.6 GB, 4-core host), and fewer when the host is short of memory: below
   `MEDIA_SESSIOND_MIN_FREE_MB` available (default 1024) there is no room for
   another. Either way one more parks the least recently used idle one (by
-  the same test), or is refused with a sentence when none is idle. A
+  the same test), or is refused with a sentence when none is idle. One
+  whose task has just ended is not idle for `MEDIA_SESSIOND_TASK_WAKE_GRACE`
+  (10 s): the notification starts a turn a second behind it, and parking in
+  that second cut one off mid-tool-call on 12 Nov 2026 (`waking`). A park
+  that cuts work off after all is noted `why: "slot"` and due, so it comes
+  back (`_on_exit`). A
   session held only by low-priority background agents (the `low-priority`
   agent type) gives its slot up: its agents are told to hand back (the
   squeeze record their hook reads), and `MEDIA_RESTART_LOW_GRACE_S` (120)
@@ -154,6 +159,7 @@ headless_mail.py).
 
 Config (env): MEDIA_SESSIOND_SOCKET, MEDIA_SESSIOND_IDLE, MEDIA_SESSIOND_MAX,
 MEDIA_SESSIOND_MIN_FREE_MB, MEDIA_SESSIOND_BACKGROUND_AFTER, MEDIA_SESSIOND_TASK_STALE_S,
+MEDIA_SESSIOND_TASK_WAKE_GRACE,
 MEDIA_SESSIOND_LONG_COMMAND_S,
 MEDIA_SESSIOND_CLOSE_GRACE, MEDIA_SESSIOND_ELICIT_TIMEOUT, MEDIA_SESSIOND_CLAUDE (the binary; default
 `harnesses.program("claude")`), MEDIA_HEADLESS_MODEL (`--model`),
@@ -303,6 +309,22 @@ def elicit_timeout_s() -> float:
 def close_grace_s() -> float:
     """Exit after stdin closes took up to 7.2 s in the spike; 10 s by default."""
     return _env_f("MEDIA_SESSIOND_CLOSE_GRACE", 10.0)
+
+
+def task_wake_grace_s() -> float:
+    """How long after a background task ends its session stays out of the
+    choice of which one to park for a wanted slot
+    (`MEDIA_SESSIOND_TASK_WAKE_GRACE`, default 10 s).
+
+    A task's `task_notification` re-invokes the chat, and the turn it starts
+    is about a second behind it. Until that turn's first event arrives the
+    session still reads as `waiting` with no tasks left — idle, and so the
+    first thing `_ensure_room` takes. On 12 Nov 2026 that cost one its turn
+    mid-tool-call: its test run finished at 12:47:33, the notification
+    started a turn at 12:47:34, and the same second parked it for another
+    chat's held message.
+    """
+    return _env_f("MEDIA_SESSIOND_TASK_WAKE_GRACE", 10.0)
 
 
 #: How long `send` waits for the CLI to acknowledge a message
@@ -546,6 +568,14 @@ class Session:
         #: `work()` plus `at` and `why`; `due` once the next sessiond start
         #: has judged it worth resuming (`Supervisor.load`).
         self.cut_off: dict | None = None
+        #: When a background task here last ended (0.0: none has). Its
+        #: notification starts a turn, so the session is not idle for
+        #: `task_wake_grace_s` after it, however it reads (`waking`).
+        self.task_ended_at = 0.0
+        #: Why `_park` is parking it ("slot": taken as the idle one for
+        #: another chat), for `_on_exit` to tell a park that cut work off
+        #: from one that found nothing to cut.
+        self.park_why = ""
         #: The last `rate_limit_event` that said `rejected` (its
         #: `rate_limit_info`), for when the usage limit's `result` follows.
         self.limit_info: dict | None = None
@@ -612,6 +642,15 @@ class Session:
     def idle_since(self) -> float:
         """When it last did anything: its last event or its newest task's."""
         return max([self.last_event_at, *self.tasks.values()])
+
+    def waking(self, now: float | None = None) -> bool:
+        """Whether a background task has just ended here: its notification
+        re-invokes the chat, so a turn is on its way and the session is not
+        idle however it reads (`task_wake_grace_s`). Once the turn's first
+        event lands the state says so and this stops mattering."""
+        if not self.task_ended_at:
+            return False
+        return (now or time.time()) - self.task_ended_at < task_wake_grace_s()
 
     def task_list(self, now: float | None = None) -> list[dict]:
         """The tasks that count (`active_tasks`), with what each is."""
@@ -2363,6 +2402,7 @@ class Supervisor:
                     self._task_ended(s, key, status, (obj.get("patch") or {}).get("error"), obj)
                     s.tasks.pop(key, None)
                     s.task_info.pop(key, None)
+                    s.task_ended_at = now
                 elif key and (key in s.tasks or sub == "task_progress"):
                     s.tasks[key] = now
             elif t == "system" and sub == "task_notification":
@@ -2371,6 +2411,7 @@ class Supervisor:
                                  obj.get("summary"), obj)
                 s.tasks.pop(_task_key(obj), None)
                 s.task_info.pop(_task_key(obj), None)
+                s.task_ended_at = now
             elif t == "user":
                 content = (obj.get("message") or {}).get("content")
                 for block in content if isinstance(content, list) else ():
@@ -2584,6 +2625,20 @@ class Supervisor:
                 event(self, s, {"event": "result", "result": {"status": "ERROR", "error": "\n".join(s.stderr_tail)[-2000:] or "Antigravity ended before completing its reply."}})
             s.proc = None
             s.exit_code = rc
+            if s.cut_off is None and s.parking and s.park_why == "slot" \
+                    and (w := s.work()):
+                # Taken as the idle session for another chat's message, and
+                # it was working after all: a task's notification had started
+                # a turn that this park's stdin close then cut off, inside the
+                # second before its first event arrived (`task_wake_grace_s`
+                # covers the usual gap; a slower start still lands here).
+                # Marked due, so `deliver_due` brings it back with a note
+                # rather than leaving the work stranded — which on 12 Nov 2026
+                # it did, until David asked how it was going.
+                s.cut_off = {**w, "at": round(time.time(), 3), "why": "slot",
+                             "due": True}
+                log.info("sessiond: %s was working when it was parked for a slot "
+                         "(%s); it will be resumed", s.id[:8], s.state)
             if s.cut_off is None and not s.closing and not s.parking:
                 # Ended by itself, or killed with the host (systemd signals
                 # the whole cgroup at once, so a child can go before the
@@ -2694,8 +2749,10 @@ class Supervisor:
         if len(live) < max_live() and not short:
             self._end_squeeze()
             return
+        now = time.time()
         idle = sorted((x for x in live if x.state == "waiting" and not x.pending
-                       and not x.queued and not x.active_tasks()),
+                       and not x.queued and not x.active_tasks()
+                       and not x.waking(now)),
                       key=lambda x: x.idle_since())
         who = for_id or (exclude.id if exclude else "")
         if not idle and quiet:
@@ -2719,7 +2776,7 @@ class Supervisor:
                               "for one to finish", "busy")
             raise Refused(f"{len(live)} phone sessions are busy on this host; "
                           "close one or wait for one to finish", "busy")
-        self._park(idle[0])
+        self._park(idle[0], why="slot")
 
     def _yield_low(self, live: "list[Session]") -> bool:
         """Under the lock, with no idle session to park: a session held only
@@ -2776,7 +2833,7 @@ class Supervisor:
             reason = slot_reason(x, now)[0]
             level = _speech_level(x.id)
             gen = reason in ("working", "starting")
-            if reason == "idle":
+            if reason == "idle" and not x.waking(now):
                 tier = -1
             elif level == "interrupt":
                 tier = 4 if gen else 3
@@ -2829,7 +2886,7 @@ class Supervisor:
             self._squeeze = None
             _write_squeeze(None)
 
-    def _park(self, s: Session) -> None:
+    def _park(self, s: Session, why: str = "") -> None:
         if s.agent == "opencode":
             self._oc_detach(s, "parked")
             return
@@ -2837,6 +2894,7 @@ class Supervisor:
         if proc is None:
             return
         s.parking = True
+        s.park_why = why
         self._close_stdin(s)
         self._wind_down(s, proc)
 
