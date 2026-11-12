@@ -2715,7 +2715,10 @@ ahead.
       `hippocampus` and `memory-governor` do follow to red2 (step 6) they
       are **renamed on the way**: one `agent-memory-*` prefix for a
       subsystem that answers to four today (`hippocampus*`,
-      `memory-governor*`, `governor-digest*`, `agent-memory-*`), with
+      `memory-governor*`, `governor-digest*`, `agent-memory-*`) — the units
+      becoming `agent-memory-store` and `agent-memory-policy`, each saying
+      what it does while the code keeps Hippocampus and Memory Governor —
+      with
       `HIPPOCAMPUS_*` and `GOVERNOR_*` kept readable for good and the
       Python package, tests and HTTP paths left alone — agent-memory
       `docs/NAMING.md` (David, 12 Nov 2026: "hippocampus probably needs to
