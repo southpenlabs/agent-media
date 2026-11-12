@@ -2614,9 +2614,13 @@ ahead.
     should have a backup system built in", thread a4e12d56, via agent-mail
     #246; follows an outside review's point that backups were the biggest
     gap, #245). `docs/proposals/2026-11-12-backup-and-restore.md`.
-    **Designed 12 Nov 2026, not built; two questions open for David**
-    (deploy cadence, and whether the nightly carries the speech clips and
-    transcripts). On the critical path for the server moving home (item
+    **Designed and decided 12 Nov 2026, not built.** David's two answers:
+    deploy cadence is **batch when idle**, not every green push (revising
+    where-things-run decision 2, from #245's push-back — 16 agents pushing
+    to the machine that answers the phone); and the nightly carries the
+    core plus the session transcripts ("I think transcripts should be
+    included in the daily backup"), about 1G a night, with the 734M of
+    speech clips left to `--tier full` and so, for now, unprotected. On the critical path for the server moving home (item
     above, `2026-11-12-the-server-moves-home.md`): "new machine = release +
     restore + switch" is the cutover drill, and the destination is a
     **setting**, never the machine holding the data — after the move red2

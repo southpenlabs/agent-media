@@ -160,8 +160,17 @@ His framing: "we're talking about moving all the agent stuff to red2".
    worker and holds the backups. The plan is
    `docs/proposals/2026-11-12-the-server-moves-home.md`; everything else
    here stands, and step 1's releases are the drill the move uses.
-2. **Deploy on every green push**, once step 1 has shown the step back
-   works.
+2. ~~**Deploy on every green push**, once step 1 has shown the step back
+   works.~~
+   **Revised 12 Nov 2026: batch the deploys instead.** The review in mail
+   #245 pushed back — with up to 16 agents pushing, any session can put code
+   on the machine holding the personal data, gated only by tests, and the
+   restarts churn — and the move home sharpens it, because that machine
+   becomes red2, answering the phone. David chose *batch when idle*: green
+   pushes queue and deploy together, hourly or when the house is quiet,
+   rather than one deploy and restart per push. Still no tag to cut, and
+   still no one in the loop; the deployer (step 2 of the order of work) is
+   what has to honour it.
 3. **Green first: the core and server test suites**, not the 80-minute app
    run.
 4. **No bigger red5 for now**; revisit after step 5 shows what red5 really
