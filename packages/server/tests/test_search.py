@@ -652,6 +652,14 @@ def test_in_thread_and_harness_narrow_by_the_thread(home, gate, monkeypatch):
     assert len(ask("marmot harness:claude")["messages"]) == 2
     assert ask("marmot harness:codex")["messages"] == []
     assert ask("marmot harness:codex")["threads"] == []
+    # A closed set, so a near miss is a 400 with the names — and a complaint
+    # the query builder can act on — not a query that matches nothing.
+    ok, err = search.search("marmot harness:claude-code", "tok")
+    assert not ok and err["status"] == 400 and "claude, codex, pi, hermes, matrix" in err["error"]
+    assert search._as_query("marmot harness:claude-code") == ("", "harness: is one of claude, codex, pi, hermes, matrix")
+    # The open sets stay free text: projects, titles and tool names change.
+    for q in ("marmot in:nowhere", "marmot thread:nothing", "marmot tool:nosuchtool"):
+        assert ask(q)["messages"] == [], q
 
 
 def test_kind_picks_the_words_or_the_tool_steps(home, gate):
@@ -697,6 +705,33 @@ def test_after_and_before_take_dates(home, gate):
     for bad in ("soonish", "2026-13-01", "11-2026"):
         ok, err = search.search(f"gecko after:{bad}", "tok")
         assert not ok and err["status"] == 400 and "not a date" in err["error"], bad
+
+
+def test_ago_belongs_to_the_date_in_front_of_it(home, gate):
+    """`after:7d ago`, as it is said out loud — and as a model writes it.
+
+    The operator list said "7d / 3w / 6m / 1y ago", so the translator wrote
+    `from:me music bed after:7d ago`; "ago" was then a word every message
+    had to hold, and the search found nothing (red5, 12 Nov 2026).
+    """
+    s = claude(home, SID)
+    s.prompt("the music bed fades in")
+    s.end_turn()
+    import datetime as dt
+
+    year = dt.datetime.fromtimestamp(ask("music")["messages"][0]["at"]).year
+    assert ask(f"music after:{year} ago")["terms"] == ["music"]
+    assert len(ask(f"music after:{year} ago")["messages"]) == 1
+    assert len(ask(f'music after:"{year} ago"')["messages"]) == 1
+    assert ask(f"music after:{year + 1} ago")["messages"] == []
+    assert search._when("7d ago") == pytest.approx(search._when("7d"), abs=2)
+    # Only straight after a date: anywhere else it is a word like any other.
+    assert search.parse("from:me music ago")["terms"] == ["music", "ago"]
+    assert search.parse("ago")["terms"] == ["ago"]
+    assert ask("music ago")["messages"] == []
+    # And the list no longer invites it.
+    assert "ago" not in dict((syn, what) for syn, what, _eg in search.OPERATORS)[
+        "after:<date>, before:<date>"]
 
 
 def test_an_unknown_operator_is_read_as_words(home, gate):
@@ -953,3 +988,163 @@ def test_the_compose_route_reads_a_malformed_exchange_as_none(server, signed_in,
                       {"ask": "the gauge", "tried": tried}, headers=AUTH)
         assert res.status == 200, tried
     assert all(u.splitlines() == ["the gauge"] for u in seen)
+
+
+def test_a_question_goes_to_whichever_fast_model_answers_first(home, gate, monkeypatch):
+    """A search box cannot wait on the summary gateway's 60 s and one model
+    (12 Nov 2026): `intake.fast` tries the fast list in order inside one
+    deadline, the purpose's own model first."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    tried = []
+
+    def fake_chat(system, user, timeout, model=None):
+        tried.append((model, timeout))
+        return None if model == "slow-one" else "gauge from:me"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "slow-one,quick-two")
+    monkeypatch.delenv("MEDIA_SEARCH_TRANSLATE_MODEL", raising=False)
+    search._NL_CACHE.clear()
+    assert search.translate("what did I say about the gauge") == "gauge from:me"
+    assert [m for m, _ in tried] == ["slow-one", "quick-two"], "in order, until one answers"
+    # Inside the search's own deadline, not the summary gateway's.
+    assert all(t <= search.TRANSLATE_TIMEOUT_S for _, t in tried), tried
+
+    # The purpose's own model goes first, and the builder gets a longer one.
+    fast._reset_for_tests()
+    tried.clear()
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE_MODEL", "chosen")
+    search._NL_CACHE.clear()
+    search.translate("what did I say about the gauge")
+    assert tried[0][0] == "chosen"
+    tried.clear()
+    search.compose("what did I say about the gauge")
+    assert tried[0][0] == "chosen"
+    assert tried[0][1] > search.TRANSLATE_TIMEOUT_S and tried[0][1] <= search.COMPOSE_TIMEOUT_S
+
+    # A deadline of one's own still wins over both.
+    fast._reset_for_tests()
+    tried.clear()
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE_TIMEOUT", "3")
+    search._NL_CACHE.clear()
+    search.translate("what did I say about the gauge")
+    assert tried[0][1] <= 3
+
+
+# --- an answer that will not parse is said out loud, and asked again ------------
+
+def test_an_answer_that_is_no_query_is_logged_rather_than_dropped_in_silence(
+        home, gate, monkeypatch, caplog):
+    """7c5ebe1f's `after:7d ago` hid because a model answer the parser
+    refused was dropped without a word. On the search's own path the words as
+    typed still win — but the log says what was written and why it went."""
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda *a, **k: "music bed from:nobody\n")
+    search._NL_CACHE.clear()
+    with caplog.at_level("WARNING"):
+        assert search.translate("what did I say about the music bed last week") is None
+    said = caplog.text
+    assert "music bed from:nobody" in said and "no query" in said
+    assert "from: is me or agent" in said, "the parser's own complaint"
+    # A gateway that answered nothing at all is not worth a line: there is
+    # nothing to look at.
+    caplog.clear()
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: "")
+    search._NL_CACHE.clear()
+    with caplog.at_level("WARNING"):
+        assert search.translate("what did I say about the music bed last week") is None
+    assert caplog.text == ""
+
+
+def test_compose_hands_a_query_that_will_not_parse_back_to_the_model_once(
+        gate, monkeypatch, caplog):
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append(user)
+        return "music bed from:nobody\n" if len(asked) == 1 else "music bed from:me\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    with caplog.at_level("WARNING"):
+        got = search.compose("what did I say about the music bed")
+    assert got == {"q": "music bed from:me", "note": ""}
+    assert len(asked) == 2, "asked again, not dropped"
+    # The parser's own complaint is what it is told, in the exchange's words.
+    assert "You wrote: music bed from:nobody" in asked[1]
+    assert "could not read that: from: is me or agent" in asked[1]
+    assert "try 1" in caplog.text
+
+
+def test_compose_gives_up_after_the_second_try_and_says_so(gate, monkeypatch, caplog):
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    tries = []
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: tries.append(user) or "from:nobody ((")
+    with caplog.at_level("WARNING"):
+        assert search.compose("what did I say about the music bed") is None
+    assert len(tries) == 2, "twice, and no more"
+    assert "try 1" in caplog.text and "try 2" in caplog.text
+    # Nothing left of the deadline: the second try is not started at all.
+    fast._reset_for_tests()
+    tries.clear()
+    monkeypatch.setattr(search, "COMPOSE_TIMEOUT_S", 0)
+    with caplog.at_level("WARNING"):
+        assert search.compose("what did I say about the music bed") is None
+    assert len(tries) == 1
+
+
+def test_the_builder_is_told_the_same_dates_the_help_page_shows(gate, monkeypatch):
+    """compose shares `_translate_prompt`, so 7c5ebe1f's fix is the sheet's
+    too: the list no longer invites "7d ago", and a model that says it anyway
+    is read rather than refused."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    seen = []
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: seen.append(system) or "music bed after:7d ago")
+    got = search.compose("what did I say about the music bed last week")
+    assert got["q"] == "music bed after:7d ago", "read as a date, not as the word ago"
+    assert "7d, 3w, 6m, 1y" in seen[0] and "1y ago" not in seen[0]
+    assert search.parse(got["q"])["terms"] == ["music", "bed"]
+
+
+def test_the_near_miss_a_model_writes_comes_back_as_a_complaint_it_can_act_on(
+        gate, monkeypatch, caplog):
+    """`harness:claude-code` is the mistake a model makes (the harness is
+    called Claude Code everywhere but in the index), and 659a2601 made it a
+    complaint rather than a confident chip over no hits. End to end: the
+    builder is told the list and writes the name the index holds."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append(user)
+        return "music bed harness:claude-code\n" if len(asked) == 1 else "music bed harness:claude\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    with caplog.at_level("WARNING"):
+        got = search.compose("what did I say about the music bed in Claude Code")
+    assert got == {"q": "music bed harness:claude", "note": ""}
+    assert "harness: is one of claude, codex, pi, hermes, matrix" in asked[1]
+    assert search.parse(got["q"])["filters"]["harness"] == [("claude", False)]
+
+    # The open sets stay open: a project or a tool that is simply not there
+    # is no hits, never a complaint, so the builder is never sent round again
+    # over a folder it had right.
+    fast._reset_for_tests()
+    asked.clear()
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: asked.append(user) or "music bed in:no-such-project")
+    assert search.compose("what did I say about the music bed in no-such-project") == {
+        "q": "music bed in:no-such-project", "note": ""}
+    assert len(asked) == 1, "asked once: an empty answer is an answer"
