@@ -264,9 +264,14 @@ except /pair, which is how a device gets its token):
   GET  /features → which optional parts this server has (org, music,
                   contacts, bridges, personas), so the app shows only those
                   (features.py, §6.11a)
-  GET  /search?q=[&limit=&before=&tools=1&memory=0&session=] → every thread's messages,
-                  titles, recaps and projects, and long-term memory when this
-                  host has agent-memory (search.py, §6.14)
+  GET  /search?q=[&limit=&before=&tools=1&memory=0&session=&translate=1] → every
+                  thread's messages, titles, recaps and projects, and long-term
+                  memory when this host has agent-memory. `q` takes the search
+                  operators (-word, OR, (), NEAR, from:, in:, thread:, harness:,
+                  tool:, kind:, after:/before:), and `translate=1` turns a plain
+                  English question into them (search.py, §6.14)
+  GET  /search/help → those operators as a page, open, linked from every
+                  search answer (`Link: …; rel="help"`, and `help` in the body)
   GET  /contacts?q=[&limit=][&label=…&label=…][&labels_mode=any|all] →
                   people from the phone's contacts, or those a name, number or
                   email being typed matches, with any (or all) of the labels,
@@ -432,7 +437,7 @@ CORS_PATHS = frozenset({
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
-    "/sessions/events", "/search", "/contacts",
+    "/sessions/events", "/search", "/search/help", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
@@ -669,7 +674,7 @@ def _cors(h: BaseHTTPRequestHandler) -> None:
                                     and h.command in ("POST", "OPTIONS")):
         return
     h.send_header("Access-Control-Allow-Origin", "*")
-    h.send_header("Access-Control-Expose-Headers", "Content-Encoding")
+    h.send_header("Access-Control-Expose-Headers", "Content-Encoding, Link")
 
 
 #: What a refusal is sent as when Cloudflare carries it. Cloudflare puts its
@@ -685,11 +690,15 @@ def _status(h: BaseHTTPRequestHandler, code: int) -> int:
     return code
 
 
-def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str) -> None:
+def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str,
+          headers: dict | None = None) -> None:
+    headers = dict(headers or {})
     h.send_response(_status(h, code))
     h.send_header("Content-Type", ctype)
     h.send_header("Content-Length", str(len(body)))
-    h.send_header("Cache-Control", "no-store")
+    h.send_header("Cache-Control", headers.pop("Cache-Control", "no-store"))
+    for k, v in headers.items():
+        h.send_header(k, v)
     _cors(h)
     h.end_headers()
     h.wfile.write(body)
@@ -761,11 +770,13 @@ def _send_file(h: BaseHTTPRequestHandler, file, size: int, ctype: str,
             left -= len(chunk)
 
 
-def _json(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
-    _send(h, code, json.dumps(obj).encode(), "application/json")
+def _json(h: BaseHTTPRequestHandler, code: int, obj: dict,
+          headers: dict | None = None) -> None:
+    _send(h, code, json.dumps(obj).encode(), "application/json", headers)
 
 
-def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
+def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict,
+            headers: dict | None = None) -> None:
     """JSON, compressed if the caller said it could take it.
 
     Big listings (contacts, the timeline, a long thread) are highly
@@ -783,11 +794,13 @@ def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict) -> None:
         h.send_header("Content-Encoding", "gzip")
         h.send_header("Content-Length", str(len(packed)))
         h.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            h.send_header(k, v)
         _cors(h)
         h.end_headers()
         h.wfile.write(packed)
         return
-    _send(h, code, body, "application/json")
+    _send(h, code, body, "application/json", headers)
 
 
 def _read_json(h: BaseHTTPRequestHandler) -> dict | None:
@@ -2145,11 +2158,22 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
                                    memory=arg("memory") not in ("0", "false"),
                                    sort=arg("sort"), after=arg("after"), offset=arg("offset"),
                                    since=arg("since"), who=arg("who"), rooms=arg("rooms"),
-                                   session=arg("session"))
+                                   session=arg("session"),
+                                   translate_nl=arg("translate") in ("1", "true"))
+        # The operators have a page of their own, and every answer points at
+        # it: a header a client can follow without reading the body (§6.14).
+        link = {"Link": f'<{search.HELP_PATH}>; rel="help"'}
         if ok:
-            _json_z(h, 200, {"ok": True, **detail})
+            _json_z(h, 200, {"ok": True, **detail}, link)
         else:
-            _json(h, detail.pop("status", 400), {"ok": False, **detail})
+            _json(h, detail.pop("status", 400), {"ok": False, **detail}, link)
+    elif path == "/search/help":
+        # The operators, as a page (search.help_html). No credential: it is
+        # the grammar, not anybody's words, so a link to it opens anywhere.
+        from . import search
+
+        _send(h, 200, search.help_html().encode(), "text/html; charset=utf-8",
+              {"Cache-Control": "public, max-age=300"})
     elif CONTACT_TIMELINE.fullmatch(path):
         _contact_timeline(h, CONTACT_TIMELINE.fullmatch(path).group(1), query)
     elif CONTACT_PHOTO.fullmatch(path):

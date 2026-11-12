@@ -86,7 +86,8 @@ from pathlib import Path
 from . import auth, transcript
 
 #: Bump when the schema or what a row holds changes: the index is rebuilt.
-SCHEMA_VERSION = 1
+#: 2 (12 Nov 2026): `docs.names`, the tool names a step row holds, for `tool:`.
+SCHEMA_VERSION = 2
 #: A query brings changed files up to date first, for at most this long.
 QUERY_BUDGET_S = 0.6
 #: How often the background thread looks for changed files.
@@ -127,7 +128,7 @@ CREATE TABLE IF NOT EXISTS threads (
   first_at REAL, last_at REAL);
 CREATE TABLE IF NOT EXISTS docs (
   id INTEGER PRIMARY KEY, session TEXT, msg TEXT, role TEXT, at REAL,
-  pos INTEGER, kind INTEGER, body TEXT);
+  pos INTEGER, kind INTEGER, body TEXT, names TEXT);
 CREATE TABLE IF NOT EXISTS rooms (session TEXT PRIMARY KEY, sig TEXT);
 CREATE INDEX IF NOT EXISTS docs_session_pos ON docs(session, pos);
 CREATE VIRTUAL TABLE IF NOT EXISTS text_fts USING fts5(
@@ -218,13 +219,34 @@ def _delete_docs(conn: sqlite3.Connection, where: str, args: tuple) -> None:
     conn.execute(f"DELETE FROM docs WHERE {where}", args)
 
 
+#: A tool name as the first line of a step reads: no spaces, and short. A
+#: result-only step (a pi `toolResult`, a Codex output) has its output on that
+#: line instead, which this is what keeps out of `names`.
+_NAME = re.compile(r"^[A-Za-z_][\w.:-]{0,60}$")
+
+
+def tool_names(tools: str) -> str:
+    """The tool names a step body holds, as `|bash|read|` — every harness
+    writes the name on the first line of each `\n\n` group (`bodies`, the pi
+    and Codex readers, Hermes's `tool` column). `""` when none reads like a
+    name. What `tool:` matches."""
+    got = []
+    for group in (tools or "").split("\n\n"):
+        first = group.strip().split("\n", 1)[0].strip()
+        if first and _NAME.fullmatch(first) and first.lower() not in got:
+            got.append(first.lower())
+    return "|" + "|".join(got) + "|" if got else ""
+
+
 def _insert_doc(conn: sqlite3.Connection, session: str, msg: str, role: str, at: float,
                 pos: int, kind: int, body: str) -> None:
     body = body.strip()[:BODY_MAX]
     if not body:
         return
-    cur = conn.execute("INSERT INTO docs(session, msg, role, at, pos, kind, body) "
-                       "VALUES(?,?,?,?,?,?,?)", (session, msg, role, at, pos, kind, body))
+    names = tool_names(body) if kind == _TOOL else None
+    cur = conn.execute("INSERT INTO docs(session, msg, role, at, pos, kind, body, names) "
+                       "VALUES(?,?,?,?,?,?,?,?)",
+                       (session, msg, role, at, pos, kind, body, names))
     fts = "tool_fts" if kind == _TOOL else "text_fts"
     conn.execute(f"INSERT INTO {fts}(rowid, body) VALUES(?, ?)", (cur.lastrowid, body))
 
@@ -1087,14 +1109,54 @@ FIELDS = {"from": "from", "who": "from",
           "in": "in", "project": "in", "folder": "in",
           "thread": "thread", "title": "thread",
           "harness": "harness", "agent": "harness",
+          "tool": "tool", "ran": "tool",
           "after": "after", "since": "after",
           "before": "before", "until": "before",
           "kind": "kind", "is": "kind"}
-#: A token: a leading `-`, a `field:`, then a "quoted phrase" or a bare word.
-_TOKEN = re.compile(r'-?(?:[A-Za-z][A-Za-z_]*:)?"[^"]*"|\S+')
-_FIELD = re.compile(r'^(-?)([A-Za-z][A-Za-z_]*):(.*)$', re.DOTALL)
+#: How far apart `a NEAR b` allows them, in tokens, when no `/n` is given.
+NEAR_DEFAULT = 10
+#: The operators: syntax, what it does, an example. The help page is rendered
+#: from this list, so the two cannot drift apart.
+OPERATORS = (
+    ('"a phrase"', "those words, in that order", '"follow along clock"'),
+    ("-word, -“a phrase”", "must not be there", "heron -kingfisher"),
+    ("a OR b, a | b", "either of them (AND is the default, said out loud or not)",
+     "snapcast OR pulseaudio"),
+    ("(a OR b) c", "grouping, nested as deep as you like", "(piper OR mimic) voice"),
+    ("word*", "that start of a word — the last word is a prefix anyway", "gaug*"),
+    ("a NEAR b, a NEAR/5 b", "close together: within ten words, or the /n given",
+     "restart NEAR sessiond"),
+    ("from:me, from:agent", "whose words", "from:me kiwi"),
+    ("in:<words>", "the thread's project or folder", "in:agent-media"),
+    ("thread:<words>", "its title, Claude's own title, or its first prompt",
+     'thread:"speech gauge"'),
+    ("harness:<name>", "claude, codex, pi, hermes or matrix", "harness:matrix"),
+    ("tool:<name>", "a step that ran that tool (`ran:` is the same)", "tool:bash grep"),
+    ("kind:text, kind:tool", "the words only, or the tool steps only", "kind:tool ocelot"),
+    ("after:<date>, before:<date>",
+     "2026-11-12, 2026-11, 2026, today, yesterday, or 7d / 3w / 6m / 1y ago",
+     "gauge after:7d"),
+    ("<date>..<date>", "between the two; either side may be left off",
+     "gauge 2026-11-01..2026-11-12"),
+    ("-in:, -thread:, -harness:, -tool:", "the other way round", "-in:meridian"),
+)
+#: A field operator's value, a bare token, the date forms.
+_FIELD = re.compile(r"^(-?)([A-Za-z][A-Za-z_]*):(.*)$", re.DOTALL)
 _RELATIVE = re.compile(r"^(\d+)\s*([dwmy])$")
 _DATE = re.compile(r"^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$")
+_RANGE = re.compile(r"^([^\s.]*)\.\.([^\s.]*)$")
+_NEAR = re.compile(r"^NEAR(?:/(\d+))?$")
+_AROUND = re.compile(r"^AROUND\((\d+)\)$", re.IGNORECASE)
+#: The tokens a query is made of, in the order they are tried.
+_TOK = re.compile(r"""
+    (?P<around>AROUND\(\d+\))
+  | (?P<open>\()
+  | (?P<close>\))
+  | (?P<bar>\|)
+  | (?P<field>-?[A-Za-z][A-Za-z_]*:(?:"[^"]*"|[^\s()]*))
+  | (?P<phrase>-?"[^"]*")
+  | (?P<word>-?[^\s()|]+)
+""", re.X | re.I)
 
 
 class QueryError(ValueError):
@@ -1128,97 +1190,238 @@ def _when(value: str) -> float:
     raise QueryError(f"{value} is not a date (2026-11-12, today, 7d)")
 
 
+# --- reading a query ------------------------------------------------------------
+
+
+def _term_node(body: str, state: dict, *, negated: bool) -> dict | None:
+    """A word or a `"phrase"` as a leaf of the tree. A trailing `*` asks for
+    a prefix; a bare word's parts (`follow-along`) are ANDed, because that is
+    how FTS has them."""
+    phrase = body.startswith('"')
+    star = not phrase and body.endswith("*")
+    words = _WORD.findall(body.strip('"'))
+    if not words:
+        return None
+    if phrase:
+        leaves = [{"op": "term", "text": " ".join(words), "phrase": True}]
+    else:
+        leaves = [{"op": "term", "text": w} for w in words]
+        if star:
+            leaves[-1]["prefix"] = True
+    for leaf in leaves:
+        (state["not"] if negated else state["terms"]).append(leaf["text"])
+    # The one that gets the as-you-type `*` if the query ends here.
+    state["last"] = None if (negated or phrase or star) else leaves[-1]
+    return leaves[0] if len(leaves) == 1 else {"op": "and", "of": leaves}
+
+
+def _field(token: str, state: dict) -> None:
+    """A `field:value` token, onto `state["filters"]`. `QueryError` on a
+    value the field cannot take; an unknown field never reaches here."""
+    neg, name, value = _FIELD.match(token).groups()
+    name = FIELDS[name.lower()]
+    if len(value) > 1 and value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    value, neg = value.strip(), bool(neg)
+    f = state["filters"]
+    state["last"] = None
+    if not value:
+        return
+    if name == "from":
+        got = FROM.get(value.lower())
+        if not got:
+            raise QueryError("from: is me or agent")
+        f["from"] = got
+    elif name == "kind":
+        if value.lower() not in KINDS:
+            raise QueryError("kind: is text or tool")
+        f["kind"] = value.lower()
+    elif name in ("after", "before"):
+        f[name] = _when(value)
+    else:
+        f.setdefault(name, []).append(
+            (value.lower() if name in ("harness", "tool") else value, neg))
+
+
+def _range(token: str, state: dict) -> bool:
+    """`<date>..<date>`, either side allowed to be missing, as `after:` and
+    `before:`. False when the token is not a range of dates, so it is read as
+    words instead."""
+    m = _RANGE.match(token)
+    if not m or not (m.group(1) or m.group(2)):
+        return False
+    lo, hi = m.groups()
+    try:
+        got = {**({"after": _when(lo)} if lo else {}),
+               **({"before": _when(hi)} if hi else {})}
+    except QueryError:
+        return False
+    state["filters"].update(got)
+    state["last"] = None
+    return True
+
+
+def _only_terms(node: dict) -> bool:
+    """Can `NEAR` take it? FTS5's NEAR takes phrases, nothing nested."""
+    return node["op"] == "term" or (node["op"] == "and"
+                                   and all(k["op"] == "term" for k in node["of"]))
+
+
+def _parse_or(toks: list, i: int, state: dict) -> tuple[dict | None, int]:
+    """`and (OR and)*` — the loosest binding, as everywhere else."""
+    node, i = _parse_and(toks, i, state)
+    alts = [node] if node else []
+    while i < len(toks) and toks[i][0] == "or":
+        other, i = _parse_and(toks, i + 1, state)
+        if other:
+            alts.append(other)
+    if not alts:
+        return None, i
+    return (alts[0] if len(alts) == 1 else {"op": "or", "of": alts}), i
+
+
+def _parse_and(toks: list, i: int, state: dict) -> tuple[dict | None, int]:
+    """Up to the next `OR` or `)`: words, `-words`, `NEAR`, a `( … )` of its
+    own, and the field operators along the way."""
+    yes: list[dict] = []
+    no: list[dict] = []
+    while i < len(toks):
+        kind, value = toks[i]
+        if kind in ("or", "close"):
+            break
+        if kind == "open":
+            # A ( that is never closed is read as if it were: a query being
+            # typed should answer, not refuse.
+            node, i = _parse_or(toks, i + 1, state)
+            if i < len(toks) and toks[i][0] == "close":
+                i += 1
+            if node:
+                yes.append(node)
+            state["last"] = None
+            continue
+        i += 1
+        if kind == "field":
+            _field(value, state)
+            continue
+        if kind == "and":
+            continue
+        if kind == "near":
+            left = yes.pop() if yes else None
+            right = None
+            if i < len(toks) and toks[i][0] in ("word", "phrase") \
+                    and not toks[i][1].startswith("-"):
+                right = _term_node(toks[i][1], state, negated=False)
+                i += 1
+            if left and right and _only_terms(left) and _only_terms(right):
+                yes.append({"op": "near", "of": [left, right],
+                            "within": int(value or NEAR_DEFAULT)})
+            else:
+                yes += [n for n in (left, right) if n]
+            state["last"] = None
+            continue
+        negated = value.startswith("-")
+        body = value[1:] if negated else value
+        if not negated and kind == "word" and _range(body, state):
+            continue
+        node = _term_node(body, state, negated=negated)
+        if node is not None:
+            (no if negated else yes).append(node)
+    if not yes and not no:
+        return None, i
+    node = None if not yes else (yes[0] if len(yes) == 1 else {"op": "and", "of": yes})
+    if no and node:
+        node = {"op": "not", "of": [node, no[0] if len(no) == 1 else {"op": "or", "of": no}]}
+    return node, i
+
+
+def _tokens(q: str) -> list[tuple[str, str]]:
+    out = []
+    for m in _TOK.finditer(q or ""):
+        kind, value = m.lastgroup, m.group(0)
+        if kind == "bar":
+            out.append(("or", ""))
+            continue
+        if kind == "around":
+            out.append(("near", _AROUND.match(value).group(1)))
+            continue
+        if kind == "field":
+            # An unknown `word:word` is not an operator at all: it is read as
+            # words, the way it reads (`notes:vole` finds both).
+            name = _FIELD.match(value).group(2).lower()
+            if name not in FIELDS:
+                out.append(("word", value))
+                continue
+        if kind == "word":
+            bare = value.upper()
+            if bare in ("OR", "AND"):
+                out.append((bare.lower(), ""))
+                continue
+            near = _NEAR.match(bare) or _AROUND.match(value)
+            if near:
+                out.append(("near", near.group(1) or ""))
+                continue
+        out.append((kind, value))
+    return out
+
+
 def parse(q: str) -> dict:
     """A query read the way a search engine reads one.
 
-    Words must all match and a `"quoted phrase"` stays whole, as before.
-    Beyond that: `-word` and `-"phrase"` must **not** be there, `a OR b` (or
-    `a | b`) takes either side, and a field operator narrows rather than
-    matches — `from:me` / `from:agent` (whose words), `in:<project or
-    folder>`, `thread:<words of its title>`, `harness:claude|codex|pi|
-    hermes|matrix`, `kind:text|tool`, `after:<date>` and `before:<date>`,
-    each also with a `-` in front (`-in:meridian`). `after:`/`before:`
-    take what `_when` reads. An unknown `word:word` is read as words, the
-    way it reads.
+    Words must all match and a `"quoted phrase"` stays whole. Beyond that:
+    `-word` and `-"a phrase"` must **not** be there, `a OR b` (or `a | b`)
+    takes either side, `( … )` groups, `word*` matches that start of a word,
+    `a NEAR b` (or `NEAR/5`, or `AROUND(5)`) wants them close together, and a
+    field operator narrows rather than matches — `from:`, `in:`, `thread:`,
+    `harness:`, `tool:`, `kind:`, `after:`, `before:` and `<date>..<date>`,
+    each but the last also with a `-` in front. `OPERATORS` is the whole
+    list, and the help page is rendered from it. An unknown `word:word` is
+    read as words, the way it reads, and a bracket left open is read as if
+    it had been closed: a query half typed answers rather than refuses.
 
     `{"terms": [every positive term, for highlighting],
-      "groups": [[[term, …] AND, …] OR, …] AND,
-      "not": [term, …], "filters": {…},
-      "prefix": the last word typed matches as a prefix}`
+      "tree": a node, or None when the query has no words,
+      "not": [term, …] — every negated one, for a chip,
+      "filters": {…}}`
+
+    A node is `{"op": "term", "text", "prefix"?, "phrase"?}`,
+    `{"op": "and"|"or", "of": [node, …]}`, `{"op": "not", "of": [keep,
+    drop]}`, or `{"op": "near", "of": [node, node], "within": n}`.
     """
-    groups: list[list[list[str]]] = []
-    nots: list[str] = []
-    filters: dict = {"in": [], "thread": [], "harness": []}
-    prefix = False
-    pending_or = False
-    for m in _TOKEN.finditer(q or ""):
-        token = m.group(0)
-        if token == "|" or token.upper() == "OR":
-            pending_or = bool(groups)
-            continue
-        if token.upper() == "AND":  # the default; said out loud or not
-            continue
-        fm = _FIELD.match(token)
-        if fm and FIELDS.get(fm.group(2).lower()):
-            neg, name, value = bool(fm.group(1)), FIELDS[fm.group(2).lower()], fm.group(3)
-            if len(value) > 1 and value.startswith('"') and value.endswith('"'):
-                value = value[1:-1]
-            value = value.strip()
-            prefix, pending_or = False, False
-            if not value:
-                continue
-            if name == "from":
-                got = FROM.get(value.lower())
-                if not got:
-                    raise QueryError("from: is me or agent")
-                filters["from"] = got
-            elif name == "kind":
-                if value.lower() not in KINDS:
-                    raise QueryError("kind: is text or tool")
-                filters["kind"] = value.lower()
-            elif name in ("after", "before"):
-                filters[name] = _when(value)
-            else:
-                filters[name].append((value.lower() if name == "harness" else value, neg))
-            continue
-        neg = token.startswith("-")
-        body = token[1:] if neg else token
-        if body.startswith('"'):
-            words = _WORD.findall(body.strip('"'))
-            terms, bare = ([" ".join(words)] if words else []), False
-        else:
-            terms, bare = _WORD.findall(body), True
-        if not terms:
-            continue
-        if neg:
-            nots.extend(terms)
-            prefix = False
-        else:
-            if pending_or and groups:
-                groups[-1].append(terms)
-            else:
-                groups.append([terms])
-            prefix = bare
-        pending_or = False
-    terms = [t for g in groups for alt in g for t in alt]
-    return {"terms": terms, "groups": groups, "not": nots,
-            "filters": {k: v for k, v in filters.items() if v != []},
-            "prefix": prefix and bool(terms)}
+    state: dict = {"terms": [], "not": [], "filters": {}, "last": None}
+    toks = _tokens(q)
+    nodes: list[dict] = []
+    i = 0
+    while i < len(toks):
+        node, after = _parse_or(toks, i, state)
+        if node:
+            nodes.append(node)
+        if after == i or (after < len(toks) and toks[after][0] == "close"):
+            after += 1  # a ) with no (, or a token nothing could be made of
+        i = after
+    if state["last"] is not None:
+        # As-you-type: the last word of all matches as a prefix, so results
+        # come while it is still being typed.
+        state["last"]["prefix"] = True
+    tree = nodes[0] if len(nodes) == 1 else {"op": "and", "of": nodes} if nodes else None
+    return {"terms": state["terms"], "tree": tree, "not": state["not"],
+            "filters": state["filters"]}
 
 
 def terms_of(q: str) -> list[str]:
-    """The words a query is made of, as they are matched: quoted phrases are
-    kept whole, everything else is split into words, and the operators
-    (`-word`, `OR`, `from:`, …) are read by `parse` instead."""
+    """The words a query is made of, as they are matched: quoted phrases kept
+    whole, everything else split into words, the operators read by `parse`."""
     return parse(q)["terms"]
 
 
 def operators_of(parsed: dict) -> dict:
-    """What the answer says about how `q` was read, JSON-shaped."""
-    pairs = ("in", "thread", "harness")
-    return {"groups": parsed["groups"], "not": parsed["not"],
+    """How `q` was read, JSON-shaped, for a client that shows it back."""
+    pairs = ("in", "thread", "harness", "tool")
+    return {"tree": parsed["tree"], "not": parsed["not"],
             "filters": {k: ([{"value": v, "not": n} for v, n in got] if k in pairs else got)
                         for k, got in parsed["filters"].items()}}
+
+
+# --- the FTS5 match -------------------------------------------------------------
 
 
 def _literal(t: str, prefix: bool = False) -> str:
@@ -1226,32 +1429,27 @@ def _literal(t: str, prefix: bool = False) -> str:
     return quoted + "*" if prefix and " " not in t else quoted
 
 
+def _fts(node: dict) -> str:
+    op = node["op"]
+    if op == "term":
+        return _literal(node["text"], bool(node.get("prefix")))
+    if op == "near":
+        return f"NEAR({' '.join(_fts(k).strip('()') for k in node['of'])}, {node['within']})"
+    if op == "not":
+        return f"({_fts(node['of'][0])} NOT {_fts(node['of'][1])})"
+    return "(" + f" {op.upper()} ".join(_fts(k) for k in node["of"]) + ")"
+
+
 def fts_query(parsed) -> str:
-    """The FTS5 MATCH for a parsed query (or, as before, a plain list of
-    terms): every group must match, an OR group either of its sides, a
-    `-word` must not be there, and the last word typed matches as a prefix
-    (as-you-type)."""
+    """The FTS5 MATCH for a parsed query, or for a plain list of terms."""
     if isinstance(parsed, (list, tuple)):
-        terms = list(parsed)
-        parsed = {"groups": [[[t]] for t in terms], "not": [],
-                  "prefix": bool(terms) and " " not in terms[-1]}
-    groups, nots = parsed.get("groups") or [], parsed.get("not") or []
-    parts = []
-    for gi, group in enumerate(groups):
-        alts = []
-        for ai, alt in enumerate(group):
-            last = (parsed.get("prefix") and gi == len(groups) - 1
-                    and ai == len(group) - 1)
-            lits = [_literal(t, prefix=bool(last) and i == len(alt) - 1)
-                    for i, t in enumerate(alt)]
-            one = " AND ".join(lits)
-            alts.append(one if len(lits) == 1 else f"({one})")
-        part = " OR ".join(alts)
-        parts.append(part if len(alts) == 1 else f"({part})")
-    match = " AND ".join(parts)
-    if nots and match:
-        match = f"({match}) NOT ({' OR '.join(_literal(t) for t in nots)})"
-    return match
+        leaves = [{"op": "term", "text": t} for t in parsed]
+        if leaves and " " not in leaves[-1]["text"]:
+            leaves[-1]["prefix"] = True
+        parsed = {"tree": (leaves[0] if len(leaves) == 1
+                           else {"op": "and", "of": leaves} if leaves else None)}
+    tree = parsed.get("tree")
+    return _fts(tree) if tree else ""
 
 
 def _like(value: str) -> str:
@@ -1390,19 +1588,33 @@ def _threads_rows(conn: sqlite3.Connection) -> dict[str, dict]:
     return {r[0]: dict(zip(cols, r)) for r in conn.execute(f"SELECT {', '.join(cols)} FROM threads")}
 
 
+def _node_match(hay: str, node: dict) -> bool:
+    """One node of a parsed query against a plain string (a thread's title,
+    recap or project), the way `_mark_terms` matches: at the start of a word,
+    case-insensitive. `NEAR` is read as "both here" — the distance is the
+    index's to judge, and these are a line long."""
+    op = node["op"]
+    if op == "term":
+        return bool(_mark_terms(hay, [node["text"]]))
+    if op == "not":
+        keep, drop = node["of"]
+        return _node_match(hay, keep) and not _node_match(hay, drop)
+    if op == "or":
+        return any(_node_match(hay, k) for k in node["of"])
+    return all(_node_match(hay, k) for k in node["of"])
+
+
 def _words_match(hay: str, parsed: dict) -> bool:
-    """Do a thread's own words satisfy the query: every group (either side of
-    an `OR`), and none of the `-word`s."""
-    for group in parsed.get("groups") or []:
-        if not any(all(_mark_terms(hay, [w]) for w in alt) for alt in group):
-            return False
-    return not any(_mark_terms(hay, [w]) for w in parsed.get("not") or [])
+    """Does a thread's own words satisfy the query?"""
+    tree = parsed.get("tree")
+    return bool(tree) and _node_match(hay, tree)
 
 
 def _thread_passes(t: dict | None, view: dict, f: dict) -> bool:
     """A thread hit under the field operators: `in:`, `thread:`, `harness:`
-    and `before:`. `from:` and `kind:` are about messages — `who=` never
-    narrowed threads either, and `kind:tool` answers no thread at all."""
+    and `before:`. `from:`, `kind:` and `tool:` are about messages — `who=`
+    never narrowed threads either, and a query about tool steps answers no
+    thread at all (the route leaves `threads` empty for those)."""
     t = t or {}
     where = {"in": [view.get("project") or "", t.get("cwd") or ""],
              "thread": [view.get("title") or "", t.get("ai_title") or "",
@@ -1497,6 +1709,11 @@ def _narrowing(fts: str, *, since: float | None, who: str | None,
         sql += (" AND d.session " + ("NOT IN" if neg else "IN")
                 + " (SELECT session FROM threads WHERE harness = ?)")
         args.append(value)
+    for value, neg in f.get("tool", []):
+        # `names` is `|bash|read|` on a step row, NULL on a words row, so a
+        # `tool:` query is a tool-step query (the route sets `kind` too).
+        sql += f" AND COALESCE(d.names, '') {'NOT ' if neg else ''}LIKE ? ESCAPE '\\'"
+        args.append(_like("|" + value + "|"))
     if f.get("before") is not None:
         sql += " AND d.at < ?"
         args.append(f["before"])
@@ -1623,6 +1840,128 @@ def _session_total(conn: sqlite3.Connection, query: str, session: str,
                         params).fetchone()[0]
 
 
+# --- plain English, into operators ----------------------------------------------
+
+#: Where the helper page lives (app.py serves it, rendered from `OPERATORS`).
+HELP_PATH = "/search/help"
+#: How long a translated query is remembered, so paging never asks twice.
+_NL_TTL_S = 900.0
+_NL_CACHE: dict[str, tuple[float, str]] = {}
+#: At most this many are kept (a search box can be typed into all day).
+_NL_MAX = 64
+
+
+def translate_enabled() -> bool:
+    return (os.environ.get("MEDIA_SEARCH_TRANSLATE", "1") or "1").strip() != "0"
+
+
+def _translate_prompt() -> str:
+    """The system prompt: the grammar itself, from `OPERATORS`, so the model
+    is told exactly what the parser takes and nothing it does not."""
+    from datetime import datetime
+
+    lines = "\n".join(f"  {syntax} — {what} (e.g. {eg})" for syntax, what, eg in OPERATORS)
+    return (
+        "You turn a question about someone's own chat history into a search "
+        "query for a full-text index of those chats. The query language is "
+        f"exactly this and nothing else:\n{lines}\n"
+        f"Today is {datetime.now():%Y-%m-%d}. Keep the words the person would "
+        "have actually said in the conversation, drop the ones that are only "
+        "about searching (\"find\", \"what did I say about\", \"show me\"), and "
+        "add the operators their question implies. Prefer few words: the index "
+        "needs every word to match. Reply with the query on one line, nothing "
+        "else — no quotes around the whole thing, no explanation.")
+
+
+def translatable(parsed: dict, q: str) -> bool:
+    """Is this worth a gateway call? Only a query with no operators of its
+    own that reads like a sentence — three words or more, or a question."""
+    if parsed["not"] or parsed["filters"]:
+        return False
+    return len((q or "").split()) >= 3 or (q or "").strip().endswith("?")
+
+
+def translate(q: str) -> str | None:
+    """`q` as operators, from the summary gateway (Haiku by default, the
+    follow-up's call style). `None` when it is switched off, the gateway does
+    not answer, or its answer has no words in it. Remembered for 15 minutes,
+    so the next page of the same search does not ask again."""
+    if not translate_enabled():
+        return None
+    key = " ".join((q or "").lower().split())
+    now = time.monotonic()
+    got = _NL_CACHE.get(key)
+    if got and now - got[0] < _NL_TTL_S:
+        return got[1] or None
+    from agent_media_core.intake._summary import _chat, _int_env, DEFAULT_TIMEOUT
+
+    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT",
+                       _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
+    model = (os.environ.get("MEDIA_SEARCH_TRANSLATE_MODEL")
+             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
+    out = _chat(_translate_prompt(), (q or "").strip()[:500], timeout, model=model) or ""
+    line = next((ln.strip().strip("`").strip() for ln in out.splitlines() if ln.strip()), "")
+    line = line[:300]
+    try:
+        ok = bool(line) and bool(parse(line)["terms"])
+    except QueryError:
+        ok = False
+    if len(_NL_CACHE) >= _NL_MAX:
+        _NL_CACHE.clear()
+    _NL_CACHE[key] = (now, line if ok else "")
+    return line if ok else None
+
+
+# --- the helper page ------------------------------------------------------------
+
+
+_HELP_CSS = """
+:root { color-scheme: light dark; --ink: #16181d; --dim: #5c6370; --line: #e3e5ea;
+        --bg: #fbfbfc; --chip: #f2f3f5; }
+@media (prefers-color-scheme: dark) {
+  :root { --ink: #e8eaee; --dim: #9aa1ad; --line: #2a2d34; --bg: #15171a; --chip: #21242a; } }
+* { box-sizing: border-box; }
+body { margin: 0 auto; padding: 2rem 1.25rem 4rem; max-width: 46rem; background: var(--bg);
+       color: var(--ink); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+p.lead { color: var(--dim); margin: 0 0 1.75rem; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em;
+     color: var(--dim); font-weight: 600; padding: 0 .6rem .4rem 0; }
+td { padding: .55rem .6rem .55rem 0; border-top: 1px solid var(--line); vertical-align: top; }
+td.syntax { white-space: nowrap; }
+code { font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+       background: var(--chip); border-radius: 4px; padding: .1rem .3rem; }
+td.eg code { background: none; padding: 0; color: var(--dim); }
+footer { margin-top: 2rem; color: var(--dim); font-size: .85rem; }
+"""
+
+
+def help_html() -> str:
+    """The helper page: every operator, its example, rendered from
+    `OPERATORS` so the page and the parser cannot drift apart."""
+    from html import escape
+
+    rows = []
+    for syntax, what, eg in OPERATORS:
+        bits = " ".join(f"<code>{escape(s.strip())}</code>" for s in syntax.split(","))
+        rows.append(f"<tr><td class=syntax>{bits}</td><td>{escape(what)}</td>"
+                    f"<td class=eg><code>{escape(eg)}</code></td></tr>")
+    return ("<!doctype html><html lang=en><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width, initial-scale=1'>"
+            "<title>Search operators</title><style>" + _HELP_CSS + "</style>"
+            "<body><h1>Search operators</h1>"
+            "<p class=lead>Every word has to match, and the last one matches as a "
+            "prefix, so results come as you type. These narrow it down.</p>"
+            "<table><tr><th>Type this</th><th>To find</th><th>For example</th></tr>"
+            + "".join(rows) +
+            "</table><footer>Anything the box does not recognise is read as words, "
+            "so <code>notes:vole</code> finds both. A plain English question — "
+            "<code>what did I say about the gauge last week</code> — is turned into "
+            "these operators and shown back to you, which you can edit or "
+            "undo.</footer></body></html>")
+
+
 # --- memory ---------------------------------------------------------------------
 
 #: `(checked at, available)`: whether agent-memory answers on this host.
@@ -1668,7 +2007,8 @@ def _memory_section(q: str, limit: int = 8) -> dict:
 
 def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
            memory: bool = True, sort=None, after=None, offset=None, since=None,
-           who=None, rooms=None, session=None) -> tuple[bool, dict]:
+           who=None, rooms=None, session=None,
+           translate_nl: bool = False) -> tuple[bool, dict]:
     """`GET /search` (server-contract.md §6.14)."""
     user, err = auth.gate(bearer)
     if not user:
@@ -1677,9 +2017,22 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
         parsed = parse(q)
     except QueryError as e:
         return False, {"error": str(e), "status": 400}
+    # `translate=1`: a question in plain English, turned into the operators
+    # and said out loud in the answer, never silently.
+    said = None
+    if translate_nl and translatable(parsed, q):
+        got = translate(q)
+        if got:
+            try:
+                other = parse(got)
+            except QueryError:
+                other = {"terms": []}
+            if other["terms"]:
+                parsed, said = other, {"from": q, "to": got}
     terms = parsed["terms"]
     if not terms:
-        return False, {"error": "nothing to search for", "status": 400}
+        return False, {"error": "nothing to search for", "status": 400,
+                       "help": HELP_PATH}
     try:
         n = max(1, min(LIMIT_MAX, int(limit))) if limit not in (None, "") else LIMIT
     except (TypeError, ValueError):
@@ -1696,7 +2049,8 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
     # `after:` is `since` (the later of the two), `kind:` picks the tables.
     ops = parsed["filters"]
     who = ops.get("from") or who
-    kind = ops.get("kind")
+    # `tool:` is a question about tool steps, so it turns them on by itself.
+    kind = ops.get("kind") or ("tool" if ops.get("tool") else None)
     times = {}
     for name, v in (("before", before), ("after", after), ("since", since)):
         try:
@@ -1747,6 +2101,7 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
         except sqlite3.OperationalError as e:
             return False, {"error": f"could not search for that ({e})", "status": 400}
         out = {"q": q, "terms": terms, "query": operators_of(parsed),
+               "help": HELP_PATH,
                "tools": bool(tools) or kind == "tool", "sort": sort,
                "threads": (_thread_hits(parsed, rows, listed, owned, sort=sort,
                                         since=times["since"], rooms=rooms)
@@ -1754,6 +2109,8 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
                "messages": messages,
                "next": nxt,
                "indexing": not caught["done"]}
+        if said:
+            out["translated"] = said
         if session:
             out["session"] = session
             if total is not None:

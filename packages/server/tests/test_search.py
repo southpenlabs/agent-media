@@ -379,9 +379,13 @@ def test_route_shape_and_auth(server, signed_in, home):
     s.end_turn()
     res, obj = call(server, "GET", "/search?q=kestrel", headers=AUTH)
     assert res.status == 200, obj
-    assert set(obj) == {"ok", "q", "terms", "query", "tools", "sort", "threads", "messages",
-                        "next", "indexing", "memory", "docs"}
-    assert obj["query"] == {"groups": [[["kestrel"]]], "not": [], "filters": {}}
+    assert set(obj) == {"ok", "q", "terms", "query", "help", "tools", "sort", "threads",
+                        "messages", "next", "indexing", "memory", "docs"}
+    assert obj["query"] == {"tree": {"op": "term", "text": "kestrel", "prefix": True},
+                            "not": [], "filters": {}}
+    assert obj["help"] == "/search/help"
+    assert res.getheader("Link") == '</search/help>; rel="help"'
+    assert "Link" in res.getheader("Access-Control-Expose-Headers")
     [m] = obj["messages"]
     assert set(m) == {"session", "message", "role", "at", "kind", "snippet", "thread"}
     assert set(m["thread"]) == {"title", "project", "harness", "live", "archived"}
@@ -669,13 +673,24 @@ def test_an_unknown_operator_is_read_as_words(home, gate):
     assert len(out["messages"]) == 1
     assert out["terms"] == ["notes", "vole"]
     assert out["query"]["filters"] == {}
+    # A bracket left open is read as if it were closed, and a stray ) ignored.
+    assert len(ask("(vole")["messages"]) == 1
+    assert len(ask("vole)")["messages"]) == 1
 
 
 def test_the_answer_says_how_the_query_was_read(home, gate):
     claude(home, SID).prompt("quokka")
     out = ask('quokka OR "tree kangaroo" -wombat from:me in:zoo kind:text')
     assert out["terms"] == ["quokka", "tree kangaroo"]
-    assert out["query"]["groups"] == [[["quokka"], ["tree kangaroo"]]]
+    # A `-word` binds inside the conjunct it sits in, as a search engine's does:
+    # here to the second side of the OR. Brackets, or putting it first, widen it.
+    assert out["query"]["tree"] == {
+        "op": "or",
+        "of": [{"op": "term", "text": "quokka"},
+               {"op": "not", "of": [{"op": "term", "text": "tree kangaroo", "phrase": True},
+                                    {"op": "term", "text": "wombat"}]}]}
+    wide = ask("-wombat (quokka OR koala)")["query"]["tree"]
+    assert wide["op"] == "not" and wide["of"][0]["op"] == "or"
     assert out["query"]["not"] == ["wombat"]
     assert out["query"]["filters"] == {"from": "me", "kind": "text",
                                        "in": [{"value": "zoo", "not": False}]}
@@ -691,3 +706,142 @@ def test_the_find_bar_counts_under_the_operators(home, gate):
     assert out["total"] == 6
     out = ask("tapir from:me", session=SID, sort="oldest")
     assert out["total"] == 3 and {h["role"] for h in out["messages"]} == {"user"}
+
+
+
+def test_brackets_group_and_nest(home, gate):
+    s = claude(home, SID)
+    s.prompt("the piper voice is too fast")
+    s.text("mimic is slower")
+    s.end_turn()
+    assert len(ask("(piper OR mimic)")["messages"]) == 2
+    assert [h["role"] for h in ask("(piper OR mimic) voice")["messages"]] == ["user"]
+    assert ask("(piper OR mimic) AND (voice AND slower)")["messages"] == []
+    assert len(ask("((piper OR wombat) OR (mimic AND slower))")["messages"]) == 2
+    # The tree says how it was read.
+    assert search.parse("(a OR b) c")["tree"] == {
+        "op": "and", "of": [{"op": "or", "of": [{"op": "term", "text": "a"},
+                                                {"op": "term", "text": "b"}]},
+                            {"op": "term", "text": "c", "prefix": True}]}
+
+
+def test_a_star_asks_for_a_prefix(home, gate):
+    s = claude(home, SID)
+    s.prompt("the gauge was wired")
+    s.text("the wiring is done")
+    s.end_turn()
+    # Only the last word is a prefix by itself; a `*` says so anywhere.
+    assert ask("wir done")["messages"] == []
+    assert [h["role"] for h in ask("wir* done")["messages"]] == ["assistant"]
+    assert search.fts_query(search.parse("wir* done")) == '("wir"* AND "done"*)'
+
+
+def test_near_wants_them_close_together(home, gate):
+    s = claude(home, SID)
+    s.prompt("restart sessiond when the turn ends")
+    s.text("restart " + " ".join(f"word{i}" for i in range(25)) + " sessiond")
+    s.end_turn()
+    assert len(ask("restart sessiond")["messages"]) == 2
+    assert [h["role"] for h in ask("restart NEAR sessiond")["messages"]] == ["user"]
+    assert len(ask("restart NEAR/30 sessiond")["messages"]) == 2
+    assert len(ask("restart AROUND(30) sessiond")["messages"]) == 2
+    assert search.fts_query(search.parse("a NEAR/5 b")) == 'NEAR("a" "b", 5)'
+
+
+def test_tool_names_a_step_ran(home, gate):
+    s = claude(home, SID)
+    s.prompt("look for the ocelot")
+    s.tool("Bash", {"command": "grep -r ocelot notes/"}, "t1")
+    s.result("t1", "none")
+    s.text("No ocelot there.")
+    s.end_turn()
+    out = ask("ocelot tool:bash")
+    assert [h["kind"] for h in out["messages"]] == ["tool"] and out["tools"] is True
+    assert out["threads"] == []
+    assert ask("ocelot tool:read")["messages"] == []
+    assert ask("ocelot ran:bash")["messages"] == out["messages"]
+    assert len(ask("ocelot -tool:read", tools=True)["messages"]) == 1
+    # The names a step row holds, as the index keeps them.
+    assert search.tool_names("Bash\nRun the grep\n\nRead\nthe notes") == "|bash|read|"
+    assert search.tool_names("some output with spaces") == ""
+
+
+def test_a_date_range(home, gate):
+    import datetime as dt
+
+    s = claude(home, SID)
+    s.prompt("the gecko again")
+    s.end_turn()
+    at = ask("gecko")["messages"][0]["at"]
+    day = dt.datetime.fromtimestamp(at).date()
+    before, after = day - dt.timedelta(days=1), day + dt.timedelta(days=1)
+    assert len(ask(f"gecko {before}..{after}")["messages"]) == 1
+    assert ask(f"gecko {after}..")["messages"] == []
+    assert len(ask(f"gecko ..{after}")["messages"]) == 1
+    assert ask(f"gecko {before}..{before}")["messages"] == []
+    # Something that is not a range of dates is read as words.
+    assert search.parse("a..b")["terms"] == ["a", "b"]
+
+
+def test_the_help_page_is_the_operators(server, signed_in, home):
+    res, body = call(server, "GET", "/search/help", headers=AUTH)
+    assert res.status == 200 and res.getheader("Content-Type").startswith("text/html")
+    page = __import__("html").unescape(body.decode())
+    for syntax, _what, _eg in search.OPERATORS:
+        assert syntax.split(",")[0].strip() in page
+    # Open: the grammar is nobody's words, so a link to it needs no token.
+    res, _ = call(server, "GET", "/search/help")
+    assert res.status == 200
+
+
+def test_plain_english_is_translated_and_said_out_loud(home, gate, monkeypatch):
+    s = claude(home, SID)
+    s.prompt("the gauge is wrong again")
+    s.text("fixed the gauge")
+    s.end_turn()
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append((system, user))
+        return "gauge from:me\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    search._NL_CACHE.clear()
+    # Off unless asked for.
+    out = ask("what did I say about the gauge")
+    assert "translated" not in out and not asked
+    out = ask("what did I say about the gauge", translate_nl=True)
+    assert out["translated"] == {"from": "what did I say about the gauge", "to": "gauge from:me"}
+    assert out["q"] == "what did I say about the gauge"
+    assert out["terms"] == ["gauge"] and out["query"]["filters"] == {"from": "me"}
+    assert [h["role"] for h in out["messages"]] == ["user"]
+    # The grammar itself is what the model is told.
+    assert "kind:text" in asked[0][0] and search.OPERATORS[0][0] in asked[0][0]
+    # Asked once: the next page comes out of the cache.
+    ask("what did I say about the gauge", translate_nl=True)
+    assert len(asked) == 1
+    # A query that already has operators is never sent, nor one of two words.
+    ask("gauge from:me", translate_nl=True)
+    ask("the gauge", translate_nl=True)
+    assert len(asked) == 1
+
+
+def test_a_translation_that_makes_no_sense_is_left_alone(home, gate, monkeypatch):
+    s = claude(home, SID)
+    s.prompt("the kiwi question")
+    s.end_turn()
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda *a, **k: "from:nobody ((")
+    search._NL_CACHE.clear()
+    out = ask("what did I ask about the kiwi", translate_nl=True)
+    # Left as the words that were typed, which is what a search of them finds.
+    assert "translated" not in out and out["terms"][-1] == "kiwi"
+    # The gateway not answering at all is the same.
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: None)
+    search._NL_CACHE.clear()
+    out = ask("what did I ask about the kiwi", translate_nl=True)
+    assert "translated" not in out
+    # And the switch turns it off.
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE", "0")
+    search._NL_CACHE.clear()
+    assert search.translate("what did I ask about the kiwi") is None

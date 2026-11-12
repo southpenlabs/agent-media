@@ -5782,7 +5782,7 @@ data: {}
 
 ### 6.14 Search — gated (built 23 Sep 2026)
 
-#### `GET /search?q=<words>[&limit=][&before=<at>][&tools=1][&memory=0][&sort=][&after=<at>][&offset=<n>][&since=<at>][&who=][&rooms=][&session=<id>]` — gated (`auth.gate`)
+#### `GET /search?q=<words>[&limit=][&before=<at>][&tools=1][&memory=0][&sort=][&after=<at>][&offset=<n>][&since=<at>][&who=][&rooms=][&session=<id>][&translate=1]` — gated (`auth.gate`)
 
 Every thread's messages — both sides; live, closed, headless and archived
 threads alike — plus thread titles, recaps and projects, plus long-term
@@ -5792,8 +5792,10 @@ memory as its own section when this host has agent-memory. Code:
 
 ```json
 {"ok": true, "q": "follow along", "terms": ["follow", "along"],
- "query": {"groups": [[["follow"]], [["along"]]], "not": [], "filters": {}},
- "tools": false, "sort": "newest",
+ "query": {"tree": {"op": "and", "of": [{"op": "term", "text": "follow"},
+                                        {"op": "term", "text": "along", "prefix": true}]},
+           "not": [], "filters": {}},
+ "help": "/search/help", "tools": false, "sort": "newest",
  "threads": [
    {"session": "5f8c…", "title": "Sasonica rebuild", "project": "p-agent-media",
     "harness": "claude", "live": true, "archived": false,
@@ -5818,36 +5820,68 @@ memory as its own section when this host has agent-memory. Code:
   read — the app highlights them in the thread after a jump. No words
   (`q` empty or all punctuation, or only operators): 400
   `"nothing to search for"`.
-- **Operators** (12 Nov 2026), the ones a search engine takes, read by
-  `search.parse`:
+- **Operators** (12 Nov 2026), the ones a search engine takes. `search.parse`
+  reads them and `search.OPERATORS` is the list the help page is rendered
+  from, so the page, the model's prompt and the parser cannot drift apart:
 
   | | |
   | --- | --- |
   | `-word`, `-"a phrase"` | must **not** be there |
   | `a OR b`, `a \| b` | either side (`AND` is the default, said or not) |
+  | `(a OR b) c` | grouping, nested as deep as you like |
+  | `word*` | that start of a word (the last word is a prefix anyway) |
+  | `a NEAR b`, `a NEAR/5 b`, `a AROUND(5) b` | within ten words of each other, or the `/n` given (FTS5 `NEAR`) |
   | `from:me`, `from:agent` | whose words — `who=`, and it wins over it (`mine`/`user`/`i`, `assistant`/`ai`/`them` too; `who:` is the same operator) |
   | `in:<words>` | the thread's project or folder holds them (`project:`, `folder:`) |
   | `thread:<words>` | its title, Claude's `ai-title` or its first prompt holds them (`title:`) |
   | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`) |
+  | `tool:<name>` | a tool step that ran it (`ran:`) — turns tool steps on by itself, like `kind:tool` |
   | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
-  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` ago. `after:` is `since=` (the later of the two wins); `before:` is a bound on the words, not the page cursor `before=` (`since:`, `until:`) |
+  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` ago. `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
+  | `<date>..<date>` | both of those at once; either side may be left off |
 
   A `-` in front of a field operator turns it around (`-in:meridian`,
-  `-thread:scratch`, `-harness:matrix`). An unknown `word:word` is read as
-  words, the way it reads (`notes:vole` finds both). The operators narrow
-  in the index, so a page comes back full; they narrow `threads` the same
-  way, except `from:` and `kind:` (which are about messages — `who=` never
-  narrowed threads either). A `from:`, `kind:` or date value that cannot be
-  read is 400 with what it takes.
-- **`query`** (12 Nov 2026): how `q` was read, for an app that wants to
-  show it back as chips — `{"groups": [[["tree kangaroo"], ["quokka"]],
-  …], "not": ["wombat"], "filters": {"from": "me", "kind": "text", "after":
-  <epoch>, "before": <epoch>, "in": [{"value": "zoo", "not": false}],
-  "thread": […], "harness": […]}}`. `groups` is an AND of ORs of ANDs (a
-  group per word typed, a group's alternatives either side of an `OR`, a
-  hyphenated word's parts ANDed); `filters` holds only the operators the
-  query used. `terms` stays what it was: every positive term, flat, to
-  highlight.
+  `-tool:read`). A `-word` binds to the conjunct it sits in, as a search
+  engine's does — `quokka OR "tree kangaroo" -wombat` takes the `-wombat`
+  off the second side only; brackets or putting it first widen it. An
+  unknown `word:word` is read as words, the way it reads (`notes:vole`
+  finds both), and a bracket left open is read as if it had been closed, so
+  a query half typed answers rather than refuses. The operators narrow in
+  the index, so a page comes back full; they narrow `threads` the same way,
+  except `from:`, `kind:` and `tool:` (which are about messages — `who=`
+  never narrowed threads either). A `from:`, `kind:` or date value that
+  cannot be read is 400 with what it takes.
+- **`query`** (12 Nov 2026): how `q` was read, for an app that wants to show
+  it back as chips — `{"tree": …, "not": ["wombat"], "filters": {"from":
+  "me", "kind": "text", "after": <epoch>, "before": <epoch>, "in":
+  [{"value": "zoo", "not": false}], "thread": […], "harness": […], "tool":
+  […]}}`. `tree` is how the words were grouped: a node is `{"op": "term",
+  "text", "prefix"?, "phrase"?}`, `{"op": "and"|"or", "of": [node, …]}`,
+  `{"op": "not", "of": [keep, drop]}` or `{"op": "near", "of": [node,
+  node], "within": n}`, and it is `null` when the query has no words.
+  `not` is every negated term wherever it sits, which is what a chip row
+  wants; `filters` holds only the operators the query used. `terms` stays
+  what it was: every positive term, flat, to highlight.
+- **`translate=1`** (12 Nov 2026): a question in plain English, turned into
+  those operators by the summary gateway (Haiku; the follow-up's call
+  style, `MEDIA_SEARCH_TRANSLATE_MODEL` / `_TIMEOUT`,
+  `MEDIA_SEARCH_TRANSLATE=0` switches it off) and then searched for. Never
+  silent: the answer carries `"translated": {"from": "<what was typed>",
+  "to": "<the query that ran>"}`, and `q` stays what was typed, so the app
+  can show the operators as chips with an "as typed" undo (ask again
+  without `translate`). Only when the query has **no operators of its own**
+  and reads like a sentence (three words or more, or ends in `?`), so an
+  operator query and a two-word query never pay for a call; the answer is
+  remembered for 15 minutes, so paging a translated search does not ask
+  again. A gateway that does not answer, or an answer with no words in it,
+  leaves the query exactly as typed and says nothing. The call is on the
+  query's own path, so a client should pass `translate=1` on submit, not on
+  every keystroke.
+- **`help`** (12 Nov 2026): the path of the operator page,
+  `"/search/help"` — see below. Every answer carries it, and the response
+  header `Link: </search/help>; rel="help"` says the same thing for a
+  client that reads headers (`Access-Control-Expose-Headers` lists `Link`,
+  so a browser may). A 400 for a query with no words carries it too.
 - **`messages`**, newest first, at most `limit` (default 20, at most 100).
   `message` is the §6.2.2 message id (the transcript `uuid` of its first
   record) — the id `/conversation/log?around=` takes. `kind` is `text`, or
@@ -5882,8 +5916,11 @@ memory as its own section when this host has agent-memory. Code:
   as any other, `/conversation/log?session=<id>&around=<message>`.
 - **`tools=1`** (the app's Advanced setting) adds tool steps: a tool's name,
   its title, its input summary and its result summary (§6.2.2 — summaries,
-  never file contents). Without it they are never searched. `kind:tool` in the
-  query turns them on by itself (and `tools` in the answer says so).
+  never file contents). Without it they are never searched. `kind:tool` or
+  `tool:<name>` in the query turns them on by itself (and `tools` in the
+  answer says so). A step row also keeps the names of the tools it holds
+  (`docs.names`, `|bash|read|`, from the first line of each step as every
+  harness writes it), which is what `tool:` matches; schema version 2.
 - **`threads`**: at most 20, newest first — threads whose title, latest
   recap or project hold every term (case-insensitive substring). Names are
   the thread list's (`/targets`, a 10 s cache) where it has the thread,
@@ -5935,6 +5972,15 @@ memory as its own section when this host has agent-memory. Code:
   thread by `at` instead. A Matrix hit opens the same way (17 Oct 2026):
   the room's log takes `around=<event id>` and finds it, paging back for
   it if the room does not hold it yet.
+
+#### `GET /search/help` — open (no credential)
+
+The operators as a page: a self-contained HTML table rendered from
+`search.OPERATORS` (`search.help_html`), light and dark, no assets. Open on
+every listener and needing no token — it is the grammar, not anybody's
+words, so a link to it opens anywhere a browser is (`Cache-Control:
+public, max-age=300`). The app's search header links it, and `/search`
+points at it in both the body (`help`) and a `Link: …; rel="help"` header.
 
 **The index.** SQLite FTS5 at `$XDG_STATE_HOME/agent-media/search.db`
 (`~/.local/state/…`): a `docs` table (one row per message and kind: session,
