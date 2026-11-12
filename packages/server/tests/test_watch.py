@@ -412,3 +412,26 @@ def test_discover_signed_out_has_no_recommendations(server, signed_in, fake, cre
     assert res.status == 400
     res, _ = call(server, "OPTIONS", "/watch/discover")
     assert res.status in (200, 204)
+
+
+def test_discover_takes_any_span_of_years(server, signed_in, fake, creds):
+    """The app's year range (David, 12 Nov 2026: "some filters for a year ...
+    Maybe a range?"): any span, one year, and the open-ended ones it sends
+    with both ends (1900-<to>, <from>-<next year>) go to Trakt as `years`;
+    Recommended, filtered here, keeps to the span too."""
+    _connect(server)
+    for year, want in (("2015-2019", "2015-2019"), ("2016", "2016"), ("1900-1999", "1900-1999"), ("2020-2027", "2020-2027")):
+        res, _ = call(server, "GET", f"/watch/discover?kind=movie&list=trending&year={year}", headers=AUTH)
+        assert res.status == 200, year
+        q = urllib.parse.parse_qs(fake.public[-1][0].partition("?")[2])
+        assert q["years"] == [want], year
+    _, every = call(server, "GET", "/watch/discover?kind=movie&list=recommended&hide_watched=0", headers=AUTH)
+    years = sorted({i["year"] for i in every["items"] if i.get("year")})
+    assert len(years) > 1, "the stub's recommendations span years"
+    lo = years[len(years) // 2]
+    _, obj = call(server, "GET", f"/watch/discover?kind=movie&list=recommended&hide_watched=0&year={lo}-2100", headers=AUTH)
+    assert obj["items"] and all(i["year"] >= lo for i in obj["items"])
+    _, obj = call(server, "GET", f"/watch/discover?kind=movie&list=recommended&hide_watched=0&year=1900-{lo - 1}", headers=AUTH)
+    assert all(i["year"] < lo for i in obj["items"])
+    res, _ = call(server, "GET", "/watch/discover?kind=movie&list=trending&year=2019-2015", headers=AUTH)
+    assert res.status == 400, "reversed: the app swaps them"
