@@ -471,9 +471,13 @@ the day of the cutover, not after it.
    backup stopped on sockets in the state dir (1635b873, 007a0f16), the
    store's folder did not exist on red2 (c872b6f0, ce3c7394), `media` is
    not on an ssh shell's PATH there, a second session host's orphan sweep
-   (off under `MEDIA_REHEARSAL=1`). **Still to do:** the DNS record for
-   `red2-ryer.sasonica.com` (→ red2's tunnel `6aaf956d-…`), then pair a
-   second device with the copy and send it a message; not rehearsed at
+   (off under `MEDIA_REHEARSAL=1`). The DNS record for `red2-ryer.sasonica.com` is in (sam, with
+   David's OK): the copy answers there as this server. `/app/` was 404:
+   `MEDIA_WEB_APP_DIR` lives in the canvas's hand-made drop-in on red5,
+   which a restore holds back, so **the real move must set it on red2**
+   (its own build of sasonica-app) or the web app and every `/app/t/<id>`
+   thread link 404s. **Still to do:** pair a second device with the copy
+   and send it a message; not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
    **The rehearsal — and the command's own test.** `media server move --to
