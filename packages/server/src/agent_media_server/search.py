@@ -1919,6 +1919,92 @@ def translate(q: str) -> str | None:
     return line if ok else None
 
 
+#: A refinement exchange carried back: how many turns are read, and how long
+#: each line may be. A query builder is a conversation about one search, not a
+#: chat — past that the oldest turns are dropped.
+COMPOSE_TURNS = 6
+COMPOSE_CHARS = 300
+
+
+def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
+    """A query written for someone from their own words, and then changed by
+    what they said about it (`POST /search/compose`, §6.14).
+
+    `tried` is the exchange so far, oldest first: `[{"q": <what was written>,
+    "note": <what they said about it>}, …]`. With none it is `translate`'s
+    one shot; with some, the model is shown what it wrote and what was wrong
+    with it, so "only my own words" or "not last week, the week before"
+    changes the query instead of starting again.
+
+    `{"q": <the query>, "note": <one line, or "">}` — the note is for
+    something they asked for that the operators cannot say, which is worth
+    showing rather than pretending. `None` when the gateway is off, does not
+    answer, or answers with nothing searchable: the caller leaves the words
+    alone and says so.
+
+    Never cached: the whole point is that the next call is different.
+    """
+    if not translate_enabled() or not (ask or "").strip():
+        return None
+    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _chat, _int_env
+
+    said = [(ask or "").strip()[:500]]
+    for turn in (tried or [])[-COMPOSE_TURNS:]:
+        q = str(turn.get("q") or "").strip()[:COMPOSE_CHARS]
+        note = str(turn.get("note") or "").strip()[:COMPOSE_CHARS]
+        if q:
+            said.append(f"You wrote: {q}")
+        if note:
+            said.append(f"They said: {note}")
+    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT",
+                       _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
+    model = (os.environ.get("MEDIA_SEARCH_TRANSLATE_MODEL")
+             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
+    system = _translate_prompt() + (
+        " If they say what was wrong with the query you wrote, change that "
+        "query rather than starting again, and keep the rest of it. After the "
+        "query you may add one short line, starting with 'note: ', for "
+        "something they asked for that the query language cannot say — "
+        "nothing else, and nothing when the query says it all.")
+    out = _chat(system, "\n".join(said), timeout, model=model) or ""
+    query, note = "", ""
+    for raw in out.splitlines():
+        line = raw.strip().strip("`").strip()
+        if not line:
+            continue
+        if line.lower().startswith("note:"):
+            note = note or line[5:].strip()[:COMPOSE_CHARS]
+        elif not query:
+            query = line[:COMPOSE_CHARS]
+    try:
+        ok = bool(query) and bool(parse(query)["terms"])
+    except QueryError:
+        ok = False
+    return {"q": query, "note": note} if ok else None
+
+
+def compose_request(body: dict, bearer: str) -> tuple[bool, dict]:
+    """`POST /search/compose {ask, tried?}` — the gate, then `compose`.
+
+    503 `no_model` when nothing wrote a query: the app keeps the words as
+    they are and says the assistant could not be reached, which is the one
+    answer it cannot guess from an empty query.
+    """
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    ask = str((body or {}).get("ask") or "").strip()
+    if not ask:
+        return False, {"error": "ask is the words to write a query from", "status": 400}
+    raw = (body or {}).get("tried")
+    tried = [t for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
+    got = compose(ask, tried)
+    if not got:
+        return False, {"error": "no assistant answered", "code": "no_model",
+                       "status": 503, "help": HELP_PATH}
+    return True, {**got, "ask": ask, "help": HELP_PATH}
+
+
 # --- the helper page ------------------------------------------------------------
 
 

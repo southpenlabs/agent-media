@@ -879,3 +879,77 @@ def test_a_translation_that_makes_no_sense_is_left_alone(home, gate, monkeypatch
     monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE", "0")
     search._NL_CACHE.clear()
     assert search.translate("what did I ask about the kiwi") is None
+
+
+# --- a query written for you, and changed by what you said about it -------------
+
+def test_compose_writes_a_query_and_is_shown_what_it_wrote_and_what_was_wrong(gate, monkeypatch):
+    """§6.14 POST /search/compose: the refinement is the exchange so far, so
+    "only my own words" changes the query instead of starting again."""
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append((system, user))
+        return "gauge from:me after:2026-10-01\nnote: there is no operator for a chat you starred\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    got = search.compose("what did I say about the gauge",
+                         [{"q": "gauge", "note": "only my own words, and last month"}])
+    assert got == {"q": "gauge from:me after:2026-10-01",
+                   "note": "there is no operator for a chat you starred"}
+    system, user = asked[0]
+    # The grammar is the prompt, and the exchange is read back in order.
+    assert search.OPERATORS[0][0] in system and "change that query" in system
+    assert user.splitlines() == ["what did I say about the gauge", "You wrote: gauge",
+                                 "They said: only my own words, and last month"]
+    # Never cached: the next call is the point.
+    search.compose("what did I say about the gauge", [])
+    assert len(asked) == 2
+    # Only the last turns are carried.
+    search.compose("gauge", [{"q": f"q{i}", "note": f"n{i}"} for i in range(9)])
+    assert "q2" not in asked[-1][1] and "q8" in asked[-1][1]
+
+
+def test_compose_answers_nothing_for_an_unsearchable_query_or_no_gateway(gate, monkeypatch):
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: "from:nobody ((")
+    assert search.compose("whatever") is None
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: None)
+    assert search.compose("whatever") is None
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: "gauge")
+    assert search.compose("  ") is None, "nothing to write a query from"
+    monkeypatch.setenv("MEDIA_SEARCH_TRANSLATE", "0")
+    assert search.compose("what did I say about the gauge") is None
+
+
+def test_the_compose_route_gates_refuses_empty_words_and_says_when_no_model_answered(
+        server, signed_in, home, monkeypatch):
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda *a, **k: "gauge from:me")
+    res, out = call(server, "POST", "/search/compose", {"ask": "what did I say about the gauge"},
+                    headers=AUTH)
+    assert res.status == 200 and out["q"] == "gauge from:me"
+    assert out["ask"] == "what did I say about the gauge" and out["help"] == search.HELP_PATH
+
+    res, _ = call(server, "POST", "/search/compose", {"ask": "anything"})
+    assert res.status == 401, "gated like the search itself"
+
+    res, out = call(server, "POST", "/search/compose", {"ask": " "}, headers=AUTH)
+    assert res.status == 400 and "ask" in out["error"]
+
+    # Nothing wrote a query: said as its own code, so the app can keep the
+    # words and tell the person why.
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: None)
+    res, out = call(server, "POST", "/search/compose", {"ask": "what did I say"}, headers=AUTH)
+    assert res.status == 503 and out["code"] == "no_model"
+
+
+def test_the_compose_route_reads_a_malformed_exchange_as_none(server, signed_in, home, monkeypatch):
+    """`tried` from an older or confused client never breaks the call."""
+    seen = []
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: seen.append(user) or "gauge")
+    for tried in ("not a list", [None, 3, "x"], [{"q": None, "note": None}]):
+        res, _ = call(server, "POST", "/search/compose",
+                      {"ask": "the gauge", "tried": tried}, headers=AUTH)
+        assert res.status == 200, tried
+    assert all(u.splitlines() == ["the gauge"] for u in seen)

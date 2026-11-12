@@ -5877,6 +5877,40 @@ memory as its own section when this host has agent-memory. Code:
   leaves the query exactly as typed and says nothing. The call is on the
   query's own path, so a client should pass `translate=1` on submit, not on
   every keystroke.
+#### `POST /search/compose {ask, tried?}` — gated (`auth.gate`)
+
+A query written from somebody's own words, and then changed by what they say
+about it (12 Nov 2026; David: "It would be nice to have agent assistants to
+create these queries too"). `translate=1` above is one shot on the search's
+own path; this is the conversation — the app's "Have a go for me" sheet keeps
+the exchange and sends it back each time, so "only my own words" or "not last
+week, the week before" changes the query instead of starting again.
+
+```json
+{"ask": "what did I say about the gauge",
+ "tried": [{"q": "gauge", "note": "only my own words, and last month"}]}
+→ {"ok": true, "q": "gauge from:me after:2026-10-01", "note": "",
+   "ask": "what did I say about the gauge", "help": "/search/help"}
+```
+
+- **`ask`** is the words as typed, and the only field required; empty is 400.
+  **`tried`** is the exchange so far, oldest first, each turn the query that
+  was written and what was said about it. The last `COMPOSE_TURNS` (6) are
+  read, each field cut at 300 characters; anything else in the list is
+  ignored, so an older client cannot break the call.
+- **`q`** is the query, checked by the parser before it is answered — a model
+  that writes something unsearchable counts as no answer. **`note`** is one
+  line for something asked for that the operators cannot say (""
+  when the query says it all), worth showing rather than pretending.
+- The same model and switches as `translate=1`
+  (`MEDIA_SEARCH_TRANSLATE_MODEL` / `_TIMEOUT`, `MEDIA_SEARCH_TRANSLATE=0`
+  turns it off). Never cached: the next call is meant to differ. Nothing
+  wrote a query (off, no gateway, no answer, nothing searchable) is **503
+  `{"code": "no_model"}`** — the one thing a client cannot read from an empty
+  query, so it keeps the words and says the assistant could not be reached.
+- An agent writes these queries from a shell instead: `media find` and the
+  `search_history` tool, above.
+
 - **`help`** (12 Nov 2026): the path of the operator page,
   `"/search/help"` — see below. Every answer carries it, and the response
   header `Link: </search/help>; rel="help"` says the same thing for a
