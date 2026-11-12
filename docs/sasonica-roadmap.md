@@ -2745,8 +2745,12 @@ ahead.
     add-on needs nothing more: the rooms hub is the product's.
     **Open:** Windows, which David asked about ("Can it also link to an
     installer for Windows?") — a Windows machine has no rooms hub to wire,
-    and the useful link there is the Sasonica Shell installer; left for the
-    cross-platform work (`docs/proposals/2026-09-23-cross-platform.md`).
+    and the useful link there is the Sasonica Shell installer; **proposed
+    12 Nov 2026** in `docs/proposals/2026-09-23-cross-platform.md` ("A rooms
+    hub's system packages: the Windows side"): a Windows machine's rooms row
+    reads "not this machine's job" with the Shell installer (its address from
+    the server), Snapcast's Windows client as an optional room, and mpv's
+    winget/scoop/choco line for its own speech — not built.
 
 ## Loose ends
 
