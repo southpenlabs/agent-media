@@ -8,7 +8,7 @@ from __future__ import annotations
 import urllib.parse
 
 import pytest
-from agent_media_core import tmdb, trakt
+from agent_media_core import tmdb, trakt, trakt_browse
 
 from test_contract import AUTH, call, server, signed_in, typed  # noqa: F401
 from test_watch import MOVIE, SHOW, FakeTrakt, _connect, creds  # noqa: F401
@@ -22,6 +22,14 @@ FULL = {**MOVIE, "tagline": "Why are they here?", "certification": "PG-13", "rat
         "trailer": "https://youtube.com/watch?v=tFMo3UJ4B4g"}
 DUNE = {"title": "Dune", "year": 2021, "ids": {"trakt": 3, "slug": "dune-2021", "tmdb": 438631},
         "genres": ["science-fiction"], "rating": 8.0, "votes": 90000}
+RATINGS = {"trakt": {"rating": 8.03, "votes": 51803, "distribution": {"10": 9}},
+           "tmdb": {"rating": 7.638, "votes": 20162, "link": "https://www.themoviedb.org/movie/329865"},
+           "imdb": {"rating": 7.9, "votes": 844487, "link": "https://www.imdb.com/title/tt2543164"},
+           "metascore": {"rating": 81, "link": "https://www.imdb.com/title/tt2543164/criticreviews"},
+           "rotten_tomatoes": {"rating": 94, "state": "fresh", "user_rating": 83, "user_state": "upright",
+                               "link": "https://www.rottentomatoes.com/m/arrival_2016"},
+           "mal": {"rating": None, "votes": 0, "link": None},
+           "letterboxd": {"rating": 4.13, "votes": 2191110, "link": "javascript:alert(1)"}}
 EP = lambda n, t, d: {"season": 2, "number": n, "title": t, "ids": {"trakt": 200 + n}, "first_aired": d,  # noqa: E731
                       "overview": f"About {t}.", "runtime": 50}
 
@@ -40,6 +48,9 @@ class Browse(FakeTrakt):
                          {"type": "list", "list": {"name": "Hidden", "privacy": "private", "ids": {"trakt": 901}}}]
         if p == "/movies/arrival-2016":
             return 200, FULL
+        if p == "/movies/arrival-2016/ratings":
+            assert q.get("extended") == ["all"]
+            return 200, RATINGS
         if p == "/movies/arrival-2016/people":
             return 200, {"cast": [{"characters": ["Louise Banks"], "person": PERSON}],
                          "crew": {"writing": [{"jobs": ["Screenplay"], "person": {"name": "Eric Heisserer", "ids": {"trakt": 78, "slug": "eric-heisserer"}}}],
@@ -52,6 +63,8 @@ class Browse(FakeTrakt):
         if p == "/shows/severance":
             return 200, {**SHOW, "network": "Apple TV+", "status": "returning series", "aired_episodes": 19,
                          "first_aired": "2022-02-18T02:00:00.000Z", "rating": 8.7, "votes": 30000}
+        if p == "/shows/severance/ratings":
+            return 500, {}
         if p in ("/shows/severance/people", "/shows/severance/related"):
             return 200, {} if p.endswith("people") else []
         if p == "/shows/severance/seasons":
@@ -100,6 +113,10 @@ class Browse(FakeTrakt):
 def fake(monkeypatch):
     f = Browse()
     monkeypatch.setattr(trakt, "_request", f)
+    # The host's YouTube search is a stub too: never Mopidy, never yt-dlp.
+    f.searched = []
+    f.videos = []
+    monkeypatch.setattr(trakt_browse, "_youtube_search", lambda q: (f.searched.append(q), list(f.videos))[1])
     trakt.clear_cache()
     yield f
     trakt.clear_cache()
@@ -132,6 +149,18 @@ def test_a_movies_page(server, signed_in, fake, creds):
         ("Denis Villeneuve", "Director, Producer", "Directing"), ("Eric Heisserer", "Screenplay", "Writing")]
     assert [(r["title"], r["watched"]) for r in obj["related"]] == [("Dune", False)]
     assert "seasons" not in obj
+    # Its trailer (Trakt's own: no TMDb here) and its ratings, formatted, in order, only those with a number.
+    assert obj["trailer"] == "https://youtube.com/watch?v=tFMo3UJ4B4g" and obj["trailer_source"] == "trakt"
+    assert not fake.searched, "Trakt has one: nothing searched"
+    rt = "https://www.rottentomatoes.com/m/arrival_2016"
+    assert obj["ratings"] == [
+        {"source": "imdb", "label": "IMDb", "value": "7.9", "out_of": "10", "votes": 844487, "link": "https://www.imdb.com/title/tt2543164"},
+        {"source": "rotten_tomatoes", "label": "Rotten Tomatoes", "value": "94%", "state": "fresh", "link": rt},
+        {"source": "rotten_tomatoes_audience", "label": "RT audience", "value": "83%", "state": "upright", "link": rt},
+        {"source": "metascore", "label": "Metacritic", "value": "81", "out_of": "100", "link": "https://www.imdb.com/title/tt2543164/criticreviews"},
+        {"source": "trakt", "label": "Trakt", "value": "80%", "votes": 51803},
+        {"source": "tmdb", "label": "TMDB", "value": "7.6", "out_of": "10", "votes": 20162, "link": "https://www.themoviedb.org/movie/329865"},
+        {"source": "letterboxd", "label": "Letterboxd", "value": "4.1", "out_of": "5", "votes": 2191110}], "a link that is not https is dropped"
     n = len(fake.seen)
     call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
     assert not [s for s in fake.seen[n:] if s[0].startswith("/movies/")], "the page kept a day"
@@ -145,6 +174,9 @@ def test_a_shows_page_and_a_season(server, signed_in, fake, creds):
     _connect(server)
     _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
     assert obj["title"]["network"] == "Apple TV+" and obj["title"]["aired_episodes"] == 19
+    # Trakt's ratings did not answer: the page still does, with the title's own Trakt rating; no trailer.
+    assert obj["ratings"] == [{"source": "trakt", "label": "Trakt", "value": "87%", "votes": 30000}]
+    assert obj["trailer"] is None and obj["trailer_source"] is None and fake.searched == ["Severance 2022 official trailer"]
     assert obj["seasons"] == [
         {"number": 1, "title": "Season 1", "episodes": 9, "aired": 9, "completed": 9, "first_aired": None},
         {"number": 2, "title": None, "episodes": 10, "aired": 10, "completed": 1, "first_aired": "2025-01-17T02:00:00.000Z"}]
@@ -221,6 +253,58 @@ def test_discover_more_lists_and_filters(server, signed_in, fake, creds):
     for bad in ("rating=1-2", "network=Netflix", "language=xx"):
         res, _ = call(server, "GET", f"/watch/discover?kind=movie&list=trending&{bad}", headers=AUTH)
         assert res.status == 400, bad
+
+
+def test_tmdbs_trailer_wins_when_it_has_one(server, signed_in, fake, creds, monkeypatch):
+    monkeypatch.setenv("MEDIA_TMDB_TOKEN", "tok")
+    videos = {"results": [{"site": "YouTube", "type": "Trailer", "official": True, "key": "tmdbTrailer1"}]}
+    monkeypatch.setattr(tmdb, "_request", lambda path, params=None, timeout=15.0: (
+        {"videos": videos} if path == "/movie/329865" else {}))
+    monkeypatch.setattr(tmdb, "_details", {})
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert "tmdbTrailer1" in obj["trailer"] and obj["trailer_source"] == "tmdb", obj["trailer"]
+    videos["results"] = []
+    monkeypatch.setattr(tmdb, "_details", {})
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["trailer"] == "https://youtube.com/watch?v=tFMo3UJ4B4g", "TMDb has none: Trakt's own"
+    assert obj["trailer_source"] == "trakt" and not fake.searched
+
+
+def test_a_trailer_is_searched_for_when_neither_has_one(server, signed_in, fake, creds, monkeypatch, tmp_path):
+    monkeypatch.setattr(trakt_browse, "_trailers_path", lambda: tmp_path / "watch-trailers.json")
+    fake.videos = [{"id": "aaaaaaaaaaa", "title": "Some Other Show | Official Trailer"},
+                   {"id": "bbbbbbbbbbb", "title": "Severance: the theme"},
+                   {"id": "ccccccccccc", "title": "Severance — Official Trailer | Apple TV+"},
+                   {"id": "not an id", "title": "Severance trailer"}]
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["trailer"] == "https://www.youtube.com/watch?v=ccccccccccc" and obj["trailer_source"] == "youtube_search"
+    assert fake.searched == ["Severance 2022 official trailer"]
+    # Kept by title: the page opened again does not search again; a week on it does.
+    fake.videos = []
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["trailer"].endswith("ccccccccccc") and len(fake.searched) == 1
+    item = {"title": "Severance", "year": 2022, "ids": {"trakt": 7}}
+    import time
+    assert trakt_browse._searched_trailer("tv", item, time.time() + 8 * 86400) is None and len(fake.searched) == 2
+    # No result with "trailer": the first that names the title; none naming it: none.
+    fake.videos = [{"id": "aaaaaaaaaaa", "title": "Unrelated"}, {"id": "bbbbbbbbbbb", "title": "Severance: the theme"}]
+    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 8}}, time.time()).endswith("bbbbbbbbbbb")
+    fake.videos = [{"id": "aaaaaaaaaaa", "title": "Unrelated trailer"}]
+    assert trakt_browse._searched_trailer("tv", {**item, "ids": {"trakt": 9}}, time.time()) is None
+    # A list never searches: only a title's page does.
+    n = len(fake.searched)
+    call(server, "GET", "/watch/discover?kind=tv&list=trending&hide_watched=0", headers=AUTH)
+    call(server, "GET", "/watch/search?kind=all&query=severance", headers=AUTH)
+    assert len(fake.searched) == n
+
+
+def test_ratings_leave_out_what_has_no_number():
+    from agent_media_core.trakt_browse import _ratings
+    assert _ratings(None) == [] and _ratings({"imdb": {"rating": None}, "trakt": {"rating": 0.0, "votes": 0}}) == []
+    assert _ratings({"rotten_tomatoes": {"rating": 0, "state": "rotten", "user_rating": None}}) == [
+        {"source": "rotten_tomatoes", "label": "Rotten Tomatoes", "value": "0%", "state": "rotten"}]
+    assert _ratings({"rating": 7.5, "votes": 10}) == [{"source": "trakt", "label": "Trakt", "value": "75%", "votes": 10}]
+    assert _ratings({"mal": {"rating": 8.44, "votes": 3}})[0] == {"source": "mal", "label": "MyAnimeList", "value": "8.4", "out_of": "10", "votes": 3}
 
 
 def test_signed_out_pages_still_answer_and_the_personal_ones_say_so(server, signed_in, fake, creds):

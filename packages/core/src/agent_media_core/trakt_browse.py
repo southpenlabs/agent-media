@@ -5,8 +5,11 @@ from a show's feed.
 
   search_all(q)      movies, shows, people and lists by words
   title(kind, id)    a movie's or show's page: facts, cast and crew,
-                     related; a show's seasons (how far watched) and the
-                     next episode to air
+                     related; its trailer (TMDb's, Trakt's, or one found
+                     by a YouTube search) and its ratings (IMDb, Rotten
+                     Tomatoes, Metacritic … as Trakt carries them); a
+                     show's seasons (how far watched) and the next episode
+                     to air
   season(id, n)      a season's episodes, each watched or not
   person(id)         a person: bio line, photo (TMDb, when set), and what
                      they made — movies and shows, acting and crew, by year
@@ -179,6 +182,163 @@ def _credits(got) -> tuple[list[dict], list[dict]]:
     return cast[:CAST_MAX], list(merged.values())[:CREW_MAX]
 
 
+#: The ratings a title's page shows, in the order shown: (source, Trakt's key
+#: in /ratings?extended=all, its field, label, how the number is written).
+#: "pct": a whole percentage; "pct10": 0–10 written as a percentage (Trakt's
+#: own way); "one": one decimal place; "whole": a whole number. `out_of` is
+#: what the number is out of, when it is not a percentage.
+RATING_SOURCES = (
+    ("imdb", "imdb", "rating", "IMDb", "one", "10"),
+    ("rotten_tomatoes", "rotten_tomatoes", "rating", "Rotten Tomatoes", "pct", None),
+    ("rotten_tomatoes_audience", "rotten_tomatoes", "user_rating", "RT audience", "pct", None),
+    ("metascore", "metascore", "rating", "Metacritic", "whole", "100"),
+    ("trakt", "trakt", "rating", "Trakt", "pct10", None),
+    ("tmdb", "tmdb", "rating", "TMDB", "one", "10"),
+    ("letterboxd", "letterboxd", "rating", "Letterboxd", "one", "5"),
+    ("mal", "mal", "rating", "MyAnimeList", "one", "10"),
+)
+
+
+def _ratings(got, own: Optional[dict] = None) -> list[dict]:
+    """A title's ratings as the app draws them, from Trakt's
+    `/ratings?extended=all`: `[{source, label, value, out_of?, votes?,
+    state?, link?}]` in RATING_SOURCES' order, only the sources with a
+    number. `own` (the title itself) gives Trakt's own when the answer has
+    none."""
+    got = dict(got) if isinstance(got, dict) else {}
+    if not isinstance(got.get("trakt"), dict) and isinstance(got.get("rating"), (int, float)):
+        got["trakt"] = {"rating": got.get("rating"), "votes": got.get("votes")}  # the answer without extended=all
+    if not isinstance(got.get("trakt"), dict) and own:
+        got["trakt"] = {"rating": own.get("rating"), "votes": own.get("votes")}
+    out = []
+    for source, key, field, label, how, out_of in RATING_SOURCES:
+        o = got.get(key)
+        r = o.get(field) if isinstance(o, dict) else None
+        if isinstance(r, bool) or not isinstance(r, (int, float)):
+            continue
+        state = o.get("user_state" if field == "user_rating" else "state")
+        votes = o.get("votes") if field == "rating" else None
+        votes = int(votes) if isinstance(votes, (int, float)) and not isinstance(votes, bool) and votes > 0 else None
+        if r <= 0 and not votes and not state:
+            continue  # 0 with nobody voting: not rated
+        value = (f"{round(r)}%" if how == "pct" else f"{round(r * 10)}%" if how == "pct10"
+                 else str(round(r)) if how == "whole" else f"{r:.1f}")
+        row = {"source": source, "label": label, "value": value}
+        if out_of:
+            row["out_of"] = out_of
+        if votes:
+            row["votes"] = votes
+        if isinstance(state, str) and state:
+            row["state"] = state
+        link = o.get("link")
+        if isinstance(link, str) and link.startswith("https://"):
+            row["link"] = link
+        out.append(row)
+    return out
+
+
+def _tmdb_trailer(kind: str, item: dict) -> Optional[str]:
+    """TMDb's trailer for the title, when TMDb is set up and has one."""
+    from . import tmdb
+    tmdb_id = (item.get("ids") or {}).get("tmdb")
+    if not tmdb.set_up() or tmdb_id is None:
+        return None
+    try:
+        return tmdb.details(kind, int(tmdb_id)).get("trailer") or None
+    except Exception:  # noqa: BLE001 — Trakt's own then
+        return None
+
+
+#: A trailer found by searching is kept a week; "none found" a day.
+TRAILER_FOUND_TTL_S = 7 * 86400.0
+TRAILER_NONE_TTL_S = 86400.0
+TRAILER_KEEP = 500
+
+
+def _youtube_search(q: str) -> list[dict]:
+    """`[{id, title}]` for the words, from whichever YouTube search the host
+    already has (music_versions' two: Mopidy's "youtube-search" add-on, else
+    the "youtube-radio" add-on's yt-dlp search); [] with neither. The seam
+    the tests stub."""
+    from . import music_bed_favourites as fav
+    from . import youtube_addon
+
+    if fav._may_search():
+        return [{"id": r.get("id"), "title": r.get("title") or ""} for r in fav.search(q)]
+    if youtube_addon.get("youtube-radio") is not None:
+        from . import radio_dj
+        return [{"id": r.get("id"), "title": r.get("title") or ""} for r in radio_dj.search([q])]
+    return []
+
+
+def _trailers_path():
+    from ._paths import state_dir
+    return state_dir() / "watch-trailers.json"
+
+
+def _searched_trailer(kind: str, item: dict, now: float) -> Optional[str]:
+    """A trailer by search, for a title neither TMDb nor Trakt has one for:
+    "<title> <year> official trailer" asked of the host's YouTube search, the
+    first result with "trailer" in its title that names the title, else the
+    first that names it. Kept by title (a week; a day when nothing was
+    found), so only a title page's first opening searches."""
+    import json
+    import os
+    import re
+
+    name = str(item.get("title") or "").strip()
+    key = f"{kind}:{(item.get('ids') or {}).get('trakt') or item.get('id')}"
+    if not name:
+        return None
+    path = _trailers_path()
+    try:
+        kept = json.loads(path.read_text())
+        kept = kept if isinstance(kept, dict) else {}
+    except (OSError, ValueError):
+        kept = {}
+    hit = kept.get(key)
+    if isinstance(hit, dict):
+        ttl = TRAILER_FOUND_TTL_S if hit.get("url") else TRAILER_NONE_TTL_S
+        if now - float(hit.get("at") or 0) < ttl:
+            return hit.get("url") or None
+    try:
+        rows = _youtube_search(" ".join(x for x in (name, str(item.get("year") or ""), "official trailer") if x))
+    except Exception:  # noqa: BLE001 — asked again next time
+        return None
+
+    def fold(x: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(x).lower()).strip()
+
+    want = fold(name)
+    rows = [r for r in rows if isinstance(r, dict) and re.fullmatch(r"[A-Za-z0-9_-]{11}", str(r.get("id") or ""))
+            and want and want in fold(r.get("title") or "")]
+    best = next((r for r in rows if "trailer" in fold(r["title"])), rows[0] if rows else None)
+    url = f"https://www.youtube.com/watch?v={best['id']}" if best else None
+    kept[key] = {"url": url, "at": now}
+    if len(kept) > TRAILER_KEEP:
+        kept = dict(sorted(kept.items(), key=lambda kv: -float(kv[1].get("at") or 0))[:TRAILER_KEEP])
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}")
+        tmp.write_text(json.dumps(kept))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return url
+
+
+def _trailer(kind: str, item: dict, now: float) -> tuple[Optional[str], Optional[str]]:
+    """(address, source) of a title's trailer: TMDb's when it is set up and
+    has one, else Trakt's own, else one found by search; (None, None)."""
+    got = _tmdb_trailer(kind, item)
+    if got:
+        return got, "tmdb"
+    if item.get("trailer"):
+        return item["trailer"], "trakt"
+    got = _searched_trailer(kind, item, now)
+    return (got, "youtube_search") if got else (None, None)
+
+
 def title(kind: str, ident, now: Optional[float] = None) -> dict:
     """A movie's or a show's page (what GET /watch/title answers, less `ok`)."""
     what, tid, now = _one(kind), _id(ident), _now(now)
@@ -196,7 +356,13 @@ def title(kind: str, ident, now: Optional[float] = None) -> dict:
                  "released": o.get("released") or o.get("first_aired") or None})
     if kind == "tv":
         item.update({"network": o.get("network") or None, "aired_episodes": o.get("aired_episodes")})
-    out: dict = {"kind": kind, "title": item, "cast": [], "crew": [], "related": []}
+    out: dict = {"kind": kind, "title": item, "trailer": None, "trailer_source": None, "ratings": [], "cast": [], "crew": [], "related": []}
+    try:
+        got = _pub(f"tg:{what}:{tid}", f"/{what}/{tid}/ratings?extended=all", now)
+    except T.TraktError:
+        got = None
+    out["ratings"] = _ratings(got, o)
+    out["trailer"], out["trailer_source"] = _trailer(kind, item, now)
     try:
         out["cast"], out["crew"] = _credits(_pub(f"tp:{what}:{tid}", f"/{what}/{tid}/people", now))
     except T.TraktError:

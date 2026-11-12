@@ -10496,7 +10496,8 @@ person's `photo`.
   "ids", "known_for", "url", "photo"?}`; a list: `{"id", "name",
   "description", "item_count", "likes", "user", "url"}`.
 - `GET /watch/title?kind=movie|tv&id=<trakt id or slug>` → `{"ok", "kind",
-  "title", "cast", "crew", "related", "tmdb", "seasons"?, "next_episode"?}`.
+  "title", "trailer", "trailer_source", "ratings", "cast", "crew",
+  "related", "tmdb", "seasons"?, "next_episode"?}`.
   `title` is the item with its whole `overview` and `tagline`,
   `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
   `released`, and for a show `network` and `aired_episodes`. `cast`:
@@ -10505,8 +10506,32 @@ person's `photo`.
   person. `related`: up to 12 more like it. A show's `seasons`: `[{"number",
   "title", "episodes", "aired", "completed", "first_aired"}]` (specials left
   out; `completed` this account's), and `next_episode` `{"season", "number",
-  "title", "first_aired"}` when one is to air. Trailer and where to watch
-  stay `GET /watch/item`. 404 when Trakt has no such title.
+  "title", "first_aired"}` when one is to air. `trailer`: the address of
+  its trailer or null, and `trailer_source` which it is: `tmdb` (TMDb's,
+  when TMDb is set up and has one), else `trakt` (Trakt's own,
+  `title.trailer`: no TMDb credential needed), else `youtube_search`: the
+  host's own YouTube search (the one `/music/versions` uses, when the host
+  has one) asked for "<title> <year> official trailer", the first result
+  with "trailer" in its title that names the title, else the first that
+  names it. A searched one may be the wrong video, so the app says where it
+  came from. It is searched for only here, when the page is opened and
+  neither other source has one, never for a list's rows, and kept by title
+  a week (nothing found: a day). `ratings`: what
+  Trakt carries from elsewhere (`/movies|shows/<id>/ratings?extended=all`,
+  kept a day with the page), formatted here so the app draws each as given:
+  `[{"source", "label", "value", "out_of"?, "votes"?, "state"?, "link"?}]`,
+  always in the order `imdb` ("7.9" out of "10"), `rotten_tomatoes` ("94%";
+  `state` e.g. `fresh`, `rotten`), `rotten_tomatoes_audience` ("83%";
+  `state` e.g. `upright`, `spilled`), `metascore` ("81" out of "100"),
+  `trakt` ("80%"), `tmdb` ("7.6" out of "10"), `letterboxd` ("4.1" out of
+  "5"; movies), `mal` (out of "10"), and only the sources that have a
+  number. `value` is text to show; `out_of` is left out of a percentage;
+  `state` is the source's own word, passed on; `link` (https only) is the
+  source's page for the title. When Trakt's ratings do not answer, the list
+  is the title's own Trakt rating or empty; it is never an error. The list
+  rows (search, Discover) carry Trakt's `rating` only: the others would
+  cost a call a row. Where to watch stays `GET /watch/item`. 404 when Trakt
+  has no such title.
 - `GET /watch/season?id=<show>&season=<n>` → `{"ok", "season", "episodes":
   [{"season", "number", "title", "overview", "first_aired", "runtime",
   "rating"?, "ids", "watched"?}]}`. One is marked watched with `POST /watch
