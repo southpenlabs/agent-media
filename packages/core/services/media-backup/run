@@ -1,0 +1,23 @@
+#!/bin/sh
+# media-backup — carry agent-media's state off this machine, once a night.
+#
+# The `daily` tier: the config and secrets, the device identities, the four
+# databases and the session transcripts. Not the speech clips (David chose
+# core plus transcripts, 12 Nov 2026); `--tier full` is a move's job, not a
+# nightly one.
+#
+# Nothing else protects this data on a timer once sam's red5-backup-pull is
+# retired, so a failure here raises backup.<host> and a schedule that quietly
+# stops firing is caught by `media backup stale` from selfcheck, which is not
+# on this timer and so survives its death.
+exec 2>&1
+[ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
+export MEDIA_BACKUP_DEST MEDIA_BACKUP_MAX_BYTES MEDIA_BACKUP_STAGE MEDIA_BACKUP_STALE_DAYS
+media backup run --tier daily
+rc=$?
+# systemd runs this from a nightly timer (`timer`; it sets INVOCATION_ID).
+# runit, the phone's supervisor, has no timers: it restarts whatever exits, so
+# without this the backup would run in a tight loop. There, the day's wait is
+# the service's own. Same shape as state-gc.
+[ -n "$INVOCATION_ID" ] && exit $rc
+exec sleep 86400

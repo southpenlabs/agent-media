@@ -12,6 +12,7 @@ media backup list                   # the snapshots, the store's size, the cap
 media backup show [id]              # one snapshot's manifest
 media backup verify [id] [--deep]   # intact; --deep restores it and checks that
 media backup sync                   # the quick second pass before a cutover
+media backup stale                  # is the schedule still running?
 media backup where                  # the destination, its cap, its free space
 media restore [id|path] [--apply]   # a dry run until --apply
 ```
@@ -108,9 +109,44 @@ Alerts, through the usual `alerts.report`:
 - `backup.<host>` — a run failed
 - `backup.<host>.space` — the store passed 70% of its cap, or the cap cannot
   be met, or the destination filesystem is under 5G free
+- `backup.<host>.stale` — no backup has finished sound in
+  `MEDIA_BACKUP_STALE_DAYS` (default 2), or none ever has
 
-That last one is not decoration: on red5 the destination shares `/mnt/data`
+The space one is not decoration: on red5 the destination shares `/mnt/data`
 with an 8G swapfile and 18G of personal files.
+
+## The schedule, and noticing it stopped
+
+The nightly run is the `media-backup` service template —
+`agent-media-backup.timer`, `03:40` with a 20-minute jitter and
+`Persistent=true` so a host that was asleep catches up. It runs the `daily`
+tier. `media-setup install-services` writes it, and its `roles` file gates it
+on `MEDIA_BACKUP_DEST`: without a destination it is skipped with a reason
+rather than installed and writing a "backup" onto the same disk as the
+original, which survives a deleted row and nothing else.
+
+**The staleness check deliberately does not live on that timer.** A run that
+fails raises `backup.<host>` itself; a timer that quietly stops firing raises
+nothing at all, which is the way backups usually die. So the check is a fact
+in `selfcheck_facts()` — collected by `media doctor` and read by the status
+bar's warning, neither of which depends on the backup timer being alive:
+
+```
+backup_timer=missing      the nightly timer is not installed
+backup_ever=no            nothing has ever finished here
+backup_stale=yes          the last good one is over the limit
+backup_age_days=9
+```
+
+`health_problems()` turns each into a complaint, so a backup that stopped
+shows up in the same ⚠ as a dead service. On a host with no
+`MEDIA_BACKUP_DEST` the facts are silent: a phone or a worker is not expected
+to back anything up, and a warning there would be noise that teaches people
+to ignore the one that matters.
+
+"The last good backup" is its own stamp (`last-good.json` in the store), not
+the newest snapshot: a failed run leaves a snapshot directory too, and
+pruning can remove every snapshot the check would otherwise have read.
 
 ## Where it goes
 
@@ -193,9 +229,6 @@ what happened rather than parsing output.
 
 Honest about the edges, as of 13 Nov 2026:
 
-- **No schedule.** Nothing runs nightly; there is no timer installed and so no
-  `backup.<host>.stale` alert for a schedule that quietly stopped. `media
-  backup` runs when called.
 - **No encryption at rest.** The push to red5 goes over ssh, so it is
   encrypted in flight, and the destination is mode 700 — but the snapshot sits
   as plain files there. `age` is on both machines; wiring it, and printing a

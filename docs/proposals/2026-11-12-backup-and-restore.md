@@ -349,10 +349,14 @@ Done, and tested:
 Two things the design promised that the first version does not have, written
 down rather than glossed:
 
-- **No schedule.** Nothing runs nightly yet, so there is no
-  `backup.<host>.stale` alert either. Until that lands, sam's
-  `red5-backup-pull` is still what protects this data on a timer, and should
-  keep running.
+- ~~**No schedule.**~~ **Closed 13 Nov 2026.** The `media-backup` service
+  template runs the `daily` tier at 03:40 with jitter and `Persistent=true`,
+  gated on `MEDIA_BACKUP_DEST` so it is never installed without somewhere to
+  go. And the staleness check deliberately does **not** live on that timer —
+  a failed run alerts itself, while a timer that stops firing alerts nothing,
+  so it is a fact in `selfcheck_facts()` that `media doctor` and the status
+  bar's warning read. 105d7f90 argued for this order over encryption, on the
+  grounds that nothing of ours ran on a timer at all; that was right.
 - **No encryption at rest.** The push to red5 is over ssh and the destination
   is mode 700, but the snapshot is plain files there. `age` is installed on
   both machines; wiring it, with the recovery phrase printed once to keep off

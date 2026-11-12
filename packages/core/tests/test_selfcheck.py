@@ -258,3 +258,52 @@ def test_repo_note_falls_back_to_skew_without_branch_info():
     note, skew = cli.repo_note(
         "dotfiles", "abc123", "main", {"dotfiles-head": "def4560000"})
     assert skew is True and "skewed" in note
+
+
+# --- the backup, which is the one failure that is silent by nature ----------
+
+
+def test_backup_facts_are_silent_without_a_destination(monkeypatch):
+    """A phone or a worker backs nothing up. A warning there would be noise
+    that teaches people to ignore the one that matters."""
+    monkeypatch.delenv("MEDIA_BACKUP_DEST", raising=False)
+    assert cli._backup_facts() == {}
+
+
+def test_backup_facts_report_a_stale_backup_and_a_missing_timer(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_BACKUP_DEST", str(tmp_path / "dest"))
+    from agent_media_server import backup as bk
+
+    monkeypatch.setattr(bk, "staleness", lambda *a, **k: {
+        "ever": True, "stale": True, "days": 9.0, "limit_days": 2.0, "why": "old"})
+    monkeypatch.setattr(bk, "schedule_state", lambda: {
+        "unit": "agent-media-backup.timer", "installed": False,
+        "active": None, "next": None})
+    got = cli._backup_facts()
+    assert got["backup_stale"] == "yes"
+    assert got["backup_age_days"] == "9"
+    assert got["backup_timer"] == "missing"
+
+
+def test_health_problems_flags_a_backup_that_stopped():
+    """A run that fails raises its own alert; a schedule that quietly stops
+    raises nothing, so doctor has to be the one that notices."""
+    problems = cli.health_problems(
+        {"selfcheck": "1", "install": "editable", "services": "5",
+         "backup_timer": "missing", "backup_stale": "yes", "backup_age_days": "9"})
+    assert any("timer is not installed" in p for p in problems)
+    assert any("9 days ago" in p for p in problems)
+
+
+def test_health_problems_flags_a_backup_that_never_ran():
+    problems = cli.health_problems(
+        {"selfcheck": "1", "install": "editable", "backup_ever": "no",
+         "backup_stale": "yes"})
+    assert any("has ever finished here" in p for p in problems)
+    assert not any("days ago" in p for p in problems), "one complaint, not two"
+
+
+def test_health_problems_silent_on_a_host_whose_backup_is_fine():
+    assert cli.health_problems(
+        {"selfcheck": "1", "install": "editable", "services": "5",
+         "backup_stale": "no", "backup_age_days": "0.4"}) == []

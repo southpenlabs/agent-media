@@ -1,0 +1,15 @@
+# The state being carried off is this host's own, so the backup belongs
+# wherever that state is — the machine the app pairs with. A worker holds
+# only a mirror of transcripts it was lent.
+requires: origin
+
+# A destination is a decision, not a property of the machine: without one
+# this would write a "backup" onto the same disk as the original, which
+# survives a deleted row and nothing else. Until MEDIA_BACKUP_DEST names
+# somewhere (another host, a bucket, another disk), this is skipped with a
+# reason rather than installed and giving false comfort.
+#
+# `media backup where` says so when it is not installed, and selfcheck's
+# backup_stale fact says so when nothing has run — neither is silent about
+# the gap.
+requires-env: MEDIA_BACKUP_DEST

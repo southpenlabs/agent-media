@@ -452,3 +452,84 @@ def test_a_remote_push_makes_the_destination_folder(install, monkeypatch):
         c[:2] == ["ssh", "red5"] and c[2:4] == ["mkdir", "-p"] for c in calls), \
         "the parents have to be made one way or the other"
     assert "-aH" in push, "hardlinks must survive the push or the history costs full size"
+
+
+# --- the schedule, and noticing it stopped ----------------------------------
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_a_good_run_is_stamped_and_a_failed_one_is_not(install, monkeypatch):
+    """"The newest snapshot" is not the same question as "the last good
+    backup": a failed run leaves a snapshot directory too."""
+    assert bk.last_good() is None
+    bk.backup(tier="core", now=1_000_000)
+    good = bk.last_good()
+    assert good and good["id"] and good["tier"] == "core"
+
+    # A run that cannot dump a database must not move the stamp forward.
+    def boom(src, dst):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(bk, "dump_database", boom)
+    res = bk.backup(tier="core", now=2_000_000)
+    assert not res["ok"]
+    assert bk.last_good()["id"] == good["id"], "a failed run is not a good backup"
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_staleness_counts_from_the_last_good_backup(install):
+    bk.backup(tier="core", now=1_000_000)
+    at = bk.last_good()["at"]
+    fresh = bk.staleness(now=at + 3600)
+    assert fresh["ever"] and not fresh["stale"]
+    old = bk.staleness(now=at + 5 * 86400)
+    assert old["stale"] and old["days"] == 5.0
+    assert "over the 2-day limit" in old["why"]
+
+
+def test_never_having_run_is_stale_and_said_at_error_level(install, monkeypatch):
+    """The quietest failure of all: a backup that was never set up. It must
+    not read as "fine, nothing to report"."""
+    raised: list[tuple] = []
+    monkeypatch.setattr(bk, "_alert",
+                        lambda suffix, title, level="warn": raised.append((suffix, level, title)))
+    st = bk.check_stale()
+    assert st["stale"] and st["ever"] is False
+    assert raised and raised[0][0] == "stale" and raised[0][1] == "error"
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_a_stale_backup_alerts_and_a_fresh_one_does_not(install, monkeypatch):
+    raised: list[tuple] = []
+    monkeypatch.setattr(bk, "_alert",
+                        lambda suffix, title, level="warn": raised.append((suffix, level)))
+    bk.backup(tier="core", now=1_000_000)
+    at = bk.last_good()["at"]
+    bk.check_stale(now=at + 3600)
+    assert not raised, "a fresh backup says nothing"
+    bk.check_stale(now=at + 9 * 86400)
+    assert ("stale", "warn") in raised
+
+
+def test_the_timer_unit_name_is_asked_of_setup_not_written_down():
+    """It was written down wrong first (a repeated `media-`), which would have
+    reported "not installed" forever on a host that had it."""
+    from agent_media_core import setup
+
+    assert bk.timer_unit() == "agent-media-backup.timer"
+    assert bk.timer_unit() in setup._template_units(bk.SERVICE_TEMPLATE)
+    assert bk.SERVICE_TEMPLATE in setup.service_template_names()
+
+
+def test_schedule_state_says_when_the_timer_is_missing(install, monkeypatch):
+    def fake_run(argv, **kw):
+        class R:
+            returncode = 0
+            stdout = "LoadState=not-found\nActiveState=inactive\n"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(bk.subprocess, "run", fake_run)
+    st = bk.schedule_state()
+    assert st["installed"] is False, "nothing runs nightly, and it has to say so"
+    assert st["unit"].endswith(".timer")

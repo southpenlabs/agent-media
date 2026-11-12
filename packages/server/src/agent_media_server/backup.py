@@ -3,6 +3,7 @@
     media backup                     # a snapshot to the configured destination
     media backup list|show|verify    # what is held, and whether it is sound
     media backup sync                # the quick second pass before a cutover
+    media backup stale               # is the schedule still running?
     media restore <id|path>          # onto this machine, --dry-run by default
 
 Design: `docs/proposals/2026-11-12-backup-and-restore.md` (roadmap 62).
@@ -545,6 +546,8 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     out["manifest"] = str(snap / "manifest.json")
     out["path"] = str(snap)
 
+    if out["ok"]:
+        _mark_good(store, man)
     if prune:
         out["pruned"] = _prune(store, max_bytes())
     if host:
@@ -554,6 +557,81 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     if failed:
         _alert("", f"backup {sid}: {len(failed)} item(s) failed", level="error")
     return out
+
+
+#: A daily backup older than this is wrong, not merely late. Two days leaves
+#: room for one missed run (a reboot, a host asleep) before it is said out loud.
+STALE_DAYS_DEFAULT = 2.0
+
+
+def stale_after_days() -> float:
+    raw = os.environ.get("MEDIA_BACKUP_STALE_DAYS", "").strip()
+    try:
+        return float(raw) if raw else STALE_DAYS_DEFAULT
+    except ValueError:
+        return STALE_DAYS_DEFAULT
+
+
+def _good_stamp(store: Path) -> Path:
+    return store / "last-good.json"
+
+
+def _mark_good(store: Path, man: dict) -> None:
+    """Record that a run finished sound.
+
+    Kept beside the snapshots rather than inferred from them, for two reasons:
+    a failed run leaves a snapshot directory too, so "the newest snapshot" is
+    not the same question as "the last good backup"; and pruning can remove
+    every snapshot a stale check would otherwise have read.
+    """
+    try:
+        _good_stamp(store).write_text(json.dumps({
+            "id": man.get("id"), "created": man.get("created"),
+            "at": time.time(), "tier": man.get("tier"),
+            "host": man.get("host"), "totals": man.get("totals"),
+        }, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def last_good(dest: str | None = None) -> dict | None:
+    """The last backup that finished sound, or None if there has never been one."""
+    try:
+        return json.loads(_good_stamp(_local_store(dest)).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def staleness(dest: str | None = None, *, now: float | None = None) -> dict:
+    """How long since a backup last finished sound, and whether that is wrong.
+
+    This is the check a schedule cannot make for itself. A run that fails
+    raises `backup.<host>`; a schedule that quietly stops firing raises
+    nothing at all, which is the way backups usually die -- so something
+    outside the timer has to ask this question. `selfcheck_facts()` does, so
+    `media doctor` and the status bar's warning both see it.
+    """
+    now = time.time() if now is None else now
+    good = last_good(dest)
+    limit = stale_after_days()
+    if not good:
+        return {"ever": False, "stale": True, "days": None, "limit_days": limit,
+                "why": "no backup has ever finished sound here"}
+    age_days = max(0.0, (now - float(good.get("at") or 0))) / 86400.0
+    return {"ever": True, "stale": age_days > limit, "days": round(age_days, 2),
+            "limit_days": limit, "id": good.get("id"), "tier": good.get("tier"),
+            "why": (f"the last good backup was {age_days:.1f} days ago, "
+                    f"over the {limit:g}-day limit") if age_days > limit else ""}
+
+
+def check_stale(dest: str | None = None, *, now: float | None = None,
+                alert: bool = True) -> dict:
+    """`staleness()`, and say it out loud when it is wrong."""
+    st = staleness(dest, now=now)
+    if st["stale"] and alert:
+        _alert("stale", f"backup: {st['why']}",
+               level="error" if not st["ever"] else "warn")
+    return st
 
 
 def _push(store: Path, host: str, path: str) -> dict:
@@ -636,6 +714,49 @@ def _alert(suffix: str, title: str, *, level: str = "warn") -> None:
 
 
 # --- reading one ------------------------------------------------------------
+
+
+#: The service template whose `timer` file carries the nightly cadence.
+SERVICE_TEMPLATE = "media-backup"
+#: Fallback if setup cannot be asked. Derived rather than written down where
+#: possible: the first guess here was wrong by a repeated `media-`, which would
+#: have made `where` report "not installed" forever on a host that had it.
+TIMER_UNIT_FALLBACK = "agent-media-backup.timer"
+
+
+def timer_unit() -> str:
+    """The timer `media-setup install-services` writes, asked of setup itself
+    so the two cannot drift."""
+    try:
+        from agent_media_core import setup
+        for unit in setup._template_units(SERVICE_TEMPLATE):
+            if unit.endswith(".timer"):
+                return unit
+    except Exception:                               # noqa: BLE001
+        pass
+    return TIMER_UNIT_FALLBACK
+
+
+def schedule_state() -> dict:
+    """Whether the nightly timer is installed and armed on this host.
+
+    Asked because "no backups" and "backups failing" look identical from the
+    outside, and the first is the quieter of the two: a timer that was never
+    installed raises nothing, ever.
+    """
+    unit = timer_unit()
+    out: dict = {"unit": unit, "installed": False, "active": None, "next": None}
+    try:
+        r = subprocess.run(["systemctl", "--user", "show", unit,
+                            "--property=LoadState,ActiveState,NextElapseUSecRealtime"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return out
+    got = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+    out["installed"] = got.get("LoadState") == "loaded"
+    out["active"] = got.get("ActiveState") or None
+    out["next"] = got.get("NextElapseUSecRealtime") or None
+    return out
 
 
 def _local_store(dest: str | None = None) -> Path:
@@ -950,6 +1071,12 @@ def main(argv: list[str] | None = None) -> int:
     sy.add_argument("--to", default=None)
     sy.add_argument("--json", action="store_true")
 
+    stl = sub.add_parser("stale", help="is the schedule still running?")
+    stl.add_argument("--to", default=None)
+    stl.add_argument("--json", action="store_true")
+    stl.add_argument("--quiet", action="store_true",
+                     help="check without raising the alert")
+
     wh = sub.add_parser("where", help="the destination, its cap and its room")
     wh.add_argument("--to", default=None)
     wh.add_argument("--json", action="store_true")
@@ -1005,10 +1132,27 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  ! {b}")
             return 0 if res["ok"] else 1
 
+        if cmd == "stale":
+            st = check_stale(a.to, alert=not a.quiet)
+            if as_json:
+                print(json.dumps(st, indent=2))
+            else:
+                if not st["ever"]:
+                    print("no backup has ever finished sound here")
+                else:
+                    print(f"last good backup: {st['days']:g} days ago "
+                          f"({st.get('id')}, tier {st.get('tier')})")
+                if st["stale"]:
+                    print(f"  ! {st['why']}")
+            return 1 if st["stale"] else 0
+
         if cmd == "where":
             store = destination(a.to)
             host, path = _remote(store)
-            info = {"dest": store, "remote": host, "max_bytes": max_bytes()}
+            # staleness reads the local store, which is the real history even
+            # when the destination is another machine (it holds the mirror).
+            info = {"dest": store, "remote": host, "max_bytes": max_bytes(),
+                    "schedule": schedule_state(), "staleness": staleness(a.to)}
             if host is None:
                 p = Path(path)
                 info["exists"] = p.is_dir()
@@ -1025,6 +1169,17 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"store:       {_human(info.get('store_bytes'))}")
                     print(f"free:        {_human(info['free'])}"
                           + ("  ! under the floor" if info.get("under_floor") else ""))
+                sch = info["schedule"]
+                print(f"schedule:    " + (
+                    f"{sch['unit']} {sch['active'] or '?'}"
+                    + (f", next {sch['next']}" if sch.get("next") else "")
+                    if sch["installed"] else
+                    "NOT INSTALLED — nothing runs nightly "
+                    "(`media-setup install-services`)"))
+                st = info["staleness"]
+                print("last good:   " + (
+                    f"{st['days']:g} days ago" if st["ever"] else "never")
+                    + ("  ! " + st["why"] if st["stale"] else ""))
             return 0
     except (ValueError, FileNotFoundError, RuntimeError) as e:
         print(f"media backup: {e}", file=__import__("sys").stderr)

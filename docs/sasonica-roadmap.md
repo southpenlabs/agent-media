@@ -2614,7 +2614,12 @@ ahead.
     should have a backup system built in", thread a4e12d56, via agent-mail
     #246; follows an outside review's point that backups were the biggest
     gap, #245). `docs/proposals/2026-11-12-backup-and-restore.md`.
-    **Designed and decided 12 Nov 2026, not built.** David's two answers:
+    **BUILT 13 Nov 2026** (`media backup` / `media restore`,
+    `agent_media_server/backup.py`, 30 tests, reference at
+    `docs/reference/backup-and-restore.md`; the nightly timer and the
+    stale alert followed the same day, encryption at rest is still to
+    come, so sam's `red5-backup-pull` still runs). Decided 12 Nov;
+    David's two answers:
     deploy cadence is **batch when idle**, not every green push (revising
     where-things-run decision 2, from #245's push-back — 16 agents pushing
     to the machine that answers the phone); and the nightly carries the
@@ -2650,8 +2655,11 @@ ahead.
     copied live: `state.db` carries a 32M WAL beside it, so an rsync of the
     pair can be torn. Encrypted before it leaves the machine, with the
     recovery phrase printed once to keep off the server. `backup.<host>`
-    alerts on a failed run and `backup.<host>.stale` on a schedule that
-    quietly stopped; `media backup verify` restores into a throwaway HOME
+    alerts on a failed run, `backup.<host>.space` on the cap or the disk,
+    and `backup.<host>.stale` on a schedule that quietly stopped — that
+    last one checked from `selfcheck_facts()`, not from the backup's own
+    timer, since a timer that stops firing cannot report itself, so
+    `media doctor` and the status bar's ⚠ carry it; `media backup verify` restores into a throwaway HOME
     and runs `integrity_check`, which is what makes the drill a drill
     rather than a hope. Supersedes dotfiles `red5-backup-pull` for
     agent-media's own state; the script keeps `~/.claude`, mail, org,
@@ -2665,7 +2673,11 @@ ahead.
     printed; `media server rename` changes them), hand-made systemd
     drop-ins are kept but held back from a restore, and `media backup
     verify --deep` restores into a throwaway HOME and checks the databases
-    there.
+    there. The nightly is the `media-backup` service template
+    (`agent-media-backup.timer`, 03:40 with jitter and `Persistent=true`,
+    the `daily` tier), gated on `MEDIA_BACKUP_DEST` so it is never
+    installed without somewhere to go; `media backup where` and
+    `media backup stale` say when nothing is running.
 
 63. **The server moves home: the app pairs with red2** (David, 12 Nov 2026,
     thread a4e12d56, via agent-mail #248: "I think I'm going to pair the

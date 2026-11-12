@@ -8579,8 +8579,48 @@ def selfcheck_facts() -> "dict[str, str]":
     facts.update(jev.facts())
     facts.update(_package_facts())
     facts.update(_layout_facts())
+    facts.update(_backup_facts())
     _cache_facts(facts)
     return facts
+
+
+def _backup_facts() -> "dict[str, str]":
+    """Whether this host's state is actually being carried off it.
+
+    Here rather than on the backup's own timer, because the failure this has
+    to catch is that timer not firing: a run that fails raises its own alert,
+    while a schedule that quietly stopped raises nothing at all, which is the
+    way backups usually die. `doctor` collects these facts and the status
+    bar's warning reads them, neither of which depends on the timer being
+    alive.
+
+    Silent on a host with no destination set: a phone or a worker is not
+    expected to back anything up, and a warning there would be noise that
+    teaches people to ignore the one that matters.
+    """
+    import os as _os
+
+    if not (_os.environ.get("MEDIA_BACKUP_DEST") or "").strip():
+        return {}
+    try:
+        from agent_media_server import backup as _backup
+    except ImportError:
+        return {}
+    try:
+        st = _backup.staleness()
+        sch = _backup.schedule_state()
+        out = {"backup_stale": "yes" if st["stale"] else "no"}
+        if st["ever"]:
+            out["backup_age_days"] = f"{st['days']:g}"
+        else:
+            out["backup_ever"] = "no"
+        if not sch["installed"]:
+            out["backup_timer"] = "missing"
+        elif sch.get("active") and sch["active"] != "active":
+            out["backup_timer"] = str(sch["active"])
+        return out
+    except Exception as e:  # noqa: BLE001 — a check must never break selfcheck
+        return {"backup_error": str(e)[:200]}
 
 
 def _drift_facts(root: "Optional[Path]") -> "dict[str, str]":
@@ -8989,6 +9029,20 @@ def health_problems(facts: "dict[str, str]") -> "list[str]":
                         "start (pip install -e packages/server)")
     if facts.get("crashloop"):
         problems.append(f"crash-looping: {facts['crashloop']}")
+    # A backup nobody notices has stopped is the usual way state is lost: the
+    # run that fails says so itself, the schedule that stops says nothing.
+    if facts.get("backup_timer") == "missing":
+        problems.append("the nightly backup timer is not installed, so nothing "
+                        "carries this host's state off it "
+                        "(`media-setup install-services`)")
+    elif facts.get("backup_timer"):
+        problems.append(f"the nightly backup timer is {facts['backup_timer']}, "
+                        "not active — nothing runs nightly")
+    if facts.get("backup_ever") == "no":
+        problems.append("no backup has ever finished here (`media backup`)")
+    elif facts.get("backup_stale") == "yes":
+        problems.append(f"the last good backup was {facts.get('backup_age_days', '?')} "
+                        "days ago (`media backup stale`)")
     if facts.get("drift"):
         problems.append(f"service files are copies that differ from the checkout, so "
                         f"git pull won't reach them: {facts['drift']} — compare, then "
