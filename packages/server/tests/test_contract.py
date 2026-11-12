@@ -204,10 +204,13 @@ def test_targets_shape(server, shelf, signed_in):
     # `archived_at` on 30 Oct 2026: when it was archived, else None (archive.py).
     # `you_at`, `last_from_you` on 30 Oct 2026: Show → Sent, Waiting for reply (you_wrote.py).
     # `model`, `model_label` on 4 Nov 2026: the model a thread runs on (session_model.py, §6.16).
+    # `changes` on 12 Nov 2026: what the thread holds in its folder's checkout,
+    # counted (git_who.add_changes, §6.1) — None here, and None until the
+    # server has read that checkout behind a list.
     assert keys(live) == {"session", "title", "live", "pane", "recap", "archived", "archived_at", "draft_at", "you_at", "last_from_you",
                           "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
                           "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "issue", "spaces", "mail_from",
-                          "top", "marked_unread", "mark_carried", "model", "model_label"}
+                          "top", "marked_unread", "mark_carried", "model", "model_label", "changes"}
     assert live == {"session": SID2, "title": "Sasonica web", "live": True, "pane": "%42",
                     "recap": None, "archived": False, "archived_at": None, "draft_at": None, "you_at": None, "last_from_you": False,
                     "rested": None, "pinned": False,
@@ -215,11 +218,11 @@ def test_targets_shape(server, shelf, signed_in):
                     "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
                     "tags": [], "quiet": None, "quiet_rule": None, "remind": None, "reminded": False, "issue": None, "spaces": ["inbox"], "mail_from": None,
                     "top": None, "marked_unread": False, "mark_carried": None,
-                    "model": None, "model_label": None}
+                    "model": None, "model_label": None, "changes": None}
     assert keys(shelved) == {"session", "title", "live", "pane", "at", "recap", "archived", "archived_at", "draft_at", "you_at", "last_from_you",
                              "rested", "pinned", "project", "cwd", "harness", "priority", "speech", "speech_own",
                           "speech_from", "speech_fallback", "tags", "quiet", "quiet_rule", "remind", "reminded", "issue", "spaces", "mail_from",
-                          "top", "marked_unread", "mark_carried", "model", "model_label"}
+                          "top", "marked_unread", "mark_carried", "model", "model_label", "changes"}
     assert shelved["project"] == "p-agent-media" and shelved["cwd"] is None
     assert shelved["rested"] is None and shelved["pinned"] is False
     assert shelved["live"] is False and shelved["pane"] is None
