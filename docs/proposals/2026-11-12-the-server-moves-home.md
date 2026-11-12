@@ -461,8 +461,10 @@ the day of the cutover, not after it.
    one-use sign-ins and been a second David on Matrix, so the practice copy
    runs in a throwaway folder on red2 with every chat ended and every
    outside credential deleted. Result, third run: full backup of red5 with
-   everything up 913 s (2.8 GB, 33,500 files), second pass **133 s** (the
-   real move's downtime floor; worth shortening), sandbox up in 12 s, the
+   everything up 913 s (2.8 GB, 33,500 files), second pass **133 s**, cut to
+   **33 s** the same day (the whole-store mirror re-read every snapshot;
+   `sync()` now sends only the new one with `--link-dest`: the real move's
+   downtime floor), sandbox up in 12 s, the
    copy answers on red2 with red5's `server-id`, all 679 thread records
    there, nothing resumed, a new chat started and answered in it, red2's
    own sessiond and jobs worker untouched. Found and fixed on the way: the
