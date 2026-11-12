@@ -1114,6 +1114,12 @@ FROM = {"me": "me", "mine": "me", "i": "me", "user": "me", "listener": "me",
         "agent": "agent", "assistant": "agent", "ai": "agent", "them": "agent"}
 #: What `kind:` (or `is:`) takes: the words only, or tool steps only.
 KINDS = ("text", "tool")
+#: What `harness:` takes — every harness the index holds a thread for. A
+#: closed set, so a value outside it is a 400 (and a complaint a model can
+#: act on, 05453168's `_as_query`) rather than a query that quietly matches
+#: nothing: `harness:claude-code` is the kind of near miss a model writes.
+#: `in:`, `thread:` and `tool:` stay free text — those sets are open.
+HARNESSES = ("claude", "codex", "pi", "hermes", "matrix")
 #: Field operators, each onto the one thing it narrows.
 FIELDS = {"from": "from", "who": "from",
           "in": "in", "project": "in", "folder": "in",
@@ -1255,6 +1261,10 @@ def _field(token: str, state: dict) -> None:
     elif name in ("after", "before"):
         f[name] = _when(value)
         state["dated"] = True  # an `ago` after this one is part of the date
+    elif name == "harness":
+        if value.lower() not in HARNESSES:
+            raise QueryError(f"harness: is one of {', '.join(HARNESSES)}")
+        f.setdefault(name, []).append((value.lower(), neg))
     else:
         f.setdefault(name, []).append(
             (value.lower() if name in ("harness", "tool") else value, neg))

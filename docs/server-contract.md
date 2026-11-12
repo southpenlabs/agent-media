@@ -5834,7 +5834,7 @@ memory as its own section when this host has agent-memory. Code:
   | `from:me`, `from:agent` | whose words — `who=`, and it wins over it (`mine`/`user`/`i`, `assistant`/`ai`/`them` too; `who:` is the same operator) |
   | `in:<words>` | the thread's project or folder holds them (`project:`, `folder:`) |
   | `thread:<words>` | its title, Claude's `ai-title` or its first prompt holds them (`title:`) |
-  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`) |
+  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`). A closed set: anything else is 400 with the names, so a near miss is said rather than answered with nothing. `in:`, `thread:` and `tool:` stay free text |
   | `tool:<name>` | a tool step that ran it (`ran:`) — turns tool steps on by itself, like `kind:tool` |
   | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
   | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` (a bare `ago` straight after one of these belongs to it — `after:7d ago` — and is a word anywhere else). `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
