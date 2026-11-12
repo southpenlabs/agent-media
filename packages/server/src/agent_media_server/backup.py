@@ -458,7 +458,7 @@ def _store_bytes(store: Path) -> int:
 
 
 def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = False,
-           now: float | None = None, prune: bool = True) -> dict:
+           now: float | None = None, prune: bool = True, quick_push: bool = False) -> dict:
     """Make one snapshot. Returns a result rather than printing, so
     `media server move` can call it and read what happened.
     """
@@ -551,7 +551,16 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     if prune:
         out["pruned"] = _prune(store, max_bytes())
     if host:
-        pushed = _push(store, host, path)
+        # `quick_push` (the cutover's second pass): only this snapshot goes,
+        # hardlinked there against the one before it, when the far side has
+        # that one. The whole-store mirror re-reads every snapshot's file
+        # list for `-H`: 2 minutes from Germany to Melbourne against 11 s
+        # (the move's rehearsal, 13 Nov 2026), and those minutes are downtime.
+        pushed = None
+        if quick_push and link_from is not None and out["ok"]:
+            pushed = _push_one(store, host, path, sid, link_from.name)
+        if pushed is None or not pushed.get("ok"):
+            pushed = _push(store, host, path)
         out["pushed"] = pushed
         out["ok"] = out["ok"] and pushed.get("ok", False)
     if failed:
@@ -658,6 +667,29 @@ def _push(store: Path, host: str, path: str) -> dict:
     r = subprocess.run(argv, capture_output=True, text=True)
     return {"ok": r.returncode in (0, 24), "code": r.returncode,
             "error": r.stderr.strip()[:400] or None}
+
+
+def _push_one(store: Path, host: str, path: str, sid: str, prev: str) -> dict:
+    """Send one snapshot, hardlinked on the far side against `prev` there
+    (`--link-dest`), and the store's own small files. Not a mirror: nothing
+    pruned here is removed there; the next whole push does that. `ok: False`
+    when the far side has no `prev` (the caller then mirrors the lot)."""
+    far = f"{path.rstrip('/')}/snapshots"
+    has = subprocess.run(["ssh", host, "test", "-f", f"{far}/{prev}/manifest.json"],
+                         capture_output=True, text=True)
+    if has.returncode != 0:
+        return {"ok": False, "code": has.returncode, "error": f"{host} has no {prev}"}
+    r = subprocess.run(["rsync", "-a", "--no-specials", "--no-devices",
+                        f"--link-dest={far}/{prev}",
+                        f"{store}/snapshots/{sid}/", f"{host}:{far}/{sid}/"],
+                       capture_output=True, text=True)
+    if r.returncode not in (0, 24):
+        return {"ok": False, "code": r.returncode, "error": r.stderr.strip()[:400] or None}
+    tops = [str(p) for p in store.iterdir() if p.is_file()]
+    if tops:
+        subprocess.run(["rsync", "-a", *tops, f"{host}:{path.rstrip('/')}/"],
+                       capture_output=True, text=True)
+    return {"ok": True, "code": r.returncode, "error": None, "quick": True, "against": prev}
 
 
 def _rsync_has_mkpath() -> bool:
@@ -1022,7 +1054,7 @@ def sync(*, tier: str = "full", to: str | None = None, now: float | None = None)
     host, path = _remote(destination(to))
     had = bool(_snapshots(Path(path))) if host is None else None
     started = time.time()
-    out = backup(tier=tier, to=to, now=now)
+    out = backup(tier=tier, to=to, now=now, quick_push=True)
     out["seconds"] = round(time.time() - started, 1)
     # None when the store is on another machine and cannot be counted from here.
     out["second_pass"] = had

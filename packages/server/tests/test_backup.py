@@ -454,6 +454,35 @@ def test_a_remote_push_makes_the_destination_folder(install, monkeypatch):
     assert "-aH" in push, "hardlinks must survive the push or the history costs full size"
 
 
+def test_the_second_pass_sends_only_the_new_snapshot(install, monkeypatch):
+    """The cutover's second pass is downtime: the whole-store mirror took
+    2 minutes from red5 to red2 against 11 s for the one new snapshot
+    hardlinked against the last (13 Nov 2026). Calls recorded, not run."""
+    calls: list[list[str]] = []
+    has_prev = {"rc": 0}
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        class R:
+            returncode = has_prev["rc"] if argv[:1] == ["ssh"] and "test" in argv else 0
+            stderr = ""
+            stdout = "rsync version 3.5.0"
+        return R()
+
+    monkeypatch.setattr(bk.subprocess, "run", fake_run)
+    store = install["dest"]
+    (store / "snapshots" / "s2").mkdir(parents=True)
+    (store / "last-good.json").write_text("{}")
+    got = bk._push_one(store, "red2", "/far/store", "s2", "s1")
+    assert got["ok"] and got["quick"]
+    one = next(c for c in calls if c[0] == "rsync" and c[-1] == "red2:/far/store/snapshots/s2/")
+    assert "--link-dest=/far/store/snapshots/s1" in one and "--delete" not in one
+    assert any(c[0] == "rsync" and str(store / "last-good.json") in c for c in calls)
+    # The far side without the one before: not ok, so the caller mirrors the lot.
+    has_prev["rc"] = 1
+    assert not bk._push_one(store, "red2", "/far/store", "s2", "s1")["ok"]
+
+
 # --- the schedule, and noticing it stopped ----------------------------------
 
 
