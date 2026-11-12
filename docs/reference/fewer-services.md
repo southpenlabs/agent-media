@@ -201,8 +201,26 @@ is therefore checked to be under the root *after* following symlinks, and
 only media suffixes are served at all. Both have tests that sign the hostile
 path with the real key, which is the only version of that test worth having.
 
-With it set, `MEDIA_CLIPS_BIND=tailnet` comes off and loopback — the
-default — is correct.
+**Done on red5, 12 Nov 2026.** `MEDIA_BOOK_BASEURL_PHONE` is the public
+route with `MEDIA_BOOK_SIGNED_PHONE=1`, `MEDIA_CLIPS_BIND` is gone, and the
+clip port listens on 127.0.0.1 only — the mesh address refuses. Verified
+with a real 4.6 MB file: 4649576 bytes over public HTTPS, byte-for-byte what
+is on disk, through a filename with spaces, parentheses, a `+` and brackets
+in it; and the unsigned URL refused with 404.
+
+### What still binds a mesh address on red5
+
+Three, all still their own units, none of them measured:
+
+| | port | note |
+| --- | --- | --- |
+| `speech-state` | 8675 | its unit resolves the mesh by design — peers on other hosts post to it |
+| `share` | 8771 | `MEDIA_SHARE_BIND` is set explicitly; the public `/share` app route exists and is what the app uses |
+| the canvas page | 8781 | the tailnet-only canvas, separate from the app routes on 8789 |
+
+Neither `share` nor `speech-state` logs its requests, so there is no
+evidence either way about whether anything still reaches them — see the
+note above. Retiring them wants a counter first, not a journal.
 
 ### Moving one in
 
