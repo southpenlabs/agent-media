@@ -3,8 +3,8 @@
 David, 12 Nov 2026, after being told the red5 backup runs from a dotfiles
 script on red2: "agent-media should have a backup system built in" (thread
 a4e12d56, relayed as agent-mail #246; follows point 4 of #245, an outside
-review of the where-things-run plan). Status: **designed, not built; two
-questions open for David** (below).
+review of the where-things-run plan). Status: **designed and decided
+12 Nov 2026, not built** (his two answers below).
 
 So this is a feature of the product, not a fix for this fleet: anyone who
 installs agent-media should be able to back up its state and restore it onto
@@ -79,12 +79,18 @@ with months of history kept.
 
 ### Tier 3 — the bulk (~1.9G, irreplaceable but heavy)
 
-- `sessiond/` (943M) — session transcripts, and the mirrors of the workers'
+Split by David's answer below: the transcripts join the nightly backup, the
+rest is opt-in.
+
+- `sessiond/` (943M) — session transcripts, and the mirrors of the workers'.
+  **In the nightly backup** (David, 12 Nov 2026).
 - `audio/` (734M, 20,692 clips) — rendered speech. Not a cache: a clip is
   *the only copy of what was said in that voice*
   (`_paths.py`, moved out of `~/.cache` on 18 Oct 2026 for exactly this
   reason). Without it, replay and the feed lose every past reply.
-- `visual/` (116M), `feed/` (91M), `sealed/` (15M), `photos/` (12M)
+  **Not in the nightly** — `--tier full` only.
+- `visual/` (116M), `feed/` (91M), `sealed/` (15M), `photos/` (12M).
+  Not in the nightly either.
 - **`~/shared/` (269M on red5, 26 days of it)** — the files David shares from
   the phone's share sheet, which `POST /upload` writes to a folder per day
   (`uploads.py`, `MEDIA_UPLOAD_DIR`). It sits outside the state dir, so it
@@ -126,8 +132,9 @@ migrating a base a single command instead of a project.
 
 ```
 media backup                 # run one now, to the configured destinations
-media backup --tier core     # tiers 1+2 only (the default for the schedule)
-media backup --tier full     # + tier 3
+media backup --tier daily    # the schedule's tier: 1+2 plus the transcripts
+media backup --tier core     # tiers 1+2 only, without the transcripts
+media backup --tier full     # everything, clips and visuals included
 media backup list            # every backup, its id, when, size, tier, where
 media backup show <id>       # the manifest: what it holds, file by file
 media backup verify <id>     # restore into a throwaway HOME and check it
@@ -180,7 +187,8 @@ warns while it has no evidence the key was saved.
 
 ### Schedule, and knowing when it stopped
 
-Nightly at a configurable hour, core tier, through the existing scheduler.
+Nightly at a configurable hour, the `daily` tier, through the existing
+scheduler.
 Failures go to `alerts.report` with alert id `backup.<host>` — the same
 mechanism as `restart-services.<host>`, so it escalates and speaks.
 
@@ -230,24 +238,36 @@ there is one place to look.
 Until `media backup` exists, that reversed rsync is the stopgap, and it is
 worth setting up on the day of the cutover rather than after it.
 
-## Open questions for David
+## What David decided (12 Nov 2026)
 
-1. **Deploy cadence.** Decided 11 Nov as *deploy on every green push* (#2 in
-   where-things-run). The review in #245 pushes back, and the move sharpens
-   its point: with up to 16 agents pushing, any session can put code on the
-   machine holding the personal data gated only by tests — and after the
-   cutover that machine is his own computer at home, answering the phone.
-   Keep every green push, batch them (hourly, or when the house is idle), or
-   deploy only on a tag? Worth settling before the deployer is built.
-2. **What the nightly backup holds.** Core only (~65M: config, secrets,
-   device identities, the databases) or core plus the speech clips and
-   session transcripts (~2G)? The clips are the only copy of what was said,
-   so excluding them means replay of old replies does not survive losing the
-   server. Two things bear on it: red5, the destination after the move, is
-   **at 79% disk**, so ~2G a night with restic history needs checking first;
-   and tier 3 changes slowly, so a third answer is *core nightly, full
-   weekly*, which is the recommendation.
+1. **Deploy cadence: batch when idle.** Not every green push (the 11 Nov
+   decision, now revised in `2026-11-11-where-things-run.md` decision 2) and
+   not a tag. Green pushes queue and deploy together, hourly or when the
+   house is quiet. Nothing for this design to do; it is the deployer's job,
+   recorded here because #245 asked for the choice to be put to him.
+2. **The nightly carries the core and the transcripts.** He chose core only
+   over a weekly full, and added: "I think transcripts should be included in
+   the daily backup." So the `daily` tier is tiers 1 and 2 (~65M) plus
+   `sessiond/` (943M) — about **1G a night**, though restic will dedupe most
+   of it, since transcripts are append-mostly. Two things follow:
 
-Settled enough not to ask: where it goes (red5 off-site over its jobs
+   - *Check red5's disk before the first run.* It is at **79%**, and it is
+     the off-site destination after the move.
+   - *The speech clips are left unprotected, and that is a real consequence,
+     not a rounding error.* `audio/` is 734M across 20,692 clips and each is
+     the only copy of what was said in that voice; under this choice, losing
+     the server loses replay of every past reply, while the text of those
+     replies survives in the databases. They are available as `--tier full`,
+     and a weekly full run would cover them, but he declined that when it was
+     offered, so nothing schedules it. Worth raising again once the first
+     nightly shows what a run actually costs.
+
+   On "transcripts": `sessiond/` holds the thread transcripts behind the app,
+   and that is what `media backup` carries. Claude Code's own
+   `~/.claude/projects/*.jsonl` are every agent's, not this project's, so
+   they stay in sam's script — which already backs them up. Either reading of
+   his answer is covered.
+
+Settled earlier, not asked: where it goes (red5 off-site over its jobs
 connection, per the move plan — a bucket can be added later as a second
 destination, and the design takes any number).
