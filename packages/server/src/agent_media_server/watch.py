@@ -15,7 +15,7 @@ agent_media_core.tmdb; David, 9 Nov 2026).
        &hide_watched=0|1   gated → {"ok", "kind", "list", "lists", "page", "more", "hide_watched",
                            "signed_in", "items", "genres": [{slug, name}]}
   GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
-  GET  /watch/title?kind=movie|tv&id=       gated → a title's page (facts, cast, crew, related, seasons)
+  GET  /watch/title?kind=movie|tv&id=       gated → a title's page (facts, trailer, ratings, cast, crew, related, seasons)
   GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
   GET  /watch/person?id=                    gated → {"ok", "person", "movies": {cast, crew}, "shows": {cast, crew}}
   GET  /watch/lists?which=trending|popular|mine&page=    gated → {"ok", "lists", …}
