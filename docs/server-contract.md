@@ -10624,7 +10624,7 @@ person's `photo`.
   has no such title.
 - **Open in** (`watch_open.py`; David, 12 Nov 2026). `open_in` on a
   title's page is the ordered list of keys that open the title somewhere
-  else: `[{"id", "label", "url", "fallback"?, "kind"?}]`. The app opens
+  else: `[{"id", "label", "url", "fallback"?, "kind"?, "mode"?, "page"?}]`. The app opens
   `url`, and `fallback` when nothing on the device takes `url`. They are
   links only: nothing here finds, resolves or plays a stream.
   - Apps the owner turned on come first, with no `kind`. `stremio`:
@@ -10635,10 +10635,31 @@ person's `photo`.
     `docs/deep-links.md`); `fallback` is the same path under
     `https://web.stremio.com/#/`. Only when it is on and Trakt has the
     title's IMDb id. Off by default: `GET /watch/settings` (gated) →
-    `{"ok", "open_in": [{"id", "label", "on"}]}`, and `POST /watch/settings
-    {"open_in": {"stremio": true|false}}` (admins) saves and answers the
-    same, kept in `<state_dir>/watch-open-in.json`; 400 for an unknown app
-    or a value that is not a boolean.
+    `{"ok", "open_in": [{"id", "label", "on", "mode", "modes"}]}`, and
+    `POST /watch/settings {"open_in"?: {"stremio": true|false},
+    "open_in_mode"?: {"stremio": "app"|"page"}}` (admins; one or both)
+    saves and answers the same, kept in `<state_dir>/watch-open-in.json`;
+    400 for an unknown app, a value that is not a boolean, or a mode that
+    is not in the app's `modes`.
+  - **How an app's key opens** (David, 13 Nov 2026: "can we do the same
+    media controls as we did with YouTube and Spotify and insight
+    timer?"). An app's entry carries `mode`: `"app"` (the default: `url`,
+    then `fallback`, as above) or `"page"`, which adds `page` (the
+    address under `https://web.stremio.com/#/`). In page mode an Android
+    shell shows that page, Stremio's own web app as it is, in a view of
+    its own, and the app's controls (play, pause, seek, the position, the
+    phone's media keys) are a remote for the video on that page; a
+    browser, or a shell without the page player, opens the link as in
+    `"app"` mode. Still links only: the server names an address, and the
+    app finds, resolves, proxies and fetches no stream — what plays, and
+    from where, is Stremio's page's business and its user's. `modes` in
+    the settings is what this install offers: `["app"]`, and `"page"` as
+    well only where `personal_use` allows `stremio-page`
+    (`MEDIA_WATCH_STREMIO_PAGE`; a service's site shown inside another
+    product is for an owner's own install,
+    docs/decisions/2026-11-02-personal-use.md). A kept `"page"` reads as
+    `"app"` wherever it is no longer offered. An entry without `mode`
+    (an older server) is `"app"`.
   - Then the where-to-watch services, when TMDb is set up: each known
     service once, `kind` the first way it offers the title (`stream`,
     `free`, `ads`, `rent`, `buy`), `url` that service's own search for the

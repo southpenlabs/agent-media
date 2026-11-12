@@ -62,6 +62,8 @@ METHODS = {
                            "(its Developer Policy III.3 and III.5 leave an assistant doing this in doubt)"),
     "signed-in-reading": ("MEDIA_SIGNED_IN_READING",
                           "pages read, and friends-only videos played, with the app's stored sign-ins"),
+    "stremio-page": ("MEDIA_WATCH_STREMIO_PAGE",
+                     "Stremio's own web app shown inside the app, the video on its page driven by the app's controls"),
     "camera-reports": ("MEDIA_CAMERA_REPORTS",
                        "people's reports of where phone and seatbelt cameras stand, read from a "
                        "community site through the phone, for the Map and the camera alerts"),
