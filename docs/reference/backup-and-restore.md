@@ -53,6 +53,14 @@ protected without anyone remembering to list it. What is named out, and why:
 Not carried at all, deliberately: `~/.local/share/agent-media` — release
 artifacts and a clone of origin, which an install brings back.
 
+**A socket or a pipe is not state, wherever it sits.** The by-rule scan skips
+anything under the state root that is not a file, a folder or a link, and the
+folder copies pass `--no-specials --no-devices` so `rsync -a` does not
+recreate one found inside a folder as an empty node either. The service that
+owns a socket makes its own, so restoring one is pointless. This is not
+hypothetical: the first full backup of red5 stopped on `sink-speech.sock` and
+`sink-book.sock` (13 Nov 2026, found by the move's rehearsal).
+
 ## Why a database is dumped and not copied
 
 `state.db` carries a write-ahead log beside it — 32M of one when this was

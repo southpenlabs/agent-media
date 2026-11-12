@@ -384,7 +384,13 @@ def _copy_tree(src: Path, dst: Path, link_dest: Path | None) -> dict:
     costs only the new ones.
     """
     dst.mkdir(parents=True, exist_ok=True)
-    argv = ["rsync", "-a", "--delete", "--numeric-ids"]
+    # `--no-specials --no-devices`: `-a` would otherwise recreate a socket or
+    # pipe found inside a folder as an empty node, which is the same thing the
+    # by-rule scan skips at the top level (13 Nov 2026, `sink-speech.sock`).
+    # A socket is not state wherever it sits, and restoring one is pointless:
+    # the service that owns it makes its own. rsync skips them and still
+    # exits 0.
+    argv = ["rsync", "-a", "--no-specials", "--no-devices", "--delete", "--numeric-ids"]
     for pat in EXCLUDE:
         argv += ["--exclude", pat]
     if link_dest and link_dest.is_dir():

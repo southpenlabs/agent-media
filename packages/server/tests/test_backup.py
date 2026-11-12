@@ -402,3 +402,26 @@ def test_a_snapshot_from_a_newer_version_is_refused_not_half_applied(install, tm
     assert not out["ok"] and "does not" in out["error"]
     assert out["restored"] == [], "nothing was written"
     assert not (roots["state"] / "server-id").exists()
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_a_socket_inside_a_folder_is_not_carried_either(install):
+    """The by-rule scan skips a socket beside the state; `-a` would have
+    recreated one *inside* a folder as an empty node. A socket is not state
+    wherever it sits, and the service that owns it makes its own."""
+    import socket as _socket
+
+    sock = install["state"] / "sessiond" / "live.sock"
+    s = _socket.socket(_socket.AF_UNIX)
+    s.bind(str(sock))
+    try:
+        (install["state"] / "sessiond" / "p.fifo").parent.mkdir(exist_ok=True)
+        os.mkfifo(install["state"] / "sessiond" / "p.fifo")
+        res = bk.backup(tier="daily")
+        assert res["ok"], res["warnings"]
+        held = Path(res["path"]) / "data" / "state" / "sessiond"
+        assert (held / "t1.jsonl").exists(), "the real transcripts still come"
+        assert not (held / "live.sock").exists()
+        assert not (held / "p.fifo").exists()
+    finally:
+        s.close()
