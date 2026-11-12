@@ -146,7 +146,14 @@ def environment(name: str, base: Path | None = None) -> dict[str, str]:
     home = r["home"]
     bindir = str(Path(sys.executable).parent)
     envfile = base / "rehearsal.env"
+    # The web app the server serves at /app/: a host setting (a drop-in on
+    # red5, which a restore holds back), so the copy answered 404 there
+    # (13 Nov 2026). This machine's own build, when it has one.
+    web = os.environ.get("MEDIA_WEB_APP_DIR") or str(
+        Path.home() / "projects" / "sasonica-app" / "build-app" / "client")
+    extra = {"MEDIA_WEB_APP_DIR": web} if Path(web).is_dir() else {}
     return {
+        **extra,
         "XDG_STATE_HOME": str(home / ".local" / "state"),
         "XDG_CONFIG_HOME": str(home / ".config"),
         "XDG_CACHE_HOME": str(home / ".cache"),
@@ -202,6 +209,32 @@ def start(store: str, name: str) -> dict:
     if not got.get("ok", True) and got.get("error"):
         return {"ok": False, "error": f"the restore failed: {got.get('error')}"}
     fenced = fence(base)
+    why = _run_units(name, base)
+    if why:
+        return {"ok": False, "error": why, "fenced": fenced}
+    st = status()
+    return {"ok": st["running"], "name": name, "root": str(base), "fenced": fenced,
+            "units": st["units"], "restored": len(got.get("restored") or []),
+            "warnings": got.get("warnings") or [],
+            **({} if st["running"] else {"error": "a unit is not running: journalctl --user -u "
+                                                  + " -u ".join(UNITS)})}
+
+
+def restart(name: str) -> dict:
+    """The copy's two units again, with today's settings; nothing restored."""
+    from . import server_address
+
+    name = server_address.origin(name)
+    if not name or not root().exists():
+        return {"ok": False, "error": "no practice copy here, or no address"}
+    stop(remove=False)
+    why = _run_units(name, root())
+    st = status()
+    return {"ok": st["running"] and not why, "units": st["units"], **({"error": why} if why else {})}
+
+
+def _run_units(name: str, base: Path) -> str:
+    """Start the two units; "" when both were started, else why not."""
     env = environment(name, base)
     (base / "rehearsal.env").write_text(
         "# The practice copy's own settings (server_sandbox.py). Not the restored env file.\n"
@@ -215,16 +248,10 @@ def start(store: str, name: str) -> dict:
                *[f"--setenv={k}={v}" for k, v in env.items()], *argv]
         rr = subprocess.run(run, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if rr.returncode != 0:
-            return {"ok": False, "error": f"{unit} did not start: {(rr.stderr or rr.stdout).strip()}",
-                    "fenced": fenced}
+            return f"{unit} did not start: {(rr.stderr or rr.stdout).strip()}"
         time.sleep(2)
     time.sleep(3)
-    st = status()
-    return {"ok": st["running"], "name": name, "root": str(base), "fenced": fenced,
-            "units": st["units"], "restored": len(got.get("restored") or []),
-            "warnings": got.get("warnings") or [],
-            **({} if st["running"] else {"error": "a unit is not running: journalctl --user -u "
-                                                  + " -u ".join(UNITS)})}
+    return ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -233,9 +260,12 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("start")
     st.add_argument("--from", dest="store", required=True)
     st.add_argument("--name", required=True)
+    rs = sub.add_parser("restart")
+    rs.add_argument("--name", required=True)
     sub.add_parser("stop")
     sub.add_parser("status")
     a = ap.parse_args(argv)
-    got = start(a.store, a.name) if a.cmd == "start" else stop() if a.cmd == "stop" else status()
+    got = (start(a.store, a.name) if a.cmd == "start" else restart(a.name) if a.cmd == "restart"
+           else stop() if a.cmd == "stop" else status())
     print(json.dumps(got, indent=1))
     return 0 if got.get("ok") else 1
