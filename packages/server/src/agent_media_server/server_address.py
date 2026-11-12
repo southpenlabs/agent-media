@@ -428,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
                          "nothing stopped here (server_sandbox.py)")
     mv.add_argument("--rehearse-stop", action="store_true",
                     help="stop and remove the practice copy")
+    stl = sub.add_parser("settle", add_help=False,
+                         help="after a restore here: make the state this machine's")
+    stl.add_argument("args", nargs=argparse.REMAINDER)
+    mv.add_argument("--force", action="store_true",
+                    help="move even while chats are working here (they are not resumed there)")
     sb = sub.add_parser("sandbox", add_help=False,
                         help="the practice copy on this machine: start, stop, status")
     sb.add_argument("args", nargs=argparse.REMAINDER)
@@ -437,6 +442,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "rename":
         return rename(a.to, a.also, check=not a.no_check, dry_run=a.dry_run,
                       restart=not a.no_restart)
+    if a.cmd == "settle":
+        from . import server_settle
+
+        return server_settle.main(a.args)
     if a.cmd == "sandbox":
         from . import server_sandbox
 
@@ -455,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.rehearse:
             return server_move.rehearse(a.to, a.name, yes=a.yes)
         return server_move.move(a.to, a.name, a.also, yes=a.yes, dry_run=a.dry_run,
-                                foreground=a.foreground, fire=a.fire)
+                                foreground=a.foreground, fire=a.fire, force=a.force)
     if a.cmd == "check":
         bad = problems()
         for p in bad:

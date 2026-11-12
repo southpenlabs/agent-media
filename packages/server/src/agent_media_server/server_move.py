@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -62,7 +63,7 @@ from pathlib import Path
 from . import server_address
 
 STORE = ".local/share/agent-media-move"
-STEPS = ("check", "keep", "backup", "stop", "sync", "restore", "verify")
+STEPS = ("check", "keep", "backup", "transcripts", "units", "stop", "sync", "restore", "verify")
 #: The first step that runs detached from the caller.
 DETACHED_FROM = "stop"
 
@@ -143,11 +144,13 @@ def describe(to: str, name: str, also: list[str]) -> list[str]:
     return [
         f"1 check    {to}: ssh, a release with `media restore` and `media server`",
         f"2 keep     {to}: a full backup of its own state, for --rollback",
-        f"3 backup   here → {to}:~/{STORE}/store, services up (minutes)",
-        "4 stop     the services here, the session host last (detached from here on)",
-        "5 sync     what changed since step 3 (seconds)",
-        f"6 restore  {to}: stop its units, restore, install-services, rename to "
-        f"{server_address.origin(name)} (still answering: {keep}), start",
+        f"3 backup   here → {to}:~/{STORE}/store, services up (minutes); then the "
+        "chats' transcripts",
+        "4 stop     the services here, the session host last (detached from here on); "
+        "refused while a chat is working",
+        "5 sync     what changed since step 3, state and transcripts (under a minute)",
+        f"6 restore  {to}: stop its units, restore, install-services and the hooks, make the "
+        f"state its own, rename to {server_address.origin(name)} (still answering: {keep}), start",
         f"7 verify   {server_address.origin(name)} answers as this server",
         "by hand    the DNS records and the tunnel; the house audio; --rollback undoes 2–6",
     ]
@@ -205,7 +208,147 @@ def step_backup(st: dict, run) -> None:
     st["snapshot"] = got.get("id")
 
 
+def busy_chats() -> list[str]:
+    """Chats on this server that are working now, in a sentence each."""
+    from agent_media_core import restart_services as rs
+
+    out = []
+    me = os.environ.get("MEDIA_SESSIOND_SESSION") or ""
+    for v in rs.sessiond_sessions():
+        if me and v.get("session") == me:
+            continue          # the chat running the move: it knows
+        why = rs.session_busy(v)
+        if why:
+            out.append(f"{rs._label(v)} {', '.join(why)}")
+    return out
+
+
+def transcript_list(home: Path | None = None) -> list[str]:
+    """The agents' own transcripts of this server's chats, as paths under
+    `~/.claude/projects`: `<folder>/<id>.jsonl` and `<folder>/<id>/` (its
+    background agents). A chat on another host has none here."""
+    from . import sessiond
+
+    root = (home or Path.home()) / ".claude" / "projects"
+    out = []
+    for rec in sessiond.records():
+        sid = str(rec.get("session") or "")
+        if not sid or rec.get("host"):
+            continue
+        for p in root.glob(f"*/{sid}.jsonl"):
+            out.append(str(p.relative_to(root)))
+            if p.with_suffix("").is_dir():
+                out.append(str(p.with_suffix("").relative_to(root)) + "/")
+    return sorted(set(out))
+
+
+#: Units never carried: the house audio is set up by hand on the new machine
+#: (the move proposal, "The house audio"), and a jobs worker is that
+#: machine's own link to a server, not part of this one.
+UNITS_SKIP = ("am-", "agent-media-jobs-worker")
+_UNIT_REF = re.compile(r"^(?:Requires|Wants|After|BindsTo|PartOf)=(.*)$", re.M)
+
+
+def units_dir() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
+
+
+def collect_units(dest: Path, enabled=None) -> dict:
+    """This server's unit files, as plain files in `dest`, and which of them
+    are enabled (`enabled.json`). `media-setup install-services` writes only
+    the units that have a service template; the canvas, the speech shims and
+    several timers are unit files of their own (symlinks into a checkout, or
+    a host's own), so a restore followed by install-services had no server
+    to start (found 13 Nov 2026). Every `agent-media*` unit and timer, and
+    any user unit one of them names (`tailnet-ip.service`), symlinks read
+    through; hand-made drop-ins travel with the backup."""
+    src = units_dir()
+    want = {p.name for p in src.glob("agent-media*") if p.suffix in (".service", ".timer")}
+    todo = list(want)
+    while todo:
+        p = src / todo.pop()
+        try:
+            text = p.read_text()
+        except OSError:
+            continue
+        for m in _UNIT_REF.finditer(text):
+            for ref in m.group(1).split():
+                if ref not in want and (src / ref).is_file():
+                    want.add(ref)
+                    todo.append(ref)
+    want = {n for n in want if not n.startswith(UNITS_SKIP)}
+    dest.mkdir(parents=True, exist_ok=True)
+    for old in dest.iterdir():
+        if old.is_file():
+            old.unlink()
+    copied = []
+    for name in sorted(want):
+        try:
+            (dest / name).write_text((src / name).read_text())
+            copied.append(name)
+        except OSError:
+            continue
+    if enabled is None:
+        def enabled(name: str) -> bool:
+            r = subprocess.run(["systemctl", "--user", "is-enabled", name],
+                               capture_output=True, text=True)
+            return r.stdout.strip() == "enabled"
+    on = [n for n in copied if enabled(n)]
+    (dest / "enabled.json").write_text(json.dumps(on, indent=1) + "\n")
+    return {"ok": True, "units": copied, "enabled": on}
+
+
+def step_units(st: dict, run) -> None:
+    from . import backup
+
+    stage = backup.local_store_for_remote() / "units"
+    got = collect_units(stage)
+    rc, err = _rsync(["rsync", "-a", "--delete", f"{stage}/",
+                      f"{st['to']}:{st['there_store']}/units/"])
+    if rc != 0:
+        raise Stop(f"the unit files did not go: {err[-300:]}")
+    st["units"] = {"count": len(got["units"]), "enabled": len(got["enabled"])}
+
+
+def _rsync(argv: list[str], stdin: str = "") -> tuple[int, str]:
+    r = subprocess.run(argv, input=stdin, capture_output=True, text=True)
+    return r.returncode, (r.stderr or r.stdout).strip()
+
+
+def carry_transcripts(st: dict) -> dict:
+    """The chats' transcripts to the other machine, beside its own. Without
+    them a moved thread shows its messages but cannot be read back or
+    resumed: they are the agent's (in `~/.claude`), not in the backup. The
+    folder names come from each chat's path, so the homes must match."""
+    home = str(Path.home())
+    if st.get("there_home") and st["there_home"] != home:
+        return {"ok": False, "skipped": f"the homes differ ({home} here, {st['there_home']} "
+                                        "there): transcripts are filed by path, not carried"}
+    files = transcript_list()
+    if not files:
+        return {"ok": True, "files": 0}
+    t0 = time.time()
+    rc, err = _rsync(["rsync", "-a", "-r", "--files-from=-", "--no-specials", "--no-devices",
+                      f"{home}/.claude/projects/", f"{st['to']}:{home}/.claude/projects/"],
+                     "\n".join(files) + "\n")
+    return {"ok": rc in (0, 24), "files": len(files), "seconds": round(time.time() - t0, 1),
+            **({"error": err[-300:]} if rc not in (0, 24) else {})}
+
+
+def step_transcripts(st: dict, run) -> None:
+    got = carry_transcripts(st)
+    st.setdefault("transcripts", []).append(got)
+    if not got.get("ok") and not got.get("skipped"):
+        raise Stop(f"the transcripts did not go: {got.get('error')}")
+
+
 def step_stop(st: dict, run) -> None:
+    busy = [] if st.get("force") else busy_chats()
+    if busy:
+        raise Stop("chats are working here, and a move resumes none of them over there: "
+                   + "; ".join(busy[:4]) + (f" and {len(busy) - 4} more" if len(busy) > 4 else "")
+                   + ". Let them finish (`media restart-services --only sessiond --after 10` "
+                     "asks them to), or pass --force")
     units = up_units()
     st["stopped_here"] = units
     _save(st)
@@ -223,23 +366,59 @@ def step_sync(st: dict, run) -> None:
         raise Stop(f"the final sync did not finish: {got.get('warnings') or got}")
     st["snapshot"] = got.get("id")
     st["sync_seconds"] = got.get("seconds")
+    # The transcripts' second pass: what the chats wrote since the first.
+    if st.get("transcripts") is not None and not st.get("rehearsal"):
+        RUN["transcripts"](st, run)
 
 
 def step_restore(st: dict, run) -> None:
     to, store = st["to"], shlex.quote(st["there_store"] + "/store")
     old = [o for o in dict.fromkeys([st.get("old") or "", *st.get("also", [])]) if o]
     also = " ".join(f"--also {shlex.quote(o)}" for o in old)
+    own = shlex.quote(st["there_store"] + "/own-records")
+    units = shlex.quote(st["there_store"] + "/units")
     for what, cmd in (
         ("stopping its units", f"u=$({THERE_UNITS}); [ -z \"$u\" ] || systemctl --user stop $u"),
+        # Its own chats' records, aside: the restore lays this server's
+        # record of each (`host: <there>`) over them (server_settle.py).
+        ("keeping its own chats' records", f"media server settle --stash --own {own}"),
         ("the restore", f"media restore latest --from {store} --apply --force"),
+        # The hand-made drop-ins too: the canvas's holds the public listener
+        # and the web app's folder (a restore holds them back unasked; they
+        # use %h, and the rename rewrites the address in them).
+        ("the hand-made drop-ins", f"media restore latest --from {store} "
+                                   "--only .config/systemd/user --apply --force"),
         ("install-services", "media-setup install-services"),
+        # The units install-services has no template for (the canvas, the
+        # speech shims, timers): this server's own files, then pointed at
+        # the release. A unit the release lacks a file for is said, not fatal.
+        ("the server's other units", f"media server settle --units {units} && "
+                                     "(media-setup release-mode || true)"),
+        # The agent's hooks: without them a reply is never filed or spoken
+        # (the rehearsal, 13 Nov 2026). The installer registers them by
+        # name, so they are linked where a shell finds them.
+        ("the agent's hooks", "media-setup install-hooks && mkdir -p ~/.local/bin && "
+                              "for b in \"$(dirname \"$(command -v media)\")\"/media-hook-*; do "
+                              "[ -e ~/.local/bin/$(basename $b) ] || "
+                              "ln -s $b ~/.local/bin/$(basename $b); done"),
+        ("making the state this machine's", f"media server settle --own {own}"),
         ("the rename", f"media server rename --to {shlex.quote(st['name'])} {also} "
                        "--no-check --no-restart"),
-        ("starting its units", f"u=$({THERE_ENABLED}); [ -z \"$u\" ] || systemctl --user start $u"),
+        # Its jobs worker was its link to this server as a worker: the
+        # server is here now, so it would dial itself.
+        ("starting its units", "systemctl --user daemon-reload; "
+                               "systemctl --user disable --now agent-media-jobs-worker "
+                               f"2>/dev/null; u=$({THERE_ENABLED}); "
+                               "[ -z \"$u\" ] || systemctl --user start $u"),
     ):
         rc, got = run(_there(st, cmd), to)
         _need(rc, got, f"{to}: {what}")
         st.setdefault("there_log", []).append({"what": what, "out": got[-2000:]})
+        if what.startswith("making the state"):
+            try:
+                st["settled"] = json.loads(got[got.index("{"):])
+            except ValueError:
+                pass
 
 
 def step_verify(st: dict, run) -> None:
@@ -256,7 +435,8 @@ def step_verify(st: dict, run) -> None:
                    "--verify`; to undo, `media server move --rollback`")
 
 
-RUN = {"check": step_check, "keep": step_keep, "backup": step_backup, "stop": step_stop,
+RUN = {"check": step_check, "keep": step_keep, "backup": step_backup,
+       "transcripts": step_transcripts, "units": step_units, "stop": step_stop,
        "sync": step_sync, "restore": step_restore, "verify": step_verify}
 
 
@@ -374,7 +554,7 @@ def rehearse_stop(to: str, *, run=sh, out=print) -> int:
 
 def move(to: str, name: str, also: list[str], *, yes: bool = False, dry_run: bool = False,
          foreground: bool = False, fire: bool = False, run=sh, out=print,
-         detach=None) -> int:
+         detach=None, force: bool = False) -> int:
     new = server_address.origin(name)
     if not to or not new:
         out("server move: --to <host> and --name https://<new address>, please")
@@ -397,7 +577,7 @@ def move(to: str, name: str, also: list[str], *, yes: bool = False, dry_run: boo
         return 1
     st = {"to": to, "name": new, "old": server_address.current(),
           "also": [o for o in (server_address.origin(a) for a in also) if o],
-          "started": round(time.time())}
+          "started": round(time.time()), "force": bool(force)}
     rc = _do(st, STEPS[:STEPS.index(DETACHED_FROM)], run, out)
     if rc:
         out("nothing here was stopped; fix that and run it again.")

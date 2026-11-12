@@ -43,6 +43,18 @@ def rig(monkeypatch):
     monkeypatch.setattr(backup, "sync", lambda **kw: made.append(("sync", kw["to"])) or
                         {"ok": True, "id": "s2", "seconds": 3.0})
     monkeypatch.setattr(sm, "up_units", lambda: ["agent-media-visual-canvas", "agent-media-sessiond"])
+    monkeypatch.setattr(sm, "busy_chats", lambda: [])
+    # RUN holds the step functions themselves, so the table is what is
+    # patched: a step left real here once read this machine's unit files and
+    # tried to rsync them to red2 (13 Nov 2026).
+    monkeypatch.setitem(sm.RUN, "units", lambda st, run: made.append(("units", st["to"])))
+    monkeypatch.setitem(sm.RUN, "transcripts", lambda st, run: (
+        made.append(("transcripts", st["to"])), st.setdefault("transcripts", []).append({"ok": True})))
+    monkeypatch.setattr(sm, "_rsync", lambda argv, stdin="": pytest.fail(f"a real rsync: {argv}"))
+    monkeypatch.setattr(sm.subprocess, "run",
+                        lambda *a, **k: pytest.fail(f"a real command from a test: {a}"))
+    monkeypatch.setattr(sm, "carry_transcripts",
+                        lambda st: made.append(("transcripts", st["to"])) or {"ok": True, "files": 3})
     monkeypatch.setattr(server_address, "reaches_here", lambda url, timeout=15.0: (True, ""))
     return fake, made
 
@@ -69,15 +81,25 @@ def test_the_steps_run_in_order(rig):
     assert st["done"] == list(sm.STEPS) and st["finished"]
     assert st["there_store"] == "/home/other/.local/share/agent-media-move"
     assert made == [("backup", "red2:/home/other/.local/share/agent-media-move/store"),
-                    ("sync", "red2:/home/other/.local/share/agent-media-move/store")]
+                    ("transcripts", "red2"), ("units", "red2"),
+                    ("sync", "red2:/home/other/.local/share/agent-media-move/store"),
+                    ("transcripts", "red2")]
     cmds = [c for _h, c in fake.ran]
     # Its own state is kept before anything of this server's lands there.
     keep = next(i for i, c in enumerate(cmds) if "media backup run" in c and "/before" in c)
     stop = next(i for i, c in enumerate(cmds) if c.startswith("systemctl --user stop agent-media"))
-    restore = next(i for i, c in enumerate(cmds) if "media restore latest" in c)
+    restore = next(i for i, c in enumerate(cmds) if "media restore latest" in c and "--only" not in c)
     install = next(i for i, c in enumerate(cmds) if "install-services" in c)
     rename = next(i for i, c in enumerate(cmds) if "media server rename" in c)
-    assert keep < stop < restore < install < rename
+    stash = next(i for i, c in enumerate(cmds) if "settle --stash" in c)
+    hooks = next(i for i, c in enumerate(cmds) if "install-hooks" in c)
+    settle = next(i for i, c in enumerate(cmds) if "media server settle --own" in c
+                  and "--stash" not in c)
+    dropins = next(i for i, c in enumerate(cmds) if "--only .config/systemd/user" in c)
+    others = next(i for i, c in enumerate(cmds) if "settle --units" in c)
+    assert "release-mode" in cmds[others]
+    assert keep < stop < stash < restore < dropins < install < others < hooks < settle < rename
+    assert "disable --now agent-media-jobs-worker" in cmds[-1]
     # Here the session host stops last; there the old name keeps answering.
     here_stops = [c for h, c in fake.ran if not h and "systemctl --user stop" in c]
     assert here_stops[-1].endswith("agent-media-sessiond")
@@ -111,7 +133,7 @@ def test_the_stop_and_after_run_detached_unless_foreground(rig):
     rc, said = _move(fake, yes=True, foreground=False,
                      detach=lambda to, name: units.append((to, name)) or "media-server-move-x")
     assert rc == 0 and units == [("red2", NAME)] and "--status" in said
-    assert sm._load()["done"] == ["check", "keep", "backup"]
+    assert sm._load()["done"] == ["check", "keep", "backup", "transcripts", "units"]
     assert not any("systemctl --user stop" in c for _h, c in fake.ran)
     # The detached half carries on from the log.
     said2: list[str] = []
@@ -169,3 +191,66 @@ def test_status(rig):
     _move(fake, yes=True)
     said.clear()
     assert sm.status(out=said.append) == 0 and "finished" in said[-1]
+
+
+def test_a_working_chat_refuses_the_stop_unless_forced(rig, monkeypatch):
+    fake, _made = rig
+    monkeypatch.setattr(sm, "busy_chats", lambda: ["session 12345678 (fix the thing) is working"])
+    rc, said = _move(fake, yes=True)
+    assert rc == 1 and "is working" in said and "--force" in said
+    assert not any("systemctl --user stop" in c for _h, c in fake.ran)
+    assert sm._load()["failed"]["step"] == "stop"
+    fake.ran.clear()
+    said2: list[str] = []
+    assert sm.move("red2", NAME, [], yes=True, foreground=True, force=True, run=fake,
+                   out=said2.append) == 0
+
+
+def test_transcripts_are_listed_for_this_servers_chats_only(tmp_path, monkeypatch):
+    from agent_media_server import sessiond
+
+    root = tmp_path / ".claude" / "projects"
+    (root / "-home-x-a").mkdir(parents=True)
+    (root / "-home-x-a" / "s1.jsonl").write_text("{}")
+    (root / "-home-x-a" / "s1" / "subagents").mkdir(parents=True)
+    (root / "-home-x-a" / "s2.jsonl").write_text("{}")       # a chat on another host
+    (root / "-home-x-a" / "zz.jsonl").write_text("{}")       # not one of the server's
+    monkeypatch.setattr(sessiond, "records", lambda root=None: [
+        {"session": "s1"}, {"session": "s2", "host": "red2"}, {"session": "s3"}])
+    assert sm.transcript_list(tmp_path) == ["-home-x-a/s1.jsonl", "-home-x-a/s1/"]
+
+
+def test_transcripts_are_not_carried_between_different_homes(monkeypatch):
+    monkeypatch.undo()
+    got = sm.carry_transcripts({"to": "red2", "there_home": "/somewhere/else"})
+    assert not got["ok"] and "homes differ" in got["skipped"]
+
+
+def test_the_servers_own_unit_files_are_collected(tmp_path, monkeypatch):
+    """install-services has no template for the canvas: its unit file (a
+    symlink into a checkout on red5) is carried, with what it requires, read
+    through the link; the house audio and a jobs worker are not."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    src = sm.units_dir()
+    src.mkdir(parents=True)
+    real = tmp_path / "checkout" / "agent-media-visual-canvas.service"
+    real.parent.mkdir()
+    real.write_text("[Unit]\nRequires=tailnet-ip.service\nAfter=network-online.target "
+                    "tailnet-ip.service\n[Service]\nExecStart=x\n")
+    (src / "agent-media-visual-canvas.service").symlink_to(real)
+    (src / "tailnet-ip.service").write_text("[Service]\nExecStart=y\n")
+    (src / "agent-media-state-gc.service").write_text("[Service]\nExecStart=z\n")
+    (src / "agent-media-state-gc.timer").write_text("[Timer]\nOnCalendar=daily\n")
+    (src / "agent-media-jobs-worker.service").write_text("x")
+    (src / "am-sinks.service").write_text("x")
+    (src / "unrelated.service").write_text("x")
+    (src / "agent-media-visual-canvas.service.d").mkdir()
+    dest = tmp_path / "out"
+    got = sm.collect_units(dest, enabled=lambda n: n.endswith((".timer", "canvas.service")))
+    assert got["units"] == ["agent-media-state-gc.service", "agent-media-state-gc.timer",
+                            "agent-media-visual-canvas.service", "tailnet-ip.service"]
+    assert not (dest / "agent-media-visual-canvas.service").is_symlink()
+    assert "Requires=tailnet-ip.service" in (dest / "agent-media-visual-canvas.service").read_text()
+    import json as _json
+    assert _json.loads((dest / "enabled.json").read_text()) == [
+        "agent-media-state-gc.timer", "agent-media-visual-canvas.service"]

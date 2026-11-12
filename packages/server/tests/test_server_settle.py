@@ -1,0 +1,134 @@
+"""`media server settle` (server_settle.py): after a restore on the machine a
+server moved to, the state is that machine's. All under the test's own
+state dir; "this machine" is a patched hostname.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from agent_media_server import server_settle as ss, sessiond_remote
+
+
+@pytest.fixture
+def there(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessiond_remote.socket, "gethostname", lambda: "red2")
+    env = tmp_path / "agent-media.env"
+    env.write_text("MEDIA_HEADLESS=1\nMEDIA_SESSIOND_DEFAULT_HOST=red2\n")
+    monkeypatch.setenv("MEDIA_ENV_FILE", str(env))
+    sd = ss._state() / "sessiond"
+    sd.mkdir(parents=True)
+    return sd, env, tmp_path
+
+
+def _rec(sd, sid, **kw):
+    (sd / f"{sid}.json").write_text(json.dumps({"session": sid, "state": "ended", **kw}))
+
+
+def _read(sd, sid):
+    return json.loads((sd / f"{sid}.json").read_text())
+
+
+def test_a_chat_that_ran_here_gets_this_machines_own_record_back(there):
+    sd, _env, tmp = there
+    # Before the restore: this machine's records, one of them the old
+    # server never knew.
+    _rec(sd, "worker-chat", state="waiting", cwd=str(tmp), turns=7, pid=42)
+    _rec(sd, "only-here", cwd=str(tmp), turns=1)
+    own = tmp / "own"
+    assert ss.stash(own)["stashed"] == 2
+    # The restore: the old server's view of the first, and a chat of its own.
+    (sd / "only-here.json").unlink()
+    _rec(sd, "worker-chat", host="red2", cwd="/home/old/x", remote_cwd=str(tmp), seq_seen=3)
+    _rec(sd, "old-chat", cwd=str(tmp))
+    (sd / "remote").mkdir()
+    (sd / "remote" / "worker-chat.jsonl").write_text("{}\n")
+    got = ss.settle(own)
+    mine = _read(sd, "worker-chat")
+    assert "host" not in mine and mine["turns"] == 7 and mine["cwd"] == str(tmp)
+    assert not (sd / "remote" / "worker-chat.jsonl").exists()
+    assert _read(sd, "only-here")["turns"] == 1
+    assert got["adopted"] == 1 and got["kept_own"] == 1 and got["adopted_without_own"] == 0
+
+
+def test_a_worker_chat_with_no_record_here_stays_as_an_ended_thread(there):
+    sd, _env, tmp = there
+    _rec(sd, "lost", host="red2", state="working", cwd=str(tmp))
+    _rec(sd, "elsewhere", host="red9", state="working")
+    got = ss.settle(tmp / "nothing-stashed")
+    assert "host" not in _read(sd, "lost") and _read(sd, "lost")["state"] == "ended"
+    assert _read(sd, "elsewhere")["host"] == "red9"          # another host's: left alone
+    assert got["adopted_without_own"] == 1
+
+
+def test_nothing_the_stop_cut_off_is_resumed_and_it_is_listed(there):
+    sd, _env, tmp = there
+    _rec(sd, "cut", state="ended", cwd=str(tmp), first_text="fix the  thing",
+         cut_off={"why": "restart", "at": 1.0}, held=[{"uuid": "u", "text": "also this"}])
+    _rec(sd, "idle", state="waiting", cwd=str(tmp))
+    _rec(sd, "done", state="ended", cwd=str(tmp))
+    (sd / "sessiond.stopped.json").write_text('{"at": 1}')
+    got = ss.settle(None)
+    assert _read(sd, "cut")["cut_off"] is None and _read(sd, "cut")["held"]   # its message stays
+    assert _read(sd, "idle")["state"] == "ended"
+    assert [c["session"] for c in got["not_resumed"]] == ["cut"]
+    assert got["not_resumed"][0]["first_text"] == "fix the thing"
+    assert json.loads((ss._state() / "moved-chats.json").read_text())["not_resumed"]
+    assert not (sd / "sessiond.stopped.json").exists()
+    # The real session host agrees: nothing is due.
+    from agent_media_server import sessiond
+
+    sup = sessiond.Supervisor(root=sd)
+    sup._kill_orphans = lambda ours: None
+    sup.load()
+    assert not any(s.cut_off or s.live for s in sup.sessions.values())
+
+
+def test_folders_not_on_this_machine_are_counted(there):
+    sd, _env, tmp = there
+    for i in range(3):
+        _rec(sd, f"a{i}", cwd="/home/old/scratch")
+    _rec(sd, "b", cwd=str(tmp))
+    got = ss.settle(None)
+    assert got["folders_missing"] == [{"cwd": "/home/old/scratch", "chats": 3}]
+
+
+def test_a_default_host_naming_this_machine_is_unset(there):
+    _sd, env, _tmp = there
+    got = ss.settle(None)
+    text = env.read_text()
+    assert got["default_host_unset"] and "MEDIA_HEADLESS=1\n" in text
+    assert not any(ln.startswith("MEDIA_SESSIOND_DEFAULT_HOST") for ln in text.splitlines())
+
+
+def test_a_default_host_naming_another_machine_stays(there, monkeypatch):
+    _sd, env, _tmp = there
+    env.write_text("MEDIA_SESSIOND_DEFAULT_HOST=red7\n")
+    assert not ss.settle(None)["default_host_unset"]
+    assert env.read_text() == "MEDIA_SESSIOND_DEFAULT_HOST=red7\n"
+
+
+def test_carried_units_are_written_where_missing_and_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from agent_media_server.server_move import units_dir
+
+    dst = units_dir()
+    dst.mkdir(parents=True)
+    (dst / "agent-media-sessiond.service").write_text("the release's own\n")
+    src = tmp_path / "units"
+    src.mkdir()
+    (src / "agent-media-sessiond.service").write_text("the old machine's\n")
+    (src / "agent-media-visual-canvas.service").write_text("canvas\n")
+    (src / "agent-media-gone.service").write_text("x\n")
+    (src / "enabled.json").write_text(json.dumps(
+        ["agent-media-visual-canvas.service", "agent-media-sessiond.service", "not-carried.service"]))
+    ran: list[list[str]] = []
+    got = ss.install_units(src, run=lambda argv: (ran.append(argv), (0, ""))[1])
+    assert (dst / "agent-media-sessiond.service").read_text() == "the release's own\n"
+    assert (dst / "agent-media-visual-canvas.service").read_text() == "canvas\n"
+    assert got["kept"] == ["agent-media-sessiond.service"]
+    assert sorted(got["written"]) == ["agent-media-gone.service", "agent-media-visual-canvas.service"]
+    assert got["enabled"] == ["agent-media-visual-canvas.service", "agent-media-sessiond.service"]
+    assert ran[0] == ["systemctl", "--user", "daemon-reload"]
