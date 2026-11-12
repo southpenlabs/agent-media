@@ -5882,6 +5882,16 @@ memory as its own section when this host has agent-memory. Code:
   header `Link: </search/help>; rel="help"` says the same thing for a
   client that reads headers (`Access-Control-Expose-Headers` lists `Link`,
   so a browser may). A 400 for a query with no words carries it too.
+- **The owner's own tools** (12 Nov 2026) do not come through here at all:
+  a shell on the host has no device token, and the index is built from files
+  it can already read. `media find "<query>"` and the `search_history` MCP
+  tool call `search.answer` — this route's own body, with the gate left to
+  `search.search` — so an agent searches the same index with the same
+  operators (`agent_media_core/history_search.py`; `media find --operators`
+  prints the language, `--json` the answer below, `--ask` turns a plain
+  English question into operators as `translate=1` does). David, 12 Nov
+  2026: "It would be nice to have agent assistants to create these queries
+  too".
 - **`messages`**, newest first, at most `limit` (default 20, at most 100).
   `message` is the §6.2.2 message id (the transcript `uuid` of its first
   record) — the id `/conversation/log?around=` takes. `kind` is `text`, or

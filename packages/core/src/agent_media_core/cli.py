@@ -8167,6 +8167,37 @@ def cmd_library_scan(a) -> int:
     return 0
 
 
+def cmd_find(a) -> int:
+    """`media find <query>` — search David's own chats, the way the app's
+    search box does (history_search.py, server-contract.md §6.14)."""
+    from . import history_search
+
+    if getattr(a, "operators", False):
+        for syntax, what, eg in history_search.operators():
+            print(f"{syntax:<28} {what}\n{'':<28} e.g. {eg}")
+        return 0
+    query = " ".join(a.query or []).strip()
+    if not query:
+        print("media find: what should I search for? (--operators lists the "
+              "query language)", file=sys.stderr)
+        return 2
+    try:
+        out = history_search.run(
+            query, limit=a.limit or history_search.LIMIT, sort=a.sort, tools=a.tools,
+            session=a.session, memory=a.memory, ask=a.ask, cursor=a.page)
+    except history_search.NotHere as e:
+        print(f"media find: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"media find: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps(out, default=str))
+        return 0
+    print(history_search.text(out, ids=not a.no_ids, asked=a.ask))
+    return 0 if (out.get("messages") or out.get("threads")) else 1
+
+
 def cmd_search(a) -> int:
     query = " ".join(a.query) if getattr(a, "query", None) else ""
     m = _srv()
@@ -10878,6 +10909,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="feedback from Sasonica installs: answer <install> [--post N] <text> | poll | status")
     feedback.add_argument("args", nargs=argparse.REMAINDER)
     feedback.set_defaults(func=cmd_feedback)
+
+    find = sub.add_parser("find", help="search David's chats: messages, titles "
+                          "and recaps, with the app's own operators")
+    find.add_argument("query", nargs="*",
+                      help='the words, with any of the operators: '
+                           'from:me, in:<project>, thread:<words>, '
+                           'harness:<name>, tool:<name>, kind:text|tool, '
+                           'after:/before:<date>, -word, OR, "a phrase" '
+                           '(--operators lists them all)')
+    find.add_argument("-n", "--limit", type=int, default=None,
+                      help="hits to answer with (default 10, at most 100)")
+    find.add_argument("--sort", choices=("newest", "oldest", "best"), default="newest")
+    find.add_argument("--tools", action="store_true",
+                      help="search tool steps as well as words")
+    find.add_argument("--session", default="",
+                      help="one thread only, by its id")
+    find.add_argument("--memory", action="store_true",
+                      help="long-term memory beside the chats (agent-memory)")
+    find.add_argument("--ask", action="store_true",
+                      help="a plain English question, read as operators by "
+                           "the gateway's model first (costs a model call); "
+                           "the answer says what it became")
+    find.add_argument("--page", default="",
+                      help="the last answer's `more hits` cursor")
+    find.add_argument("--no-ids", action="store_true",
+                      help="leave off the session and message ids")
+    find.add_argument("--json", action="store_true",
+                      help="the answer itself (§6.14), for a tool to read")
+    find.add_argument("--operators", action="store_true",
+                      help="print the query language and stop")
+    find.set_defaults(func=cmd_find)
 
     search = sub.add_parser("search", help="unified search (music/book library)")
     search.add_argument("--lines", action="store_true",

@@ -121,6 +121,12 @@ The spine. Subdirs mirror the data flow:
   any podcast client. `media feed`, `media doc play --feed`. See
   **[`docs/reference/feed.md`](./docs/reference/feed.md)**.
 
+- **`history_search.py`** — `media find "<words>"`: David's own chats
+  searched from a shell, with the app's operators (`from:me`, `in:<project>`,
+  `after:7d`, `-word`, `OR`; `media find --operators` lists them). The same
+  index the app's search box reads (server-contract.md §6.14), so it needs
+  the server package on the host; also the `search_history` MCP tool.
+
 Also exposes an MCP server (`media-mcp`) for tool-based control from Claude.
 
 See **[`packages/core/README.md`](./packages/core/README.md)** for the full

@@ -472,6 +472,49 @@ def _is_prompt_clip(row: dict) -> bool:
 
 
 @mcp.tool()
+def search_history(query: str, limit: int = 10, sort: str = "newest",
+                   tools: bool = False, session: str = "",
+                   memory: bool = False, ask: bool = False) -> dict:
+    """Search David's own chats — every message of both sides, in every
+    harness (Claude Code, Codex, pi, Hermes) and every Matrix room, plus
+    thread titles and recaps.
+
+    Use it before guessing at something he has discussed before: a past
+    decision, what a thread concluded, who said what and when. It reads the
+    same index the app's search box does, with the same query language:
+
+      from:me, from:agent        whose words
+      in:<words>                 the thread's project or folder
+      thread:<words>             its title or first prompt
+      harness:claude|codex|pi|hermes|matrix
+      tool:<name>                a step that ran that tool
+      kind:text, kind:tool       the words only, or tool steps only
+      after:<date>, before:<date>  2026-11-12, today, 7d, 3w, 6m, 1y
+      -word, a OR b, (a OR b) c, "a phrase", word*, a NEAR b
+
+    Every word must match and the last matches as a prefix. Write the
+    operators yourself; `ask=True` is for a plain English question instead,
+    read as operators by a model first (a gateway call — the answer says what
+    it became).
+
+    `sort` is newest, oldest or best (best match). `tools=True` adds tool
+    steps. `session` narrows to one thread by id. `memory=True` puts
+    long-term memory beside the chats.
+
+    A hit carries `session` and `message`: the thread and the message id, so
+    the transcript can be opened at it. `next` is the cursor for the page
+    after this one.
+    """
+    from . import history_search
+
+    try:
+        return history_search.run(query, limit=max(1, limit), sort=sort, tools=tools,
+                                  session=session, memory=memory, ask=ask)
+    except (history_search.NotHere, ValueError) as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 def speech_history(limit: int = 10) -> list[dict]:
     """The last N speech clips. Most recent first."""
     # Exclude "Claude is waiting" notif clips and converse questions: they're
