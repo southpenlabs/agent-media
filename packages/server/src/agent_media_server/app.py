@@ -1978,6 +1978,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             _json(h, 200, {"ok": True, **news_thread.state()})
         return True
+    if path == "/server/probe":
+        # `media server rename` checking a new address reaches this server
+        # (server_address.py): a hash of the id and the nonce, nothing more.
+        from . import server_address
+
+        _json(h, 200, server_address.probe_answer(query))
+        return True
     if path == "/sessions/events":
         # Every session's state as a stream (§6.13): the phone's background
         # notifier. Answers the request however it ends.
@@ -2219,9 +2226,14 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/features":
         # Which optional parts this server has, for the app to show only
         # those (features.py).
-        from . import features
+        from . import features, server_address
 
         ok, detail = features.features(_bearer(h))
+        # Asked on a name this server answered on before a rename: where
+        # it is now, for the app to follow (server_address.py).
+        moved = server_address.moved_to_for(h.headers.get("Host") or "")
+        if moved:
+            detail["moved_to"] = moved
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/personas/scope":
         # Where each persona is offered, layered (persona_scope.py, §6.24).

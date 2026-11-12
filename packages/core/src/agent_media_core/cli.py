@@ -9700,6 +9700,15 @@ def cmd_contacts(a) -> int:
     return contacts.main(a.args or ["--help"])
 
 
+def cmd_server(a) -> int:
+    """`media server status|check|rename`: this server's public address and
+    giving it a new one (agent_media_server.server_address)."""
+    mod = _server_module("server_address")
+    if mod is None:
+        return 1
+    return mod.main(a.args or ["--help"])
+
+
 def cmd_session(a) -> int:
     """`media session list|send`: headless sessions (sessiond) seen and
     messaged from another session (agent_media_server.headless_mail)."""
@@ -10258,6 +10267,21 @@ def cmd_doctor(a) -> int:
                 print(f"  {host}: {ln}")
             if not ok:
                 print(f"  {host}: fix incomplete — needs a look")
+
+    # This server's public address, where it has one: every setting naming
+    # it agrees, none names a previous one, the tunnel routes it
+    # (agent_media_server.server_address; the check that would have caught
+    # every rename bug).
+    try:
+        from agent_media_server import server_address
+    except ImportError:
+        server_address = None
+    if server_address is not None and server_address.current():
+        bad = server_address.problems()
+        for p in bad:
+            print(f"address: ✗ {p}")
+        if bad and "local" not in unhealthy:
+            unhealthy.append("local")
 
     return _write_ledger(hosts, skewed, unhealthy, unreachable)
 
@@ -10893,6 +10917,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "[--wait S] <text> (queued behind a turn, never over a question card)")
     session.add_argument("args", nargs=argparse.REMAINDER)
     session.set_defaults(func=cmd_session)
+
+    srv = sub.add_parser(
+        "server", add_help=False,
+        help="this server's public address: status, check, rename --to https://<new> "
+             "[--also https://<old>] [--dry-run] (agent_media_server.server_address)")
+    srv.add_argument("args", nargs=argparse.REMAINDER)
+    srv.set_defaults(func=cmd_server)
 
     tf = sub.add_parser("test-failure", help="a failing test told to the thread whose commit broke it")
     tfs = tf.add_subparsers(dest="tf_cmd", required=True)

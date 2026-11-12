@@ -5490,6 +5490,13 @@ local look, never a network call:
 | `personal_use` | `{"on", "methods": {name: allowed}, "addons": [names]}` (2 Nov 2026; `addons`: the methods a separate add-on provides here — `spotify-via-youtube`, `insight-timer-profiles`, `facebook-previews`, `spotify-speaker`, `messaging-bridges` and the six `youtube-*` methods are not in this package at all, but in a personal-use add-on installed separately (`agent_media.addons` entry points), and are allowed only where one is; `personal_use.py`, `docs/proposals/2026-11-02-personal-use-switch.md`): what this install allows that a public product could not. `on` is `MEDIA_PERSONAL_USE=1`: the server serves only its owner's personal use, and every method may run; unset (the package's default), none may and each feature uses its public alternative. A method's own setting wins either way. Methods: `spotify-via-youtube` (`MEDIA_SPOTIFY_VIA_YOUTUBE`; else a Spotify link is saved by its oEmbed name and cover and played on Spotify itself, §6.46), `insight-timer-profiles` (`MEDIA_PRACTICE_PROFILES`; else no teacher profiles or places, §6.45), `insight-timer-page` (`MEDIA_PRACTICE_EMBED_PLAY`; `embed_play`, §6.45), `messaging-bridges` (`MEDIA_BRIDGES`; an add-on method since 3 Nov 2026, §6.26), `facebook-stories` (`MEDIA_STORIES`), `facebook-previews` (`MEDIA_FACEBOOK_PREVIEWS`; else a Facebook link's card is fetched as a browser, §6.18), `signed-in-reading` (`MEDIA_SIGNED_IN_READING`), `spotify-speaker` (`MEDIA_SPOTIFY_SPEAKER`; §6.42), and YouTube's, all add-on methods (2 Nov 2026): `youtube-accounts` (`MEDIA_YOUTUBE_ACCOUNTS`; else nothing read), `youtube-metadata` (`MEDIA_YOUTUBE_METADATA`; else shared links judged by shape, oEmbed titles, no lengths), `youtube-radio` (`MEDIA_RADIO_YOUTUBE`, still required; else the hand-off player), `youtube-downloads` (`MEDIA_YOUTUBE_DOWNLOADS`; else nothing downloaded, cached files still play), `youtube-streaming` (`MEDIA_YOUTUBE_STREAMING`; else a YouTube stream is refused) and `youtube-search` (`MEDIA_YOUTUBE_SEARCH`; else the backing music finds nothing on YouTube) |
 | `version` | `{"mode", "sha", "short", "ref", "built", "deployed"}` (11 Nov 2026): the code this server process runs. `mode` is `release` (a release folder, `media update`; `sha` its commit, `ref` the branch it was built from, `built` and `deployed` epoch seconds, `deployed` when `current` last moved to it), `checkout` (started from a git checkout: `sha` is its HEAD when asked, which says nothing of uncommitted edits or of when the process started) or `installed` (neither; `sha` empty). `docs/reference/releases.md`, `release.py` |
 
+**`moved_to`** (12 Nov 2026): present only when the request came in on a name
+this server answered on before a rename (`media server rename`, §19 "Naming
+a server and renaming it"): the server's current address, e.g.
+`"https://red2-ryer.sasonica.com"`. The app stores it as its server address
+(as an edit in Settings → Advanced does, `auth.ts moveServer`); the device
+token is unchanged, so nothing is paired again.
+
 A check that fails answers false. In `CORS_PATHS`. Pinned by
 `packages/server/tests/test_features.py`.
 
@@ -5657,6 +5664,10 @@ event: ping
 data: {}
 ```
 
+- `server_moved` (12 Nov 2026): `{"base": "https://<new>"}`, the very first
+  frame when the stream was opened on a name this server answered on before
+  a rename (§19 "Naming a server and renaming it"): the app moves to `base`
+  and reconnects there, as for `/features`' `moved_to`.
 - `sessions`: the first frame on every connection, then again whenever any
   row's `session`, `title` or `state` changes — the whole list each time
   (it is a few rows), sorted by `session`. `state` is `/sessions/state`'s
@@ -12250,3 +12261,15 @@ That is a later decision, not part of this contract.
     2026, and the older Sasonica app became Sasonica ABS (`com.sasonica.abs`).
     Their speech targets followed on 27 Sep: `next` → `sasonica`, `app` → `abs`.
     Dated text keeps the names it was written with.
+
+
+### Naming a server and renaming it (12 Nov 2026)
+
+How a server gets its address, the `<host>-<user>.sasonica.com` convention,
+and what the app keeps of it: `docs/reference/server-address.md`.
+`media server rename --to https://<new>` changes it everywhere at once and
+keeps the old name answering; a request on an old name is told
+(`/features` `moved_to`, the stream's `server_moved`). `GET
+/server/probe?nonce=<n>` → `{"ok": true, "proof"}` (open, on the public
+listener) is how the command knows the new name reaches *this* server: a
+hash of the server's id and the nonce, nothing more.

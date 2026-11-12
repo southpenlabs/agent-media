@@ -462,6 +462,14 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
             h.wfile.write(f"id: {n}\nevent: {event}\ndata: {body}\n\n".encode())
             h.wfile.flush()
 
+        # A stream opened on a name this server answered on before a rename:
+        # where it is now, first, for the phone to follow (server_address.py).
+        from . import server_address
+
+        moved = server_address.moved_to_for(h.headers.get("Host") or "")
+        if moved:
+            send("server_moved", {"base": moved})
+
         seen = -1
         seen_rows = None
         cursor = alerts_after

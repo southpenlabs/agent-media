@@ -410,6 +410,19 @@ the day of the cutover, not after it.
    the move is this command being run twice (step 3, then step 4).
    `media backup` / `media restore` (item 62) are what it carries the state
    with, so they land first or alongside.
+   **Points 1–3 BUILT 12 Nov 2026** (`server_address.py`,
+   `docs/reference/server-address.md`, contract §19 "Naming a server and
+   renaming it"): `media server rename --to … [--also …] [--dry-run]` checks
+   the name reaches this server (`/server/probe`), rewrites every setting
+   naming the old address in the env file and the systemd drop-ins (a copy
+   of each kept), adds the names to the tunnel's ingress, keeps the old one
+   as a previous name, tells sasonica.com and schedules the restart;
+   `/features` `moved_to` and the stream's `server_moved` on an old name;
+   `media server check`, also in `media doctor`. The dry run on red5 found
+   five settings: `MEDIA_PUBLIC_URL` (env file and the canvas's
+   `servers.conf`), both clip base URLs and the book base URL. The app's
+   half (follow `moved_to`/`server_moved` with `auth.ts moveServer`) is
+   sasonica-app's. Point 4 waits for `media backup`/`media restore`.
 1. **red2 becomes a release host.** `MEDIA_RELEASE_*` in its env file with
    the same `MEDIA_RELEASE_PACKAGES` red5 has (core, server, visual,
    tts-shim, completions-shim, engine-openai, engine-piper, the four intakes,
