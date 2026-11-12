@@ -193,3 +193,35 @@ def details(kind: str, tmdb_id: int, now: Optional[float] = None) -> dict:
     with _lock:
         _details[key] = (now, out)
     return out
+
+
+def add_photos(people: list[dict], now: Optional[float] = None) -> None:
+    """Set `photo` on each person TMDb has a picture of (in place; a row's
+    `ids.tmdb`), from GET /person/{id}, kept with the posters."""
+    if not set_up():
+        return
+    now = time.time() if now is None else now
+    kept = _posters_load()
+    want = []
+    for p in people:
+        tid = (p.get("ids") or {}).get("tmdb")
+        hit = kept.get(f"person:{tid}") if tid is not None else None
+        if tid is not None and not (isinstance(hit, dict) and now - float(hit.get("at") or 0) < POSTER_TTL_S):
+            if f"person:{tid}" not in want:
+                want.append(f"person:{tid}")
+    if want:
+        def one(key: str):
+            try:
+                return key, str(_request(f"/person/{key.partition(':')[2]}").get("profile_path") or "")
+            except Exception:  # noqa: BLE001 — asked again later
+                return key, None
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for key, path in pool.map(one, want[:NEW_PER_LISTING]):
+                if path is not None:
+                    kept[key] = {"p": path, "at": now}
+        _posters_save(kept)
+    for p in people:
+        tid = (p.get("ids") or {}).get("tmdb")
+        hit = kept.get(f"person:{tid}") if tid is not None else None
+        if isinstance(hit, dict) and hit.get("p"):
+            p["photo"] = poster_url(hit["p"], "w185")

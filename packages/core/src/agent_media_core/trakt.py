@@ -421,11 +421,17 @@ def _short(text) -> str:
     return t if len(t) <= OVERVIEW_CHARS else t[:OVERVIEW_CHARS - 1].rstrip() + "…"
 
 
+def _scores(o: dict) -> dict:
+    """`rating` (0–10, one place) and `votes`, where Trakt gave them (extended=full)."""
+    r = o.get("rating")
+    return {"rating": round(float(r), 1), "votes": int(o.get("votes") or 0)} if isinstance(r, (int, float)) and r > 0 else {}
+
+
 def _movie(m: dict) -> dict:
     ids = _ids(m)
     return {"id": f"movie:{ids.get('trakt') or ids.get('slug')}", "kind": "movie",
             "title": str(m.get("title") or ""), "year": m.get("year"),
-            "runtime": m.get("runtime") or None, "genres": _genres(m),
+            "runtime": m.get("runtime") or None, "genres": _genres(m), **_scores(m),
             "overview": _short(m.get("overview")),
             "url": f"{SITE}/movies/{ids.get('slug') or ids.get('trakt')}", "ids": ids}
 
@@ -434,7 +440,7 @@ def _show(s: dict) -> dict:
     ids = _ids(s)
     return {"id": f"show:{ids.get('trakt') or ids.get('slug')}", "kind": "show",
             "title": str(s.get("title") or ""), "year": s.get("year"),
-            "runtime": s.get("runtime") or None, "genres": _genres(s),
+            "runtime": s.get("runtime") or None, "genres": _genres(s), **_scores(s),
             "overview": _short(s.get("overview")),
             "url": f"{SITE}/shows/{ids.get('slug') or ids.get('trakt')}", "ids": ids}
 
@@ -798,16 +804,88 @@ def _years(year: str) -> Optional[tuple[int, int]]:
     return lo, hi
 
 
+#: More of Trakt's public lists (12 Nov 2026): name → path under /movies|shows.
+DISCOVER_MORE = {"watched_week": "watched/weekly", "watched_month": "watched/monthly", "watched_all": "watched/all",
+                 "played": "played/weekly", "collected": "collected/weekly", "boxoffice": "boxoffice"}
+SHOW_STATUS = ("returning series", "continuing", "in production", "planned", "upcoming", "pilot", "canceled", "ended")
+NETWORKS = ("Netflix", "HBO", "Apple TV+", "Disney+", "Prime Video", "Hulu", "Max", "Paramount+", "BBC One",
+            "BBC Two", "Channel 4", "ITV1", "ABC (AU)", "SBS", "Stan", "FX", "AMC", "NBC", "CBS", "Showtime")
+LANGUAGES = (("en", "English"), ("fr", "French"), ("de", "German"), ("es", "Spanish"), ("it", "Italian"),
+             ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"), ("sv", "Swedish"), ("da", "Danish"),
+             ("no", "Norwegian"), ("hi", "Hindi"), ("pt", "Portuguese"))
+COUNTRIES = (("us", "United States"), ("gb", "United Kingdom"), ("au", "Australia"), ("ca", "Canada"),
+             ("fr", "France"), ("de", "Germany"), ("es", "Spain"), ("it", "Italy"), ("jp", "Japan"),
+             ("kr", "South Korea"), ("se", "Sweden"), ("dk", "Denmark"), ("in", "India"), ("nz", "New Zealand"))
+CERTS = {"movie": ("g", "pg", "pg-13", "r", "nr"), "tv": ("tv-y", "tv-g", "tv-pg", "tv-14", "tv-ma")}
+RUNTIMES = {"movie": (("0-90", "Under 90 min"), ("90-120", "90–120 min"), ("120-400", "Over 2 hours")),
+            "tv": (("0-30", "Under 30 min"), ("30-60", "30–60 min"), ("60-400", "Over an hour"))}
+RATINGS = (("60-100", "6 and up"), ("70-100", "7 and up"), ("80-100", "8 and up"))
+
+
+def filters_for(kind: str) -> list[dict]:
+    """The filters GET /watch/discover takes beyond genre and year, for the
+    app to draw: `[{id, label, options: [{value, label}]}]`."""
+    opt = lambda pairs: [{"value": v, "label": l} for v, l in pairs]  # noqa: E731
+    out = [{"id": "rating", "label": "Rating", "options": opt(RATINGS)},
+           {"id": "runtime", "label": "Length", "options": opt(RUNTIMES[kind])},
+           {"id": "language", "label": "Language", "options": opt(LANGUAGES)},
+           {"id": "country", "label": "Country", "options": opt(COUNTRIES)},
+           {"id": "certification", "label": "Certification", "options": opt((c, c.upper()) for c in CERTS[kind])}]
+    if kind == "tv":
+        out += [{"id": "network", "label": "Network", "options": opt((n, n) for n in NETWORKS)},
+                {"id": "status", "label": "Status", "options": opt((x, x.capitalize()) for x in SHOW_STATUS)}]
+    return out
+
+
+def _filter_query(kind: str, filters: Optional[dict]) -> dict:
+    """Trakt's filter parameters from ours, each checked against what
+    filters_for offers. ValueError for one that is not offered."""
+    out = {}
+    names = {"rating": "ratings", "runtime": "runtimes", "language": "languages", "country": "countries",
+             "certification": "certifications", "network": "networks", "status": "status"}
+    offered = {f["id"]: {o["value"] for o in f["options"]} for f in filters_for(kind)}
+    for k, v in (filters or {}).items():
+        v = str(v or "").strip()
+        if not v:
+            continue
+        if k not in offered or v not in offered[k]:
+            raise ValueError(f"{k} is not one of the filters offered")
+        out[names[k]] = v
+    return out
+
+
+def _obj_matches(o: dict, fq: dict) -> bool:
+    """A filter applied here (recommendations, which Trakt does not filter)."""
+    def span(v):
+        a, _, b = v.partition("-")
+        return float(a), float(b)
+    if "ratings" in fq:
+        lo, hi = span(fq["ratings"])
+        if not lo <= float(o.get("rating") or 0) * 10 <= hi:
+            return False
+    if "runtimes" in fq:
+        lo, hi = span(fq["runtimes"])
+        if not lo <= float(o.get("runtime") or 0) <= hi:
+            return False
+    for ours, theirs in (("languages", "language"), ("countries", "country"), ("certifications", "certification"),
+                         ("networks", "network"), ("status", "status")):
+        if ours in fq and str(o.get(theirs) or "").lower() != fq[ours].lower():
+            return False
+    return True
+
+
 def discover(kind: str, which: str, genre: str = "", year: str = "", page: int = 1,
-             hide_watched: bool = True, now: Optional[float] = None) -> dict:
+             hide_watched: bool = True, now: Optional[float] = None, filters: Optional[dict] = None) -> dict:
     """What GET /watch/discover answers (less `ok`). ValueError for a bad
     kind, list, genre or year, or recommendations when not signed in;
     TraktError when Trakt fails."""
     if kind not in KINDS:
         raise ValueError("kind must be movie or tv")
     which = which or "trending"
-    if which not in DISCOVER:
-        raise ValueError(f"list must be one of {', '.join(DISCOVER)}")
+    every = DISCOVER + tuple(k for k in DISCOVER_MORE if k != "boxoffice" or kind == "movie")
+    if which not in every:
+        raise ValueError(f"list must be one of {', '.join(every)}")
+    fq = _filter_query(kind, filters)
     if not set_up():
         raise ValueError(NOT_SET_UP)
     me = signed_in()
@@ -832,6 +910,7 @@ def discover(kind: str, which: str, genre: str = "", year: str = "", page: int =
             objs = [o for o in objs if genre in [str(g).lower() for g in o.get("genres") or []]]
         if span:
             objs = [o for o in objs if isinstance(o.get("year"), int) and span[0] <= o["year"] <= span[1]]
+        objs = [o for o in objs if _obj_matches(o, fq)]
         start = (page - 1) * PAGE_SIZE
         more = len(objs) > start + PAGE_SIZE
         objs = objs[start:start + PAGE_SIZE]
@@ -841,12 +920,13 @@ def discover(kind: str, which: str, genre: str = "", year: str = "", page: int =
             q["genres"] = genre
         if span:
             q["years"] = f"{span[0]}-{span[1]}" if span[0] != span[1] else str(span[0])
-        path = f"/{what}/{which}?{urllib.parse.urlencode(q)}"
+        q.update(fq)
+        path = f"/{what}/{DISCOVER_MORE.get(which, which)}?{urllib.parse.urlencode(q)}"
         rows = _cached(f"d:{path}", now, lambda: _public_get(path), PUBLIC_TTL_S)
         raw = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
         # Trending and anticipated wrap each in {watchers|list_count, movie}; popular does not.
         objs = [r.get(one) if isinstance(r.get(one), dict) else r for r in raw]
-        more = len(raw) >= PAGE_SIZE
+        more = len(raw) >= PAGE_SIZE and which != "boxoffice"
     items = [_movie(o) if kind == "movie" else _show(o) for o in objs if isinstance(o, dict) and o.get("ids")]
     if me:
         try:
@@ -868,6 +948,6 @@ def discover(kind: str, which: str, genre: str = "", year: str = "", page: int =
         gs = genres(kind, now)
     except TraktError:
         gs = []
-    return {"kind": kind, "list": which, "lists": [d for d in DISCOVER if d != "recommended" or me],
+    return {"kind": kind, "list": which, "lists": [d for d in every if d != "recommended" or me],
             "page": page, "more": more, "hide_watched": hide_watched and me, "signed_in": me,
-            "items": items, "genres": gs}
+            "items": items, "genres": gs, "filters": filters_for(kind)}
