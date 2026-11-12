@@ -93,22 +93,57 @@ media server move --status | --verify | --rollback
 ```
 
 1. **check** the other machine over ssh: an agent-media there with `media
-   restore` and `media server` (its release, else its checkout), its home.
+   restore` and `media server` (its release, else its checkout), its home;
+   the store's folder is made.
 2. **keep** its own state: a full backup of it, there
    (`~/.local/share/agent-media-move/before`), and the units it runs. This
    is what `--rollback` puts back.
-3. **backup** here → there, services up (`media backup`, tier `full`).
-4. **stop** the services here, the session host last. From this step the
-   command runs detached (a transient systemd unit), because a chat that
-   runs it is stopped here; `--status` reads its log
+3. **backup** here → there, services up (`media backup`, tier `full`); then
+   **transcripts**: the agents' own transcripts of this server's chats
+   (`~/.claude/projects/<folder>/<id>.jsonl` and its background agents'),
+   which no backup holds and without which a moved thread cannot be read
+   back or resumed (filed by path, so only between equal homes); then
+   **units**: this server's own unit files (below).
+4. **stop** the services here, the session host last — refused while a chat
+   is working (`--force` moves anyway; nothing is resumed over there). From
+   this step the command runs detached (a transient systemd unit), because
+   a chat that runs it is stopped here; `--status` reads its log
    (`<state>/server-move.json`). `--foreground` keeps it in the terminal.
-5. **sync**: what changed since step 3 (seconds).
-6. **restore** there: its units stopped, `media restore latest --apply
-   --force`, `media-setup install-services`, `media server rename` to the
-   new name with the old one kept answering, its units started.
+5. **sync**: what changed since step 3, state and transcripts (about half a
+   minute: only the new snapshot goes, hardlinked against the last).
+6. **restore** there, in this order: its units stopped; its own chats'
+   records kept aside; `media restore latest --apply --force`; the
+   hand-made drop-ins (`--only .config/systemd/user`: the canvas's holds
+   the public listener and the web app's folder); `media-setup
+   install-services`; the server's other units (`media server settle
+   --units`, then `media-setup release-mode`); the agent's hooks
+   (`media-setup install-hooks`, linked into `~/.local/bin`); `media server
+   settle`; `media server rename` to the new name with the old one kept
+   answering; its jobs worker disabled (it would dial itself) and its
+   units started.
 7. **verify**: the new name answers as this server (the restored
    `server-id` is this one's). If its DNS or tunnel is not moved yet this
    fails and says so; nothing is undone by itself, and `--verify` asks again.
+
+**The unit files.** `media-setup install-services` writes only the units
+that have a service template (the session host, the sinks, the timers in
+`services/`). The canvas — the server itself — the speech shims, the
+intakes and several timers are unit files of their own: symlinks into a
+checkout, or the host's. So "restore, then install-services" has no server
+to start. The move carries every `agent-media*` unit and timer and any unit
+one of them requires (`tailnet-ip.service`), read through their links,
+writes each that the new machine lacks, enables those enabled here, and
+`release-mode` points them at the release (all 36 of red5's map onto red2's
+release, checked 13 Nov 2026). The house audio's units (`am-*`) are not
+carried: that is set up by hand.
+
+**`media server settle`** (server_settle.py) makes the restored state the
+new machine's: a chat it ran as this server's worker gets its own record
+back in place of this server's (`host: <there>`); nothing the stop cut off
+is resumed (an agent resuming mid-task in another working tree, without the
+old one's uncommitted files) but listed in `<state>/moved-chats.json`; a
+`MEDIA_SESSIOND_DEFAULT_HOST` naming the machine itself is commented out;
+chat folders that are not on the machine are counted.
 
 Up to step 3 nothing here is touched: a failure leaves the server running.
 Not in it: the DNS records and the tunnel's credentials, the house audio,
@@ -117,10 +152,10 @@ base"). `--rollback` stops the other machine's units, puts its kept state
 back, starts what it ran before, and starts what was stopped here; DNS goes
 back by hand.
 
-Not yet proven by a real run: the rehearsal (move proposal, step 3) is its
-first. Known gap for it: chats running on the other machine as this server's
-worker have records on both sides, and the restore brings this server's
-(`host: <there>`), so start from a quiet house.
+Proven by the rehearsal (below): backup, sync, restore on another machine,
+the same server at a new address, pairing, a chat and its reply. Not yet
+run for real anywhere: step 4 and step 6's units, hooks and settle on a live
+machine, and `--rollback`. Their first real run is the cutover.
 
 ### What the restore leaves to the rename
 

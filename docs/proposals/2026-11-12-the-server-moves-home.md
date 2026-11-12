@@ -491,7 +491,18 @@ the day of the cutover, not after it.
    `settings.json.bak-hooks-20261113`), and a second chat's reply reached
    its thread. red5's settings also carry `media-hook-heard`, `-context`
    and `-shared-check` and the activity lines, which `install-hooks` does
-   not write: those come with the assistant's workspace (5a). Still open: not rehearsed at
+   not write: those come with the assistant's workspace (5a). **Folded into the command the same day** (166add3b,
+   `docs/reference/server-address.md`): transcripts carried (2.2 GB and
+   0.8 GB of background agents' for red5's 680 chats), the stop refused
+   while a chat works, the hooks, the drop-ins, `media server settle`, and
+   — the largest finding — **the server's own unit files**:
+   `media-setup install-services` has no template for the canvas, the
+   speech shims, the intakes or several timers (symlinks into the checkout
+   on red5), so "restore, then install-services" had no server to start.
+   The move carries them (36 unit files, 22 enabled; all map onto red2's
+   release in a scratch `release-mode --dry-run`). Chat folders red2 lacks
+   (`~/scratch`, `~/spl/…`, `~/org`: 260-odd chats) cannot be resumed there
+   until they exist: 5a. Still open: not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
    **The rehearsal — and the command's own test.** `media server move --to
