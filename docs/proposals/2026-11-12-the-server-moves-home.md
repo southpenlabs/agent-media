@@ -389,7 +389,14 @@ the day of the cutover, not after it.
    "What is not part of the base".
 6. **Later, recommended**: `hippocampus`, `memory-governor`, `litellm` and
    `cli-proxy-api` to red2, so the two most-used paths stop crossing the
-   world. Then look again at what red5 is for, and at whether the
+   world. The memory services are **renamed as they land** — one
+   `agent-memory-*` prefix for a subsystem that answers to four today, with
+   the old variables kept readable for good (agent-memory
+   `docs/NAMING.md`, David, 12 Nov 2026: "hippocampus probably needs to be
+   renamed something more agent-memory like"). Unit names cannot alias, so
+   a host that is being provisioned anyway is the cheap moment: the new
+   names are written once on red2 rather than edited on red5 and then
+   moved. Then look again at what red5 is for, and at whether the
    where-things-run deployer (step 2 there) should now run on red2.
 
 ## What to watch

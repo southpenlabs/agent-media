@@ -2711,7 +2711,16 @@ ahead.
       searched nothing — **fixed 12 Nov 2026**, red5's client config copied
       across pointing at `red5:54321` and searched from a red2 chat to
       confirm. One file on one host, fixed the same day, blocking nothing:
-      which is the point of keeping the workspace out of the base.
+      which is the point of keeping the workspace out of the base. When
+      `hippocampus` and `memory-governor` do follow to red2 (step 6) they
+      are **renamed on the way**: one `agent-memory-*` prefix for a
+      subsystem that answers to four today (`hippocampus*`,
+      `memory-governor*`, `governor-digest*`, `agent-memory-*`), with
+      `HIPPOCAMPUS_*` and `GOVERNOR_*` kept readable for good and the
+      Python package, tests and HTTP paths left alone — agent-memory
+      `docs/NAMING.md` (David, 12 Nov 2026: "hippocampus probably needs to
+      be renamed something more agent-memory like"). Unit names cannot
+      alias, so it rides the provisioning rather than being a sweep.
 
 ## Loose ends
 
