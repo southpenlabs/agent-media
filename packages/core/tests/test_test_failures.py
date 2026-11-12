@@ -50,3 +50,30 @@ def test_a_refused_send_is_not_kept(repo):
     r = T.notify("t", "HEAD~1", repo=repo, send=lambda *a: (False, "host down"))
     assert r == {"sent": False, "thread": THREAD, "reason": "host down"}
     assert T.notify("t", "HEAD~1", repo=repo, send=lambda *a: (True, ""))["sent"] is True
+
+
+# --- the form commits are actually written in -------------------------------
+
+
+def test_thread_line_is_read_as_a_link_which_is_how_commits_write_it():
+    """Every commit in these repos writes its thread as a link, not a bare id.
+    The pattern demanded a bare id and so matched none of them: a red test
+    could not be routed to the session that caused it even when the line was
+    there. Found 13 Nov 2026, when a backup test's failure could not be routed
+    and "no Thread: line" turned out not to be the whole story.
+    """
+    link = ("speech: a change\n\nbody\n\n"
+            "Thread: https://red5.sasonica.com/app/t/45628bf4-a304-47e8-bbc2-83ebd1ceadff\n")
+    m = T._THREAD.search(link)
+    assert m and m.group(1) == "45628bf4-a304-47e8-bbc2-83ebd1ceadff"
+
+
+def test_thread_line_still_reads_a_bare_id():
+    bare = f"x\n\nThread: {THREAD}\n"
+    m = T._THREAD.search(bare)
+    assert m and m.group(1) == THREAD
+
+
+def test_a_line_that_merely_starts_with_thread_is_not_one():
+    assert T._THREAD.search("Threaded: 45628bf4-a304-47e8-bbc2-83ebd1ceadff\n") is None
+    assert T._THREAD.search("Thread: none yet\n") is None

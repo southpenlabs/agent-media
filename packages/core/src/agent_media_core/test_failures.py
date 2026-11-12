@@ -5,8 +5,9 @@ issue and ensure that notification is sent about these failed tests from
 now on". A session that finds a red test whose cause is another session's
 commit runs `media test-failure notify <test> --commit <sha> --why <cause>`:
 
-- the commit's thread is its ``Thread: <session id>`` line (every commit in
-  these repos ends with one)
+- the commit's thread is its ``Thread:`` line (every commit in these repos ends
+  with one), as a bare session id or, as they are actually written, a link:
+  ``Thread: https://<host>/app/t/<id>``
 - the message goes to that thread through the session host (`media session
   send`, signed ``[From <sender>]``); an ended thread is woken by it, with its
   own history, so the session that wrote the change can fix it
@@ -30,7 +31,17 @@ from typing import Optional
 
 from ._paths import state_dir
 
-_THREAD = re.compile(r"^Thread:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$", re.M | re.I)
+#: The id is taken from anywhere on the `Thread:` line, because every commit in
+#: these repos writes the thread as its **link** --
+#: `Thread: https://<host>/app/t/<id>` -- and this pattern once demanded a bare
+#: id and nothing else. It therefore matched no commit in the repo, so a red
+#: test could not be routed to the session that caused it even when the line
+#: was there (found 13 Nov 2026, when a backup test's failure could not be
+#: routed and the reason turned out not to be the missing line it looked like).
+#: Both forms are read now.
+_THREAD = re.compile(
+    r"^Thread:.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$",
+    re.M | re.I)
 
 
 def _ledger_path() -> Path:

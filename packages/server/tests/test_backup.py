@@ -524,20 +524,29 @@ def test_never_having_run_is_stale_and_said_at_error_level(install, monkeypatch)
                         lambda suffix, title, level="warn": raised.append((suffix, level, title)))
     st = bk.check_stale()
     assert st["stale"] and st["ever"] is False
-    assert raised and raised[0][0] == "stale" and raised[0][1] == "error"
+    # By suffix, not by position: another alert arriving first must not
+    # decide whether this passes.
+    assert ("stale", "error") in [(r[0], r[1]) for r in raised]
 
 
 @pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
 def test_a_stale_backup_alerts_and_a_fresh_one_does_not(install, monkeypatch):
+    """Only the `stale` alerts are this test's business. It asserted on *every*
+    alert at first and so failed on red5, where /tmp is a 1.7G tmpfs and the
+    run rightly raised `space` for being under the free-disk floor (found by
+    the move's rehearsal, 13 Nov 2026). A test about staleness must not be
+    hostage to how much room the machine running it happens to have."""
     raised: list[tuple] = []
     monkeypatch.setattr(bk, "_alert",
                         lambda suffix, title, level="warn": raised.append((suffix, level)))
+    stale = lambda: [r for r in raised if r[0] == "stale"]          # noqa: E731
+
     bk.backup(tier="core", now=1_000_000)
     at = bk.last_good()["at"]
     bk.check_stale(now=at + 3600)
-    assert not raised, "a fresh backup says nothing"
+    assert stale() == [], "a fresh backup says nothing about staleness"
     bk.check_stale(now=at + 9 * 86400)
-    assert ("stale", "warn") in raised
+    assert ("stale", "warn") in stale()
 
 
 def test_the_timer_unit_name_is_asked_of_setup_not_written_down():
@@ -562,3 +571,40 @@ def test_schedule_state_says_when_the_timer_is_missing(install, monkeypatch):
     st = bk.schedule_state()
     assert st["installed"] is False, "nothing runs nightly, and it has to say so"
     assert st["unit"].endswith(".timer")
+
+
+def test_a_run_with_little_room_left_says_so(install, monkeypatch):
+    """The `space` floor alert, pinned deliberately rather than tripped over.
+    It is what caught red5's 1.7G /tmp during the rehearsal; the risk it
+    guards is the destination disk, which on red5 carries an 8G swapfile."""
+    import shutil as _shutil
+
+    raised: list[tuple] = []
+    monkeypatch.setattr(bk, "_alert",
+                        lambda suffix, title, level="warn": raised.append((suffix, level)))
+    tight = _shutil.disk_usage("/")._replace(free=1 * 1024 ** 3)
+    monkeypatch.setattr(bk.shutil, "disk_usage", lambda p: tight)
+    res = bk.backup(tier="jewels")
+    assert ("space", "warn") in raised
+    assert any("free" in w for w in res["warnings"]), \
+        "and it is on the run's own result, not only in the alert"
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_the_nightly_mirrors_rather_than_quick_pushing(install, monkeypatch):
+    """`sync()` sends only the new snapshot, which is right for a cutover: it
+    is downtime. The nightly must NOT do that, because a quick push removes
+    nothing pruned here from the far side — so the cap would stop being
+    enforced where the disk actually matters, and on red5 that disk carries an
+    8G swapfile and 18G of personal files.
+    """
+    seen: list[bool] = []
+    real = bk.backup
+    monkeypatch.setattr(bk, "backup",
+                        lambda **kw: (seen.append(bool(kw.get("quick_push"))), real(**kw))[1])
+    bk.sync(tier="core", now=1_000_060)
+    assert seen == [True], "the cutover's second pass is the quick one"
+
+    seen.clear()
+    bk.main(["run", "--tier", "core"])
+    assert seen == [False], "the nightly mirrors, so the far side gets pruned too"
