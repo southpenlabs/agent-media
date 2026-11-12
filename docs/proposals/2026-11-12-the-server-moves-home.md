@@ -476,8 +476,15 @@ the day of the cutover, not after it.
    `MEDIA_WEB_APP_DIR` lives in the canvas's hand-made drop-in on red5,
    which a restore holds back, so **the real move must set it on red2**
    (its own build of sasonica-app) or the web app and every `/app/t/<id>`
-   thread link 404s. **Still to do:** pair a second device with the copy
-   and send it a message; not rehearsed at
+   thread link 404s. A test device paired over the public name (`POST /pair`, admin,
+   the same `server_id`), listed the copy's 481 conversations and started a
+   chat with `POST /ask`; the agent on red2 answered in its transcript, but
+   **the reply never reached the thread**: red2's `~/.claude/settings.json`
+   has none of the media hooks (red5's has `media-hook-claude-code`,
+   `-context`, `-heard`, `-shared-check`), because as a worker its replies
+   are filed by red5's Stop hook. **The real move needs `media-setup
+   install-hooks` on red2, from the release**, or every reply is silent and
+   unfiled. **Still to do:** that, then a reply seen in the thread; not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
    **The rehearsal — and the command's own test.** `media server move --to
