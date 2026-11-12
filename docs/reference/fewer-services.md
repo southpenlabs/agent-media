@@ -184,12 +184,25 @@ measuring those properly needs a counter or a packet count first. The
 public `/share` route exists and is the app's path, but whether anything
 still posts to 8771 is an open question.
 
-**The one real mesh dependency left on red5** is
-`MEDIA_BOOK_BASEURL_PHONE=http://red5:8780`, for `media book play --target
-phone`, which fetches book files over HTTP. There are signed public routes
-for clips, book *covers*, podcast files and practice videos; a fifth, for
-book media, would retire it — and with it `MEDIA_CLIPS_BIND=tailnet`, the
-only reason that port still asks for a mesh address.
+**The last mesh dependency, now gone.**
+`MEDIA_BOOK_BASEURL_PHONE=http://red5:8780` served `media book play --target
+phone`, which fetches book files over HTTP rather than copying them. There
+were signed public routes for clips, book *covers*, podcast files and
+practice videos; `GET /books/files/<rel>?sig=` (`book_files.py`) is the
+fifth, and with it the base becomes
+`https://<server>/books/files` + `MEDIA_BOOK_SIGNED_<TARGET>=1`.
+
+It is not just the clip route with a different prefix, and the difference is
+the security of it. A clip name is one flat filename, matched against a
+character class. A book path has directories in it, so the name alone cannot
+be validated that way — and the signature does not help, because a link we
+minted for `../../.ssh/id_ed25519` would verify perfectly. The resolved file
+is therefore checked to be under the root *after* following symlinks, and
+only media suffixes are served at all. Both have tests that sign the hostile
+path with the real key, which is the only version of that test worth having.
+
+With it set, `MEDIA_CLIPS_BIND=tailnet` comes off and loopback — the
+default — is correct.
 
 ### Moving one in
 
