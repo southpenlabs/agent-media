@@ -121,3 +121,23 @@ Not yet proven by a real run: the rehearsal (move proposal, step 3) is its
 first. Known gap for it: chats running on the other machine as this server's
 worker have records on both sides, and the restore brings this server's
 (`host: <there>`), so start from a quiet house.
+
+### What the restore leaves to the rename
+
+Backup and restore: `docs/reference/backup-and-restore.md`,
+`agent_media_server.backup`. The division of labour — **a restore
+deliberately does not touch the addresses.** The env file comes back naming
+the old server exactly as it was, because a restore that guessed an address
+would break the very thing the move depends on; the restore output lists
+every setting it found pointing at the old machine, and the rename is the
+step that changes them. Hand-made drop-ins (the canvas's `servers.conf`) are
+kept in the backup but not written on restore: `media-setup
+install-services` writes the new machine's, and the address then comes from
+the env file the rename rewrote. A restored
+`MEDIA_SESSIOND_DEFAULT_HOST` naming the new machine itself is harmless
+(`sessiond_remote.is_local`: chats start there), and is unset the morning
+after.
+
+`server_id` survives a restore, which is what makes the restored install the
+same server at a new address rather than a new one — so the id above, and the
+`moved_to` answers, keep working across the move.
