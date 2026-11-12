@@ -10749,6 +10749,56 @@ person's `photo`.
   - `region`, and `attribution` (TMDb's and JustWatch's credit, which the
     app shows under the list).
   Kept an hour. 502 `TMDb didn't answer` when TMDb fails.
+- **Free films** (`watch_free.py`; David, 13 Nov 2026, to a short fixed
+  list of legitimate sources: "yeah, let's do that"). Films that play in
+  the app's own player. **The sources are a table compiled into the
+  server** (`watch_free.SOURCES`), today one: the Internet Archive's
+  Feature Films collection, and of it only the items whose own page states
+  a public-domain dedication or a Creative Commons licence (`licenseurl`).
+  No setting, variable or request names a source or an address; there is
+  no add-on address, torrent, magnet, info-hash or debrid anywhere in it,
+  and a file's address is built by the server from `https://archive.org`,
+  the item's id and a file name. `GET /watch` says `free_films: true`
+  where the server has this.
+  - `GET /watch/free?list=popular|recent&q=&genre=&year=&page=
+    &hide_watched=0|1` → Discover's answer (`kind` `movie`, `list`,
+    `lists`, `page`, `more`, `hide_watched`, `signed_in`, `items`,
+    `genres`), and `q` (the words taken), `source` (`{"id", "name",
+    "site", "terms"}`) and `attribution`. The Archive's
+    `advancedsearch.php` under the rule above, most downloaded
+    (`popular`) or newest added (`recent`) first, 20 a page; `q` narrows
+    by title words (words only: none of the Archive's query syntax),
+    `genre` is a slug of `genres` (a fixed few, matched to the Archive's
+    subjects), `year` a year or span. Each item is matched to Trakt's
+    movie, by an IMDb id the item names, else by title and year (a year
+    either side), kept a day: matched, it is Trakt's item (ids, genres,
+    rating, `url`), so its page and the Watched and Watchlist writes work,
+    with `watched` and `on_watchlist` when signed in; unmatched, it has
+    `ids: {}`, `id` `movie:free:<item>`, the Archive's title, year,
+    runtime and description, and `url` its page there. Every item has
+    `free`: `{"source": "archive", "id": <item>, "page"}`, and `poster`
+    (TMDb's where set up and matched, else the Archive's own frame).
+  - `GET /watch/free/file?id=<item>` or `?title=&year=` → `{"ok",
+    "source", "id", "title", "year", "url", "mime", "duration", "size",
+    "height", "page", "license", "subtitles", "attribution"}`: the film's
+    file, `url` a direct `https://archive.org/download/<item>/<file>.mp4`
+    the device streams itself (ranged requests; the server proxies no
+    video). The file is the item's longest MP4 derivative (H.264 first);
+    never its torrent, an original in another container, or a private
+    file. The item's own metadata must pass the rule again, so an id from
+    outside it is 404, as is an item with no such file. By `title` and
+    `year` (a title's page asks, to offer Play): the most downloaded item
+    under the rule whose title is the same, 404 when none.
+    `subtitles`: `[{"name", "lang", "label"}]`, the `.srt`/`.vtt` files
+    the item ships (its machine transcript, `.asr.srt`, left out).
+  - `GET /watch/free/subtitles?id=<item>&name=<one of those>` → `{"ok",
+    "vtt", "lang", "label"}`: that file as WebVTT text (SubRip converted),
+    for the player's track; 404 for a name not in the item's list.
+  Kept an hour. 400 for a bad list, genre, year, page or id; 502 `The
+  Internet Archive didn't answer`. Left out on purpose: Stremio's "Public
+  Domain Movies" add-on (stale since 2023; the Archive is the library
+  behind it), OpenSubtitles and MDBList (each needs a key and its terms
+  read first).
 - `GET /media/search` (§6.46a) has a `person` group: `found` the people.
 - 400 for an id, kind, list, page or filter that is not one, or a personal
   list or calendar when not connected; 502 when Trakt fails.

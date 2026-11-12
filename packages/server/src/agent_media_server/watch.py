@@ -20,6 +20,10 @@ agent_media_core.tmdb; David, 9 Nov 2026).
   GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
   GET  /watch/title?kind=movie|tv&id=&season=&episode=   gated → a title's page (facts, trailer, ratings, cast,
                                             crew, related, seasons, `open_in`: links that open it elsewhere)
+  GET  /watch/free?list=popular|recent&q=&genre=&year=&page=&hide_watched=0|1   gated → Discover's shape: free
+                                            films from the fixed table of sources (watch_free.py), each with `free`
+  GET  /watch/free/file?id=<item> | title=&year=   gated → {"ok", "source", "id", "url", "duration", "subtitles", …}
+  GET  /watch/free/subtitles?id=&name=      gated → {"ok", "vtt", "lang", "label"}
   GET  /watch/settings                      gated → {"ok", "open_in": [{"id", "label", "on", "mode", "modes"}]}
   POST /watch/settings {"open_in"?: {id: bool}, "open_in_mode"?: {id: "app"|"page"}}   admins → the same
   GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
@@ -47,7 +51,10 @@ from . import auth
 
 PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/watch/title",
                    "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/watch/settings", "/accounts/trakt", "/accounts/trakt/start",
-                   "/accounts/trakt/finish", "/accounts/trakt/signout"})
+                   "/accounts/trakt/finish", "/accounts/trakt/signout",
+                   "/watch/free", "/watch/free/file", "/watch/free/subtitles"})
+#: Free films from the fixed table of sources (watch_free.py), all GET and gated.
+FREE = ("/watch/free", "/watch/free/file", "/watch/free/subtitles")
 
 
 #: Pages, people, lists and the calendar (trakt_browse.py), all GET and gated.
@@ -119,6 +126,38 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                 send_json(h, 400, {"ok": False, "error": str(e)})
                 return True
         send_json(h, 200, {"ok": True, "open_in": watch_open.apps()})
+        return True
+    if path in FREE:
+        # Films from a fixed table of sources (watch_free.py): no address is ever taken from the request.
+        if method != "GET":
+            return False
+        user, err = auth.gate(bearer)
+        if not user:
+            send_json(h, err.pop("status", 401), {"ok": False, **err})
+            return True
+        from agent_media_core import watch_free
+        try:
+            if path == "/watch/free":
+                page = _q(h, "page") or "1"
+                if not page.isdigit():
+                    raise ValueError("page is a number")
+                got = watch_free.browse(_q(h, "list"), _q(h, "q"), _q(h, "genre"), _q(h, "year"), int(page),
+                                        _q(h, "hide_watched") != "0")
+            elif path == "/watch/free/file":
+                got = watch_free.file(_q(h, "id"), _q(h, "title"), _q(h, "year"))
+            else:
+                got = watch_free.subtitles(_q(h, "id"), _q(h, "name"))
+        except ValueError as e:
+            send_json(h, 400, {"ok": False, "error": str(e)})
+            return True
+        except LookupError as e:
+            send_json(h, 404, {"ok": False, "error": str(e)})
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"watch: {path}: {e}", file=sys.stderr)
+            send_json(h, 502, {"ok": False, "error": f"The Internet Archive didn't answer: {e}"})
+            return True
+        send_json(h, 200, {"ok": True, **got})
         return True
     if path in BROWSE:
         if method != "GET":
@@ -212,7 +251,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                 send_json(h, 502, {"ok": False, "error": f"Trakt didn't answer: {e}"})
                 return True
             # `by_service`: Discover has the "service" list (what a streaming service has; TMDb's).
-            send_json(h, 200, {"ok": True, **got, "tmdb": tmdb.set_up(), "by_service": tmdb.set_up()})
+            send_json(h, 200, {"ok": True, **got, "tmdb": tmdb.set_up(), "by_service": tmdb.set_up(),
+                               "free_films": True})  # GET /watch/free: films that play here (watch_free.py)
             return True
         try:
             tid = int(_q(h, "tmdb"))
