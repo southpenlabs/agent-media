@@ -88,14 +88,17 @@ def set_up() -> bool:
 
 
 def flow() -> str:
-    """How a sign-in starts: "device" (a code typed at trakt.tv/activate),
-    or "pkce" when MEDIA_TRAKT_FLOW says so. Trakt gives an app with no
-    secret a device code too and takes the poll without one (checked 13 Nov
-    2026: 200, then 400 "waiting"), which spares the listener the PKCE
-    redirect to a localhost page that does not load (David, 13 Nov 2026:
-    "The trakt login from settings seems to redirect to a non-existent
-    localhost"). begin() still falls back to PKCE when no code is given."""
-    return "pkce" if (os.environ.get("MEDIA_TRAKT_FLOW") or "").strip().lower() == "pkce" else "device"
+    """How a sign-in starts: "device" (a code typed at trakt.tv/activate)
+    with a client secret, "pkce" without one; MEDIA_TRAKT_FLOW (device |
+    pkce) says otherwise. For a day (13 Nov 2026) an app with no secret
+    went by device too: Trakt's API gives such an app a code and takes the
+    poll, but its activate page then refuses a development app ("Only its
+    developer and their testers can connect it") even for an authorised
+    account, so PKCE is the one that works there."""
+    want = (os.environ.get("MEDIA_TRAKT_FLOW") or "").strip().lower()
+    if want in ("device", "pkce"):
+        return want
+    return "device" if client_secret() else "pkce"
 
 
 def redirect_uri() -> str:

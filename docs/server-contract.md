@@ -10827,15 +10827,16 @@ sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
   when TMDb fails.
 
 **Signing in** (admins, `auth.may_admin`). Two ways (`flow`): `device`
-(Trakt's device code: a code typed at Trakt's address), the default with or
-without a client secret, and `pkce` (authorization code with PKCE, S256:
-Trakt's sign-in page, then the address it lands on pasted back) when
-`MEDIA_TRAKT_FLOW=pkce` says so or Trakt gives an app with no secret no
-code. Until 13 Nov 2026 an app with no secret always went by PKCE, whose
-redirect for a development app is a localhost page that does not load
-(David: "redirect to a non-existent localhost"); Trakt's device flow turned
-out to take such an app (a code given, the poll answered 400 "waiting"
-without a secret), though its docs do not say so. No secret is ever sent
+(Trakt's device code: a code typed at Trakt's address) with a client
+secret, `pkce` (authorization code with PKCE, S256: Trakt's sign-in page,
+then the address it lands on pasted back) without; `MEDIA_TRAKT_FLOW`
+(`device` | `pkce`) says otherwise. For a day (13 Nov 2026) an app with no
+secret went by device as well, since Trakt's API gives it a code and takes
+the poll; but Trakt's activate page then refuses a development app ("Only
+its developer and their testers can connect it") even for an authorised
+account, so PKCE is what works there. PKCE's redirect for a development
+app is a localhost page that does not load; the Android app catches that
+address itself (in hand), a browser pastes it. No secret is ever sent
 when there is none. A token refresh is done by one process at a time (a
 lock file beside `trakt-token.json`), reads the file again inside the lock,
 and a refusal wipes the sign-in only when the file still holds the token

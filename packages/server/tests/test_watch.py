@@ -171,9 +171,10 @@ def test_the_device_sign_in_then_sign_out(server, signed_in, fake, creds):
     assert res.status == 400, "no sign-in waiting"
 
 
-def test_a_code_without_a_secret(server, signed_in, fake, monkeypatch):
-    # Trakt gives an app with no secret a device code too (13 Nov 2026): no localhost redirect.
+def test_a_code_without_a_secret_when_asked_for(server, signed_in, fake, monkeypatch):
+    # MEDIA_TRAKT_FLOW=device: Trakt's API takes it with no secret (its activate page may not, for a development app).
     monkeypatch.setenv("MEDIA_TRAKT_CLIENT_ID", "cid")
+    monkeypatch.setenv("MEDIA_TRAKT_FLOW", "device")
     res, obj = call(server, "POST", "/accounts/trakt/start", {}, AUTH)
     assert res.status == 200 and obj["flow"] == "device" and obj["user_code"] == "ABCD1234"
     call(server, "POST", "/accounts/trakt/finish", {}, AUTH)
@@ -207,10 +208,9 @@ def test_a_refresh_another_process_already_did_signs_nobody_out(server, signed_i
     assert trakt._load()["refresh_token"] == "theirs-r", "nothing wiped"
 
 
-def test_pkce_when_asked_for(server, signed_in, fake, monkeypatch):
+def test_pkce_without_a_secret(server, signed_in, fake, monkeypatch):
     import urllib.parse
     monkeypatch.setenv("MEDIA_TRAKT_CLIENT_ID", "cid")
-    monkeypatch.setenv("MEDIA_TRAKT_FLOW", "pkce")
     res, obj = call(server, "POST", "/accounts/trakt/start", {}, AUTH)
     assert res.status == 200 and obj["flow"] == "pkce" and obj["redirect_uri"] == "http://localhost"
     url = urllib.parse.urlsplit(obj["url"])
