@@ -5834,10 +5834,10 @@ memory as its own section when this host has agent-memory. Code:
   | `from:me`, `from:agent` | whose words — `who=`, and it wins over it (`mine`/`user`/`i`, `assistant`/`ai`/`them` too; `who:` is the same operator) |
   | `in:<words>` | the thread's project or folder holds them (`project:`, `folder:`) |
   | `thread:<words>` | its title, Claude's `ai-title` or its first prompt holds them (`title:`) |
-  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`) |
+  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`). A closed set: anything else is 400 with the names, so a near miss is said rather than answered with nothing. `in:`, `thread:` and `tool:` stay free text |
   | `tool:<name>` | a tool step that ran it (`ran:`) — turns tool steps on by itself, like `kind:tool` |
   | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
-  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` ago. `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
+  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` (a bare `ago` straight after one of these belongs to it — `after:7d ago` — and is a word anywhere else). `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
   | `<date>..<date>` | both of those at once; either side may be left off |
 
   A `-` in front of a field operator turns it around (`-in:meridian`,
@@ -5863,9 +5863,20 @@ memory as its own section when this host has agent-memory. Code:
   wants; `filters` holds only the operators the query used. `terms` stays
   what it was: every positive term, flat, to highlight.
 - **`translate=1`** (12 Nov 2026): a question in plain English, turned into
-  those operators by the summary gateway (Haiku; the follow-up's call
-  style, `MEDIA_SEARCH_TRANSLATE_MODEL` / `_TIMEOUT`,
-  `MEDIA_SEARCH_TRANSLATE=0` switches it off) and then searched for. Never
+  those operators by whichever fast model answers first (`intake.fast`: the
+  models of `MEDIA_FAST_MODELS` in order inside one deadline,
+  `MEDIA_SEARCH_TRANSLATE_MODEL` before them and `MEDIA_FOLLOWUP_MODEL`
+  after, a model that errors skipped for a cooldown) and then searched for.
+  The deadline is 8 s on the search's own path and 15 s for
+  `/search/compose`, or `MEDIA_SEARCH_TRANSLATE_TIMEOUT` where it is set;
+  `MEDIA_SEARCH_TRANSLATE=0` switches it off. It was one model on the
+  summary gateway's own timeout to begin with, which is a minute on this
+  host — too long for a search box to wait when the first fast model answers
+  in about two seconds. An answer the parser refuses is still dropped here
+  (the words as typed are a better answer than a second wait, and
+  `/search/compose` is where a second try belongs), but it is **logged** with
+  what was written and what was wrong with it: a prompt that invited
+  `after:7d ago` hid for a day behind a silent drop (7c5ebe1f). Never
   silent: the answer carries `"translated": {"from": "<what was typed>",
   "to": "<the query that ran>"}`, and `q` stays what was typed, so the app
   can show the operators as chips with an "as typed" undo (ask again
@@ -5877,6 +5888,44 @@ memory as its own section when this host has agent-memory. Code:
   leaves the query exactly as typed and says nothing. The call is on the
   query's own path, so a client should pass `translate=1` on submit, not on
   every keystroke.
+#### `POST /search/compose {ask, tried?}` — gated (`auth.gate`)
+
+A query written from somebody's own words, and then changed by what they say
+about it (12 Nov 2026; David: "It would be nice to have agent assistants to
+create these queries too"). `translate=1` above is one shot on the search's
+own path; this is the conversation — the app's "Have a go for me" sheet keeps
+the exchange and sends it back each time, so "only my own words" or "not last
+week, the week before" changes the query instead of starting again.
+
+```json
+{"ask": "what did I say about the gauge",
+ "tried": [{"q": "gauge", "note": "only my own words, and last month"}]}
+→ {"ok": true, "q": "gauge from:me after:2026-10-01", "note": "",
+   "ask": "what did I say about the gauge", "help": "/search/help"}
+```
+
+- **`ask`** is the words as typed, and the only field required; empty is 400.
+  **`tried`** is the exchange so far, oldest first, each turn the query that
+  was written and what was said about it. The last `COMPOSE_TURNS` (6) are
+  read, each field cut at 300 characters; anything else in the list is
+  ignored, so an older client cannot break the call.
+- **`q`** is the query, checked by the parser before it is answered. A model
+  that writes something unsearchable is **told so and asked once more**, with
+  the parser's own complaint, inside what is left of the deadline (less than
+  `COMPOSE_RETRY_FLOOR_S`, 3 s, and the second try is not started): the sheet
+  is a conversation somebody is watching, so another turn beats an answer
+  thrown away. Still no query after that is the 503 below. **`note`** is one
+  line for something asked for that the operators cannot say (`""` when the
+  query says it all), worth showing rather than pretending.
+- The same model and switches as `translate=1`
+  (`MEDIA_SEARCH_TRANSLATE_MODEL` / `_TIMEOUT`, `MEDIA_SEARCH_TRANSLATE=0`
+  turns it off). Never cached: the next call is meant to differ. Nothing
+  wrote a query (off, no gateway, no answer, nothing searchable) is **503
+  `{"code": "no_model"}`** — the one thing a client cannot read from an empty
+  query, so it keeps the words and says the assistant could not be reached.
+- An agent writes these queries from a shell instead: `media find` and the
+  `search_history` tool, above.
+
 - **`help`** (12 Nov 2026): the path of the operator page,
   `"/search/help"` — see below. Every answer carries it, and the response
   header `Link: </search/help>; rel="help"` says the same thing for a
@@ -10516,9 +10565,10 @@ person's `photo`.
   of each; a private list is left out. A person: `{"id" (slug), "name",
   "ids", "known_for", "url", "photo"?}`; a list: `{"id", "name",
   "description", "item_count", "likes", "user", "url"}`.
-- `GET /watch/title?kind=movie|tv&id=<trakt id or slug>` → `{"ok", "kind",
-  "title", "trailer", "trailer_source", "trailer_pending"?, "ratings",
-  "cast", "crew", "related", "tmdb", "seasons"?, "next_episode"?}`.
+- `GET /watch/title?kind=movie|tv&id=<trakt id or slug>[&season=&episode=]`
+  → `{"ok", "kind", "title", "trailer", "trailer_source",
+  "trailer_pending"?, "ratings", "cast", "crew", "related", "open_in",
+  "tmdb", "seasons"?, "next_episode"?}`.
   `title` is the item with its whole `overview` and `tagline`,
   `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
   `released`, and for a show `network` and `aired_episodes`. `cast`:
@@ -10556,6 +10606,35 @@ person's `photo`.
   rows (search, Discover) carry Trakt's `rating` only: the others would
   cost a call a row. Where to watch stays `GET /watch/item`. 404 when Trakt
   has no such title.
+- **Open in** (`watch_open.py`; David, 12 Nov 2026). `open_in` on a
+  title's page is the ordered list of keys that open the title somewhere
+  else: `[{"id", "label", "url", "fallback"?, "kind"?}]`. The app opens
+  `url`, and `fallback` when nothing on the device takes `url`. They are
+  links only: nothing here finds, resolves or plays a stream.
+  - Apps the owner turned on come first, with no `kind`. `stremio`:
+    `stremio:///detail/movie/<imdb>/<imdb>` for a movie,
+    `stremio:///detail/series/<imdb>` for a show, and with `season` and
+    `episode` on the request `stremio:///detail/series/<imdb>/<imdb>:<season>:<episode>`
+    (Stremio's documented deep links: stremio-addon-sdk
+    `docs/deep-links.md`); `fallback` is the same path under
+    `https://web.stremio.com/#/`. Only when it is on and Trakt has the
+    title's IMDb id. Off by default: `GET /watch/settings` (gated) →
+    `{"ok", "open_in": [{"id", "label", "on"}]}`, and `POST /watch/settings
+    {"open_in": {"stremio": true|false}}` (admins) saves and answers the
+    same, kept in `<state_dir>/watch-open-in.json`; 400 for an unknown app
+    or a value that is not a boolean.
+  - Then the where-to-watch services, when TMDb is set up: each known
+    service once, `kind` the first way it offers the title (`stream`,
+    `free`, `ads`, `rent`, `buy`), `url` that service's own search for the
+    title (`https://www.netflix.com/search?q=Arrival`). TMDb's provider
+    data has no address for a title at a service, so a search is as close
+    as it gets. Known services are one best-effort table
+    (`watch_open.SERVICES`, by TMDb provider id, else name): Netflix,
+    Prime Video, Apple TV, HBO Max, SBS On Demand, ABC iview, 9Now,
+    YouTube, Google Play, Tubi, MUBI, Plex, Crunchyroll, Curiosity Stream;
+    a channel sold inside Prime Video or Apple TV opens that service's
+    search. Any other provider has no key and is reached through
+    `where.link` (JustWatch's page, credited as before).
 - `GET /watch/season?id=<show>&season=<n>` → `{"ok", "season", "episodes":
   [{"season", "number", "title", "overview", "first_aired", "runtime",
   "rating"?, "ids", "watched"?}]}`. One is marked watched with `POST /watch
@@ -10601,7 +10680,10 @@ sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
   "region", "attribution"}`: `trailer` a YouTube link (official Trailer >
   Trailer > official Teaser > Teaser) or null; `where` the region's
   services `{"region", "link", "stream", "free", "ads", "rent", "buy"}`,
-  each a list of `{"name", "logo"}`, or null when TMDb lists none there.
+  each a list of `{"name", "logo", "service"?, "label"?, "url"?}`, or null
+  when TMDb lists none there. `url` is the service's own search for the
+  title, on a known service's row ("Open in" above: `service` its id
+  there, `label` its name).
   One `GET /{movie|tv}/{id}?append_to_response=videos,watch/providers`,
   kept a day. The region is `MEDIA_TMDB_REGION` (ISO 3166-1, default AU).
   `attribution` is the credit to show beside them (TMDB; services by

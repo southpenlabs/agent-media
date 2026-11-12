@@ -15,7 +15,10 @@ agent_media_core.tmdb; David, 9 Nov 2026).
        &hide_watched=0|1   gated → {"ok", "kind", "list", "lists", "page", "more", "hide_watched",
                            "signed_in", "items", "genres": [{slug, name}]}
   GET  /watch/search?kind=all&query=        gated → {"ok", "q", "movies", "shows", "people", "lists"}
-  GET  /watch/title?kind=movie|tv&id=       gated → a title's page (facts, trailer, ratings, cast, crew, related, seasons)
+  GET  /watch/title?kind=movie|tv&id=&season=&episode=   gated → a title's page (facts, trailer, ratings, cast,
+                                            crew, related, seasons, `open_in`: links that open it elsewhere)
+  GET  /watch/settings                      gated → {"ok", "open_in": [{"id", "label", "on"}]}
+  POST /watch/settings {"open_in": {id: bool}}   admins → the same
   GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
   GET  /watch/person?id=                    gated → {"ok", "person", "movies": {cast, crew}, "shows": {cast, crew}}
   GET  /watch/lists?which=trending|popular|mine&page=    gated → {"ok", "lists", …}
@@ -40,7 +43,7 @@ from http.server import BaseHTTPRequestHandler
 from . import auth
 
 PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/watch/title",
-                   "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/accounts/trakt", "/accounts/trakt/start",
+                   "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/watch/settings", "/accounts/trakt", "/accounts/trakt/start",
                    "/accounts/trakt/finish", "/accounts/trakt/signout"})
 
 
@@ -82,6 +85,28 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             return True
         send_json(h, 200, {"ok": True, **got})
         return True
+    if path == "/watch/settings":
+        # Which "open in <app>" keys a title's page carries (watch_open.py): the owner's choice, off by default.
+        from agent_media_core import watch_open
+        user, err = auth.gate(bearer) if method == "GET" else auth.may_admin(bearer)
+        if not user:
+            send_json(h, err.pop("status", 401 if method == "GET" else 403), {"ok": False, **err})
+            return True
+        if method == "POST":
+            want = _body(h).get("open_in")
+            try:
+                if not isinstance(want, dict) or not want:
+                    raise ValueError('send {"open_in": {"<app>": true|false}}')
+                for app, on in want.items():
+                    if app not in watch_open.APPS or not isinstance(on, bool):
+                        raise ValueError(f"open_in: {app!r} is not one of {', '.join(watch_open.APPS)}, or not true|false")
+                for app, on in want.items():
+                    watch_open.set_app(app, on)
+            except ValueError as e:
+                send_json(h, 400, {"ok": False, "error": str(e)})
+                return True
+        send_json(h, 200, {"ok": True, "open_in": watch_open.apps()})
+        return True
     if path in BROWSE:
         if method != "GET":
             return False
@@ -95,7 +120,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             if not page.isdigit():
                 raise ValueError("page is a number")
             if path == "/watch/title":
-                got = B.title(_q(h, "kind"), _q(h, "id"))
+                got = B.title(_q(h, "kind"), _q(h, "id"), season=_q(h, "season") or None,
+                              episode=_q(h, "episode") or None)
                 got["tmdb"] = tmdb.set_up()
             elif path == "/watch/season":
                 got = B.season(_q(h, "id"), _q(h, "season"))

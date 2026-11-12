@@ -125,6 +125,16 @@ real players, phones and history. These have all happened.
   when run alone, which is the tell), or compared `time.monotonic()` with
   `0.0` as if it meant "never": the monotonic clock counts from boot, so a
   long-up host and a fresh CI runner disagree. Use a `None` sentinel.
+- **A chat's own environment fails the hook tests.** A session started from
+  the phone runs under sessiond, which sets `MEDIA_HOOK_ENABLED=0` (and 24
+  other `MEDIA_*`) so the hooks do not fire on the chat itself. Run core's
+  suite from such a chat and about a dozen tests fail at `main()`'s first
+  line — test_hook_session, test_hook_ask_turns, test_hook_early_detach,
+  test_hook_pi_stream, test_quota, test_session_speech_cut, test_jobs_worker,
+  test_selfcheck, test_setup — with nothing wrong in the tree. Nothing to
+  report to a commit's thread: scrub the environment and they pass
+  (`env -i PATH=/usr/bin:/bin HOME=/tmp/scrub ../../.venv/bin/pytest -q`,
+  12 Nov 2026).
 - **A worktree's tests import main's code.** The repo `.venv` installs every
   package editable from the main checkout, so pytest on a worktree runs
   main's sources. Put the worktree first:

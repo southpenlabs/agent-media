@@ -75,6 +75,7 @@ from __future__ import annotations
 import hashlib
 import glob
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -84,6 +85,8 @@ import time
 from pathlib import Path
 
 from . import auth, transcript
+
+log = logging.getLogger("agent-media.server.search")
 
 #: Bump when the schema or what a row holds changes: the index is rebuilt.
 #: 2 (12 Nov 2026): `docs.names`, the tool names a step row holds, for `tool:`.
@@ -164,13 +167,20 @@ def _connect() -> sqlite3.Connection:
 
 
 def _wipe(conn: sqlite3.Connection) -> None:
+    """Start the index over at the current `SCHEMA_VERSION`.
+
+    The tables are **dropped and made again**, not emptied: `CREATE TABLE IF
+    NOT EXISTS` leaves an existing table's columns as they are, so a bump
+    that adds one (`docs.names`, version 2) kept the old definition and every
+    insert into it then failed — `table docs has no column named names`, an
+    index that answered nothing at all (red5, 12 Nov 2026).
+    """
     conn.execute("BEGIN IMMEDIATE")
-    for t in ("files", "threads", "docs", "rooms"):
-        conn.execute(f"DELETE FROM {t}")
-    conn.execute("INSERT INTO text_fts(text_fts) VALUES('delete-all')")
-    conn.execute("INSERT INTO tool_fts(tool_fts) VALUES('delete-all')")
-    conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+    for t in ("text_fts", "tool_fts", "files", "threads", "docs", "rooms"):
+        conn.execute(f"DROP TABLE IF EXISTS {t}")
     conn.execute("COMMIT")
+    conn.executescript(_SCHEMA)
+    conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
     _MATRIX_REV.clear()
     _MATRIX_GAPS.clear()
 
@@ -1104,6 +1114,12 @@ FROM = {"me": "me", "mine": "me", "i": "me", "user": "me", "listener": "me",
         "agent": "agent", "assistant": "agent", "ai": "agent", "them": "agent"}
 #: What `kind:` (or `is:`) takes: the words only, or tool steps only.
 KINDS = ("text", "tool")
+#: What `harness:` takes — every harness the index holds a thread for. A
+#: closed set, so a value outside it is a 400 (and a complaint a model can
+#: act on, 05453168's `_as_query`) rather than a query that quietly matches
+#: nothing: `harness:claude-code` is the kind of near miss a model writes.
+#: `in:`, `thread:` and `tool:` stay free text — those sets are open.
+HARNESSES = ("claude", "codex", "pi", "hermes", "matrix")
 #: Field operators, each onto the one thing it narrows.
 FIELDS = {"from": "from", "who": "from",
           "in": "in", "project": "in", "folder": "in",
@@ -1134,7 +1150,8 @@ OPERATORS = (
     ("tool:<name>", "a step that ran that tool (`ran:` is the same)", "tool:bash grep"),
     ("kind:text, kind:tool", "the words only, or the tool steps only", "kind:tool ocelot"),
     ("after:<date>, before:<date>",
-     "2026-11-12, 2026-11, 2026, today, yesterday, or 7d / 3w / 6m / 1y ago",
+     "2026-11-12, 2026-11 or 2026 (that day, month or year), today, yesterday, "
+     "7d, 3w, 6m, 1y",
      "gauge after:7d"),
     ("<date>..<date>", "between the two; either side may be left off",
      "gauge 2026-11-01..2026-11-12"),
@@ -1170,6 +1187,10 @@ def _when(value: str) -> float:
     from datetime import datetime, timedelta
 
     v = value.strip().lower()
+    # "7d ago", as it is said out loud (and as a model writes it from the
+    # list above, which is where this came from: `after:7d ago` searched for
+    # the word "ago" and found nothing, red5, 12 Nov 2026).
+    v = v.removesuffix("ago").strip()
     now = datetime.now()
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if v == "today":
@@ -1210,6 +1231,7 @@ def _term_node(body: str, state: dict, *, negated: bool) -> dict | None:
             leaves[-1]["prefix"] = True
     for leaf in leaves:
         (state["not"] if negated else state["terms"]).append(leaf["text"])
+    state["dated"] = False
     # The one that gets the as-you-type `*` if the query ends here.
     state["last"] = None if (negated or phrase or star) else leaves[-1]
     return leaves[0] if len(leaves) == 1 else {"op": "and", "of": leaves}
@@ -1224,7 +1246,7 @@ def _field(token: str, state: dict) -> None:
         value = value[1:-1]
     value, neg = value.strip(), bool(neg)
     f = state["filters"]
-    state["last"] = None
+    state["last"], state["dated"] = None, False
     if not value:
         return
     if name == "from":
@@ -1238,6 +1260,11 @@ def _field(token: str, state: dict) -> None:
         f["kind"] = value.lower()
     elif name in ("after", "before"):
         f[name] = _when(value)
+        state["dated"] = True  # an `ago` after this one is part of the date
+    elif name == "harness":
+        if value.lower() not in HARNESSES:
+            raise QueryError(f"harness: is one of {', '.join(HARNESSES)}")
+        f.setdefault(name, []).append((value.lower(), neg))
     else:
         f.setdefault(name, []).append(
             (value.lower() if name in ("harness", "tool") else value, neg))
@@ -1258,6 +1285,7 @@ def _range(token: str, state: dict) -> bool:
         return False
     state["filters"].update(got)
     state["last"] = None
+    state["dated"] = True
     return True
 
 
@@ -1323,6 +1351,11 @@ def _parse_and(toks: list, i: int, state: dict) -> tuple[dict | None, int]:
         body = value[1:] if negated else value
         if not negated and kind == "word" and _range(body, state):
             continue
+        # `after:7d ago` — the "ago" belongs to the date in front of it, not
+        # to the words. Nothing else swallows a word.
+        if body.lower() == "ago" and state.get("dated"):
+            state["dated"] = False
+            continue
         node = _term_node(body, state, negated=negated)
         if node is not None:
             (no if negated else yes).append(node)
@@ -1387,7 +1420,7 @@ def parse(q: str) -> dict:
     `{"op": "and"|"or", "of": [node, …]}`, `{"op": "not", "of": [keep,
     drop]}`, or `{"op": "near", "of": [node, node], "within": n}`.
     """
-    state: dict = {"terms": [], "not": [], "filters": {}, "last": None}
+    state: dict = {"terms": [], "not": [], "filters": {}, "last": None, "dated": False}
     toks = _tokens(q)
     nodes: list[dict] = []
     i = 0
@@ -1851,6 +1884,60 @@ _NL_CACHE: dict[str, tuple[float, str]] = {}
 _NL_MAX = 64
 
 
+#: How long a question read on the search's own path may take. A search box
+#: cannot wait on the summary gateway's own timeout (60 s on this host): the
+#: fast models answer in seconds or not at all, and a question that is not
+#: answered is searched as it was typed.
+TRANSLATE_TIMEOUT_S = 8
+#: The query builder's own deadline: longer, because somebody asked for it and
+#: is watching the sheet, but still not a minute.
+COMPOSE_TIMEOUT_S = 15
+
+
+def _ask_model(system: str, user: str, seconds: int) -> str:
+    """One turn to whichever fast model answers first (`intake.fast`), inside
+    `seconds` — or MEDIA_SEARCH_TRANSLATE_TIMEOUT when that is set.
+
+    `fast.chat` is the engine the other few-second asks use (a thread's name,
+    the voice check): the models in MEDIA_FAST_MODELS are tried in order
+    inside one deadline, MEDIA_SEARCH_TRANSLATE_MODEL first where it is set
+    and MEDIA_FOLLOWUP_MODEL last, and one that errors is skipped for a
+    cooldown — so a gateway that is down costs one try, not one per search.
+    Before 12 Nov 2026 this was a single model (MEDIA_FOLLOWUP_MODEL,
+    claude-haiku-4-5 here: 12–19 s) on the summary gateway's timeout, which
+    is 60 s on this host — a minute of a search box waiting on one model
+    when gemini-3-flash answers in about two seconds.
+    """
+    from agent_media_core.intake import fast
+    from agent_media_core.intake._summary import _int_env
+
+    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT", seconds)
+    return fast.chat(system, user, timeout,
+                     purpose_env="MEDIA_SEARCH_TRANSLATE_MODEL") or ""
+
+
+def _as_query(out: str) -> tuple[str, str]:
+    """A model's answer as `(query, why not)`: the first line it wrote, and
+    the parser's own complaint when that line is no query.
+
+    Both callers drop an answer that will not parse, which is right — a
+    query nobody can run is worse than the words as typed — but dropping it
+    in silence is how a prompt that invited `after:7d ago` went unnoticed
+    for a day (7c5ebe1f). So the drop is logged with what was written and
+    what was wrong with it.
+    """
+    line = next((ln.strip().strip("`").strip() for ln in (out or "").splitlines() if ln.strip()), "")
+    line = line[:300]
+    if not line:
+        return "", "nothing was written"
+    try:
+        if not parse(line)["terms"]:
+            return "", "no words to search for"
+    except QueryError as e:
+        return "", str(e)
+    return line, ""
+
+
 def translate_enabled() -> bool:
     return (os.environ.get("MEDIA_SEARCH_TRANSLATE", "1") or "1").strip() != "0"
 
@@ -1893,23 +1980,128 @@ def translate(q: str) -> str | None:
     got = _NL_CACHE.get(key)
     if got and now - got[0] < _NL_TTL_S:
         return got[1] or None
-    from agent_media_core.intake._summary import _chat, _int_env, DEFAULT_TIMEOUT
-
-    timeout = _int_env("MEDIA_SEARCH_TRANSLATE_TIMEOUT",
-                       _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    model = (os.environ.get("MEDIA_SEARCH_TRANSLATE_MODEL")
-             or os.environ.get("MEDIA_FOLLOWUP_MODEL") or None)
-    out = _chat(_translate_prompt(), (q or "").strip()[:500], timeout, model=model) or ""
-    line = next((ln.strip().strip("`").strip() for ln in out.splitlines() if ln.strip()), "")
-    line = line[:300]
-    try:
-        ok = bool(line) and bool(parse(line)["terms"])
-    except QueryError:
-        ok = False
+    out = _ask_model(_translate_prompt(), (q or "").strip()[:500], TRANSLATE_TIMEOUT_S)
+    line, why = _as_query(out)
+    if why and out.strip():
+        # Not repaired here: this is on the way to the results, and the words
+        # as typed are a better answer than a second wait. The sheet
+        # (`compose`) does ask again.
+        log.warning("search: %r read as %r, which is no query (%s)",
+                    (q or "")[:120], out.strip()[:120], why)
     if len(_NL_CACHE) >= _NL_MAX:
         _NL_CACHE.clear()
-    _NL_CACHE[key] = (now, line if ok else "")
-    return line if ok else None
+    _NL_CACHE[key] = (now, line)
+    return line or None
+
+
+#: A refinement exchange carried back: how many turns are read, and how long
+#: each line may be. A query builder is a conversation about one search, not a
+#: chat — past that the oldest turns are dropped.
+COMPOSE_TURNS = 6
+COMPOSE_CHARS = 300
+#: Less of the deadline than this left, and the second try is not started:
+#: a call with a second to live is a second of somebody waiting for nothing.
+COMPOSE_RETRY_FLOOR_S = 3
+
+
+def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
+    """A query written for someone from their own words, and then changed by
+    what they said about it (`POST /search/compose`, §6.14).
+
+    `tried` is the exchange so far, oldest first: `[{"q": <what was written>,
+    "note": <what they said about it>}, …]`. With none it is `translate`'s
+    one shot; with some, the model is shown what it wrote and what was wrong
+    with it, so "only my own words" or "not last week, the week before"
+    changes the query instead of starting again.
+
+    `{"q": <the query>, "note": <one line, or "">}` — the note is for
+    something they asked for that the operators cannot say, which is worth
+    showing rather than pretending. `None` when the gateway is off, does not
+    answer, or answers with nothing searchable even after being told so:
+    the caller leaves the words alone and says the assistant could not be
+    reached.
+
+    **A query that will not parse is handed back to the model once**, with
+    the parser's own complaint, inside what is left of the deadline. The
+    sheet is a conversation and somebody is watching it, so one more turn is
+    cheaper than an answer thrown away — and an answer thrown away in
+    silence is how a prompt that invited `after:7d ago` stayed hidden
+    (7c5ebe1f). The search's own path does not do this: there the words as
+    typed are a better answer than a second wait.
+
+    Never cached: the whole point is that the next call is different.
+    """
+    if not translate_enabled() or not (ask or "").strip():
+        return None
+    said = [(ask or "").strip()[:500]]
+    for turn in (tried or [])[-COMPOSE_TURNS:]:
+        q = str(turn.get("q") or "").strip()[:COMPOSE_CHARS]
+        note = str(turn.get("note") or "").strip()[:COMPOSE_CHARS]
+        if q:
+            said.append(f"You wrote: {q}")
+        if note:
+            said.append(f"They said: {note}")
+    system = _translate_prompt() + (
+        " If they say what was wrong with the query you wrote, change that "
+        "query rather than starting again, and keep the rest of it. After the "
+        "query you may add one short line, starting with 'note: ', for "
+        "something they asked for that the query language cannot say — "
+        "nothing else, and nothing when the query says it all.")
+    user = "\n".join(said)
+    deadline = time.monotonic() + COMPOSE_TIMEOUT_S
+    out = _ask_model(system, user, COMPOSE_TIMEOUT_S)
+    for attempt in (1, 2):
+        query, note = _compose_lines(out)
+        bad = _as_query(query)[1] if query else "nothing was written"
+        if not bad:
+            return {"q": query, "note": note}
+        log.warning("compose: %r read as %r, which is no query (%s), try %d",
+                    ask[:120], (out or "").strip()[:120], bad, attempt)
+        left = int(deadline - time.monotonic())
+        if attempt == 2 or left < COMPOSE_RETRY_FLOOR_S:
+            return None
+        # The parser's complaint is just another correction, in the same
+        # words the exchange is already written in.
+        out = _ask_model(system, f"{user}\nYou wrote: {query or '(nothing)'}\n"
+                                 f"The search box could not read that: {bad}. "
+                                 f"Write the query again, correctly.", left)
+    return None
+
+
+def _compose_lines(out: str | None) -> tuple[str, str]:
+    """A compose answer split into its query and its `note:` line."""
+    query, note = "", ""
+    for raw in (out or "").splitlines():
+        line = raw.strip().strip("`").strip()
+        if not line:
+            continue
+        if line.lower().startswith("note:"):
+            note = note or line[5:].strip()[:COMPOSE_CHARS]
+        elif not query:
+            query = line[:COMPOSE_CHARS]
+    return query, note
+
+
+def compose_request(body: dict, bearer: str) -> tuple[bool, dict]:
+    """`POST /search/compose {ask, tried?}` — the gate, then `compose`.
+
+    503 `no_model` when nothing wrote a query: the app keeps the words as
+    they are and says the assistant could not be reached, which is the one
+    answer it cannot guess from an empty query.
+    """
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    ask = str((body or {}).get("ask") or "").strip()
+    if not ask:
+        return False, {"error": "ask is the words to write a query from", "status": 400}
+    raw = (body or {}).get("tried")
+    tried = [t for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
+    got = compose(ask, tried)
+    if not got:
+        return False, {"error": "no assistant answered", "code": "no_model",
+                       "status": 503, "help": HELP_PATH}
+    return True, {**got, "ask": ask, "help": HELP_PATH}
 
 
 # --- the helper page ------------------------------------------------------------

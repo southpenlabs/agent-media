@@ -270,6 +270,8 @@ except /pair, which is how a device gets its token):
                   operators (-word, OR, (), NEAR, from:, in:, thread:, harness:,
                   tool:, kind:, after:/before:), and `translate=1` turns a plain
                   English question into them (search.py, §6.14)
+  POST /search/compose {ask, tried?} → a query written from plain words, and
+                  changed by what was said about the last one (§6.14)
   GET  /search/help → those operators as a page, open, linked from every
                   search answer (`Link: …; rel="help"`, and `help` in the body)
   GET  /contacts?q=[&limit=][&label=…&label=…][&labels_mode=any|all] →
@@ -437,7 +439,7 @@ CORS_PATHS = frozenset({
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
-    "/sessions/events", "/search", "/search/help", "/contacts",
+    "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
@@ -480,7 +482,7 @@ PODCAST_PATHS = frozenset({"/podcasts/discover", "/podcasts/show"})
 CORS_PATHS = CORS_PATHS | PODCAST_PATHS
 # Movies and TV from Trakt, and its sign-in (watch.py, §6.54).
 WATCH_PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show", "/watch/discover", "/watch/title",
-                         "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/accounts/trakt", "/accounts/trakt/start",
+                         "/watch/season", "/watch/person", "/watch/lists", "/watch/list", "/watch/calendar", "/watch/settings", "/accounts/trakt", "/accounts/trakt/start",
                          "/accounts/trakt/finish", "/accounts/trakt/signout"})
 CORS_PATHS = CORS_PATHS | WATCH_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
@@ -4137,6 +4139,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = quick.handoff(str(body.get("session") or ""), body, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/search/compose":
+        # A search query written from plain words, and changed by what was
+        # said about the last attempt (search.compose, §6.14).
+        from . import search
+
+        ok, detail = search.compose_request(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/tags/auto":
         # Tag every chat now, in the background (tags_auto.py).

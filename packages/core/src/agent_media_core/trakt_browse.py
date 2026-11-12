@@ -380,8 +380,23 @@ def _trailer(kind: str, item: dict, now: float) -> tuple[Optional[str], Optional
     return (got, "youtube_search", False) if got else (None, None, pending)
 
 
-def title(kind: str, ident, now: Optional[float] = None) -> dict:
-    """A movie's or a show's page (what GET /watch/title answers, less `ok`)."""
+def _open_in(kind: str, item: dict, season=None, episode=None) -> list[dict]:
+    """The title's "open in" keys (watch_open.open_in): the services from
+    TMDb's where-to-watch when it is set up, and the owner's apps."""
+    from . import tmdb, watch_open
+    where = None
+    tmdb_id = (item.get("ids") or {}).get("tmdb")
+    if tmdb.set_up() and tmdb_id is not None:
+        try:
+            where = tmdb.details(kind, int(tmdb_id)).get("where")
+        except Exception:  # noqa: BLE001 — the apps' keys alone then
+            where = None
+    return watch_open.open_in(kind, item.get("ids") or {}, where, season, episode)
+
+
+def title(kind: str, ident, now: Optional[float] = None, season=None, episode=None) -> dict:
+    """A movie's or a show's page (what GET /watch/title answers, less `ok`).
+    `season` and `episode`: the episode an "open in" link should go to."""
     what, tid, now = _one(kind), _id(ident), _now(now)
     if not T.set_up():
         raise ValueError(T.NOT_SET_UP)
@@ -418,6 +433,7 @@ def title(kind: str, ident, now: Optional[float] = None) -> dict:
     _mark(kind, [item] + out["related"], now)
     _posters([item] + out["related"])
     _photos(out["cast"][:12])
+    out["open_in"] = _open_in(kind, item, season, episode)
     if kind == "tv":
         out["seasons"] = _seasons(tid, item["ids"].get("trakt"), now)
         try:
