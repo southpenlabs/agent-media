@@ -699,6 +699,33 @@ def test_after_and_before_take_dates(home, gate):
         assert not ok and err["status"] == 400 and "not a date" in err["error"], bad
 
 
+def test_ago_belongs_to_the_date_in_front_of_it(home, gate):
+    """`after:7d ago`, as it is said out loud — and as a model writes it.
+
+    The operator list said "7d / 3w / 6m / 1y ago", so the translator wrote
+    `from:me music bed after:7d ago`; "ago" was then a word every message
+    had to hold, and the search found nothing (red5, 12 Nov 2026).
+    """
+    s = claude(home, SID)
+    s.prompt("the music bed fades in")
+    s.end_turn()
+    import datetime as dt
+
+    year = dt.datetime.fromtimestamp(ask("music")["messages"][0]["at"]).year
+    assert ask(f"music after:{year} ago")["terms"] == ["music"]
+    assert len(ask(f"music after:{year} ago")["messages"]) == 1
+    assert len(ask(f'music after:"{year} ago"')["messages"]) == 1
+    assert ask(f"music after:{year + 1} ago")["messages"] == []
+    assert search._when("7d ago") == pytest.approx(search._when("7d"), abs=2)
+    # Only straight after a date: anywhere else it is a word like any other.
+    assert search.parse("from:me music ago")["terms"] == ["music", "ago"]
+    assert search.parse("ago")["terms"] == ["ago"]
+    assert ask("music ago")["messages"] == []
+    # And the list no longer invites it.
+    assert "ago" not in dict((syn, what) for syn, what, _eg in search.OPERATORS)[
+        "after:<date>, before:<date>"]
+
+
 def test_an_unknown_operator_is_read_as_words(home, gate):
     s = claude(home, SID)
     s.prompt("see notes/vole.md for the vole")

@@ -1141,7 +1141,8 @@ OPERATORS = (
     ("tool:<name>", "a step that ran that tool (`ran:` is the same)", "tool:bash grep"),
     ("kind:text, kind:tool", "the words only, or the tool steps only", "kind:tool ocelot"),
     ("after:<date>, before:<date>",
-     "2026-11-12, 2026-11, 2026, today, yesterday, or 7d / 3w / 6m / 1y ago",
+     "2026-11-12, 2026-11 or 2026 (that day, month or year), today, yesterday, "
+     "7d, 3w, 6m, 1y",
      "gauge after:7d"),
     ("<date>..<date>", "between the two; either side may be left off",
      "gauge 2026-11-01..2026-11-12"),
@@ -1177,6 +1178,10 @@ def _when(value: str) -> float:
     from datetime import datetime, timedelta
 
     v = value.strip().lower()
+    # "7d ago", as it is said out loud (and as a model writes it from the
+    # list above, which is where this came from: `after:7d ago` searched for
+    # the word "ago" and found nothing, red5, 12 Nov 2026).
+    v = v.removesuffix("ago").strip()
     now = datetime.now()
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if v == "today":
@@ -1217,6 +1222,7 @@ def _term_node(body: str, state: dict, *, negated: bool) -> dict | None:
             leaves[-1]["prefix"] = True
     for leaf in leaves:
         (state["not"] if negated else state["terms"]).append(leaf["text"])
+    state["dated"] = False
     # The one that gets the as-you-type `*` if the query ends here.
     state["last"] = None if (negated or phrase or star) else leaves[-1]
     return leaves[0] if len(leaves) == 1 else {"op": "and", "of": leaves}
@@ -1231,7 +1237,7 @@ def _field(token: str, state: dict) -> None:
         value = value[1:-1]
     value, neg = value.strip(), bool(neg)
     f = state["filters"]
-    state["last"] = None
+    state["last"], state["dated"] = None, False
     if not value:
         return
     if name == "from":
@@ -1245,6 +1251,7 @@ def _field(token: str, state: dict) -> None:
         f["kind"] = value.lower()
     elif name in ("after", "before"):
         f[name] = _when(value)
+        state["dated"] = True  # an `ago` after this one is part of the date
     else:
         f.setdefault(name, []).append(
             (value.lower() if name in ("harness", "tool") else value, neg))
@@ -1265,6 +1272,7 @@ def _range(token: str, state: dict) -> bool:
         return False
     state["filters"].update(got)
     state["last"] = None
+    state["dated"] = True
     return True
 
 
@@ -1330,6 +1338,11 @@ def _parse_and(toks: list, i: int, state: dict) -> tuple[dict | None, int]:
         body = value[1:] if negated else value
         if not negated and kind == "word" and _range(body, state):
             continue
+        # `after:7d ago` — the "ago" belongs to the date in front of it, not
+        # to the words. Nothing else swallows a word.
+        if body.lower() == "ago" and state.get("dated"):
+            state["dated"] = False
+            continue
         node = _term_node(body, state, negated=negated)
         if node is not None:
             (no if negated else yes).append(node)
@@ -1394,7 +1407,7 @@ def parse(q: str) -> dict:
     `{"op": "and"|"or", "of": [node, …]}`, `{"op": "not", "of": [keep,
     drop]}`, or `{"op": "near", "of": [node, node], "within": n}`.
     """
-    state: dict = {"terms": [], "not": [], "filters": {}, "last": None}
+    state: dict = {"terms": [], "not": [], "filters": {}, "last": None, "dated": False}
     toks = _tokens(q)
     nodes: list[dict] = []
     i = 0

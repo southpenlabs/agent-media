@@ -5837,7 +5837,7 @@ memory as its own section when this host has agent-memory. Code:
   | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`) |
   | `tool:<name>` | a tool step that ran it (`ran:`) — turns tool steps on by itself, like `kind:tool` |
   | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
-  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` ago. `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
+  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` (a bare `ago` straight after one of these belongs to it — `after:7d ago` — and is a word anywhere else). `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
   | `<date>..<date>` | both of those at once; either side may be left off |
 
   A `-` in front of a field operator turns it around (`-in:meridian`,
