@@ -41,8 +41,13 @@ as it started and fade out after it. Now, each a switch in Settings → Music
   thinking readout keeps its harp, and a bed held across it carries on
   MEDIA_MUSIC_BED_THOUGHT_DB (8) lower underneath until the reply after it.
 
-Each switch's default is MEDIA_MUSIC_BED_<NAME> (on unless 0/off/false/no);
-Settings' choice wins.
+- **sing_in** — before a long reply (not the answer to a message David has
+  just sent) over a favourite whose original is kept, a few seconds of the
+  original fade in at its chorus and hand over to the bed as the first word
+  comes (music_bed_vocal.before_for, `before`; a phone only). Off by default.
+
+Each switch's default is MEDIA_MUSIC_BED_<NAME> (on unless 0/off/false/no;
+sing_in off unless 1/on/true/yes); Settings' choice wins.
 
 Where: a phone is told the whole mix as one stored property beside `under`
 (sinks/speech.py UNDER_MIX_PROPERTY, `params` below) and does all of it in
@@ -82,10 +87,16 @@ SWITCHES = (
     ("carry", "Keep the music going between replies",
      "When another reply is about to start, the music carries on into it "
      "(a different piece crossfades)."),
+    ("sing_in", "Sing it in before long replies",
+     "Before a long reply over one of your favourites that you did not just ask for, "
+     "a few seconds of the song itself fade in at its chorus, and the vocals drop "
+     "away as the voice starts."),
     ("vocal", "Sing it out after long replies",
      "After a long reply over one of your favourites, the song itself comes in, "
      "vocals and all, and plays to the end of its next chorus."),
 )
+#: Switches off unless Settings or their MEDIA_MUSIC_BED_<NAME> turns them on.
+OFF_BY_DEFAULT = ("sing_in",)
 IDS = tuple(s[0] for s in SWITCHES)
 
 DEFAULTS = {
@@ -113,12 +124,15 @@ def stored(name: str) -> Optional[bool]:
 
 
 def env_on(name: str) -> bool:
-    return (os.environ.get(f"MEDIA_MUSIC_BED_{name.upper()}") or "").strip().lower() not in (
-        "0", "off", "false", "no")
+    v = (os.environ.get(f"MEDIA_MUSIC_BED_{name.upper()}") or "").strip().lower()
+    if name in OFF_BY_DEFAULT:
+        return v in ("1", "on", "true", "yes")
+    return v not in ("0", "off", "false", "no")
 
 
 def on(name: str) -> bool:
-    """Whether switch `name` is on: Settings', else its env, else on."""
+    """Whether switch `name` is on: Settings', else its env, else its
+    default (on, but OFF_BY_DEFAULT's)."""
     s = stored(name)
     return env_on(name) if s is None else s
 
@@ -204,13 +218,17 @@ def _kind_of(style: str) -> str:
     return style if style in music_bed.KIND_BEDS else "reply"
 
 
-def params(source: str, style: str, path, long: bool = False) -> dict:
+def params(source: str, style: str, path, long: bool = False,
+           sing_in: bool = False) -> dict:
     """The mix for one bed, as a phone is told it (JSON) and this host's
     under player uses it: every effect's amount, 0 for one switched off.
     `outro` is the ending's file (a path; the sink makes it a clip URI for
     a phone), "" for none. `long` (a long reply, music_bed_vocal.is_long)
     over a favourite whose original is kept: `after`, the vocal handover,
-    which replaces the ending and the carry."""
+    which replaces the ending and the carry. `sing_in` (the reply may be
+    sung in: music_bed_vocal.may_sing_in) with `long`, a reply's bed, over
+    such a favourite and the switch on: `before`, a few seconds of the
+    original ahead of the first word (music_bed_vocal.before_for)."""
     breathe = on("breathe")
     carve = on("carve")
     outro = ""
@@ -228,6 +246,14 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
             after = music_bed_vocal.after_for(path)
         except Exception as e:  # noqa: BLE001
             log.debug("music-bed mix: vocal: %s", e)
+    before = None
+    if (long and sing_in and source == "favourites" and _kind_of(style) == "reply"
+            and on("sing_in")):
+        try:
+            from . import music_bed_vocal
+            before = music_bed_vocal.before_for(path)
+        except Exception as e:  # noqa: BLE001
+            log.debug("music-bed mix: sing it in: %s", e)
     swell = tunable("BREATHE_DB") if breathe else 0.0
     out = {
         "v": 1,
@@ -258,12 +284,15 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
     }
     if after:
         out.update(after=after, outro="", carry_ms=0.0)
+    if before:
+        out["before"] = before
     try:
         from . import calm
         if calm.active():
             # Drift it out: no song after the words, the loop fading slowly
             # under its ending (calm.py).
             out.pop("after", None)
+            out.pop("before", None)
             out["outro_ms"] = calm.drift_ms()
             if not out["outro"] and source == "generated":
                 from . import music_bed_outro
@@ -274,13 +303,13 @@ def params(source: str, style: str, path, long: bool = False) -> dict:
     return out
 
 
-def for_plan(plan, long: bool = False) -> Optional[dict]:
+def for_plan(plan, long: bool = False, sing_in: bool = False) -> Optional[dict]:
     """`params` for a music_bed.Plan played as an under clip; None for a
     streaming one (Mopidy's fade only) or on any failure."""
     try:
         if plan is None or plan.kind != "under" or plan.path is None:
             return None
-        return params(plan.source, plan.style, plan.path, long)
+        return params(plan.source, plan.style, plan.path, long, sing_in)
     except Exception as e:  # noqa: BLE001 — a mix must never cost a bed
         log.warning("music-bed mix: %s", e)
         return None

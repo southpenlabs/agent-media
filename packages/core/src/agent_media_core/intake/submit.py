@@ -5363,7 +5363,12 @@ def _submit_event(event: Event,
                 from .. import music_bed_vocal
                 bed_tone, bed_stop = music_bed.start(
                     bed_plan, target, sink,
-                    long=music_bed_vocal.is_long(_dj.estimate_seconds(text), len(sentences)))
+                    long=music_bed_vocal.is_long(_dj.estimate_seconds(text), len(sentences)),
+                    # Sing it in: never before the answer to a message he
+                    # has just sent (what began the turn: the stop hook's
+                    # turn_by / turn_at).
+                    sing_in=_bed_kind == "reply"
+                    and music_bed_vocal.may_sing_in(event.metadata))
                 if bed_tone:
                     # The intro (music_bed_mix): this host's bed leads the
                     # first word in; a phone holds its first sentence itself.

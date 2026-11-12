@@ -1011,9 +1011,10 @@ class SinkSpeech:
                     if m.get("outro"):
                         m["outro"] = _clip_uri_for(str(m["outro"]), target,
                                                    self._prefer_url(target))
-                    if (m.get("after") or {}).get("uri"):
-                        m["after"] = dict(m["after"], uri=_clip_uri_for(
-                            str(m["after"]["uri"]), target, self._prefer_url(target)))
+                    for k in ("after", "before"):
+                        if (m.get(k) or {}).get("uri"):
+                            m[k] = dict(m[k], uri=_clip_uri_for(
+                                str(m[k]["uri"]), target, self._prefer_url(target)))
                     mixed = json.dumps(m)
                 ipc.set_property(sock, TONE_KIND_PROPERTY, kind or "")
                 ipc.set_property(sock, UNDER_MIX_PROPERTY, mixed)
