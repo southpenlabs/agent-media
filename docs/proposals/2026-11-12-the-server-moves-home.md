@@ -422,7 +422,16 @@ the day of the cutover, not after it.
    five settings: `MEDIA_PUBLIC_URL` (env file and the canvas's
    `servers.conf`), both clip base URLs and the book base URL. The app's
    half (follow `moved_to`/`server_moved` with `auth.ts moveServer`) is
-   sasonica-app's. Point 4 waits for `media backup`/`media restore`.
+   sasonica-app's (done, 54fb9c8c). **Point 4 BUILT 13 Nov 2026**, on
+   `media backup`/`media restore` (95bceaf5): `media server move --to <host>
+   --name https://… [--yes]`, `--status`, `--verify`, `--rollback`
+   (`server_move.py`; the steps are in `docs/reference/server-address.md`).
+   Tested against fakes only; its first real run is the rehearsal. Found
+   while checking red2 read-only: `media` is not on an ssh shell's PATH
+   there (the command finds the release's or the checkout's), and red2 has
+   no release yet (step 1), so today it would use red2's checkout. Open for
+   the rehearsal: records of chats that ran on red2 as red5's worker (the
+   restore brings red5's record, `host: red2`).
 1. **red2 becomes a release host.** `MEDIA_RELEASE_*` in its env file with
    the same `MEDIA_RELEASE_PACKAGES` red5 has (core, server, visual,
    tts-shim, completions-shim, engine-openai, engine-piper, the four intakes,

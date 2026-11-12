@@ -82,26 +82,42 @@ clip and book links name this server, and the tunnel routes its name. Also
 run by `media doctor`, where a disagreement marks this host unhealthy.
 `media server status` prints the address, the previous names and the id.
 
-## Moving to another machine
+## Moving to another machine: `media server move`
 
-`media server move` (the move proposal's point 4) is the whole drill as one
-command: a release built there, `media backup` here and `media restore`
-there, the services stopped here, a final sync, `media server rename` there,
-start, verify, `--rollback`. It is built on this rename and on backup and
-restore (roadmap 62).
+Run on the machine that is the server now (`server_move.py`):
 
-Backup and restore are built: `docs/reference/backup-and-restore.md`,
-`agent_media_server.backup`. What matters here is the division of labour —
-**a restore deliberately does not touch the addresses.** The env file and the
-canvas drop-in come back naming the old server exactly as they were, because a
-restore that guessed an address would break the very thing the move depends
-on; the restore output lists every setting it found pointing at the old
-machine, and this rename is the step that changes them. `MEDIA_PUBLIC_URL`,
-the clip and book base URLs, and `MEDIA_SESSIOND_DEFAULT_HOST` are the ones it
-names. Hand-made drop-ins are kept in the backup but not written on restore:
-`media-setup install-services` and then this rename is the way to get them
-onto the new machine.
+```
+media server move --to red2 --name https://red2-ryer.sasonica.com        # the steps, nothing done
+media server move --to red2 --name https://red2-ryer.sasonica.com --yes  # do it
+media server move --status | --verify | --rollback
+```
 
-`server_id` survives a restore, which is what makes the restored install the
-same server at a new address rather than a new one — so the id above, and the
-`moved_to` answers, keep working across the move.
+1. **check** the other machine over ssh: an agent-media there with `media
+   restore` and `media server` (its release, else its checkout), its home.
+2. **keep** its own state: a full backup of it, there
+   (`~/.local/share/agent-media-move/before`), and the units it runs. This
+   is what `--rollback` puts back.
+3. **backup** here → there, services up (`media backup`, tier `full`).
+4. **stop** the services here, the session host last. From this step the
+   command runs detached (a transient systemd unit), because a chat that
+   runs it is stopped here; `--status` reads its log
+   (`<state>/server-move.json`). `--foreground` keeps it in the terminal.
+5. **sync**: what changed since step 3 (seconds).
+6. **restore** there: its units stopped, `media restore latest --apply
+   --force`, `media-setup install-services`, `media server rename` to the
+   new name with the old one kept answering, its units started.
+7. **verify**: the new name answers as this server (the restored
+   `server-id` is this one's). If its DNS or tunnel is not moved yet this
+   fails and says so; nothing is undone by itself, and `--verify` asks again.
+
+Up to step 3 nothing here is touched: a failure leaves the server running.
+Not in it: the DNS records and the tunnel's credentials, the house audio,
+the assistant's own workspace (move proposal, "What is not part of the
+base"). `--rollback` stops the other machine's units, puts its kept state
+back, starts what it ran before, and starts what was stopped here; DNS goes
+back by hand.
+
+Not yet proven by a real run: the rehearsal (move proposal, step 3) is its
+first. Known gap for it: chats running on the other machine as this server's
+worker have records on both sides, and the restore brings this server's
+(`host: <there>`), so start from a quiet house.

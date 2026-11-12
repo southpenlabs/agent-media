@@ -409,12 +409,37 @@ def main(argv: list[str] | None = None) -> int:
                     help="do not first check that the new address reaches this server")
     rn.add_argument("--no-restart", action="store_true",
                     help="do not schedule the restart that makes the services read it")
+    mv = sub.add_parser("move", help="move this server onto another machine: backup, restore "
+                                     "there, rename, start (server_move.py)")
+    mv.add_argument("--to", default="", help="the other machine, as ssh reaches it")
+    mv.add_argument("--name", default="", help="the address the server has there")
+    mv.add_argument("--also", action="append", default=[],
+                    help="another old address to keep answering")
+    mv.add_argument("--yes", action="store_true", help="do it (without: the steps, nothing done)")
+    mv.add_argument("--dry-run", action="store_true")
+    mv.add_argument("--foreground", action="store_true",
+                    help="run every step from this terminal, not detached")
+    mv.add_argument("--fire", action="store_true", help=argparse.SUPPRESS)
+    mv.add_argument("--status", action="store_true", help="how the last move went")
+    mv.add_argument("--verify", action="store_true", help="check the new address again")
+    mv.add_argument("--rollback", action="store_true", help="undo the last move")
     sub.add_parser("check", help="whether every setting agrees on this server's address")
     sub.add_parser("status", help="the address, the previous ones and the server's id")
     a = ap.parse_args(argv)
     if a.cmd == "rename":
         return rename(a.to, a.also, check=not a.no_check, dry_run=a.dry_run,
                       restart=not a.no_restart)
+    if a.cmd == "move":
+        from . import server_move
+
+        if a.status:
+            return server_move.status()
+        if a.rollback:
+            return server_move.rollback()
+        if a.verify:
+            return server_move.verify()
+        return server_move.move(a.to, a.name, a.also, yes=a.yes, dry_run=a.dry_run,
+                                foreground=a.foreground, fire=a.fire)
     if a.cmd == "check":
         bad = problems()
         for p in bad:
