@@ -2005,14 +2005,26 @@ def _memory_section(q: str, limit: int = 8) -> dict:
 # --- the route ------------------------------------------------------------------
 
 
-def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
-           memory: bool = True, sort=None, after=None, offset=None, since=None,
-           who=None, rooms=None, session=None,
-           translate_nl: bool = False) -> tuple[bool, dict]:
-    """`GET /search` (server-contract.md §6.14)."""
+def search(q: str, bearer: str, **kw) -> tuple[bool, dict]:
+    """`GET /search` (server-contract.md §6.14): the gate, then `answer`."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    return answer(q, **kw)
+
+
+def answer(q: str, *, limit=None, before=None, tools: bool = False,
+           memory: bool = True, sort=None, after=None, offset=None, since=None,
+           who=None, rooms=None, session=None,
+           translate_nl: bool = False) -> tuple[bool, dict]:
+    """The same answer with no credential asked for: `search` is the gated
+    way in, and this is what it answers with.
+
+    The owner's own tools on this host read the index through here rather
+    than over HTTP — they have the files the index is built from anyway, and
+    a shell has no device token (`agent_media_core.history_search`,
+    `media find` and the `search_history` MCP tool).
+    """
     try:
         parsed = parse(q)
     except QueryError as e:
