@@ -484,7 +484,14 @@ the day of the cutover, not after it.
    `-context`, `-heard`, `-shared-check`), because as a worker its replies
    are filed by red5's Stop hook. **The real move needs `media-setup
    install-hooks` on red2, from the release**, or every reply is silent and
-   unfiled. **Still to do:** that, then a reply seen in the thread; not rehearsed at
+   unfiled. **Done on red2 the same day** (David: "yeah do it"):
+   `media-setup install-hooks` (it registers the bare command
+   `media-hook-claude-code`, so the release's `media-hook-*` are linked
+   into `~/.local/bin`; settings kept as
+   `settings.json.bak-hooks-20261113`), and a second chat's reply reached
+   its thread. red5's settings also carry `media-hook-heard`, `-context`
+   and `-shared-check` and the activity lines, which `install-hooks` does
+   not write: those come with the assistant's workspace (5a). Still open: not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
    **The rehearsal — and the command's own test.** `media server move --to
