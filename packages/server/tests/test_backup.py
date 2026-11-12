@@ -425,3 +425,30 @@ def test_a_socket_inside_a_folder_is_not_carried_either(install):
         assert not (held / "p.fifo").exists()
     finally:
         s.close()
+
+
+def test_a_remote_push_makes_the_destination_folder(install, monkeypatch):
+    """rsync makes the last folder of a destination but not its parents, so a
+    push to a machine that has never held a backup failed (the move's first
+    rehearsal, 13 Nov 2026). Nothing here reaches another machine: the call is
+    recorded, not run."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = "rsync version 3.5.0"
+        return R()
+
+    monkeypatch.setattr(bk.subprocess, "run", fake_run)
+    monkeypatch.setattr(bk, "_MKPATH", None)
+    out = bk._push(install["dest"], "red5", "/mnt/data/agent-media-backups")
+    assert out["ok"]
+    push = calls[-1]
+    assert push[0] == "rsync" and push[-1] == "red5:/mnt/data/agent-media-backups/"
+    assert "--mkpath" in push or any(
+        c[:2] == ["ssh", "red5"] and c[2:4] == ["mkdir", "-p"] for c in calls), \
+        "the parents have to be made one way or the other"
+    assert "-aH" in push, "hardlinks must survive the push or the history costs full size"

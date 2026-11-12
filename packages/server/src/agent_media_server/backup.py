@@ -558,11 +558,44 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
 
 def _push(store: Path, host: str, path: str) -> dict:
     """Send the store to the far side. Hardlinks are preserved (`-H`) so the
-    snapshots stay as cheap there as here."""
-    argv = ["rsync", "-aH", "--delete", str(store) + "/", f"{host}:{path}/"]
+    snapshots stay as cheap there as here.
+
+    rsync makes the last folder of a destination but not its parents, so a
+    destination two levels deep fails on a machine that has never had one
+    (`media server move`'s first rehearsal hit this, 13 Nov 2026). `--mkpath`
+    makes the lot; where rsync is too old for it, `mkdir -p` over ssh does.
+    """
+    dest = f"{host}:{path}/"
+    argv = ["rsync", "-aH", "--delete"]
+    if _rsync_has_mkpath():
+        argv.append("--mkpath")
+    else:
+        mk = subprocess.run(["ssh", host, "mkdir", "-p", path],
+                            capture_output=True, text=True)
+        if mk.returncode != 0:
+            return {"ok": False, "code": mk.returncode,
+                    "error": f"could not make {path} on {host}: "
+                             f"{mk.stderr.strip()[:300]}"}
+    argv += [str(store) + "/", dest]
     r = subprocess.run(argv, capture_output=True, text=True)
     return {"ok": r.returncode in (0, 24), "code": r.returncode,
             "error": r.stderr.strip()[:400] or None}
+
+
+def _rsync_has_mkpath() -> bool:
+    """`--mkpath` arrived in rsync 3.2.3. Asked once per process."""
+    global _MKPATH
+    if _MKPATH is None:
+        try:
+            r = subprocess.run(["rsync", "--mkpath", "--version"],
+                               capture_output=True, text=True, timeout=10)
+            _MKPATH = r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            _MKPATH = False
+    return _MKPATH
+
+
+_MKPATH: bool | None = None
 
 
 def _prune(store: Path, cap: int) -> list[str]:
