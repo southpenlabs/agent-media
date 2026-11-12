@@ -5770,8 +5770,9 @@ memory as its own section when this host has agent-memory. Code:
 `packages/server/tests/test_search.py`. Gzipped when accepted.
 
 ```json
-{"ok": true, "q": "follow along", "terms": ["follow", "along"], "tools": false,
- "sort": "newest",
+{"ok": true, "q": "follow along", "terms": ["follow", "along"],
+ "query": {"groups": [[["follow"]], [["along"]]], "not": [], "filters": {}},
+ "tools": false, "sort": "newest",
  "threads": [
    {"session": "5f8c…", "title": "Sasonica rebuild", "project": "p-agent-media",
     "harness": "claude", "live": true, "archived": false,
@@ -5794,7 +5795,38 @@ memory as its own section when this host has agent-memory. Code:
   must match; the last one matches as a prefix, so results come as you type.
   Case and accents are ignored (FTS5 `unicode61`). `terms` is how `q` was
   read — the app highlights them in the thread after a jump. No words
-  (`q` empty or all punctuation): 400 `"nothing to search for"`.
+  (`q` empty or all punctuation, or only operators): 400
+  `"nothing to search for"`.
+- **Operators** (12 Nov 2026), the ones a search engine takes, read by
+  `search.parse`:
+
+  | | |
+  | --- | --- |
+  | `-word`, `-"a phrase"` | must **not** be there |
+  | `a OR b`, `a \| b` | either side (`AND` is the default, said or not) |
+  | `from:me`, `from:agent` | whose words — `who=`, and it wins over it (`mine`/`user`/`i`, `assistant`/`ai`/`them` too; `who:` is the same operator) |
+  | `in:<words>` | the thread's project or folder holds them (`project:`, `folder:`) |
+  | `thread:<words>` | its title, Claude's `ai-title` or its first prompt holds them (`title:`) |
+  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`) |
+  | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
+  | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` ago. `after:` is `since=` (the later of the two wins); `before:` is a bound on the words, not the page cursor `before=` (`since:`, `until:`) |
+
+  A `-` in front of a field operator turns it around (`-in:meridian`,
+  `-thread:scratch`, `-harness:matrix`). An unknown `word:word` is read as
+  words, the way it reads (`notes:vole` finds both). The operators narrow
+  in the index, so a page comes back full; they narrow `threads` the same
+  way, except `from:` and `kind:` (which are about messages — `who=` never
+  narrowed threads either). A `from:`, `kind:` or date value that cannot be
+  read is 400 with what it takes.
+- **`query`** (12 Nov 2026): how `q` was read, for an app that wants to
+  show it back as chips — `{"groups": [[["tree kangaroo"], ["quokka"]],
+  …], "not": ["wombat"], "filters": {"from": "me", "kind": "text", "after":
+  <epoch>, "before": <epoch>, "in": [{"value": "zoo", "not": false}],
+  "thread": […], "harness": […]}}`. `groups` is an AND of ORs of ANDs (a
+  group per word typed, a group's alternatives either side of an `OR`, a
+  hyphenated word's parts ANDed); `filters` holds only the operators the
+  query used. `terms` stays what it was: every positive term, flat, to
+  highlight.
 - **`messages`**, newest first, at most `limit` (default 20, at most 100).
   `message` is the §6.2.2 message id (the transcript `uuid` of its first
   record) — the id `/conversation/log?around=` takes. `kind` is `text`, or
@@ -5829,7 +5861,8 @@ memory as its own section when this host has agent-memory. Code:
   as any other, `/conversation/log?session=<id>&around=<message>`.
 - **`tools=1`** (the app's Advanced setting) adds tool steps: a tool's name,
   its title, its input summary and its result summary (§6.2.2 — summaries,
-  never file contents). Without it they are never searched.
+  never file contents). Without it they are never searched. `kind:tool` in the
+  query turns them on by itself (and `tools` in the answer says so).
 - **`threads`**: at most 20, newest first — threads whose title, latest
   recap or project hold every term (case-insensitive substring). Names are
   the thread list's (`/targets`, a 10 s cache) where it has the thread,

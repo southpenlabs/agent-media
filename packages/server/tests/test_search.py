@@ -379,8 +379,9 @@ def test_route_shape_and_auth(server, signed_in, home):
     s.end_turn()
     res, obj = call(server, "GET", "/search?q=kestrel", headers=AUTH)
     assert res.status == 200, obj
-    assert set(obj) == {"ok", "q", "terms", "tools", "sort", "threads", "messages", "next",
-                        "indexing", "memory", "docs"}
+    assert set(obj) == {"ok", "q", "terms", "query", "tools", "sort", "threads", "messages",
+                        "next", "indexing", "memory", "docs"}
+    assert obj["query"] == {"groups": [[["kestrel"]]], "not": [], "filters": {}}
     [m] = obj["messages"]
     assert set(m) == {"session", "message", "role", "at", "kind", "snippet", "thread"}
     assert set(m["thread"]) == {"title", "project", "harness", "live", "archived"}
@@ -543,3 +544,150 @@ def test_one_thread_skips_the_thread_list(home, gate, monkeypatch):
     monkeypatch.setattr(search, "_listed", lambda: (_ for _ in ()).throw(AssertionError("listed")))
     page = ask("osprey", session=SID)
     assert page["total"] == 1 and len(page["messages"]) == 1
+
+
+# --- the operators --------------------------------------------------------------
+
+
+def test_a_minus_term_and_or_and_a_phrase(home, gate):
+    s = claude(home, SID)
+    s.prompt("the heron waits by the pond")
+    s.text("the heron left and a kingfisher came")
+    s.end_turn()
+    s2 = claude(home, SID2)
+    s2.prompt("the heron waits by the gate")
+    s2.end_turn()
+    # -word: the messages that do not have it.
+    assert [h["session"] for h in ask("heron -kingfisher")["messages"]] == [SID2, SID]
+    assert [h["snippet"]["text"] for h in ask("heron -pond -gate")["messages"]] \
+        == ["the heron left and a kingfisher came"]
+    assert [h["role"] for h in ask('heron -"by the pond" -gate')["messages"]] == ["assistant"]
+    assert ask('heron -"by the" -kingfisher')["messages"] == []
+    # OR, and its `|`.
+    assert len(ask("kingfisher OR pond")["messages"]) == 2
+    assert len(ask("kingfisher | pond")["messages"]) == 2
+    assert len(ask("heron AND pond")["messages"]) == 1
+    # A -word takes the thread hit away too.
+    s2.write({"type": "custom-title", "customTitle": "Heron gate", "sessionId": SID2})
+    search.rebuild()
+    assert {t["session"] for t in ask("heron")["threads"]} == {SID, SID2}
+    assert [t["session"] for t in ask("heron -gate")["threads"]] == [SID]
+    assert ask("heron -heron")["threads"] == []
+    assert {t["session"] for t in ask("gate OR pond")["threads"]} == {SID, SID2}
+
+
+def test_from_narrows_to_one_side(home, gate):
+    s = claude(home, SID)
+    s.prompt("who left the quail out")
+    s.text("the quail is in")
+    s.end_turn()
+    assert [h["role"] for h in ask("quail from:me")["messages"]] == ["user"]
+    assert [h["role"] for h in ask("quail from:agent")["messages"]] == ["assistant"]
+    # It wins over who=, and from: takes the same words the route does.
+    assert [h["role"] for h in ask("quail from:me", who="agent")["messages"]] == ["user"]
+    ok, err = search.search("quail from:nobody", "tok")
+    assert not ok and err["status"] == 400 and "me or agent" in err["error"]
+
+
+def test_in_thread_and_harness_narrow_by_the_thread(home, gate, monkeypatch):
+    a = claude(home, SID, cwd="/home/x/projects/agent-media")
+    a.write({"type": "custom-title", "customTitle": "Speech gauge", "sessionId": SID})
+    a.prompt("the marmot problem")
+    a.end_turn()
+    b = claude(home, SID2, cwd="/home/x/projects/zebra", project="-zebra")
+    b.write({"type": "custom-title", "customTitle": "Stripes", "sessionId": SID2})
+    b.prompt("the marmot problem")
+    b.end_turn()
+    monkeypatch.setattr(sessions, "project_of",
+                        lambda cwd, folder="": "p-" + os.path.basename(cwd))
+    search.rebuild()
+    assert [h["session"] for h in ask("marmot in:zebra")["messages"]] == [SID2]
+    assert [h["session"] for h in ask("marmot in:p-agent-media")["messages"]] == [SID]
+    assert [h["session"] for h in ask("marmot -in:zebra")["messages"]] == [SID]
+    assert [h["session"] for h in ask("marmot thread:stripes")["messages"]] == [SID2]
+    assert [h["session"] for h in ask('marmot thread:"speech gauge"')["messages"]] == [SID]
+    # A thread hit (its title, recap or project) is narrowed the same way.
+    assert [t["session"] for t in ask("stripes in:zebra")["threads"]] == [SID2]
+    assert ask("stripes in:agent-media")["threads"] == []
+    assert [t["session"] for t in ask("stripes -in:agent-media")["threads"]] == [SID2]
+    assert ask("stripes -thread:stripes")["threads"] == []
+    assert len(ask("marmot harness:claude")["messages"]) == 2
+    assert ask("marmot harness:codex")["messages"] == []
+    assert ask("marmot harness:codex")["threads"] == []
+
+
+def test_kind_picks_the_words_or_the_tool_steps(home, gate):
+    s = claude(home, SID)
+    s.prompt("look for the ocelot")
+    s.tool("Bash", {"command": "grep -r ocelot notes/"}, "t1")
+    s.result("t1", "none")
+    s.text("No ocelot there.")
+    s.end_turn()
+    # kind:tool searches the steps without the Advanced setting, and nothing else.
+    out = ask("ocelot kind:tool")
+    assert [h["kind"] for h in out["messages"]] == ["tool"] and out["tools"] is True
+    assert out["threads"] == []
+    assert {h["kind"] for h in ask("ocelot kind:text", tools=True)["messages"]} == {"text"}
+    ok, err = search.search("ocelot kind:picture", "tok")
+    assert not ok and err["status"] == 400 and "text or tool" in err["error"]
+
+
+def test_after_and_before_take_dates(home, gate):
+    import datetime as dt
+
+    s = claude(home, SID)
+    s.write({"type": "custom-title", "customTitle": "The gecko", "sessionId": SID})
+    s.prompt("the gecko now")
+    s.end_turn()
+    at = ask("gecko")["messages"][0]["at"]
+    day = dt.datetime.fromtimestamp(at)
+    before, after = (day - dt.timedelta(days=1)).date(), (day + dt.timedelta(days=1)).date()
+    assert len(ask(f"gecko after:{before}")["messages"]) == 1
+    assert ask(f"gecko after:{after}")["messages"] == []
+    assert len(ask(f"gecko before:{after}")["messages"]) == 1
+    assert ask(f"gecko before:{before}")["messages"] == []
+    assert len(ask(f"gecko after:{day.year} before:{day.year + 1}")["messages"]) == 1
+    # A thread hit follows before: and after: too.
+    assert [h["session"] for h in ask(f"gecko before:{after}")["threads"]] == [SID]
+    assert ask(f"gecko before:{before}")["threads"] == []
+    # The words a date takes, read without the index.
+    now = dt.datetime.now()
+    assert search._when("today") == now.replace(hour=0, minute=0, second=0,
+                                                microsecond=0).timestamp()
+    assert now.timestamp() - search._when("7d") == pytest.approx(7 * 86400, abs=2)
+    assert search._when("2026-11") == dt.datetime(2026, 11, 1).timestamp()
+    for bad in ("soonish", "2026-13-01", "11-2026"):
+        ok, err = search.search(f"gecko after:{bad}", "tok")
+        assert not ok and err["status"] == 400 and "not a date" in err["error"], bad
+
+
+def test_an_unknown_operator_is_read_as_words(home, gate):
+    s = claude(home, SID)
+    s.prompt("see notes/vole.md for the vole")
+    s.end_turn()
+    out = ask("notes:vole")
+    assert len(out["messages"]) == 1
+    assert out["terms"] == ["notes", "vole"]
+    assert out["query"]["filters"] == {}
+
+
+def test_the_answer_says_how_the_query_was_read(home, gate):
+    claude(home, SID).prompt("quokka")
+    out = ask('quokka OR "tree kangaroo" -wombat from:me in:zoo kind:text')
+    assert out["terms"] == ["quokka", "tree kangaroo"]
+    assert out["query"]["groups"] == [[["quokka"], ["tree kangaroo"]]]
+    assert out["query"]["not"] == ["wombat"]
+    assert out["query"]["filters"] == {"from": "me", "kind": "text",
+                                       "in": [{"value": "zoo", "not": False}]}
+
+
+def test_the_find_bar_counts_under_the_operators(home, gate):
+    s = claude(home, SID)
+    for i in range(3):
+        s.prompt(f"tapir {i}")
+        s.text(f"tapir answer {i}")
+        s.end_turn()
+    out = ask("tapir", session=SID, sort="oldest")
+    assert out["total"] == 6
+    out = ask("tapir from:me", session=SID, sort="oldest")
+    assert out["total"] == 3 and {h["role"] for h in out["messages"]} == {"user"}

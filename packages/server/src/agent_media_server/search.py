@@ -3,6 +3,14 @@ agent-memory is installed here — long-term memory beside them.
 
     GET /search?q=<words>[&limit=][&before=<at>][&tools=1][&memory=0]
 
+**The query** is words, as a search engine's is: a `"quoted phrase"` stays
+whole, `-word` must not be there, `a OR b` takes either side, and a field
+operator narrows rather than matches — `from:me`, `in:<project>`,
+`thread:<title>`, `harness:`, `kind:text|tool`, `after:`/`before:<date>`.
+`parse` reads them and `fts_query` turns them into one FTS5 MATCH; the field
+operators narrow in SQL beside `since=`, `who=` and `rooms=` (`_narrowing`),
+so a page comes back full of what was asked for.
+
 **The index** is a SQLite FTS5 database in the state dir (`search.db`,
 `XDG_STATE_HOME/agent-media/`). It is fed by the same parser the thread log
 uses (`transcript.Builder`), so a hit is a message the app can open, by the
@@ -1069,30 +1077,188 @@ def _run() -> None:
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 
+#: What `from:` takes, onto `who=`: whose words.
+FROM = {"me": "me", "mine": "me", "i": "me", "user": "me", "listener": "me",
+        "agent": "agent", "assistant": "agent", "ai": "agent", "them": "agent"}
+#: What `kind:` (or `is:`) takes: the words only, or tool steps only.
+KINDS = ("text", "tool")
+#: Field operators, each onto the one thing it narrows.
+FIELDS = {"from": "from", "who": "from",
+          "in": "in", "project": "in", "folder": "in",
+          "thread": "thread", "title": "thread",
+          "harness": "harness", "agent": "harness",
+          "after": "after", "since": "after",
+          "before": "before", "until": "before",
+          "kind": "kind", "is": "kind"}
+#: A token: a leading `-`, a `field:`, then a "quoted phrase" or a bare word.
+_TOKEN = re.compile(r'-?(?:[A-Za-z][A-Za-z_]*:)?"[^"]*"|\S+')
+_FIELD = re.compile(r'^(-?)([A-Za-z][A-Za-z_]*):(.*)$', re.DOTALL)
+_RELATIVE = re.compile(r"^(\d+)\s*([dwmy])$")
+_DATE = re.compile(r"^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$")
+
+
+class QueryError(ValueError):
+    """A field operator's value that cannot be read: the 400's words."""
+
+
+def _when(value: str) -> float:
+    """A date operator's value as epoch seconds: `2026-11-12`, `2026-11` or
+    `2026` (the start of that day, month or year, local time), `today`,
+    `yesterday`, or `7d` / `3w` / `6m` / `1y` ago."""
+    from datetime import datetime, timedelta
+
+    v = value.strip().lower()
+    now = datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if v == "today":
+        return midnight.timestamp()
+    if v == "yesterday":
+        return (midnight - timedelta(days=1)).timestamp()
+    rel = _RELATIVE.match(v)
+    if rel:
+        days = {"d": 1, "w": 7, "m": 30, "y": 365}[rel.group(2)] * int(rel.group(1))
+        return (now - timedelta(days=days)).timestamp()
+    iso = _DATE.match(v)
+    if iso:
+        y, mo, d = (int(g) if g else 1 for g in iso.groups())
+        try:
+            return datetime(y, mo, d).timestamp()
+        except ValueError:
+            raise QueryError(f"{value} is not a date (2026-11-12, today, 7d)") from None
+    raise QueryError(f"{value} is not a date (2026-11-12, today, 7d)")
+
+
+def parse(q: str) -> dict:
+    """A query read the way a search engine reads one.
+
+    Words must all match and a `"quoted phrase"` stays whole, as before.
+    Beyond that: `-word` and `-"phrase"` must **not** be there, `a OR b` (or
+    `a | b`) takes either side, and a field operator narrows rather than
+    matches — `from:me` / `from:agent` (whose words), `in:<project or
+    folder>`, `thread:<words of its title>`, `harness:claude|codex|pi|
+    hermes|matrix`, `kind:text|tool`, `after:<date>` and `before:<date>`,
+    each also with a `-` in front (`-in:meridian`). `after:`/`before:`
+    take what `_when` reads. An unknown `word:word` is read as words, the
+    way it reads.
+
+    `{"terms": [every positive term, for highlighting],
+      "groups": [[[term, …] AND, …] OR, …] AND,
+      "not": [term, …], "filters": {…},
+      "prefix": the last word typed matches as a prefix}`
+    """
+    groups: list[list[list[str]]] = []
+    nots: list[str] = []
+    filters: dict = {"in": [], "thread": [], "harness": []}
+    prefix = False
+    pending_or = False
+    for m in _TOKEN.finditer(q or ""):
+        token = m.group(0)
+        if token == "|" or token.upper() == "OR":
+            pending_or = bool(groups)
+            continue
+        if token.upper() == "AND":  # the default; said out loud or not
+            continue
+        fm = _FIELD.match(token)
+        if fm and FIELDS.get(fm.group(2).lower()):
+            neg, name, value = bool(fm.group(1)), FIELDS[fm.group(2).lower()], fm.group(3)
+            if len(value) > 1 and value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
+            value = value.strip()
+            prefix, pending_or = False, False
+            if not value:
+                continue
+            if name == "from":
+                got = FROM.get(value.lower())
+                if not got:
+                    raise QueryError("from: is me or agent")
+                filters["from"] = got
+            elif name == "kind":
+                if value.lower() not in KINDS:
+                    raise QueryError("kind: is text or tool")
+                filters["kind"] = value.lower()
+            elif name in ("after", "before"):
+                filters[name] = _when(value)
+            else:
+                filters[name].append((value.lower() if name == "harness" else value, neg))
+            continue
+        neg = token.startswith("-")
+        body = token[1:] if neg else token
+        if body.startswith('"'):
+            words = _WORD.findall(body.strip('"'))
+            terms, bare = ([" ".join(words)] if words else []), False
+        else:
+            terms, bare = _WORD.findall(body), True
+        if not terms:
+            continue
+        if neg:
+            nots.extend(terms)
+            prefix = False
+        else:
+            if pending_or and groups:
+                groups[-1].append(terms)
+            else:
+                groups.append([terms])
+            prefix = bare
+        pending_or = False
+    terms = [t for g in groups for alt in g for t in alt]
+    return {"terms": terms, "groups": groups, "not": nots,
+            "filters": {k: v for k, v in filters.items() if v != []},
+            "prefix": prefix and bool(terms)}
+
 
 def terms_of(q: str) -> list[str]:
     """The words a query is made of, as they are matched: quoted phrases are
-    kept whole, everything else is split into words."""
-    out = []
-    for m in re.finditer(r'"([^"]+)"|(\S+)', q or ""):
-        if m.group(1):
-            words = _WORD.findall(m.group(1))
-            if words:
-                out.append(" ".join(words))
-        else:
-            out.extend(_WORD.findall(m.group(2)))
-    return out
+    kept whole, everything else is split into words, and the operators
+    (`-word`, `OR`, `from:`, …) are read by `parse` instead."""
+    return parse(q)["terms"]
 
 
-def fts_query(terms: list[str]) -> str:
-    """Every term must match; the last one as a prefix (as-you-type)."""
+def operators_of(parsed: dict) -> dict:
+    """What the answer says about how `q` was read, JSON-shaped."""
+    pairs = ("in", "thread", "harness")
+    return {"groups": parsed["groups"], "not": parsed["not"],
+            "filters": {k: ([{"value": v, "not": n} for v, n in got] if k in pairs else got)
+                        for k, got in parsed["filters"].items()}}
+
+
+def _literal(t: str, prefix: bool = False) -> str:
+    quoted = '"' + t.replace('"', "") + '"'
+    return quoted + "*" if prefix and " " not in t else quoted
+
+
+def fts_query(parsed) -> str:
+    """The FTS5 MATCH for a parsed query (or, as before, a plain list of
+    terms): every group must match, an OR group either of its sides, a
+    `-word` must not be there, and the last word typed matches as a prefix
+    (as-you-type)."""
+    if isinstance(parsed, (list, tuple)):
+        terms = list(parsed)
+        parsed = {"groups": [[[t]] for t in terms], "not": [],
+                  "prefix": bool(terms) and " " not in terms[-1]}
+    groups, nots = parsed.get("groups") or [], parsed.get("not") or []
     parts = []
-    for i, t in enumerate(terms):
-        quoted = '"' + t.replace('"', "") + '"'
-        if i == len(terms) - 1 and " " not in t:
-            quoted += "*"
-        parts.append(quoted)
-    return " ".join(parts)
+    for gi, group in enumerate(groups):
+        alts = []
+        for ai, alt in enumerate(group):
+            last = (parsed.get("prefix") and gi == len(groups) - 1
+                    and ai == len(group) - 1)
+            lits = [_literal(t, prefix=bool(last) and i == len(alt) - 1)
+                    for i, t in enumerate(alt)]
+            one = " AND ".join(lits)
+            alts.append(one if len(lits) == 1 else f"({one})")
+        part = " OR ".join(alts)
+        parts.append(part if len(alts) == 1 else f"({part})")
+    match = " AND ".join(parts)
+    if nots and match:
+        match = f"({match}) NOT ({' OR '.join(_literal(t) for t in nots)})"
+    return match
+
+
+def _like(value: str) -> str:
+    """A `LIKE ? ESCAPE '\\'` pattern for a field operator's value."""
+    for ch in ("\\", "%", "_"):
+        value = value.replace(ch, "\\" + ch)
+    return f"%{value}%"
 
 
 def _marked(snippet: str) -> dict:
@@ -1224,9 +1390,40 @@ def _threads_rows(conn: sqlite3.Connection) -> dict[str, dict]:
     return {r[0]: dict(zip(cols, r)) for r in conn.execute(f"SELECT {', '.join(cols)} FROM threads")}
 
 
-def _thread_hits(terms: list[str], rows: dict[str, dict], listed: dict[str, dict],
+def _words_match(hay: str, parsed: dict) -> bool:
+    """Do a thread's own words satisfy the query: every group (either side of
+    an `OR`), and none of the `-word`s."""
+    for group in parsed.get("groups") or []:
+        if not any(all(_mark_terms(hay, [w]) for w in alt) for alt in group):
+            return False
+    return not any(_mark_terms(hay, [w]) for w in parsed.get("not") or [])
+
+
+def _thread_passes(t: dict | None, view: dict, f: dict) -> bool:
+    """A thread hit under the field operators: `in:`, `thread:`, `harness:`
+    and `before:`. `from:` and `kind:` are about messages — `who=` never
+    narrowed threads either, and `kind:tool` answers no thread at all."""
+    t = t or {}
+    where = {"in": [view.get("project") or "", t.get("cwd") or ""],
+             "thread": [view.get("title") or "", t.get("ai_title") or "",
+                        t.get("first_prompt") or ""]}
+    for name, parts in where.items():
+        hay = " ".join(parts).lower()
+        for value, neg in f.get(name, []):
+            if (value.lower() in hay) == neg:
+                return False
+    for value, neg in f.get("harness", []):
+        if ((view.get("harness") or "") == value) == neg:
+            return False
+    if f.get("before") is not None and (view.get("at") or 0) >= f["before"]:
+        return False
+    return True
+
+
+def _thread_hits(parsed: dict, rows: dict[str, dict], listed: dict[str, dict],
                  owned: set[str], *, sort: str = "newest", since: float | None = None,
                  rooms: str | None = None) -> list[dict]:
+    terms, filters = parsed["terms"], parsed["filters"]
     hits = []
     for sid in set(rows) | set(listed):
         t = rows.get(sid)
@@ -1234,7 +1431,9 @@ def _thread_hits(terms: list[str], rows: dict[str, dict], listed: dict[str, dict
         fields = {"title": view["title"], "recap": view["recap"] or "",
                   "project": view["project"] or ""}
         hay = " \n".join(fields.values())
-        if not all(_mark_terms(hay, [w]) for w in terms):
+        if not _words_match(hay, parsed):
+            continue
+        if not _thread_passes(t, view, filters):
             continue
         # After the words: each check stats its files, and asking all of the
         # thousands of threads was most of a search's half second.
@@ -1267,10 +1466,40 @@ WHO = {"me": "user", "agent": "assistant"}
 ROOMS = ("only", "none")
 
 
+#: The threads columns a `thread:` or `in:` operator looks in.
+_IN_COLS = ("project", "cwd")
+_THREAD_COLS = ("title", "ai_title", "first_prompt")
+
+
+def _in_threads(cols: tuple[str, ...], value: str, neg: bool) -> tuple[str, list]:
+    """`AND d.session [NOT] IN (the threads whose <cols> hold <value>)`."""
+    where = " OR ".join(f"COALESCE({c}, '') LIKE ? ESCAPE '\\'" for c in cols)
+    return (" AND d.session " + ("NOT IN" if neg else "IN")
+            + f" (SELECT session FROM threads WHERE {where})"), [_like(value)] * len(cols)
+
+
 def _narrowing(fts: str, *, since: float | None, who: str | None,
-               rooms: str | None, session: str | None = None) -> tuple[str, list]:
-    """The SQL for `since`, `who`, `rooms` and `session`, after `{fts} MATCH ?`."""
+               rooms: str | None, session: str | None = None,
+               filters: dict | None = None) -> tuple[str, list]:
+    """The SQL for `since`, `who`, `rooms`, `session` and the query's own field
+    operators (`in:`, `thread:`, `harness:`, `before:`), after
+    `{fts} MATCH ?`. `from:`, `after:` and `kind:` are read by the route,
+    onto `who`, `since` and which tables are searched."""
     sql, args = "", []
+    f = filters or {}
+    for value, neg in f.get("in", []):
+        more, got = _in_threads(_IN_COLS, value, neg)
+        sql, args = sql + more, args + got
+    for value, neg in f.get("thread", []):
+        more, got = _in_threads(_THREAD_COLS, value, neg)
+        sql, args = sql + more, args + got
+    for value, neg in f.get("harness", []):
+        sql += (" AND d.session " + ("NOT IN" if neg else "IN")
+                + " (SELECT session FROM threads WHERE harness = ?)")
+        args.append(value)
+    if f.get("before") is not None:
+        sql += " AND d.at < ?"
+        args.append(f["before"])
     if session:
         sql += " AND d.session = ?"
         args.append(session)
@@ -1291,11 +1520,12 @@ def _message_hits(conn: sqlite3.Connection, query: str, *, tools: bool, before: 
                   owned: set[str], sort: str = "newest", after: float | None = None,
                   offset: int = 0, since: float | None = None, who: str | None = None,
                   rooms: str | None = None,
-                  session: str | None = None) -> tuple[list[dict], float | int | None]:
+                  session: str | None = None, filters: dict | None = None,
+                  kind: str | None = None) -> tuple[list[dict], float | int | None]:
     """A page of message hits and the cursor for the next (`None` at the end):
     an `at` for newest (`before=`) and oldest (`after=`), a count for best
     (`offset=`)."""
-    tables = [("text_fts", "text")] + ([("tool_fts", "tool")] if tools else [])
+    tables = _tables(tools=tools, kind=kind)
     select = ("SELECT d.session, d.msg, d.role, d.at, "
               "snippet({fts}, 0, ?, ?, '…', ?), bm25({fts}) "
               "FROM {fts} JOIN docs d ON d.id = {fts}.rowid WHERE {fts} MATCH ?")
@@ -1317,12 +1547,13 @@ def _message_hits(conn: sqlite3.Connection, query: str, *, tools: bool, before: 
         # better), then the newest: the same order every time, so an offset
         # into it is a stable cursor.
         merged = []
-        for fts, kind in tables:
-            more, args = _narrowing(fts, since=since, who=who, rooms=rooms, session=session)
+        for fts, tkind in tables:
+            more, args = _narrowing(fts, since=since, who=who, rooms=rooms, session=session,
+                                    filters=filters)
             found = conn.execute(
                 select.format(fts=fts) + more + f" ORDER BY bm25({fts}), d.at DESC LIMIT ?",
                 (_OPEN, _CLOSE, SNIPPET_TOKENS, query, *args, offset + limit + 1)).fetchall()
-            merged += [(r, kind) for r in found]
+            merged += [(r, tkind) for r in found]
         merged.sort(key=lambda rk: (rk[0][5], -rk[0][3]))
         page = merged[offset:offset + limit]
         out = [h for h in (hit(r, k) for r, k in page) if h]
@@ -1330,12 +1561,13 @@ def _message_hits(conn: sqlite3.Connection, query: str, *, tools: bool, before: 
 
     oldest = sort == "oldest"
     out: list[dict] = []
-    for fts, kind in tables:
+    for fts, tkind in tables:
         if oldest:
             cursor = after if after is not None else float("-inf")
         else:
             cursor = before if before is not None else float("inf")
-        more, args = _narrowing(fts, since=since, who=who, rooms=rooms, session=session)
+        more, args = _narrowing(fts, since=since, who=who, rooms=rooms, session=session,
+                                filters=filters)
         order = (" AND d.at > ? ORDER BY d.at ASC LIMIT ?" if oldest
                  else " AND d.at < ? ORDER BY d.at DESC LIMIT ?")
         batch = max(limit * 2, 40)
@@ -1347,7 +1579,7 @@ def _message_hits(conn: sqlite3.Connection, query: str, *, tools: bool, before: 
             if not found:
                 break
             for row in found:
-                h = hit(row, kind)
+                h = hit(row, tkind)
                 if h:
                     out.append(h)
                     got += 1
@@ -1359,9 +1591,18 @@ def _message_hits(conn: sqlite3.Connection, query: str, *, tools: bool, before: 
     return out, out[-1]["at"] if len(out) >= limit else None
 
 
+def _tables(*, tools: bool, kind: str | None) -> list[tuple[str, str]]:
+    """Which FTS tables a query reads: the words, tool steps too with
+    `tools=1`, and one of them alone under `kind:`."""
+    if kind in KINDS:
+        return [("tool_fts", "tool")] if kind == "tool" else [("text_fts", "text")]
+    return [("text_fts", "text")] + ([("tool_fts", "tool")] if tools else [])
+
+
 def _session_total(conn: sqlite3.Connection, query: str, session: str,
                    rows: dict[str, dict], owned: set[str], *, tools: bool,
-                   since: float | None, who: str | None) -> int:
+                   since: float | None, who: str | None,
+                   filters: dict | None = None, kind: str | None = None) -> int:
     """How many of one thread's messages match, each once: the find bar's "3 of 12".
     0 for a thread search does not answer (machinery, an excluded folder)."""
     t = rows.get(session)
@@ -1372,8 +1613,9 @@ def _session_total(conn: sqlite3.Connection, query: str, session: str,
     # stop for the find bar's arrows, so it counts once (15 said, 10 to step
     # through, 19 Oct 2026).
     parts, params = [], []
-    for fts in ("text_fts", "tool_fts") if tools else ("text_fts",):
-        more, args = _narrowing(fts, since=since, who=who, rooms=None, session=session)
+    for fts, _kind in _tables(tools=tools, kind=kind):
+        more, args = _narrowing(fts, since=since, who=who, rooms=None, session=session,
+                                filters=filters)
         parts.append(f"SELECT d.msg FROM {fts} JOIN docs d ON d.id = {fts}.rowid "
                      f"WHERE {fts} MATCH ?" + more)
         params += [query, *args]
@@ -1431,7 +1673,11 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    terms = terms_of(q)
+    try:
+        parsed = parse(q)
+    except QueryError as e:
+        return False, {"error": str(e), "status": 400}
+    terms = parsed["terms"]
     if not terms:
         return False, {"error": "nothing to search for", "status": 400}
     try:
@@ -1446,6 +1692,11 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
     if rooms not in (None, "") and rooms not in ROOMS:
         return False, {"error": "rooms is only or none", "status": 400}
     who, rooms, session = who or None, rooms or None, session or None
+    # The query's own operators, over the parameters: `from:` is `who`,
+    # `after:` is `since` (the later of the two), `kind:` picks the tables.
+    ops = parsed["filters"]
+    who = ops.get("from") or who
+    kind = ops.get("kind")
     times = {}
     for name, v in (("before", before), ("after", after), ("since", since)):
         try:
@@ -1458,6 +1709,9 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
         return False, {"error": "offset must be a count (a best-match `next`)", "status": 400}
     # Only the sort's own cursor counts: `before` for newest, `after` for
     # oldest, `offset` for best. Any of them means a later page.
+    if ops.get("after") is not None:
+        times["since"] = (ops["after"] if times["since"] is None
+                          else max(times["since"], ops["after"]))
     cursor = {"newest": times["before"], "oldest": times["after"], "best": skip}[sort]
     from concurrent.futures import ThreadPoolExecutor
 
@@ -1476,25 +1730,27 @@ def search(q: str, bearer: str, *, limit=None, before=None, tools: bool = False,
         # One thread's find bar shows no thread names: not the list at all.
         listed = {} if session else _listed()
         owned = _owned_headless()
-        query = fts_query(terms)
+        query = fts_query(parsed)
         try:
             messages, nxt = _message_hits(
                 conn, query, tools=tools, before=times["before"], limit=n, rows=rows,
                 listed=listed, owned=owned, sort=sort, after=times["after"],
                 offset=skip or 0, since=times["since"], who=who, rooms=rooms,
-                session=session)
+                session=session, filters=ops, kind=kind)
             # Every match on this one page: they are the count, with no
             # second pass over the index (a common word took 0.5 s).
             total = (None if not session or cursor is not None
                      else len({h["message"] for h in messages}) if nxt is None
                      else _session_total(conn, query, session, rows, owned, tools=tools,
-                                         since=times["since"], who=who))
+                                         since=times["since"], who=who, filters=ops,
+                                         kind=kind))
         except sqlite3.OperationalError as e:
             return False, {"error": f"could not search for that ({e})", "status": 400}
-        out = {"q": q, "terms": terms, "tools": bool(tools), "sort": sort,
-               "threads": (_thread_hits(terms, rows, listed, owned, sort=sort,
+        out = {"q": q, "terms": terms, "query": operators_of(parsed),
+               "tools": bool(tools) or kind == "tool", "sort": sort,
+               "threads": (_thread_hits(parsed, rows, listed, owned, sort=sort,
                                         since=times["since"], rooms=rooms)
-                           if first else []),
+                           if first and kind != "tool" else []),
                "messages": messages,
                "next": nxt,
                "indexing": not caught["done"]}
@@ -1536,9 +1792,12 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "query" and len(args) > 1:
         conn = _connect()
         rows = _threads_rows(conn)
-        terms = terms_of(" ".join(args[1:]))
-        hits, _ = _message_hits(conn, fts_query(terms), tools="--tools" in args, before=None,
-                                limit=10, rows=rows, listed={}, owned=set())
+        parsed = parse(" ".join(a for a in args[1:] if a != "--tools"))
+        ops = parsed["filters"]
+        hits, _ = _message_hits(conn, fts_query(parsed), tools="--tools" in args, before=None,
+                                limit=10, rows=rows, listed={}, owned=set(),
+                                since=ops.get("after"), who=ops.get("from"),
+                                filters=ops, kind=ops.get("kind"))
         for h in hits:
             print(h["at"], h["session"][:8], h["thread"]["title"][:40], "|", h["snippet"]["text"][:120])
         return 0
