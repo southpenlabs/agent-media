@@ -10539,9 +10539,10 @@ person's `photo`.
   of each; a private list is left out. A person: `{"id" (slug), "name",
   "ids", "known_for", "url", "photo"?}`; a list: `{"id", "name",
   "description", "item_count", "likes", "user", "url"}`.
-- `GET /watch/title?kind=movie|tv&id=<trakt id or slug>` → `{"ok", "kind",
-  "title", "trailer", "trailer_source", "trailer_pending"?, "ratings",
-  "cast", "crew", "related", "tmdb", "seasons"?, "next_episode"?}`.
+- `GET /watch/title?kind=movie|tv&id=<trakt id or slug>[&season=&episode=]`
+  → `{"ok", "kind", "title", "trailer", "trailer_source",
+  "trailer_pending"?, "ratings", "cast", "crew", "related", "open_in",
+  "tmdb", "seasons"?, "next_episode"?}`.
   `title` is the item with its whole `overview` and `tagline`,
   `certification`, `language`, `country`, `status`, `homepage`, `trailer`,
   `released`, and for a show `network` and `aired_episodes`. `cast`:
@@ -10579,6 +10580,35 @@ person's `photo`.
   rows (search, Discover) carry Trakt's `rating` only: the others would
   cost a call a row. Where to watch stays `GET /watch/item`. 404 when Trakt
   has no such title.
+- **Open in** (`watch_open.py`; David, 12 Nov 2026). `open_in` on a
+  title's page is the ordered list of keys that open the title somewhere
+  else: `[{"id", "label", "url", "fallback"?, "kind"?}]`. The app opens
+  `url`, and `fallback` when nothing on the device takes `url`. They are
+  links only: nothing here finds, resolves or plays a stream.
+  - Apps the owner turned on come first, with no `kind`. `stremio`:
+    `stremio:///detail/movie/<imdb>/<imdb>` for a movie,
+    `stremio:///detail/series/<imdb>` for a show, and with `season` and
+    `episode` on the request `stremio:///detail/series/<imdb>/<imdb>:<season>:<episode>`
+    (Stremio's documented deep links: stremio-addon-sdk
+    `docs/deep-links.md`); `fallback` is the same path under
+    `https://web.stremio.com/#/`. Only when it is on and Trakt has the
+    title's IMDb id. Off by default: `GET /watch/settings` (gated) →
+    `{"ok", "open_in": [{"id", "label", "on"}]}`, and `POST /watch/settings
+    {"open_in": {"stremio": true|false}}` (admins) saves and answers the
+    same, kept in `<state_dir>/watch-open-in.json`; 400 for an unknown app
+    or a value that is not a boolean.
+  - Then the where-to-watch services, when TMDb is set up: each known
+    service once, `kind` the first way it offers the title (`stream`,
+    `free`, `ads`, `rent`, `buy`), `url` that service's own search for the
+    title (`https://www.netflix.com/search?q=Arrival`). TMDb's provider
+    data has no address for a title at a service, so a search is as close
+    as it gets. Known services are one best-effort table
+    (`watch_open.SERVICES`, by TMDb provider id, else name): Netflix,
+    Prime Video, Apple TV, HBO Max, SBS On Demand, ABC iview, 9Now,
+    YouTube, Google Play, Tubi, MUBI, Plex, Crunchyroll, Curiosity Stream;
+    a channel sold inside Prime Video or Apple TV opens that service's
+    search. Any other provider has no key and is reached through
+    `where.link` (JustWatch's page, credited as before).
 - `GET /watch/season?id=<show>&season=<n>` → `{"ok", "season", "episodes":
   [{"season", "number", "title", "overview", "first_aired", "runtime",
   "rating"?, "ids", "watched"?}]}`. One is marked watched with `POST /watch
@@ -10624,7 +10654,10 @@ sent as a Bearer; preferred) or `MEDIA_TMDB_API_KEY` (v3, as `api_key`),
   "region", "attribution"}`: `trailer` a YouTube link (official Trailer >
   Trailer > official Teaser > Teaser) or null; `where` the region's
   services `{"region", "link", "stream", "free", "ads", "rent", "buy"}`,
-  each a list of `{"name", "logo"}`, or null when TMDb lists none there.
+  each a list of `{"name", "logo", "service"?, "label"?, "url"?}`, or null
+  when TMDb lists none there. `url` is the service's own search for the
+  title, on a known service's row ("Open in" above: `service` its id
+  there, `label` its name).
   One `GET /{movie|tv}/{id}?append_to_response=videos,watch/providers`,
   kept a day. The region is `MEDIA_TMDB_REGION` (ISO 3166-1, default AU).
   `attribution` is the credit to show beside them (TMDB; services by

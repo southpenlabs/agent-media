@@ -346,3 +346,83 @@ def test_browse_is_gated(server, fake, creds):
     for path in ("/watch/title?kind=movie&id=arrival-2016", "/watch/person?id=amy-adams", "/watch/lists"):
         res, _ = call(server, "GET", path)
         assert res.status in (401, 403), path
+
+
+def _providers(monkeypatch, name="Arrival"):
+    monkeypatch.setenv("MEDIA_TMDB_TOKEN", "tok")
+    where = {"link": "https://www.themoviedb.org/movie/329865/watch?locale=AU",
+             "flatrate": [{"provider_id": 8, "provider_name": "Netflix", "logo_path": "/n.jpg"},
+                          {"provider_id": 1796, "provider_name": "Netflix Standard with Ads"},
+                          {"provider_id": 21, "provider_name": "Stan"},
+                          {"provider_name": "HBO Max Amazon Channel"}],
+             "rent": [{"provider_id": 2, "provider_name": "Apple TV Store"},
+                      {"provider_id": 10, "provider_name": "Amazon Video"}]}
+    monkeypatch.setattr(tmdb, "_request", lambda path, params=None, timeout=15.0: (
+        {"title": name, "name": name, "watch/providers": {"results": {"AU": where}}}
+        if params and params.get("append_to_response") else {}))
+    monkeypatch.setattr(tmdb, "_details", {})
+
+
+def test_a_title_opens_in_its_services(server, signed_in, fake, creds, monkeypatch):
+    """`open_in`: each known service once, at its own search for the title;
+    an unknown one (Stan: no confirmed search address) has no key."""
+    _providers(monkeypatch, "Arrival & Departure")
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"] == [
+        {"id": "netflix", "label": "Netflix", "url": "https://www.netflix.com/search?q=Arrival%20%26%20Departure", "kind": "stream"},
+        {"id": "prime", "label": "Prime Video", "url": "https://www.primevideo.com/search/?phrase=Arrival%20%26%20Departure", "kind": "stream"},
+        {"id": "appletv", "label": "Apple TV", "url": "https://tv.apple.com/search?term=Arrival%20%26%20Departure", "kind": "rent"}], obj["open_in"]
+    assert not [o for o in obj["open_in"] if o["id"] == "stremio"], "off until the owner turns it on"
+    # The same links ride the where-to-watch rows; the JustWatch link stays.
+    _, item = call(server, "GET", "/watch/item?kind=movie&tmdb=329865", headers=AUTH)
+    rows = item["where"]["stream"]
+    assert rows[0] == {"name": "Netflix", "logo": "https://image.tmdb.org/t/p/w92/n.jpg", "service": "netflix",
+                       "label": "Netflix", "url": "https://www.netflix.com/search?q=Arrival%20%26%20Departure"}
+    assert rows[2] == {"name": "Stan", "logo": None}
+    assert item["where"]["link"].startswith("https://www.themoviedb.org/") and "JustWatch" in item["attribution"]
+
+
+def test_without_tmdb_a_title_has_no_service_keys(server, signed_in, fake, creds):
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"] == []
+
+
+def test_open_in_stremio_is_the_owners_choice(server, signed_in, fake, creds, monkeypatch):
+    res, obj = call(server, "GET", "/watch/settings", headers=AUTH)
+    assert res.status == 200 and obj["open_in"] == [{"id": "stremio", "label": "Stremio", "on": False}]
+    for bad in ({}, {"open_in": {}}, {"open_in": {"kodi": True}}, {"open_in": {"stremio": "yes"}}):
+        res, _ = call(server, "POST", "/watch/settings", bad, AUTH)
+        assert res.status == 400, bad
+    res, obj = call(server, "POST", "/watch/settings", {"open_in": {"stremio": True}}, AUTH)
+    assert res.status == 200 and obj["open_in"][0]["on"] is True
+    # A movie: Stremio's documented deep link by IMDb id, and the same page on the web.
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert obj["open_in"] == [{"id": "stremio", "label": "Stremio", "url": "stremio:///detail/movie/tt2543164/tt2543164",
+                               "fallback": "https://web.stremio.com/#/detail/movie/tt2543164/tt2543164"}]
+    # A show without an IMDb id has no key; with one, the series, or the episode asked for.
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["open_in"] == []
+    monkeypatch.setitem(SHOW["ids"], "imdb", "tt11280740")
+    trakt.clear_cache()
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance", headers=AUTH)
+    assert obj["open_in"][0]["url"] == "stremio:///detail/series/tt11280740"
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance&season=2&episode=3", headers=AUTH)
+    assert obj["open_in"][0]["url"] == "stremio:///detail/series/tt11280740/tt11280740:2:3"
+    assert obj["open_in"][0]["fallback"] == "https://web.stremio.com/#/detail/series/tt11280740/tt11280740:2:3"
+    _, obj = call(server, "GET", "/watch/title?kind=tv&id=severance&season=x&episode=3", headers=AUTH)
+    assert obj["open_in"][0]["url"] == "stremio:///detail/series/tt11280740", "a bad episode: the series"
+    # Stremio first, then the services.
+    _providers(monkeypatch)
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert [o["id"] for o in obj["open_in"]] == ["stremio", "netflix", "prime", "appletv"]
+    res, obj = call(server, "POST", "/watch/settings", {"open_in": {"stremio": False}}, AUTH)
+    assert obj["open_in"][0]["on"] is False
+    _, obj = call(server, "GET", "/watch/title?kind=movie&id=arrival-2016", headers=AUTH)
+    assert [o["id"] for o in obj["open_in"]] == ["netflix", "prime", "appletv"]
+
+
+def test_open_in_settings_are_gated(server, fake, creds):
+    res, _ = call(server, "GET", "/watch/settings")
+    assert res.status == 401
+    res, _ = call(server, "POST", "/watch/settings", {"open_in": {"stremio": True}})
+    assert res.status in (401, 403)

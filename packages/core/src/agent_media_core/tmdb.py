@@ -13,7 +13,9 @@ lists carry no posters and the info sheet no trailer or services.
             ones a listing (the rest come at the next)
   details   GET /movie|tv/{id}?append_to_response=videos,watch/providers →
             the best YouTube trailer (official Trailer > Trailer > official
-            Teaser > Teaser) and the region's services, kept a day in memory
+            Teaser > Teaser) and the region's services, kept a day in memory;
+            a known service's row carries its own search for the title
+            (watch_open.py)
 
 TMDb asks that it be credited where its data is shown ("This product uses
 the TMDB API but is not endorsed or certified by TMDB"; JustWatch for the
@@ -157,15 +159,23 @@ def _trailer(videos: dict) -> Optional[str]:
     return f"https://www.youtube.com/watch?v={max(yt, key=score)['key']}"
 
 
-def _where(providers: dict, reg: str) -> Optional[dict]:
+def _where(providers: dict, reg: str, title: str = "") -> Optional[dict]:
+    from . import watch_open
+
     r = ((providers or {}).get("results") or {}).get(reg)
     if not isinstance(r, dict):
         return None
     out: dict = {"region": reg, "link": r.get("link") or None}
     for key in ("flatrate", "free", "ads", "rent", "buy"):
-        out["stream" if key == "flatrate" else key] = [
-            {"name": p.get("provider_name") or "", "logo": poster_url(p.get("logo_path") or "", LOGO_SIZE)}
-            for p in r.get(key) or [] if isinstance(p, dict) and p.get("provider_name")]
+        rows = []
+        for p in r.get(key) or []:
+            if not isinstance(p, dict) or not p.get("provider_name"):
+                continue
+            row = {"name": p["provider_name"], "logo": poster_url(p.get("logo_path") or "", LOGO_SIZE)}
+            # The service's own search for the title, where the service is known (watch_open.SERVICES).
+            row.update(watch_open.service_url(p.get("provider_id"), p["provider_name"], title) or {})
+            rows.append(row)
+        out["stream" if key == "flatrate" else key] = rows
     return out
 
 
@@ -186,7 +196,7 @@ def details(kind: str, tmdb_id: int, now: Optional[float] = None) -> dict:
         return hit[1]
     got = _request(f"/{kind}/{int(tmdb_id)}", {"append_to_response": "videos,watch/providers"})
     out = {"trailer": _trailer(got.get("videos") or {}),
-           "where": _where(got.get("watch/providers") or {}, reg),
+           "where": _where(got.get("watch/providers") or {}, reg, str(got.get("title") or got.get("name") or "")),
            "poster": poster_url(str(got.get("poster_path") or "")),
            "tagline": str(got.get("tagline") or "") or None,
            "region": reg, "attribution": ATTRIBUTION}
