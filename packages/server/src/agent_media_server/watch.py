@@ -279,7 +279,12 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         if path == "/accounts/trakt":
             send_json(h, 200, {"ok": True, **trakt.status()})
         elif path.endswith("/start"):
-            send_json(h, 200, {"ok": True, **trakt.begin()})
+            began = trakt.begin()
+            # A line for each step of a sign-in (never the code or address):
+            # with none, a "Finish does nothing" could not be told from a
+            # refusal (13 Nov 2026).
+            print(f"watch: trakt sign-in started ({began.get('flow')})", file=sys.stderr)
+            send_json(h, 200, {"ok": True, **began})
         elif path.endswith("/finish"):
             import json
             n = int(h.headers.get("Content-Length") or 0)
@@ -288,11 +293,17 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             except ValueError:
                 body = {}
             address = str((body if isinstance(body, dict) else {}).get("address") or "")
-            send_json(h, 200, {"ok": True, **trakt.finish(address)})
+            done = trakt.finish(address)
+            if done.get("signed_in"):
+                print("watch: trakt sign-in finished: signed in", file=sys.stderr)
+            elif address:
+                print(f"watch: trakt sign-in finish with an address: {done}", file=sys.stderr)
+            send_json(h, 200, {"ok": True, **done})
         else:
             trakt.sign_out()
             send_json(h, 200, {"ok": True, **trakt.status()})
     except ValueError as e:
+        print(f"watch: trakt {path.rsplit('/', 1)[-1]} refused: {e}", file=sys.stderr)
         send_json(h, 409 if not trakt.set_up() else 400,
                   {"ok": False, "error": str(e), "set_up": trakt.set_up()})
     except Exception as e:  # noqa: BLE001
