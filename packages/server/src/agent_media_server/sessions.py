@@ -980,19 +980,48 @@ def _folder_for_session(session: str) -> str:
     return str(_manifest_of(session).get("folder") or "")
 
 
-def title_of(session: str, *, live_only: bool = False) -> str:
+#: A list's titles stop at TITLE_LIST characters; an open thread's header
+#: shows the whole (David, 12 Nov 2026: "the title probably shouldn't be
+#: truncated in the extended view"), up to TITLE_WHOLE, as a first message
+#: can be a whole mail. `_cut` keeps the whole one by session as it cuts.
+TITLE_LIST = 60
+TITLE_WHOLE = 300
+_WHOLE_TITLES: dict[str, str] = {}
+
+
+def _cut(session: str, title: str) -> str:
+    """`title` as a list shows it, cut to TITLE_LIST; the whole kept for
+    `whole_title`."""
+    if len(title) <= TITLE_LIST:
+        _WHOLE_TITLES.pop(session, None)
+        return title
+    _WHOLE_TITLES[session] = title if len(title) <= TITLE_WHOLE else title[:TITLE_WHOLE - 1] + "…"
+    return title[:TITLE_LIST - 1] + "…"
+
+
+def whole_title(session: str, title: str) -> str:
+    """The whole of a title `_cut` shortened, else `title` as it is."""
+    whole = _WHOLE_TITLES.get(session, "")
+    if title.endswith("…") and whole.startswith(title[:-1]):
+        return whole
+    return title
+
+
+def title_of(session: str, *, live_only: bool = False, whole: bool = False) -> str:
     """A thread's name as the list would give it, for an open thread's
     header (§11 `title`): a live one's from the `/sessions/state` sweep (its
     pane's title, or a headless one's shelf name), else the shelf's. ""
     when it has none. `live_only`: "" rather than read the shelf (each read
-    opens every manifest), for a caller asking every second."""
+    opens every manifest), for a caller asking every second. `whole`: not
+    cut to a list's length (`whole_title`), for the header."""
     for r in cached_states()[0]:
         if r.get("session") == session:
-            return str(r.get("title") or "")
+            title = str(r.get("title") or "")
+            return whole_title(session, title) if whole else title
     if live_only:
         return ""
-    title = _shelf_title(_manifest_of(session))
-    return title if len(title) <= 60 else title[:59] + "…"
+    title = _cut(session, _shelf_title(_manifest_of(session)))
+    return whole_title(session, title) if whole else title
 
 
 def _shelf_title(data: dict) -> str:
@@ -1188,8 +1217,7 @@ def _live_title(session: str) -> str:
     """A live Codex or pi session's name, or the first thing asked of it."""
     from agent_media_core import harnesses
 
-    title = harnesses.title_of(session) or harnesses.first_prompt(session)
-    return title if len(title) <= 60 else title[:59] + "…"
+    return _cut(session, harnesses.title_of(session) or harnesses.first_prompt(session))
 
 
 #: What Claude Code calls a session it has not named yet. A chat started from
@@ -1257,7 +1285,7 @@ def _display_title(session: str, pane_title: str) -> str:
     first = _claude_first_prompt(session)
     if not first:
         return pane_title
-    return first if len(first) <= 60 else first[:59] + "…"
+    return _cut(session, first)
 
 
 #: Shelved conversations listed at most, newest first — archived ones aside,
@@ -1300,7 +1328,7 @@ def _headless_title(session: str, view: dict) -> str:
     uses for Codex and pi."""
     shelf = _shelf_title(_manifest_of(session))
     if shelf:
-        return shelf if len(shelf) <= 60 else shelf[:59] + "…"
+        return _cut(session, shelf)
     from agent_media_core import conversation
 
     path = conversation.transcript(session)
@@ -1319,8 +1347,7 @@ def _headless_title(session: str, view: dict) -> str:
 
             title = session_feed._asked(session, [])
             _HEADLESS_TITLES[session] = (sig, title)
-    title = " ".join((title or str(view.get("first_text") or "")).split())
-    return title if len(title) <= 60 else title[:59] + "…"
+    return _cut(session, " ".join((title or str(view.get("first_text") or "")).split()))
 
 
 def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
@@ -1443,7 +1470,7 @@ def _stored_title(row) -> str:
     """
     shelf = _shelf_title(_manifest_of(row.session))
     if shelf:
-        return shelf if len(shelf) <= 60 else shelf[:59] + "…"
+        return _cut(row.session, shelf)
     sig: tuple = ()
     if row.path:
         try:
@@ -1461,7 +1488,7 @@ def _stored_title(row) -> str:
     title = " ".join(session_feed._asked(row.session, []).split())
     if title.startswith(f"Conversation {row.session[:8]}"):
         title = ""             # nothing in it to name it by
-    title = title if len(title) <= 60 else title[:59] + "…"
+    title = _cut(row.session, title)
     _STORED_TITLES[row.session] = (sig, title)
     return title
 

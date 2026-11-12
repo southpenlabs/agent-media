@@ -205,7 +205,7 @@ def snapshot(session: str, limit: int | None = None) -> tuple[bool, dict]:
                 "background": st["background"],
                 "resumable": sessions.session_exists(session),
                 "agents": agent_counts(session, st["session_live"]),
-                "title": sessions.title_of(session)})
+                "title": sessions.title_of(session, whole=True)})
     # Where the thread is, for the small line under its title (§6.1).
     sessions.add_projects([env])
     return True, env
@@ -384,8 +384,9 @@ class Watcher:
         # elsewhere: the auto-name after a first turn, `/rename` at the
         # terminal, another device. A live one is read off the cached sweep
         # each time; an ended one's is read once and then pushed by a rename
-        # through the server (`renamed`).
-        title = sessions.title_of(self.session, live_only=emit)
+        # through the server (`renamed`). Whole, not cut to the list's
+        # 60 characters: the opened header shows it all (12 Nov 2026).
+        title = sessions.title_of(self.session, live_only=emit, whole=True)
         if title:
             now["title"] = {"title": title}
         for name, value in now.items():
