@@ -1114,3 +1114,37 @@ def test_the_builder_is_told_the_same_dates_the_help_page_shows(gate, monkeypatc
     assert got["q"] == "music bed after:7d ago", "read as a date, not as the word ago"
     assert "7d, 3w, 6m, 1y" in seen[0] and "1y ago" not in seen[0]
     assert search.parse(got["q"])["terms"] == ["music", "bed"]
+
+
+def test_the_near_miss_a_model_writes_comes_back_as_a_complaint_it_can_act_on(
+        gate, monkeypatch, caplog):
+    """`harness:claude-code` is the mistake a model makes (the harness is
+    called Claude Code everywhere but in the index), and 659a2601 made it a
+    complaint rather than a confident chip over no hits. End to end: the
+    builder is told the list and writes the name the index holds."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append(user)
+        return "music bed harness:claude-code\n" if len(asked) == 1 else "music bed harness:claude\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    with caplog.at_level("WARNING"):
+        got = search.compose("what did I say about the music bed in Claude Code")
+    assert got == {"q": "music bed harness:claude", "note": ""}
+    assert "harness: is one of claude, codex, pi, hermes, matrix" in asked[1]
+    assert search.parse(got["q"])["filters"]["harness"] == [("claude", False)]
+
+    # The open sets stay open: a project or a tool that is simply not there
+    # is no hits, never a complaint, so the builder is never sent round again
+    # over a folder it had right.
+    fast._reset_for_tests()
+    asked.clear()
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: asked.append(user) or "music bed in:no-such-project")
+    assert search.compose("what did I say about the music bed in no-such-project") == {
+        "q": "music bed in:no-such-project", "note": ""}
+    assert len(asked) == 1, "asked once: an empty answer is an answer"
