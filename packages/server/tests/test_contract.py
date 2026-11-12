@@ -241,7 +241,9 @@ def test_sessions_state_shape(server, shelf, signed_in):
     # deliberately (§6.1). The rig's live session has no process, so its
     # memory is unknown: null, and not counted in the sum.
     # `title` joined the same day, the name /targets gives the session.
-    assert keys(obj) == {"ok", "sessions", "host"}
+    # `unheard` (12 Nov 2026): each thread's held replies, none in the rig.
+    assert keys(obj) == {"ok", "sessions", "host", "unheard"}
+    assert obj["unheard"] == {}
     _, targets = call(server, "GET", "/targets", headers=AUTH)
     title = next(r["title"] for r in targets["sessions"] if r["session"] == SID2)
     assert obj["sessions"] == [{"session": SID2, "state": "working",

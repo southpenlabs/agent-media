@@ -1154,7 +1154,8 @@ def session_states(bearer: str) -> tuple[bool, dict]:
     `/conversations`. While a restart of the session host waits, the answer
     carries `restart_pending` (sessiond.restart_view), so the app's poll
     can say so on any thread (David, 3 Nov 2026: "Can we have some sort of
-    alert when it's going to restart?").
+    alert when it's going to restart?"). `unheard` counts each thread's
+    replies held and never played, live or not (speech.unheard_counts).
     """
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
@@ -1166,6 +1167,10 @@ def session_states(bearer: str) -> tuple[bool, dict]:
     restart = sessiond.restart_view()
     if restart:
         out["restart_pending"] = restart
+    from . import speech
+
+    # Every thread's, live or not: the list's Play key (speech.unheard_counts).
+    out["unheard"] = speech.unheard_counts()
     return True, out
 
 

@@ -655,6 +655,13 @@ What each live session is doing.
   one): the same object as `/targets`' (§6.1), so the app's 5-second poll
   can put "Restart waiting" on any thread while it holds. Older servers
   leave it out.
+- `unheard` (12 Nov 2026; additive, top level): `{session: count}`, each
+  thread's replies held and never played, live or not, by the same test as
+  `/speech/recent`'s `unheard` (§6.5; a held copy of a reply heard in
+  another copy is not counted, private threads are left out); threads with
+  none are left out, `{}` when none waits. The thread list's Play key shows
+  where it is above zero and sends `replay-unheard` (§6.5). Counted at most
+  every 3 s (`speech.unheard_counts`). Older servers leave it out.
 - `mem_mb` (22 Sep 2026): resident memory of the session's agent process
   (the claude / codex / pi / hermes process `live_sessions` found) **and all
   its descendants** — MCP servers, sandboxes — in whole MB (`procmem.py`).
