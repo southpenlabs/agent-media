@@ -2725,6 +2725,29 @@ ahead.
       be renamed something more agent-memory like"). Unit names cannot
       alias, so it rides the provisioning rather than being a sweep.
 
+64. **A rooms hub checks its system packages** (agent-mail #261 from sam,
+    12 Nov 2026, after red2 was found without pactl, parec, mpv and mpc,
+    #259; David: "how should we handle this as a distributable package?",
+    "also put it on the road map"). The install puts no system packages on a
+    host, and `media-setup check` looked only at python3, mpv, mpc, edge-tts
+    and jq, so a host could pass it while the rooms units failed at their
+    first ExecStart. **Built 12 Nov 2026, Linux only** (David: "Linux only
+    for now"; the rooms are PipeWire and Snapcast, which have no Windows
+    build): `ROOMS_PREREQS` in `setup.py` names pactl and parec
+    (pulseaudio-utils), pipewire-pulse, snapserver and mpv with their apt,
+    dnf and pacman packages; `media-setup check` reports them on a rooms hub
+    (or with `--rooms` before wiring one) and prints the one install line
+    for the distro read from `/etc/os-release`; the profile gains a
+    **rooms** row, so the app's setup page shows what is missing and that
+    line; `media-setup server` warns loudly before writing units whose
+    binaries are absent (it still writes them: the packages can come after).
+    Nothing is installed by agent-media, as with linger. The personal-use
+    add-on needs nothing more: the rooms hub is the product's.
+    **Open:** Windows, which David asked about ("Can it also link to an
+    installer for Windows?") — a Windows machine has no rooms hub to wire,
+    and the useful link there is the Sasonica Shell installer; left for the
+    cross-platform work (`docs/proposals/2026-09-23-cross-platform.md`).
+
 ## Loose ends
 
 - **A reply with a figure had no follow-along at all** (David, 23 Sep 2026)

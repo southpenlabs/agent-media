@@ -96,6 +96,18 @@ def _no_live_trakt_or_tmdb(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_inherited_url_signing(monkeypatch):
+    """The env file may switch on signed URLs per target
+    (MEDIA_BOOK_SIGNED_<T>, MEDIA_SPEECH_CLIP_SIGNED_<T>): once an earlier
+    test has loaded it, a link the test expects plain gets a `?sig=` (12 Nov
+    2026: test_the_sink_signs_only_when_told_to and
+    test_a_download_plays_from_its_web_address, red here, green in CI). A test
+    that wants signing sets its own."""
+    for key in [k for k in os.environ if k.startswith(("MEDIA_BOOK_SIGNED_", "MEDIA_SPEECH_CLIP_SIGNED_"))]:
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_music_level(monkeypatch):
     """The env file may set the backing music level (MEDIA_MUSIC_BED_GAIN_DB),
     and every duck level follows it (route/dj.py `scaled`):
