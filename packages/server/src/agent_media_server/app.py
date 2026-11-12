@@ -2017,13 +2017,15 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # folder's changed files, history and web links, `&path=` one file's diff,
         # `&commit=` a commit's files (and with `&path=`, one file's diff in it),
         # `&tree=` one folder of the checkout ("" for its top), `&blob=` one file;
-        # `&ignored=1` takes in what git ignores too (the app's Hidden files).
+        # `&ignored=1` takes in what git ignores too (the app's Hidden files);
+        # `&who=1` the chats that hold its changes (git_who.py).
         qs = parse_qs(query, keep_blank_values=True)
         tree = qs["tree"][0] if "tree" in qs else None
         ok, detail = threads.git_changes(qs.get("session", [""])[0], _bearer(h),
                                          qs.get("path", [""])[0], qs.get("commit", [""])[0],
                                          tree=tree, blob=qs.get("blob", [""])[0],
-                                         ignored=qs.get("ignored", [""])[0] == "1")
+                                         ignored=qs.get("ignored", [""])[0] == "1",
+                                         who=qs.get("who", [""])[0] == "1")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/patterns":
         # Named prompts for the chips' hold menu and a message's (patterns.py, §6.2.1).

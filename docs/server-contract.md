@@ -9886,8 +9886,8 @@ or without bridges.
 ### 6.49 A thread's changes: files, history and diffs behind the git line — gated (built 3 Nov 2026)
 
 Code: `agent_media_server/git_state.py` (`changes`, `file_diff`, `commit`,
-`commit_diff`, `web_of`), `threads.git_changes`. Pinned by
-`packages/server/tests/test_git_state.py`. David, 3 Nov 2026: "Can we make
+`commit_diff`, `web_of`), `git_who.py`, `threads.git_changes`. Pinned by
+`packages/server/tests/test_git_state.py` and `test_git_who.py`. David, 3 Nov 2026: "Can we make
 that Git status line clickable? maybe we could see diffs from it. sort of
 like what Paseo does" — read-only; then history, commit diffs and links to
 the folder's forge ("let's make it work for some other popular git
@@ -9971,6 +9971,28 @@ repositories too... including forgejo").
   either way. A folder that exists but holds nothing is `entries: []`.
   An admin device's only: a member or guest gets 403 `not_admin`
   (docs/proposals/2026-11-05-file-access.md).
+- `GET /session/git?session=<id>&who=1` (12 Nov 2026, the sheet's "N
+  changed" and "N to push" chips; David: "click on the indicator that
+  specifies how it differs from the branch or worktree to know which
+  threads hold the changes") → `{"ok", "threads": [{"session", "title",
+  "here", "files": [{"path", "how"}], "commits": [<sha12>], "at"}],
+  "unclaimed": {"files": [<path>], "commits": [<sha12>]}}`: the chats that
+  hold the folder's changes, newest first (at most 20). Read from the
+  Claude Code transcripts of sessions that ran in the checkout or a folder
+  inside it, untouched for no more than 14 days (`git_who.py`). A changed
+  file is a chat's when, after the file's last commit, the chat wrote it
+  with Edit, Write, MultiEdit or NotebookEdit and a line of that edit is
+  still in the file (`how: "edit"`), or ran a shell command naming it that
+  rewrites what it names (`sed -i`, `open(..., 'w')`, `git apply`,
+  `mv`/`cp`/`rm`…) or redirects into it, a heredoc script only while one
+  of its lines is among the file's uncommitted added lines (`how:
+  "shell"`, a guess). An unpushed commit is a chat's when its hash is in
+  the output of that chat's committing command. `here`: the chat asking.
+  What no transcript accounts for (another harness, a person at a
+  terminal, a chat in a folder outside the checkout) is `unclaimed`. Each
+  transcript is read once and then only from where it stopped, and a
+  plain `?session=` ask starts that read in the background, so a cold
+  first ask can take seconds and later ones do not.
 
 ### 6.50 The Map page's layers — gated, not a guest (built 6 Nov 2026)
 

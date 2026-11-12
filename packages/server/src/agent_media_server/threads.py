@@ -59,11 +59,13 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
 
 
 def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
-                tree: str | None = None, blob: str = "", ignored: bool = False) -> tuple[bool, dict]:
+                tree: str | None = None, blob: str = "", ignored: bool = False,
+                who: bool = False) -> tuple[bool, dict]:
     """`GET /session/git` (§6.49): the session folder's changed files, history
     and web links; with `path` that file's diff; with `commit` that commit's
     files, and with both that file's diff in it; with `tree` one folder of
-    the checkout, with `blob` one file in it (All files). Read-only."""
+    the checkout, with `blob` one file in it (All files); with `who` the
+    chats that hold its changes (git_who.py). Read-only."""
     session = (session or "").strip()
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
@@ -95,9 +97,22 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
         if got is None:
             return False, {"error": "not a changed file in this thread's folder", "status": 404}
         return True, got
+    if who:
+        from . import git_who
+
+        got = git_who.who(cwd)
+        if got is None:
+            return False, {"error": "this thread's folder is not a git checkout", "status": 404}
+        for row in got["threads"]:
+            row["title"] = sessions.title_of(row["session"]) or ""
+            row["here"] = row["session"] == session
+        return True, got
     got = git_state.changes(cwd)
     if got is None:
         return False, {"error": "this thread's folder is not a git checkout", "status": 404}
+    from . import git_who
+
+    git_who.warm(cwd)
     return True, got
 
 
