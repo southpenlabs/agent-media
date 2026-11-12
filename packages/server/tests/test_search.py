@@ -1023,3 +1023,86 @@ def test_a_question_goes_to_whichever_fast_model_answers_first(home, gate, monke
     search._NL_CACHE.clear()
     search.translate("what did I say about the gauge")
     assert tried[0][1] <= 3
+
+
+# --- an answer that will not parse is said out loud, and asked again ------------
+
+def test_an_answer_that_is_no_query_is_logged_rather_than_dropped_in_silence(
+        home, gate, monkeypatch, caplog):
+    """7c5ebe1f's `after:7d ago` hid because a model answer the parser
+    refused was dropped without a word. On the search's own path the words as
+    typed still win — but the log says what was written and why it went."""
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda *a, **k: "music bed from:nobody\n")
+    search._NL_CACHE.clear()
+    with caplog.at_level("WARNING"):
+        assert search.translate("what did I say about the music bed last week") is None
+    said = caplog.text
+    assert "music bed from:nobody" in said and "no query" in said
+    assert "from: is me or agent" in said, "the parser's own complaint"
+    # A gateway that answered nothing at all is not worth a line: there is
+    # nothing to look at.
+    caplog.clear()
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", lambda *a, **k: "")
+    search._NL_CACHE.clear()
+    with caplog.at_level("WARNING"):
+        assert search.translate("what did I say about the music bed last week") is None
+    assert caplog.text == ""
+
+
+def test_compose_hands_a_query_that_will_not_parse_back_to_the_model_once(
+        gate, monkeypatch, caplog):
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    asked = []
+
+    def fake_chat(system, user, timeout, model=None):
+        asked.append(user)
+        return "music bed from:nobody\n" if len(asked) == 1 else "music bed from:me\n"
+
+    monkeypatch.setattr("agent_media_core.intake._summary._chat", fake_chat)
+    with caplog.at_level("WARNING"):
+        got = search.compose("what did I say about the music bed")
+    assert got == {"q": "music bed from:me", "note": ""}
+    assert len(asked) == 2, "asked again, not dropped"
+    # The parser's own complaint is what it is told, in the exchange's words.
+    assert "You wrote: music bed from:nobody" in asked[1]
+    assert "could not read that: from: is me or agent" in asked[1]
+    assert "try 1" in caplog.text
+
+
+def test_compose_gives_up_after_the_second_try_and_says_so(gate, monkeypatch, caplog):
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    tries = []
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: tries.append(user) or "from:nobody ((")
+    with caplog.at_level("WARNING"):
+        assert search.compose("what did I say about the music bed") is None
+    assert len(tries) == 2, "twice, and no more"
+    assert "try 1" in caplog.text and "try 2" in caplog.text
+    # Nothing left of the deadline: the second try is not started at all.
+    fast._reset_for_tests()
+    tries.clear()
+    monkeypatch.setattr(search, "COMPOSE_TIMEOUT_S", 0)
+    with caplog.at_level("WARNING"):
+        assert search.compose("what did I say about the music bed") is None
+    assert len(tries) == 1
+
+
+def test_the_builder_is_told_the_same_dates_the_help_page_shows(gate, monkeypatch):
+    """compose shares `_translate_prompt`, so 7c5ebe1f's fix is the sheet's
+    too: the list no longer invites "7d ago", and a model that says it anyway
+    is read rather than refused."""
+    from agent_media_core.intake import fast
+
+    fast._reset_for_tests()
+    seen = []
+    monkeypatch.setattr("agent_media_core.intake._summary._chat",
+                        lambda system, user, *a, **k: seen.append(system) or "music bed after:7d ago")
+    got = search.compose("what did I say about the music bed last week")
+    assert got["q"] == "music bed after:7d ago", "read as a date, not as the word ago"
+    assert "7d, 3w, 6m, 1y" in seen[0] and "1y ago" not in seen[0]
+    assert search.parse(got["q"])["terms"] == ["music", "bed"]

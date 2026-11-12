@@ -75,6 +75,7 @@ from __future__ import annotations
 import hashlib
 import glob
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -84,6 +85,8 @@ import time
 from pathlib import Path
 
 from . import auth, transcript
+
+log = logging.getLogger("agent-media.server.search")
 
 #: Bump when the schema or what a row holds changes: the index is rebuilt.
 #: 2 (12 Nov 2026): `docs.names`, the tool names a step row holds, for `tool:`.
@@ -1903,6 +1906,28 @@ def _ask_model(system: str, user: str, seconds: int) -> str:
                      purpose_env="MEDIA_SEARCH_TRANSLATE_MODEL") or ""
 
 
+def _as_query(out: str) -> tuple[str, str]:
+    """A model's answer as `(query, why not)`: the first line it wrote, and
+    the parser's own complaint when that line is no query.
+
+    Both callers drop an answer that will not parse, which is right — a
+    query nobody can run is worse than the words as typed — but dropping it
+    in silence is how a prompt that invited `after:7d ago` went unnoticed
+    for a day (7c5ebe1f). So the drop is logged with what was written and
+    what was wrong with it.
+    """
+    line = next((ln.strip().strip("`").strip() for ln in (out or "").splitlines() if ln.strip()), "")
+    line = line[:300]
+    if not line:
+        return "", "nothing was written"
+    try:
+        if not parse(line)["terms"]:
+            return "", "no words to search for"
+    except QueryError as e:
+        return "", str(e)
+    return line, ""
+
+
 def translate_enabled() -> bool:
     return (os.environ.get("MEDIA_SEARCH_TRANSLATE", "1") or "1").strip() != "0"
 
@@ -1946,16 +1971,17 @@ def translate(q: str) -> str | None:
     if got and now - got[0] < _NL_TTL_S:
         return got[1] or None
     out = _ask_model(_translate_prompt(), (q or "").strip()[:500], TRANSLATE_TIMEOUT_S)
-    line = next((ln.strip().strip("`").strip() for ln in out.splitlines() if ln.strip()), "")
-    line = line[:300]
-    try:
-        ok = bool(line) and bool(parse(line)["terms"])
-    except QueryError:
-        ok = False
+    line, why = _as_query(out)
+    if why and out.strip():
+        # Not repaired here: this is on the way to the results, and the words
+        # as typed are a better answer than a second wait. The sheet
+        # (`compose`) does ask again.
+        log.warning("search: %r read as %r, which is no query (%s)",
+                    (q or "")[:120], out.strip()[:120], why)
     if len(_NL_CACHE) >= _NL_MAX:
         _NL_CACHE.clear()
-    _NL_CACHE[key] = (now, line if ok else "")
-    return line if ok else None
+    _NL_CACHE[key] = (now, line)
+    return line or None
 
 
 #: A refinement exchange carried back: how many turns are read, and how long
@@ -1963,6 +1989,9 @@ def translate(q: str) -> str | None:
 #: chat — past that the oldest turns are dropped.
 COMPOSE_TURNS = 6
 COMPOSE_CHARS = 300
+#: Less of the deadline than this left, and the second try is not started:
+#: a call with a second to live is a second of somebody waiting for nothing.
+COMPOSE_RETRY_FLOOR_S = 3
 
 
 def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
@@ -1978,15 +2007,22 @@ def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
     `{"q": <the query>, "note": <one line, or "">}` — the note is for
     something they asked for that the operators cannot say, which is worth
     showing rather than pretending. `None` when the gateway is off, does not
-    answer, or answers with nothing searchable: the caller leaves the words
-    alone and says so.
+    answer, or answers with nothing searchable even after being told so:
+    the caller leaves the words alone and says the assistant could not be
+    reached.
+
+    **A query that will not parse is handed back to the model once**, with
+    the parser's own complaint, inside what is left of the deadline. The
+    sheet is a conversation and somebody is watching it, so one more turn is
+    cheaper than an answer thrown away — and an answer thrown away in
+    silence is how a prompt that invited `after:7d ago` stayed hidden
+    (7c5ebe1f). The search's own path does not do this: there the words as
+    typed are a better answer than a second wait.
 
     Never cached: the whole point is that the next call is different.
     """
     if not translate_enabled() or not (ask or "").strip():
         return None
-    from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _chat, _int_env
-
     said = [(ask or "").strip()[:500]]
     for turn in (tried or [])[-COMPOSE_TURNS:]:
         q = str(turn.get("q") or "").strip()[:COMPOSE_CHARS]
@@ -2001,9 +2037,31 @@ def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
         "query you may add one short line, starting with 'note: ', for "
         "something they asked for that the query language cannot say — "
         "nothing else, and nothing when the query says it all.")
-    out = _ask_model(system, "\n".join(said), COMPOSE_TIMEOUT_S) or ""
+    user = "\n".join(said)
+    deadline = time.monotonic() + COMPOSE_TIMEOUT_S
+    out = _ask_model(system, user, COMPOSE_TIMEOUT_S)
+    for attempt in (1, 2):
+        query, note = _compose_lines(out)
+        bad = _as_query(query)[1] if query else "nothing was written"
+        if not bad:
+            return {"q": query, "note": note}
+        log.warning("compose: %r read as %r, which is no query (%s), try %d",
+                    ask[:120], (out or "").strip()[:120], bad, attempt)
+        left = int(deadline - time.monotonic())
+        if attempt == 2 or left < COMPOSE_RETRY_FLOOR_S:
+            return None
+        # The parser's complaint is just another correction, in the same
+        # words the exchange is already written in.
+        out = _ask_model(system, f"{user}\nYou wrote: {query or '(nothing)'}\n"
+                                 f"The search box could not read that: {bad}. "
+                                 f"Write the query again, correctly.", left)
+    return None
+
+
+def _compose_lines(out: str | None) -> tuple[str, str]:
+    """A compose answer split into its query and its `note:` line."""
     query, note = "", ""
-    for raw in out.splitlines():
+    for raw in (out or "").splitlines():
         line = raw.strip().strip("`").strip()
         if not line:
             continue
@@ -2011,11 +2069,7 @@ def compose(ask: str, tried: list[dict] | None = None) -> dict | None:
             note = note or line[5:].strip()[:COMPOSE_CHARS]
         elif not query:
             query = line[:COMPOSE_CHARS]
-    try:
-        ok = bool(query) and bool(parse(query)["terms"])
-    except QueryError:
-        ok = False
-    return {"q": query, "note": note} if ok else None
+    return query, note
 
 
 def compose_request(body: dict, bearer: str) -> tuple[bool, dict]:
