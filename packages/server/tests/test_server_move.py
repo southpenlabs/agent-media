@@ -380,3 +380,20 @@ def test_the_old_mailbox_is_retired_and_a_rollback_brings_it_back(tmp_path):
     assert sm.restore_mailbox(got)
     assert (d / "mail.sqlite3").read_text() == "the mail" and not (d / "mail.sqlite3.moved").exists()
     assert not sm.restore_mailbox(got)                         # already back
+
+
+def test_the_move_says_when_the_mail_does_not_go_with_it(rig):
+    fake, _made = rig
+    fake.fail["notmuch count"] = (0, "170736")
+    real = fake.__call__
+
+    def run(cmd, host="", timeout=0):
+        if "notmuch count" in cmd:
+            return (0, "170736") if not host else (1, "")
+        return real(cmd, host, timeout)
+
+    said: list[str] = []
+    assert sm.move("red2", NAME, [], yes=True, foreground=True, run=run, out=said.append) == 0
+    said2: list[str] = []
+    sm.status(out=said2.append)
+    assert any("has email in notmuch and red2 has none" in ln for ln in said2)

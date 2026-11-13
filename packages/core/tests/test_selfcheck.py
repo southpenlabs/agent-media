@@ -387,3 +387,45 @@ def test_agent_mail_that_cannot_run_is_a_problem_only_on_the_session_host(monkey
     assert any("agent-mail is installed but does not run" in p and "checkout not found" in p
                for p in cli.health_problems(here))
     assert elsewhere["agent_mail"] == "broken" and cli.health_problems(elsewhere) == []
+
+
+def test_a_server_that_reads_email_with_no_mail_here_is_a_problem(monkeypatch):
+    """The server reads email from this host's notmuch: on a machine without
+    it the app's mail goes quiet (red2 the day after the move)."""
+    import shutil
+    import subprocess
+
+    class R:
+        def __init__(self, out, rc=0):
+            self.stdout, self.returncode = out, rc
+
+    env = {"v": "MEDIA_TIMELINE_SOURCES=texts,notes,calls,email MEDIA_X=1"}
+    count = {"out": "170736", "rc": 0}
+
+    def fake(argv, **kw):
+        if argv[:3] == ["systemctl", "--user", "show"]:
+            return R(env["v"])
+        return R(count["out"], count["rc"])
+
+    monkeypatch.delenv("MEDIA_TIMELINE_NOTMUCH", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/notmuch")
+    f: dict = {}
+    cli._mail_store_facts(f, True)
+    assert f["mail_store"] == "ok" and cli.health_problems({"selfcheck": "1", **f}) == []
+    count.update(out="0")
+    f = {}
+    cli._mail_store_facts(f, True)
+    assert any("reads email" in p for p in cli.health_problems({"selfcheck": "1", **f}))
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    f = {}
+    cli._mail_store_facts(f, True)
+    assert f["mail_store_why"] == "notmuch is not installed"
+    # Email off, or the server not here: nothing to say.
+    env["v"] = "MEDIA_TIMELINE_SOURCES=texts,notes"
+    f = {}
+    cli._mail_store_facts(f, True)
+    assert f == {}
+    f = {}
+    cli._mail_store_facts(f, False)
+    assert f == {}

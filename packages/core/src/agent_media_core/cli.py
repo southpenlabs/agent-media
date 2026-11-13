@@ -8626,6 +8626,7 @@ def selfcheck_facts() -> "dict[str, str]":
     if parked:
         facts["parked"] = ",".join(parked)   # reported, never a problem
     _agent_mail_facts(facts, any(s == "up" and n.endswith("sessiond") for n, s in services))
+    _mail_store_facts(facts, any(s == "up" and n.endswith("visual-canvas") for n, s in services))
     loops = _crash_loops()
     if loops:
         facts["crashloop"] = ",".join(f"{n}:{c}" for n, c in loops)
@@ -9097,6 +9098,47 @@ def _agent_mail_facts(facts: "dict[str, str]", session_host: bool) -> None:
             facts["agent_mail_needed"] = "1"
 
 
+def _mail_store_facts(facts: "dict[str, str]", server_here: bool) -> None:
+    """The server's email, where it runs here and reads email: `mail_store=
+    ok|missing`. It opens a message, reads one aloud and finds a contact's
+    mail in this host's notmuch, so a server whose machine has no notmuch
+    (or an empty one) has nothing to show and says nothing — red2 for a day
+    after the server moved there (13–14 Nov 2026). Only where the server's
+    own unit turns email on (`email` in its MEDIA_TIMELINE_SOURCES): an
+    install without email has nothing to say."""
+    import shutil
+    import subprocess
+
+    if not server_here:
+        return
+    try:
+        env = subprocess.run(["systemctl", "--user", "show", "agent-media-visual-canvas",
+                              "-p", "Environment", "--value"], capture_output=True, text=True,
+                             timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    srcs = next((w.split("=", 1)[1] for w in env.split()
+                 if w.startswith("MEDIA_TIMELINE_SOURCES=")), "")
+    if "email" not in [x.strip() for x in srcs.split(",")]:
+        return
+    exe = os.environ.get("MEDIA_TIMELINE_NOTMUCH") or shutil.which("notmuch")
+    n = ""
+    if exe:
+        try:
+            r = subprocess.run([exe, "count"], capture_output=True, text=True, timeout=20,
+                               stdin=subprocess.DEVNULL)
+            n = r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            n = ""
+    if n.isdigit() and int(n) > 0:
+        facts["mail_store"] = "ok"
+        facts["mail_messages"] = n
+    else:
+        facts["mail_store"] = "missing"
+        facts["mail_store_why"] = ("notmuch is not installed" if not exe
+                                   else "notmuch has no mail here")
+
+
 def _in_release(mod: "Path") -> bool:
     """Whether the running module is inside a built release: a folder with
     `RELEASE.json` above its venv (release.py writes it last)."""
@@ -9117,6 +9159,10 @@ def health_problems(facts: "dict[str, str]") -> "list[str]":
         return []      # too old to selfcheck; skew reporting still applies
     if facts.get("install") == "copy":
         problems.append("install is a copy, not editable — git pull won't deploy")
+    if facts.get("mail_store") == "missing":
+        problems.append("the server reads email from this host's notmuch, and "
+                        f"{facts.get('mail_store_why') or 'there is none'}: opening, reading out "
+                        "and a contact's mail have nothing here (move the mail with the server)")
     if facts.get("agent_mail") == "broken" and facts.get("agent_mail_needed") == "1":
         problems.append("agent-mail is installed but does not run on the session host, so mail "
                         f"to its chats is lost: {facts.get('agent_mail_why') or 'no reason given'}")

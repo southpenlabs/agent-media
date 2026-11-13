@@ -235,6 +235,21 @@ def step_check(st: dict, run) -> None:
     rc, got = run(f"mkdir -p {shlex.quote(st['there_store'] + '/store')} && "
                   f"chmod 700 {shlex.quote(st['there_store'])}", to, 30)
     _need(rc, got, f"making {st['there_store']} on {to}")
+    # Email is the host's, not the server's state, and is not carried: the
+    # server reads it from this host's notmuch, so a machine without one
+    # leaves the app's mail empty (13 Nov 2026). Said, not stopped.
+    if _count(run, "") and not _count(run, to):
+        st.setdefault("warnings", []).append(
+            f"this machine has email in notmuch and {to} has none: the server reads it from "
+            "its own machine, so the app's mail will be empty there until the maildir, its "
+            "sync and its index move too (and only one machine may sync it)")
+
+
+def _count(run, host: str) -> int:
+    """How many messages notmuch has here or on `host`; 0 for none or no notmuch."""
+    rc, got = run("command -v notmuch >/dev/null && notmuch count", host, 60)
+    tail = got.strip().splitlines()[-1] if got.strip() else ""
+    return int(tail) if rc == 0 and tail.isdigit() else 0
 
 
 def step_keep(st: dict, run) -> None:
@@ -886,6 +901,8 @@ def status(*, out=print) -> int:
         return 0
     out(f"to {st.get('to')} as {st.get('name')} (was {st.get('old') or 'unnamed'})")
     out(f"done: {', '.join(st.get('done') or []) or 'nothing'}")
+    for w in st.get("warnings") or []:
+        out(f"! {w}")
     if st.get("failed"):
         out(f"failed at {st['failed']['step']}: {st['failed']['why']}")
     elif st.get("rolled_back"):
