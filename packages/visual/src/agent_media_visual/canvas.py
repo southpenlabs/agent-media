@@ -2304,6 +2304,10 @@ def main() -> None:
     if sys.argv[1:2] == ["devices"]:         # `media-visual-canvas devices [--revoke|--enrol ID]`
         from agent_media_server import devices as _devices
         raise SystemExit(_devices.cli_devices(sys.argv[2:]))
+    # Before any thread: the canvas answers each request on one, and glibc's
+    # per-thread arenas kept 811 MB of freed memory on red2 (malloc_arenas).
+    from agent_media_core import malloc_arenas
+    malloc_arenas.cap()
     ap =argparse.ArgumentParser(description="agent-media visual canvas")
     ap.add_argument("--port", type=int,
                     default=int(os.environ.get("MEDIA_VISUAL_PORT") or DEFAULT_PORT))
