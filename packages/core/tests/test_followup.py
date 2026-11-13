@@ -94,3 +94,20 @@ def test_the_agents_actions_are_filed_beside_the_follow_up(monkeypatch, tmp_path
     assert fu.load_actions("other") is None
     fu.save_actions("", acts, "k")
     assert fu.load_actions("") is None
+
+
+def test_a_short_reply_is_framed_and_the_models_meta_talk_dropped(monkeypatch, tmp_path):
+    """14 Nov 2026: "You're welcome. Enjoy the bigger text." came back as a
+    chip asking for the conversation — the reply is now framed, and a line
+    longer than a chip can be is not filed."""
+    _state(monkeypatch, tmp_path)
+    seen = {}
+    def chat(p, t, timeout, model=None):
+        seen["text"] = t
+        return ("I need to see the coding assistant's latest reply to predict what "
+                "the person would say next. Please share the conversation you'd "
+                "like me to continue from.\nthanks")
+    monkeypatch.setattr(_summary, "_chat", chat)
+    assert fu.suggest_followup("You're welcome. Enjoy the bigger text.", "sess-1", "k1") == "thanks"
+    assert seen["text"] == "<reply>\nYou're welcome. Enjoy the bigger text.\n</reply>"
+    assert fu.load_followup("sess-1")["replies"] == ["thanks"]

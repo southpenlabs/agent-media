@@ -40,8 +40,15 @@ DEFAULT_PROMPT = (
     "the way they would say it, like \"go with projects, do the relabel\" or "
     "\"why did the second test fail?\". Fewer when fewer fit; one is fine. At "
     "most twelve words each. No numbering, no quotes, no preamble, no "
-    "explanation, no trailing full stop. Reply with the lines only."
+    "explanation, no trailing full stop. Reply with the lines only. The reply "
+    "comes inside <reply> tags; if it closes the work (thanks, goodbye), the "
+    "lines can close it too, like \"thanks\" or \"what's next\"."
 )
+
+#: A chip longer than this is not a reply but the model talking about the
+#: task ("I need to see the coding assistant's latest reply…", 14 Nov 2026):
+#: the prompt asks for twelve words at most.
+MAX_WORDS = 16
 
 #: How many model lines are kept as chips (the agent's marker may give four).
 MODEL_REPLIES = 3
@@ -147,7 +154,7 @@ def _clean_lines(out: str) -> list[str]:
     lines: list[str] = []
     for raw in (out or "").splitlines():
         line = _clean(re.sub(r"^\s*(?:\d+[.)]|[-•*])\s*", "", raw))
-        if line and len(line) <= 200 and line.lower() not in {x.lower() for x in lines}:
+        if line and len(line) <= 200 and len(line.split()) <= MAX_WORDS and line.lower() not in {x.lower() for x in lines}:
             lines.append(line)
     return lines[:MODEL_REPLIES]
 
@@ -163,7 +170,10 @@ def suggest_followup(raw_reply: str, session: str, key: str) -> str | None:
     timeout = _int_env("MEDIA_FOLLOWUP_TIMEOUT",
                        _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
     model = os.environ.get("MEDIA_FOLLOWUP_MODEL") or None
-    lines = _clean_lines(_chat(prompt, text, timeout, model=model) or "")
+    # Framed, so a short reply ("You're welcome. Enjoy the bigger text.") is
+    # read as the assistant's words and not as a message to the model.
+    framed = f"<reply>\n{text}\n</reply>"
+    lines = _clean_lines(_chat(prompt, framed, timeout, model=model) or "")
     if not lines:
         return None
     save_followup(session, lines[0], key, replies=lines, source="model")
