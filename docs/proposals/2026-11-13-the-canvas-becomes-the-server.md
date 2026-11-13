@@ -225,10 +225,11 @@ this file, as fewer-services did with its §4d.
   session host from before it sends them all and the server filters, so
   the two can be updated in either order. `sessiond.records()` keeps each
   file's parse until the file changes (the stat is the test; a record is
-  renamed into place, so nothing can be stale). **Not deployed**: the
-  server is left running until the three-hour figure for step 0 is in, so
-  the two are measured apart; and the saving needs the session host on the
-  new release too, which is a drain of the running chats.
+  renamed into place, so nothing can be stale). **Deployed 14 Nov 2026,
+  09:10** (release 951fd93f, the server and the session host together,
+  drained): the poll's request is now 5 views and 0.01 MB in 9 ms,
+  against 702 views and 0.82 MB in 63 ms for the whole list. The server's
+  memory over a day on this release is the next figure to take.
 - Still whole: `/targets` (the thread list) and search's "which sessions
   are headless" ask for every view. Next in change 4.
 - **Step 1** (the three-hour figure, the doctor line): the figure is in
