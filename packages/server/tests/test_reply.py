@@ -112,6 +112,66 @@ def test_a_stale_pane_id_falls_through_to_a_revive(monkeypatch, _allowed):
     assert ok is True and detail["pane"] == "%9"
 
 
+def test_a_dead_session_is_not_revived_into_a_signed_out_agent(monkeypatch, _allowed):
+    """The window would open on the harness's sign-in screen, and the message
+    be typed into it (red2, 13 Nov 2026: Codex kept it as its API key)."""
+    monkeypatch.setattr(sessions, "live_sessions", dict)
+    monkeypatch.setattr(send, "_agent_unready",
+                        lambda agent, profile="": f"{agent} is signed out on this host")
+    monkeypatch.setattr(send, "open_window", lambda *a, **k: pytest.fail("opened"))
+    monkeypatch.setattr(send, "_send_to_pane", lambda p, t: pytest.fail("typed"))
+    ok, detail = send.reply("hi", "tok", session=SESS)
+    assert ok is False and detail["status"] == 409 and detail["fix"] == "harnesses"
+    assert "signed out" in detail["error"]
+
+
+_CODEX_SIGN_IN_SCREEN = """
+  Welcome to Codex, OpenAI's command-line coding agent
+  Choose how you want to use Codex.
+> 1. Sign in with ChatGPT
+     Usage included with Plus, Pro, Business, and Enterprise plans
+  2. Sign in with Device Code
+     Sign in from another device with a one-time code
+  3. Sign in another way
+     Use an API key or another provider
+  Press enter to continue
+"""
+
+
+def test_a_message_is_not_typed_into_codex_sign_in_screen(monkeypatch, _allowed):
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "codex")
+    monkeypatch.setattr(panes, "alive", lambda p: True)
+    monkeypatch.setattr(panes, "capture", lambda p, lines=40, ansi=False: _CODEX_SIGN_IN_SCREEN)
+    monkeypatch.setattr(send, "_send_to_pane", lambda p, t: pytest.fail("typed"))
+    ok, detail = send.reply("how do we restore calendar access?", "tok", session=SESS)
+    assert ok is False and detail["status"] == 409 and detail["fix"] == "harnesses"
+    assert detail["error"] == "codex is signed out on this host"
+
+
+def test_a_message_is_not_typed_over_a_codex_prompt(monkeypatch, _allowed):
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "codex")
+    monkeypatch.setattr(panes, "alive", lambda p: True)
+    monkeypatch.setattr(panes, "capture",
+                        lambda p, lines=40, ansi=False: "  Hooks need review\n› 1. Trust\n  2. Not now\n")
+    monkeypatch.setattr(send, "_send_to_pane", lambda p, t: pytest.fail("typed"))
+    ok, detail = send.reply("hi", "tok", session=SESS)
+    assert ok is False and detail["status"] == 409 and "question" in detail["error"]
+
+
+def test_a_codex_composer_still_takes_a_message(monkeypatch, _allowed):
+    sent = []
+    monkeypatch.setattr(sessions, "live_sessions", lambda: {SESS: "%7"})
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "codex")
+    monkeypatch.setattr(panes, "alive", lambda p: True)
+    monkeypatch.setattr(panes, "capture",
+                        lambda p, lines=40, ansi=False: "› Ask Codex to do anything\n")
+    monkeypatch.setattr(send, "_send_to_pane", lambda p, t: sent.append(t) or "")
+    ok, detail = send.reply("hi", "tok", session=SESS)
+    assert ok is True and sent
+
+
 def test_a_window_that_never_comes_up_is_reported(monkeypatch, _allowed):
     monkeypatch.setattr(sessions, "live_sessions", dict)
     monkeypatch.setattr(send, "open_window", lambda *a, **k: ("%9", "%9 did not come up"))

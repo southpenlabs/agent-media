@@ -663,6 +663,47 @@ def _agent_unready(agent: str, profile: str = "") -> str:
             if state == "out" else "")
 
 
+def _revive_unready(session: str, agent: str) -> dict:
+    """The refusal for reviving `session` when its agent would not answer, or {}.
+
+    An ended chat is reopened with the harness's own resume, and a signed-out
+    harness opens on its sign-in screen instead: on red2, 13 Nov 2026, a
+    Codex chat came back that way and the next message was typed into the
+    sign-in menu, which took it as the API key and saved it.
+    """
+    from agent_media_core import harnesses
+
+    try:
+        profile = harnesses.profile_of(session) or ""
+    except Exception:          # noqa: BLE001 - no profile found is the default one
+        profile = ""
+    why = _agent_unready(agent, profile) if profile else _agent_unready(agent)
+    return {"error": why, "status": 409, "agent": agent, "fix": "harnesses"} if why else {}
+
+
+#: Codex's own sign-in menu, which a signed-out Codex shows in place of a chat.
+_CODEX_SIGN_IN = re.compile(r"Sign in with ChatGPT|Sign in with Device Code")
+
+
+def _pane_blocked(pane: str, agent: str) -> dict:
+    """The refusal for typing a message into `pane` while a prompt holds it, or {}.
+
+    Codex only: its sign-in menu, its trust prompts and its questions take
+    keys, not words, so a message typed over one is lost or, on the sign-in
+    menu, kept as the API key. A question is answered with `answer`.
+    """
+    if agent != "codex":
+        return {}
+    cap = panes.strip_ansi(panes.capture(pane, lines=40, ansi=False))
+    if panes.classify(cap, agent) != "approval":
+        return {}
+    if _CODEX_SIGN_IN.search(cap):
+        return {"error": "codex is signed out on this host", "status": 409,
+                "agent": agent, "fix": "harnesses"}
+    return {"error": "codex is waiting on a question in its window: answer that first",
+            "status": 409, "agent": agent}
+
+
 #: Agents whose threads are listed and read, but which a new chat is not
 #: started in yet. Gemini CLI (17 Oct 2026): its fresh-session id, its
 #: composer and its trust prompt are not measured on a signed-in pane — the
@@ -938,6 +979,9 @@ def _resume_pane(session: str) -> tuple[bool, dict]:
         return True, {"session": session, "pane": pane, "live": True, "opened": False}
     if not sessions.session_exists(session):
         return False, {"error": f"session {session[:8]} has no transcript to resume", "status": 404}
+    why = _revive_unready(session, sessions.agent_of(session))
+    if why:
+        return False, why
     pane, err = open_window(session, sessions.transcript_cwd(session), resume=True,
                             agent=sessions.agent_of(session))
     if err:
@@ -1293,10 +1337,16 @@ def _deliver_pane(session: str, body: str, text: str) -> tuple[bool, dict]:
         # would silently answer as someone else.
         return False, {"error": f"session {session[:8]} has no transcript to resume"}
     else:
+        why = _revive_unready(session, agent)
+        if why:
+            return False, why
         pane, err = open_window(session, sessions.transcript_cwd(session), resume=True, agent=agent)
         if err:
             return False, {"error": err, "pane": pane or None}
         opened = True
+    blocked = _pane_blocked(pane, agent)
+    if blocked:
+        return False, {**blocked, "session": session, "pane": pane, "opened": opened}
     # A turn running now: the agent takes the words when it is ready (Claude
     # Code at its next tool step, or as the next turn), so the answer says
     # `queued`, as a headless send's does, and the app marks the message
