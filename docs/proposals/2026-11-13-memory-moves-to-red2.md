@@ -131,7 +131,83 @@ between would need carrying back by hand (an export of what was added
 since), which is the reason to keep the window short and to do it at a
 quiet hour.
 
+## Dotfiles follows (sam, 13 Nov 2026)
+
+David, 13 Nov 2026: "let's get [dot]files up to speed with the agent-memory
+changes too ... Maybe that should go in the proposal first". Dotfiles is
+where a host's roles are listed and provisioned, and today it describes the
+memory services as they were on red5 in June. Left alone it undoes this
+plan: its `agent-memory` role installs `hippocampus.service` under the old
+name and enables and starts it wherever `~/.config/agent-memory/hippocampus.env`
+exists, which since step 1 includes red2.
+
+What dotfiles has about memory, and what each becomes:
+
+| in dotfiles | today | becomes |
+|---|---|---|
+| `ansible/roles/agent-memory` | clones `sacred-brain.git`, pipx, templates `hippocampus.service`, enables and starts it | clones `agent-memory.git`, pipx, links the renamed units from the checkout's `ops/systemd/user-renamed/`; no unit template of its own; starts nothing unless the host says so |
+| `profiles.yaml` hosts | `agent_memory` on red5 only | on red2 only, changed at the cutover, not before |
+| `ansible/host_vars/red2.yml` | nothing about memory | `agent_memory_enabled: true`, set at the cutover |
+| `packages/zsh/.config/shell/hosts/red2.env.zsh` | `AGENT_MEMORY_HIPPOCAMPUS_URL=http://red5:54321` | `http://127.0.0.1:54321` |
+| `packages/bin/.local/bin/red5-backup-pull` | copies the store's SQLite and `governor/state.db` from red5 | those two entries go when red5's copy is removed (step 6); until then they skip themselves if the files are gone |
+
+Three rules for the rewritten role, each from something that went wrong or
+nearly did:
+
+1. **It never starts a store by default.** `agent_memory_enabled` is false
+   unless a host's vars say true. Provisioning a host and running the one
+   store are different acts; only the cutover does the second.
+2. **It does nothing on a host where an old-named unit is still enabled or
+   running**, and says so. Until red5's units are disabled, a playbook run
+   there must not lay the new names beside the old.
+3. **The units come from the agent-memory checkout, as links**, not from a
+   template in dotfiles. A second copy of a unit file is how
+   `hippocampus.service` on red5 came to differ from the repo's.
+
+Order:
+
+- **Now, before the cutover** (changes nothing running): the role rewritten
+  to the three rules; `agent_memory` stays on red5 in `profiles.yaml` and
+  rule 2 makes the role a no-op there.
+- **At the cutover**, with step 4: `profiles.yaml` moves `agent_memory` from
+  red5 to red2; `host_vars/red2.yml` gets `agent_memory_enabled: true`;
+  `red2.env.zsh` goes to loopback. One commit, so the description of the
+  fleet changes when the fleet does.
+- **After**, with step 6: the two red5 entries leave `red5-backup-pull`.
+
+Not in dotfiles, so not fixed by any of this:
+
+- `~/.config/hippocampus.env`, the client file, is placed by hand on each
+  host. Step 4 said "dotfiles carries the file, so this is one change there
+  and a rollout"; it does not. It is an edit on each machine: loopback for
+  both URLs on red2, `red2:54321` elsewhere. `GOVERNOR_URL` only works on the
+  host the policy layer runs on, since that stays on loopback.
+- `~/.config/agent-memory/secrets.env` on red2 is a plain copy of red5's.
+  On red5 it is rendered from the sops store; red2 has no `dotfiles-secrets`
+  command, so a key rotation would not reach it.
+- The line in agent-config's global `CLAUDE.md` that names `red5:54321`
+  (`harnesses/claude/.claude/CLAUDE.md`), and the header of
+  `agent-memory-search`.
+- The store binds from `HIPPOCAMPUS_HOST` and `HIPPOCAMPUS_PORT` in the
+  environment, 0.0.0.0:54321 when unset; `host` and `port` in
+  `hippocampus.toml` are not read for it. A test of the binary must set
+  both (step 1's first test did not, and stood on the real port for 40 s).
+
+The other roles David chose for red2 ("Everything red5 has", decision 4 of
+the host items): `audio_server`, `ci_runner` and `memory_caps` describe
+what red2 already runs and are listed now. `liberator` and `meridian` are
+the gateways: they wait for the gateway's own move, for the reason
+`agent_memory` waits for this one.
+
 ## Progress
+
+- **Step 1 done, 13 Nov 2026 17:43** (sam): red2 has the checkout
+  (`~/projects/sacred-brain` a link to it, as on red5), the pipx venv, the
+  ten renamed unit files linked and disabled (agent-memory 286195c,
+  `ops/systemd/user-renamed/`), and `~/.config/agent-memory/` with the two
+  gateway addresses pointed at red5 over the tailnet. The store and the
+  policy layer were run against a scratch state folder on 127.0.0.1:55321
+  and :55323 and stopped. Nothing on red5 was changed.
 
 - **Step 2 done, 13 Nov 2026 17:35** (David: "sounds good. let's do it"):
   Claude's memory files merged red5 → red2. 594 files added, 60 already
