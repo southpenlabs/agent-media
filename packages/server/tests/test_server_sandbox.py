@@ -111,17 +111,48 @@ class Fake:
         if "sandbox start" in cmd:
             return 0, json.dumps({"ok": True, "fenced": {"chats_ended": 3, "resumes_dropped": 2,
                                                          "credentials_deleted": ["a"],
-                                                         "refresh_tokens_blanked": 1}})
+                                                         "refresh_tokens_blanked": 1},
+                                  "practice": {"settle": {"adopted": 13, "not_resumed": 1,
+                                                          "default_host_unset": True,
+                                                          "folders_missing": [
+                                                              {"cwd": "/x", "chats": 2}]},
+                                               "units": {"written": 36, "would_enable": 22,
+                                                         "release_can_run": 25, "other": []}}})
         if "server/probe?nonce=" in cmd:
             nonce = cmd.split("nonce=")[1].rstrip("'")
             return 0, json.dumps({"ok": True, "proof": self.proof_of(nonce)})
         return 0, "ok"
 
 
+def test_settle_is_practised_on_the_copy_not_on_this_machines_state(copy, monkeypatch, tmp_path):
+    r, sd, _cfg = copy
+    from agent_media_server import server_settle, sessiond_remote
+
+    monkeypatch.setattr(sessiond_remote.socket, "gethostname", lambda: "red2")
+    real_state = server_settle._state()
+    own = tmp_path / "own"
+    own.mkdir()
+    (own / "elsewhere.json").write_text(json.dumps({"session": "elsewhere", "state": "waiting",
+                                                    "turns": 9}))
+    (r["home"] / ".config" / "agent-media.env").write_text("MEDIA_SESSIOND_DEFAULT_HOST=red2\n")
+    got = sb.practise_settle(sb.root(), own)
+    assert got["adopted"] == 1 and got["default_host_unset"] and got["not_resumed"] == 2
+    mine = json.loads((sd / "elsewhere.json").read_text())
+    assert "host" not in mine and mine["turns"] == 9
+    # Nothing was written to, and nothing still points at, the copy from here.
+    assert server_settle._state() == real_state
+    assert not (real_state / "moved-chats.json").exists()
+    assert (r["state"] / "moved-chats.json").exists()
+
+
 @pytest.fixture
 def rig(monkeypatch):
     monkeypatch.setattr(backup, "backup", lambda **kw: {"ok": True, "id": "s1"})
     monkeypatch.setattr(backup, "sync", lambda **kw: {"ok": True, "id": "s2", "seconds": 4.0})
+    monkeypatch.setitem(sm.RUN, "units", lambda st, run: st.update(units={"count": 2}))
+    monkeypatch.setitem(sm.RUN, "transcripts", lambda st, run: st.setdefault(
+        "transcripts", []).append({"ok": True, "files": 5, "seconds": 1.0}))
+    monkeypatch.setattr(sm, "_rsync", lambda argv, stdin="": pytest.fail(f"a real rsync: {argv}"))
     monkeypatch.setattr(server_address, "reaches_here",
                         lambda url, timeout=15.0: (False, "no DNS yet"))
     return Fake()
@@ -139,6 +170,9 @@ def test_a_rehearsal_stops_nothing_here_and_overwrites_nothing_there(rig):
                in c for c in cmds)
     text = "\n".join(said)
     assert "2 resumes dropped" in text and "final sync took 4.0 s" in text
+    assert "13 of red2's own chats got their record back" in text and "missing: /x (2 chats)" in text
+    assert "36 carried, 22 would be enabled" in text and "transcripts: 5 paths" in text
+    assert any("--units /home/other/.local/share/agent-media-move/units" in c for c in cmds)
     assert "not reachable yet (no DNS yet)" in text
 
 

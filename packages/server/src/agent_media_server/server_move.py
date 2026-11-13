@@ -367,7 +367,7 @@ def step_sync(st: dict, run) -> None:
     st["snapshot"] = got.get("id")
     st["sync_seconds"] = got.get("seconds")
     # The transcripts' second pass: what the chats wrote since the first.
-    if st.get("transcripts") is not None and not st.get("rehearsal"):
+    if st.get("transcripts") is not None:
         RUN["transcripts"](st, run)
 
 
@@ -474,10 +474,12 @@ def rehearse(to: str, name: str, *, yes: bool = False, run=sh, out=print) -> int
         out("server move: --to <host> and --name https://<address>, please")
         return 2
     for line in (f"1 check    {to}: ssh, a release with `media server sandbox`",
-                 f"2 backup   here → {to}:~/{STORE}/store, services up (minutes)",
-                 "3 sync     the second pass, timed (nothing here is stopped)",
-                 f"4 sandbox  {to}: restore into a throwaway folder, fence it (no chat resumed, "
-                 "no outside credential kept), start its own session host and server",
+                 f"2 backup   here → {to}:~/{STORE}/store, services up (minutes); the chats' "
+                 "transcripts (really carried) and this server's unit files",
+                 "3 sync     the second pass of both, timed (nothing here is stopped)",
+                 f"4 sandbox  {to}: restore into a throwaway folder, practise `settle` and the "
+                 "unit files on the copy, fence it (no chat resumed, no outside credential "
+                 "kept), start its own session host and server",
                  f"5 verify   the copy answers as this server on {to}, and at {new} if its "
                  "DNS is there",
                  f"after      `media server move --to {to} --rehearse-stop` removes it"):
@@ -490,6 +492,7 @@ def rehearse(to: str, name: str, *, yes: bool = False, run=sh, out=print) -> int
     def sandbox(st: dict, run) -> None:
         rc, got = run(_there(st, "media server sandbox start --from "
                              f"{shlex.quote(st['there_store'] + '/store')} "
+                             f"--units {shlex.quote(st['there_store'] + '/units')} "
                              f"--name {shlex.quote(new)}"), to)
         try:
             st["sandbox"] = json.loads(got[got.index("{"):])
@@ -519,7 +522,8 @@ def rehearse(to: str, name: str, *, yes: bool = False, run=sh, out=print) -> int
 
     RUN.update(sandbox=sandbox, local=local)
     try:
-        rc = _do(st, ("check", "backup", "sync", "sandbox", "local"), run, out)
+        rc = _do(st, ("check", "backup", "transcripts", "units", "sync", "sandbox", "local"),
+                 run, out)
     finally:
         RUN.pop("sandbox", None)
         RUN.pop("local", None)
@@ -530,6 +534,28 @@ def rehearse(to: str, name: str, *, yes: bool = False, run=sh, out=print) -> int
         f"dropped, {len(f.get('credentials_deleted') or [])} credential files deleted, "
         f"{f.get('refresh_tokens_blanked', 0)} refresh tokens blanked")
     out(f"final sync took {st.get('sync_seconds')} s")
+    tr = st.get("transcripts") or []
+    if tr:
+        out("transcripts: " + "; ".join(
+            f"{t.get('files', 0)} paths in {t.get('seconds', '?')} s" if t.get("ok")
+            else str(t.get("skipped") or t.get("error")) for t in tr))
+    pr = (st.get("sandbox") or {}).get("practice") or {}
+    se = pr.get("settle") or {}
+    if se:
+        out(f"settle: {se.get('adopted', 0)} of {to}'s own chats got their record back "
+            f"({se.get('adopted_without_own', 0)} without one), {se.get('not_resumed', 0)} cut-off "
+            f"chats not resumed, default host unset: {se.get('default_host_unset')}, "
+            f"{len(se.get('folders_missing') or [])} chat folders missing"
+            + (f" — {se.get('error')}" if se.get("error") else ""))
+        for f in (se.get("folders_missing") or [])[:8]:
+            out(f"  missing: {f.get('cwd')} ({f.get('chats')} chats)")
+    un = pr.get("units") or {}
+    if un:
+        out(f"units: {un.get('written', 0)} carried, {un.get('would_enable', 0)} would be enabled, "
+            f"the release can run {un.get('release_can_run', 0)}"
+            + (f" — {un.get('error')}" if un.get("error") else ""))
+        for ln in un.get("other") or []:
+            out(f"  {ln}")
     pub = st.get("public") or {}
     out(f"{new}: answers as this server" if pub.get("ok")
         else f"{new}: not reachable yet ({pub.get('why')}); the copy answers on {to} itself")

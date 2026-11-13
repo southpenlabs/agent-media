@@ -193,7 +193,61 @@ def status() -> dict:
             "running": all(v == "active" for v in up.values())}
 
 
-def start(store: str, name: str) -> dict:
+class _env:
+    """Environment variables set for a block, then put back."""
+
+    def __init__(self, **kv: str) -> None:
+        self.kv, self.old = kv, {}
+
+    def __enter__(self):
+        for k, v in self.kv.items():
+            self.old[k] = os.environ.get(k)
+            os.environ[k] = v
+
+    def __exit__(self, *a):
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def practise_settle(base: Path, own: Path) -> dict:
+    """`media server settle` on the copy, as the real move runs it on the
+    machine's real state: with this machine's own chat records (stashed from
+    its real state, read only) and the restored env file. Run before the
+    fence, which then ends whatever it left."""
+    from . import server_settle
+
+    r = roots(base)
+    with _env(XDG_STATE_HOME=str(r["home"] / ".local" / "state"),
+              MEDIA_ENV_FILE=str(r["home"] / ".config" / "agent-media.env")):
+        got = server_settle.settle(own)
+    got["not_resumed"] = len(got.get("not_resumed") or [])
+    return got
+
+
+def practise_units(base: Path, units: Path) -> dict:
+    """The carried unit files written into the copy's own config folder and
+    `media-setup release-mode --dry-run` asked what it would do with them:
+    which the release can run, and which it has no file for. Nothing is
+    enabled and no real unit is read or written."""
+    from . import server_settle
+
+    cfg = roots(base)["home"] / ".config"
+    with _env(XDG_CONFIG_HOME=str(cfg)):
+        got = server_settle.install_units(units, run=lambda argv: (0, ""))
+    r = subprocess.run([str(Path(sys.executable).parent / "media-setup"), "release-mode",
+                        "--dry-run"], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                       env={**os.environ, "XDG_CONFIG_HOME": str(cfg)})
+    lines = [ln for ln in (r.stdout + r.stderr).splitlines() if ln and not ln.startswith(" ")]
+    would = [ln.split(":")[0] for ln in lines if "would write" in ln]
+    other = [ln[:160] for ln in lines if "would write" not in ln]
+    return {"written": len(got["written"]), "would_enable": len(got["enabled"]),
+            "release_can_run": len(would), "other": other[:12], "rc": r.returncode}
+
+
+def start(store: str, name: str, units: str = "") -> dict:
     """Restore the newest snapshot in `store` into the sandbox, fence it, and
     start its session host and server."""
     from . import backup, server_address
@@ -205,15 +259,32 @@ def start(store: str, name: str) -> dict:
     base = root()
     r = roots(base)
     r["state"].mkdir(parents=True)
+    # This machine's own chat records, read from its real state before
+    # anything points at the copy (what the real move stashes).
+    from . import server_settle
+
+    own = base / "own-records"
+    stashed = server_settle.stash(own)
     got = backup.restore("latest", dest=store, into=r, dry_run=False, force=True)
     if not got.get("ok", True) and got.get("error"):
         return {"ok": False, "error": f"the restore failed: {got.get('error')}"}
+    practice: dict = {"stashed": stashed.get("stashed")}
+    try:
+        practice["settle"] = practise_settle(base, own)
+    except Exception as e:  # noqa: BLE001 — the practice reports, the copy still starts
+        practice["settle"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if units and Path(os.path.expanduser(units)).is_dir():
+        try:
+            practice["units"] = practise_units(base, Path(os.path.expanduser(units)))
+        except Exception as e:  # noqa: BLE001
+            practice["units"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     fenced = fence(base)
     why = _run_units(name, base)
     if why:
         return {"ok": False, "error": why, "fenced": fenced}
     st = status()
     return {"ok": st["running"], "name": name, "root": str(base), "fenced": fenced,
+            "practice": practice,
             "units": st["units"], "restored": len(got.get("restored") or []),
             "warnings": got.get("warnings") or [],
             **({} if st["running"] else {"error": "a unit is not running: journalctl --user -u "
@@ -260,12 +331,13 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("start")
     st.add_argument("--from", dest="store", required=True)
     st.add_argument("--name", required=True)
+    st.add_argument("--units", default="", help="carried unit files to practise with")
     rs = sub.add_parser("restart")
     rs.add_argument("--name", required=True)
     sub.add_parser("stop")
     sub.add_parser("status")
     a = ap.parse_args(argv)
-    got = (start(a.store, a.name) if a.cmd == "start" else restart(a.name) if a.cmd == "restart"
+    got = (start(a.store, a.name, a.units) if a.cmd == "start" else restart(a.name) if a.cmd == "restart"
            else stop() if a.cmd == "stop" else status())
     print(json.dumps(got, indent=1))
     return 0 if got.get("ok") else 1
