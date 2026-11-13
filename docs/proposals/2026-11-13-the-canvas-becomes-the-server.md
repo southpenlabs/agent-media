@@ -57,7 +57,14 @@ session records and raw Android contact rows.
 **A symptom patch is in** (403b589c): `malloc_arenas.cap()` asks for two
 arenas at start-up. Twenty seconds after the restart: one arena holding
 8 MB, 113 MB resident. The like-for-like figure, three hours on, is due at
-about 00:13 on 14 Nov and belongs here: _to be filled in_.
+about 00:13 on 14 Nov and belongs here. **In, 14 Nov 2026**: the
+canvas was restarted again at 23:08 on 13 Nov (by another session, same
+release), so the check fired at two hours, not three: 309 MB resident,
+589 MB with file cache, peak 1,576 MB. At 02:54, 3 h 46 min after that
+restart, it was still 309 MB resident, against 963 MB at three hours
+before the cap: about a third. The peak (1.6 GB against 2.2 GB) is the
+part the cap does not touch; the worker pool (change 3) and the session
+list (change 4) are meant for that.
 
 **Why it churns.** Two confirmed causes, both "read everything, every
 time":
@@ -224,8 +231,8 @@ this file, as fewer-services did with its §4d.
   new release too, which is a drain of the running chats.
 - Still whole: `/targets` (the thread list) and search's "which sessions
   are headless" ask for every view. Next in change 4.
-- **Step 1** (the three-hour figure, the doctor line): the figure is due
-  00:13 on 14 Nov; the doctor line is not written.
+- **Step 1** (the three-hour figure, the doctor line): the figure is in
+  (above: 309 MB, from 963). The doctor line is not written.
 
 ## Decisions (David, 13 Nov 2026: "they all sound like excellent ideas")
 
