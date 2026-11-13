@@ -3532,17 +3532,39 @@ def _next_to_resume(session: str, after_id: int) -> Optional[int]:
     return None
 
 
+def _listener_last_turn(session: str) -> int:
+    """The history id of the listener's newest turn in `session`, else 0."""
+    for r in StateStore().recent_history(sink="speech", limit=2000):   # newest first
+        ex = r.get("extras") or {}
+        if (r.get("source") == "listener" and isinstance(ex, dict)
+                and ex.get("source_session") == session and isinstance(r.get("id"), int)):
+            return r["id"]
+    return 0
+
+
 def _oldest_unheard(session: str) -> Optional[dict]:
-    """The thread's oldest held reply not yet heard, with audio, or None.
-    Replayed, it goes on through the later ones (`_next_unheard`): a reply
-    notification's Play reads the thread's unheard replies in order (David,
-    2 Nov 2026: per thread, not a summary of all of them)."""
-    waiting = [r for r in _speech_history(200, session=session)   # newest first
-               if isinstance(r.get("id"), int)
-               and r["extras"].get("held") and not r["extras"].get("heard")
-               and _row_has_audio(r)]
-    waiting = _not_heard_elsewhere(waiting)
-    return waiting[-1] if waiting else None
+    """The first of the unheard replies the thread ends on, with audio, or
+    None. Replayed, it goes on through the later ones (`_next_unheard`): a
+    reply notification's Play reads the thread's unheard replies in order
+    (David, 2 Nov 2026: per thread, not a summary of all of them).
+
+    The run back from the newest reply stops at a reply that was heard and
+    at the listener's own turn (what came before it was answered, so read);
+    another session's mail is no turn of theirs. The app's "Play the
+    unheard replies" counts the same (thread.tsx trailingUnheard; David, 14
+    Nov 2026: "this thread has multiple replies but 'the unheard reply'")."""
+    since = _listener_last_turn(session)
+    run: list[dict] = []
+    for r in _speech_history(200, session=session):   # newest first
+        if not isinstance(r.get("id"), int) or r["id"] <= since:
+            break
+        if not _row_has_audio(r):
+            continue
+        if not r["extras"].get("held") or r["extras"].get("heard"):
+            break
+        run.append(r)
+    run = _not_heard_elsewhere(run)
+    return run[-1] if run else None
 
 
 def _not_heard_elsewhere(rows: list) -> list:

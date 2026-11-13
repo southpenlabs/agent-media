@@ -3565,8 +3565,10 @@ Actions (`_APP_SPEECH_ACTIONS`): `toggle`, `skip-`, `skip+`, `para-`,
   inside a thread; with replies held rather than spoken, "the newest of
   all" is often a thread the listener is not in.
 - `replay-unheard` (2 Nov 2026), with `session` (required: 400
-  `"replay-unheard needs a session"`): that thread's unheard replies (held,
-  never played: `unheard` on its lines), oldest first, each chained to the
+  `"replay-unheard needs a session"`): the unheard replies that thread ends
+  on (held, never played: `unheard` on its lines; the run back from the
+  newest stops at a reply heard or spoken at once and at the listener's own
+  turn, not at another session's mail, 14 Nov 2026), oldest first, each chained to the
   next as a `replay-id` of an unheard reply is, so a Stop ends the run
   (`media replay --unheard --session S`). With none unheard it is that
   thread's `replay`. The Play on the app's reply notification sends it, so

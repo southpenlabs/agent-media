@@ -74,18 +74,41 @@ def _unheard_ns(session):
                               unheard=True, session=session, index=1)
 
 
-def test_replay_unheard_starts_at_the_threads_oldest(store, monkeypatch):
-    # A reply notification's Play (David, 2 Nov 2026): that thread's unheard
-    # replies in order, from the oldest, never another thread's.
-    _row(store, "elsewhere", session="s2", held=True)
-    played = _row(store, "played", held=True)
-    store.mark_heard(played)
-    first = _row(store, "one", held=True)
-    _row(store, "spoken at once")
-    second = _row(store, "two", held=True)
+def _played(monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "_replay_row",
                         lambda row, **kw: calls.append((row["id"], kw)) or 0)
+    return calls
+
+
+def test_replay_unheard_starts_at_the_first_of_those_the_thread_ends_on(store, monkeypatch):
+    # A reply notification's Play (David, 2 Nov 2026): that thread's unheard
+    # replies in order, never another thread's. A reply heard, or spoken at
+    # once, ends the run back: the unheard one before it is not played.
+    _row(store, "before", held=True)
+    _row(store, "spoken at once")
+    first = _row(store, "one", held=True)
+    _row(store, "elsewhere", session="s2", held=True)
+    played = _row(store, "played", held=True)
+    store.mark_heard(played)
+    second = _row(store, "two", held=True)
+    third = _row(store, "three", held=True)
+    calls = _played(monkeypatch)
+    assert cli.cmd_replay(_unheard_ns("s1")) == 0
+    assert calls == [(second, {"then_id": third})]
+    assert first < second
+
+
+def test_replay_unheard_starts_after_the_listeners_own_turn(store, monkeypatch):
+    # What came before the listener's last message was answered, so read;
+    # the app's "Play the unheard replies" counts the same (14 Nov 2026).
+    _row(store, "answered", held=True)
+    store.add_history(sink="speech", uri="", started_at=time.time(), target="phone",
+                      source="listener", text="You: go ahead",
+                      extras={"source_session": "s1"})
+    first = _row(store, "one", held=True)
+    second = _row(store, "two", held=True)
+    calls = _played(monkeypatch)
     assert cli.cmd_replay(_unheard_ns("s1")) == 0
     assert calls == [(first, {"then_id": second})]
 
