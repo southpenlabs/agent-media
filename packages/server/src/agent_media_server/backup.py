@@ -576,7 +576,10 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     # The encrypted history, when one is configured. After the snapshot is
     # built and before the local prune, so a snapshot is never dropped here
     # until it is safely in the repository.
-    if out["ok"] and repo():
+    # Not on the cutover's second pass (`quick_push`): it is downtime, and
+    # restic's backup and prune added 72 s to it (the second rehearsal, 13
+    # Nov 2026). The pass before it, and every nightly, still write it.
+    if out["ok"] and repo() and not quick_push:
         kept = to_repo(snap, tier)
         out["repo"] = kept
         if not kept.get("ok"):

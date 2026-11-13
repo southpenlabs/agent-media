@@ -483,6 +483,19 @@ def test_the_second_pass_sends_only_the_new_snapshot(install, monkeypatch):
     assert not bk._push_one(store, "red2", "/far/store", "s2", "s1")["ok"]
 
 
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_the_second_pass_leaves_the_encrypted_history_to_the_nightly(install, monkeypatch):
+    """The encrypted history's backup and prune are a minute and more; the
+    cutover's second pass is downtime, so it skips them. An ordinary run does not."""
+    calls: list[str] = []
+    monkeypatch.setattr(bk, "repo", lambda: "sftp:far:/repo")
+    monkeypatch.setattr(bk, "to_repo", lambda snap, tier: calls.append(snap.name) or {"ok": True})
+    bk.backup(tier="core", now=1_000_000)
+    assert len(calls) == 1
+    bk.sync(tier="core", now=1_000_100)
+    assert len(calls) == 1
+
+
 # --- the schedule, and noticing it stopped ----------------------------------
 
 
