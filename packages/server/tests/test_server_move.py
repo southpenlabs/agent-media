@@ -141,6 +141,11 @@ def test_the_stop_and_after_run_detached_unless_foreground(rig):
                      detach=lambda to, name: units.append((to, name)) or "media-server-move-x")
     assert rc == 0 and units == [("red2", NAME)] and "--status" in said
     assert sm._load()["done"] == ["check", "keep", "backup", "transcripts", "units"]
+    # Half done is not finished: a watcher reads this.
+    assert "finished" not in sm._load()
+    said0: list[str] = []
+    sm.status(out=said0.append)
+    assert not any("finished" in ln for ln in said0)
     assert not any("systemctl --user stop" in c for _h, c in fake.ran)
     # The detached half carries on from the log.
     said2: list[str] = []

@@ -131,10 +131,20 @@ def scan_runit(root: Path, svdir: "Optional[Path]") -> "list[Drift]":
 
 
 def _generated(text: str, root: Path) -> bool:
-    """A unit media-setup wrote: its ExecStart runs a `run` in this checkout."""
+    """A unit media-setup wrote: its ExecStart is `/bin/sh` running a
+    service's `run`, in this checkout or, on a release host
+    (docs/reference/releases.md), in a release: `…/services/<name>/run`
+    under the releases' root. The code it runs is `media update`'s to
+    change, so it is not a stale copy either (red2's sink-book unit was
+    called one beside the checkout's older hand-written unit, 13 Nov 2026)."""
     for line in text.splitlines():
-        if line.strip().startswith("ExecStart=") and str(root) in line \
-                and line.rstrip().endswith("/run"):
+        line = line.strip()
+        if not line.startswith("ExecStart=") or not line.endswith("/run"):
+            continue
+        if str(root) in line:
+            return True
+        if line.startswith("ExecStart=/bin/sh ") and "/services/" in line \
+                and ("/agent-media/current/" in line or "/agent-media/releases/" in line):
             return True
     return False
 

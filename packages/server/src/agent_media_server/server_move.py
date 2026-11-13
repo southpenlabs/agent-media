@@ -507,7 +507,11 @@ RUN = {"check": step_check, "keep": step_keep, "backup": step_backup,
        "sync": step_sync, "restore": step_restore, "verify": step_verify}
 
 
-def _do(st: dict, steps: tuple[str, ...], run, out) -> int:
+def _do(st: dict, steps: tuple[str, ...], run, out, *, last: bool = True) -> int:
+    """Run `steps`, each recorded in the log. `finished` is written only
+    when these were the move's last steps (`last`): the first half used to
+    write it too, and a watcher read "finished" a minute before the stop
+    (the cutover, 13 Nov 2026)."""
     for name in steps:
         st["step"] = name
         st.setdefault("done", [])
@@ -524,7 +528,8 @@ def _do(st: dict, steps: tuple[str, ...], run, out) -> int:
         _save(st)
         out(f"✓ {name} ({time.time() - t0:.0f} s)")
     st.pop("step", None)
-    st["finished"] = round(time.time())
+    if last:
+        st["finished"] = round(time.time())
     _save(st)
     return 0
 
@@ -682,7 +687,7 @@ def move(to: str, name: str, also: list[str], *, yes: bool = False, dry_run: boo
     st = {"to": to, "name": new, "old": server_address.current(),
           "also": [o for o in (server_address.origin(a) for a in also) if o],
           "started": round(time.time()), "force": bool(force)}
-    rc = _do(st, STEPS[:STEPS.index(DETACHED_FROM)], run, out)
+    rc = _do(st, STEPS[:STEPS.index(DETACHED_FROM)], run, out, last=False)
     if rc:
         out("nothing here was stopped; fix that and run it again.")
         return rc

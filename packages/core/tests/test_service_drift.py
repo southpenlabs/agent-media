@@ -99,6 +99,19 @@ def test_a_unit_media_setup_generated_is_not_a_copy(tree):
     assert service_drift.scan(root, sv, ud) == []
 
 
+def test_a_unit_generated_on_a_release_host_is_not_a_copy(tree):
+    from agent_media_core import service_drift as sd
+
+    root = tree[0] if isinstance(tree, tuple) else tree
+    rel = ("[Service]\nExecStart=/bin/sh /home/x/.local/share/agent-media/current/.venv/lib/"
+           "python3.13/site-packages/agent_media_core/services/sink-book/run\n")
+    assert sd._generated(rel, Path("/nowhere/checkout"))
+    assert not sd._generated("[Service]\nExecStart=/usr/bin/mpv --idle=yes\n",
+                             Path("/nowhere/checkout"))
+    assert not sd._generated("[Service]\nExecStart=/bin/sh /opt/other/services/x/run\n",
+                             Path("/nowhere/checkout"))
+
+
 def test_strangers_are_left_out(tree):
     """sshd, snapclient, a unit of another project: not ours to grade."""
     root, sv, ud = tree
