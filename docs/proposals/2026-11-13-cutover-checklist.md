@@ -130,3 +130,20 @@ Found afterwards, and fixed or still open:
   `profiles.yaml` still has red2 as `[base, dev]` though it now runs the
   server and both CI runners; the two runners share `~/setup-pnpm` and one
   APK build failed on it.
+
+Later the same day:
+
+- **The house audio moved** (sam, 16:30–16:45; step 11): the sinks,
+  snapserver, Mopidy, spotifyd, beet-web and the red4 mounts run on red2
+  and are stopped and disabled on red5; `rooms_hub: red2` (dotfiles
+  8ea8a1d); hpo's clients are connected. A third fifo was missing from
+  red2's tmpfiles and is there now. Untested: a song in a room.
+- **agent-mail moved to red2** (David: "let's set agent-mail up over
+  here"): the checkout cloned, the mailbox, delivery state and
+  `delivery.env` copied, `~/projects/sam-inbox` copied; on red5 the mailbox
+  and the checkout are renamed (`…moved-to-red2…`) so `agent-mail` there
+  fails loudly — left in place it silently made a new empty mailbox. The
+  first mail on red2 started a sam session there. agent-media leans on
+  agent-mail (`media session send`, the inbox hook, `media test-failure
+  notify`) without saying so anywhere: a `media doctor` check for it and a
+  line in the move for its mailbox are owed.
