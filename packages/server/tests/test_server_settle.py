@@ -150,3 +150,61 @@ def test_this_machines_own_settings_survive_the_restore(there):
     assert "beside the data" in got["warnings"][1]
     # Already in the restored file: not written twice.
     assert ss.keep_host_keys(own) == []
+
+
+# --- the listeners' addresses ---------------------------------------------------------------
+
+OLD_TS, NEW_TS = "100.103.43.93", "100.65.209.67"
+
+
+_move_binds = ss.move_binds
+
+
+def _binds(lines, has=(NEW_TS,), tailnet=NEW_TS):
+    return _move_binds(lines, bindable=lambda ip: ip in has, tailnet=lambda: tailnet)
+
+
+def test_the_old_machines_tailnet_bind_becomes_this_machines():
+    """The cutover, 13 Nov 2026: `MEDIA_SHARE_BIND` came across as red5's
+    tailnet address and the share listener crash-looped on red2."""
+    lines = ["MEDIA_HEADLESS=1", f"MEDIA_SHARE_BIND={OLD_TS}", f"export MEDIA_FEED_BIND='{OLD_TS}'",
+             "MEDIA_SPEECH_STATE_BIND=127.0.0.1", "MEDIA_VISUAL_BIND=0.0.0.0",
+             f"MEDIA_SHIM_BIND={NEW_TS}", "MEDIA_COMPLETIONS_BIND=red2"]
+    moved, warnings = _binds(lines)
+    assert [(b["key"], b["was"], b["now"]) for b in moved] == [
+        ("MEDIA_SHARE_BIND", OLD_TS, NEW_TS), ("MEDIA_FEED_BIND", OLD_TS, NEW_TS)]
+    assert not warnings
+    assert f"MEDIA_SHARE_BIND={NEW_TS}" in lines and f"export MEDIA_FEED_BIND={NEW_TS}" in lines
+    assert sum(OLD_TS in ln and ln.startswith("#") for ln in lines) == 2
+    # Loopback, a wildcard, an address it has and a name are left as they are.
+    for kept in ("MEDIA_SPEECH_STATE_BIND=127.0.0.1", "MEDIA_VISUAL_BIND=0.0.0.0",
+                 f"MEDIA_SHIM_BIND={NEW_TS}", "MEDIA_COMPLETIONS_BIND=red2"):
+        assert kept in lines
+    # A second settle finds nothing to do.
+    assert _binds(lines) == ([], [])
+
+
+def test_a_bind_it_cannot_move_is_said_not_guessed():
+    # No tailnet address here, and a LAN address of the old machine's.
+    lines = [f"MEDIA_SHARE_BIND={OLD_TS}", "MEDIA_FEED_BIND=192.168.7.9"]
+    before = list(lines)
+    moved, warnings = _binds(lines, has=(), tailnet="")
+    assert not moved and lines == before
+    assert len(warnings) == 2 and all("not an address of this machine" in w for w in warnings)
+
+
+def test_a_setting_built_on_the_old_address_is_named():
+    lines = [f"MEDIA_FEED_BIND={OLD_TS}", f"MEDIA_FEED_BASE_URL=http://{OLD_TS}:8770"]
+    moved, warnings = _binds(lines)
+    assert len(moved) == 1
+    assert warnings == [f"MEDIA_FEED_BASE_URL still names {OLD_TS}, the old machine's address"]
+
+
+def test_settle_writes_the_moved_bind_into_the_env_file(there, monkeypatch):
+    _sd, env, _tmp = there
+    env.write_text(env.read_text() + f"MEDIA_SHARE_BIND={OLD_TS}\n")
+    # This machine's addresses are the test's, not the one it runs on.
+    monkeypatch.setattr(ss, "move_binds", _binds)
+    got = ss.settle()
+    assert got["binds_moved"] == [{"key": "MEDIA_SHARE_BIND", "was": OLD_TS, "now": NEW_TS}]
+    assert f"MEDIA_SHARE_BIND={NEW_TS}" in env.read_text().splitlines()

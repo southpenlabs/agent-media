@@ -143,7 +143,13 @@ back in place of this server's (`host: <there>`); nothing the stop cut off
 is resumed (an agent resuming mid-task in another working tree, without the
 old one's uncommitted files) but listed in `<state>/moved-chats.json`; a
 `MEDIA_SESSIOND_DEFAULT_HOST` naming the machine itself is commented out;
-chat folders that are not on the machine are counted.
+chat folders that are not on the machine are counted. A listener's address
+(`MEDIA_*_BIND`) is the machine's, and the restore brings the old one's: a
+tailnet address this machine does not have becomes its own tailnet address
+(`binds_moved`, the old value left in a comment), and any other address it
+cannot bind, or a setting still built on the old one, is a warning. At the
+cutover the share listener crash-looped on red5's address until it was set
+by hand (13 Nov 2026).
 
 Up to step 3 nothing here is touched: a failure leaves the server running.
 Not in it: the DNS records and the tunnel's credentials, the house audio,

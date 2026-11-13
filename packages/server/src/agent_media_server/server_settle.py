@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import argparse
 import collections
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import time
 from pathlib import Path
 
@@ -99,6 +101,77 @@ def keep_host_keys(own: Path | None) -> list[str]:
             fh.write("\n# This machine's own, kept across the restore (media server settle).\n"
                      + "".join(f"{k}={v}\n" for k, v in add))
     return [k for k, _v in add]
+
+
+_TAILNET = ipaddress.ip_network("100.64.0.0/10")
+_BIND = re.compile(r"^(\s*(?:export\s+)?)(MEDIA_[A-Z0-9_]*BIND)=(.*)$")
+
+
+def _bindable(ip: str) -> bool:
+    """Whether a listener can be opened on `ip` here: asked of the kernel,
+    which is the one that refuses it (EADDRNOTAVAIL)."""
+    try:
+        fam = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        with socket.socket(fam, socket.SOCK_STREAM) as sk:
+            sk.bind((ip, 0))
+        return True
+    except OSError:
+        return False
+
+
+def _tailnet_here() -> str:
+    try:
+        from agent_media_core.setup import _tailnet_address
+
+        return (_tailnet_address() or "").strip()
+    except Exception:
+        return ""
+
+
+def move_binds(lines: list[str], *, bindable=_bindable, tailnet=_tailnet_here) -> tuple[list, list]:
+    """The listeners' addresses, made this machine's (in `lines`, in place).
+
+    A `MEDIA_*_BIND` is an address of the machine, and a restore carries the
+    old machine's: the share listener crash-looped on red2 with "Cannot
+    assign requested address", bound to red5's tailnet address (the cutover,
+    13 Nov 2026). `rename` rewrites the server's public name, never these.
+
+    An address this machine has is left alone, and so are loopback, a
+    wildcard and a name. A tailnet address it has not becomes its own
+    tailnet address: the same listener, as private as it was. Anything else
+    it cannot bind is not guessed at; it is said.
+    """
+    moved, warnings, ts = [], [], None
+    for i, line in enumerate(lines):
+        m = _BIND.match(line)
+        if not m:
+            continue
+        lead, key, raw = m.groups()
+        val = raw.strip().strip("\"'")
+        try:
+            ip = ipaddress.ip_address(val)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_unspecified or bindable(val):
+            continue
+        if ip.version == 4 and ip in _TAILNET:
+            if ts is None:
+                ts = tailnet()
+            if ts and ts != val and bindable(ts):
+                lines[i] = f"{lead}{key}={ts}"
+                lines.insert(i, f"# (media server settle: was {val}, the old machine's "
+                                "tailnet address)")
+                moved.append({"key": key, "was": val, "now": ts})
+                continue
+        warnings.append(f"{key}={val} is not an address of this machine: its listener cannot "
+                        "start until it is set")
+    # The old addresses elsewhere (a base URL built on one): said, not rewritten.
+    for old in sorted({b["was"] for b in moved}):
+        for line in lines:
+            k = re.match(r"^\s*(?:export\s+)?([A-Z0-9_]+)=", line)
+            if k and old in line and not _BIND.match(line):
+                warnings.append(f"{k.group(1)} still names {old}, the old machine's address")
+    return moved, warnings
 
 
 def settle(own: Path | None = None) -> dict:
@@ -171,12 +244,13 @@ def settle(own: Path | None = None) -> dict:
         if m and is_local(m.group(1).strip().strip("\"'")):
             lines[i] = ("# (media server settle: the chats run here now) " + line)
             out["default_host_unset"] = True
-    if out["default_host_unset"]:
+    out["binds_moved"], bind_warnings = move_binds(lines)
+    if out["default_host_unset"] or out["binds_moved"]:
         env.write_text("\n".join(lines) + "\n")
     out["host_keys_kept"] = keep_host_keys(own)
     # A backup onto a path of the old machine's, or to this machine itself,
     # protects nothing here: said, not guessed at.
-    out["warnings"] = []
+    out["warnings"] = list(bind_warnings)
     text = "\n".join(lines)
     m = re.search(r"^MEDIA_BACKUP_DEST=(.*)$", text, re.M)
     if m and ":" not in m.group(1) and not os.path.isdir(os.path.expanduser(m.group(1).strip())):
