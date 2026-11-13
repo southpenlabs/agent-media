@@ -113,3 +113,20 @@ Found afterwards, and fixed or still open:
   and the am-* units still run on red5, none on red2. Asked of sam.
 - red2 has no deployer: its services run release 4e47a672 until someone
   runs `media update` there.
+- Who carried it through: the "Migration status" thread on red2
+  (2f095c0e), which fixed the parser (4e47a672), re-fired the move from
+  red5 at 15:01, set the two `MEDIA_*_BIND` by hand and then taught
+  `settle` to (312a041a), and did step 12 (the backup settings, `media
+  backup init`; the encrypted history's first snapshot is on red5).
+- **Not carried by the move, found on red2:** `gh`'s sign-in
+  (`~/.config/gh/hosts.yml`, needed by `/app/update` to read the app's
+  releases; copied from red5 by hand). It belongs with the things a move
+  names as the host's: said here until the move warns about it.
+- A "Roll back now" question card from 14:16 was still up in sam's session
+  at 16:30. `--rollback` now refuses a move that finished more than a
+  quarter of an hour ago unless forced (7be2706a).
+- Open on red2, host setup (sam, David): dotfiles one commit behind since
+  11 Nov (an installer appended a line to the tracked `.zshrc`);
+  `profiles.yaml` still has red2 as `[base, dev]` though it now runs the
+  server and both CI runners; the two runners share `~/setup-pnpm` and one
+  APK build failed on it.
