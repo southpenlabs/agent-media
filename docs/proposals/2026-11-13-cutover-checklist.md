@@ -35,7 +35,7 @@ does what, what to check, and how to go back.
 |---|---|---|---|
 | 10 | D | Open the app. It should follow to the new address by itself; if not, Settings → Advanced → Server address | a thread opens, a new chat answers, the reply is in the thread |
 | 11 | S | The house audio, in the plan's order: am-sinks, am-snapfifo@am/@am-music, snapserver, mopidy(+mpv, books), spotifyd, beet-web, the red4 mounts on red2; the same stopped on red5; `rooms_hub: red2` in dotfiles; p8a's two run scripts `red5` → `red2` | `pactl list short source-outputs` shows two different source ids; a reply is spoken; a song plays in one room |
-| 12 | M | The backup settings on red2: `MEDIA_BACKUP_DEST=red5:/mnt/data/agent-media-backups`, the encrypted history's repository off red2 (the backup chat says where); `agent-media-backup.timer` enabled | `media backup where`; `media backup stale` says fresh after one run |
+| 12 | M | The backup settings on red2 (the backup chat's, 13 Nov): `MEDIA_BACKUP_DEST=/home/ryer/.local/share/agent-media-backups` and `MEDIA_BACKUP_REPO=sftp:red5:/mnt/data/agent-media-restic` (the plain store stays on the server, the encrypted history goes to red5; `backup.key` is on both already); then `media backup init`, `agent-media-backup.timer` enabled, `media backup run` once. Long restic commands over ssh run detached; never `restic unlock` while one is alive | `media backup where`; `media backup stale` says fresh; the journal says "encrypted history: written to sftp:red5:…" |
 | 13 | M | `media doctor` and `media server check` on red2 | no ✗ |
 | 14 | M | Tell the other sessions: the shared checkout and the server are on red2 now | — |
 
