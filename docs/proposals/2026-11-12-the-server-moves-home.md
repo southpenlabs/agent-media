@@ -502,7 +502,22 @@ the day of the cutover, not after it.
    The move carries them (36 unit files, 22 enabled; all map onto red2's
    release in a scratch `release-mode --dry-run`). Chat folders red2 lacks
    (`~/scratch`, `~/spl/…`, `~/org`: 260-odd chats) cannot be resumed there
-   until they exist: 5a. Still open: not rehearsed at
+   until they exist: 5a. **Copied 13 Nov 2026** (sam, David choosing
+   rsync over clone): `~/scratch`, `~/spl` whole (with its uncommitted
+   files), `~/org`, `~/crypto-trading-stack`, and the `~/projects/websites*`
+   links, at the same paths; **the evening needs the same rsync again**
+   (`rsync -aH --exclude=node_modules/ --exclude=.venv/
+   --exclude=__pycache__/ ~/{scratch,spl,org,crypto-trading-stack}
+   red2:~/`), and red2 has no `github-spl` ssh alias yet. **A test sound
+   from red2 was heard on hpo** (sam): three beeps through red2's
+   snapserver, started and stopped again. For the evening's audio:
+   `fs.protected_fifos` refuses ryer writing the snapserver-owned fifo in
+   `/tmp` (the `am-snapfifo` units need its owner or another folder);
+   mopidy and a Spotify feed are not installed on red2; and hpo's
+   snapclients (0.27) pass `tcp://red5:1704`, which that version does not
+   parse — red5 showed every room client disconnected on 13 Nov — so
+   repointing them must also change the syntax (`-h <host> -p 1704`).
+   Still open: not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
    **The rehearsal — and the command's own test.** `media server move --to
