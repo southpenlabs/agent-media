@@ -2910,6 +2910,23 @@ band energies, a Foote kernel on the self-similarity matrix; the most
 repeated section is the chorus), run out of process with the Demucs venv's
 Python or `MEDIA_MUSIC_BED_VOCAL_PYTHON`; without numpy, no sections and the
 fallback length. Pinned by `packages/core/tests/test_music_bed_vocal.py`.
+**The song plays at the music share (13 Nov 2026)** (David: "does sing it
+out respect the media volumes? It seems a bit loud for its current 30%
+setting. even the ducking volume seems a bit loud"). The song is music, so
+in the app it follows the **music** share of the speech and music balance
+(§6.4 `/speech/balance`), not speech's: for target `sasonica` the server
+adds **`"music_gain"`** (0..1, `speech_balance.music_level() / 100`, e.g.
+0.3 at balance 70) to the `after` and `before` objects it sends
+(`sinks/speech._music_share`); other targets get none. The phone's speech
+player plays the song (Sing it out's original, and Sing it in's snippet) at
+that share times its fade and ease, muted with speech; without `music_gain`
+(an older server) it takes the music player's own volume, and with no music
+player, speech's (sasonica-app `UnderFade.songShare`). The beds stay on
+speech's share, set against the voice by the Backing music level: the
+instrumental a song is carried back into under the next reply, and the bed
+Sing it in hands over to, are beds. While the listener dictates the song
+dips to a tenth (-20 dB; it was a fifth) of that share
+(`Media3Speech.SONG_DUCK`).
 
 **Singing it in before a long reply (12 Nov 2026)** (`music_bed_vocal.before_for`,
 `may_sing_in`; David: "Sing it in", the mirror of Sing it out — "it probably

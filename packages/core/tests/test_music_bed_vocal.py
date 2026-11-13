@@ -146,6 +146,31 @@ def test_a_phone_is_told_the_originals_clip(monkeypatch, tmp_path):
     assert sink.play_under(str(bed), Target("testphone"), loop=True, mix=mix)
     told = json.loads(dict(sent)[speech.UNDER_MIX_PROPERTY])
     assert told["after"]["uri"] == "/phone/clips/music-bed-vocal-k1.mp3"
+    assert "music_gain" not in told["after"]       # the balance is the app's only
+
+
+def test_the_app_is_told_the_songs_music_share(monkeypatch, tmp_path):
+    """The song is music: the app plays it at the music share of the speech
+    and music balance (here speech louder by 70: music at 30 %), not at
+    speech's."""
+    from agent_media_core.sinks import speech
+    from agent_media_core import speech_balance
+    monkeypatch.setenv("MEDIA_SPEECH_SOCKET_SASONICA", "tcp://127.0.0.1:1")
+    monkeypatch.setenv("MEDIA_SPEECH_CLIP_LOCALDIR_SASONICA", "/phone/clips")
+    sent = []
+    monkeypatch.setattr(speech.ipc, "set_property",
+                        lambda sock, name, value, **kw: sent.append((name, value)))
+    monkeypatch.setattr(speech.SinkSpeech, "_prefer_url", lambda self, t: False)
+    speech_balance.set_balance(70)
+    bed = _keep_original(tmp_path)
+    mix = M.params("favourites", "auto", bed, long=True)
+    mix["before"] = {"uri": str(bed)}
+    sink = speech.SinkSpeech.__new__(speech.SinkSpeech)
+    assert sink.play_under(str(bed), Target("sasonica"), loop=True, mix=mix)
+    told = json.loads(dict(sent)[speech.UNDER_MIX_PROPERTY])
+    assert told["after"]["music_gain"] == 0.3
+    assert told["before"]["music_gain"] == 0.3
+    assert "music_gain" not in mix["after"]        # the caller's mix is left as it was
 
 
 def test_a_bed_singing_out_is_never_held(monkeypatch, tmp_path):

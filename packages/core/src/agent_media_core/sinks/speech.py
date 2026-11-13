@@ -50,6 +50,19 @@ def _broker_default_volume() -> float:
         return 130.0
 
 
+def _music_share(target: "Target | None") -> "float | None":
+    """The music share of the speech and music balance (speech_balance.py),
+    0..1, for a song the phone's speech player plays (Sing it out's original,
+    Sing it in's snippet: told as `music_gain` in the mix's `after`/`before`),
+    or None for a target the balance does not set. David, 13 Nov 2026: "does
+    sing it out respect the media volumes? It seems a bit loud for its
+    current 30% setting"."""
+    from .. import speech_balance
+    if target is None or not speech_balance.applies_to(target.name):
+        return None
+    return round(speech_balance.music_level() / 100.0, 3)
+
+
 def _balance_level(target: "Target | None") -> "float | None":
     """The app's speech gain from the speech and music balance
     (speech_balance.py), or None for a target it does not set."""
@@ -1011,10 +1024,15 @@ class SinkSpeech:
                     if m.get("outro"):
                         m["outro"] = _clip_uri_for(str(m["outro"]), target,
                                                    self._prefer_url(target))
+                    share = _music_share(target)
                     for k in ("after", "before"):
                         if (m.get(k) or {}).get("uri"):
                             m[k] = dict(m[k], uri=_clip_uri_for(
                                 str(m[k]["uri"]), target, self._prefer_url(target)))
+                            if share is not None:
+                                # The song is music: it plays at the music share
+                                # of the speech and music balance, not speech's.
+                                m[k]["music_gain"] = share
                     mixed = json.dumps(m)
                 ipc.set_property(sock, TONE_KIND_PROPERTY, kind or "")
                 ipc.set_property(sock, UNDER_MIX_PROPERTY, mixed)
