@@ -8464,19 +8464,52 @@ def _systemd_service_states() -> "list[tuple[str, str]]":
     timed = {line.split()[0][:-len(".timer")]
              for line in (r.stdout or "").splitlines()
              if line.split() and line.split()[0].endswith(".timer")}
+    idle = []
     for line in (r.stdout or "").splitlines():
         parts = line.split()
         if len(parts) < 4 or not parts[0].endswith(".service"):
             continue
-        unit, active = parts[0], parts[2]
+        unit, load, active = parts[0], parts[1], parts[2]
         stem = unit[:-len(".service")]
+        if load == "not-found":
+            # Named by another unit or a drop-in, but there is no unit file:
+            # nothing is installed to be down (a server that moved away
+            # leaves these behind, red5 on 13 Nov 2026).
+            continue
         if stem in timed and active != "failed":
             # `failed` still counts: a job that errored has something to say,
             # and its next window will not fix it.
             out.append((stem, "timed"))
             continue
+        if active == "inactive":
+            idle.append(len(out))
         out.append((stem, "up" if active == "active" else active))
+    # Stopped and disabled is switched off on purpose, as runit's `down`
+    # file is: parked, reported, never a problem. Stopped while enabled is
+    # still down, and failed is failed either way.
+    off = _systemd_disabled([out[i][0] + ".service" for i in idle])
+    for i in idle:
+        if out[i][0] + ".service" in off:
+            out[i] = (out[i][0], "parked")
     return out
+
+
+def _systemd_disabled(units: "list[str]") -> "set[str]":
+    """Those of `units` that are disabled or masked (`systemctl is-enabled`
+    answers one line a unit, in order)."""
+    import subprocess
+
+    if not units:
+        return set()
+    try:
+        r = subprocess.run(["systemctl", "--user", "is-enabled", *units],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    lines = (r.stdout or "").splitlines()
+    if len(lines) != len(units):
+        return set()
+    return {u for u, st in zip(units, lines) if st.strip() in ("disabled", "masked")}
 
 
 # A restart is one exit; a crash LOOP is several in quick succession. Match the

@@ -321,3 +321,37 @@ def test_a_release_is_a_copy_on_purpose_not_a_fault(tmp_path):
     assert cli._in_release(mod)
     assert not cli._in_release(tmp_path / "elsewhere" / "agent_media_core" / "__init__.py")
     assert cli.health_problems({"selfcheck": "1", "install": "release"}) == []
+
+
+def test_a_stopped_disabled_unit_is_parked_and_a_missing_one_is_not_listed(monkeypatch):
+    """A server that moved away leaves its units stopped and disabled, and
+    names with no unit file behind them: neither is a service that is down
+    (red5 after the move to red2, 13 Nov 2026). Stopped while enabled is."""
+    import subprocess
+
+    listing = "\n".join([
+        "agent-media-canvas.service    not-found inactive dead    canvas",
+        "agent-media-tts.service       loaded    inactive dead    tts",
+        "agent-media-sink.service      loaded    inactive dead    sink",
+        "agent-media-sessiond.service  loaded    active   running sessiond",
+        "agent-media-broken.service    loaded    failed   failed  broken",
+        "agent-media-gc.service        loaded    inactive dead    gc",
+        "agent-media-gc.timer          loaded    active   waiting gc",
+    ])
+
+    class R:
+        def __init__(self, out):
+            self.stdout, self.returncode = out, 0
+
+    def fake(argv, **kw):
+        if "list-units" in argv:
+            return R(listing)
+        assert argv[:3] == ["systemctl", "--user", "is-enabled"]
+        return R("\n".join({"agent-media-tts.service": "disabled",
+                             "agent-media-sink.service": "enabled"}[u] for u in argv[3:]))
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert cli._systemd_service_states() == [
+        ("agent-media-tts", "parked"), ("agent-media-sink", "inactive"),
+        ("agent-media-sessiond", "up"), ("agent-media-broken", "failed"),
+        ("agent-media-gc", "timed")]
