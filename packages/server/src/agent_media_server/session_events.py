@@ -421,7 +421,14 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
-    if not _W.subscribe():
+    # The watcher this stream subscribed to, held for its whole life: the
+    # module's `_W` is replaced between tests, and a stream that waited on
+    # one and unsubscribed from the next left the first subscribed for ever,
+    # its thread sweeping session states every POLL_S into whatever the
+    # later tests had faked (test_stop and test_speech_now, flaky in CI from
+    # 12 Nov 2026).
+    w = _W
+    if not w.subscribe():
         _json(h, 503, {"ok": False, "error": "too many open streams"})
         return True
     h.close_connection = True
@@ -489,10 +496,10 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         last_sent = time.monotonic()
         checked = time.monotonic()
         while True:
-            with _W.cond:
-                _W.cond.wait_for(lambda: _W.version != seen and _W.rows is not None,
-                                 timeout=max(0.01, ping_s - (time.monotonic() - last_sent)))
-                version, rows, head = _W.version, _W.rows, _W.alerts_head
+            with w.cond:
+                w.cond.wait_for(lambda: w.version != seen and w.rows is not None,
+                                timeout=max(0.01, ping_s - (time.monotonic() - last_sent)))
+                version, rows, head = w.version, w.rows, w.alerts_head
             if version != seen and rows is not None:
                 first = seen == -1
                 seen = version
@@ -591,11 +598,19 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
             notes.listening(False)
         for ch, pl in players.items():
             speech_frames.listening(pl[2], False, pl[0], channel=ch)
-        _W.unsubscribe()
+        w.unsubscribe()
     return True
 
 
 def _reset_for_tests() -> None:
-    """A fresh watcher: none left subscribed or running from another test."""
+    """A fresh watcher: none left subscribed or running from another test.
+    The old one is stopped, not just dropped: a stream still open from the
+    test before holds it, and its thread would go on sweeping."""
     global _W
-    _W = _Watcher()
+    old, _W = _W, _Watcher()
+    with old.cond:
+        old.subs = 0
+        old.cond.notify_all()
+    t = old.thread
+    if t is not None and t is not threading.current_thread():
+        t.join(timeout=2.0)
