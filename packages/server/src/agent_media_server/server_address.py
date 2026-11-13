@@ -473,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.status:
             return server_move.status()
         if a.rollback:
-            return server_move.rollback()
+            return server_move.rollback(force=a.force)
         if a.verify:
             return server_move.verify()
         if a.rehearse_stop:

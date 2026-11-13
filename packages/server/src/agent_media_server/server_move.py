@@ -726,12 +726,31 @@ def verify(*, out=print) -> int:
     return _do(st, ("verify",), sh, out)
 
 
-def rollback(*, run=sh, out=print) -> int:
+#: A finished move older than this is the server's life, not a move in
+#: flight: rolling it back needs saying so.
+ROLLBACK_FRESH_S = 15 * 60
+
+
+def rollback(*, run=sh, out=print, force: bool = False, now: float | None = None) -> int:
     st = _load()
     if not st.get("to"):
         out("server move: no move to roll back")
         return 2
     to = st["to"]
+    # A move that finished and has been serving since: a rollback now stops
+    # that server and lays the other machine's old state over everything it
+    # has written since (chats, messages, pairings). On 13 Nov 2026 a
+    # question card offering "Roll back now" sat unanswered for two hours
+    # after the move had been carried through. Refused unless forced.
+    done_at = st.get("finished")
+    if done_at and not st.get("rolled_back") and not force:
+        age = (now or time.time()) - float(done_at)
+        if age > ROLLBACK_FRESH_S:
+            out(f"server move: this move finished {age / 60:.0f} minutes ago and {to} has been "
+                f"the server since ({st.get('name')}). A rollback now would stop it and put "
+                f"{to}'s old state back over everything written there since. If that is "
+                "what you mean, add --force.")
+            return 1
     done = st.get("done") or []
     rc_all = 0
     if "sync" in done or st.get("step") == "restore" or "restore" in done:

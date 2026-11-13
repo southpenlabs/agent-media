@@ -328,3 +328,17 @@ def test_a_rollback_links_again_the_unit_files_a_disable_removed(tmp_path, monke
     assert sm.relink_units(links) == ["agent-media-visual-canvas.service"]
     assert (src / "agent-media-visual-canvas.service").read_text() == "[Service]\nExecStart=x\n"
     assert sm.relink_units(links) == []                            # there already
+
+
+def test_a_move_that_has_been_serving_is_not_rolled_back_without_force(rig):
+    """A stale "Roll back now" answered hours after the move was carried
+    through would have stopped the working server (13 Nov 2026)."""
+    fake, _made = rig
+    _move(fake, yes=True)
+    fake.ran.clear()
+    said: list[str] = []
+    later = sm._load()["finished"] + 2 * 3600
+    assert sm.rollback(run=fake, out=said.append, now=later) == 1
+    assert not fake.ran and "--force" in said[-1] and "120 minutes ago" in said[-1]
+    assert sm.rollback(run=fake, out=said.append, now=later, force=True) == 0
+    assert any("media restore latest" in c for _h, c in fake.ran)
