@@ -147,3 +147,13 @@ Later the same day:
   agent-mail (`media session send`, the inbox hook, `media test-failure
   notify`) without saying so anywhere: a `media doctor` check for it and a
   line in the move for its mailbox are owed.
+- **Matrix was unreachable from the server from the restore (15:01) until
+  18:00**: `MATRIX_HOMESERVER=http://127.0.0.1:8008` in
+  `~/.config/agent-media/matrix.env` and `secrets.env` is red5's own
+  homeserver, loopback only; the canvas logged "matrix: sync failed:
+  Connection refused" 728 times, so people's rooms and the bridges brought
+  nothing into the app for three hours. Set to the homeserver's public
+  address (`https://mel.ryer.org`, its own `.well-known`), the canvas
+  restarted, sync on again. Another address of the old machine that
+  `settle` should have caught: a setting naming `127.0.0.1` for a service
+  that did not move with the server is the same class as the `*_BIND`s.

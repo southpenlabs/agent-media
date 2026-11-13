@@ -223,6 +223,33 @@ the gateways: they wait for the gateway's own move, for the reason
   the services land; the store's state joins the nightly backup. The hour
   for step 3 is still David's to name.
 
+- **Steps 3–5 done, 13 Nov 2026 17:55–18:00** (David: "sooner the better";
+  sam asked for the stops and starts in one hand). red5's six units
+  stopped and disabled at 17:55:23 (how they were is in
+  `red5:~/.local/state/agent-memory/moved-to-red2-20261113/units-before.txt`;
+  `MOVED.txt` beside the old state); the state copied (72 MB; the store's
+  SQLite `integrity_check` ok, 9,410 memories, the governor's `state.db`
+  ok); the renamed units enabled and started on red2 at 17:56:05 — about
+  40 s without a store. Client files: red2's `~/.config/hippocampus.env`
+  to `127.0.0.1`, red5's to `red2` (copies kept as
+  `.bak-memory-move-20261113`). Checks: the same top hit for a known
+  memory from red2 and from red5; the store and the policy layer answer
+  `/health`; `agent-memory-claude-sync` ran on red2 and wrote 7 of 324
+  (the notes made on red2 this week: 9,419 now); a consolidation ran; the
+  healthcheck says OK. Not yet seen: a new chat's start-of-session context
+  on red2, and tonight's dream (03:00).
+- Found on the way: `governor_context.sh` and `governor_precompact.sh`
+  were not on red2 at all (red5 has them linked from the repo's
+  `scripts/`; Claude's settings call them only if present), so no chat on
+  red2 had been given its memory context; linked now. And the healthcheck's
+  Matrix alert could not be sent: `MATRIX_HOMESERVER` was
+  `http://127.0.0.1:8008`, red5's own — see the cutover's record.
+- Still to do: sam's dotfiles commit (`agent_memory` from red5 to red2,
+  `agent_memory_enabled`, `red2.env.zsh` to loopback); the client file on
+  the other hosts by hand; the global `CLAUDE.md` line naming `red5:54321`;
+  `red5-backup-pull`; the store's state into the nightly backup; red5's
+  copy removed after a fortnight.
+
 ## What can go wrong
 
 - **Two stores running at once** is the failure this whole plan exists to
