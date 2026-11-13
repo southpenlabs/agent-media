@@ -27,7 +27,9 @@ KEEP_LINES = 4000
 #: Events taken from one batch.
 MAX_EVENTS = 200
 #: Fields kept from each event, and from the row.
-_EVENT_KEYS = ("t", "msg", "idx", "heard", "elapsed", "delay", "skew", "lead",
+# `uplink`: the app's measured trip to this server, which it adds to the lead
+# since 13 Nov 2026 (the bold ran ahead once the server was a few ms away).
+_EVENT_KEYS = ("t", "msg", "idx", "heard", "elapsed", "delay", "skew", "lead", "uplink",
                "anchor_age_s", "off", "next_off", "paused", "src")
 _ROW_KEYS = ("source_session", "history_id", "play_started_at", "paused_at",
              "current_sentence_idx", "clip_offsets_s", "clip_starts_s",
