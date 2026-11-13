@@ -307,3 +307,17 @@ def test_health_problems_silent_on_a_host_whose_backup_is_fine():
     assert cli.health_problems(
         {"selfcheck": "1", "install": "editable", "services": "5",
          "backup_stale": "no", "backup_age_days": "0.4"}) == []
+
+
+def test_a_release_is_a_copy_on_purpose_not_a_fault(tmp_path):
+    """A release host's own install is deployed by `media update`: it is not
+    the stale-copy fault (red2 reported itself the day it became the server)."""
+    rel = tmp_path / "releases" / "abc123"
+    mod = rel / ".venv" / "lib" / "python3.13" / "site-packages" / "agent_media_core" / "__init__.py"
+    mod.parent.mkdir(parents=True)
+    mod.write_text("")
+    assert not cli._in_release(mod)                 # a build that did not finish
+    (rel / "RELEASE.json").write_text("{}")
+    assert cli._in_release(mod)
+    assert not cli._in_release(tmp_path / "elsewhere" / "agent_media_core" / "__init__.py")
+    assert cli.health_problems({"selfcheck": "1", "install": "release"}) == []

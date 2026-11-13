@@ -8542,7 +8542,13 @@ def selfcheck_facts() -> "dict[str, str]":
     mod = Path(agent_media_core.__file__).resolve()
     root = _checkout_root()
     facts["module"] = str(mod)
-    if root is None:
+    if root is None and _in_release(mod):
+        # A release (`media update`, docs/reference/releases.md) is a copy on
+        # purpose: it is deployed by `media update`, never by `git pull`, so
+        # it is not the stale-copy fault below (red2 said so of itself the
+        # day it became the server, 13 Nov 2026).
+        facts["install"] = "release"
+    elif root is None:
         # Installed as a copy with no checkout beside it: `git pull` deploys
         # nothing here, which is how call-guard ran weeks-old code.
         facts["install"] = "copy"
@@ -9001,6 +9007,17 @@ def _cache_facts(facts: "dict[str, str]") -> None:
         mb = _dir_mb(path)
         if mb:
             facts[name] = str(mb)
+
+
+def _in_release(mod: "Path") -> bool:
+    """Whether the running module is inside a built release: a folder with
+    `RELEASE.json` above its venv (release.py writes it last)."""
+    for parent in mod.parents:
+        if (parent / "RELEASE.json").is_file():
+            return True
+        if parent.name == "releases":
+            break
+    return False
 
 
 def health_problems(facts: "dict[str, str]") -> "list[str]":
