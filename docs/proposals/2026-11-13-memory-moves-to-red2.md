@@ -131,6 +131,22 @@ between would need carrying back by hand (an export of what was added
 since), which is the reason to keep the window short and to do it at a
 quiet hour.
 
+## Progress
+
+- **Step 2 done, 13 Nov 2026 17:35** (David: "sounds good. let's do it"):
+  Claude's memory files merged red5 → red2. 594 files added, 60 already
+  identical, 3 differed: two `MEMORY.md` indexes merged by line (the home
+  folder's, agent-media's) and one note where red2's was newer and stayed.
+  Both sides of each are kept in `memory/_merge-20261113/`; red2's files as
+  they were are in
+  `~/.local/share/agent-media-move/memory-merge-20261113/red2-before/`.
+  red2 now has 668 memory files against 69. Some of the notes written on
+  red2 this week describe the days before the move ("shared files live on
+  red5", "red2's home is a trimmed copy") and want a read.
+- The recommendations under "Decisions" were accepted with it: rename as
+  the services land; the store's state joins the nightly backup. The hour
+  for step 3 is still David's to name.
+
 ## What can go wrong
 
 - **Two stores running at once** is the failure this whole plan exists to
