@@ -130,9 +130,13 @@ after the stop): where agent-mail is used on the old machine
 (`~/.local/state/agent-mail/mail.sqlite3`), its mailbox, delivery state and
 `~/.config/agent-mail` are carried as they are. It is not agent-media's
 state and no backup holds it, but the sessions' mail goes where the session
-host is. The old mailbox is left untouched: `--status` says to retire it
-(rename it), because left in place the old machine's `agent-mail` goes on
-writing to it. The other machine needs agent-mail's own checkout; the step
+host is. Once its second pass has gone the old mailbox is **retired**: renamed
+`mail.sqlite3.moved-to-<host>-<date>`, with a `mail.sqlite3.moved` note
+beside where it was saying where it went. agent-mail (7e9fcbc) refuses to
+make a new mailbox beside that note, so mail sent on the old machine fails
+with that line instead of landing in an empty mailbox nobody reads (a
+renamed mailbox was simply made again, 13 Nov 2026). `--rollback` puts it
+back. The other machine needs agent-mail's own checkout; the step
 warns when it cannot run it. `media doctor` reports an agent-mail that is
 installed but cannot run on the machine running the session host.
 

@@ -52,6 +52,8 @@ def rig(monkeypatch):
     # patched: a step left real here once read this machine's unit files and
     # tried to rsync them to red2 (13 Nov 2026).
     monkeypatch.setitem(sm.RUN, "units", lambda st, run: made.append(("units", st["to"])))
+    monkeypatch.setattr(sm, "RETIRE", lambda to: made.append(("retire", to)) or
+                        {"kept": "/nowhere/mail.sqlite3.moved-to-red2-20261113", "note": "/nowhere/n"})
     monkeypatch.setitem(sm.RUN, "mail", lambda st, run: (
         made.append(("mail", st["to"])), st.update(mail={"ok": True, "carried": ["x"]})))
     monkeypatch.setitem(sm.RUN, "transcripts", lambda st, run: (
@@ -89,7 +91,7 @@ def test_the_steps_run_in_order(rig):
     assert made == [("backup", "red2:/home/other/.local/share/agent-media-move/store"),
                     ("transcripts", "red2"), ("mail", "red2"), ("units", "red2"),
                     ("sync", "red2:/home/other/.local/share/agent-media-move/store"),
-                    ("transcripts", "red2"), ("mail", "red2")]
+                    ("transcripts", "red2"), ("mail", "red2"), ("retire", "red2")]
     cmds = [c for _h, c in fake.ran]
     # Its own state is kept before anything of this server's lands there.
     keep = next(i for i, c in enumerate(cmds) if "media backup run" in c and "/before" in c)
@@ -208,7 +210,7 @@ def test_status(rig):
     _move(fake, yes=True)
     said.clear()
     assert sm.status(out=said.append) == 0 and any(ln.startswith("finished") for ln in said)
-    assert "retire the one here" in said[-1]            # the mailbox was carried
+    assert "and the one here retired (mail.sqlite3.moved-to-red2-20261113)" in said[-1]
 
 
 def test_a_working_chat_refuses_the_stop_unless_forced(rig, monkeypatch):
@@ -363,3 +365,18 @@ def test_the_mailbox_is_carried_where_agent_mail_is_used(tmp_path, monkeypatch):
     assert st["mail"]["carried"] == [".local/state/agent-mail", ".config/agent-mail"]
     assert sent[0][-2:] == [f"{home}/.local/state/agent-mail/", "red2:.local/state/agent-mail/"]
     assert "cannot run agent-mail yet" in st["mail"]["warning"]
+
+
+def test_the_old_mailbox_is_retired_and_a_rollback_brings_it_back(tmp_path):
+    home = tmp_path / "home"
+    d = home / ".local" / "state" / "agent-mail"
+    d.mkdir(parents=True)
+    assert sm.retire_mailbox("red2", home) == {}               # none here: nothing to do
+    (d / "mail.sqlite3").write_text("the mail")
+    got = sm.retire_mailbox("red2", home, now=1794537000)
+    assert not (d / "mail.sqlite3").exists()
+    assert (d / "mail.sqlite3.moved-to-red2-20261113").read_text() == "the mail"
+    assert (d / "mail.sqlite3.moved").read_text().startswith("red2 (ssh red2 agent-mail")
+    assert sm.restore_mailbox(got)
+    assert (d / "mail.sqlite3").read_text() == "the mail" and not (d / "mail.sqlite3.moved").exists()
+    assert not sm.restore_mailbox(got)                         # already back

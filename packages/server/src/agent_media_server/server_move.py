@@ -108,6 +108,11 @@ def sh(cmd: str, host: str = "", timeout: float = 3600.0) -> tuple[int, str]:
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
+#: Who retires the old mailbox; a test puts a stand-in here.
+def RETIRE(to: str) -> dict:
+    return retire_mailbox(to)
+
+
 #: Never stopped by a move: it holds a tmux session's panes open, and the
 #: panes are the person's, not the server's.
 NEVER_STOP = ("agent-media-tmux-hold",)
@@ -420,6 +425,37 @@ def carry_mailbox(st: dict) -> dict:
     return {"ok": True, "carried": dirs}
 
 
+def retire_mailbox(to: str, home: Path | None = None, now: float | None = None) -> dict:
+    """The old mailbox, once its second pass has gone: renamed, with a
+    `mail.sqlite3.moved` note beside where it was saying where it went.
+    agent-mail refuses to make a new mailbox beside that note, so mail sent
+    on the old machine fails loudly instead of landing in an empty mailbox
+    nobody reads. A rollback puts it back (`restore_mailbox`)."""
+    home = home or Path.home()
+    db = home / ".local" / "state" / "agent-mail" / "mail.sqlite3"
+    if not db.is_file():
+        return {}
+    kept = db.with_name(f"mail.sqlite3.moved-to-{to}-{time.strftime('%Y%m%d', time.localtime(now))}")
+    db.rename(kept)
+    note = db.with_name("mail.sqlite3.moved")
+    note.write_text(f"{to} (ssh {to} agent-mail …), with the server, "
+                    f"{time.strftime('%-d %b %Y', time.localtime(now))}\n")
+    return {"kept": str(kept), "note": str(note)}
+
+
+def restore_mailbox(retired: dict) -> bool:
+    """Undo `retire_mailbox`: the mailbox back under its name, the note gone."""
+    kept = Path(str((retired or {}).get("kept") or ""))
+    if not (retired or {}).get("kept") or not kept.is_file():
+        return False
+    db = kept.with_name("mail.sqlite3")
+    if db.exists():
+        return False
+    kept.rename(db)
+    Path(str(retired.get("note") or "")).unlink(missing_ok=True)
+    return True
+
+
 def step_mail(st: dict, run) -> None:
     got = carry_mailbox(st)
     st["mail"] = got
@@ -484,6 +520,10 @@ def step_sync(st: dict, run) -> None:
     # And the mailbox's: what was mailed since the first.
     if (st.get("mail") or {}).get("carried") and not st.get("rehearsal"):
         RUN["mail"](st, run)
+        # Its last pass has gone: the one here is retired, so nothing more
+        # is written to a mailbox that is no longer read.
+        st["mail"]["retired"] = RETIRE(st["to"])
+        _save(st)
 
 
 def step_restore(st: dict, run) -> None:
@@ -814,6 +854,8 @@ def rollback(*, run=sh, out=print, force: bool = False, now: float | None = None
             rc, got = run(_there(st, cmd), to)
             out(f"{'✓' if rc == 0 else '✗'} {to}: {what}" + ("" if rc == 0 else f": {got[-300:]}"))
             rc_all = rc_all or rc
+    if restore_mailbox((st.get("mail") or {}).get("retired") or {}):
+        out("✓ here: agent-mail's mailbox is back under its name")
     back = relink_units(st.get("unit_links") or {})
     if back:
         run("systemctl --user daemon-reload", "", 60)
@@ -852,8 +894,9 @@ def status(*, out=print) -> int:
         out("finished: the server answers at its new address.")
         mail = st.get("mail") or {}
         if mail.get("carried"):
-            out(f"agent-mail's mailbox was carried to {st.get('to')}: retire the one here "
-                "(rename ~/.local/state/agent-mail/mail.sqlite3) so no mail is written to it"
+            out(f"agent-mail's mailbox was carried to {st.get('to')}"
+                + (f" and the one here retired ({Path(mail['retired']['kept']).name})"
+                   if (mail.get("retired") or {}).get("kept") else "")
                 + (f". {mail['warning']}" if mail.get("warning") else ""))
     elif st.get("step"):
         out(f"running: {st['step']}")
