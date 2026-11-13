@@ -128,3 +128,37 @@ clients back. The tokens go back the same way, red2 stopped first.
 3. When: soon, as the other moves.
 4. sam prepares red2 (step 1) and does the dotfiles side; the move session
    runs the cutover and the checks.
+
+## Done (13 Nov 2026, 23:49; David: "Cut over now")
+
+- Baseline on red5 first: a request through each route — Claude
+  (`claude-haiku-4-5`, Meridian), ChatGPT (`gpt-5.6-luna`; `gpt-5.4-mini`
+  and `gpt-5.5` were already refused by the ChatGPT account, not by the
+  move), Gemini, Venice (`kimi-k2.7-code`), the local model — all 200.
+- red5: `login-watch.timer`, `litellm`, `meridian`, `cli-proxy-api`
+  stopped and disabled at 23:49:06 (how they were:
+  `red5:~/.local/share/agent-gateway-moved-to-red2-20261113/`).
+- The two rotating sign-ins (`~/.config/litellm/chatgpt/`,
+  `~/.cli-proxy-api/`) and `login-watch`'s state copied only then; red2's
+  three started and `:4000` bound at 23:49:39 — 33 s without a gateway.
+  The same five requests on red2: all 200. `login-watch.timer` enabled on
+  red2; `login-watch --status` there: ChatGPT, Claude (red2's own login),
+  Gemini, GitHub, Tailscale, Venice and OpenRouter all OK.
+- The forwarder: `gateway-forward-4000` and `-3456` on red5 (socat, bound
+  to red5's tailnet address, each caller in the journal); requests through
+  `red5:4000` reach red2. Check its journal for callers to repoint, then
+  remove both after a fortnight.
+- Repointed: red2's memory settings (`hippocampus.env`, `.toml`,
+  `memory-governor.env`) to `100.65.209.67:4000`, the store and policy
+  layer restarted; `MEDIA_SUMMARY_BASE_URL` in red2's env file;
+  `avante.lua` on both hosts; sam's prepared branches landed — dotfiles
+  71a28dd (`GATEWAY_HOST` gives `LITELLM_GATEWAY_URL`,
+  `MERIDIAN_BASE_URL`, `MEDIA_SUMMARY_BASE_URL`; the clients read it) and
+  agent-config 08a1d8c — and applied on red2 and red5.
+- Still to do: the canvas keeps the old summary address until its next
+  restart (refused tonight while a reply spoke; the forwarder carries it
+  meanwhile); merge agent-gateway's `red2` branch into main once this has
+  held (a pull on red5 before then would point its units at red2); sam's
+  rewrite of the `liberator` and `meridian` roles before red2 joins those
+  groups; `~/.hermes/profiles/meridian/config.yaml` on red5; red5's units
+  and the forwarder removed after a fortnight.
