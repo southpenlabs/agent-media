@@ -419,14 +419,20 @@ class HeadlessDriver:
                 "task_list": list(v.get("task_list") or []) if live else [],
                 "queued": bool(v.get("queued")) if live else False}
 
-    def rows(self) -> list[dict]:
+    def rows(self, live: bool = False) -> list[dict]:
         """Every session sessiond holds, as its views (the socket's `list`,
-        else the records on disk, none of them live)."""
+        else the records on disk, none of them live). `live`: only the ones
+        running now, which is all a caller asking "what is busy" wants. A
+        sessiond from before `live` sends them all, so it is filtered here
+        too; with sessiond down there are none."""
         from .. import sessiond
 
-        r = call("list", timeout=5.0)
+        r = call("list", timeout=5.0, **({"live": True} if live else {}))
         if r.get("ok"):
-            return list(r.get("sessions") or [])
+            got = list(r.get("sessions") or [])
+            return [v for v in got if v.get("live")] if live else got
+        if live:
+            return []
         return [{**rec, "live": False} for rec in sessiond.records()]
 
     def state(self, session: str) -> dict:

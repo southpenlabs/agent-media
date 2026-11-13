@@ -1,4 +1,4 @@
-# The canvas becomes the server: an overhaul, not a rewrite (proposal, 13 Nov 2026)
+# The canvas becomes the server: an overhaul, not a rewrite (decided 13 Nov 2026)
 
 David, 13 Nov 2026, the evening the server moved to red2, after asking why
 the canvas held 1.2 GB ("it seemed to be quite memory intensive. I'm
@@ -62,10 +62,16 @@ about 00:13 on 14 Nov and belongs here: _to be filled in_.
 **Why it churns.** Two confirmed causes, both "read everything, every
 time":
 
+- **The session list, asked for whole.** Found when step 2 was started:
+  the states the app polls (`/sessions/state`, every three seconds while a
+  list is open) asked the session host for every session it has ever held
+  to find the live ones. On red2 that was 699 views and 0.8 MB of JSON,
+  built in the session host and parsed in the server, for 2 live sessions.
+  This, not the record files, is what filled the memory sample.
 - `sessiond.records()` opens and parses every session record on each call
-  (737 files, 3.1 MB on red2), with no cache, and is called from the
-  session lists, the headless driver, agent mail's delivery and thinking
-  speech. The lists the app polls go through it.
+  (737 files, 3.1 MB on red2), with no cache. On a host with headless
+  chats on (red2) it is the fallback and little used; on a host without,
+  the same poll goes through it.
 - The phone's address book is read whole every 15 minutes
   (`MEDIA_CONTACTS_INTERVAL_S`), as the text `content query` prints, and
   parsed row by row (`contacts_android.py`).
@@ -163,7 +169,7 @@ before left a problem:
 |---|---|---|---|
 | 0 | the arena cap | done (403b589c) | |
 | 1 | the three-hour figure, and a `media doctor` line for the server's resident memory and thread count | small | |
-| 2 | change 4: the session-record index | small | |
+| 2 | change 4: the session list | **built 13 Nov, not yet deployed** (see Progress) | |
 | 3 | change 3: the worker pool, behind a setting, off by default; on on red2 for a week | medium | |
 | 4 | change 4: contacts streaming | small | |
 | 5 | changes 1 and 2: the name and the template | medium | what-each-machine-is, step 2 (`server` role) |
@@ -204,11 +210,28 @@ this file, as fewer-services did with its §4d.
 - **Two things changing at once on the machine that just moved.** One
   step at a time, each reversible by `media update --rollback`.
 
-## Decisions for David
+## Progress
 
-1. Go ahead in this order, starting with steps 1 and 2?
-2. The service's new name: `agent-media-server` (fewer-services already
-   uses it), or something else?
-3. The worker pool on red2 for a week before it becomes the default: yes?
-4. Change 5: stop at "a separate pool inside the server" unless a
-   measurement says otherwise (recommended), or plan the split now?
+- **Step 0, the arena cap**: live on red2's canvas since 21:13 on 13 Nov.
+- **Step 2, built 13 Nov 2026**: the session host's `list` takes
+  `live: true` and the state poll asks for that (2 views, not 699); a
+  session host from before it sends them all and the server filters, so
+  the two can be updated in either order. `sessiond.records()` keeps each
+  file's parse until the file changes (the stat is the test; a record is
+  renamed into place, so nothing can be stale). **Not deployed**: the
+  server is left running until the three-hour figure for step 0 is in, so
+  the two are measured apart; and the saving needs the session host on the
+  new release too, which is a drain of the running chats.
+- Still whole: `/targets` (the thread list) and search's "which sessions
+  are headless" ask for every view. Next in change 4.
+- **Step 1** (the three-hour figure, the doctor line): the figure is due
+  00:13 on 14 Nov; the doctor line is not written.
+
+## Decisions (David, 13 Nov 2026: "they all sound like excellent ideas")
+
+1. **Go ahead in this order**, starting with steps 1 and 2.
+2. **The name: `agent-media-server`.**
+3. **The worker pool runs on red2 for a week** before it becomes the
+   default.
+4. **Change 5 stops at a separate pool inside the server** unless a
+   measurement says otherwise.

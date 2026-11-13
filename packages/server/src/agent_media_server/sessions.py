@@ -1114,7 +1114,7 @@ def _live_states() -> list[dict]:
     if driver.headless_enabled() or any(r.get("agent") == "antigravity" for r in sessiond.records()):
         from .driver.headless import contract_state
 
-        hl = [v for v in driver.headless_driver().rows()
+        hl = [v for v in driver.headless_driver().rows(live=True)
               if v.get("live") and v.get("session") and v["session"] not in live
               and (driver.headless_enabled() or v.get("agent") == "antigravity")]
         hmem = procmem.tree_mem_mb({v["session"]: v.get("pid") for v in hl})

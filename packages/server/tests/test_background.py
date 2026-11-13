@@ -87,7 +87,7 @@ class FakeHeadless:
                   "first_text": "Run it", "pending": [], "queued": [],
                   "tasks": len(tasks), "task_list": tasks}
 
-    def rows(self):
+    def rows(self, live=False):
         return [self.v]
 
     def view(self, session):

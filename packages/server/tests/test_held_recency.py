@@ -20,7 +20,7 @@ class FakeHeadless:
     def __init__(self, views):
         self.views = views
 
-    def rows(self):
+    def rows(self, live=False):
         return self.views
 
 

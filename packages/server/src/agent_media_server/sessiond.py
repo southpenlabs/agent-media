@@ -403,21 +403,56 @@ def read_record(session: str, root: Path | None = None) -> dict | None:
         return None
 
 
+#: `{directory: {file name: ((inode, size, mtime_ns), record or None)}}`: each
+#: record file's parse, kept until the file changes. `records()` was every
+#: file opened and parsed on every call, from the lists the app polls: 737
+#: files and 3.1 MB on red2 on 13 Nov 2026, and the discarded copies were
+#: most of what the server's memory held
+#: (docs/proposals/2026-11-13-the-canvas-becomes-the-server.md). A record is
+#: written whole and renamed into place (`_write_atomic`), so a changed file
+#: is a new inode: the stat is the whole test, and nothing here can be stale.
+_RECORDS: dict[str, dict[str, tuple[tuple, dict | None]]] = {}
+_RECORDS_LOCK = threading.Lock()
+
+
 def records(root: Path | None = None) -> list[dict]:
-    out = []
+    """Every session's record, by file name. Each dict is the caller's own,
+    so a key may be set or removed; the lists and dicts inside one
+    (`pending`, `task_list`, `last_result`…) are the kept parse's and are
+    not to be changed in place."""
     d = root or state_root()
     try:
-        names = sorted(p for p in d.iterdir() if p.suffix == ".json"
-                       and not p.name.endswith(".settings.json"))
+        with os.scandir(d) as it:
+            found = []
+            for e in it:
+                if not e.name.endswith(".json") or e.name.endswith(".settings.json"):
+                    continue
+                try:
+                    st = e.stat()
+                except OSError:
+                    continue
+                found.append((e.name, e.path, (st.st_ino, st.st_size, st.st_mtime_ns)))
     except OSError:
         return []
-    for p in names:
-        try:
-            rec = json.loads(p.read_text())
-        except (OSError, ValueError):
-            continue
-        if isinstance(rec, dict) and rec.get("session"):
-            out.append(rec)
+    found.sort()
+    out = []
+    with _RECORDS_LOCK:
+        kept = _RECORDS.get(str(d), {})
+        now: dict[str, tuple[tuple, dict | None]] = {}
+        for name, path, key in found:
+            got = kept.get(name)
+            if got is None or got[0] != key:
+                try:
+                    rec = json.loads(Path(path).read_text())
+                except (OSError, ValueError):
+                    rec = None
+                if not (isinstance(rec, dict) and rec.get("session")):
+                    rec = None
+                got = (key, rec)
+            now[name] = got
+            if got[1] is not None:
+                out.append(dict(got[1]))
+        _RECORDS[str(d)] = now
     return out
 
 
@@ -3827,7 +3862,14 @@ class Supervisor:
                         "free_mb": round(free) if free is not None else None,
                         "min_free_mb": min_free_mb()}
             if op == "list":
-                return {"ok": True, "sessions": self.list() + self.remote.views_all()}
+                views = self.list() + self.remote.views_all()
+                # `live: true`: only the sessions running now. The states the
+                # app polls want those alone, and were sent every session
+                # ever held to find them: 699 views and 0.8 MB every three
+                # seconds for 2 live ones (red2, 13 Nov 2026).
+                if req.get("live"):
+                    views = [v for v in views if v.get("live")]
+                return {"ok": True, "sessions": views}
             if op == "get":
                 return {"ok": True, **self.get(sid)}
             if op == "start":
