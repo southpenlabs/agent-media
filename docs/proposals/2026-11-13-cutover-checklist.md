@@ -171,4 +171,10 @@ Later the same day:
   disabled; the first rsync of the maildir running (unit
   `mail-presync-105d`, reports to the move session). Then: stop and
   disable red5's `mail-sync.timer`, a final rsync, enable it on red2,
-  check `notmuch search`, `/mail/message` and the timeline.
+  check `notmuch search`, `/mail/message` and the timeline. **Done 03:24–03:27**: the first rsync took 29 min
+  (9.7 GB); red5's `mail-sync.timer` stopped and disabled at 03:24:38;
+  the final pass took 27 s; red2's index has all 170,736 messages and its
+  first sync run fetched one new message without downloading the rest
+  again (mbsync's state travelled in the maildir); `mail-sync.timer`
+  every 10 min on red2; the server's `mail_read.message()` opens the
+  newest message. red5's maildir on `/mnt/data` is left as it was.
