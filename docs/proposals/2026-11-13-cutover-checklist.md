@@ -157,3 +157,18 @@ Later the same day:
   restarted, sync on again. Another address of the old machine that
   `settle` should have caught: a setting naming `127.0.0.1` for a service
   that did not move with the server is the same class as the `*_BIND`s.
+- **Email moves to red2 too** (14 Nov 2026, ~03:00; David: "are we moving
+  mail across too? ... we probably should"). Found first: the server reads
+  mail from this host's notmuch (`mail_read.py`, `timeline.py`,
+  `contacts_mail.py`), and red2 had neither notmuch nor the maildir, so
+  opening a mail from the timeline, a mail read aloud and the mail in a
+  contact's history have had nothing since the cutover. red5 syncs 15
+  Gmail accounts with mbsync (app passwords in `~/.mail-secrets`, static,
+  no rotating token) into `~/Mail` → `/mnt/data/ryer/Mail`, 9.7 GB with a
+  1.9 GB notmuch index, every 10 min (`mail-sync.timer`, `mail-sync`,
+  `mail-tag`). Done: isync and notmuch installed on red2; `.mbsyncrc`,
+  `.notmuch-config`, `.mail-secrets/`, the two scripts and the timer copied,
+  disabled; the first rsync of the maildir running (unit
+  `mail-presync-105d`, reports to the move session). Then: stop and
+  disable red5's `mail-sync.timer`, a final rsync, enable it on red2,
+  check `notmuch search`, `/mail/message` and the timeline.
