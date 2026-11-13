@@ -8603,6 +8603,7 @@ def selfcheck_facts() -> "dict[str, str]":
         facts["down"] = ",".join(down)
     if parked:
         facts["parked"] = ",".join(parked)   # reported, never a problem
+    _agent_mail_facts(facts, any(s == "up" and n.endswith("sessiond") for n, s in services))
     loops = _crash_loops()
     if loops:
         facts["crashloop"] = ",".join(f"{n}:{c}" for n, c in loops)
@@ -9042,6 +9043,38 @@ def _cache_facts(facts: "dict[str, str]") -> None:
             facts[name] = str(mb)
 
 
+def _agent_mail_facts(facts: "dict[str, str]", session_host: bool) -> None:
+    """agent-mail, where it is installed: `agent_mail=ok|broken` and why.
+
+    agent-media leans on it without requiring it: `media session send`
+    signs a message as mail does, the inbox hook tells a chat what is
+    waiting, `media test-failure notify` and the sessions' own mail go
+    through it. It is a companion, its own repository, and a host without
+    the command simply has no mail. But a host that has the command and
+    cannot run it, while it runs the session host, loses mail quietly: red2
+    carried the wrappers with no checkout or mailbox behind them the day
+    the server moved there (13 Nov 2026). A host that is not the session
+    host is left alone: the wrapper on such a host says the mailbox is
+    elsewhere, which is the truth."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("agent-mail")
+    if not exe:
+        return
+    try:
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+        ok, why = r.returncode == 0, (r.stderr or r.stdout).strip().splitlines()[:1]
+    except (OSError, subprocess.SubprocessError) as e:
+        ok, why = False, [str(e)]
+    facts["agent_mail"] = "ok" if ok else "broken"
+    if not ok:
+        facts["agent_mail_why"] = (why[0] if why else "it does not run")[:160]
+        if session_host:
+            facts["agent_mail_needed"] = "1"
+
+
 def _in_release(mod: "Path") -> bool:
     """Whether the running module is inside a built release: a folder with
     `RELEASE.json` above its venv (release.py writes it last)."""
@@ -9062,6 +9095,9 @@ def health_problems(facts: "dict[str, str]") -> "list[str]":
         return []      # too old to selfcheck; skew reporting still applies
     if facts.get("install") == "copy":
         problems.append("install is a copy, not editable — git pull won't deploy")
+    if facts.get("agent_mail") == "broken" and facts.get("agent_mail_needed") == "1":
+        problems.append("agent-mail is installed but does not run on the session host, so mail "
+                        f"to its chats is lost: {facts.get('agent_mail_why') or 'no reason given'}")
     for name, _ in _cache_dirs():
         try:
             mb = int(facts.get(name) or 0)

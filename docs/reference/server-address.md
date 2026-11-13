@@ -125,6 +125,17 @@ media server move --status | --verify | --rollback
    `server-id` is this one's). If its DNS or tunnel is not moved yet this
    fails and says so; nothing is undone by itself, and `--verify` asks again.
 
+**agent-mail's mailbox** (step `mail`, after the transcripts and again
+after the stop): where agent-mail is used on the old machine
+(`~/.local/state/agent-mail/mail.sqlite3`), its mailbox, delivery state and
+`~/.config/agent-mail` are carried as they are. It is not agent-media's
+state and no backup holds it, but the sessions' mail goes where the session
+host is. The old mailbox is left untouched: `--status` says to retire it
+(rename it), because left in place the old machine's `agent-mail` goes on
+writing to it. The other machine needs agent-mail's own checkout; the step
+warns when it cannot run it. `media doctor` reports an agent-mail that is
+installed but cannot run on the machine running the session host.
+
 **The unit files.** `media-setup install-services` writes only the units
 that have a service template (the session host, the sinks, the timers in
 `services/`). The canvas — the server itself — the speech shims, the

@@ -355,3 +355,35 @@ def test_a_stopped_disabled_unit_is_parked_and_a_missing_one_is_not_listed(monke
         ("agent-media-tts", "parked"), ("agent-media-sink", "inactive"),
         ("agent-media-sessiond", "up"), ("agent-media-broken", "failed"),
         ("agent-media-gc", "timed")]
+
+
+def test_agent_mail_that_cannot_run_is_a_problem_only_on_the_session_host(monkeypatch, tmp_path):
+    """agent-mail is a companion, not a requirement: a host without it has
+    nothing to say. One that has the command and cannot run it, where the
+    session host runs, loses mail quietly (red2, 13 Nov 2026)."""
+    import shutil
+    import subprocess
+
+    class R:
+        def __init__(self, rc, err=""):
+            self.returncode, self.stderr, self.stdout = rc, err, ""
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    facts: dict = {}
+    cli._agent_mail_facts(facts, True)
+    assert facts == {} and cli.health_problems({"selfcheck": "1"}) == []
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/x/agent-mail")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(0))
+    facts = {}
+    cli._agent_mail_facts(facts, True)
+    assert facts == {"agent_mail": "ok"}
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: R(1, "agent-mail checkout not found at /x; set AGENT_MAIL_DIR"))
+    here, elsewhere = {"selfcheck": "1"}, {"selfcheck": "1"}
+    cli._agent_mail_facts(here, True)
+    cli._agent_mail_facts(elsewhere, False)
+    assert any("agent-mail is installed but does not run" in p and "checkout not found" in p
+               for p in cli.health_problems(here))
+    assert elsewhere["agent_mail"] == "broken" and cli.health_problems(elsewhere) == []

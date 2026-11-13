@@ -63,7 +63,8 @@ from pathlib import Path
 from . import server_address
 
 STORE = ".local/share/agent-media-move"
-STEPS = ("check", "keep", "backup", "transcripts", "units", "stop", "sync", "restore", "verify")
+STEPS = ("check", "keep", "backup", "transcripts", "mail", "units", "stop", "sync", "restore",
+         "verify")
 #: The first step that runs detached from the caller.
 DETACHED_FROM = "stop"
 
@@ -388,6 +389,50 @@ def carry_transcripts(st: dict) -> dict:
             **({"error": err[-300:]} if rc not in (0, 24) else {})}
 
 
+def mailbox_dirs(home: Path | None = None) -> list[str]:
+    """agent-mail's own folders under the home, where it is used here: the
+    mailbox and its delivery state, and its settings. Home-relative."""
+    home = home or Path.home()
+    out = []
+    if (home / ".local" / "state" / "agent-mail" / "mail.sqlite3").is_file():
+        out.append(".local/state/agent-mail")
+        if (home / ".config" / "agent-mail").is_dir():
+            out.append(".config/agent-mail")
+    return out
+
+
+def carry_mailbox(st: dict) -> dict:
+    """agent-mail's mailbox to the other machine. It is not agent-media's
+    state and no backup holds it, but the sessions' mail goes where the
+    session host is: left behind, every message between sessions crossed
+    back to the old machine by ssh (the cutover, 13 Nov 2026). Carried as
+    it is, both passes; the old one is not touched, and the move says to
+    retire it."""
+    dirs = mailbox_dirs()
+    if not dirs:
+        return {"ok": True, "carried": []}
+    home = Path.home()
+    for d in dirs:
+        rc, err = _rsync(["rsync", "-a", "--mkpath", "--no-specials", "--no-devices",
+                          f"{home}/{d}/", f"{st['to']}:{d}/"])
+        if rc not in (0, 24):
+            return {"ok": False, "carried": [], "error": err[-300:]}
+    return {"ok": True, "carried": dirs}
+
+
+def step_mail(st: dict, run) -> None:
+    got = carry_mailbox(st)
+    st["mail"] = got
+    if not got.get("ok"):
+        raise Stop(f"agent-mail's mailbox did not go: {got.get('error')}")
+    if got.get("carried"):
+        rc, out_ = run("agent-mail --version", st["to"], 30)
+        if rc != 0:
+            st["mail"]["warning"] = (f"{st['to']} cannot run agent-mail yet "
+                                     f"({out_.strip().splitlines()[-1] if out_.strip() else 'no answer'}): "
+                                     "the mailbox is there, its checkout is not")
+
+
 def step_transcripts(st: dict, run) -> None:
     got = carry_transcripts(st)
     st.setdefault("transcripts", []).append(got)
@@ -436,6 +481,9 @@ def step_sync(st: dict, run) -> None:
     # The transcripts' second pass: what the chats wrote since the first.
     if st.get("transcripts") is not None:
         RUN["transcripts"](st, run)
+    # And the mailbox's: what was mailed since the first.
+    if (st.get("mail") or {}).get("carried") and not st.get("rehearsal"):
+        RUN["mail"](st, run)
 
 
 def step_restore(st: dict, run) -> None:
@@ -503,7 +551,8 @@ def step_verify(st: dict, run) -> None:
 
 
 RUN = {"check": step_check, "keep": step_keep, "backup": step_backup,
-       "transcripts": step_transcripts, "units": step_units, "stop": step_stop,
+       "transcripts": step_transcripts, "mail": step_mail, "units": step_units,
+       "stop": step_stop,
        "sync": step_sync, "restore": step_restore, "verify": step_verify}
 
 
@@ -801,6 +850,11 @@ def status(*, out=print) -> int:
         out("rolled back.")
     elif st.get("finished"):
         out("finished: the server answers at its new address.")
+        mail = st.get("mail") or {}
+        if mail.get("carried"):
+            out(f"agent-mail's mailbox was carried to {st.get('to')}: retire the one here "
+                "(rename ~/.local/state/agent-mail/mail.sqlite3) so no mail is written to it"
+                + (f". {mail['warning']}" if mail.get("warning") else ""))
     elif st.get("step"):
         out(f"running: {st['step']}")
     return 1 if st.get("failed") else 0

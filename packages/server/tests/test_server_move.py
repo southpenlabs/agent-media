@@ -52,6 +52,8 @@ def rig(monkeypatch):
     # patched: a step left real here once read this machine's unit files and
     # tried to rsync them to red2 (13 Nov 2026).
     monkeypatch.setitem(sm.RUN, "units", lambda st, run: made.append(("units", st["to"])))
+    monkeypatch.setitem(sm.RUN, "mail", lambda st, run: (
+        made.append(("mail", st["to"])), st.update(mail={"ok": True, "carried": ["x"]})))
     monkeypatch.setitem(sm.RUN, "transcripts", lambda st, run: (
         made.append(("transcripts", st["to"])), st.setdefault("transcripts", []).append({"ok": True})))
     monkeypatch.setattr(sm, "_rsync", lambda argv, stdin="": pytest.fail(f"a real rsync: {argv}"))
@@ -85,9 +87,9 @@ def test_the_steps_run_in_order(rig):
     assert st["done"] == list(sm.STEPS) and st["finished"]
     assert st["there_store"] == "/home/other/.local/share/agent-media-move"
     assert made == [("backup", "red2:/home/other/.local/share/agent-media-move/store"),
-                    ("transcripts", "red2"), ("units", "red2"),
+                    ("transcripts", "red2"), ("mail", "red2"), ("units", "red2"),
                     ("sync", "red2:/home/other/.local/share/agent-media-move/store"),
-                    ("transcripts", "red2")]
+                    ("transcripts", "red2"), ("mail", "red2")]
     cmds = [c for _h, c in fake.ran]
     # Its own state is kept before anything of this server's lands there.
     keep = next(i for i, c in enumerate(cmds) if "media backup run" in c and "/before" in c)
@@ -140,7 +142,7 @@ def test_the_stop_and_after_run_detached_unless_foreground(rig):
     rc, said = _move(fake, yes=True, foreground=False,
                      detach=lambda to, name: units.append((to, name)) or "media-server-move-x")
     assert rc == 0 and units == [("red2", NAME)] and "--status" in said
-    assert sm._load()["done"] == ["check", "keep", "backup", "transcripts", "units"]
+    assert sm._load()["done"] == ["check", "keep", "backup", "transcripts", "mail", "units"]
     # Half done is not finished: a watcher reads this.
     assert "finished" not in sm._load()
     said0: list[str] = []
@@ -205,7 +207,8 @@ def test_status(rig):
     assert sm.status(out=said.append) == 0 and "no server move" in said[0]
     _move(fake, yes=True)
     said.clear()
-    assert sm.status(out=said.append) == 0 and "finished" in said[-1]
+    assert sm.status(out=said.append) == 0 and any(ln.startswith("finished") for ln in said)
+    assert "retire the one here" in said[-1]            # the mailbox was carried
 
 
 def test_a_working_chat_refuses_the_stop_unless_forced(rig, monkeypatch):
@@ -294,7 +297,7 @@ def test_fire_carries_on_from_the_failed_step_and_keeps_what_the_stop_recorded(r
     rc, said = _move(fake, yes=True)
     assert rc == 1 and "restore" in said
     st = sm._load()
-    assert st["done"] == ["check", "keep", "backup", "transcripts", "units", "stop", "sync"]
+    assert st["done"] == ["check", "keep", "backup", "transcripts", "mail", "units", "stop", "sync"]
     stopped, disabled = st["stopped_here"], st["disabled_here"]
     assert stopped and disabled
     # Nothing is up now, as after the real stop.
@@ -342,3 +345,21 @@ def test_a_move_that_has_been_serving_is_not_rolled_back_without_force(rig):
     assert not fake.ran and "--force" in said[-1] and "120 minutes ago" in said[-1]
     assert sm.rollback(run=fake, out=said.append, now=later, force=True) == 0
     assert any("media restore latest" in c for _h, c in fake.ran)
+
+
+def test_the_mailbox_is_carried_where_agent_mail_is_used(tmp_path, monkeypatch):
+    monkeypatch.undo()
+    home = tmp_path / "home"
+    assert sm.mailbox_dirs(home) == []                         # no agent-mail here: nothing
+    (home / ".local" / "state" / "agent-mail").mkdir(parents=True)
+    (home / ".local" / "state" / "agent-mail" / "mail.sqlite3").write_text("db")
+    (home / ".config" / "agent-mail").mkdir(parents=True)
+    assert sm.mailbox_dirs(home) == [".local/state/agent-mail", ".config/agent-mail"]
+    monkeypatch.setattr(sm.Path, "home", classmethod(lambda cls: home))
+    sent: list[list[str]] = []
+    monkeypatch.setattr(sm, "_rsync", lambda argv, stdin="": (sent.append(argv), (0, ""))[1])
+    st = {"to": "red2"}
+    sm.step_mail(st, lambda cmd, host="", timeout=0: (1, "agent-mail checkout not found at /x"))
+    assert st["mail"]["carried"] == [".local/state/agent-mail", ".config/agent-mail"]
+    assert sent[0][-2:] == [f"{home}/.local/state/agent-mail/", "red2:.local/state/agent-mail/"]
+    assert "cannot run agent-mail yet" in st["mail"]["warning"]
