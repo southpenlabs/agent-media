@@ -1245,7 +1245,17 @@ def restore(which: str | None = None, *, dest: str | None = None, into: dict[str
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             if p["kind"] == "tree":
-                argv = ["rsync", "-a", "--delete", str(src) + "/", str(target) + "/"]
+                # `--delete` makes the folder match the snapshot, and a name
+                # the backup leaves out on purpose is not in the snapshot --
+                # so without these excludes a restore removed it from the
+                # target. That would have deleted the other machine's copy of
+                # the encryption key (`backup.key`, excluded since 13 Nov
+                # 2026) at the cutover, on the machine about to need it.
+                # rsync does not delete what it excludes.
+                argv = ["rsync", "-a", "--delete"]
+                for pat in EXCLUDE:
+                    argv += ["--exclude", pat]
+                argv += [str(src) + "/", str(target) + "/"]
                 r = subprocess.run(argv, capture_output=True, text=True)
                 if r.returncode not in (0, 24):
                     raise RuntimeError(r.stderr.strip()[:300])

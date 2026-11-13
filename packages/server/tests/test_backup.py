@@ -741,3 +741,29 @@ def test_the_encryption_key_is_never_inside_a_backup(install, monkeypatch, tmp_p
     assert not (held / bk.KEY_NAME).exists(), \
         "the key to the encrypted history must not be in the plain snapshot"
     assert bk.excluded_reason(bk.KEY_NAME), "and it is excluded by name, with a reason"
+
+
+@pytest.mark.skipif(NO_RSYNC, reason="needs rsync for the tree copies")
+def test_a_restore_does_not_delete_what_a_backup_leaves_out(install, tmp_path):
+    """The key is excluded from every backup, and the config folder is restored
+    with --delete: together they would have removed the other machine's copy
+    of the key at the cutover, on the machine about to need it (asked by the
+    move's chat, 13 Nov 2026: "does the passphrase file travel in the
+    backup?" -- no, and it must survive the restore that does not carry it).
+    """
+    bk.backup(tier="core")
+    other = tmp_path / "other"
+    roots = {"home": other / "home", "state": other / "state"}
+    cfg = roots["home"] / ".config" / "agent-media"
+    cfg.mkdir(parents=True)
+    roots["state"].mkdir(parents=True)
+    (cfg / bk.KEY_NAME).write_text("the second copy\n")
+    (cfg / "stale-leftover.toml").write_text("not in the snapshot\n")
+
+    res = bk.restore("latest", into=roots, dry_run=False, force=True)
+    assert res["ok"], res.get("errors")
+    assert (cfg / bk.KEY_NAME).read_text() == "the second copy\n", \
+        "the key the backup leaves out must survive the restore"
+    assert (cfg / "config.toml").exists()
+    assert not (cfg / "stale-leftover.toml").exists(), \
+        "anything else still matches the snapshot"
