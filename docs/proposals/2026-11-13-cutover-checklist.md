@@ -77,3 +77,39 @@ red5 as red2's session worker (pairing in the other direction); retiring
 red5's agent-media install after a fortnight; sp4, pn and ftv's room clients
 (offline; they follow when they next come up); the three hooks red5 has and
 red2 lacks (`media-hook-heard`, `-context`, `-shared-check`).
+
+## What happened (13 Nov 2026)
+
+Started 14:09 on David's "Go". check, keep, backup (272 s), transcripts
+(72 s) and units ran with everything up; red5's units were stopped and
+disabled at about 14:15. The restore then **failed at its first command on
+red2**, 14:16: `media server settle --stash --own …` was rejected by the
+main parser (a pass-through subcommand does not receive a leading option;
+the rehearsal called `settle()` in process and never met it). The move
+session's chat had stopped with red5, as designed, so the fix (4e47a672,
+15:00) and the carry-on were another session's; `--fire` now resumes from
+the failed step instead of stopping twice. On red2 the share listener then
+crash-looped on red5's tailnet address in `MEDIA_SHARE_BIND`; `settle`
+moves such binds now (312a041a, 15:26). The server was down for roughly
+three quarters of an hour, not two minutes.
+
+State at 16:10, checked from red2: the server answers at both names with
+red5's `server-id`; `media server check` is clean; the backup settings are
+the backup chat's and a backup has run; the move session's own chat came
+back on red2 (the only one in `moved-chats.json`).
+
+Found afterwards, and fixed or still open:
+
+- The watcher took `finished` in the move's log to mean the whole move: the
+  first half sets it too. It woke the move session just before the stop.
+  (Open: one `finished` for the lot.)
+- `systemctl disable` on red5 removed the unit files that were symlinks
+  into the checkout, so `--rollback` could not have enabled them. The stop
+  records the links now and a rollback restores them.
+- `media doctor` on red2 called its own release "a copy, not editable", and
+  called red5's stopped, disabled units "down": both fixed (da7ed410).
+  red5's env file no longer names a backup destination.
+- **The house audio (step 11) was not moved**: snapserver, mopidy, spotifyd
+  and the am-* units still run on red5, none on red2. Asked of sam.
+- red2 has no deployer: its services run release 4e47a672 until someone
+  runs `media update` there.

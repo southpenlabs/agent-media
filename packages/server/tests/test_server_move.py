@@ -305,3 +305,21 @@ def test_fire_carries_on_from_the_failed_step_and_keeps_what_the_stop_recorded(r
     said3: list[str] = []
     assert sm.move("red2", NAME, [], fire=True, run=fake, out=said3.append) == 0
     assert "every step is done" in "\n".join(said3)
+
+
+def test_a_rollback_links_again_the_unit_files_a_disable_removed(tmp_path, monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    src = sm.units_dir()
+    src.mkdir(parents=True)
+    real = tmp_path / "checkout" / "agent-media-visual-canvas.service"
+    real.parent.mkdir()
+    real.write_text("[Service]\nExecStart=x\n")
+    (src / "agent-media-visual-canvas.service").symlink_to(real)
+    (src / "agent-media-sessiond.service").write_text("a plain file\n")
+    links = sm.unit_links(["agent-media-visual-canvas.service", "agent-media-sessiond.service"])
+    assert links == {"agent-media-visual-canvas.service": str(real)}
+    (src / "agent-media-visual-canvas.service").unlink()          # what `disable` does
+    assert sm.relink_units(links) == ["agent-media-visual-canvas.service"]
+    assert (src / "agent-media-visual-canvas.service").read_text() == "[Service]\nExecStart=x\n"
+    assert sm.relink_units(links) == []                            # there already

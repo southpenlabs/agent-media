@@ -128,6 +128,28 @@ def up_units() -> list[str]:
     return sorted(set(names), key=lambda n: (not n.endswith(".timer"), "sessiond" in n, n))
 
 
+def unit_links(names: list[str]) -> dict[str, str]:
+    """Those of `names` whose unit file is a symlink, and its target."""
+    out = {}
+    for n in names:
+        p = units_dir() / n
+        if p.is_symlink():
+            out[n] = os.readlink(p)
+    return out
+
+
+def relink_units(links: dict[str, str]) -> list[str]:
+    """Put back the unit-file symlinks a disable removed; those restored."""
+    done = []
+    for n, target in (links or {}).items():
+        p = units_dir() / n
+        if not p.exists() and not p.is_symlink():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.symlink_to(target)
+            done.append(n)
+    return done
+
+
 def enabled_units() -> list[str]:
     """Those enabled here: disabled by the move, so a reboot of the old
     machine does not start a second copy of the server."""
@@ -383,6 +405,11 @@ def step_stop(st: dict, run) -> None:
     units = up_units()
     st["stopped_here"] = units
     st["disabled_here"] = enabled_units()
+    # `systemctl disable` removes a unit file that is itself a symlink (the
+    # canvas and the shims on red5 were links into the checkout: after the
+    # cutover they were `not-found` there, and a rollback had nothing to
+    # enable, 13 Nov 2026). Where each pointed is kept, to link them again.
+    st["unit_links"] = unit_links(st["disabled_here"])
     _save(st)
     for u in units:
         rc, got = run(f"systemctl --user stop {shlex.quote(u)}", "", 120)
@@ -714,6 +741,10 @@ def rollback(*, run=sh, out=print) -> int:
             rc, got = run(_there(st, cmd), to)
             out(f"{'✓' if rc == 0 else '✗'} {to}: {what}" + ("" if rc == 0 else f": {got[-300:]}"))
             rc_all = rc_all or rc
+    back = relink_units(st.get("unit_links") or {})
+    if back:
+        run("systemctl --user daemon-reload", "", 60)
+        out(f"✓ here: {len(back)} unit files linked again")
     if st.get("disabled_here"):
         rc, got = run("systemctl --user enable "
                       + " ".join(shlex.quote(u) for u in st["disabled_here"]), "", 120)
