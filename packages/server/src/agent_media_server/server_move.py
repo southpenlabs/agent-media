@@ -107,13 +107,32 @@ def sh(cmd: str, host: str = "", timeout: float = 3600.0) -> tuple[int, str]:
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
-def up_units() -> list[str]:
-    """This host's systemd units of ours that are up, the session host last
-    (it holds the chats)."""
-    from agent_media_core import restart_services as rs
+#: Never stopped by a move: it holds a tmux session's panes open, and the
+#: panes are the person's, not the server's.
+NEVER_STOP = ("agent-media-tmux-hold",)
 
-    names = [s.name for s in rs.services() if s.kind == "systemd" and s.state == "up"]
-    return sorted(names, key=lambda n: (n.endswith("sessiond"), n))
+
+def _unit_names(*args: str) -> list[str]:
+    r = subprocess.run(["systemctl", "--user", *args, "--plain", "--no-legend",
+                        "agent-media*", "am-*"], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+    return [ln.split()[0] for ln in r.stdout.splitlines() if ln.split()]
+
+
+def up_units() -> list[str]:
+    """This host's units of ours that are active, services and timers: the
+    timers first (so none fires a job mid-move), the session host last (it
+    holds the chats)."""
+    names = [n for n in _unit_names("list-units", "--state=active")
+             if n.endswith((".service", ".timer")) and not n.startswith(NEVER_STOP)]
+    return sorted(set(names), key=lambda n: (not n.endswith(".timer"), "sessiond" in n, n))
+
+
+def enabled_units() -> list[str]:
+    """Those enabled here: disabled by the move, so a reboot of the old
+    machine does not start a second copy of the server."""
+    return sorted(n for n in _unit_names("list-unit-files", "--state=enabled")
+                  if not n.startswith(NEVER_STOP))
 
 
 #: Prints the directory of a `media` there that has `restore` and `server`.
@@ -351,11 +370,20 @@ def step_stop(st: dict, run) -> None:
                      "asks them to), or pass --force")
     units = up_units()
     st["stopped_here"] = units
+    st["disabled_here"] = enabled_units()
     _save(st)
     for u in units:
         rc, got = run(f"systemctl --user stop {shlex.quote(u)}", "", 120)
         if rc != 0:
             raise Stop(f"stopping {u} here failed: {got}")
+    # Left installed, not enabled: the server is the other machine now, and
+    # this one coming back from a reboot must not start a second copy
+    # (`--rollback` enables them again).
+    if st["disabled_here"]:
+        rc, got = run("systemctl --user disable "
+                      + " ".join(shlex.quote(u) for u in st["disabled_here"]), "", 120)
+        if rc != 0:
+            raise Stop(f"disabling this machine's units failed: {got[-300:]}")
 
 
 def step_sync(st: dict, run) -> None:
@@ -619,9 +647,16 @@ def move(to: str, name: str, also: list[str], *, yes: bool = False, dry_run: boo
 
 def _detach(to: str, name: str) -> str:
     unit = f"media-server-move-{time.strftime('%Y%m%d-%H%M%S')}"
-    media = shutil.which("media") or str(Path(sys.executable).with_name("media"))
-    subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect", media, "server",
-                    "move", "--to", to, "--name", name, "--fire"],
+    # The `media` that is running this, not the one on PATH: on a release
+    # host PATH's is the release, which may be older than this command.
+    here = Path(sys.executable).with_name("media")
+    media = str(here) if here.exists() else (shutil.which("media") or "media")
+    # What the detached half needs of this shell: the ssh agent (the other
+    # machine is reached over ssh) and where a remote backup is staged.
+    keep = [f"--setenv={k}={os.environ[k]}" for k in ("SSH_AUTH_SOCK", "MEDIA_BACKUP_STAGE")
+            if os.environ.get(k)]
+    subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect", *keep, media,
+                    "server", "move", "--to", to, "--name", name, "--fire"],
                    check=True, capture_output=True, stdin=subprocess.DEVNULL)
     return unit
 
@@ -655,6 +690,12 @@ def rollback(*, run=sh, out=print) -> int:
         ):
             rc, got = run(_there(st, cmd), to)
             out(f"{'✓' if rc == 0 else '✗'} {to}: {what}" + ("" if rc == 0 else f": {got[-300:]}"))
+            rc_all = rc_all or rc
+    if st.get("disabled_here"):
+        rc, got = run("systemctl --user enable "
+                      + " ".join(shlex.quote(u) for u in st["disabled_here"]), "", 120)
+        if rc != 0:
+            out(f"✗ enabling this machine's units again: {got[-300:]}")
             rc_all = rc_all or rc
     for u in st.get("stopped_here") or []:
         rc, got = run(f"systemctl --user start {shlex.quote(u)}", "", 120)

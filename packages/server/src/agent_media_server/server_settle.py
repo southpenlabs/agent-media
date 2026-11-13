@@ -62,7 +62,43 @@ def stash(own: Path) -> dict:
     for p, _rec in _records(sd):
         shutil.copy2(p, own / p.name)
         n += 1
+    # Its env file too: a few of its settings are about this machine, not
+    # the server, and the restore replaces the file (`HOST_KEYS`).
+    from .server_address import env_file
+
+    try:
+        shutil.copy2(env_file(), own / "agent-media.env.before")
+    except OSError:
+        pass
     return {"ok": True, "stashed": n, "own": str(own)}
+
+
+#: Settings that describe the machine, kept from its own env file when the
+#: restored one lacks them: where its agent CLI is (red2's `claude` is under
+#: fnm, on no PATH a unit has).
+HOST_KEYS = ("MEDIA_SESSIOND_CLAUDE",)
+
+
+def keep_host_keys(own: Path | None) -> list[str]:
+    from .server_address import env_file
+
+    if own is None or not (own / "agent-media.env.before").exists():
+        return []
+    before = dict(m.groups() for m in re.finditer(
+        r"^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$", (own / "agent-media.env.before").read_text(),
+        re.M))
+    env = env_file()
+    try:
+        now = env.read_text()
+    except OSError:
+        now = ""
+    add = [(k, before[k]) for k in HOST_KEYS
+           if k in before and not re.search(rf"^\s*(?:export\s+)?{k}=", now, re.M)]
+    if add:
+        with open(env, "a") as fh:
+            fh.write("\n# This machine's own, kept across the restore (media server settle).\n"
+                     + "".join(f"{k}={v}\n" for k, v in add))
+    return [k for k, _v in add]
 
 
 def settle(own: Path | None = None) -> dict:
@@ -137,6 +173,19 @@ def settle(own: Path | None = None) -> dict:
             out["default_host_unset"] = True
     if out["default_host_unset"]:
         env.write_text("\n".join(lines) + "\n")
+    out["host_keys_kept"] = keep_host_keys(own)
+    # A backup onto a path of the old machine's, or to this machine itself,
+    # protects nothing here: said, not guessed at.
+    out["warnings"] = []
+    text = "\n".join(lines)
+    m = re.search(r"^MEDIA_BACKUP_DEST=(.*)$", text, re.M)
+    if m and ":" not in m.group(1) and not os.path.isdir(os.path.expanduser(m.group(1).strip())):
+        out["warnings"].append(f"MEDIA_BACKUP_DEST={m.group(1).strip()} is not a folder on this "
+                               "machine: the nightly backup has nowhere to go until it is set")
+    m = re.search(r"^MEDIA_BACKUP_REPO=\S*?:([A-Za-z0-9_.-]+):", text, re.M)
+    if m and is_local(m.group(1)):
+        out["warnings"].append("MEDIA_BACKUP_REPO names this machine itself: the encrypted "
+                               "history would sit beside the data it protects")
     return out
 
 

@@ -132,3 +132,21 @@ def test_carried_units_are_written_where_missing_and_enabled(tmp_path, monkeypat
     assert sorted(got["written"]) == ["agent-media-gone.service", "agent-media-visual-canvas.service"]
     assert got["enabled"] == ["agent-media-visual-canvas.service", "agent-media-sessiond.service"]
     assert ran[0] == ["systemctl", "--user", "daemon-reload"]
+
+
+def test_this_machines_own_settings_survive_the_restore(there):
+    sd, env, tmp = there
+    env.write_text("MEDIA_SESSIOND_CLAUDE=/home/x/fnm/bin/claude\nMEDIA_HEADLESS=1\n")
+    own = tmp / "own"
+    ss.stash(own)
+    # The restore: the old machine's env file, without that key.
+    env.write_text("MEDIA_PUBLIC_URL=https://old.example\n"
+                   "MEDIA_BACKUP_DEST=/mnt/old-machine/backups\n"
+                   "MEDIA_BACKUP_REPO=sftp:red2:/home/x/restic\n")
+    got = ss.settle(own)
+    assert got["host_keys_kept"] == ["MEDIA_SESSIOND_CLAUDE"]
+    assert "MEDIA_SESSIOND_CLAUDE=/home/x/fnm/bin/claude\n" in env.read_text()
+    assert len(got["warnings"]) == 2 and "nowhere to go" in got["warnings"][0]
+    assert "beside the data" in got["warnings"][1]
+    # Already in the restored file: not written twice.
+    assert ss.keep_host_keys(own) == []

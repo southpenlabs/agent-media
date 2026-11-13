@@ -42,7 +42,11 @@ def rig(monkeypatch):
                         {"ok": True, "id": "s1"})
     monkeypatch.setattr(backup, "sync", lambda **kw: made.append(("sync", kw["to"])) or
                         {"ok": True, "id": "s2", "seconds": 3.0})
-    monkeypatch.setattr(sm, "up_units", lambda: ["agent-media-visual-canvas", "agent-media-sessiond"])
+    monkeypatch.setattr(sm, "up_units", lambda: ["agent-media-state-gc.timer",
+                                                 "agent-media-visual-canvas.service",
+                                                 "agent-media-sessiond.service"])
+    monkeypatch.setattr(sm, "enabled_units", lambda: ["agent-media-state-gc.timer",
+                                                      "agent-media-visual-canvas.service"])
     monkeypatch.setattr(sm, "busy_chats", lambda: [])
     # RUN holds the step functions themselves, so the table is what is
     # patched: a step left real here once read this machine's unit files and
@@ -102,7 +106,10 @@ def test_the_steps_run_in_order(rig):
     assert "disable --now agent-media-jobs-worker" in cmds[-1]
     # Here the session host stops last; there the old name keeps answering.
     here_stops = [c for h, c in fake.ran if not h and "systemctl --user stop" in c]
-    assert here_stops[-1].endswith("agent-media-sessiond")
+    assert here_stops[-1].endswith("agent-media-sessiond.service")
+    # And nothing here is left enabled to start a second copy at a reboot.
+    assert ("", "systemctl --user disable agent-media-state-gc.timer "
+                "agent-media-visual-canvas.service") in fake.ran
     assert f"--to {NAME}" in cmds[rename] and f"--also {OLD}" in cmds[rename]
     assert "--no-restart" in cmds[rename]
     # The other machine's own agent-media is first on the PATH for each.
@@ -155,7 +162,7 @@ def test_a_name_that_does_not_answer_fails_verify_and_undoes_nothing(rig, monkey
     monkeypatch.setattr(sm.time, "time", clock)
     rc, said = _move(fake, yes=True)
     assert rc == 1 and "did not answer" in said and "--rollback" in said
-    assert not any("systemctl --user start agent-media-sessiond" == c for _h, c in fake.ran)
+    assert not any("systemctl --user start agent-media-sessiond.service" == c for _h, c in fake.ran)
     assert sm._load()["failed"]["step"] == "verify"
 
 
@@ -170,8 +177,11 @@ def test_rollback_puts_the_other_machine_back_and_starts_this_one(rig):
     assert any("systemctl --user start agent-media-sessiond.service agent-media-jobs-worker.service"
                in c for c in there)
     here = [c for h, c in fake.ran if not h]
-    assert here == ["systemctl --user start agent-media-visual-canvas",
-                    "systemctl --user start agent-media-sessiond"]
+    assert here == ["systemctl --user enable agent-media-state-gc.timer "
+                    "agent-media-visual-canvas.service",
+                    "systemctl --user start agent-media-state-gc.timer",
+                    "systemctl --user start agent-media-visual-canvas.service",
+                    "systemctl --user start agent-media-sessiond.service"]
     assert sm._load()["rolled_back"] and "by hand" in said[-1]
 
 
@@ -254,3 +264,14 @@ def test_the_servers_own_unit_files_are_collected(tmp_path, monkeypatch):
     import json as _json
     assert _json.loads((dest / "enabled.json").read_text()) == [
         "agent-media-state-gc.timer", "agent-media-visual-canvas.service"]
+
+
+def test_the_stop_order_and_what_is_never_stopped(monkeypatch):
+    monkeypatch.undo()
+    active = ["agent-media-sessiond.service", "agent-media-backup.timer",
+              "agent-media-tmux-hold-amux-scratch.service", "am-sinks.service",
+              "agent-media-visual-canvas.service", "agent-media-x.socket"]
+    monkeypatch.setattr(sm, "_unit_names", lambda *a: active)
+    assert sm.up_units() == ["agent-media-backup.timer", "agent-media-visual-canvas.service",
+                             "am-sinks.service", "agent-media-sessiond.service"]
+    assert "agent-media-tmux-hold-amux-scratch.service" not in sm.enabled_units()
