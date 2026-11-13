@@ -272,3 +272,52 @@ def test_undoing_mark_heard_on_a_live_reply_finds_its_row(server, shelf, signed_
     assert res.status == 200 and obj == {"ok": True, "id": rid}
     ex = st.history_row(rid)["extras"]
     assert "heard" not in ex and ex["stopped_at"]["sentence"] == 2
+
+
+def test_a_held_play_marks_those_replies_heard_with_an_undo(server, shelf, signed_in, voice, monkeypatch):
+    """`POST /speech/heard {ids}` (a Play key held, 14 Nov 2026): each is
+    heard and loses its resume point, nothing is played, the thread waiting
+    on one leaves up next; Undo gives each back what it had."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    ran: list = []
+    monkeypatch.setattr(speech, "_CTL", lambda action, arg, *a, **k: ran.append(action) or "")
+    held = _row("held")
+    cut = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                         source="claude-code", text="spoken, stopped", extras={"source_session": SID})
+    st.set_stopped_at(cut, 3)
+    up_next.add(SID, held)
+    res, obj = call(server, "POST", "/speech/heard", {"ids": [held, cut]}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "marked": sorted([held, cut]), "undo": True}
+    assert st.history_row(held)["extras"]["heard"] is True
+    assert "stopped_at" not in st.history_row(cut)["extras"]
+    assert up_next.listing() == [] and ran == []
+    res, obj = call(server, "POST", "/speech/heard", {"undo": True}, AUTH)
+    assert res.status == 200 and obj["ids"] == [held, cut]
+    assert "heard" not in st.history_row(held)["extras"]
+    assert st.history_row(cut)["extras"]["stopped_at"]["sentence"] == 3
+    for bad in ([], ["1"], [True], "1", [0]):
+        res, obj = call(server, "POST", "/speech/heard", {"ids": bad}, AUTH)
+        assert res.status == 400 and obj["error"] == "ids must be history ids"
+    res, obj = call(server, "POST", "/speech/heard", {"ids": [999999]}, AUTH)
+    assert res.status == 404
+
+
+def test_the_lists_play_held_marks_the_threads_unheard_with_an_undo(server, shelf, signed_in, voice):
+    """`{session, with_undo: true}` (the thread list's Play held): the
+    thread's unheard replies, as Mark read does, and Undo brings them back."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    a, b = _row("one"), _row("two")
+    theirs = _row("theirs", session=SID_B)
+    res, obj = call(server, "POST", "/speech/heard", {"session": SID, "with_undo": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "marked": [a, b], "undo": True}
+    assert "heard" not in st.history_row(theirs)["extras"]
+    res, obj = call(server, "POST", "/speech/heard", {"undo": True}, AUTH)
+    assert res.status == 200
+    assert not st.history_row(a)["extras"].get("heard") and not st.history_row(b)["extras"].get("heard")
+    res, obj = call(server, "POST", "/speech/heard", {"session": SID_B, "with_undo": True}, AUTH)
+    res, obj = call(server, "POST", "/speech/heard", {"session": SID_B, "with_undo": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "marked": [], "undo": False}

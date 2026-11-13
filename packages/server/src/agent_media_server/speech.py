@@ -146,6 +146,51 @@ def mark_now_heard() -> tuple[bool, dict]:
     return True, {"id": rid, "session": str(ex.get("source_session") or ""), "undo": True}
 
 
+#: The most replies one `{"ids"}` marks.
+MAX_MARK_IDS = 200
+
+
+def mark_rows_heard(ids: list[int]) -> tuple[bool, dict]:
+    """Hold a Play to mark it heard (David, 14 Nov 2026: "holding on the
+    resume button to mark it heard like the go-to end button does on the mini
+    player ... same goes for other unheard play buttons"): each reply of
+    `ids` counts as heard — a held one gets `extras.heard`, and any loses its
+    resume point (`stopped_at`), so no Resume and no unheard ▶. Nothing is
+    played or stopped. Undone as the player's Mark heard is (`undo_mark_heard`):
+    each gets back what it had. A thread waiting on Up next for one of them
+    leaves it. False with a status when none of them is a spoken reply."""
+    from agent_media_core.state import StateStore
+
+    from . import up_next
+
+    st = StateStore()
+    rows, sessions, found = [], set(), 0
+    for rid in ids:
+        row = st.history_row(rid)
+        ex = (row or {}).get("extras")
+        if (not row or row.get("sink") != "speech" or row.get("source") == "listener"
+                or not isinstance(ex, dict) or ex.get("listener")):
+            continue
+        found += 1
+        stop = ex.get("stopped_at") if isinstance(ex.get("stopped_at"), dict) else {}
+        sentence = stop.get("sentence") if isinstance(stop.get("sentence"), int) else None
+        cleared = st.set_stopped_at(rid, None)
+        heard = st.mark_heard(rid)
+        if cleared or heard:
+            rows.append({"id": rid, "sentence": sentence if cleared else None, "heard": heard})
+            sessions.add(str(ex.get("source_session") or ex.get("session") or ""))
+    if not found:
+        return False, {"status": 404, "error": "no such spoken reply"}
+    marked = {r["id"] for r in rows}
+    for x in up_next.listing():
+        if x.get("id") in marked:
+            up_next.remove(str(x.get("session") or ""))
+    if rows:
+        with _MARK_LOCK:
+            _LAST_MARK[0] = {"rows": rows, "at": time.time()}
+    return True, {"marked": sorted(marked), "undo": bool(rows)}
+
+
 #: How long the player's Mark heard can be undone (the app's notice shows less).
 MARK_UNDO_S = 120.0
 #: The last Mark heard: its row (a live reply's is found by `started_at`, written
@@ -167,6 +212,14 @@ def undo_mark_heard() -> tuple[bool, dict]:
     if not mark or time.time() - mark["at"] > MARK_UNDO_S:
         return False, {"status": 404, "error": "nothing to undo"}
     st = StateStore()
+    if "rows" in mark:
+        # A held Play's mark (`mark_rows_heard`): each as it was.
+        for r in mark["rows"]:
+            if r["sentence"] is not None:
+                st.set_stopped_at(r["id"], int(r["sentence"]))   # unheard again too
+            if r["heard"]:
+                st.set_extra(r["id"], "heard", None)
+        return True, {"id": mark["rows"][0]["id"], "ids": [r["id"] for r in mark["rows"]]}
     rid = mark["id"]
     end = time.monotonic() + 3.0
     while rid is None:

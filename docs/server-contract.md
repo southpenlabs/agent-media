@@ -3457,6 +3457,19 @@ The speech bar.
   unheard again, its resume point the sentence it was on (a live reply's
   row found by its start, filed as it ends). 404 `"nothing to undo"`; 409
   `"that reply is not filed yet"`.
+- **A Play key held marks it heard** (14 Nov 2026, David: "holding on the
+  resume button to mark it heard like the go-to end button does on the mini
+  player ... same goes for other unheard play buttons"). `POST /speech/heard
+  {"ids": [<history id>, …]}` (1–200 whole numbers, else 400 `"ids must be
+  history ids"`) → `{"ok": true, "marked": [ids], "undo": bool}`: each
+  spoken reply named gets `extras.heard` (a held one) and loses
+  `stopped_at`, so no Resume and no unheard ▶; nothing plays or stops, and
+  a thread waiting on Up next for one of them leaves it. 404 `"no such
+  spoken reply"` when none is one. `{"session", "with_undo": true}` does
+  the same for every held unheard reply of that thread (the thread list's
+  Play held; `marked` may be empty). Either is undone by `{"undo": true}`
+  as above (`{"ok": true, "id", "ids"}`): each gets back its resume point
+  and is unheard again. `GET /features` `mark_heard_ids` says it is here.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
@@ -5492,6 +5505,7 @@ local look, never a network call:
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
+| `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |

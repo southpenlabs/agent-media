@@ -3461,9 +3461,33 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             print(f"speech/heard: now, reply {info.get('id')}", file=sys.stderr)
             _json(h, 200, {"ok": True, **info})
             return True
+        if "ids" in body:
+            # A Play key held (§6.5, 14 Nov 2026): those replies are heard, with an Undo.
+            ids = body.get("ids")
+            if (not isinstance(ids, list) or not 0 < len(ids) <= speech.MAX_MARK_IDS
+                    or not all(isinstance(i, int) and not isinstance(i, bool) and i > 0 for i in ids)):
+                _json(h, 400, {"ok": False, "error": "ids must be history ids"})
+                return True
+            done, info = speech.mark_rows_heard(ids)
+            if not done:
+                _json(h, info.pop("status", 404), {"ok": False, **info})
+                return True
+            print(f"speech/heard: ids {info.get('marked')}", file=sys.stderr)
+            _json(h, 200, {"ok": True, **info})
+            return True
         us = str(body.get("session") or "")
         if not sessions._SESSION.fullmatch(us):
             _json(h, 400, {"ok": False, "error": "not a session id"})
+            return True
+        if body.get("with_undo") is True:
+            # The thread list's Play held: its unheard replies, with an Undo.
+            ids = StateStore().thread_unheard_ids(us)[-speech.MAX_MARK_IDS:]
+            done, info = speech.mark_rows_heard(ids) if ids else (False, {})
+            if not done:
+                info = {"marked": [], "undo": False}
+            up_next.remove(us)
+            print(f"speech/heard: {us[:8]} held, {len(info.get('marked') or [])} marked", file=sys.stderr)
+            _json(h, 200, {"ok": True, **info})
             return True
         marked = StateStore().mark_thread_heard(us)
         up_next.remove(us)

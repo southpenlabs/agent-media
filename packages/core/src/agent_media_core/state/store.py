@@ -1153,6 +1153,20 @@ class StateStore:
                         (json.dumps(ex), int(row_id)))
         return True
 
+    def thread_unheard_ids(self, session: str) -> list[int]:
+        """The ids of a thread's held replies not yet heard, oldest first
+        (the rows `mark_thread_heard` would mark), read only."""
+        if not session:
+            return []
+        with self._cursor() as cur:
+            cur.execute("SELECT id FROM history WHERE sink = 'speech' "
+                        "AND (json_extract(extras, '$.source_session') = ? "
+                        "OR json_extract(extras, '$.session') = ?) "
+                        "AND json_extract(extras, '$.held') "
+                        "AND NOT coalesce(json_extract(extras, '$.heard'), 0) ORDER BY id",
+                        (session, session))
+            return [int(r[0]) for r in cur.fetchall()]
+
     def mark_thread_heard(self, session: str) -> list[int]:
         """Mark read (David, 8 Nov 2026: "when we Mark something as read,
         should we also mark it as heard?"): every held reply of a thread not
