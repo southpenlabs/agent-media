@@ -5733,6 +5733,9 @@ def _submit_event(event: Event,
                 # handed (streaming only) — bounded, so a failed append cannot
                 # hold the reply open.
                 lag = 0
+                # Ticks a started player has sat on no entry of a list that
+                # is not ours (stopped as it started, then refilled).
+                unstarted = 0
                 # Whether the player was paused at the last readable tick,
                 # carried across a yield (see there).
                 last_paused = False
@@ -5995,8 +5998,35 @@ def _submit_event(event: Event,
                         break  # playlist finished
                     pos = snap.get("playlist-pos")
                     if pos is None or pos < 0:
-                        time.sleep(0.1)   # loaded but not on an entry yet
+                        # Loaded but not on an entry yet — or stopped as it
+                        # started. A Stop that lands between the lead and the
+                        # tail clears the list, and the tail's appends then
+                        # refill it partway; Sasonica's speech player is idle
+                        # only with an empty list, so it answers "not idle,
+                        # on no entry" and never moves. Waited on without
+                        # limit, that was 23 s of a row saying playing and a
+                        # bold walking on with nothing sounding, until a
+                        # tapped sentence started the short list two clips
+                        # off (13 Nov 2026, thread 4aa2f903). The same test
+                        # and the same ~3s as the idle player's above: a
+                        # list that is not the one we handed over.
+                        count = snap.get("playlist-count")
+                        if (stream and rest_was_done and count is not None
+                                and count != _handed[0]):
+                            unstarted += 1
+                            if unstarted > 30:
+                                _player_gone.set()
+                                finished = True
+                                why = (f"playlist replaced under us before it "
+                                       f"started (count={count} "
+                                       f"handed={_handed[0]})")
+                                _mark_speech_ended(state)
+                                break
+                        else:
+                            unstarted = 0
+                        time.sleep(0.1)
                         continue
+                    unstarted = 0
                     if pos != i and 0 <= pos < n:
                         i = pos
                         highlighter.show(clip_data[i][0],

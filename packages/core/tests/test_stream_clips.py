@@ -405,3 +405,46 @@ def test_a_torn_reading_does_not_move_the_first_start(monkeypatch):
                    state=state, sink=_Torn(), coordinator=_Coord())
     starts = ((_row(state) or {}).get("extras") or {}).get("clip_starts_s") or []
     assert starts and 1.5 <= starts[0] <= 2.5, f"sentence one moved to sentence two's start: {starts}"
+
+
+def test_a_reply_stopped_as_it_starts_does_not_wait_on_the_refilled_list(monkeypatch):
+    """13 Nov 2026, thread 4aa2f903: a Stop reached the phone 0.2 s after a
+    reply's two-clip lead, and the nine sentences appended after it refilled
+    the cleared list. Sasonica's speech player is idle only with an empty
+    list, so it said "not idle, on no entry" — which read here as "loaded,
+    not started yet" and was waited on without limit: nothing sounded, the
+    row said playing and the app's bold walked on for 23 s, until a tapped
+    sentence started the short list two clips off."""
+    gate = threading.Event()
+    monkeypatch.setattr(S, "render_text", _gated(gate))
+    monkeypatch.setenv("MEDIA_STREAM_CLIPS", "1")
+    monkeypatch.setenv("MEDIA_STREAM_LEAD_S", "2")   # one clip
+
+    class _StoppedAtTheStart(_Player):
+        def play_playlist(self, uris, target=None, gapless=True):
+            super().play_playlist(uris, target, gapless)
+            self.stop()
+
+        def snapshot(self, target=None):
+            self.snapshots += 1
+            self._gate.set()
+            for _ in range(200):        # the tail's appends land first
+                if len(self.list) >= 3:
+                    break
+                threading.Event().wait(0.01)   # (sleep is stubbed here)
+            if self.snapshots > 200:    # the old wait: no way out but this
+                self.list = []
+            return {"idle-active": not self.list, "pause": False,
+                    "playlist-count": len(self.list), "playlist-pos": -1}
+
+    player = _StoppedAtTheStart(gate)
+    state = StateStore()
+    S.submit_event(Event(text=FOUR, source=Source.CLI, target=PHONE,
+                         metadata={"pane": "%7"}),
+                   state=state, sink=player, coordinator=_Coord())
+
+    assert player.jumps == [], f"a stopped reply was restarted: {player.jumps}"
+    assert player.snapshots <= 200, "the refilled list was waited on to the end"
+    assert len(player.list) == 3, "the appends that refilled it"
+    ex = (_row(state) or {}).get("extras") or {}
+    assert len(ex.get("clip_uris") or []) == 4, "still archived whole"
