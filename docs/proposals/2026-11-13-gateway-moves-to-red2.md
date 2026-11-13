@@ -115,3 +115,16 @@ clients back. The tokens go back the same way, red2 stopped first.
 4. **Who.** sam for the host side (venv, npm, units, dotfiles roles, the
    client defaults), the cutover and the checks from the move session, as
    for the memory.
+
+## Decided (David, 13 Nov 2026: "Go with your recommendations")
+
+1. Clients find it by a name of its own: one `LITELLM_GATEWAY_URL` (and
+   `MEDIA_SUMMARY_BASE_URL` from it) set in dotfiles' `env.zsh` from a
+   `gateway_host` variable, the defaults in `pi-liberator`,
+   `agent-venice-mcp`, `aicli` and `codex` reading it; done with the
+   cutover's repointing.
+2. A forwarder on red5 for two weeks, `:4000` and `:3456` to red2, logging
+   each caller so they can be repointed.
+3. When: soon, as the other moves.
+4. sam prepares red2 (step 1) and does the dotfiles side; the move session
+   runs the cutover and the checks.
