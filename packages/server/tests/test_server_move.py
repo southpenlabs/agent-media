@@ -47,7 +47,7 @@ def rig(monkeypatch):
                                                  "agent-media-sessiond.service"])
     monkeypatch.setattr(sm, "enabled_units", lambda: ["agent-media-state-gc.timer",
                                                       "agent-media-visual-canvas.service"])
-    monkeypatch.setattr(sm, "busy_chats", lambda: [])
+    monkeypatch.setattr(sm, "busy_chats", lambda to="": [])
     # RUN holds the step functions themselves, so the table is what is
     # patched: a step left real here once read this machine's unit files and
     # tried to rsync them to red2 (13 Nov 2026).
@@ -205,7 +205,8 @@ def test_status(rig):
 
 def test_a_working_chat_refuses_the_stop_unless_forced(rig, monkeypatch):
     fake, _made = rig
-    monkeypatch.setattr(sm, "busy_chats", lambda: ["session 12345678 (fix the thing) is working"])
+    monkeypatch.setattr(sm, "busy_chats",
+                        lambda to="": ["session 12345678 (fix the thing) is working"])
     rc, said = _move(fake, yes=True)
     assert rc == 1 and "is working" in said and "--force" in said
     assert not any("systemctl --user stop" in c for _h, c in fake.ran)

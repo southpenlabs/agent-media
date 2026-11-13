@@ -227,11 +227,23 @@ def step_backup(st: dict, run) -> None:
     st["snapshot"] = got.get("id")
 
 
-def busy_chats() -> list[str]:
-    """Chats on this server that are working now, in a sentence each."""
+def busy_chats(to: str = "") -> list[str]:
+    """Chats on this server that are working now, in a sentence each; and
+    those it runs on `to` as its worker: the move stops that machine's
+    session host too, before the restore."""
     from agent_media_core import restart_services as rs
 
     out = []
+    if to:
+        try:
+            from .driver import headless
+
+            r = headless.call("list", timeout=5.0)
+            for v in (r.get("sessions") or []) if r.get("ok") else []:
+                if v.get("host") == to and v.get("live") and rs.session_busy(v):
+                    out.append(f"{rs._label(v)} on {to} {', '.join(rs.session_busy(v))}")
+        except Exception:  # noqa: BLE001 — the local check below still stands
+            pass
     me = os.environ.get("MEDIA_SESSIOND_SESSION") or ""
     for v in rs.sessiond_sessions():
         if me and v.get("session") == me:
@@ -362,7 +374,7 @@ def step_transcripts(st: dict, run) -> None:
 
 
 def step_stop(st: dict, run) -> None:
-    busy = [] if st.get("force") else busy_chats()
+    busy = [] if st.get("force") else busy_chats(st.get("to") or "")
     if busy:
         raise Stop("chats are working here, and a move resumes none of them over there: "
                    + "; ".join(busy[:4]) + (f" and {len(busy) - 4} more" if len(busy) > 4 else "")
