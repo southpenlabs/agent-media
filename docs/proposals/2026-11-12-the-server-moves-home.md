@@ -517,6 +517,16 @@ the day of the cutover, not after it.
    snapclients (0.27) pass `tcp://red5:1704`, which that version does not
    parse — red5 showed every room client disconnected on 13 Nov — so
    repointing them must also change the syntax (`-h <host> -p 1704`).
+   **Later on 13 Nov (sam):** hpo's clients are on upstream snapclient
+   0.35.0 and connected to red5 (a 0.35 client and the 0.31 servers agree);
+   dotfiles a621d1e makes the rooms role bring snapclient to >= 0.35 itself.
+   sp4, pn and ftv were offline and p8a's client not connected: unchecked.
+   red2's audio is installed and disabled (snapserver, the am-* units,
+   Mopidy 3.4.2 with red5's extensions, spotifyd, the fifo fix). **Red2
+   still lacks:** spotifyd's sign-in (a credential: a fresh login or
+   carried on the evening), beets, red4's sshfs mounts (`~/audiobooks`,
+   `~/media`; red2's key on red4), and the media-bin package Mopidy's
+   books unit calls.
    Still open: not rehearsed at
    all: `media-setup install-services` for the server's units, the house
    audio, any outside service. The original plan for this step:
