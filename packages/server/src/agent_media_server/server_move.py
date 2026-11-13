@@ -630,7 +630,18 @@ def move(to: str, name: str, also: list[str], *, yes: bool = False, dry_run: boo
         if not st or st.get("to") != to:
             out("server move: nothing was begun to carry on")
             return 2
-        return _do(st, STEPS[STEPS.index(DETACHED_FROM):], run, out)
+        # Carry on, do not start over: a step already done is not run again.
+        # `stop` records what it stopped and disabled for `--rollback`, and
+        # running it a second time would record the empty lists it now sees
+        # and leave nothing to put back (the cutover's restore failed, 13 Nov
+        # 2026, and finishing it had to skip `stop` and `sync`).
+        done = set(st.get("done") or [])
+        st.pop("failed", None)
+        rest = tuple(s for s in STEPS[STEPS.index(DETACHED_FROM):] if s not in done)
+        if not rest:
+            out("server move: every step is done; `--verify` checks the new address")
+            return 0
+        return _do(st, rest, run, out)
     for line in describe(to, new, also):
         out(line)
     if dry_run or not yes:

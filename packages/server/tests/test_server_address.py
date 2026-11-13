@@ -196,3 +196,17 @@ def test_another_server_on_the_name_is_refused(monkeypatch):
                         lambda req, timeout=0: Answer(b'{"ok": true, "proof": "not-ours"}'))
     ok, why = sa.reaches_here(NEW)
     assert not ok and "another server" in why
+
+
+@pytest.mark.parametrize("argv", [["settle", "--stash", "--own", "/tmp/x"],
+                                  ["settle", "--", "--stash", "--own", "/tmp/x"]])
+def test_settle_takes_its_own_options_through_media_server(monkeypatch, argv):
+    """`media server settle --stash --own DIR` died on the main parser at the
+    cutover (13 Nov 2026): argparse's REMAINDER does not capture a leading
+    option, so the pass-through subcommands get their argv first."""
+    got: list[list[str]] = []
+    from agent_media_server import server_settle
+
+    monkeypatch.setattr(server_settle, "main", lambda a: got.append(a) or 0)
+    assert sa.main(argv) == 0
+    assert got == [["--stash", "--own", "/tmp/x"]]

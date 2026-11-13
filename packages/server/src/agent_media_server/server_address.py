@@ -396,6 +396,23 @@ def rename(new: str, also: list[str], *, check: bool = True, dry_run: bool = Fal
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The pass-through subcommands take their own options, and argparse's
+    # REMAINDER does not capture a leading one: `media server settle --stash`
+    # died on the main parser ("unrecognized arguments: --stash --own") at the
+    # red5 -> red2 cutover, 13 Nov 2026. Hand them their argv before the main
+    # parser sees it. A leading `--` is dropped, so both spellings work.
+    av = list(sys.argv[1:] if argv is None else argv)
+    if av and av[0] in ("settle", "sandbox"):
+        rest = av[1:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        if av[0] == "settle":
+            from . import server_settle
+
+            return server_settle.main(rest)
+        from . import server_sandbox
+
+        return server_sandbox.main(rest)
     ap = argparse.ArgumentParser(prog="media server",
                                  description="this server's public address, and giving it a new one")
     sub = ap.add_subparsers(dest="cmd", required=True)

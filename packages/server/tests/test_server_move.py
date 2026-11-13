@@ -276,3 +276,32 @@ def test_the_stop_order_and_what_is_never_stopped(monkeypatch):
     assert sm.up_units() == ["agent-media-backup.timer", "agent-media-visual-canvas.service",
                              "am-sinks.service", "agent-media-sessiond.service"]
     assert "agent-media-tmux-hold-amux-scratch.service" not in sm.enabled_units()
+
+
+def test_fire_carries_on_from_the_failed_step_and_keeps_what_the_stop_recorded(rig,
+                                                                               monkeypatch):
+    """The cutover (13 Nov 2026) failed at `restore` with the stop done. A
+    second `--fire` must not run `stop` again: it would record the units it
+    now sees (none are up) and `--rollback` would have nothing to start."""
+    fake, made = rig
+    monkeypatch.setitem(sm.RUN, "restore", lambda st, run: (_ for _ in ()).throw(
+        sm.Stop("red2: keeping its own chats' records failed")))
+    rc, said = _move(fake, yes=True)
+    assert rc == 1 and "restore" in said
+    st = sm._load()
+    assert st["done"] == ["check", "keep", "backup", "transcripts", "units", "stop", "sync"]
+    stopped, disabled = st["stopped_here"], st["disabled_here"]
+    assert stopped and disabled
+    # Nothing is up now, as after the real stop.
+    monkeypatch.setattr(sm, "up_units", lambda: [])
+    monkeypatch.setattr(sm, "enabled_units", lambda: [])
+    monkeypatch.setitem(sm.RUN, "restore", lambda st, run: made.append(("restore", st["to"])))
+    said2: list[str] = []
+    assert sm.move("red2", NAME, [], fire=True, run=fake, out=said2.append) == 0
+    st = sm._load()
+    assert st["done"] == list(sm.STEPS) and st["finished"] and not st.get("failed")
+    assert st["stopped_here"] == stopped and st["disabled_here"] == disabled
+    assert "stop" not in "\n".join(said2)
+    said3: list[str] = []
+    assert sm.move("red2", NAME, [], fire=True, run=fake, out=said3.append) == 0
+    assert "every step is done" in "\n".join(said3)
