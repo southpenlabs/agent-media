@@ -2028,6 +2028,41 @@ def _row_messaging(args, *, check_only: bool):
     return "installed", str(path)
 
 
+def _row_hosts(args, *, check_only: bool):
+    """Auto mode told which machines are the person's own, from the servers
+    their Sasonica account administers (agent_media_server.automode_hosts).
+    Opt-in like `messaging`: a plain profile run only refreshes a line that
+    is there; `--only hosts` writes it. Needs this machine's server."""
+    try:
+        from agent_media_server import automode_hosts
+    except ImportError:
+        return "absent", "no agent-media server on this machine"
+    path = _settings_path(args)
+    if check_only:
+        try:
+            have = automode_hosts.current(_load_json(path))
+        except Exception:                            # noqa: BLE001
+            have = ""
+        return ("ok", str(path)) if have else ("absent", "opt-in: media-setup profile --only hosts")
+    state, detail = automode_hosts.apply(path, add=getattr(args, "only", None) == "hosts",
+                                         dry_run=args.dry_run)
+    return ("ok" if state == "kept" else state), detail
+
+
+def cmd_hosts(args: argparse.Namespace) -> int:
+    """`media-setup hosts`: write auto mode's line of this account's machines;
+    `--refresh` (the daily job) only rewrites one that is there."""
+    try:
+        from agent_media_server import automode_hosts
+    except ImportError:
+        print("media-setup hosts: no agent-media server on this machine", file=sys.stderr)
+        return 1
+    state, detail = automode_hosts.apply(_settings_path(args), add=not args.refresh,
+                                         dry_run=args.dry_run)
+    print(f"media-setup hosts: {state} ({detail})")
+    return 1 if state == "failed" else 0
+
+
 def gemini_settings_path() -> Path:
     """Gemini CLI's own settings: `~/.gemini/settings.json`, under
     `GEMINI_CLI_HOME` when that moves its home."""
@@ -2450,6 +2485,8 @@ PROFILE_ROWS = (
      "core", _row_restart),
     ("messaging", "auto mode told that messages between your own sessions "
      "(media session send) are sanctioned (opt-in)", "extra", _row_messaging),
+    ("hosts", "auto mode told which machines your Sasonica account administers "
+     "(opt-in)", "extra", _row_hosts),
     ("services", "this host's services, by its roles", "core", _row_services),
     ("shell", "the tmux popup and control surface on PATH", "core", _row_shell),
     ("rooms", "the system packages the speaker rooms play through (pactl, parec, "
@@ -2678,6 +2715,16 @@ def _build_parser() -> argparse.ArgumentParser:
                     "~/.claude/settings.json)")
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_migrate_env)
+
+    sp = sub.add_parser("hosts",
+                        help="Tell Claude Code's auto mode which machines your "
+                             "Sasonica account administers (opt-in)")
+    sp.add_argument("--settings", help="Path to settings.json (default: "
+                    "~/.claude/settings.json)")
+    sp.add_argument("--refresh", action="store_true",
+                    help="only rewrite a line that is already there (the daily job)")
+    sp.add_argument("--dry-run", action="store_true")
+    sp.set_defaults(func=cmd_hosts)
 
     sp = sub.add_parser("profile",
                         help="Wire this machine for Sasonica (hooks, services, "

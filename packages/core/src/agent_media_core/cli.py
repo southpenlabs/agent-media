@@ -11663,6 +11663,19 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="run it even where its gate says it is not wanted")
     sc.set_defaults(func=cmd_schedule)
 
+    ah = sub.add_parser("automode-hosts",
+                        help="refresh Claude Code auto mode's line of the machines "
+                             "your Sasonica account administers (only one that is "
+                             "there; add it with media-setup hosts)")
+    ah.add_argument("--settings", help="Path to settings.json (default: "
+                    "~/.claude/settings.json)")
+    ah.add_argument("--add", action="store_true",
+                    help="write the line when there is none (media-setup hosts)")
+    ah.add_argument("--dry-run", action="store_true")
+    ah.set_defaults(func=lambda a: __import__("agent_media_core.setup", fromlist=["cmd_hosts"])
+                    .cmd_hosts(argparse.Namespace(settings=a.settings, config_dir=None,
+                                                  refresh=not a.add, dry_run=a.dry_run)))
+
     sg = sub.add_parser("state-gc",
                         help="apply the state DB's retention policy "
                              "(old errors and play rows, dead clip lists)")

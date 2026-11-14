@@ -168,6 +168,11 @@ JOBS: "tuple[Job, ...]" = (
     Job("audio-prune", ["media", "audio", "prune"],
         what="drop rendered clips past their keep-days", at=("04:10",),
         jitter=1800),
+    # Only rewrites a line someone opted into (media-setup profile --only
+    # hosts); with none there it does nothing (automode_hosts).
+    Job("automode-hosts", ["media", "automode-hosts"],
+        what="refresh auto mode's line of the machines this account administers",
+        at=("05:10",), jitter=1800, requires_role="server"),
 )
 
 

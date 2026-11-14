@@ -1,7 +1,9 @@
 # Telling auto mode which machines are yours, from what the account knows
 
 **Status:** proposal (14 Nov 2026); the role ceiling built the same day
-(websites b5a22e3, sasonica_oidc; agent-media servers_report and devices). Follows the `messaging` profile row
+(websites b5a22e3, sasonica_oidc; agent-media servers_report and devices),
+and the hosts line too (`media-setup hosts`, automode_hosts.py, the
+`automode-hosts` job). Follows the `messaging` profile row
 (e1412f5b) and agent-mail's `agent-mail-automode` (agent-mail 785014c).
 
 ## Why

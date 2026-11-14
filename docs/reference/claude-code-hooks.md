@@ -113,6 +113,17 @@ that agent-media's messaging between the person's own sessions is
 sanctioned. They start with `(agent-media)`, which is how a re-run finds and
 rewrites them; they name no host and no other tool.
 
+The `hosts` row is opt-in too, and needs this machine's server. `media-setup
+profile --only hosts` (or `media-setup hosts`) adds one `autoMode.environment`
+entry, starting `(agent-media hosts)`, naming the machines the person's
+Sasonica account administers: the servers sasonica.com lists for the account
+where its role is admin (after the role ceiling), the machines paired to each
+as jobs workers, and the account's devices there. Names only, no addresses;
+it describes ownership and allows nothing. The scheduler's `automode-hosts`
+job (`media automode-hosts`, daily) rewrites the entry as machines come and
+go, only when it is already there; with no answer from sasonica.com the last
+one stays (agent_media_server/automode_hosts.py).
+
 ### What `media-hook-context` tells a session
 
 `intake/context.py`. Two notes, both added to the prompt:
