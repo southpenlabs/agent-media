@@ -194,18 +194,26 @@ def _write_bundle(dest: Path, index: dict, paths: list[Path]) -> None:
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     proc = subprocess.Popen(["age", "-r", _recipient(), "-o", str(tmp)],
                             stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    cut = False
     try:
-        with tarfile.open(fileobj=proc.stdin, mode="w|") as tar:
-            raw = json.dumps(index, indent=1).encode()
-            info = tarfile.TarInfo("index.json")
-            info.size, info.mtime, info.mode = len(raw), int(time.time()), 0o600
-            tar.addfile(info, io.BytesIO(raw))
-            for i, p in enumerate(paths):
-                tar.add(str(p), arcname=f"item/{i}")
-        proc.stdin.close()
+        try:
+            with tarfile.open(fileobj=proc.stdin, mode="w|") as tar:
+                raw = json.dumps(index, indent=1).encode()
+                info = tarfile.TarInfo("index.json")
+                info.size, info.mtime, info.mode = len(raw), int(time.time()), 0o600
+                tar.addfile(info, io.BytesIO(raw))
+                for i, p in enumerate(paths):
+                    tar.add(str(p), arcname=f"item/{i}")
+            proc.stdin.close()
+        except BrokenPipeError:
+            # age gave up before reading it all (a bad recipient exits at
+            # once): its own words below say why, not the pipe's. Which of the
+            # two came first was a race, and test_seal's bad key failed about
+            # one run in twelve with BrokenPipeError (14 Nov 2026).
+            cut = True
         err = proc.stderr.read().decode(errors="replace").strip()
-        if proc.wait(timeout=120):
-            raise SealError(f"age failed: {err or proc.returncode}")
+        if proc.wait(timeout=120) or cut:
+            raise SealError(f"age failed: {err or proc.returncode or 'it stopped reading'}")
     except BaseException:
         proc.kill()
         tmp.unlink(missing_ok=True)
