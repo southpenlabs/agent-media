@@ -85,10 +85,38 @@ def _sessiond_session(session: str) -> None:
         os.environ["MEDIA_SESSIOND_SESSION"] = session
 
 
+def model_window(provider: str, model: str) -> int:
+    """The context window opencode knows for `provider/model`: a model of the
+    user's own config (opencode.json's `provider.<p>.models.<m>.limit`),
+    else its cached models.dev list (`<cache>/opencode/models.json`); 0 when
+    neither says. Any model, not only Claude's."""
+    import json
+    import os
+    from pathlib import Path
+
+    home = Path.home()
+    cfg_home = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or home / ".cache")
+    for path, root in ((cfg_home / "opencode" / "opencode.json", ("provider",)),
+                       (cache / "opencode" / "models.json", ())):
+        try:
+            d = json.loads(path.read_text())
+            for k in root:
+                d = d[k]
+            lim = d[provider]["models"][model].get("limit") or {}
+            n = int(lim.get("context") or 0)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if n:
+            return n
+    return 0
+
+
 def context_usage(session: str) -> tuple[int, int] | None:
     """(tokens in the context, window) after the session's last step, from
     opencode's database: the step's input, cache reads and writes, against
-    the window `context.window` guesses for its model."""
+    the window opencode knows for its model (`model_window`), else the one
+    `context.window` guesses."""
     import json
 
     from .. import harnesses
@@ -108,7 +136,9 @@ def context_usage(session: str) -> tuple[int, int] | None:
             continue
         if used:
             model = str(m.get("modelID") or "")
-            return used, context.window(model, used, context.state_dir() / f"{session}.window")
+            win = model_window(str(m.get("providerID") or ""), model)
+            return used, win or context.window(model, used,
+                                               context.state_dir() / f"{session}.window")
     return None
 
 

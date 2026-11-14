@@ -85,3 +85,31 @@ def test_bad_input_prints_nothing(env, capsys, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     assert hook_opencode.main(["note"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_the_window_is_the_models_own_for_any_model(env, monkeypatch):
+    cache = env / "cache" / "opencode"
+    cache.mkdir(parents=True)
+    (cache / "models.json").write_text(json.dumps(
+        {"opencode": {"models": {"space-bunny-free": {"limit": {"context": 1048576}}}}}))
+    cfg = env / "config" / "opencode"
+    cfg.mkdir(parents=True)
+    (cfg / "opencode.json").write_text(json.dumps(
+        {"provider": {"gateway": {"models": {"local-qwen": {"limit": {"context": 32768}}}}}}))
+    assert hook_opencode.model_window("opencode", "space-bunny-free") == 1048576
+    assert hook_opencode.model_window("gateway", "local-qwen") == 32768
+    assert hook_opencode.model_window("gateway", "unknown") == 0
+
+
+def test_a_small_local_models_context_fills_by_its_own_window(env, capsys, monkeypatch):
+    cfg = env / "config" / "opencode"
+    cfg.mkdir(parents=True)
+    (cfg / "opencode.json").write_text(json.dumps(
+        {"provider": {"gateway": {"models": {"local-qwen": {"limit": {"context": 32768}}}}}}))
+    from test_harnesses_opencode import add
+    sid = "ses_" + "q" * 26
+    add(env / "data" / "opencode" / "opencode.db", sid, messages=[
+        ("assistant", {"providerID": "gateway", "modelID": "local-qwen",
+                       "tokens": {"input": 30000, "cache": {"read": 0, "write": 0}}}, [])])
+    out = note(capsys, monkeypatch, {"session_id": sid, "prompt": "go on", "cwd": "/x"})
+    assert "91% full (30k of 32k)" in out or "(30k of 32k)" in out
