@@ -329,6 +329,18 @@ def project_of(cwd: str, folder: str = "") -> str | None:
     folder (`book_tracks.UNFILED`, where a conversation with no workspace
     goes: a phone-started one in ~/org) is not a series. Default layout: the
     folder's basename (`layout.project_of_path`)."""
+    # Inside one list (`_PASS`) a folder is looked up once: each lookup reads
+    # the layout's config and settings again, and ~500 rows share a few
+    # dozen folders.
+    held = getattr(_PASS, "projects", None)
+    if held is None:
+        return _project_of(cwd, folder)
+    if (cwd, folder) not in held:
+        held[(cwd, folder)] = _project_of(cwd, folder)
+    return held[(cwd, folder)]
+
+
+def _project_of(cwd: str, folder: str = "") -> str | None:
     from agent_media_core import book_tracks, layout
 
     if layout.projects():
@@ -348,14 +360,10 @@ def project_of(cwd: str, folder: str = "") -> str | None:
 
 def _shelf_folders() -> dict[str, str]:
     out = {}
-    for f in _manifest_dir().glob("*.json"):
-        try:
-            data = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
+    for session, data in _manifests().items():
         folder = str(data.get("folder") or "")
         if folder:
-            out[str(data.get("session") or f.stem)] = folder
+            out[session] = folder
     return out
 
 
@@ -958,9 +966,26 @@ def project_groups() -> dict[str, dict]:
 #: while no file's name, size or mtime changes. `sessions_index` asks once per
 #: thread, and reading all of them each time took 5 s of an 11 s list.
 _MANIFESTS: tuple[tuple, dict] = ((), {})
+#: Inside one `sessions_index`, the manifests as first read there: the check
+#: above is a scandir and two stats per file, and asked once per row it was
+#: ~520 files x 508 rows, half a million stats and 2 of a list's 4 s — the
+#: new chat screen's "Could not reach" while CI loaded red2 (14 Nov 2026).
+#: Per thread, so a request outside a list (a rename, then the list) still
+#: sees the file as it is now.
+_PASS = threading.local()
 
 
 def _manifests() -> dict[str, dict]:
+    held = getattr(_PASS, "manifests", None)
+    if held is not None:
+        return held
+    found = _read_manifests()
+    if getattr(_PASS, "depth", 0):
+        _PASS.manifests = found
+    return found
+
+
+def _read_manifests() -> dict[str, dict]:
     global _MANIFESTS
     try:
         entries = sorted((e for e in os.scandir(_manifest_dir()) if e.name.endswith(".json")),
@@ -1544,6 +1569,20 @@ def _stored_rows(rows: list, seen: set[str], flags, pinned, marks,
 
 
 def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
+    """See `_sessions_index`; the shelf's manifests are read, and each
+    folder's project looked up, once for the whole list (`_PASS`)."""
+    _PASS.depth = getattr(_PASS, "depth", 0) + 1
+    if _PASS.depth == 1:
+        _PASS.projects = {}
+    try:
+        return _sessions_index(days=days)
+    finally:
+        _PASS.depth -= 1
+        if not _PASS.depth:
+            _PASS.manifests = _PASS.projects = None
+
+
+def _sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     """What the assistant button can be pointed at: live sessions first, by
     the title on their pane, then recently shelved conversations by their
     folder name. One row per session; a live one that is also on the shelf
