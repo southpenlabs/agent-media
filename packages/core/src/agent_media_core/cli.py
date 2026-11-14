@@ -7251,12 +7251,54 @@ def _cmd_music_log(a) -> int:
     return 0
 
 
+def _cmd_music_keys(a) -> int:
+    """`media music keys [--json]`: each kept track's key and beat grid
+    (music_bed_grid; step four of docs/proposals/2026-11-14-music-around-
+    speech.md, David, 14 Nov 2026: "Start step four") — the favourites'
+    instrumentals, the library's tracks and the originals the outro sings
+    from, with how many are measured. Nothing chooses by them yet."""
+    from . import music_bed_favourites as fav
+    from . import music_bed_grid as grid
+    from . import music_bed_library as lib
+    from . import music_bed_vocal as vocal
+
+    favs = fav.tracks(None, fav.load())
+    by_key = {e.get("key"): e for e in favs}
+    rows = []
+    for e in favs:
+        rows.append({"kind": "favourite", "title": e.get("title") or "", "artist": e.get("artist") or "",
+                     **{k: (e.get("features") or {}).get(k) for k in ("key", "beats", "grid_v", "bpm")}})
+    for e in lib.tracks(None, lib.load()):
+        rows.append({"kind": "library", "title": e.get("title") or "", "artist": e.get("artist") or e.get("creator") or "",
+                     **{k: (e.get("features") or {}).get(k) for k in ("key", "beats", "grid_v", "bpm")}})
+    for k, r in vocal.load().items():
+        f = by_key.get(k) or {}
+        rows.append({"kind": "original", "title": f.get("title") or k, "artist": f.get("artist") or "",
+                     **{x: r.get(x) for x in ("key", "beats", "grid_v")}})
+    done = sum(1 for r in rows if not grid.needs(r))
+    if getattr(a, "json", False):
+        print(json.dumps({"measured": done, "tracks": len(rows), "python": grid.python(), "items": rows}))
+        return 0
+    if not rows:
+        print("no kept tracks")
+        return 0
+    for r in rows:
+        name = " - ".join(x for x in (r["artist"], r["title"]) if x)[:52]
+        print(f"{r['kind']:<9}  {name:<52}  {grid.describe(r) or 'not measured yet'}")
+    note = "" if grid.python() else "; no Python with numpy here, so none will be"
+    print(f"{done} of {len(rows)} measured{note}")
+    return 0
+
+
 def cmd_music(a) -> int:
     from .route import coerce_content_type, detect_content_type
 
     if a.action == "log":
         # Reads the state store only: before any player is looked for.
         return _cmd_music_log(a)
+    if a.action == "keys":
+        # Reads the music bed's indexes only, as log does.
+        return _cmd_music_keys(a)
     m = SinkMusicRouter(SinkMusic())
     if a.action == "status" and getattr(a, "json", False):
         # Structured read for a control surface. Kept ahead of the formatted
@@ -11160,7 +11202,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
                             "chapters", "chapter", "radio", "dislike",
-                            "bed", "bed-off", "bed-list", "held", "mood", "log"))
+                            "bed", "bed-off", "bed-list", "held", "mood", "log", "keys"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "

@@ -180,3 +180,13 @@ David, 14 Nov 2026, on a question card:
   the Music log page). Pruning from the app is Settings → Storage
   (Advanced), with the other ages the server prunes by (`/storage`,
   retention.py; David: "Maybe only for advanced mode").
+- 14 Nov 2026: step four built (David: "Start step four"): every kept
+  track's key (Krumhansl–Kessler on its mean chroma, with its Camelot
+  number) and beat grid (tempo, first beat, confidence) are measured by
+  music_bed_sections.py and kept beside its tempo — a favourite's and a
+  library track's `features`, an original's record — by the background
+  pass, a few a pass (music_bed_grid). `media music keys` lists them.
+  Checked on the kept originals: All Right Now A major 121 BPM, Beachball
+  134, ambient pieces confidence 0. Nothing chooses by them yet. On red2
+  the analysis now runs with the release's own Python (it has numpy and no
+  Demucs venv), so the outro's sections are measured there too.
