@@ -535,8 +535,12 @@ def clip(bearer: str, text: str, voice: str = "") -> tuple[bool, dict]:
         return False, {"status": 400, "error": "text, please"}
     if len(text) > CLIP_MAX_CHARS:
         return False, {"status": 413, "error": f"at most {CLIP_MAX_CHARS} characters"}
-    if voice.startswith("edge:"):
-        engine, name = "edge", voice[len("edge:"):]
+    from agent_media_core.render import device
+
+    routed = device.engine_voice(voice) if voice else None
+    if routed:
+        # Microsoft's (`edge:…`) or one of this server's own (`kokoro:…`).
+        engine, name = routed
     else:
         engine = (os.environ.get("MEDIA_RENDER_ENGINE")
                   or os.environ.get("CLAUDE_TTS_ENGINE") or "edge")
@@ -554,7 +558,10 @@ def clip(bearer: str, text: str, voice: str = "") -> tuple[bool, dict]:
             return False, {"status": 502, "error": f"could not render: {err or 'empty'}"}
         part.replace(out)
         _prune_clips(folder)
-    return True, {"file": str(out), "size": out.stat().st_size, "type": "audio/mpeg"}
+    with open(out, "rb") as f:
+        wav = f.read(4) == b"RIFF"
+    return True, {"file": str(out), "size": out.stat().st_size,
+                  "type": "audio/wav" if wav else "audio/mpeg"}
 
 
 #: `GET /speech/recent`'s default and largest `limit`.

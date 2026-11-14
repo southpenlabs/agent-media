@@ -189,6 +189,7 @@ except /pair, which is how a device gets its token):
                   in the app, -100..100; the server's (speech_balance.py)
   GET|POST /speech/speed-reset {"reset"} → whether the speech rate goes
                   back to 1× as each reply ends; the server's (speech_speed.py)
+  GET /speech/voice/sample?voice=<name> → a voice's sample (mp3), made once
   GET|POST /speech/voice {"mode", "voice"?} → the speech target's replies
                   rendered on the phone (Android TTS) or by the server, and
                   in which voice, by language and accent (render/device.py,
@@ -429,7 +430,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -2522,6 +2523,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The phone's voice or the server's (render/device.py).
         ok, detail = pins.speech_voice(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/voice/sample":
+        # A voice's Play button: its sample, made once (voice_samples.py).
+        ok, detail = pins.speech_voice_sample(_bearer(h), (parse_qs(query).get("voice") or [""])[0])
+        if not ok:
+            _json(h, detail.pop("status", 400), {"ok": False, **detail})
+            return True
+        _send_file(h, detail["file"], detail["size"], detail["type"])
     elif path == "/settings/read-receipts":
         # Settings' Mark chats read when opened: every room's default (§6.32).
         from . import read_receipts

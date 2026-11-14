@@ -41,6 +41,9 @@ def setting(session: str, bearer: str, *, body: dict | None = None) -> tuple[boo
     chosen = None if phone else device.server_choice(target)
     if chosen:
         default = f"{chosen[0]}:{chosen[1]}"
+    from . import voice_samples
+
+    voice_samples.annotate(voices)
     own = session_voice.voice_for(session)
     return True, {"session": session, "voice": own, "default_voice": default,
                   "effective_voice": own or default, "voices": voices, "languages": languages}

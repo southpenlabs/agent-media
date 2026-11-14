@@ -3184,6 +3184,19 @@ A `<voice>` is `{"name", "label", "gender", "locale", "language", "accent",
 Every voice also carries `provider` (`edge`, `google`, `kokoro`, `piper`)
 and the local ones `installed: true`; older apps ignore both.
 
+**Samples and speed** (15 Nov 2026, step 2): every voice the server renders
+carries `sample`, a path (`/speech/voice/sample?voice=kokoro%3Aaf_alloy`).
+`GET` it with the bearer → `audio/mpeg`: one sentence in the voice's
+language ("Oh, that's brilliant! It actually worked on the first try…"),
+rendered the first time in that voice's engine (no fallback) and kept in
+`<cache>/voice-samples/`; 404 for a voice that is not the server's
+(Google's) or not listed, 502 when the engine fails. Rendering it times
+it: render seconds over clip seconds is the voice's `rtf` on this server
+(Microsoft's includes the network), kept in `index.json` there, and from
+then on the voice carries `rtf` and `live` (`rtf` under 0.8). The app
+plays the clip in the page, not through the speech target.
+`/session/voice` carries the same. In `CORS_PATHS`.
+
 `languages` groups them: `[{"code": "en", "name": "English", "accents":
 [{"locale": "en-AU", "name": "Australia", "voices": [<voice>]}]}]` —
 English first, then by name; Australia first within English, the rest by

@@ -993,6 +993,54 @@ def test_speech_voice_offers_this_servers_own_voices(server, shelf, signed_in, t
     assert typed == []
 
 
+def test_a_voice_has_a_sample_made_once_and_timed(server, shelf, signed_in, typed, monkeypatch,
+                                                 tmp_path):
+    """The Play button's clip (voice-picker step 2): rendered once in the
+    voice's engine, kept as mp3, its render time over its length the voice's
+    `rtf`. No engine is reached: render_text is faked."""
+    from agent_media_core.render import local_voices
+    import agent_media_core.render as render_pkg
+
+    monkeypatch.setattr(local_voices, "_ASK", {"kokoro": lambda b: ["af_alloy"],
+                                               "piper": lambda b: None})
+    local_voices.clear_cache()
+    asked = []
+
+    def fake_render(text, out, *, engine, voice, fallback_to_edge=True, **kw):
+        asked.append((engine, voice, text))
+        # An mp3 as edge sends (CI has no ffmpeg to turn a WAV into one).
+        out.write_bytes(b"ID3" + b"\0" * 400)
+        return True, ""
+
+    monkeypatch.setattr(render_pkg, "render_text", fake_render)
+    from agent_media_server import voice_samples
+
+    monkeypatch.setattr(voice_samples, "folder", lambda: tmp_path / "voice-samples")
+    monkeypatch.setattr(voice_samples, "_duration_s", lambda path: 2.0)
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    alloy = next(v for v in obj["voices"] if v["name"] == "kokoro:af_alloy")
+    assert alloy["sample"] == "/speech/voice/sample?voice=kokoro%3Aaf_alloy"
+    assert "rtf" not in alloy, "not measured yet"
+    res, body = call(server, "GET", alloy["sample"], headers=AUTH)
+    assert res.status == 200 and res.getheader("Content-Type") == "audio/mpeg"
+    assert isinstance(body, bytes) and len(body) > 100
+    assert asked[0][:2] == ("kokoro", "af_alloy") and asked[0][2].startswith("Oh, that's brilliant")
+    call(server, "GET", alloy["sample"], headers=AUTH)
+    assert len(asked) == 1, "made once"
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    alloy = next(v for v in obj["voices"] if v["name"] == "kokoro:af_alloy")
+    assert isinstance(alloy["rtf"], float) and alloy["live"] is True
+    # A voice the server cannot say, and one that does not exist.
+    res, obj = call(server, "GET", "/speech/voice/sample?voice=en-au-x-aua-network", headers=AUTH)
+    assert res.status == 404
+    res, obj = call(server, "GET", "/speech/voice/sample?voice=kokoro%3Anope", headers=AUTH)
+    assert res.status == 404
+    res, obj = call(server, "GET", alloy["sample"])
+    assert res.status in (401, 403)
+    assert "/speech/voice/sample" in app.CORS_PATHS
+    assert typed == []
+
+
 def test_the_language_is_the_servers(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "GET", "/settings/language", headers=AUTH)
     assert res.status == 200 and obj["language"] == "en"

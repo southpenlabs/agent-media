@@ -545,6 +545,11 @@ def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
             device.set_override(target, mode, keep)
         except OSError as e:
             return False, {"error": f"could not save the voice ({e})", "status": 500}
+    from . import voice_samples
+
+    # A Play button's clip and the speed measured here (voice-picker step 2);
+    # `voices` and `languages` hold the same entries.
+    voice_samples.annotate(voices)
     return True, {"target": target,
                   "mode": "phone" if device.renders_on_device(target) else "server",
                   "voice": device.voice_for(target),
@@ -552,6 +557,22 @@ def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
                   "voices": voices,
                   "languages": languages,
                   "server_voice": device.server_voice(target)}
+
+
+def speech_voice_sample(bearer: str, voice: str) -> tuple[bool, dict]:
+    """`GET /speech/voice/sample?voice=<name>`: a short clip of a voice the
+    server renders, made and timed once (voice_samples.py)."""
+    from agent_media_core.render import device
+
+    from . import voice_samples
+
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    chosen = device.find_voice(voice) if voice else None
+    if not chosen:
+        return False, {"error": "no such voice", "status": 404}
+    return voice_samples.render(chosen)
 
 
 def settings_language(bearer: str, language=None, accents=None) -> tuple[bool, dict]:
