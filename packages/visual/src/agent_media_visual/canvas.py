@@ -2318,8 +2318,9 @@ def main() -> None:
                          "for a tunnel or proxy; e.g. 127.0.0.1:8789")
     args = ap.parse_args()
     _last_clip_load()      # a restart should not empty the transcript
-    srv = ThreadingHTTPServer((args.bind, args.port), Handler)
-    srv.daemon_threads = True
+    # A thread per connection, or a pool of them (http_pool, MEDIA_SERVER_POOL).
+    from agent_media_server import http_pool
+    srv = http_pool.server((args.bind, args.port), Handler)
     threading.Thread(target=_state_poller, daemon=True).start()
     if os.environ.get("MEDIA_VISUAL_VIDEO", "1") != "0":
         threading.Thread(target=_video_poller, daemon=True).start()
@@ -2408,8 +2409,7 @@ def main() -> None:
         _speech_frames.start(channel=_ch)
     if args.public:
         host, _, port = args.public.rpartition(":")
-        pub = ThreadingHTTPServer((host or "127.0.0.1", int(port)), PublicHandler)
-        pub.daemon_threads = True
+        pub = http_pool.server((host or "127.0.0.1", int(port)), PublicHandler)
         threading.Thread(target=pub.serve_forever, daemon=True).start()
         print(f"app routes only on http://{host or '127.0.0.1'}:{port}/")
     print(f"canvas on http://{args.bind}:{args.port}/  spool={spool_dir()}")
