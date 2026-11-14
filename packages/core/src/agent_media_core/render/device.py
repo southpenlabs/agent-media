@@ -28,6 +28,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from .._paths import state_dir
+from . import local_voices
 
 SUFFIX = ".tts"
 OVERRIDE_NAME = "speech-voice.json"
@@ -37,7 +38,8 @@ MODES = ("phone", "server")
 #: TextToSpeech), as the app's Settings offers them.
 GOOGLE_VOICES = tuple(
     {"name": name, "label": f"Google {label}", "gender": "", "locale": "en-AU",
-     "language": "English", "accent": "Australia", "where": ["phone"]}
+     "language": "English", "accent": "Australia", "where": ["phone"],
+     "provider": "google"}
     for name, label in (("en-au-x-aua-network", "A · online"),
                         ("en-au-x-aub-network", "B · online"),
                         ("en-au-x-auc-network", "C · online"),
@@ -110,7 +112,7 @@ def _edge_voice(raw: dict) -> Optional[dict]:
     language, accent = (m.group(1), m.group(2)) if m else (lang_code, region or locale)
     return {"name": f"edge:{short}", "label": first, "gender": str(raw.get("Gender") or ""),
             "locale": locale, "language": language, "accent": accent,
-            "where": ["phone", "server"]}
+            "where": ["phone", "server"], "provider": "edge"}
 
 
 def _builtin_edge_voices() -> list[dict]:
@@ -205,15 +207,16 @@ def languages(all_voices: Optional[list] = None) -> list[dict]:
     people. They stay the phone's fallback (FALLBACK_VOICE), and a stored
     choice of one still renders."""
     if all_voices is None:
-        all_voices = edge_voices()
+        all_voices = edge_voices() + local_voices.voices()
     by_locale: dict[str, list] = {}
     for v in _one_per_speaker(all_voices):
         by_locale.setdefault(v["locale"], []).append(v)
     langs: dict[str, dict] = {}
     for locale, vs in by_locale.items():
-        # Stable: Google's keep the order they are listed in.
-        vs.sort(key=lambda v: ((0, v["label"].lower()) if v["name"].startswith("edge:")
-                               else (1, "")))
+        # Microsoft's by name, then this server's own (Kokoro, Piper) by
+        # provider and name; stable, so Google's keep the order they are
+        # listed in.
+        vs.sort(key=_voice_order)
         code = locale.split("-")[0]
         lang = langs.setdefault(code, {"code": code, "names": Counter(), "accents": []})
         lang["names"].update(v["language"] for v in vs)
@@ -229,11 +232,22 @@ def languages(all_voices: Optional[list] = None) -> list[dict]:
     return out
 
 
+def _voice_order(v: dict) -> tuple:
+    name = v["name"]
+    if name.startswith("edge:"):
+        return (0, 0, v["label"].lower())
+    own = local_voices.split(name)
+    if own and own[0] in local_voices.PROVIDERS:
+        return (1, local_voices.PROVIDERS.index(own[0]), v["label"].lower())
+    return (2, 0, "")
+
+
 def find_voice(name: str, all_voices: Optional[list] = None) -> Optional[dict]:
     """A voice by name: any on offer, or one of Google's — not offered, but a
     choice made before they were taken off the list is still a choice."""
     if all_voices is None:
-        all_voices = voices() + edge_voices() + [dict(v) for v in GOOGLE_VOICES]
+        all_voices = (voices() + edge_voices() + local_voices.voices()
+                      + [dict(v) for v in GOOGLE_VOICES])
     for v in all_voices:
         if v["name"] == name:
             return v
@@ -266,8 +280,8 @@ def override_for(target_name: str) -> Optional[dict]:
 
 def set_override(target_name: str, mode: str, voice: Optional[str] = None) -> None:
     """Render `target_name`'s replies on the device ("phone") or here
-    ("server"), in `voice` when given (here, only a Microsoft one is
-    honoured; see server_choice)."""
+    ("server"), in `voice` when given (here, a Microsoft one or one of a
+    provider with an engine here; see server_choice)."""
     if mode not in MODES:
         raise ValueError(f"not a voice mode: {mode!r}")
     data = overrides()
@@ -305,13 +319,23 @@ def can_render(target_name: str) -> bool:
             or override_for(target_name) is not None)
 
 
+def engine_voice(voice: str) -> Optional[tuple[str, str]]:
+    """(engine, engine's voice) a server-rendered `voice` name means:
+    `edge:<ShortName>` the edge engine, `kokoro:af_alloy` the kokoro engine
+    (render/local_voices.py), and so on; None for a phone-only one."""
+    if voice.startswith("edge:"):
+        return "edge", voice[len("edge:"):]
+    return local_voices.split(voice)
+
+
 def server_choice(target_name: str) -> Optional[tuple[str, str]]:
     """(engine, voice) this host renders `target_name`'s replies in when the
-    app chose the server and a Microsoft voice, else None (the env's)."""
+    app chose the server and a voice an engine here renders, else None (the
+    env's)."""
     entry = override_for(target_name)
     voice = (entry or {}).get("voice") or ""
-    if entry and entry["mode"] == "server" and voice.startswith("edge:"):
-        return "edge", voice[len("edge:"):]
+    if entry and entry["mode"] == "server":
+        return engine_voice(voice)
     return None
 
 

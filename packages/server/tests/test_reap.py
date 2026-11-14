@@ -965,6 +965,34 @@ def test_speech_voice_is_the_phones_or_the_servers(server, shelf, signed_in, typ
     assert typed == []
 
 
+def test_speech_voice_offers_this_servers_own_voices(server, shelf, signed_in, typed, monkeypatch):
+    """Kokoro and Piper voices, when their servers run here: offered for the
+    server only, chosen like Microsoft's, and dropped for the phone's own
+    default when moving to the phone (voice-picker proposal, step 1)."""
+    from agent_media_core import audio_targets
+    from agent_media_core.render import device, local_voices
+
+    monkeypatch.setattr(audio_targets, "speech_default", lambda: "sasonica")
+    monkeypatch.setattr(local_voices, "_ASK", {"kokoro": lambda b: ["af_alloy"],
+                                               "piper": lambda b: ["en_GB-cori-high"]})
+    local_voices.clear_cache()
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    alloy = next(v for v in obj["voices"] if v["name"] == "kokoro:af_alloy")
+    assert (alloy["label"], alloy["where"], alloy["provider"]) == ("Alloy", ["server"], "kokoro")
+    assert any(v["name"] == "piper:en_GB-cori-high" for v in obj["voices"])
+    res, obj = call(server, "POST", "/speech/voice",
+                    {"mode": "phone", "voice": "kokoro:af_alloy"}, AUTH)
+    assert res.status == 400 and "only on the server" in obj["error"]
+    res, obj = call(server, "POST", "/speech/voice",
+                    {"mode": "server", "voice": "kokoro:af_alloy"}, AUTH)
+    assert (res.status, obj["voice"], obj["server_voice"]) == (200, "kokoro:af_alloy", "af_alloy")
+    assert device.server_choice("sasonica") == ("kokoro", "af_alloy")
+    res, obj = call(server, "POST", "/speech/voice", {"mode": "phone"}, AUTH)
+    assert res.status == 200 and obj["mode"] == "phone"
+    assert obj["voice"] != "kokoro:af_alloy"
+    assert typed == []
+
+
 def test_the_language_is_the_servers(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "GET", "/settings/language", headers=AUTH)
     assert res.status == 200 and obj["language"] == "en"

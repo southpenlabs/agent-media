@@ -298,6 +298,13 @@ def _no_voice_list_fetch(monkeypatch):
 
     monkeypatch.setattr(device, "_fetch_edge_voices", offline)
     monkeypatch.setattr(device, "_last_fetch_try", 0.0)
+    # This server's own voices (Kokoro, Piper) are asked of their servers on
+    # 127.0.0.1 (render/local_voices.py): none here, so nothing is listed
+    # unless a test puts its own in.
+    from agent_media_core.render import local_voices
+
+    monkeypatch.setattr(local_voices, "_ASK", {p: (lambda base: None) for p in local_voices.PROVIDERS})
+    local_voices.clear_cache()
 
 
 @pytest.fixture(autouse=True)

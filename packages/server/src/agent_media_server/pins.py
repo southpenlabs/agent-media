@@ -525,14 +525,24 @@ def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
     if voice is not None and not chosen:
         return False, {"error": "no such voice", "status": 400}
     if chosen and mode is not None and mode not in chosen["where"]:
-        return False, {"error": f"{chosen['label']} is only on the phone: "
-                                "choose a Microsoft voice for the server", "status": 400}
+        if mode == "server":
+            return False, {"error": f"{chosen['label']} is only on the phone: "
+                                    "choose a Microsoft voice for the server", "status": 400}
+        return False, {"error": f"{chosen['label']} is only on the server: "
+                                "choose a Microsoft voice for the phone", "status": 400}
     target = audio_targets.speech_default()
     if mode is not None:
         if not device.can_render(target):
             return False, {"error": f"{target} cannot render words", "status": 409}
+        keep = voice or device.voice_for(target)
+        if voice is None and keep and mode == "phone" and device.engine_voice(keep) \
+                and not keep.startswith("edge:"):
+            # Moving to the phone from a voice only the server has
+            # (Kokoro, Piper): the phone's own default, not a voice it
+            # cannot say.
+            keep = None
         try:
-            device.set_override(target, mode, voice or device.voice_for(target))
+            device.set_override(target, mode, keep)
         except OSError as e:
             return False, {"error": f"could not save the voice ({e})", "status": 500}
     return True, {"target": target,

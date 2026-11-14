@@ -2328,9 +2328,12 @@ Null clears the override (**Use default voice**). Both answer `{"ok": true,
 "session", "voice", "default_voice", "effective_voice", "voices", "languages"}`.
 `voice` is the stored override or null; `default_voice` is the current target's
 voice, and `effective_voice` is the override or that default. `voices` and
-`languages` are the named Microsoft voice catalog used by `/speech/voice`.
-These voices can render on either phone or server; choosing one changes no
-render-side or global voice setting. Gate/session checks match `/session/priority`.
+`languages` are the named voice catalog used by `/speech/voice`: every
+voice the server renders (Microsoft's, and this server's own Kokoro and
+Piper ones, 15 Nov 2026). Microsoft's render on either side; a server-only
+one applies while the server renders, and while the phone does the
+target's own voice stands in. Choosing one changes no render-side or
+global voice setting. Gate/session checks match `/session/priority`.
 Missing, empty, non-string or unknown voice is 400; a null voice is valid.
 Save failure is 500.
 
@@ -3167,23 +3170,42 @@ A `<voice>` is `{"name", "label", "gender", "locale", "language", "accent",
   falling back to a Google voice; the server renders with its edge engine.
 - Google's Australian five (`en-au-x-aua-network`, label `Google A ·
   online`): the phone's Android TTS only.
+- This server's own (15 Nov 2026, voice-picker proposal step 1):
+  Kokoro's `kokoro:<voice>` (`kokoro:af_alloy`, label `Alloy`) and Piper's
+  `piper:<voice>` (`piper:en_GB-cori-high`, label `Cori`), `where:
+  ["server"]`, listed only while the engine's server here answers
+  (`MEDIA_KOKORO_BASE_URL`, default `http://127.0.0.1:8880`, `GET /voices`,
+  or `/health` meaning all of Kokoro's; `MEDIA_PIPER_BASE_URL`, default
+  `:5000`, Piper's `GET /voices`), asked at most every 30 s
+  (`render/local_voices.py`). Kokoro's accent comes from its first letter
+  (`a` American, `b` British, …); Piper names no gender, so `gender` is
+  empty.
+
+Every voice also carries `provider` (`edge`, `google`, `kokoro`, `piper`)
+and the local ones `installed: true`; older apps ignore both.
 
 `languages` groups them: `[{"code": "en", "name": "English", "accents":
 [{"locale": "en-AU", "name": "Australia", "voices": [<voice>]}]}]` —
 English first, then by name; Australia first within English, the rest by
-name; Microsoft's voices (by name) before Google's. `voices` is the same,
-flat.
+name; Microsoft's voices (by name), then this server's own (Kokoro, then
+Piper, each by name), then Google's. `voices` is the same, flat.
 
 `server_voice` is what the server renders in: the chosen voice when in
-`server` mode with a Microsoft one — a reply to the target that renders
-here then uses the edge engine in that voice, unless the event names its
-own engine or voice — else the engine's configured voice (for display).
+`server` mode with one an engine here renders — a reply to the target that
+renders here then uses that engine (`edge:` the edge engine, `kokoro:` the
+kokoro engine, `piper:` piper; `openai:` and `qwen:` route the same way)
+in that voice, unless the event names its own engine or voice — else the
+engine's configured voice (for display). A failed render falls back as
+any does (`MEDIA_RENDER_FALLBACK_ENGINE`).
 
 Kept per target in `<state_dir>/speech-voice.json` as `{"<target>":
 {"mode", "voice"}}`, read before the env (`MEDIA_SPEECH_RENDER_<T>`,
 `MEDIA_SPEECH_DEVICE_VOICE_<T>`) on every reply. The server's, so every
-device's. 400 on another mode, a voice not in `voices`, or `server` with a
-phone-only voice (`"<label> is only on the phone: …"`); 409 when the target
+device's. 400 on another mode, a voice not in `voices`, `server` with a
+phone-only voice (`"<label> is only on the phone: …"`) or `phone` with a
+server-only one (`"<label> is only on the server: …"`); a POST of `phone`
+without `voice` while a server-only voice is in use drops it for the
+phone's own default; 409 when the target
 cannot render words; in `CORS_PATHS`.
 
 A thinking readout is said slower and quieter than a reply (David, 25 Oct

@@ -129,7 +129,14 @@ def _engine_and_voice(event: Event, target: Target) -> tuple[str, Optional[str]]
 
         own = session_voice.voice_for(_source_session(event.metadata))
         if own:
-            return ("device", own) if device_voice.renders_on_device(target.name) else ("edge", own[5:])
+            on_device = device_voice.renders_on_device(target.name)
+            if on_device and own.startswith("edge:"):
+                return "device", own
+            # A voice only this server has (kokoro:, piper:) while the
+            # phone renders: the target's own voice stands in.
+            routed = None if on_device else device_voice.engine_voice(own)
+            if routed:
+                return routed
     chosen = None if event.engine or event.voice else device_voice.server_choice(target.name)
     if chosen:
         return chosen
@@ -181,8 +188,8 @@ def _resolve_voice(event: Event, engine: str) -> Optional[str]:
 
 
 def _ext_for(engine: str) -> str:
-    """qwen / realtime / kokoro emit WAV, others MP3."""
-    return "wav" if engine in ("qwen", "realtime", "kokoro") else "mp3"
+    """qwen / realtime / kokoro / piper emit WAV, others MP3."""
+    return "wav" if engine in ("qwen", "realtime", "kokoro", "piper") else "mp3"
 
 
 def _norm_ws(s: str) -> str:

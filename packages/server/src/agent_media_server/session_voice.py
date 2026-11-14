@@ -18,10 +18,12 @@ def setting(session: str, bearer: str, *, body: dict | None = None) -> tuple[boo
             or sessions._folder_for_session(session) or matrix.room(session) is not None):
         return False, {"error": "no such session", "status": 404}
     # Microsoft voices work on either side, so a thread keeps its voice
-    # when the listener moves between phone and server-rendered playback.
+    # when the listener moves between phone and server-rendered playback;
+    # this server's own (Kokoro, Piper) apply while it renders, and the
+    # phone's default stands in while the phone does.
     languages = device.languages()
     voices = [v for lang in languages for accent in lang["accents"] for v in accent["voices"]
-              if v["name"].startswith("edge:")]
+              if "server" in v["where"]]
     if body is not None:
         if "voice" not in body:
             return False, {"error": "voice is required (null uses the default)", "status": 400}
@@ -36,8 +38,9 @@ def setting(session: str, bearer: str, *, body: dict | None = None) -> tuple[boo
     target = audio_targets.speech_default()
     phone = device.renders_on_device(target)
     default = device.voice_for(target) if phone else device.server_voice(target)
-    if not phone and device.server_choice(target):
-        default = "edge:" + default
+    chosen = None if phone else device.server_choice(target)
+    if chosen:
+        default = f"{chosen[0]}:{chosen[1]}"
     own = session_voice.voice_for(session)
     return True, {"session": session, "voice": own, "default_voice": default,
                   "effective_voice": own or default, "voices": voices, "languages": languages}

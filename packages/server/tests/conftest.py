@@ -290,6 +290,12 @@ def _clean_media_env(monkeypatch, tmp_path, request):
 
     monkeypatch.setattr(device, "_fetch_edge_voices", offline)
     monkeypatch.setattr(device, "_last_fetch_try", 0.0)
+    # This server's own voices (Kokoro, Piper) are asked of their servers on
+    # 127.0.0.1 (render/local_voices.py): none here unless a test says so.
+    from agent_media_core.render import local_voices
+
+    monkeypatch.setattr(local_voices, "_ASK", {p: (lambda base: None) for p in local_voices.PROVIDERS})
+    local_voices.clear_cache()
     # The search index lives under the state dir above; forget the last
     # test's connection and its short-lived caches.
     from agent_media_server import search

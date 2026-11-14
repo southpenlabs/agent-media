@@ -183,7 +183,8 @@ def test_the_voices_are_grouped_by_language_then_accent(monkeypatch):
     ava = device_voice.find_voice("edge:en-US-AvaMultilingualNeural")
     assert ava == {"name": "edge:en-US-AvaMultilingualNeural", "label": "Ava",
                    "gender": "Female", "locale": "en-US", "language": "English",
-                   "accent": "United States", "where": ["phone", "server"]}
+                   "accent": "United States", "where": ["phone", "server"],
+                   "provider": "edge"}
 
 
 def test_the_list_is_kept_a_day_and_the_stale_one_serves_offline(monkeypatch):
