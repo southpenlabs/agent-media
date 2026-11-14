@@ -894,6 +894,15 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
         return False, detail
     days = -1.0 if history == "all" else STORE_DAYS
     rows, where = sessions_index(days=days), mailbox.with_mail(places())
+    # A title cut to the list's length carries its whole beside it, for the
+    # rename box and the list's Full titles (David, 14 Nov 2026: "This chat
+    # title is truncated in the rename field").
+    for r in rows:
+        title = str(r.get("title") or "")
+        if title.endswith("…"):
+            whole = whole_title(str(r.get("session") or ""), title)
+            if whole != title:
+                r["title_whole"] = whole
     out = {"sessions": rows, "places": where}
     mail = mailbox.by_project(
         [(r.get("project"), r.get("cwd")) for r in rows]

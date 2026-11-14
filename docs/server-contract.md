@@ -282,6 +282,10 @@ Everything a message can be pointed at.
   after the first list of a checkout, so a client must not read `null` as
   "nothing to commit" until it has polled once more. `null` for a row
   outside a checkout, and for one whose changes no transcript accounts for.
+- **`title_whole`** (14 Nov 2026; additive, only on a row whose `title`
+  was cut): a `title` stops at 60 characters, ending "…"; the whole one (up
+  to 300) rides beside it, for the app's rename box and its Full titles
+  view. The same text a thread's header gets (§11 `title`).
 - `sessions` is `sessions_index()`. Live sessions come first, titled from the
   pane (Claude's terminal title with the spinner stripped; Codex, pi and
   Hermes from their own session files, cut to 60 chars). A live session

@@ -34,3 +34,22 @@ def test_a_whole_title_that_no_longer_matches_is_not_used(monkeypatch):
 def test_a_first_message_the_length_of_a_mail_stops_at_300():
     sessions._cut(SID, "word " * 200)
     assert len(sessions.whole_title(SID, ("word " * 200)[:59] + "…")) == sessions.TITLE_WHOLE
+
+
+def test_targets_carries_the_whole_title_beside_a_cut_one(monkeypatch):
+    """The rename box and Full titles start from the whole name (David,
+    14 Nov 2026: "This chat title is truncated in the rename field")."""
+    from agent_media_server import auth, mailbox
+
+    short = sessions._cut(SID, LONG)
+    rows = [{"session": SID, "title": short}, {"session": "other", "title": "Short one"}]
+    monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
+    monkeypatch.setattr(sessions, "sessions_index", lambda days: rows)
+    monkeypatch.setattr(sessions, "places", lambda: [])
+    monkeypatch.setattr(mailbox, "with_mail", lambda where: where)
+    monkeypatch.setattr(mailbox, "by_project", lambda pairs: None)
+    monkeypatch.setattr(sessions, "project_groups", lambda: {})
+    ok, out = sessions.targets("token")
+    assert ok
+    assert out["sessions"][0]["title_whole"] == LONG
+    assert "title_whole" not in out["sessions"][1]
