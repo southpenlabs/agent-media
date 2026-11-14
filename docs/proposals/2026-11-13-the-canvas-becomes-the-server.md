@@ -230,10 +230,30 @@ this file, as fewer-services did with its §4d.
   drained): the poll's request is now 5 views and 0.01 MB in 9 ms,
   against 702 views and 0.82 MB in 63 ms for the whole list. The server's
   memory over a day on this release is the next figure to take.
-- Still whole: `/targets` (the thread list) and search's "which sessions
-  are headless" ask for every view. Next in change 4.
-- **Step 1** (the three-hour figure, the doctor line): the figure is in
-  (above: 309 MB, from 963). The doctor line is not written.
+- **The rest of the session list, 14 Nov 2026** (523b17e8): `/targets`
+  and search take the live sessions from the session host and the ended
+  ones from `sessiond.records()`, after checking on red2 that an ended
+  session's view is its record plus `live: false` (706 ended, no field
+  different). Deployed with the pool, below.
+- **Step 1, done 14 Nov 2026** (47691fe0): the figure is in (above: 309
+  MB, from 963), and `media doctor` prints the server's size under its
+  local check: resident, peak, threads and arenas, from /proc
+  (`server_health`), never counted as a problem.
+- **Step 3, the worker pool, on red2 since 16:28 on 14 Nov** (52d83e39,
+  `MEDIA_SERVER_POOL=1` in red2's env file): an elastic pool, not the
+  plan's "streams get threads of their own", because the server only
+  knows a request is a stream once a worker holds it. Eight workers kept
+  warm and reused, more started whenever all are busy (so nothing waits
+  behind an open stream), the extra ones gone after a minute idle, at most
+  256. Before it: 226 MB resident, peak 1,247 MB, 50 threads. Reports at
+  three hours and a day go to this thread; the week ends 21 Nov.
+- **Step 4, the contacts read, built 14 Nov 2026**: a version check before
+  each 15-minute read (every raw contact's and label's id and version, the
+  region, the parser's own code) skips the read when nothing moved, with a
+  full read at least every six hours as a net. On the phone: 4 s and
+  0.17 MB for the check, against 20 s and 12.9 MB for the read it skips
+  (2,731 contacts). Not "parse as the rows stream in": skipping the read
+  saves all of it on most passes, and parsing is 0.7 s of the 20.
 
 ## Decisions (David, 13 Nov 2026: "they all sound like excellent ideas")
 

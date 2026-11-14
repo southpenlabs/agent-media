@@ -37,6 +37,7 @@ Friends, Family, Coworkers; starred is left out.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 import json
 import os
 import re
@@ -141,8 +142,64 @@ def script(nonce: str) -> str:
 def run(timeout: float = TIMEOUT_S) -> tuple[str, str]:
     """`(nonce, output)` of the script on the phone."""
     nonce = secrets.token_hex(8)
+    return nonce, _shell(script(nonce), timeout)
+
+
+#: How long the version check may take: it is a few kilobytes.
+VERSIONS_TIMEOUT_S = 30.0
+
+
+def versions_script(nonce: str) -> str:
+    """Each raw contact's and each label's id and version, nothing else."""
+    m = f"@@AM-{nonce}@@"
+    return "; ".join([
+        f"echo '{m} raw'",
+        f"content query --uri {URI}/raw_contacts --projection _id:version "
+        f"--where 'deleted=0' --sort _id",
+        f"echo '{m} groups'",
+        f"content query --uri {URI}/groups --projection _id:version "
+        f"--where 'deleted=0' --sort _id",
+        f"echo '{m} end'"])
+
+
+def versions(default_region: str = "AU", timeout: float = VERSIONS_TIMEOUT_S) -> str:
+    """A hash of what would make a full read come out differently: every raw
+    contact's and label's version (Android raises a raw contact's on any
+    change to it or its data, and a deleted one leaves the list), the region
+    numbers are read in, and this module's own code (a parser that changed
+    reads the same book differently). Equal to the last full read's: the
+    book has not moved, and the read can be skipped. A few kilobytes, where
+    the full read is the whole address book every 15 minutes
+    (docs/proposals/2026-11-13-the-canvas-becomes-the-server.md, change 4).
+    Unreachable as `run` is."""
+    nonce = secrets.token_hex(8)
+    sec = sections(_shell(versions_script(nonce), timeout), nonce)
+    if "raw" not in sec:
+        raise Unreachable("the version check has no raw section")
+    h = hashlib.sha256()
+    h.update(default_region.encode())
+    h.update(_SOURCE_HASH.encode())
+    for name in ("raw", "groups"):
+        h.update(f"\0{name}\0".encode())
+        for r in rows(sec.get(name) or ""):
+            h.update(r.encode() + b"\n")
+    return h.hexdigest()
+
+
+def _source_hash() -> str:
     try:
-        got = subprocess.run(command() + [script(nonce)], capture_output=True, text=True,
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+_SOURCE_HASH = _source_hash()
+
+
+def _shell(text: str, timeout: float) -> str:
+    """The output of a shell script run on the phone."""
+    try:
+        got = subprocess.run(command() + [text], capture_output=True, text=True,
                              timeout=timeout, encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         raise Unreachable(f"the phone did not answer in {int(timeout)} s") from None
@@ -150,7 +207,7 @@ def run(timeout: float = TIMEOUT_S) -> tuple[str, str]:
         raise Unreachable(f"could not run {command()[0]} ({e})") from None
     if got.returncode != 0:
         raise Unreachable(f"{command()[0]} {failed(got.returncode, got.stdout, got.stderr)}")
-    return nonce, got.stdout
+    return got.stdout
 
 
 # --- parsing --------------------------------------------------------------------

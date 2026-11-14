@@ -822,3 +822,47 @@ def test_rooms_match_phone_contacts(phone, monkeypatch):
     got = _contact_rows()
     assert got["!a:ryer.org"]["id"] == contacts.contact_id("android", LIONEL_LOOKUP)
     assert got["!z:ryer.org"]["name"] == "Zoë 王"
+
+
+def test_android_sync_skips_the_read_while_the_versions_stand_still(phone, monkeypatch):
+    v = {"now": "v1"}
+    monkeypatch.setattr(ca, "versions", lambda region="AU", timeout=0: v["now"])
+    assert contacts.sync_android()["unchanged"] is False and phone["runs"] == 1
+    got = contacts.sync_android()                      # nothing moved: no read
+    assert got["skipped"] is True and got["read"] == 2 and phone["runs"] == 1
+    v["now"] = "v2"                                    # something moved on the phone
+    assert "skipped" not in contacts.sync_android() and phone["runs"] == 2
+    assert contacts.sync_android()["skipped"] is True and phone["runs"] == 2
+    # Past ANDROID_FULL_S since the last full read: read whatever they say.
+    monkeypatch.setattr(contacts, "ANDROID_FULL_S", -1.0)
+    contacts.sync_android()
+    assert phone["runs"] == 3
+
+
+def test_a_failed_version_check_falls_back_to_the_full_read(phone, monkeypatch):
+    def down(region="AU", timeout=0):
+        raise ca.Unreachable("no adb")
+    monkeypatch.setattr(ca, "versions", down)
+    contacts.sync_android()
+    contacts.sync_android()
+    assert phone["runs"] == 2
+
+
+def test_the_versions_hash_reads_ids_and_versions_and_the_region(monkeypatch):
+    out = {}
+
+    def shell(text, timeout):
+        n = text.split("@@AM-")[1].split("@@")[0]
+        m = f"@@AM-{n}@@"
+        return (f"{m} raw\nRow: 0 _id=11, version={out['v']}\nRow: 1 _id=21, version=9\n"
+                f"{m} groups\nNo result found.\n{m} end\n")
+
+    monkeypatch.setattr(ca, "_shell", shell)
+    out["v"] = 4
+    a = ca.versions("AU")
+    assert ca.versions("AU") == a and ca.versions("NZ") != a
+    out["v"] = 5
+    assert ca.versions("AU") != a
+    monkeypatch.setattr(ca, "_shell", lambda text, timeout: "@@AM-x@@ raw\n")   # cut short
+    with pytest.raises(ca.Unreachable):
+        ca.versions("AU")

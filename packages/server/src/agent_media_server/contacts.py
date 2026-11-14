@@ -1603,6 +1603,18 @@ def sync_android() -> dict:
     from . import contacts_android
 
     with _SYNC_LOCK:
+        # The versions first: a few kilobytes against the whole book. The
+        # same as at the last full read (and that within ANDROID_FULL_S), and
+        # nothing on the phone has moved: no read. A failed check is not a
+        # failed sync; the full read says that.
+        try:
+            versions = contacts_android.versions(region())
+        except contacts_android.Unreachable:
+            versions = None
+        if versions:
+            skipped = _android_unmoved(versions)
+            if skipped is not None:
+                return skipped
         try:
             recs, digest = contacts_android.read(region())
         except contacts_android.Unreachable as e:
@@ -1612,6 +1624,10 @@ def sync_android() -> dict:
             conn = _connect()
             try:
                 conn.execute("BEGIN IMMEDIATE")
+                # Taken before the read: a change made while it ran moves
+                # the next check, and is read then.
+                _set_meta(conn, "android_versions", versions)
+                _set_meta(conn, "android_full_at", str(round(time.time(), 3)))
                 same = _meta(conn, "android_hash") == digest
                 before = {sid for (sid,) in conn.execute(
                     "SELECT sid FROM records WHERE kind='android'")}
@@ -1634,6 +1650,37 @@ def sync_android() -> dict:
                 conn.close()
         return {"source": "android", "unchanged": same, "read": len(recs),
                 "gone": len(before - set(recs)) if not same else 0, "contacts": total}
+
+
+#: A full read at least this often, whatever the versions say (6 h): the
+#: check trusts Android to raise a version on every change, and this is the
+#: net under that.
+ANDROID_FULL_S = 6 * 3600.0
+
+
+def _android_unmoved(versions: str) -> dict | None:
+    """`sync_android`'s answer when the phone's versions are those of the last
+    full read and it is recent, its time noted; else None (read it)."""
+    with _WRITE:
+        conn = _connect()
+        try:
+            try:
+                full_at = float(_meta(conn, "android_full_at") or 0)
+            except ValueError:
+                full_at = 0.0
+            if (_meta(conn, "android_versions") != versions or not _meta(conn, "android_hash")
+                    or time.time() - full_at > ANDROID_FULL_S):
+                return None
+            conn.execute("BEGIN IMMEDIATE")
+            _set_meta(conn, "android_synced_at", str(round(time.time(), 3)))
+            _set_meta(conn, "android_last_error", None)
+            conn.execute("COMMIT")
+            read = conn.execute("SELECT COUNT(*) FROM records WHERE kind='android'").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
+        finally:
+            conn.close()
+    return {"source": "android", "unchanged": True, "read": read, "gone": 0,
+            "contacts": total, "skipped": True}
 
 
 def sync_drupal() -> dict:
