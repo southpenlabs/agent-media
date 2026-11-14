@@ -486,7 +486,7 @@ def test_rename_auto_names_it_from_the_conversation(server, shelf, signed_in, mo
     from agent_media_server import threads
 
     seen = {}
-    monkeypatch.setattr(threads, "auto_title", lambda s: seen.setdefault("s", s) and "Speech bar fixes")
+    monkeypatch.setattr(threads, "auto_title_why", lambda s: (seen.setdefault("s", s) and "Speech bar fixes", ""))
     monkeypatch.setattr(book_tracks, "rename", lambda s, t: t)
     monkeypatch.setattr(send, "send_rename", lambda s, t: None)
     res, obj = call(server, "POST", "/rename", {"session": SID, "auto": True}, AUTH)
@@ -498,9 +498,25 @@ def test_rename_auto_names_it_from_the_conversation(server, shelf, signed_in, mo
 def test_rename_auto_without_a_name_is_502(server, shelf, signed_in, monkeypatch):
     from agent_media_server import threads
 
-    monkeypatch.setattr(threads, "auto_title", lambda s: "")
+    monkeypatch.setattr(threads, "auto_title_why", lambda s: ("", "gemini-3-flash: the gateway at red2:4000 answered 400: No connected db."))
     res, obj = call(server, "POST", "/rename", {"session": SID, "auto": True}, AUTH)
-    assert res.status == 502 and obj["error"] == "could not think of a name"
+    # The app shows the error after "Not renamed:", so it carries the reason.
+    assert res.status == 502
+    assert obj["error"] == ("could not think of a name (gemini-3-flash: the gateway at "
+                            "red2:4000 answered 400: No connected db.)")
+    assert obj["why"].startswith("gemini-3-flash:")
+
+
+def test_auto_title_says_why_there_is_no_name(monkeypatch):
+    from agent_media_core.intake import fast
+    from agent_media_server import threads
+
+    monkeypatch.setattr(threads, "_conversation_text", lambda s: "")
+    monkeypatch.setattr("agent_media_core.private.hidden", lambda s: False)
+    assert threads.auto_title_why(SID) == ("", "nothing has been said in it yet")
+    monkeypatch.setattr(threads, "_conversation_text", lambda s: "Person: hi")
+    monkeypatch.setattr(fast, "chat_why", lambda *a, **k: ("x" * 200, ""))
+    assert threads.auto_title_why(SID) == ("", "the model's answer was not a usable title")
 
 
 def test_auto_title_cleans_the_models_line(monkeypatch):

@@ -178,16 +178,24 @@ def auto_title(session: str) -> str:
     MEDIA_TITLE_MODEL, then MEDIA_FAST_MODELS, then the follow-up's), or ""
     when it cannot be had. A private thread is read only to
     MEDIA_PRIVATE_MODELS, and with none gets no name."""
+    return auto_title_why(session)[0]
+
+
+def auto_title_why(session: str) -> tuple[str, str]:
+    """`auto_title`, and when there is no name, why not — shown with the
+    app's "Not renamed" (David, 14 Nov 2026: "making it say why is a good
+    idea", after a missing gateway key read as "could not think of a name")."""
     from agent_media_core.intake import fast
     from agent_media_core.private import hidden
 
     private = hidden(session)
     if private and not fast.models(private=True):
-        return ""           # not even read: no model may have it
+        # not even read: no model may have it
+        return "", "the thread is private and no private model is set"
     text = _conversation_text(session)
     if not text:
-        return ""
-    return _ask_title(AUTO_TITLE_PROMPT, text, private)
+        return "", "nothing has been said in it yet"
+    return _ask_title_why(AUTO_TITLE_PROMPT, text, private)
 
 
 #: What a saved new-chat draft is named with (Save draft, David, 2 Nov 2026).
@@ -215,17 +223,26 @@ def draft_title(text: str, private: bool = False) -> str:
 
 
 def _ask_title(prompt: str, text: str, private: bool) -> str:
+    return _ask_title_why(prompt, text, private)[0]
+
+
+def _ask_title_why(prompt: str, text: str, private: bool) -> tuple[str, str]:
     from agent_media_core.intake import fast
     from agent_media_core.intake._summary import DEFAULT_TIMEOUT, _int_env
 
     timeout = _int_env("MEDIA_TITLE_TIMEOUT", _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    out = (fast.chat(prompt, text, timeout, purpose_env="MEDIA_TITLE_MODEL",
-                     private=private) or "").strip()
-    line = out.splitlines()[0] if out else ""
+    out, why = fast.chat_why(prompt, text, timeout, purpose_env="MEDIA_TITLE_MODEL",
+                             private=private)
+    out = (out or "").strip()
+    if not out:
+        return "", why
+    line = out.splitlines()[0]
     if line.lower().startswith("title:"):
         line = line[len("title:"):]
     line = " ".join(line.split()).strip("\"'`*#").rstrip(".").strip()
-    return line if 0 < len(line) <= 80 else ""
+    if 0 < len(line) <= 80:
+        return line, ""
+    return "", "the model's answer was not a usable title"
 
 
 #: A thread nobody has named is named for them once its first turn is done
@@ -286,9 +303,11 @@ def rename_conversation(session: str, title: str, bearer: str,
         return False, {"error": "not a session id", "status": 400}
     title = " ".join((title or "").split())
     if not title and auto:
-        title = auto_title(session)
+        title, why = auto_title_why(session)
         if not title:
-            return False, {"error": "could not think of a name", "status": 502}
+            return False, {"error": f"could not think of a name ({why})" if why
+                           else "could not think of a name", "why": why or None,
+                           "status": 502}
     if not title:
         return False, {"error": "no title", "status": 400}
     named = book_tracks.rename(session, title)

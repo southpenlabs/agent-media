@@ -74,22 +74,27 @@ def _mark(model: str | None, ok: bool) -> None:
             _down[model or ""] = time.monotonic() + _cooldown()
 
 
-def _once(system: str, user: str, model: str | None, left: float) -> tuple[bool, str | None]:
-    """`(finished, text)`: one call with a hard deadline (its own thread)."""
+def _once(system: str, user: str, model: str | None,
+          left: float) -> tuple[bool, str | None, str]:
+    """`(finished, text, why)`: one call with a hard deadline (its own
+    thread); `why` is the gateway's reason when it gave no text."""
     from . import _summary
 
-    out: list[str | None] = []
+    out: list[tuple[str | None, str]] = []
 
     def run() -> None:
         try:
-            out.append(_summary._chat(system, user, max(1, int(left + 0.999)), model=model))
-        except Exception:  # noqa: BLE001 — a failed model is the next one's turn
-            out.append(None)
+            text = _summary._chat(system, user, max(1, int(left + 0.999)), model=model)
+            out.append((text, "" if text else _summary.last_error()))
+        except Exception as e:  # noqa: BLE001 — a failed model is the next one's turn
+            out.append((None, f"{type(e).__name__}: {e}"[:160]))
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(left)
-    return (bool(out), out[0] if out else None)
+    if not out:
+        return False, None, ""
+    return True, out[0][0], out[0][1]
 
 
 def chat(system: str, user: str, timeout: float, *, purpose_env: str | None = None,
@@ -99,22 +104,36 @@ def chat(system: str, user: str, timeout: float, *, purpose_env: str | None = No
     A model that errors (no credit, unknown, the gateway down) is skipped for
     MEDIA_FAST_COOLDOWN; when every one is skipped they are all tried again,
     so a recovered gateway is noticed. Never raises."""
+    return chat_why(system, user, timeout, purpose_env=purpose_env, private=private)[0]
+
+
+def chat_why(system: str, user: str, timeout: float, *, purpose_env: str | None = None,
+             private: bool = False) -> tuple[str | None, str]:
+    """`chat`, and when there is no answer, why not, for a person to read:
+    the last model's failure ("gemini-3-flash: the gateway at red2:4000
+    answered 400: No connected db."), or that none answered in time."""
     order = models(purpose_env, private=private)
-    if not order or not (user or "").strip():
-        return None
+    if not order:
+        return None, "no private model is set (MEDIA_PRIVATE_MODELS)"
+    if not (user or "").strip():
+        return None, "nothing to ask about"
     live = [m for m in order if not _is_down(m)] or order
     deadline = time.monotonic() + max(0.5, float(timeout))
+    why = ""
     for m in live:
         left = deadline - time.monotonic()
         if left < 0.3:
             break
-        finished, text = _once(system, user, m, left)
+        finished, text, failed = _once(system, user, m, left)
         if text and text.strip():
             _mark(m, True)
-            return text
+            return text, ""
         if finished:
             _mark(m, False)
-    return None
+            why = f"{m or 'the default model'}: {failed or 'no answer'}"
+    if not why:
+        why = f"no model answered within {max(0.5, float(timeout)):g} s"
+    return None, why
 
 
 def _reset_for_tests() -> None:

@@ -44,7 +44,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -104,13 +106,45 @@ def _resolve_api_key() -> str:
             or os.environ.get("OPENAI_API_KEY") or "")
 
 
+_last = threading.local()
+
+
+def last_error() -> str:
+    """Why this thread's last `_chat` gave no answer, in words a person can
+    act on ("the gateway at red2:4000 answered 400: No connected db."), or ""
+    when it answered. Per thread, so concurrent asks do not cross."""
+    return getattr(_last, "error", "")
+
+
+def _failed(why: str) -> None:
+    _last.error = why
+
+
+def _http_why(base: str, e: urllib.error.HTTPError) -> str:
+    """An HTTP error as the gateway put it: its own message when the body is
+    the OpenAI-shaped {"error": {"message": …}}, else the status alone."""
+    host = urllib.parse.urlsplit(base).netloc or base
+    msg = ""
+    try:
+        body = json.loads(e.read().decode("utf-8", "replace") or "{}")
+        err = body.get("error") if isinstance(body, dict) else None
+        msg = str((err.get("message") if isinstance(err, dict) else err) or "")
+    except (OSError, ValueError, AttributeError):
+        pass
+    msg = " ".join(msg.split())[:160]
+    return f"the gateway at {host} answered {e.code}" + (f": {msg}" if msg else "")
+
+
 def _chat(system_prompt: str, user_text: str, timeout: int,
           model: str | None = None) -> str | None:
     """POST one system+user turn to the configured OpenAI-compatible endpoint
     and return the assistant text, or ``None`` on any problem (empty/HTTP/JSON/
-    timeout). Never raises. Shared by the summary and describe paths."""
+    timeout), with the reason in `last_error()`. Never raises. Shared by the
+    summary and describe paths."""
+    _failed("")
     user_text = (user_text or "").strip()
     if not user_text:
+        _failed("nothing to send")
         return None
     base = (os.environ.get("MEDIA_SUMMARY_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
@@ -128,15 +162,29 @@ def _chat(system_prompt: str, user_text: str, timeout: int,
         f"{base}/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {api_key}"})
+    host = urllib.parse.urlsplit(base).netloc or base
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    except urllib.error.HTTPError as e:
+        _failed(_http_why(base, e))
+        return None
+    except urllib.error.URLError as e:
+        _failed(f"the gateway at {host} could not be reached ({e.reason})")
+        return None
+    except TimeoutError:
+        _failed(f"the gateway at {host} did not answer within {timeout} s")
+        return None
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        _failed(f"the gateway at {host} failed: {type(e).__name__}")
         return None
     try:
         out = (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError):
+        _failed(f"the gateway at {host} sent no answer text")
         return None
+    if not out:
+        _failed("the model answered with nothing")
     return out or None
 
 

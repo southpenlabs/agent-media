@@ -80,3 +80,39 @@ def test_private_only_to_private_models(monkeypatch):
     assert fast.chat("s", "u", 5, private=True) is None and asked == []
     monkeypatch.setenv("MEDIA_PRIVATE_MODELS", "local")
     assert fast.chat("s", "u", 5, private=True) == "yes" and asked == ["local"]
+
+
+def test_why_names_the_last_model_and_its_failure(monkeypatch):
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "a,b")
+
+    def chat(system, user, timeout, model=None):
+        _summary._failed(f"the gateway at gw:4000 answered 400: No connected db. ({model})")
+        return None
+    monkeypatch.setattr(_summary, "_chat", chat)
+    assert fast.chat_why("s", "u", 5) == (
+        None, "b: the gateway at gw:4000 answered 400: No connected db. (b)")
+
+
+def test_why_when_nothing_answered_in_time(monkeypatch):
+    monkeypatch.setenv("MEDIA_FAST_MODELS", "slow")
+    _gateway(monkeypatch, {"slow": "late"}, {"slow": 1.5})
+    assert fast.chat_why("s", "u", 1.0) == (None, "no model answered within 1 s")
+
+
+def test_why_private_with_no_private_model():
+    assert fast.chat_why("s", "u", 5, private=True)[1].startswith("no private model")
+
+
+def test_the_gateway_s_own_message_is_the_reason(monkeypatch):
+    """A refused key (LiteLLM's 400 "No connected db.") is reported as the
+    gateway put it, not as an empty answer."""
+    import io
+    import urllib.error
+
+    def refuse(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, io.BytesIO(
+            b'{"error":{"message":"No connected db.","code":"400"}}'))
+    monkeypatch.setenv("MEDIA_SUMMARY_BASE_URL", "http://gw.invalid:4000/v1")
+    monkeypatch.setattr(_summary.urllib.request, "urlopen", refuse)
+    assert _summary._chat("s", "u", 5, model="m") is None
+    assert _summary.last_error() == "the gateway at gw.invalid:4000 answered 400: No connected db."
