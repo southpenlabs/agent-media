@@ -3610,7 +3610,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                 voice=bool(body.get("voice")),
                 nudge=body.get("nudge") is True,
                 reply_to=str(body.get("reply_to") or ""),
-                from_chip=str(body.get("from_chip") or ""))
+                from_chip=str(body.get("from_chip") or ""),
+                quote_part=body.get("quote_part") is True)
         status = detail.pop("status", 400)
         if not ok:
             # Which thread too: a refusal that names only the reason

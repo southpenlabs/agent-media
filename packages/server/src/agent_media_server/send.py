@@ -1126,7 +1126,7 @@ def reply(text: str, bearer: str, *, quote: str = "",
           mode: str = "continue", session: str = "",
           keep_reading: bool = False, voice: bool = False,
           nudge: bool = False, reply_to: str = "",
-          from_chip: str = "") -> tuple[bool, dict]:
+          from_chip: str = "", quote_part: bool = False) -> tuple[bool, dict]:
     """Put `text` into `session`.
 
     (An Audiobookshelf item id used to stand in for the session; that form
@@ -1214,6 +1214,11 @@ def reply(text: str, bearer: str, *, quote: str = "",
         # (room_send.py, §6.33); a room with none is sent as before.
         if reply_to.strip():
             # A real reply (§6.31): the bridge makes it the network's own.
+            # Words picked out of the message (`quote_part`, a selection's
+            # Reply) ride in front as well: the network quotes the whole
+            # message, which does not say which words were meant.
+            if quote_part and quote.strip():
+                drawn = f"> {quote.strip()}\n\n{drawn}"
             return room_send.send(room, drawn, reply_to=reply_to.strip())
         body = f"> {quote.strip()}\n\n{text}" if quote.strip() else drawn
         return room_send.send(room, body)

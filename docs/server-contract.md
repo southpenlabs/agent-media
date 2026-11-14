@@ -5515,6 +5515,7 @@ local look, never a network call:
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
+| `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
@@ -9110,6 +9111,14 @@ a message that answers another shows what it answers.
 **Sending.** `POST /reply` (§6.3) takes `reply_to`, the id of the message
 answered, beside `quote`, its words (the app sends both, at most 300
 characters of words).
+
+**Words picked out** (David, 14 Nov 2026: a Reply in Android's menu over
+selected text). `quote_part: true` says the `quote` is the words selected
+in the message, not the whole of it. An agent session takes it as any quote
+(it was always the words sent). A Matrix room sends the real reply with the
+selected words quoted in front (`> words`, a blank line, then the reply),
+since the network's own reply quotes the whole message; that quote stays in
+the message's words when it is read back.
 
 - **A Matrix room**: sent as a real reply,
   `m.relates_to: {"m.in_reply_to": {"event_id"}}`, with the words alone, so

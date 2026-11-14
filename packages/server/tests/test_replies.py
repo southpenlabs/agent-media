@@ -109,3 +109,29 @@ def test_replying_in_a_room_sends_a_real_reply(monkeypatch):
     assert r.page(30)[0][-1]["reply_to"] == {"id": "$1", "text": "hello", "name": "Sam"}
     ok, err = send.reply("x", "tok", session=r.thread, reply_to="$nope")
     assert not ok and err["status"] == 404
+
+
+def test_a_rooms_reply_to_picked_words_quotes_them_in_front(monkeypatch):
+    """A selection's Reply (`quote_part`): the real reply, and the words
+    picked out quoted in front, since the network quotes the whole message."""
+    from agent_media_server import auth
+
+    r, _ = _room([_ev(1, SAM, "hello there, see you at six")])
+    r.load()
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    sent = []
+
+    def put(config, path, body, token, timeout=15.0):
+        sent.append((path, body))
+        return {"event_id": f"$sent{len(sent)}"}
+
+    monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-tok")
+    monkeypatch.setattr(matrix, "_put", put)
+    monkeypatch.setattr(matrix, "_post", lambda *a, **k: {})
+    monkeypatch.setattr(auth, "gate", lambda bearer: ("david", None))
+    ok, d = send.reply("make it seven", "tok", session=r.thread, reply_to="$1",
+                       quote="at six", quote_part=True)
+    assert ok, d
+    (_, body), = sent
+    assert body == {"msgtype": "m.text", "body": "> at six\n\nmake it seven",
+                    "m.relates_to": {"m.in_reply_to": {"event_id": "$1"}}}
