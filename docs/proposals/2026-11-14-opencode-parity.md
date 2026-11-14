@@ -47,9 +47,15 @@ give it a sessiond backend of its own.
    `--agent claude|opencode|antigravity`, with that agent's own model ids
    (`--model opencode/big-pickle`; a model the agent doesn't take is refused,
    not dropped) and `--plan`. Only Claude goes to another host yet.
-6. **The slash menu.** `GET /commands` is Claude Code's list. opencode's
-   server has its own command list, which could be served the same way for
-   an opencode thread.
+6. **The slash menu.** Done (15 Nov 2026): `GET /commands` for an opencode
+   thread is opencode's own list (`GET /command`: its built-ins, the user's
+   commands under "Commands", its skills under "Skills"), with
+   `agent: "opencode"`. sessiond asks it while its server runs and keeps it
+   per folder, and never starts the server for it. A typed `/name args` for
+   one of them goes to opencode's `POST /session/:id/command`, run on a
+   thread because it answers only at the end of the turn. Any other `/word`
+   is sent as words. Checked against opencode 1.19.5: a user command and a
+   skill both run through it.
 7. **Background agents.** sessiond refuses list and stop for opencode
    ("no background agents"). opencode's subagents are child sessions
    (`parent_id`), so listing them and aborting one maps directly.

@@ -254,6 +254,29 @@ def test_a_chat_started_in_plan_mode_asks_the_plan_agent(host):
     assert first[2]["agent"] == "plan"
 
 
+def test_a_typed_command_runs_as_opencodes_command_and_the_menu_is_its_own(host):
+    from agent_media_server import sessiond_opencode as oc
+
+    sid = start(host, "hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    menu = host.sup.oc_commands(str(host.work))
+    assert [(c["name"], c["group"]) for c in menu] == [
+        ("demo-skill", "Skills"), ("init", "Commands"), ("review", "Commands")]
+    driver.headless_driver().send(sid, "/review branch main", "/review branch main")
+    wait_for(lambda: any(r[1].startswith(f"/session/{sid}/command") for r in requests(host)))
+    cmd = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/command")][-1]
+    assert cmd[2]["command"] == "review" and cmd[2]["arguments"] == "branch main"
+    wait_for(lambda: state(host, sid) == "waiting")
+    # An unknown /word is words, sent as a prompt.
+    driver.headless_driver().send(sid, "/nope at all", "/nope at all")
+    last = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
+    assert last[2]["parts"][0]["text"] == "/nope at all"
+    # With the server stopped, the kept list.
+    host.sup.oc.stop()
+    assert host.sup.oc_commands(str(host.work)) == menu
+    assert oc.split_command("hi /review", ["review"]) is None
+
+
 def test_the_server_needs_its_password(host):
     import urllib.error
     import urllib.request

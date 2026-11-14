@@ -44,6 +44,7 @@ import collections
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -142,6 +143,42 @@ def question_answers(questions: list[dict], answers: dict) -> list[list[str]]:
         parts = [p.strip() for p in a.split(", ")]
         out.append(parts if len(parts) > 1 and all(p in labels for p in parts) else [a])
     return out
+
+
+def _commands_path(cwd: str):
+    import hashlib
+
+    from agent_media_core._paths import state_dir
+
+    key = hashlib.sha1((cwd or "~").encode()).hexdigest()[:16]
+    return state_dir() / "opencode-commands" / f"{key}.json"
+
+
+def menu_of(rows) -> list[dict]:
+    """opencode's `GET /command` as the slash menu's rows (slash_menu.build's
+    shape): its own and the user's commands under "Commands", its skills
+    under "Skills". A typed `/name args` runs it (sessiond `_oc_send`)."""
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        name = str((r or {}).get("name") or "").strip() if isinstance(r, dict) else ""
+        if not name or not COMMAND_NAME.fullmatch(name):
+            continue
+        out.append({"name": name, "description": str(r.get("description") or "").strip(),
+                    "aliases": [], "group": "Skills" if r.get("source") == "skill" else "Commands"})
+    out.sort(key=lambda c: c["name"])
+    return out
+
+
+#: A command or skill name opencode would list: what `/name` is matched by.
+COMMAND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
+
+
+def split_command(text: str, names) -> tuple[str, str] | None:
+    """`(name, arguments)` when `text` is `/name args` for one of `names`."""
+    m = re.match(r"\s*/(" + COMMAND_NAME.pattern + r")(?:\s+(.*))?\Z", text or "", re.DOTALL)
+    if not m or m.group(1) not in set(names):
+        return None
+    return m.group(1), (m.group(2) or "").strip()
 
 
 class Host:
@@ -287,6 +324,31 @@ class Host:
             raise Refused(f"opencode refused it ({status}: {str(msg)[:200]})",
                           "not_found" if status == 404 else "refused")
         return out
+
+    def commands(self, cwd: str) -> list[dict]:
+        """The slash menu for an opencode chat in `cwd`: asked of the server
+        while it runs, and kept, so a chat whose server is stopped (no chat
+        attached) still has the list it last had. Never starts the server
+        (each takes ~480 MB): before any opencode chat ran there, []."""
+        path = _commands_path(cwd)
+        if self.up:
+            try:
+                rows = menu_of(self.call("GET", "/command", directory=cwd, timeout=10.0))
+            except Exception as e:  # noqa: BLE001 — the kept list will do
+                log.info("sessiond: opencode commands for %s: %s", cwd, e)
+                rows = []
+            if rows:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"at": time.time(), "cwd": cwd, "commands": rows}))
+                except OSError:
+                    pass
+                return rows
+        try:
+            kept = json.loads(path.read_text())
+            return list(kept.get("commands") or [])
+        except (OSError, ValueError, AttributeError):
+            return []
 
     def _events(self, proc: subprocess.Popen) -> None:
         """Follow `/global/event` while this server runs; reconnect if it drops."""

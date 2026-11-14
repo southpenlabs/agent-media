@@ -3690,15 +3690,23 @@ class Supervisor:
                 s.pending.pop(str(p.get("request_id")), None)
             busy = s.state in ("working", "approval")
             seq = s.seq
-        body: dict = {"parts": [{"type": "text", "text": text}]}
-        ref = oc.model_ref(s.model)
-        if ref:
-            body["model"] = ref
-        # Plan mode is opencode's own `plan` agent (no edits, asks before
-        # running commands); otherwise its default agent (`build`).
-        if s.mode == "plan":
-            body["agent"] = "plan"
-        self.oc.call("POST", f"/session/{s.id}/prompt_async", body, directory=s.cwd)
+        # `/name args` for one of opencode's commands or skills (the slash
+        # menu, `Host.commands`) runs it, as its TUI would: the prompt API
+        # takes the words as they are.
+        cmd = oc.split_command(text, [c["name"] for c in self.oc.commands(s.cwd)]) \
+            if text.lstrip().startswith("/") else None
+        if cmd:
+            self._oc_command(s, *cmd)
+        else:
+            body: dict = {"parts": [{"type": "text", "text": text}]}
+            ref = oc.model_ref(s.model)
+            if ref:
+                body["model"] = ref
+            # Plan mode is opencode's own `plan` agent (no edits, asks before
+            # running commands); otherwise its default agent (`build`).
+            if s.mode == "plan":
+                body["agent"] = "plan"
+            self.oc.call("POST", f"/session/{s.id}/prompt_async", body, directory=s.cwd)
         with self.lock:
             s.turns += 1
             if not s.first_text:
@@ -3713,6 +3721,36 @@ class Supervisor:
         return {"session": session, "uuid": "", "fresh": _fresh, "resumed": resumed,
                 "queued": busy, "acked": True, "state": s.state, "live": s.live,
                 "pid": s.proc.pid if s.live else None}
+
+    def _oc_command(self, s: Session, name: str, arguments: str) -> None:
+        """Run opencode command `name` in the chat. Its API answers only when
+        the turn is over, so it is called on a thread of its own; the turn's
+        states come from the event stream as a prompt's do. A refusal is
+        logged and the chat put back to waiting."""
+        body: dict = {"command": name, "arguments": arguments}
+        if s.model and "/" in s.model:
+            body["model"] = s.model
+        if s.mode == "plan":
+            body["agent"] = "plan"
+
+        def run() -> None:
+            try:
+                self.oc.call("POST", f"/session/{s.id}/command", body, directory=s.cwd,
+                             timeout=6 * 3600.0)
+            except Exception as e:  # noqa: BLE001 — told in the log, the chat goes on
+                log.warning("sessiond: opencode %s: /%s: %s", s.id[:12], name,
+                            getattr(e, "error", e))
+                with self.lock:
+                    if s.state == "working":
+                        s.set_state("waiting")
+                        self._save(s)
+                        self.cond.notify_all()
+
+        threading.Thread(target=run, name=f"oc-command-{s.id[:12]}", daemon=True).start()
+
+    def oc_commands(self, cwd: str) -> list[dict]:
+        """The slash menu for an opencode chat in `cwd` (`Host.commands`)."""
+        return self.oc.commands(cwd)
 
     def _oc_rename(self, session: str, title: str) -> dict:
         with self.lock:
@@ -3943,6 +3981,8 @@ class Supervisor:
                                                 slot=str(req.get("slot") or ""))}
             if op == "rename":
                 return {"ok": True, **self.rename(sid, str(req.get("title") or ""))}
+            if op == "oc_commands":
+                return {"ok": True, "commands": self.oc_commands(str(req.get("cwd") or ""))}
             if op == "release":
                 return {"ok": True, **self.release(sid)}
             if op == "run_now":

@@ -140,6 +140,16 @@ def commands_for(session: str, project: str, bearer: str,
     if not cwd and where and sessions.known_place(where):
         cwd = where
     cwd = cwd or os.path.expanduser("~")
+    from agent_media_core import harnesses
+
+    if session and harnesses.is_opencode(session):
+        # opencode's own commands and skills, as its server lists them
+        # (sessiond_opencode `Host.commands`), not Claude Code's.
+        from .driver.headless import call
+
+        r = call("oc_commands", cwd=cwd, timeout=15.0)
+        return True, {"cwd": cwd, "agent": "opencode",
+                      "commands": list(r.get("commands") or []) if r.get("ok") else []}
     return True, {"cwd": cwd, "commands": slash_menu.menu(cwd)}
 
 

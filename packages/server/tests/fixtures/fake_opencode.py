@@ -10,6 +10,7 @@ none of the model behind them. What a prompt does is chosen by its words:
   tool: CMD   a bash permission request; `once` runs it, `reject` does not
   ask         a question (one single-select)
   slow        busy until aborted
+  /name args  (POST /session/:id/command) as a prompt, answered at its end
   anything    busy, then idle
 
 Every request is appended to $FAKE_OPENCODE_LOG as `METHOD PATH BODY`.
@@ -134,6 +135,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=run_prompt, args=(directory, parts[1], text),
                              daemon=True).start()
             return self._send(204)
+        if method == "GET" and parts == ["command"]:
+            # As opencode 1.19.5 lists them: built-ins, the user's, skills.
+            return self._send(200, [
+                {"name": "init", "description": "guided AGENTS.md setup", "source": "command"},
+                {"name": "review", "description": "review changes", "source": "command"},
+                {"name": "demo-skill", "description": "A demo skill", "source": "skill"}])
+        if method == "POST" and len(parts) == 3 and parts[0] == "session" and parts[2] == "command":
+            # Answers when the turn is over, as opencode's does.
+            run_prompt(directory, parts[1], f"/{(body or {}).get('command')} "
+                                            f"{(body or {}).get('arguments', '')}")
+            return self._send(200, {"info": {"role": "assistant"}, "parts": []})
         if len(parts) == 3 and parts[0] == "session" and parts[2] == "abort":
             ABORT.setdefault(parts[1], threading.Event()).set()
             return self._send(200, True)

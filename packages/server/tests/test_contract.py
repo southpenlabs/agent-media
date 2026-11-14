@@ -353,6 +353,20 @@ def test_commands_shape(server, shelf, signed_in, monkeypatch):
     assert keys(obj["commands"][0]) == {"name", "description", "aliases"}
 
 
+def test_an_opencode_threads_commands_are_opencodes(server, shelf, signed_in, monkeypatch):
+    from agent_media_server.driver import headless
+
+    oc = "ses_" + "b" * 26
+    asked = []
+    monkeypatch.setattr(headless, "call", lambda op, **kw: asked.append((op, kw)) or {
+        "ok": True, "commands": [{"name": "review", "description": "review changes",
+                                  "aliases": [], "group": "Commands"}]})
+    res, obj = call(server, "GET", f"/commands?session={oc}", headers=AUTH)
+    assert res.status == 200, obj
+    assert obj["agent"] == "opencode" and obj["commands"][0]["name"] == "review"
+    assert asked and asked[0][0] == "oc_commands"
+
+
 # --- sending ----------------------------------------------------------------------
 
 def test_ask_dry_run_shape(server, shelf, signed_in, typed):
