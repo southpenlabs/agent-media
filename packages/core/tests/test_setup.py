@@ -820,6 +820,46 @@ def test_the_restart_row_starts_a_settings_file_without_permissions(tmp_path):
     assert data == {"permissions": {"allow": list(setup.RESTART_ALLOW_RULES)}}
 
 
+def test_the_messaging_row_is_opt_in(tmp_path, capsys):
+    """A plain profile run leaves autoMode alone and says how to opt in."""
+    (tmp_path / "settings.json").write_text(json.dumps({"model": "opus"}))
+    args = _profile_args(tmp_path)
+    row = {r["name"]: r for r in setup.profile_status(args)}["messaging"]
+    assert row["state"] == "absent" and "--only messaging" in row["detail"]
+    setup._row_messaging(args, check_only=False)
+    assert "autoMode" not in json.loads((tmp_path / "settings.json").read_text())
+
+
+def test_the_messaging_row_adds_its_rules_once_beside_others(tmp_path, capsys):
+    (tmp_path / "settings.json").write_text(json.dumps({
+        "permissions": {"allow": ["Bash(*)"]},
+        "autoMode": {"allow": ["$defaults", "Mine: anything in ~/scratch"],
+                     "environment": ["$defaults",
+                                     f"{setup.MESSAGING_TAG} an old wording"]}}))
+    args = _profile_args(tmp_path, only="messaging")
+    assert setup.cmd_profile(args) == 0
+    out = capsys.readouterr().out
+    assert "auto mode will be told" in out and "installed messaging" in out
+    data = json.loads((tmp_path / "settings.json").read_text())
+    auto = data["autoMode"]
+    assert auto["allow"][:2] == ["$defaults", "Mine: anything in ~/scratch"]
+    assert auto["allow"][2:] == list(setup.MESSAGING_AUTOMODE["allow"])
+    assert auto["environment"] == ["$defaults", *setup.MESSAGING_AUTOMODE["environment"]]
+    assert data["permissions"] == {"allow": ["Bash(*)"]}
+    assert {r["name"]: r for r in setup.profile_status(args)}["messaging"]["state"] == "ok"
+    before = (tmp_path / "settings.json").read_text()
+    assert setup.cmd_profile(args) == 0
+    assert (tmp_path / "settings.json").read_text() == before
+
+
+def test_the_messaging_row_starts_with_the_defaults(tmp_path):
+    args = _profile_args(tmp_path, only="messaging")
+    assert setup.cmd_profile(args) == 0
+    auto = json.loads((tmp_path / "settings.json").read_text())["autoMode"]
+    assert auto["allow"][0] == "$defaults" and auto["environment"][0] == "$defaults"
+    assert not any(h in json.dumps(auto) for h in ("red2", "red5", "agent-mail"))
+
+
 def _no_profiles(tmp_path, monkeypatch):
     """A harness-profiles store of the test's own: the real one has a real
     pi profile, and the pi row would link into it."""

@@ -1951,6 +1951,77 @@ def _row_restart(args, *, check_only: bool):
     return "installed", str(path)
 
 
+#: Claude Code's auto mode judges each action with a classifier of its own,
+#: which `permissions.allow` does not reach: with `Bash(*)` allowed, a
+#: session's `media session send` to another of the same person's sessions
+#: was still refused as "unsanctioned communication" (14 Nov 2026). These
+#: tell the classifier what agent-media's messaging is. Each starts with
+#: MESSAGING_TAG, which is how a re-run finds its own and rewrites them in
+#: place. Nothing here names a host or another tool: those are the
+#: installation's, not the product's (agent-mail's rule belongs to agent-mail).
+MESSAGING_TAG = "(agent-media)"
+MESSAGING_AUTOMODE = {
+    "environment": (
+        f"{MESSAGING_TAG} agent-media's session host (sessiond) runs this "
+        "person's own Claude sessions headless. `media session send`, "
+        "`media session start` and `media session wake` put a signed message "
+        "(`[From <session>]`) into one of those sessions: it is the "
+        "sanctioned channel between the person's own sessions, not a message "
+        "to anyone else.",
+    ),
+    "allow": (
+        f"{MESSAGING_TAG} Messaging another of this person's own sessions "
+        "through agent-media (`media session send`, `media session start`, "
+        "`media session wake`, `media test-failure notify`): reporting, "
+        "handing over work or answering, as those commands intend.",
+    ),
+}
+
+
+def _automode_merge(settings: dict) -> tuple[dict, bool]:
+    """MESSAGING_AUTOMODE merged into `autoMode`: our entries (MESSAGING_TAG)
+    rewritten in place, anything else kept, and `$defaults` first in a list
+    we start, so the built-in rules are kept."""
+    settings = json.loads(json.dumps(settings))
+    auto = settings.get("autoMode")
+    if not isinstance(auto, dict):
+        auto = {}
+    changed = False
+    for key, ours in MESSAGING_AUTOMODE.items():
+        cur = auto.get(key)
+        cur = list(cur) if isinstance(cur, list) else ["$defaults"]
+        kept = [e for e in cur if not (isinstance(e, str) and e.startswith(MESSAGING_TAG))]
+        new = kept + list(ours)
+        if new != cur:
+            auto[key] = new
+            changed = True
+    if changed:
+        settings["autoMode"] = auto
+    return settings, changed
+
+
+def _row_messaging(args, *, check_only: bool):
+    """Auto mode told that agent-media's messaging between the person's own
+    sessions is sanctioned (MESSAGING_AUTOMODE). Opt-in: a plain profile
+    run skips it with a reason, because it widens what a session may do on
+    its own; `media-setup profile --only messaging` prints the rules and
+    writes them. Claude Code only."""
+    path = _settings_path(args)
+    _, missing = _automode_merge(_load_json(path))
+    if not missing:
+        return "ok", str(path)
+    optin = "opt-in: media-setup profile --only messaging"
+    if check_only or getattr(args, "only", None) != "messaging":
+        return "absent", optin
+    print("  auto mode will be told (autoMode in settings.json):")
+    for key, ours in MESSAGING_AUTOMODE.items():
+        for entry in ours:
+            print(f"    {key}: {entry}")
+    merged, _ = _automode_merge(_load_json(path))
+    _write_settings(path, merged, dry_run=args.dry_run)
+    return "installed", str(path)
+
+
 def gemini_settings_path() -> Path:
     """Gemini CLI's own settings: `~/.gemini/settings.json`, under
     `GEMINI_CLI_HOME` when that moves its home."""
@@ -2371,6 +2442,8 @@ PROFILE_ROWS = (
      _row_statusline),
     ("restart", "the safe delayed service restarts allowed without a prompt",
      "core", _row_restart),
+    ("messaging", "auto mode told that messages between your own sessions "
+     "(media session send) are sanctioned (opt-in)", "extra", _row_messaging),
     ("services", "this host's services, by its roles", "core", _row_services),
     ("shell", "the tmux popup and control surface on PATH", "core", _row_shell),
     ("rooms", "the system packages the speaker rooms play through (pactl, parec, "

@@ -103,6 +103,16 @@ hook then guesses the window instead. The `restart` row adds the exact
 `media restart-services --only sessiond|canvas --after 10` commands to
 `permissions.allow`.
 
+The `messaging` row is opt-in: a plain run skips it and says so. Claude
+Code's auto mode judges actions with a classifier that `permissions.allow`
+does not reach, and it refused one session's `media session send` to
+another of the same person's sessions as "unsanctioned communication"
+(14 Nov 2026). `media-setup profile --only messaging` prints two entries and
+adds them to `autoMode` (`environment` and `allow`, after `$defaults`) telling it
+that agent-media's messaging between the person's own sessions is
+sanctioned. They start with `(agent-media)`, which is how a re-run finds and
+rewrites them; they name no host and no other tool.
+
 ### What `media-hook-context` tells a session
 
 `intake/context.py`. Two notes, both added to the prompt:
