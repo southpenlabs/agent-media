@@ -4704,7 +4704,7 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         else:
             q = parse_qs(h.path.partition("?")[2])
             one = lambda k: (q.get(k) or [""])[0].strip()  # noqa: E731
-            ok, detail = music.brainz(_bearer(h), one("search"), one("artist"), one("album"), one("name"))
+            ok, detail = music.brainz(_bearer(h), one("search"), one("artist"), one("album"), one("name"), one("popular"))
     elif path == "/music/voted":
         # One song's card state, read only (music.voted): Sing it out's keys.
         if method != "GET":

@@ -10,6 +10,10 @@
                     release (official, earliest; else the first)
   artist_by_name(n) the artist a name surely is (a top match whose name is
                     the same, folded), for the song page's link
+  popular(mbid)     an artist's most-played songs and albums, by
+                    ListenBrainz's listen counts (MusicBrainz keeps no
+                    popularity); albums are those of the discography's
+                    Albums and EPs, so bootlegs and live tapes stay out
 
 MusicBrainz asks for a User-Agent naming the app with a contact, and at
 most one call a second (spaced here, `_get`). Lookups are kept a week on
@@ -33,12 +37,15 @@ from pathlib import Path
 from typing import Optional
 
 MB = "https://musicbrainz.org/ws/2"
+LB_POPULAR = "https://api.listenbrainz.org/1/popularity"
 CAA_GROUP = "https://coverartarchive.org/release-group"
 CAA_RELEASE = "https://coverartarchive.org/release"
 USER_AGENT = "agent-media/1 ( https://github.com/southpenlabs/agent-media )"
 GAP_S = 1.05
 LOOKUP_TTL_S = 7 * 86400.0
 SEARCH_TTL_S = 86400.0
+POPULAR_TRACKS = 10
+POPULAR_ALBUMS = 8
 #: Discography sections, in order.
 SECTIONS = ("album", "ep", "single", "live", "compilation")
 
@@ -260,3 +267,51 @@ def artist_by_name(name: str) -> Optional[dict]:
             return _artist_row(top)
         return None
     return _kept(f"n:{n}", LOOKUP_TTL_S, ask)
+
+
+def popular(mbid: str) -> dict:
+    """An artist's most-played: `{tracks: [{title, artist, album, album_id,
+    length_s, listens, art}], albums: [<a discography row> + listens]}`,
+    most listened first, from ListenBrainz (David, 14 Nov 2026: "a list of
+    their popular tracks and albums ... From music brains or something").
+    A song is listed once (its live and remastered takes folded into the
+    most-played one); an album only when the discography has it under
+    Albums or EPs. Empty lists when ListenBrainz has no listens for them."""
+    mbid = _mbid(mbid)
+
+    def lb(kind: str) -> list:
+        code, got = _get(f"{LB_POPULAR}/{kind}/{mbid}")
+        if code in (204, 404):
+            return []
+        if code != 200:
+            raise OSError(f"ListenBrainz answered HTTP {code}")
+        return got if isinstance(got, list) else []
+
+    def ask():
+        tracks, seen = [], set()
+        for r in lb("top-recordings-for-artist"):
+            title = str((r or {}).get("recording_name") or "") if isinstance(r, dict) else ""
+            key = _fold(re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*$", "", title))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            ms, art = r.get("length"), None
+            if r.get("caa_release_mbid") and r.get("caa_id"):
+                art = f"{CAA_RELEASE}/{r['caa_release_mbid']}/front-250"
+            tracks.append({"title": title, "artist": r.get("artist_name") or None,
+                           "album": r.get("release_name") or None, "album_id": None,
+                           "length_s": round(ms / 1000) if isinstance(ms, (int, float)) else None,
+                           "listens": int(r.get("total_listen_count") or 0), "art": art})
+            if len(tracks) >= POPULAR_TRACKS:
+                break
+        listens = {str(g.get("release_group_mbid")): int(g.get("total_listen_count") or 0)
+                   for g in lb("top-release-groups-for-artist") if isinstance(g, dict)}
+        disco = artist(mbid)
+        albums = [{**a, "listens": listens[a["id"]]} for s in disco["sections"] if s["type"] in ("album", "ep")
+                  for a in s["albums"] if listens.get(a["id"])]
+        albums.sort(key=lambda a: -a["listens"])
+        by_title = {_fold(a["title"]): a["id"] for s in disco["sections"] for a in s["albums"]}
+        for t in tracks:
+            t["album_id"] = by_title.get(_fold(t["album"] or ""))
+        return {"tracks": tracks, "albums": albums[:POPULAR_ALBUMS]}
+    return _kept(f"p:{mbid}", LOOKUP_TTL_S, ask)

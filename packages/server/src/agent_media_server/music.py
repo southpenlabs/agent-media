@@ -1372,11 +1372,13 @@ def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = 
     return True, got
 
 
-def brainz(bearer: str, search: str = "", artist: str = "", album: str = "", name: str = "") -> tuple[bool, dict]:
+def brainz(bearer: str, search: str = "", artist: str = "", album: str = "", name: str = "",
+           popular: str = "") -> tuple[bool, dict]:
     """`GET /music/brainz` — gated like /music/recent: MusicBrainz's
     artists and albums (agent_media_core.music_brainz): `?search=`,
-    `?artist=<mbid>`, `?album=<mbid>`, or `?name=` (the artist a name surely
-    is, or null)."""
+    `?artist=<mbid>`, `?album=<mbid>`, `?name=` (the artist a name surely
+    is, or null), or `?popular=<mbid>` (their most-played songs and albums,
+    by ListenBrainz's listen counts)."""
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -1391,6 +1393,8 @@ def brainz(bearer: str, search: str = "", artist: str = "", album: str = "", nam
             return True, mb.album(album)
         if name:
             return True, {"artist": mb.artist_by_name(name[:200])}
+        if popular:
+            return True, mb.popular(popular)
     except ValueError as e:
         return False, {"error": str(e), "status": 400}
     except LookupError as e:
@@ -1398,7 +1402,7 @@ def brainz(bearer: str, search: str = "", artist: str = "", album: str = "", nam
     except Exception as e:  # noqa: BLE001
         print(f"music: musicbrainz failed: {e}", file=sys.stderr)
         return False, {"error": f"MusicBrainz didn't answer: {e}", "status": 502}
-    return False, {"error": "say search, artist, album or name", "status": 400}
+    return False, {"error": "say search, artist, album, name or popular", "status": 400}
 
 
 def brainz_play(body: dict, bearer: str) -> tuple[bool, dict]:

@@ -75,7 +75,7 @@ Sorted with what blocks a public release first. 47 rows.
 | 32 | Victorian Government camera sites | phone and seatbelt camera roads | none | monthly spreadsheet; off unless `MEDIA_MAP_VIC=1` | credit shown; confirm the licence on the page | no |
 | 33 | MusicBrainz | artists, albums, recordings | none (named client) | public API, 1 request a second | sign up with MetaBrainz as a commercial user (tiers from $0) | no |
 | 34 | Cover Art Archive | album covers | none | public | check current terms on showing covers in a paid product | no |
-| 35 | ListenBrainz | recommendations, likes, fresh releases | the listener's own name (and token) | public API, 1 request a second | as MusicBrainz | no |
+| 35 | ListenBrainz | recommendations, likes, fresh releases, an artist's popular songs and albums | the listener's own name (and token); none for popularity | public API, 1 request a second | as MusicBrainz | no |
 | 36 | Wikipedia and Wikidata | profiles of artists, authors, shows | none | public APIs | credit Wikipedia text (CC BY-SA) where shown: to confirm it is | no |
 | 37 | Internet Archive | free recordings for the music bed; free films that play in the app (`watch_free.py`, §6.54 "Free films") | none (named client) | public APIs | nothing; licences are filtered and kept (films: only items stating public domain or Creative Commons, streamed by the device from archive.org) | no |
 | 38 | ccMixter | CC BY instrumentals for the music bed | none | public query API | show each track's credit where it plays: to confirm | no |
@@ -528,11 +528,13 @@ hosted tier), every one of these becomes a reseller question.
   (https://coverartarchive.org/). Showing covers beside the music is what
   every player does; a paid product should check current terms.
 - **ListenBrainz** (`music_discover.py:55`, `personal_prefs.py:74`,
-  `music_bed_favourites.py:170`): "never make more than ONE call per
-  second"
+  `music_bed_favourites.py:170`, `music_brainz.py` `LB_POPULAR`): "never
+  make more than ONE call per second"
   (https://listenbrainz.readthedocs.io/en/latest/users/api/index.html). The
   listener's own name and optional token (`MEDIA_LISTENBRAINZ_USER`,
-  `MEDIA_LISTENBRAINZ_TOKEN`). Its terms page did not load: check current
+  `MEDIA_LISTENBRAINZ_TOKEN`); an artist's popular songs and albums
+  (`/1/popularity/…`) need neither, are asked with the MusicBrainz
+  User-Agent through the same once-a-second gap, and are kept a week. Its terms page did not load: check current
   terms at https://listenbrainz.org/terms-of-service/.
 - **Wikipedia and Wikidata** (`media_people.py:60`, `:61`): Wikidata is
   CC0; Wikipedia's text is CC BY-SA and needs a credit and link where the

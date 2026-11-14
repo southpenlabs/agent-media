@@ -4659,6 +4659,16 @@ most once a second; lookups kept a week, searches a day
 - `GET /music/brainz?name=<artist name>` → `{"ok", "artist": {…} | null}`:
   the artist a name surely is (the top match, scored 95 or more, the same
   name folded), for the song page's link.
+- `GET /music/brainz?popular=<mbid>` → `{"ok", "tracks": [{"title",
+  "artist", "album", "album_id", "length_s", "listens", "art"}], "albums":
+  [{…an album row, "listens"}]}`: the artist's ten most-played songs and
+  eight most-played albums, most first, by ListenBrainz's listen counts
+  (`api.listenbrainz.org/1/popularity/…`, no account; 14 Nov 2026). A song
+  is listed once, a bracketed take ("(live)", "(remastered)") folded into
+  it; `album_id` is the discography's album of that name, or null. Albums
+  are only the discography's Albums and EPs, so bootlegs and live tapes
+  stay out. Empty lists when ListenBrainz has no listens. The artist's
+  page in the app (a channel's page) shows both.
 - `POST /music/brainz {"album": <mbid>, "from"?: n}` (as `POST /music`'s
   gate) plays the album in order: its first track (or track `from`) found and
   played as a Discover row is (`find`), the rest found and queued one by one

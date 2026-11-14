@@ -24,6 +24,8 @@ def fake(asked):
     def get(url, timeout=20.0):
         asked.append(url)
         u = urllib.parse.urlsplit(url)
+        if u.netloc == "api.listenbrainz.org":
+            return listenbrainz(u.path)
         q = urllib.parse.parse_qs(u.query)
         assert q["fmt"] == ["json"]
         p = u.path.removeprefix("/ws/2/")
@@ -59,6 +61,20 @@ def fake(asked):
     return get
 
 
+def listenbrainz(path):
+    if path == f"/1/popularity/top-recordings-for-artist/{A}":
+        rec = lambda t, alb, n: {"recording_name": t, "release_name": alb, "artist_name": "Radiohead",  # noqa: E731
+                                 "length": 262426, "total_listen_count": n, "caa_release_mbid": R1, "caa_id": 7}
+        return 200, [rec("Karma Police", "OK Computer", 300), rec("Creep", "Pablo Honey", 200),
+                     rec("Karma Police (live)", "I Might Be Wrong", 150), rec("Airbag", "OK Computer", 100)]
+    if path == f"/1/popularity/top-release-groups-for-artist/{A}":
+        return 200, [{"release_group_mbid": "bootleg-tape", "total_listen_count": 999},
+                     {"release_group_mbid": "x1", "total_listen_count": 50},
+                     {"release_group_mbid": RG, "total_listen_count": 900},
+                     {"release_group_mbid": "x3", "total_listen_count": 80}]
+    return 404, None
+
+
 @pytest.fixture()
 def brainz(monkeypatch):
     asked = []
@@ -92,6 +108,22 @@ def test_search_artist_and_album_pages(server, signed_in, brainz):
     for bad in ("artist=nope", "search=a", ""):
         res, _ = call(server, "GET", f"/music/brainz?{bad}", headers=AUTH)
         assert res.status == 400, bad
+
+
+def test_popular_songs_and_albums(server, signed_in, brainz):
+    res, obj = call(server, "GET", f"/music/brainz?popular={A}", headers=AUTH)
+    assert res.status == 200, obj
+    assert [(t["title"], t["album"], t["album_id"], t["listens"], t["length_s"]) for t in obj["tracks"]] == [
+        ("Karma Police", "OK Computer", RG, 300, 262), ("Creep", "Pablo Honey", "x1", 200, 262),
+        ("Airbag", "OK Computer", RG, 100, 262)], "a live take folded into the song"
+    assert obj["tracks"][0]["art"] == f"https://coverartarchive.org/release/{R1}/front-250"
+    assert [(a["title"], a["listens"]) for a in obj["albums"]] == [("OK Computer", 900), ("Pablo Honey", 50)], \
+        "only the discography's albums and EPs: no bootleg, no live album"
+    n = len(brainz)
+    call(server, "GET", f"/music/brainz?popular={A}", headers=AUTH)
+    assert len(brainz) == n, "kept a week"
+    res, _ = call(server, "GET", "/music/brainz?popular=nope", headers=AUTH)
+    assert res.status == 400
 
 
 def test_play_an_album_in_order(server, signed_in, audio_host, brainz, monkeypatch):
