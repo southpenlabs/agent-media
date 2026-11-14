@@ -518,17 +518,23 @@ def _env_file_has(key: str) -> bool:
     """
     if (os.environ.get(key) or "").strip():
         return True
-    try:
-        text = _agent_media_env_path().read_text()
-    except OSError:
-        return False
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("#") or "=" not in line:
+    # And the server's own file where it has one (media-server's server.env,
+    # 14 Nov 2026): its settings gate the server's services, the tunnel's
+    # MEDIA_VISUAL_PUBLIC for one.
+    own = Path(os.environ.get("MEDIA_SERVER_ENV")
+               or Path.home() / ".config" / "agent-media" / "server.env")
+    for path in (_agent_media_env_path(), own):
+        try:
+            text = path.read_text()
+        except OSError:
             continue
-        k, _, v = line.partition("=")
-        if k.strip() == key:
-            return bool(v.strip().strip('"').strip("'"))
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            if k.strip() == key and v.strip().strip('"').strip("'"):
+                return True
     return False
 
 

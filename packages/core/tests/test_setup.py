@@ -1402,3 +1402,14 @@ def test_the_server_and_its_tunnel_go_where_the_host_declares_server(monkeypatch
     assert wanted is False and "MEDIA_VISUAL_PUBLIC" in why
     assert setup._systemd_unit_name("media-server") == "agent-media-server.service"
     assert setup._systemd_unit_name("media-tunnel") == "agent-media-tunnel.service"
+
+
+def test_the_servers_own_file_gates_its_services(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIA_VISUAL_PUBLIC", raising=False)
+    monkeypatch.setattr(setup, "_agent_media_env_path", lambda: tmp_path / "agent-media.env")
+    (tmp_path / "agent-media.env").write_text("MEDIA_X=1\n")
+    own = tmp_path / "server.env"
+    monkeypatch.setenv("MEDIA_SERVER_ENV", str(own))
+    assert setup._env_file_has("MEDIA_VISUAL_PUBLIC") is False
+    own.write_text("MEDIA_VISUAL_PUBLIC=127.0.0.1:8789\n")
+    assert setup._env_file_has("MEDIA_VISUAL_PUBLIC") is True
