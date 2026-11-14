@@ -5,7 +5,7 @@ more intelligence around song choice, including the backing music for
 replies. Maybe even work some DJing techniques into how music is managed
 around speech." — "Yes, write the proposal."
 
-Nothing here is built. It came out of the footer work in the app (a song's
+Step one is being built (see Progress); the rest is not. It came out of the footer work in the app (a song's
 player could not be brought back once the song had stopped, because nothing
 remembers it).
 
@@ -158,9 +158,20 @@ as it now keeps the last reply: its row in the log, Play again.
   another key). A preference, never a rule.
 - More choosing is more to explain: every row says why, in words.
 
-## Open questions
+## Decisions
 
-- Should a turn of the volume under a bed move the level for good, as a
-  mixer's hand would, or only be noted?
-- Does the log belong in Recent replies, or a page of its own?
-- How long is kept: the last year, or all of it?
+David, 14 Nov 2026, on a question card:
+
+- A turn of the volume under a bed is noted in the log and moves nothing
+  ("Note it only"). Looked at again once there is a week of it.
+- The log is in both places: the song under each of Recent replies, with
+  Play again, and a page of its own with why each was chosen and how it
+  ended ("Both").
+- Everything is kept, with a way to prune ("everything maybe with a pruning
+  option"): `media music log --prune <age>`, and the same from the page.
+- Step one is built now ("Yes, build step one"): the log, and the app
+  saying how each thing ended. Nothing chooses differently yet.
+
+## Progress
+
+- 14 Nov 2026: decided as above; step one begun.
