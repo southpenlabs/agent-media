@@ -109,6 +109,20 @@ in memory (Kokoro ~400 MB; Piper per loaded voice), which is why Piper was
 retired on red5: the unit stops after an idle hour when its engine is not
 the chosen voice's (red2 has 30 GB; red5 does not).
 
+### The installer's opt-in (David, 14 Nov 2026: "Can the sasonica installer be set up to download install kokoro as an Opt-In")
+
+`sasonica install --local-voice kokoro[:<voice>]` (packages/sasonica,
+beside `--local-speech` and the tunnel), `--local-voice off` to remove it.
+It checks free disk (~355 MB) and says what it needs (~540 MB RAM while
+running), fetches Kokoro's model and voices file checked against pinned
+sha256s as cloudflared is, makes the engine's venv and `kokoro-tts-server`
+as `media-setup voices` does (one code path, the installer calls it),
+writes the service for the platform (systemd user unit, launchd, logon
+task), and sets the server's fallback voice to the chosen one (default
+`af_alloy`). Safe to run again. Without the flag nothing is downloaded.
+Piper takes the same flag per voice later (`--local-voice piper:<voice>`).
+Lands with step 1.
+
 ### Outside services
 
 A row each in docs/reference/outside-services.md, same change: Hugging Face
