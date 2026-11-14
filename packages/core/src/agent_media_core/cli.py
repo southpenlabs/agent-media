@@ -9399,6 +9399,35 @@ def parse_selfcheck(text: str) -> "dict[str, str]":
     return facts
 
 
+def _restart_eta(a) -> int:
+    """`media restart-services --eta MIN [--why WORDS]`: this sessiond session
+    needs MIN more minutes before it can stop for the pending restart, so
+    the other chats can keep working on what fits before then
+    (restart_services.set_eta)."""
+    from . import restart_services as rs
+
+    sid = (os.environ.get("MEDIA_SESSIOND_SESSION") or "").strip()
+    if not sid:
+        print("restart-services --eta: not inside a phone chat (no MEDIA_SESSIOND_SESSION); "
+              "only a session the restart waits on gives an estimate", file=sys.stderr)
+        return 2
+    if a.eta < 0:
+        print("restart-services --eta: minutes must be 0 or more", file=sys.stderr)
+        return 2
+    rec = rs.set_eta(sid, a.eta * 60.0, getattr(a, "why", "") or "")
+    if rec is None:
+        print("no restart is waiting: nothing to estimate for")
+        return 0
+    until = float(rec["etas"][sid]["until"])
+    capped = until + 1 < time.time() + a.eta * 60.0
+    print(f"noted: the restart waits for you until about "
+          f"{time.strftime('%H:%M', time.localtime(until))}"
+          + (" (the drain's deadline; it gives up then)" if capped else "")
+          + ". Finish what you're on and end your turn; other chats keep working "
+          "on what fits before then.")
+    return 0
+
+
 def cmd_restart_services(a) -> int:
     """Restart the services this checkout owns, so a `git pull` actually lands.
 
@@ -9418,6 +9447,8 @@ def cmd_restart_services(a) -> int:
     """
     from . import restart_services
 
+    if getattr(a, "eta", None) is not None:
+        return _restart_eta(a)
     if getattr(a, "host", None):
         # A device that dials out to this host's server (the phone's jobs
         # worker) first: the restart goes down its own connection, so nothing
@@ -11377,6 +11408,14 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--cancel", action="store_true",
                     help="drop a restart that is waiting (draining), releasing "
                          "the messages it holds")
+    rs.add_argument("--eta", type=float, default=None, metavar="MIN",
+                    help="from inside a phone chat a waiting restart asked to "
+                         "end its turn: how many minutes the critical work in "
+                         "hand needs before it can stop. While the longest "
+                         "estimate has 3 min or more left, other chats keep "
+                         "getting their messages instead of having them held")
+    rs.add_argument("--why", default="", metavar="WORDS",
+                    help="with --eta: what is being finished")
     rs.add_argument("--dry-run", action="store_true",
                     help="name what would be restarted and show the busy "
                          "checks, touch nothing (exit 3 if busy)")

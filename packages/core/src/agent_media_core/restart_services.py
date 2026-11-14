@@ -525,6 +525,86 @@ def lets_through(rec: "Optional[dict]", sid: str) -> bool:
     return bool(rec and sid and sid in (rec.get("through") or []))
 
 
+# --- estimates: a window for quick work while the long job finishes ----------------
+#
+# A busy session doing something that cannot safely stop says how long it
+# needs (`media restart-services --eta MIN`, asked for by the restart note).
+# While the longest estimate of a session the restart waits on is at least
+# `window_min_s()` away, the window is open: messages to the other sessions
+# and new chats go through instead of being held, each told how long it has
+# (intake/context.py's WINDOW_NOTE), and the restart waits for them as for
+# any busy session. A session that gave an estimate is still held: it is the
+# one the restart waits for. Once the window closes, or the estimate passes,
+# messages are held again (David, 14 Nov 2026: "sessions working through a
+# restart notice might be requested to give an ETA of critical task
+# completion ... that way other sessions can keep working on quicker tasks
+# that will complete before the longest ETA").
+
+
+def window_min_s() -> float:
+    """MEDIA_RESTART_WINDOW_MIN_S: how much of an estimate must be left for
+    new work to be let in (default 3 min); the rest is the tail where only
+    what is running finishes."""
+    return _env_f("MEDIA_RESTART_WINDOW_MIN_S", 180.0)
+
+
+def set_eta(sid: str, seconds: float, what: str = "",
+            now: "Optional[float]" = None) -> "Optional[dict]":
+    """Record that session `sid` needs `seconds` more before it can stop for
+    the pending restart (`what`: what it is finishing, for the log and the
+    app). Capped at the drain's deadline; a later estimate replaces an
+    earlier one. The record, or None when no restart is pending."""
+    now = time.time() if now is None else now
+
+    def fn(rec):
+        if not is_active(rec, now):
+            return rec
+        until = min(now + max(0.0, float(seconds)), float(rec.get("deadline") or now))
+        etas = {**(rec.get("etas") or {}),
+                sid: {"until": round(until, 3), "at": round(now, 3), "what": what[:200]}}
+        return {**rec, "etas": etas}
+    rec = _update_pending(fn)
+    return rec if is_active(rec, now) and sid in (rec.get("etas") or {}) else None
+
+
+def eta_until(rec: "Optional[dict]", now: "Optional[float]" = None) -> "Optional[float]":
+    """When the restart expects to go: the latest estimate of a session it
+    still waits on (not for a question card), or None when none of them gave
+    one. An estimate already passed still counts (the restart is late, not
+    early)."""
+    if not rec:
+        return None
+    busy = {w.get("session") for w in rec.get("waiting_on") or []
+            if isinstance(w, dict) and w.get("session") and w.get("kind") != "question"}
+    untils = [float(e.get("until") or 0) for sid, e in (rec.get("etas") or {}).items()
+              if sid in busy and isinstance(e, dict)]
+    return max(untils) if untils else None
+
+
+def window(rec: "Optional[dict]", now: "Optional[float]" = None) -> "Optional[float]":
+    """The open window's end (`eta_until`) while at least `window_min_s()` of
+    it is left; None when it is closed or there is none."""
+    if not is_active(rec, now):
+        return None
+    now = time.time() if now is None else now
+    until = eta_until(rec, now)
+    return until if until is not None and until - now >= window_min_s() else None
+
+
+def has_eta(rec: "Optional[dict]", sid: str) -> bool:
+    return bool(rec and sid and sid in (rec.get("etas") or {}))
+
+
+def holds(rec: "Optional[dict]", sid: str, now: "Optional[float]" = None) -> bool:
+    """Whether a message to session `sid` ("" for a new chat) is held by the
+    pending restart `rec`: one is pending, has not let `sid` through, and no
+    window is open for it (a session that gave an estimate is held through
+    the window: the restart waits on it)."""
+    if not is_active(rec, now) or lets_through(rec, sid):
+        return False
+    return window(rec, now) is None or has_eta(rec, sid)
+
+
 def _update_pending(fn: "Callable[[Optional[dict]], Optional[dict]]") -> "Optional[dict]":
     """Read, change and write the record under a lock (the scheduler joining a
     drain and the detached run both write it). `fn` returns the new record,

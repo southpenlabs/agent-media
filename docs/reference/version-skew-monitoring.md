@@ -389,6 +389,26 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
   continued with SendMessage to its id (it resumes from its own transcript;
   their folder is named), and each background command to re-run if still
   needed. Idle sessions are not woken. Held messages are delivered after.
+- **Estimates and the window** (14 Nov 2026; David: "sessions working
+  through a restart notice might be requested to give an ETA of critical
+  task completion ... that way other sessions can keep working on quicker
+  tasks that will complete before the longest ETA"). The restart note asks
+  a session whose step is critical and needs more than a couple of minutes
+  to say so first: `media restart-services --eta <minutes> --why "<what>"`
+  (from inside the chat; capped at the drain's deadline; kept in the
+  record's `etas`). While the latest estimate of a session the restart
+  still waits on has `MEDIA_RESTART_WINDOW_MIN_S` (180) or more left, the
+  window is open (restart_services `window`, `holds`): sessiond lets
+  messages to every other session, and new chats, through, delivers what it
+  had held for them (not for a session cut off for the drain, nor one held
+  by the usage limit), and the context hook tells each other session once
+  that the restart is due in about N min: carry on with what fits, stop at a
+  safe point otherwise (`WINDOW_NOTE`, its own marker, so it is not cut off
+  for it). The session that gave the estimate is still held. In the
+  window's tail everything is held again and the others get the usual note
+  to end their turn; a session past its own estimate is nudged once
+  (`LATE_NOTE`) to end its turn or estimate again. The app is told `eta`
+  and `window` on `restart_pending`.
 - **A session that ended its turn for the drain** (23 Oct 2026) is idle
   when the stop comes, but its work was cut short. When the context hook
   tells a session to end its turn it leaves a marker naming the pending

@@ -64,6 +64,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 BANDS = (
@@ -485,7 +486,26 @@ RESTART_NOTE = ("A restart of the session host is waiting. Finish the step you'r
                 "and end your turn; don't start new background agents or background "
                 "commands until it's done. Background agents of yours are told as well "
                 "and will hand back; don't relaunch them before the restart. You'll be "
-                "resumed automatically.")
+                "resumed automatically. If the step you're on is critical work that "
+                "can't safely stop and needs more than a couple of minutes, first run "
+                "`media restart-services --eta <minutes> --why \"<what>\"` with an "
+                "honest estimate: other chats keep working on what fits before then.")
+
+#: What any other sessiond session is told while a window is open: the
+#: restart waits on another session's estimate (restart_services.window).
+WINDOW_NOTE = ("A restart of the session host is due in about {min} min (around {at}), "
+               "when another chat's critical work finishes. Carry on with what fits "
+               "before then; don't start anything that won't, nor background agents or "
+               "commands that would outlast it. If you can't finish by then, stop at a "
+               "safe point, say what's left, and end your turn: you'll be resumed after "
+               "the restart.")
+
+#: What a session is told once the estimate it gave has passed and the
+#: restart still waits on it.
+LATE_NOTE = ("The time you estimated for the waiting restart has passed and it still "
+             "waits on you, holding everyone's messages. Finish the step you're on and "
+             "end your turn, or, if you truly need longer, run "
+             "`media restart-services --eta <minutes>` again.")
 
 #: What a background agent of such a session is told (once per agent).
 SUBAGENT_RESTART_NOTE = (
@@ -512,19 +532,43 @@ def _restart_note(hook: dict, d: Path) -> str:
     except Exception:  # noqa: BLE001 — a note is never worth failing a hook
         return ""
     # Let through (the app's Send now on a held message): it is not asked to stop.
-    if not rec or rs.lets_through(rec, sid) or not any(isinstance(w, dict) and w.get("session") == sid
-                          and w.get("kind") != "question"
-                          for w in rec.get("waiting_on") or []):
+    if not rec or rs.lets_through(rec, sid):
         return ""
-    # A subagent's marker is its own: `told_to_end` reads the session's.
-    marker = d / (f"{sid}.{_safe(agent)}.restart" if agent else f"{sid}.restart")
+    now = time.time()
+    rid = str(rec["id"])
+    # A window is open (another session's estimate): carry on with what fits.
+    # Its own marker, so `told_to_end` stays false and the note to end the
+    # turn still comes once the window closes.
+    win = rs.window(rec, now)
+    if win is not None and not rs.has_eta(rec, sid):
+        return _once(d, sid, agent, "window", rid,
+                     WINDOW_NOTE.format(min=max(1, int(round((win - now) / 60))),
+                                        at=time.strftime("%H:%M", time.localtime(win))))
+    if not any(isinstance(w, dict) and w.get("session") == sid
+               and w.get("kind") != "question"
+               for w in rec.get("waiting_on") or []):
+        return ""
+    # Its own estimate has passed and the restart still waits on it.
+    eta = (rec.get("etas") or {}).get(sid)
+    if isinstance(eta, dict) and not agent and now >= float(eta.get("until") or 0):
+        return _once(d, sid, agent, "late", f"{rid}:{eta.get('at')}", LATE_NOTE)
+    return _once(d, sid, agent, "", rid, SUBAGENT_RESTART_NOTE if agent else RESTART_NOTE)
+
+
+def _once(d: Path, sid: str, agent: str, kind: str, key: str, note: str) -> str:
+    """`note`, unless this session (or background agent) was already given
+    this `kind` of restart note for `key` (the restart's id). The plain
+    restart note's marker is `<sid>.restart`, which `told_to_end` reads; a
+    subagent's marker is its own."""
+    name = f"{sid}.{_safe(agent)}.restart" if agent else f"{sid}.restart"
+    marker = d / (f"{name}-{kind}" if kind else name)
     try:
-        if marker.read_text().strip() == str(rec["id"]):
+        if marker.read_text().strip() == key:
             return ""
     except OSError:
         pass
-    marker.write_text(str(rec["id"]))
-    return SUBAGENT_RESTART_NOTE if agent else RESTART_NOTE
+    marker.write_text(key)
+    return note
 
 
 def _safe(name: str) -> str:

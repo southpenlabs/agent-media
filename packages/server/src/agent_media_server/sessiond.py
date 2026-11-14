@@ -492,7 +492,7 @@ def add_slot_status(row: dict, session: str, waits: dict, restart: dict | None) 
 
 def restart_view() -> dict | None:
     """A pending restart of the session host as the app is told it (§6.1,
-    `restart_pending`): `{"since", "deadline", "state", "waiting_on":
+    `restart_pending`): `{"since", "deadline", "state", "eta", "window", "waiting_on":
     [{"session", "kind", "label"}]}`, or None when none is pending."""
     try:
         from agent_media_core import restart_services as rs
@@ -501,8 +501,13 @@ def restart_view() -> dict | None:
     rec = rs.pending()
     if not rec:
         return None
+    eta = rs.eta_until(rec)
     return {"since": rec.get("since"), "deadline": rec.get("deadline"),
             "state": rec.get("state") or "waiting",
+            # The longest estimate of a session it waits on (`media
+            # restart-services --eta`), and whether quick work is let in meanwhile.
+            "eta": round(eta, 3) if eta is not None else None,
+            "window": rs.window(rec) is not None,
             "waiting_on": [{"session": w.get("session") or "", "kind": w.get("kind") or "",
                             "label": w.get("label") or ""}
                            for w in rec.get("waiting_on") or [] if isinstance(w, dict)]}
@@ -1587,14 +1592,16 @@ class Supervisor:
         return self._restart_rec if rs.is_active(self._restart_rec) else None
 
     def _holds_for_restart(self, session: str) -> bool:
-        """Whether a message to `session` is held: a restart is pending and
-        has not let it through (`release`)."""
+        """Whether a message to `session` ("" for a new chat) is held: a
+        restart is pending, has not let it through (`release`), and no
+        window is open for it (core restart_services.holds: another
+        session's estimate leaves time for quick work)."""
         rec = self.draining()
         if not rec:
             return False
         from agent_media_core import restart_services as rs
 
-        return not rs.lets_through(rec, session)
+        return rs.holds(rec, session)
 
     def release(self, session: str) -> dict:
         """The app's Send now on a message held for a restart (David, 3 Nov
@@ -1632,7 +1639,7 @@ class Supervisor:
         it stopped is left to `quota_tick`, which runs last. The sessions
         acted on."""
         if self.draining():
-            return []
+            return self._deliver_in_window()
         q = _quota()
         if q.warnings_path().exists():
             for w in q.expire_warnings():
@@ -1676,6 +1683,36 @@ class Supervisor:
                     done.append(got)
             except Exception:  # noqa: BLE001
                 log.exception("sessiond: resuming after the usage limit")
+        return done
+
+    def _deliver_in_window(self) -> list[str]:
+        """While a restart is pending with a window open (core
+        restart_services.window: another session's estimate leaves time for
+        quick work), deliver what was held for the sessions it no longer
+        holds, new chats included. A session cut off for the drain, or held
+        by the usage limit, waits for the restart as before. The sessions
+        acted on."""
+        rec = self.draining()
+        from agent_media_core import restart_services as rs
+
+        if not rec or rs.window(rec) is None:
+            return []
+        q = _quota()
+        lim = q.read() if q.path().exists() else None
+        with self.lock:
+            todo = [x.id for x in self._delivery_order([
+                x for x in self.sessions.values()
+                if x.held and not rs.holds(rec, x.id)
+                and (x.cut_off or {}).get("why") is None
+                and not (lim and q.limited(rec=lim, agent=x.agent) is not None)])]
+        done = []
+        for sid in todo:
+            try:
+                self._deliver(sid)
+                done.append(sid)
+                log.info("sessiond: %s: held messages delivered in the restart's window", sid[:8])
+            except Exception:  # noqa: BLE001 — one session must not stop the rest
+                log.exception("sessiond: delivering to %s in the window", sid[:8])
         return done
 
     @staticmethod
@@ -2995,7 +3032,7 @@ class Supervisor:
         # happen automatically"): the chat is made now and its first message
         # held, as a reply in an open thread is; `deliver_due` starts it after
         # the restart, and its reply notifies as any does.
-        restart_hold = bool(self.draining())
+        restart_hold = self._holds_for_restart("")
         q = _quota()
         lim = q.limited(agent=agent) if q.path().exists() else None
         if lim and not restart_hold:

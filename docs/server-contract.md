@@ -249,7 +249,13 @@ Everything a message can be pointed at.
   a restart of the session host is waiting for its busy sessions to finish
   (§17 "Draining"): `{"since", "deadline": <epoch s>, "state": "waiting" |
   "firing", "waiting_on": [{"session", "kind": "turn" | "agents" | "own" |
-  "speech", "label"}]}`. Each headless row, and a headless thread's
+  "speech", "label"}], "eta": <epoch s> | null, "window": bool}`. `eta`
+  (14 Nov 2026; additive) is when it expects to go: the latest estimate a
+  session it waits on gave (`media restart-services --eta`), null when none
+  did. `window` is true while at least 3 min of that is left: messages to
+  other threads and new chats then go through rather than being held, and
+  only the thread that gave the estimate is held, so "held until the server
+  restarts" can add "in about N min". Each headless row, and a headless thread's
   snapshot (§11), carries the same object plus `"held": <how many of this
   thread's messages wait for it>`, so a held reply (§6.2.2 `held`) can say
   "held until the server restarts". It goes when the restart is done or
