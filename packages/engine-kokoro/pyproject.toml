@@ -9,7 +9,16 @@ description = "Local Kokoro TTS render engine for agent-media (HTTP to a kokoro-
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-# Uses only the stdlib (urllib) to call a local kokoro-onnx HTTP server.
+# The render engine uses only the stdlib (urllib) to call a local kokoro-onnx
+# HTTP server. The server itself (kokoro-tts-server) needs the [server] extra:
+# kokoro-onnx (MIT) and numpy; the Kokoro model is Apache-2.0.
+dependencies = []
+
+[project.optional-dependencies]
+server = ["kokoro-onnx>=0.6.1,<0.7", "numpy"]
+
+[project.scripts]
+kokoro-tts-server = "agent_media_engine_kokoro.server:main"
 
 [project.entry-points."agent_media.render_engines"]
 kokoro = "agent_media_engine_kokoro:render"
