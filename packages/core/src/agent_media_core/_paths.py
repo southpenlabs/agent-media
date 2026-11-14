@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 _TERMUX_NATIVE_HOME = Path("/data/data/com.termux/files/home")
+_ON_TERMUX: bool | None = None
 
 
 def canonical_home() -> Path:
@@ -24,7 +25,12 @@ def canonical_home() -> Path:
 
     Falls back to `Path.home()` off-Termux.
     """
-    if _TERMUX_NATIVE_HOME.is_dir():
+    global _ON_TERMUX
+    # Asked thousands of times a list (every state path): Termux's home is
+    # there or not for the life of the process.
+    if _ON_TERMUX is None:
+        _ON_TERMUX = _TERMUX_NATIVE_HOME.is_dir()
+    if _ON_TERMUX:
         return _TERMUX_NATIVE_HOME
     return Path.home()
 

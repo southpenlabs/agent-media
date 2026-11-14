@@ -31,7 +31,21 @@ def marker_dir() -> Path:
 
 
 def is_private(session: str) -> bool:
-    return bool(session) and "/" not in session and (marker_dir() / session).is_file()
+    if not session or "/" in session:
+        return False
+    from . import _pass
+
+    if not _pass.active():
+        return (marker_dir() / session).is_file()
+    # In a pass (a list of ~500 threads), the markers are listed once.
+    return session in _pass.memo(("private",), _markers)
+
+
+def _markers() -> frozenset[str]:
+    try:
+        return frozenset(e.name for e in os.scandir(marker_dir()) if e.is_file())
+    except OSError:
+        return frozenset()
 
 
 def hidden(session: str) -> bool:
@@ -46,6 +60,9 @@ def mark(session: str, cwd: str = "") -> bool:
     is kept. False when the id is unusable or the file cannot be written."""
     if not session or "/" in session:
         return False
+    from . import _pass
+
+    _pass.forget(("private",))
     path = marker_dir() / session
     if path.exists():
         return True

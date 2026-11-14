@@ -329,15 +329,12 @@ def project_of(cwd: str, folder: str = "") -> str | None:
     folder (`book_tracks.UNFILED`, where a conversation with no workspace
     goes: a phone-started one in ~/org) is not a series. Default layout: the
     folder's basename (`layout.project_of_path`)."""
-    # Inside one list (`_PASS`) a folder is looked up once: each lookup reads
+    # Inside one list (`_pass`) a folder is looked up once: each lookup reads
     # the layout's config and settings again, and ~500 rows share a few
     # dozen folders.
-    held = getattr(_PASS, "projects", None)
-    if held is None:
-        return _project_of(cwd, folder)
-    if (cwd, folder) not in held:
-        held[(cwd, folder)] = _project_of(cwd, folder)
-    return held[(cwd, folder)]
+    from agent_media_core import _pass
+
+    return _pass.memo(("project_of", cwd, folder), lambda: _project_of(cwd, folder))
 
 
 def _project_of(cwd: str, folder: str = "") -> str | None:
@@ -887,6 +884,14 @@ def places(limit: int = 6) -> list[dict]:
 
 
 def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
+    """See `_targets`; one pass (`agent_media_core._pass`), as `sessions_index`."""
+    from agent_media_core import _pass
+
+    with _pass.held():
+        return _targets(bearer, history)
+
+
+def _targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     """`/targets`: everything a message can be pointed at, in one answer.
 
     `sessions` are the conversations this host holds — running, lately
@@ -966,23 +971,18 @@ def project_groups() -> dict[str, dict]:
 #: while no file's name, size or mtime changes. `sessions_index` asks once per
 #: thread, and reading all of them each time took 5 s of an 11 s list.
 _MANIFESTS: tuple[tuple, dict] = ((), {})
-#: Inside one `sessions_index`, the manifests as first read there: the check
-#: above is a scandir and two stats per file, and asked once per row it was
-#: ~520 files x 508 rows, half a million stats and 2 of a list's 4 s — the
-#: new chat screen's "Could not reach" while CI loaded red2 (14 Nov 2026).
-#: Per thread, so a request outside a list (a rename, then the list) still
-#: sees the file as it is now.
-_PASS = threading.local()
+#: Inside one `sessions_index` (`agent_media_core._pass`), the manifests as
+#: first read there: the check above is a scandir and two stats per file,
+#: and asked once per row it was ~520 files x 508 rows, half a million stats
+#: and 2 of a list's 4 s — the new chat screen's "Could not reach" while CI
+#: loaded red2 (14 Nov 2026). Outside a list (a rename, then the list) the
+#: file is seen as it is now.
 
 
 def _manifests() -> dict[str, dict]:
-    held = getattr(_PASS, "manifests", None)
-    if held is not None:
-        return held
-    found = _read_manifests()
-    if getattr(_PASS, "depth", 0):
-        _PASS.manifests = found
-    return found
+    from agent_media_core import _pass
+
+    return _pass.memo(("manifests",), _read_manifests)
 
 
 def _read_manifests() -> dict[str, dict]:
@@ -1569,17 +1569,14 @@ def _stored_rows(rows: list, seen: set[str], flags, pinned, marks,
 
 
 def sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
-    """See `_sessions_index`; the shelf's manifests are read, and each
-    folder's project looked up, once for the whole list (`_PASS`)."""
-    _PASS.depth = getattr(_PASS, "depth", 0) + 1
-    if _PASS.depth == 1:
-        _PASS.projects = {}
-    try:
+    """See `_sessions_index`. One pass (`agent_media_core._pass`): the small
+    state files every row asks about — the shelf's manifests, the moves, pins
+    and marks, the sealed and private threads — are checked once for the
+    whole list, and each folder's project looked up once."""
+    from agent_media_core import _pass
+
+    with _pass.held():
         return _sessions_index(days=days)
-    finally:
-        _PASS.depth -= 1
-        if not _PASS.depth:
-            _PASS.manifests = _PASS.projects = None
 
 
 def _sessions_index(*, days: float = STORE_DAYS) -> list[dict]:

@@ -29,7 +29,13 @@ def _path() -> Path:
 
 
 def sealed() -> dict[str, dict]:
-    """Every sealed session, with its record."""
+    """Every sealed session, with its record (checked once per pass)."""
+    from . import _pass
+
+    return _pass.memo(("sealed",), _sealed_now)
+
+
+def _sealed_now() -> dict[str, dict]:
     global _CACHE
     path = _path()
     try:
@@ -58,6 +64,9 @@ def _write(data: dict[str, dict]) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(data, indent=1, sort_keys=True))
     tmp.replace(path)
+    from . import _pass
+
+    _pass.forget(("sealed",))
 
 
 def mark(session: str, **record) -> None:

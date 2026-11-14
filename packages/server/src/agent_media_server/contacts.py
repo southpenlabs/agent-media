@@ -2304,7 +2304,15 @@ def card(cid: str) -> dict | None:
 
 def labels() -> dict:
     """`GET /contacts/labels`: every label on someone in the book, with how
-    many people have it, by name."""
+    many people have it, by name. Read once per pass (`agent_media_core.
+    _pass`): a thread list asks twice, and each read parses every card."""
+    from agent_media_core import _pass
+
+    got = _pass.memo(("contact_labels",), _labels_now)
+    return {"labels": [dict(lb) for lb in got["labels"]]}
+
+
+def _labels_now() -> dict:
     conn = _connect(create=False)
     counts: dict[str, list] = {}
     try:

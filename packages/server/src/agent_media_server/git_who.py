@@ -307,6 +307,12 @@ def who(cwd: str | None, now: float | None = None) -> dict | None:
                 for p in files:
                     if p in mine or at <= since[p]:
                         continue
+                    # Every name `_wrote` tries for a file ends in its own
+                    # name: a command without it is passed before the relpath
+                    # (70,000 of them a refresh, most of its time). Not for a
+                    # folder (`dir/`), whose relative name inside it is `.`.
+                    if not p.endswith("/") and os.path.basename(p) not in cmd:
+                        continue
                     rel = os.path.relpath(os.path.join(top, p), where) if where else p
                     if (_wrote(cmd, {p.rstrip("/"), rel.rstrip("/"), os.path.join(top, p).rstrip("/")})
                             and heredoc_landed(p, cmd)):

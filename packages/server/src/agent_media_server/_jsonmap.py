@@ -34,6 +34,13 @@ class JsonMap:
         return state_dir() / self.name
 
     def _read(self) -> dict:
+        """The rows, checked once per pass (`agent_media_core._pass`): a
+        list asks each map once a row."""
+        from agent_media_core import _pass
+
+        return _pass.memo(("jsonmap", self.name), self._read_now)
+
+    def _read_now(self) -> dict:
         path = self.path()
         try:
             st = path.stat()
@@ -61,7 +68,10 @@ class JsonMap:
                     for k, v in self._read().items()}
 
     def get(self, key: str):
-        return self.all().get(key)
+        """One row, a copy (one level deep) — of that row only."""
+        with self._lock:
+            v = self._read().get(key)
+        return dict(v) if isinstance(v, dict) else v
 
     def update(self, fn: Callable[[dict], bool]) -> bool:
         """Apply `fn` to the rows under both locks; write when it returns True.
@@ -81,7 +91,7 @@ class JsonMap:
                     # Read under the file lock: another process may have
                     # written since anybody last looked.
                     rows = {k: (dict(v) if isinstance(v, dict) else v)
-                            for k, v in self._read().items()}
+                            for k, v in self._read_now().items()}
                     if not fn(rows):
                         return False
                     tmp = path.with_suffix(f".tmp.{os.getpid()}.{threading.get_ident()}")
@@ -94,6 +104,9 @@ class JsonMap:
                                        json.loads(json.dumps(rows)))
                     except OSError:
                         pass
+                    from agent_media_core import _pass
+
+                    _pass.forget(("jsonmap", self.name))
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
         return True
@@ -109,6 +122,6 @@ class JsonMap:
     def drop(self, key: str) -> bool:
         """Remove `key`. Writes nothing (and takes no file lock) when absent."""
         with self._lock:
-            if key not in self._read():
+            if key not in self._read_now():
                 return False
         return self.update(lambda rows: rows.pop(key, None) is not None)

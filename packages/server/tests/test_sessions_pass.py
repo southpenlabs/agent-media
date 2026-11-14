@@ -37,7 +37,8 @@ def test_a_list_reads_the_manifests_once(tmp_path, monkeypatch):
     assert len(reads) == 1 and looks == ["/tmp/same"]
     assert out[0]["s1"] == "/f/p-x/t1"
     # Held only for the list: gone after it.
-    assert getattr(sessions._PASS, "manifests", None) is None
+    from agent_media_core import _pass
+    assert not _pass.active()
     sessions.sessions_index(days=1)
     assert len(reads) == 2
 
@@ -47,3 +48,37 @@ def test_a_rename_outside_a_list_is_seen_at_once(tmp_path, monkeypatch):
     assert sessions._manifest_of("s0")["folder"] == "/f/p-x/t0"
     (d / "s0.json").write_text(json.dumps({"session": "s0", "folder": "/f/p-x/renamed-longer"}))
     assert sessions._manifest_of("s0")["folder"] == "/f/p-x/renamed-longer"
+
+
+def test_a_map_written_inside_a_list_reads_back_the_write(tmp_path, monkeypatch):
+    from agent_media_core import _pass
+    from agent_media_server._jsonmap import JsonMap
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    m = JsonMap("pass-test.json")
+    m.put("a", {"n": 1})
+    with _pass.held():
+        assert m.get("a") == {"n": 1}
+        m.put("a", {"n": 2})
+        assert m.get("a") == {"n": 2}
+        got = m.get("a")
+        got["n"] = 99                      # a caller's copy, not the map's
+        assert m.get("a") == {"n": 2}
+        # Another process's write is not seen inside the pass, and is after.
+        (tmp_path / "agent-media" / "pass-test.json").write_text('{"a": {"n": 3}}')
+        assert m.get("a") == {"n": 2}
+    assert m.get("a") == {"n": 3}
+
+
+def test_private_and_sealed_inside_a_pass(tmp_path, monkeypatch):
+    from agent_media_core import _pass, private, sealed
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENT_PRIVATE_DIR", str(tmp_path / "private.d"))
+    with _pass.held():
+        assert not private.hidden("s1")
+        assert private.mark("s1")
+        sealed.mark("s2", harness="claude")
+        assert private.hidden("s1") and private.hidden("s2")
+        assert not private.hidden("s3")
+    assert private.hidden("s1") and private.hidden("s2")
