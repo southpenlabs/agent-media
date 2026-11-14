@@ -16,6 +16,13 @@ separate process, reached over an IPC socket, HTTP, or the command line:
   yt-dlp        Unlicense         acquisition, run on the phone
   Snapcast      GPLv3             whole-house sync (currently disabled)
   Termux:API    GPLv3             phone sensors and notifications
+  Piper         GPLv3             local voice (`media-setup voices piper`),
+                                  its own venv, reached over HTTP; each
+                                  voice under its own licence (MODEL_CARD)
+
+The local Kokoro voice (`media-setup voices kokoro`) is installed into its
+own venv, not bundled: kokoro-onnx (MIT, thewh1teagle/kokoro-onnx) and the
+Kokoro-82M model (Apache-2.0, hexgrad), fetched from the kokoro-onnx release.
 
 This matters if the Android companion in `android/` ever *bundles* libmpv
 rather than talking to a separately-installed mpv over TCP, as it does today:

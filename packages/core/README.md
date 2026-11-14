@@ -218,6 +218,19 @@ order: explicit pin → stable hash of the session name → `MEDIA_RENDER_VOICE`
 auto-detects the init system (runit on Termux / host-runit, systemd
 `--user` on regular Linux).
 
+### Local voices
+
+`media-setup voices kokoro[:<voice>]` and `media-setup voices
+piper:<voice>[,<voice>]` install a local TTS engine's server, each in its own
+venv under `~/.local/share/agent-media/tts/<engine>`, as a systemd user unit
+on 127.0.0.1 (`agent-media-kokoro-tts.service` on 8880,
+`agent-media-piper-tts.service` on 5000). Kokoro's model is fetched from the
+kokoro-onnx release and checked against pinned sha256s; Piper's voices come
+through Piper's own downloader. `--from <dir>` copies files already on the
+machine, free disk is checked first, `--fallback` makes the engine the render
+fallback, `--remove <engine> [--purge]` takes it away, `--dry-run` shows the
+plan. systemd only for now (`setup_voices.py`).
+
 ### Host roles
 
 Which services a host gets is chosen by its roles, read from `MEDIA_ROLES`,

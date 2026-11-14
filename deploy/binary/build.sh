@@ -65,8 +65,12 @@ else
 fi
 
 step "Packages"
+# engine-kokoro (stdlib only, without its [server] extra): the render engine,
+# and the server module `sasonica install --local-voice kokoro` copies into
+# the Kokoro venv it makes (setup_voices.py).
 "$PY" -m pip install -q --no-cache-dir --no-warn-script-location \
-  "$ROOT/packages/core" "$ROOT/packages/server" "$ROOT/packages/visual" "$ROOT/packages/sasonica"
+  "$ROOT/packages/core" "$ROOT/packages/server" "$ROOT/packages/visual" "$ROOT/packages/sasonica" \
+  "$ROOT/packages/engine-kokoro"
 SITE=$WORK/dist/$SITE_REL
 echo "$VERSION" >"$SITE/sasonica/BUILD"
 

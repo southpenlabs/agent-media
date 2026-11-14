@@ -23,6 +23,9 @@ Subcommands:
   media-setup install-shell [--dry-run] Symlink the tmux popup launcher +
                                         control surface onto PATH
                                         (~/.local/bin, ~/.local/share).
+  media-setup voices kokoro[:<voice>] | piper:<voice>[,…] [--fallback]
+                                        Local voice engines as user services
+                                        (setup_voices.py); --remove ENGINE.
   media-setup status                    Summarize current wiring.
 
 Everything is idempotent. The settings.json writer makes a `.bak` copy
@@ -2700,6 +2703,9 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="enable --now the units after writing")
     sp.add_argument("--dry-run", action="store_true")
     sp.set_defaults(func=cmd_server)
+
+    from . import setup_voices
+    setup_voices.add_parser(sub)
 
     sp = sub.add_parser("install-shell",
                         help="Symlink the tmux popup launcher + control "

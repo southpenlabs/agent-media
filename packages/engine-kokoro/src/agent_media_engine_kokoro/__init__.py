@@ -1,8 +1,9 @@
 """Local Kokoro TTS render engine for agent-media.
 
 Registered under the `agent_media.render_engines` entry-point group as
-`kokoro`. It POSTs text to a small kokoro-onnx HTTP server (see the
-`kokoro-tts` service that ships with this repo, normally on red5) and writes
+`kokoro`. It POSTs text to a small kokoro-onnx HTTP server (`kokoro-tts-server`
+in this package, installed as a user service by `media-setup voices kokoro`)
+and writes
 the returned WAV to `outfile`. Nothing leaves your own network — no cloud, no
 API key — so it satisfies the reliability/privacy goals that the cloud engines
 (edge, qwen, openai) can't. On any failure it returns (False, err) and core
@@ -14,7 +15,9 @@ Config from the environment:
                             host running the engine, as for piper; a host that
                             renders on another sets this to that host's name)
   MEDIA_RENDER_VOICE_KOKORO default voice    (default af_heart)
-  MEDIA_KOKORO_LANG         language         (default en-us)
+  MEDIA_KOKORO_LANG         language         (default: the voice's own, which
+                            the server reads from its prefix: bf_emma is
+                            British English, af_heart American)
   MEDIA_KOKORO_SPEED        speed factor     (default 1.0)
   MEDIA_KOKORO_TIMEOUT_S    request timeout  (default 30)
 """
@@ -28,14 +31,15 @@ from pathlib import Path
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8880"
 DEFAULT_VOICE = "af_heart"
-DEFAULT_LANG = "en-us"
 
 
 def render(text: str, outfile: Path, *, voice: str | None = None) -> tuple[bool, str]:
     """Render `text` to a WAV at `outfile` via the local Kokoro server."""
     base_url = (os.environ.get("MEDIA_KOKORO_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
     voice = voice or os.environ.get("MEDIA_RENDER_VOICE_KOKORO") or DEFAULT_VOICE
-    lang = os.environ.get("MEDIA_KOKORO_LANG") or DEFAULT_LANG
+    # Sent only when set: without it the server reads the voice's language
+    # from its name, so a British voice is not read with American phonemes.
+    lang = (os.environ.get("MEDIA_KOKORO_LANG") or "").strip()
     try:
         speed = float(os.environ.get("MEDIA_KOKORO_SPEED", "1.0"))
     except ValueError:
@@ -45,9 +49,10 @@ def render(text: str, outfile: Path, *, voice: str | None = None) -> tuple[bool,
     except ValueError:
         timeout = 30.0
 
-    payload = json.dumps(
-        {"text": text, "voice": voice, "lang": lang, "speed": speed}
-    ).encode()
+    body = {"text": text, "voice": voice, "speed": speed}
+    if lang:
+        body["lang"] = lang
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{base_url}/tts", data=payload, method="POST",
         headers={"Content-Type": "application/json"},

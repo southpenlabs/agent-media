@@ -139,10 +139,26 @@ entry-point group and selected with `MEDIA_RENDER_ENGINE=<name>`:
 
 | package | engine | notes |
 |---|---|---|
+| [`engine-kokoro/`](./packages/engine-kokoro/) | `kokoro` | Kokoro over HTTP to `kokoro-tts-server` (in the package); offline |
 | [`engine-openai/`](./packages/engine-openai/) | `openai` | OpenAI TTS; shells out to a Python with the `openai` lib |
 | [`engine-piper/`](./packages/engine-piper/) | `piper` | Piper over HTTP to its own server (GPL, kept out of process); offline |
 | [`engine-qwen/`](./packages/engine-qwen/) | `qwen` | Qwen / DashScope; stdlib-only |
 | [`engine-realtime/`](./packages/engine-realtime/) | `realtime` | OpenAI Realtime over WebSocket |
+
+The two local engines' servers are installed as user services, each in its
+own venv under `~/.local/share/agent-media/tts`, by `media-setup voices`:
+
+```sh
+media-setup voices kokoro:bf_emma --fallback        # ~355 MB, sha256-pinned
+media-setup voices piper:en_GB-cori-high,en_US-amy-medium
+media-setup voices kokoro --from ~/models           # copy files already here
+media-setup voices --remove piper [--purge]
+```
+
+`--fallback` makes the engine the render fallback when edge fails
+(`MEDIA_RENDER_FALLBACK_ENGINE`, `MEDIA_RENDER_VOICE_<ENGINE>`); `--dry-run`
+prints what it would do. systemd --user only for now. From the binary,
+`sasonica install --local-voice kokoro[:<voice>]` does the Kokoro one.
 
 [`examples/agent-media-engine-espeak/`](./examples/agent-media-engine-espeak/)
 is a complete reference engine to copy when writing your own.

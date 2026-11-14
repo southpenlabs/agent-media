@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 47 rows.
+Sorted with what blocks a public release first. 49 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -88,6 +88,8 @@ Sorted with what blocks a public release first. 47 rows.
 | 45 | Google Takeout and Meta data exports | contacts from the user's own exports | none | files the user downloads | nothing | no |
 | 46 | Android platform | the app | the project's signing key | sideloaded APK; no Firebase, no Play services | Play's policies only if it goes to Google Play | no |
 | 47 | Build-time fetches (jsDelivr, npm, PyPI) | vendoring MapLibre and the like | none | at build only | nothing | no |
+| 48 | kokoro-onnx GitHub release (model files) | the local Kokoro voice: `media-setup voices kokoro`, `sasonica install --local-voice` | none | fetched once on request, checked against pinned sha256s | nothing: the model is Apache-2.0 and kokoro-onnx MIT; keep the credit in NOTICE | **No, not gated** |
+| 49 | Hugging Face (rhasspy/piper-voices) | Piper voices: `media-setup voices piper:<voice>` | none | fetched on request by Piper's own downloader | **Needs work**: each voice has its own licence (its MODEL_CARD), some non-commercial; show it beside the voice (the picker's `licence`) and keep non-commercial ones out of a paid default | **No, not gated** |
 
 ## The services, one by one
 
@@ -589,6 +591,32 @@ hosted tier), every one of these becomes a reseller question.
   permissions each need a declared reason there.
 - **Build-time:** `packages/visual/vendor.sh:23` fetches from jsDelivr once;
   npm and PyPI at build. Nothing at run time.
+
+### 48 and 49. Local voices' downloads
+
+- **Used for:** the local voice engines that replace edge (row 1).
+  `media-setup voices` (`packages/core/src/agent_media_core/setup_voices.py`)
+  and `sasonica install --local-voice kokoro[:<voice>]` fetch only when
+  asked; nothing is downloaded otherwise.
+- **Kokoro (48):** `kokoro-v1.0.onnx` (~325 MB) and `voices-v1.0.bin`
+  (~28 MB) from
+  https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0,
+  checked against the sha256s pinned in `setup_voices.KOKORO_FILES` (as
+  cloudflared is); `--from <dir>` copies matching files instead. The model
+  (hexgrad/Kokoro-82M) is Apache-2.0 and kokoro-onnx is MIT. The server's
+  Python packages (kokoro-onnx, onnxruntime, numpy, phonemizer) come from
+  PyPI at install, and uv may fetch a Python (python-build-standalone, on
+  GitHub) when the machine's is newer than onnxruntime supports.
+- **Piper (49):** `python -m piper.download_voices <voice>` fetches each
+  voice from Hugging Face (https://huggingface.co/rhasspy/piper-voices), no
+  account. Licences differ per voice and are stated in each voice's
+  `MODEL_CARD`; some datasets are non-commercial: check the card of every
+  voice offered by default. piper-tts (GPL) comes from PyPI into its own
+  venv and runs as a separate program (licensing decision).
+- **Production:** fine for Kokoro. For Piper, carry each voice's licence
+  into the catalog (`licence`, proposal
+  `docs/proposals/2026-11-14-voice-picker-providers.md`) and mark the
+  non-commercial ones. Neither is gated by the personal-use switch.
 
 ### Related repositories
 
