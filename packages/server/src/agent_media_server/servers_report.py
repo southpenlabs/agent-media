@@ -181,6 +181,42 @@ def _post(iss: str, access: str, body: dict) -> tuple[int, dict]:
     return status, answer if isinstance(answer, dict) else {}
 
 
+def _get(iss: str, access: str) -> tuple[int, dict]:
+    """GET the account's servers from its issuer; `(status, answer)`."""
+    req = urllib.request.Request(f"{iss.rstrip('/')}/api/servers", method="GET",
+                                 headers={"Authorization": f"Bearer {access}", "Accept": "application/json",
+                                          "User-Agent": "agent-media servers"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read()
+            status = r.status
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+    try:
+        answer = json.loads(raw or b"{}")
+    except ValueError:
+        answer = {}
+    return status, answer if isinstance(answer, dict) else {}
+
+
+def account_servers(device_id: str, iss: str) -> tuple[int, dict]:
+    """The servers the account that enrolled `device_id` has a device on, as
+    its issuer lists them (sasonica.com's Account page reads the same), each
+    marked `this` when it is this server — for the app's "Pair another
+    server", which offers the rest (David, 14 Nov 2026: a list in the app
+    and a button on sasonica.com, "Both")."""
+    from . import app
+
+    status, answer = _get(iss, app._account_access(device_id, iss))
+    if status in (401, 403):
+        status, answer = _get(iss, app._account_access(device_id, iss, fresh=True))
+    if status == 200 and isinstance(answer.get("servers"), list):
+        mine = server_id()
+        answer["servers"] = [{**s, "this": s.get("id") == mine}
+                             for s in answer["servers"] if isinstance(s, dict)]
+    return status, answer
+
+
 def report(device_id: str) -> bool:
     """Tell the issuer of the account that enrolled this device about this
     server. False when it could not (no refresh token, issuer refused)."""

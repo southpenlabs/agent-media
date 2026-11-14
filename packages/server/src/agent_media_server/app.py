@@ -437,7 +437,7 @@ CORS_PATHS = frozenset({
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
-    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account",
+    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account", "/me/servers",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
     "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
@@ -2271,6 +2271,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/me/account":
         _me_account(h, None)
+    elif path == "/me/servers":
+        _me_servers(h)
     elif path == "/me":
         # This device as the server knows it: its name, whether it may pair
         # others, and the account that enrolled it (null for a paired one) —
@@ -2961,6 +2963,38 @@ def _me_account(h: BaseHTTPRequestHandler, body: dict | None) -> None:
         devices.update_profile(did, str(out.get("email") or ""), str(out.get("username") or ""),
                                oidc.picture_of(out))
     _json(h, status, out)
+
+
+def _me_servers(h: BaseHTTPRequestHandler) -> None:
+    """`GET /me/servers` — the servers the account that enrolled this device
+    has a device on, from its issuer (`{iss}/api/servers`), each with `this`
+    when it is this server: the app's "Pair another server" lists the others
+    to sign in to (servers_report.account_servers). 409 `sign_in_again` for a
+    device with no account (a code pairing)."""
+    from . import oidc, servers_report
+
+    dev = devices.lookup(_bearer(h))
+    if not dev:
+        _json(h, 401, {"ok": False, "error": "not a device of this server"})
+        return
+    did, iss = str(dev.get("id") or ""), str(dev.get("iss") or "")
+    if not iss:
+        _json(h, 409, {"ok": False, "code": "sign_in_again",
+                       "error": "this device is not signed in with an account"})
+        return
+    try:
+        status, out = servers_report.account_servers(did, iss)
+    except oidc.OidcError as e:
+        _json(h, 409, {"ok": False, "code": "sign_in_again",
+                       "error": "sign in with your account again to list its servers", "detail": str(e)})
+        return
+    except OSError as e:
+        _json(h, 502, {"ok": False, "code": "issuer_unreachable", "error": f"could not reach the account: {e}"})
+        return
+    if status != 200 or not out:
+        _json(h, 502, {"ok": False, "code": "issuer_error", "error": f"the account answered {status}"})
+        return
+    _json(h, 200, {"ok": True, "servers": out.get("servers") or []})
 
 
 def _refresh_profile_soon(dev: dict) -> None:
