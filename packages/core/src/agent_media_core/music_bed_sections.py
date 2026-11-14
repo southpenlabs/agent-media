@@ -19,6 +19,25 @@ Each section's mean chroma is compared with every other's: the section
 repeated most (by count, then length) and those like it are the choruses.
 Best effort: a song with no clear sections gives no bounds, and the
 handover falls back to a fixed length.
+
+It also gives each song a **key** and a **beat grid** (docs/proposals/
+2026-11-14-music-around-speech.md step four: "Key and a beat grid measured
+and stored for each track"), for choosing neighbours by key and tempo and
+for starting and ending on a beat later; nothing chooses by them yet:
+
+- ``key``: the whole song's mean chroma correlated with the Krumhansl–Kessler
+  major and minor profiles in all twelve keys; the best is the key, with
+  its Camelot number (8B C major, 8A A minor; a neighbour is one step round
+  the wheel or the same number's other letter) and ``r``, the correlation
+  (under about 0.6 it is a guess: modal, atonal, a long intro elsewhere).
+- ``beats``: an onset envelope at ~86 frames a second (positive log-spectral
+  flux), its autocorrelation over 60–180 BPM weighted towards 120 (so a
+  beat is not taken at double or half), refined in 0.05 BPM steps by a comb
+  over the whole song, which also gives the phase: ``bpm``, ``offset`` (the
+  first beat, seconds) and ``confidence`` (0–1, from the share of the beats
+  that land on an onset; low for a piece with no steady pulse).
+
+Either is null when it cannot be told (silence, too short).
 """
 
 from __future__ import annotations
@@ -124,15 +143,135 @@ def choruses(b, cuts: list[int], block_s: float) -> list[list[float]]:
             for j in sorted(like[best])]
 
 
+# Krumhansl–Kessler key profiles, from the tonic up.
+MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+#: Pitch classes from C, as a key is named.
+NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+
+
+def camelot(tonic: int, minor: bool) -> str:
+    """The Camelot wheel's name for a key (tonic from C): C major 8B, A minor
+    8A; a step round the wheel is a fifth, the letter its relative."""
+    c = (tonic + 3) % 12 if minor else tonic
+    n = (8 + 7 * c) % 12 or 12
+    return f"{n}{'A' if minor else 'B'}"
+
+
+def key_of(chroma) -> "dict | None":
+    """The key of a mean chroma whose index 0 is A (features' bins)."""
+    import numpy as np
+    c = np.roll(np.asarray(chroma, dtype="float64"), -3)   # index 0 is C
+    if not np.isfinite(c).all() or c.std() <= 1e-9:
+        return None
+    best = None
+    for minor, prof in ((False, MAJOR), (True, MINOR)):
+        for t in range(12):
+            r = float(np.corrcoef(c, np.roll(prof, t))[0, 1])
+            if best is None or r > best[0]:
+                best = (r, t, minor)
+    r, t, minor = best
+    return {"tonic": NAMES[t], "mode": "minor" if minor else "major",
+            "name": f"{NAMES[t]} {'minor' if minor else 'major'}",
+            "camelot": camelot(t, minor), "r": round(r, 3)}
+
+
+ORATE_HOP = 128        # the onset envelope's hop: ~86 frames a second
+#: The least flux that is an onset at all: a held chord's numerical noise peaked at 7, the kept
+#: originals (normalised to -16 LUFS) sat at 50-80 at their 95th percentile (14 Nov 2026).
+ONSET_FLOOR = 15.0
+ORATE_FRAME = 1024
+
+
+def onset_envelope(y):
+    """Positive log-spectral flux a frame, its local mean taken off."""
+    import numpy as np
+    n = 1 + max(0, (len(y) - ORATE_FRAME) // ORATE_HOP)
+    if n < 3:
+        return np.zeros(0)
+    win = np.hanning(ORATE_FRAME).astype("float32")
+    env = np.zeros(n, dtype="float64")
+    prev = None
+    step = 2048
+    for a in range(0, n, step):
+        idx = np.arange(a, min(n, a + step))[:, None] * ORATE_HOP + np.arange(ORATE_FRAME)[None, :]
+        idx = np.minimum(idx, len(y) - 1)
+        mag = np.log1p(100 * np.abs(np.fft.rfft(y[idx] * win, axis=1)))
+        lead = mag[:1] if prev is None else prev[None, :]
+        d = np.diff(np.vstack([lead, mag]), axis=0)
+        env[a:a + len(mag)] = np.maximum(d, 0).sum(1)
+        prev = mag[-1]
+    w = max(1, int(round(0.5 * RATE / ORATE_HOP)))
+    local = np.convolve(env, np.ones(w) / w, mode="same")
+    return np.maximum(env - local, 0)
+
+
+def _comb(env, period: float):
+    """For each phase of `period` frames: the mean envelope on its beats; the best phase and the mean over phases."""
+    import numpy as np
+    k = np.arange(int((len(env) - 1) / period))
+    if len(k) < 4:
+        return 0.0, 0.0, 0.0
+    phases = np.arange(int(period))
+    pos = np.rint(phases[:, None] + k[None, :] * period).astype(int)
+    pos = np.minimum(pos, len(env) - 1)
+    score = env[pos].mean(1)
+    i = int(score.argmax())
+    return float(score[i]), float(score.mean()), float(phases[i])
+
+
+def beats_of(env, fps: float) -> "dict | None":
+    """The beat grid: tempo, the first beat's time, how clear the pulse is."""
+    import numpy as np
+    if len(env) < fps * 8 or env.std() <= 1e-9:
+        return None
+    x = env - env.mean()
+    n = len(x)
+    ac = np.fft.irfft(np.abs(np.fft.rfft(x, 2 * n)) ** 2)[:n]
+    best = None
+    for bpm in np.arange(60.0, 180.0, 0.5):
+        lag = fps * 60.0 / bpm
+        lo = int(lag)
+        if lo + 1 >= n:
+            continue
+        v = ac[lo] + (lag - lo) * (ac[lo + 1] - ac[lo])
+        w = np.exp(-0.5 * (np.log2(bpm / 120.0) / 0.9) ** 2)
+        if best is None or v * w > best[0]:
+            best = (v * w, bpm)
+    if best is None:
+        return None
+    top = None
+    for bpm in np.arange(best[1] - 1.5, best[1] + 1.5, 0.05):
+        peak, mean, phase = _comb(env, fps * 60.0 / bpm)
+        if top is None or peak > top[0]:
+            top = (peak, mean, phase, bpm)
+    peak, mean, phase, bpm = top
+    period = fps * 60.0 / bpm
+    # How clear the pulse is: the share of its beats that land on an onset (the envelope within a
+    # frame of the beat above twice its mean). One loud start, as a held chord has, is one beat of
+    # many; a click track is all of them. (A comb's mean was fooled by that one start.)
+    k = np.arange(int((len(env) - 1 - phase) / period))
+    pos = np.rint(phase + k * period).astype(int)
+    near = np.maximum.reduce([env[np.clip(pos + d, 0, len(env) - 1)] for d in (-1, 0, 1)])
+    hit = float((near > max(2.0 * env.mean(), ONSET_FLOOR)).mean()) if len(pos) else 0.0
+    conf = max(0.0, min(1.0, (hit - 0.15) / 0.6))
+    # A frame's flux peaks when an onset is about three quarters into its window, not at its start.
+    first = (phase / fps + 0.75 * ORATE_FRAME / RATE) % (60.0 / bpm)
+    return {"bpm": round(float(bpm), 1), "offset": round(float(first), 3), "confidence": round(conf, 2)}
+
+
 def analyse(path: str) -> dict:
     y = decode(path)
     dur = len(y) / RATE
-    b = blocks(features(y))
+    f = features(y)
+    b = blocks(f)
     block_s = BLOCK * HOP / RATE
     cuts = peaks(novelty(b)) if len(b) > 2 * KERNEL else []
     return {"duration": round(dur, 2),
             "bounds": [round(c * block_s, 2) for c in cuts],
-            "choruses": choruses(b, cuts, block_s)}
+            "choruses": choruses(b, cuts, block_s),
+            "key": key_of(f[:, :12].mean(0)) if len(f) else None,
+            "beats": beats_of(onset_envelope(y), RATE / ORATE_HOP)}
 
 
 if __name__ == "__main__":

@@ -579,21 +579,25 @@ def relevel(entries: list[dict], path_of, limit: int = UPKEEP_PER_PASS) -> int:
 
 def upkeep_due(data: Optional[dict] = None) -> bool:
     """Whether a kept track waits to be measured or re-levelled."""
+    from . import music_bed_grid
     from .music_bed_tempo import needs_measure
     data = load() if data is None else data
     want = target_lufs()
-    return any(needs_measure(e) or float(e.get("lufs_target", DEFAULT_LUFS)) != want
-               for e in tracks(None, data))
+    have = tracks(None, data)
+    return (any(needs_measure(e) or float(e.get("lufs_target", DEFAULT_LUFS)) != want for e in have)
+            or music_bed_grid.due(have))
 
 
 def upkeep() -> int:
     """The background process's care of the kept tracks: each measured once
     for the slow rule (from its normalised file: tempo and busyness, not
-    loudness) and brought to the bed's level. How many were touched."""
+    loudness), its key and beat grid measured (music_bed_grid, a few a pass)
+    and brought to the bed's level. How many were touched."""
+    from . import music_bed_grid
     from .music_bed_tempo import backfill
     data = load()
     have = tracks(None, data)
-    n = backfill(have, _file) + relevel(have, _file)
+    n = backfill(have, _file) + relevel(have, _file) + music_bed_grid.backfill(have, _file)
     if n:
         save(data)
     return n

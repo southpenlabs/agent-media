@@ -395,37 +395,18 @@ def may_sing_in(metadata) -> bool:
 
 
 def _python() -> Optional[str]:
-    named = (os.environ.get("MEDIA_MUSIC_BED_VOCAL_PYTHON") or "").strip()
-    if named:
-        return named
-    from . import music_bed_favourites as fav
-    exe = fav.demucs_exe()
-    if exe:
-        py = Path(exe).parent / "python"
-        if py.is_file():
-            return str(py)
-    return None
+    """A Python with numpy for the analysis (music_bed_grid.python: the one
+    named, the Demucs venv's, or this one when it has numpy)."""
+    from . import music_bed_grid
+    return music_bed_grid.python()
 
 
 def sections(path: Path) -> dict:
-    """The original's sections (music_bed_sections.py, out of process), or
-    {} without a Python that has numpy, or on any failure."""
-    py = _python()
-    if not py:
-        return {}
-    script = Path(__file__).with_name("music_bed_sections.py")
-    try:
-        r = subprocess.run(["nice", "-n", "19", py, "-I", str(script), str(path)],
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=600)
-        if r.returncode != 0:
-            log.info("music-bed vocal: sections failed: %s",
-                     r.stderr.decode(errors="replace")[-300:])
-            return {}
-        d = json.loads(r.stdout.decode().strip().splitlines()[-1])
-        return d if isinstance(d, dict) else {}
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as e:
-        log.info("music-bed vocal: sections: %s", e)
-        return {}
+    """The original's sections, key and beat grid (music_bed_sections.py, out
+    of process, music_bed_grid.analyse), or {} without a Python that has
+    numpy, or on any failure."""
+    from . import music_bed_grid
+    return music_bed_grid.analyse(path)
 
 
 def _seconds(path: Path) -> float:
@@ -482,10 +463,13 @@ def due() -> bool:
         from . import music_bed_favourites as fav
         if not fav.enabled():
             return False
+        from . import music_bed_grid
         have = load()
         want = tunable("LUFS")
-        return any(e.get("key") not in have or have[e["key"]].get("lufs") != want
-                   for e in fav.tracks(None, fav.load()) if e.get("original_id"))
+        return (any(e.get("key") not in have or have[e["key"]].get("lufs") != want
+                    for e in fav.tracks(None, fav.load()) if e.get("original_id"))
+                or (any(music_bed_grid.needs(r) for r in have.values())
+                    and music_bed_grid.python() is not None))
     except Exception:  # noqa: BLE001
         return False
 
@@ -533,12 +517,46 @@ def upkeep(limit: Optional[int] = None) -> int:
                   "inst_s": _seconds(fav._file(e)),
                   "bounds": sec.get("bounds") or [], "choruses": sec.get("choruses") or [],
                   "made": time.time()}
+        if sec:
+            from . import music_bed_grid
+            music_bed_grid.keep(d[key], sec)
         save(d)
         got += 1
         log.info("music-bed vocal: kept the original of %s (%d sections)",
                  e.get("title") or key, len(d[key]["bounds"]) + 1)
+    got += _grid_backfill(d)
     save(d)
     return got
+
+
+def _grid_backfill(d: dict, limit: Optional[int] = None) -> int:
+    """Originals kept before their key and beat grid were measured (step
+    four, 14 Nov 2026): a few a pass, sections measured again with them."""
+    from . import music_bed_grid
+    limit = music_bed_grid.per_pass() if limit is None else limit
+    todo = [k for k, r in d.items() if music_bed_grid.needs(r)]
+    if not todo or limit <= 0:
+        return 0
+    py = music_bed_grid.python()
+    if not py:
+        return 0
+    n = 0
+    for k in todo:
+        if n >= limit:
+            break
+        rec = d[k]
+        try:
+            path = _file(rec)
+        except (KeyError, TypeError):
+            continue
+        if not path.is_file():
+            continue
+        sec = music_bed_grid.analyse(path, py)
+        music_bed_grid.keep(rec, sec)
+        if sec.get("bounds") is not None and not rec.get("bounds"):
+            rec["bounds"], rec["choruses"] = sec.get("bounds") or [], sec.get("choruses") or []
+        n += 1
+    return n
 
 
 if __name__ == "__main__":  # pragma: no cover — a manual pass
