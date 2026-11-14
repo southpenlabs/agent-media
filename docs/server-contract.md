@@ -2879,11 +2879,15 @@ of its last 120 ms counts as voice); a held bed is
 atomic rename. The streaming source (Mopidy) keeps its plain fade. Pinned by
 `packages/core/tests/test_music_bed_mix.py`.
 
-**Singing it out after a long reply (31 Oct 2026)** (`music_bed_vocal.py`,
+**The Outro (formerly Sing it out): the song after a long reply (31 Oct 2026)**
+(renamed in the app's words on 14 Nov 2026, David: "let's rename Sing it out
+to Outro ... including the Sung out filter"; every id, key and route kept:
+`vocal`, `sing_in`, `list=sung`, `music_sung`. Not the `outro` switch,
+"Finish with an ending", the backing music's own close) (`music_bed_vocal.py`,
 `music_bed_sections.py`, `under_mix.Handover`; David: "when the speech
 finishes, the music keeps playing for a while, but not just as an
 instrumental" — "Just the chorus", "Long replies only"). A seventh switch,
-`vocal` ("Sing it out after long replies", on). For a reply long by the
+`vocal` ("Outro music after long replies", on; "Sing it out after long replies" until 14 Nov 2026). For a reply long by the
 default thresholds (45 s estimated or 12 sentences, whatever
 `MEDIA_MUSIC_BED_MIN_S` says; `MEDIA_MUSIC_BED_VOCAL_MIN_S` and
 `_VOCAL_MIN_SENTENCES` set Sing it out's own, either one reached enough) over a favourites bed whose original is kept,
@@ -2943,10 +2947,10 @@ Sing it in hands over to, are beds. While the listener dictates the song
 dips to a tenth (-20 dB; it was a fifth) of that share
 (`Media3Speech.SONG_DUCK`).
 
-**Singing it in before a long reply (12 Nov 2026)** (`music_bed_vocal.before_for`,
+**The Intro (formerly Sing it in): before a long reply (12 Nov 2026)** (`music_bed_vocal.before_for`,
 `may_sing_in`; David: "Sing it in", the mirror of Sing it out — "it probably
 also should fade in at a low volume first"). One more switch, **`sing_in`**
-("Sing it in before long replies", `kind` bool, **off** by default; listed
+("Intro music before long replies", formerly "Sing it in before long replies", `kind` bool, **off** by default; listed
 just before `vocal`; `MEDIA_MUSIC_BED_SING_IN=1` turns it on for a host with
 no Settings). With it on, a reply that is long by Sing it out's test
 (`music_bed_vocal.is_long`, the `vocal_min_s` / `vocal_min_sentences`
@@ -2991,7 +2995,7 @@ their intro is the plain one. Pinned by
 `packages/core/tests/test_music_bed_vocal.py` and sasonica-app
 `SingInTest.java`.
 
-**A tune after some replies, and Sing it out on the full player (4 Nov
+**A tune after some replies, and Intro & outro on the full player (4 Nov
 2026)** (`reply_tune.py`; David: "let's put the sing it out feature as an
 option on the full size media player" — "Use the speech versus music slider
 for the volume adjustment"). `settings` carries one more switch,
@@ -3009,11 +3013,11 @@ player's `volume` (0–100) before the ask, and the phone turns its media
 volume to that share and puts it back when the song is over or stopped, or
 before the next reply speaks (sasonica-app HandoffMusic.java); on the
 Spotify route the device's volume is set with the Web API. The app puts
-`vocal` and `tune` under **Sing it out** on the full player, a folding
+`sing_in`, `vocal` and `tune` under **Intro & outro** (until 14 Nov 2026 "Sing it out") on the full player, a folding
 group under Levels (sasonica-app components/PlayerSingItOut.tsx), as well
 as in Settings → Music. Pinned by `packages/core/tests/test_reply_tune.py`.
 
-**Singing it out: the song and its controls (31 Oct 2026)** (David: "The
+**The Outro: the song and its controls (31 Oct 2026)** (David: "The
 new singing it out feature is awesome!" — he picked like and dislike, and
 radio from the song). `after` also carries the song, for the phone to show
 while it plays: `"title"`, `"artist"`, `"key"` (the favourite's key, for the
@@ -4481,7 +4485,7 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 
 | kind | lists |
 |---|---|
-| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs, and from 3 Nov YouTube videos and playlists (`source` `youtube`, `link`), saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved); `sung` (8 Nov 2026: every song sung out after a long reply, taken up or not, newest first — "Singing it out: the song and its controls"; `uri` the original's `yt:` link, `session` the reply's thread, `key` the favourite's, `engaged` what was done with it: any of `"kept"`, `"like"`, `"radio"`) |
+| `music` | `recent`, `liked` (the songs liked with `media music like`, newest first), `most` (by `plays`, then newest), `albums` (2 Nov 2026: Spotify albums, playlists and songs, and from 3 Nov YouTube videos and playlists (`source` `youtube`, `link`), saved with §6.46, newest first; `uri` `album:<key>`, `tracks` the count; `POST /music {"action": "play", "uri": "album:…"}` plays it from YouTube, 404 for one not saved); `sung` (8 Nov 2026: every song sung out after a long reply, taken up or not, newest first, the app's "Outros" — "The Outro: the song and its controls"; `uri` the original's `yt:` link, `session` the reply's thread, `key` the favourite's, `engaged` what was done with it: any of `"kept"`, `"like"`, `"radio"`) |
 | `book` | `recent`, `progress` and `finished` (the book library's books with how far through each is, latest listened first; since 11 Nov 2026 the library is this server's own, `book_library`: the audiobook folder's files read for their tags, length and cover, how far through from the book channel's positions, finished within the last minute or 98%), `all` (every book whose file is on the host, by title); a library book's row has `id` `b-<hash>`, `duration` in seconds and `art`, its cover by signed link (`GET /books/covers/<id>.jpg?sig=`, no bearer), `most`, and to browse the library (11 Nov 2026): `added` (every book, newest added first; each row's `added`, epoch seconds) and `unstarted` (the books not begun, by title). `q` searches each over its own rows |
 | `podcast` | `recent`, `most` (`new` went with Audiobookshelf on 11 Nov 2026: the followed shows' new episodes are `GET /podcasts/discover?list=new`), `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
@@ -4794,7 +4798,7 @@ cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
   it.
 - `{"action": "radio", "from_song": "<favourite key>", "video_id"?}` (31 Oct
   2026), also `POST /music/radio {"from_song", "video_id"?}`: a station from
-  the song a long reply sang out, on `sasonica` (see "Singing it out: the
+  the song a long reply sang out, on `sasonica` (see "The Outro: the
   song and its controls" for the label the app gives the song).
 - `{"action": "dislike"}` is 👎: the song is kept off the station (a second
   👎 on the same channel keeps the channel off) and the next song plays.
@@ -5662,7 +5666,7 @@ local look, never a network call:
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
 | `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
-| `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
+| `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Outros", formerly "Sung out") (8 Nov 2026) |
 | `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
 | `storage` | always: `GET`/`POST /storage` (§6.5, 14 Nov 2026) — how long rendered clips, the music log and play history are kept, and the scheduled jobs' last runs, for Settings → Storage |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |

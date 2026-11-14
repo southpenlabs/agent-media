@@ -40,7 +40,7 @@ never a network call, so the app can ask on every start.
   music_sung  the songs sung out after long replies are kept (music_sung.py,
             8 Nov 2026): POST /speech/music-bed/song takes `event: started`
             and `verdict: kept`, and GET /music/recent has `list=sung`
-            ("Sung out"); always true here
+            ("Outros", formerly "Sung out"); always true here
   speech_music_log  the music around a reply is logged with how it ended
             (speech_music.py, 14 Nov 2026): POST /speech/music-bed/song takes
             `event` ended, stopped, skipped and volume, `kind`, `pos_s` and

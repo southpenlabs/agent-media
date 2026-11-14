@@ -144,11 +144,14 @@ about a tenth of its volume), and each 6 dB lower halves that again.
 See also: `packages/core/src/agent_media_core/music_bed.py` (`gain_db`,
 `VOICE_REF_DB`, `duck_scale`).
 
-### What can I do with the song after a long reply?
+### What can I do with the song after a long reply (the Outro)?
 
 After a long reply over one of your favourites, the original song, vocals
-and all, takes over from the instrumental and plays to the end of a chorus
-(**Sing it out after long replies** in Settings → Music). While it plays it
+and all, takes over from the instrumental and plays to the end of a chorus:
+the **Outro** (**Outro music after long replies** in Settings → Music, or
+under Intro & outro on the full player; it was called Sing it out until
+14 Nov 2026). It is not **Finish with an ending**, which only gives the
+backing music its own close (a closing chord or a filtered fade). While it plays it
 shows in the mini player and at the top of the Media tab, with:
 
 - **Keep playing**: the whole song, no fade at the chorus.
@@ -164,8 +167,9 @@ radio, a single press stops it. By voice (hands-free or the mic key): "keep
 playing", "start the radio", "stop the music". Only on the phone; the song
 after a reply on house speakers has no controls yet.
 
-**Sing it in before long replies** (off until you turn it on, in Settings →
-Music or under Sing it out on the full player) is the same thing the other
+The **Intro**, **Intro music before long replies** (formerly Sing it in;
+off until you turn it on, in Settings → Music or under Intro & outro on the
+full player), is the same thing the other
 way round: before a long reply over one of your favourites, about three and
 a half seconds of the original fade in from quiet at its chorus, then the
 vocals drop away as the first word comes and the backing carries on under
@@ -173,10 +177,11 @@ the reply. It never plays before the answer to a message you have just sent
 (only before replies that follow another agent's mail or a background task
 finishing), and the first word waits for it, about two seconds more than
 usual at most, since the phone renders the first sentence meanwhile. Only on
-the phone; it shows no song bar and is not listed in Sung out.
+the phone; it shows no song bar and is not listed in Outros (the Media
+tab's list of every outro, formerly Sung out).
 
-See also: `server-contract.md` §`/speech/music-bed` ("Singing it out",
-"Singing it in"), `POST /speech/music-bed/song`, `POST /music/radio`.
+See also: `server-contract.md` §`/speech/music-bed` ("The Outro",
+"The Intro"), `POST /speech/music-bed/song`, `POST /music/radio`.
 
 ### Can it guide me through a meditation?
 
@@ -257,7 +262,7 @@ See also: `packages/core/src/agent_media_core/sleep_timer.py`, the
 Two switches in Settings → Music. **Calm mode** turns it on now; **Calm in
 the evenings** turns it on by itself from 9 pm to 6 am. While it is on,
 replies are read in a slower, softer voice, the music under them is the
-quiet night bed (no beat, never your favourites), no song sings out after a
+quiet night bed (no beat, never your favourites), there is no outro after a
 long reply, and the music drifts out over about a minute after the words.
 
 Settings, in `~/.config/agent-media.env`: `MEDIA_CALM_RATE` (-10%),

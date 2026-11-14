@@ -38,7 +38,7 @@ Told to a player in the bed's mix (music_bed_mix.params `after`): the
 original's file (a clip URI for a phone), whether it is aligned, both
 lengths, the bounds and choruses, and the times. The phone does the rest in
 the app; this host in under_mix.Handover. A switch in Settings → Music,
-"Sing it out after long replies" (`vocal`, on). It replaces the ending and
+"Outro music after long replies" (`vocal`, on; called Sing it out until 14 Nov 2026). It replaces the ending and
 the carry for that reply; a new reading's under sound ends it quickly, as
 does a cut.
 """
@@ -98,8 +98,8 @@ def is_long(est_s: Optional[float], n_sentences: int) -> bool:
 
 #: (id, label, hint, min, max, step, unit) of each, in the order Settings lists them.
 RANGES = (
-    ("vocal_min_s", "Sing it out after replies of at least",
-     "A reply this long when read aloud, or with the sentences below, ends in the song.",
+    ("vocal_min_s", "Intro and outro after replies of at least",
+     "A reply this long when read aloud, or with the sentences below, gets the intro and the outro.",
      0, 120, 5, "s"),
     ("vocal_min_sentences", "Or at least this many sentences",
      "Fewer sentences, and the reply's own length decides.",

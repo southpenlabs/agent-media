@@ -79,21 +79,22 @@ SWITCHES = (
     ("carve", "Make room for the voice",
      "While the voice speaks, the music's voice band is turned down, not only its level."),
     ("intro", "Lead in before the voice",
-     "The music starts a moment before the first word."),
+     "The backing music starts a moment before the first word."),
     ("outro", "Finish with an ending",
-     "Generated music ends on a closing chord; a track fades out through a filter."),
+     "When the voice stops, the backing music itself ends: generated music on a "
+     "closing chord, a track fading out through a filter."),
     ("sweep", "Filter sweeps on fades",
      "Fades in and out open and close a low-pass filter, like a DJ's."),
     ("carry", "Keep the music going between replies",
      "When another reply is about to start, the music carries on into it "
      "(a different piece crossfades)."),
-    ("sing_in", "Sing it in before long replies",
+    ("sing_in", "Intro music before long replies",
      "Before a long reply over one of your favourites that you did not just ask for, "
      "a few seconds of the song itself fade in at its chorus, and the vocals drop "
      "away as the voice starts."),
-    ("vocal", "Sing it out after long replies",
+    ("vocal", "Outro music after long replies",
      "After a long reply over one of your favourites, the song itself comes in, "
-     "vocals and all, and plays to the end of its next chorus."),
+     "vocals and all, and plays to the end of its chorus."),
 )
 #: Switches off unless Settings or their MEDIA_MUSIC_BED_<NAME> turns them on.
 OFF_BY_DEFAULT = ("sing_in",)

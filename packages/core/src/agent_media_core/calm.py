@@ -27,7 +27,7 @@ from typing import Optional
 
 LABEL = "Calm mode"
 HINT = ("Replies in a slower, softer voice over quiet music with no beat, which "
-        "drifts out after the words. No song sings out.")
+        "drifts out after the words. No outro.")
 EVENING_LABEL = "Calm in the evenings"
 EVENING_HINT = "Calm mode by itself in the evening and overnight."
 
