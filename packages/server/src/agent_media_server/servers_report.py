@@ -15,6 +15,13 @@ MEDIA_WEB_APP_URL, else `<api>/app` when this server serves the bundle itself
 (web_app.py; it is on the public listener too, so that holds for a tunnel
 address as well as a LAN one). MEDIA_SERVERS_REPORT=0 turns the reports off.
 
+`role` and `hosts`: the account's role here as it takes effect, and the
+names of the machines paired here as jobs workers, so sasonica.com can list
+the machines an account administers. The answer's `role_ceiling` (the
+highest role the account may have on any server, from its permissions on
+sasonica.com) is kept per account and lowers its devices' roles here
+(devices.role_of; docs/proposals/2026-11-14-hosts-for-auto-mode.md).
+
 `devices`: that account's devices here and the app build each says it runs
 (POST /device/app), so sasonica.com can offer the latest build to a phone
 that is behind (David, 7 Nov 2026: "see and download the latest build if
@@ -122,23 +129,56 @@ def account_devices(device_id: str) -> list[dict]:
     return out
 
 
+def account_role(device_id: str) -> str:
+    """The account's role on this server: the highest any of its devices
+    here has, as it takes effect (its ceiling applied). "" with no account."""
+    rows = devices.list_devices()
+    me = next((d for d in rows if d.get("id") == device_id), None)
+    key = (str((me or {}).get("iss") or ""), str((me or {}).get("sub") or ""))
+    if not all(key):
+        return ""
+    roles = [str(d.get("role") or "admin") for d in rows
+             if (str(d.get("iss") or ""), str(d.get("sub") or "")) == key]
+    ranked = [r for r in devices.ROLES if r in roles]
+    return ranked[0] if ranked else ""
+
+
+def paired_hosts() -> list[str]:
+    """The names of the machines paired here as jobs workers (pair --jobs):
+    the hosts this server restarts and updates down their own connection."""
+    names = [str(d.get("name") or "").strip()[:64] for d in devices.list_devices()
+             if devices.is_jobs_worker(d)]
+    return sorted({n for n in names if n})
+
+
 def describe(device_id: str = "") -> dict:
     body = {"id": server_id(), "name": os.environ.get("MEDIA_SERVER_NAME", "").strip() or socket.gethostname(),
             **addresses()}
     if device_id:
         body["devices"] = account_devices(device_id)
+        role = account_role(device_id)
+        if role:
+            body["role"] = role
+        body["hosts"] = paired_hosts()
     return body
 
 
-def _post(iss: str, access: str, body: dict) -> int:
+def _post(iss: str, access: str, body: dict) -> tuple[int, dict]:
+    """POST the report; `(status, answer)`, the answer {} when it is not JSON."""
     req = urllib.request.Request(f"{iss.rstrip('/')}/api/servers", data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": f"Bearer {access}", "Accept": "application/json",
                                           "Content-Type": "application/json", "User-Agent": "agent-media servers"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
-            return r.status
+            raw = r.read()
+            status = r.status
     except urllib.error.HTTPError as e:
-        return e.code
+        return e.code, {}
+    try:
+        answer = json.loads(raw or b"{}")
+    except ValueError:
+        answer = {}
+    return status, answer if isinstance(answer, dict) else {}
 
 
 def report(device_id: str) -> bool:
@@ -151,15 +191,30 @@ def report(device_id: str) -> bool:
         return False
     body = describe(device_id)
     try:
-        status = _post(iss, app._account_access(device_id, iss), body)
+        status, answer = _post(iss, app._account_access(device_id, iss), body)
         if status in (401, 403):
-            status = _post(iss, app._account_access(device_id, iss, fresh=True), body)
+            status, answer = _post(iss, app._account_access(device_id, iss, fresh=True), body)
     except (oidc.OidcError, OSError) as e:
         print(f"servers: report for {device_id} failed: {e}", file=sys.stderr)
         return False
     if status != 200:
         print(f"servers: {iss} answered {status} for {device_id}", file=sys.stderr)
-    return status == 200
+        return False
+    keep_ceiling(device_id, answer)
+    return True
+
+
+def keep_ceiling(device_id: str, answer: dict) -> None:
+    """The account's role ceiling from the issuer's answer, kept for
+    devices.role_of. An issuer that sends none (one from before the
+    ceiling) leaves what was kept."""
+    ceiling = str(answer.get("role_ceiling") or "")
+    if ceiling not in devices.ROLES:
+        return
+    me = next((d for d in devices.list_devices() if d.get("id") == device_id), None)
+    iss, sub = str((me or {}).get("iss") or ""), str((me or {}).get("sub") or "")
+    if devices.set_ceiling(iss, sub, ceiling):
+        print(f"servers: {iss} caps account {sub} at {ceiling}", file=sys.stderr)
 
 
 def report_soon(device_id: str, base: str = "") -> None:

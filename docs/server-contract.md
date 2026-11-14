@@ -11330,6 +11330,18 @@ for nothing.
   but `/pair`, `/enrol`, `/me/signout`, `/speech/ctl`, `/speech/balance`,
   `/follow/trace`, the phone's `/speech|music|handoff|book/state` reports,
   `/audio/target(s)` and `/music*`.
+- **The account's ceiling** (14 Nov 2026; docs/proposals/2026-11-14-hosts-for-auto-mode.md):
+  sasonica.com answers the servers report (`POST {iss}/api/servers`, sent at
+  each sign-in and daily) with `role_ceiling`, the highest role the account
+  may have on any server (its "sasonica server admin" or "member"
+  permission, else guest). Kept per account in `<state_dir>/role-ceilings.json`.
+  A device's role is the lower of its own and its account's ceiling
+  (`devices.role_of`; `own_role` is the stored one): a ceiling takes admin
+  away and never gives it. A device with no account, or an account the
+  issuer never answered for, keeps its own role. `GET /devices` rows carry
+  `ceiling` when there is one, and `role` as it takes effect. The report
+  sends the account's `role` here (as it takes effect) and `hosts`, the
+  names of the jobs workers paired here.
 - **Not yet** (the proposal's steps 2 and 3): harnesses, presets, personas,
   bridges and contacts setup still take any member; a member's chats are not
   yet permission-checked, so a member's agent can do what the owner's can.

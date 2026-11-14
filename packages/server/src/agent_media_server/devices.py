@@ -298,11 +298,13 @@ def lookup(token: str, ip: str = "") -> dict | None:
 
 def list_devices() -> list[dict]:
     """Every paired device, without its hash, with its role and its enrol bit
-    as they take effect (a member's stored bit is no bit), and its Now
+    as they take effect (a member's stored bit is no bit; the role lowered to
+    its account's `ceiling`, shown when there is one), and its Now
     playing `stage` mode (stage.py, §6.21h)."""
     with _LOCK:
         return [{**{k: v for k, v in d.items() if k not in _PRIVATE},
-                 "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d)}
+                 "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d),
+                 **({"ceiling": ceiling_of(d)} if ceiling_of(d) else {})}
                 for d in _load()]
 
 
@@ -341,11 +343,80 @@ def set_enrol(device_id: str, on: bool = True) -> bool:
 ROLES = ("admin", "member", "guest")
 
 
-def role_of(device: dict | None) -> str:
-    """This device's role. A row without one is an admin: every device paired
-    before roles existed keeps exactly what it had."""
+def own_role(device: dict | None) -> str:
+    """The role this server gave the device. A row without one is an admin:
+    every device paired before roles existed keeps exactly what it had."""
     role = str((device or {}).get("role") or "")
     return role if role in ROLES else "admin"
+
+
+# The role ceiling (docs/proposals/2026-11-14-hosts-for-auto-mode.md; David,
+# 14 Nov 2026: "Both, Drupal as a ceiling"): the account's issuer says the
+# highest role it may have on a server (`role_ceiling` in its answer to the
+# servers report, from its "sasonica server admin/member" permissions). Kept
+# per account in `<state_dir>/role-ceilings.json`, `{"<iss>|<sub>": role}`.
+# It only lowers: a device's role is the lower of its own and its account's
+# ceiling. A device with no account, or an account never answered for, keeps
+# its own role, so a QR-paired server and one cut off from the issuer work
+# as before.
+_CEILINGS: dict = {"key": None, "data": {}}
+
+
+def _ceilings_path() -> Path:
+    return _dir() / "role-ceilings.json"
+
+
+def ceilings() -> dict:
+    p = _ceilings_path()
+    try:
+        st = p.stat()
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return {}
+    if _CEILINGS["key"] != key:
+        try:
+            data = json.loads(p.read_text())
+        except (OSError, ValueError):
+            data = {}
+        _CEILINGS.update(key=key, data=data if isinstance(data, dict) else {})
+    return _CEILINGS["data"]
+
+
+def set_ceiling(iss: str, sub: str, role: str) -> bool:
+    """Keep the account's ceiling, as its issuer gave it. False when there is
+    nothing to keep (no account, a role that is not one) or it is unchanged."""
+    if not (iss and sub) or role not in ROLES:
+        return False
+    key = f"{iss}|{sub}"
+    with _flock("role-ceilings.lock"):
+        data = dict(ceilings())
+        if data.get(key) == role:
+            return False
+        data[key] = role
+        p = _ceilings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=1, sort_keys=True))
+        os.chmod(tmp, 0o600)
+        tmp.replace(p)
+        return True
+
+
+def ceiling_of(device: dict | None) -> str:
+    """The ceiling of the device's account, or "" when there is none."""
+    iss, sub = str((device or {}).get("iss") or ""), str((device or {}).get("sub") or "")
+    if not (iss and sub):
+        return ""
+    got = str(ceilings().get(f"{iss}|{sub}") or "")
+    return got if got in ROLES else ""
+
+
+def role_of(device: dict | None) -> str:
+    """What the device may do here: its own role, lowered to its account's
+    ceiling when there is one."""
+    own = own_role(device)
+    cap = ceiling_of(device)
+    return cap if cap and ROLES.index(cap) > ROLES.index(own) else own
 
 
 def set_role(device_id: str, role: str) -> bool:

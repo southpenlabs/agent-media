@@ -1,6 +1,7 @@
 # Telling auto mode which machines are yours, from what the account knows
 
-**Status:** proposal (14 Nov 2026). Follows the `messaging` profile row
+**Status:** proposal (14 Nov 2026); the role ceiling built the same day
+(websites b5a22e3, sasonica_oidc; agent-media servers_report and devices). Follows the `messaging` profile row
 (e1412f5b) and agent-mail's `agent-mail-automode` (agent-mail 785014c).
 
 ## Why
@@ -110,10 +111,12 @@ guest; devices.py), and sasonica.com has no roles or permissions of its own
   account, a child's) lowers the ceiling.
 - **The server applies it.** An account device's effective role is the
   lower of its own role and the account's ceiling: `role_of()` takes
-  `min(local, ceiling)`. The ceiling arrives as a claim in the token at
-  sign-in (`sasonica_role_ceiling`) and is refreshed with the daily report,
-  whose answer carries it. An account with no answer yet keeps its last
-  ceiling; one never seen has none, so the local role holds.
+  `min(local, ceiling)`. The ceiling comes back in the issuer's answer to
+  the servers report (`role_ceiling`), which a server sends at each sign-in
+  and daily; it is kept per account (`role-ceilings.json`). Not a token
+  claim: simple_oauth emits only the claims on its fixed list. An issuer
+  that sends none leaves the last one kept; an account never answered for
+  has none, so the local role holds.
 - **It only ever lowers.** A ceiling can take admin away; it never makes
   anyone admin. Making someone admin of a home server still needs that
   server. A compromised sasonica.com account can lock its owner out of
