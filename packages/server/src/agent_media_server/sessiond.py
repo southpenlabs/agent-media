@@ -3493,7 +3493,7 @@ class Supervisor:
         (measured 7 Oct 2026, 2.1.289: a made-up id answers success), so
         the caller checks it first (agent_actions.py)."""
         if self._agent(session) == "opencode":
-            raise Refused("an opencode session has no background agents", "unsupported")
+            return self._oc_stop_task(session, task_id)
         with self.lock:
             s = self._get(session)
             if not s.running:
@@ -3747,6 +3747,24 @@ class Supervisor:
                         self.cond.notify_all()
 
         threading.Thread(target=run, name=f"oc-command-{s.id[:12]}", daemon=True).start()
+
+    def _oc_stop_task(self, session: str, task_id: str) -> dict:
+        """An opencode subagent is a child session (its `task` tool's): it is
+        aborted, its parent's turn going on with the task's error as the
+        result. Only a child of this session, and only while the server runs."""
+        from agent_media_core import harnesses
+
+        with self.lock:
+            s = self._get(session)
+            if not s.live:
+                return {"session": session, "stopped": False, "why": "not live",
+                        **self._brief(s)}
+        if not harnesses.opencode_rows(
+                "select 1 from session where id = ? and parent_id = ?", (task_id, session)):
+            raise Refused("no such agent in this chat", "not_found")
+        self.oc.call("POST", f"/session/{task_id}/abort", directory=s.cwd)
+        with self.lock:
+            return {"session": session, "stopped": True, "why": None, **self._brief(s)}
 
     def oc_commands(self, cwd: str) -> list[dict]:
         """The slash menu for an opencode chat in `cwd` (`Host.commands`)."""

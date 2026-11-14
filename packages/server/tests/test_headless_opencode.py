@@ -277,6 +277,26 @@ def test_a_typed_command_runs_as_opencodes_command_and_the_menu_is_its_own(host)
     assert oc.split_command("hi /review", ["review"]) is None
 
 
+def test_stopping_a_subagent_aborts_its_child_session_and_nothing_else(host, tmp_path, monkeypatch):
+    import sqlite3
+
+    sid = start(host, "hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    kid, other = "ses_" + "k" * 26, "ses_" + "o" * 26
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    db = tmp_path / "data" / "opencode" / "opencode.db"
+    db.parent.mkdir(parents=True)
+    with sqlite3.connect(db) as c:
+        c.execute("create table session (id text primary key, parent_id text)")
+        c.executemany("insert into session values (?,?)", [(kid, sid), (other, "ses_" + "x" * 26)])
+    ok, d = driver.headless_driver().stop_task(sid, kid)
+    assert ok and d["stopped"]
+    assert any(r[0] == "POST" and r[1].startswith(f"/session/{kid}/abort") for r in requests(host))
+    ok, d = driver.headless_driver().stop_task(sid, other)
+    assert not ok
+    assert not any(r[1].startswith(f"/session/{other}/abort") for r in requests(host))
+
+
 def test_the_server_needs_its_password(host):
     import urllib.error
     import urllib.request

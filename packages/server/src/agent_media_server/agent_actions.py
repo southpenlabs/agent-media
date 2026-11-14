@@ -39,6 +39,10 @@ def stop_words(row: dict) -> str:
 
 
 def message_words(row: dict, text: str) -> str:
+    if str(row.get("id") or "").startswith("ses_"):
+        # opencode: a subagent is resumed by its task tool with its task_id.
+        return (f"Please pass this to your subagent {_label(row)} with the task tool, "
+                f"resuming it with task_id {row['id']}, word for word, then carry on: {text}")
     return (f"Please pass this to your background agent {_label(row)} with "
             f"SendMessage, word for word, then carry on: {text}")
 

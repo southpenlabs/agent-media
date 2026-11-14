@@ -61,8 +61,9 @@ from pathlib import Path
 
 from . import transcript
 
-#: An agent's id as the file names carry it (`agent-<id>.jsonl`).
-AGENT_ID = re.compile(r"[0-9a-z]{6,64}")
+#: An agent's id as the file names carry it (`agent-<id>.jsonl`), or an
+#: opencode subagent's: its own session's id (`ses_…`, `opencode_agents`).
+AGENT_ID = re.compile(r"[0-9a-z]{6,64}|ses_[0-9A-Za-z]{20,40}")
 #: An agent with no terminal record is running only while its file changed
 #: this recently (and the thread's session is live).
 STALE_S = 1800.0
@@ -319,10 +320,94 @@ def _live(session: str) -> bool:
     return bool(hl and hl.get("live"))
 
 
+def _ms(v) -> float | None:
+    try:
+        return float(v) / 1000.0 if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def opencode_agents(session: str, *, live: bool | None = None) -> list[dict] | None:
+    """An opencode thread's subagents, as the §6.12 rows. Each is a call of
+    opencode's `task` tool, whose part says it all: the child session it
+    runs in (`state.metadata.sessionId`, the row's id), what it was asked
+    (`input.description`, `subagent_type`), and its status — `completed` →
+    done, `error` → failed (stopped when it was aborted), `running` or
+    `pending` → running while the thread is live, else stopped (it died with
+    the server). Steps are the child session's tool calls. None when the
+    thread has no messages at all."""
+    from agent_media_core import harnesses
+
+    if not harnesses.opencode_rows("select 1 from message where session_id = ? limit 1",
+                                   (session,)):
+        return None
+    calls = harnesses.opencode_rows(
+        "select data from part where session_id = ? and json_extract(data, '$.type') = 'tool' "
+        "and json_extract(data, '$.tool') = 'task' order by id", (session,))
+    if not calls:
+        return []
+    if live is None:
+        live = _live(session)
+    rows = []
+    for (data,) in calls:
+        try:
+            p = json.loads(data)
+        except ValueError:
+            continue
+        st = p.get("state") if isinstance(p, dict) else None
+        st = st if isinstance(st, dict) else {}
+        meta = st.get("metadata") if isinstance(st.get("metadata"), dict) else {}
+        child = str(meta.get("sessionId") or "")
+        if not AGENT_ID.fullmatch(child):
+            continue
+        inp = st.get("input") if isinstance(st.get("input"), dict) else {}
+        t = st.get("time") if isinstance(st.get("time"), dict) else {}
+        status = str(st.get("status") or "")
+        if status == "completed":
+            status = "done"
+        elif status == "error":
+            status = "stopped" if "abort" in str(st.get("error") or "").lower() else "failed"
+        else:
+            status = "running" if live else "stopped"
+        steps = []
+        for (sd,) in harnesses.opencode_rows(
+                "select data from part where session_id = ? "
+                "and json_extract(data, '$.type') = 'tool' order by id", (child,)):
+            try:
+                sp = json.loads(sd)
+            except ValueError:
+                continue
+            sst = sp.get("state") if isinstance(sp.get("state"), dict) else {}
+            stt = sst.get("time") if isinstance(sst.get("time"), dict) else {}
+            steps.append((str(sst.get("title") or sp.get("tool") or ""),
+                          _ms(stt.get("end")) or _ms(stt.get("start"))))
+        start = _ms(t.get("start")) or time.time()
+        end = _ms(t.get("end"))
+        last = max([start, end or 0.0, *[a for _, a in steps if a]])
+        rows.append({
+            "id": child,
+            "description": str(inp.get("description") or st.get("title") or ""),
+            "agent_type": str(inp.get("subagent_type") or ""),
+            "is_fork": False, "parent_id": None, "depth": 1,
+            "started_at": round(start, 3),
+            "ended_at": round(end or last, 3) if status != "running" else None,
+            "status": status,
+            "current_step": (steps[-1][0] or None) if steps and status == "running" else None,
+            "steps": len(steps),
+            "last_at": round(last, 3),
+        })
+    rows.sort(key=lambda r: (r["started_at"], r["id"]))
+    return rows
+
+
 def agents(session: str, *, live: bool | None = None, now: float | None = None) -> list[dict] | None:
     """Every subagent of `session`, in start order — the §6.12 rows — or None
     when the session has no transcript. `live`: whether the thread's session
     is running, when the caller already knows (else it is looked up)."""
+    from agent_media_core import harnesses
+
+    if harnesses.is_opencode(session):
+        return opencode_agents(session, live=live)
     path = transcript.transcript_path(session)
     if not path:
         return None
@@ -431,6 +516,21 @@ def agent_log(session: str, agent_id: str, *, limit: int, before: str = "") -> t
     "agent": <row>, "messages", "older"}`. Its first message is the prompt
     it was given. Speech never joins (`spoken` is always null): a subagent's
     words are not spoken."""
+    from agent_media_core import harnesses
+
+    if harnesses.is_opencode(session):
+        # Its own session, read as any opencode thread is.
+        row = next((r for r in agents(session) or [] if r["id"] == agent_id), None)
+        got = transcript._opencode_page(agent_id, limit=limit, before=before) if row else None
+        if got is None:
+            return False, {"error": "no such agent", "status": 404}
+        msgs, older = got
+        transcript.strip_markers(msgs)
+        if row["status"] != "running":
+            for m in msgs:
+                if isinstance(m.get("turn"), dict):
+                    m["turn"]["running"] = False
+        return True, {"session": session, "agent": row, "messages": msgs, "older": older}
     path = agent_path(session, agent_id)
     if not path:
         return False, {"error": "no such agent", "status": 404}
