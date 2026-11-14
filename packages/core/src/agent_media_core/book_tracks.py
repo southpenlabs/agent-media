@@ -605,7 +605,10 @@ def _live_turn(session: str) -> Optional[dict]:
             "paused": bool(paused_at),
             # Set on a replay: which history row is audible again, so the
             # transcript can light up that line rather than add a new one.
-            "history_id": int(ex.get("history_id") or 0)}
+            "history_id": int(ex.get("history_id") or 0),
+            # A person's message in a Matrix room read out for the first time
+            # (no history row yet): which one (matrix._join_speech).
+            **({"matrix_event": str(ex["matrix_event"])} if ex.get("matrix_event") else {})}
 
 
 def conversation_log(session: str) -> list:

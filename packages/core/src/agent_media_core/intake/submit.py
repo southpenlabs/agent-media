@@ -4000,6 +4000,10 @@ def _submit_remote_say(text: str, cmd: str, coordinator: Coordinator,
     if (event.metadata or {}).get("dedup_key"):
         # What joins the live line to its message (see the local lane).
         source_extras["dedup_key"] = event.metadata["dedup_key"]
+    if (event.metadata or {}).get("matrix_event"):
+        # A person's message in a room: which one, for its follow-along (see
+        # the local lane).
+        source_extras["matrix_event"] = event.metadata["matrix_event"]
     # Per-sentence state for a lane that renders and plays the whole reply on
     # another device. We split the text the same way the local path does; the
     # renderer tells us where each sentence lands (or, failing that, how long
@@ -5571,6 +5575,11 @@ def _submit_event(event: Event,
                     extras.update({k: event.metadata[k] for k in
                                    ("thinking", "thinking_message", "thinking_part")
                                    if k in event.metadata})
+                if (event.metadata or {}).get("matrix_event"):
+                    # A person's message in a room, read out the first time:
+                    # which one, so the room's view can follow it along
+                    # (matrix._join_speech) before its history row exists.
+                    extras["matrix_event"] = event.metadata["matrix_event"]
                 if arriving:
                     extras["streaming"] = True
                 # A notification or an alert, not a reply or a question:

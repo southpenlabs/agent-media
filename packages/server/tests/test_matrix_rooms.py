@@ -214,6 +214,43 @@ def test_held_speech_is_a_play_on_its_message(one_room):
     assert "unheard" not in matrix.envelope(one_room, limit=30)["messages"][1]["spoken"]
 
 
+def _live(**kw):
+    return {"at": 9.0, "text": "Sam: hello there. How are you?",
+            "sentences": ["Sam: hello there.", "How are you?"], "sentence": 1,
+            "offsets": [0.0, 1.4], "elapsed": 2.0, "server_time": 100.0,
+            "delay": 0.0, "paused": False, "history_id": 0, **kw}
+
+
+def test_a_message_being_played_follows_along(one_room, monkeypatch):
+    """A person's message replayed by its Play (history_id) carries the clock,
+    its first sentence without the spoken "Sam: " the message does not show."""
+    from agent_media_core.state import StateStore
+
+    one_room.load()
+    rid = StateStore().add_history(sink="speech", uri="/tmp/x.ogg", started_at=5.0,
+                                   extras={"session": one_room.thread,
+                                           "matrix_event": "$2", "held": True})
+    monkeypatch.setattr(matrix, "_live_turn", lambda t: _live(history_id=rid))
+    by = {m["id"]: m for m in matrix.envelope(one_room, limit=30)["messages"]}
+    sp = by["$2"]["spoken"]
+    assert "unheard" not in sp
+    assert sp["live"]["sentences"] == ["hello there.", "How are you?"]
+    assert sp["live"]["sentence"] == 1 and sp["live"]["offsets"] == [0.0, 1.4]
+    assert by["$1"]["spoken"] is None
+    from agent_media_server import transcript
+    assert transcript.live_of(list(by.values()))["id"] == "$2"
+
+
+def test_a_message_read_out_first_time_follows_along(one_room, monkeypatch):
+    """Read out as it arrives, before its history row: joined by its event."""
+    one_room.load()
+    monkeypatch.setattr(matrix, "_live_turn", lambda t: _live(matrix_event="$2"))
+    by = {m["id"]: m for m in matrix.envelope(one_room, limit=30)["messages"]}
+    assert by["$2"]["spoken"]["at"] == 9.0
+    assert by["$2"]["spoken"]["live"]["sentences"][0] == "hello there."
+    assert by["$1"]["spoken"] is None
+
+
 def test_a_rooms_level_can_be_set_from_the_app(one_room, monkeypatch):
     from agent_media_core import speak_priority
     from agent_media_server import auth, pins

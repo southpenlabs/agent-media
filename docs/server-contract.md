@@ -523,7 +523,12 @@ Everything a message can be pointed at.
   follow it as an agent's reply does: quiet keeps them unplayed with a
   Play, normal plays only while the room is open. A message with speech
   has `spoken: {id, key: "", at}` (plus `unheard: true` while held), and
-  the app's Play replays it by id. **Contact** (17 Oct 2026, §6.25):
+  the app's Play replays it by id. While it is read out (its Play, or as
+  it arrives, when `id` is `null` until its row is written) it has
+  `spoken.live` too, as a reply does (§6.2), so the app bolds and follows
+  it; the spoken name is taken off the first sentence, which the message
+  does not show (14 Nov 2026). A voice note has no sentences and no
+  `live`. **Contact** (17 Oct 2026, §6.25):
   `"contact": {"id", "name"}`, the one person the room is with, from the
   phone's contacts — so Messages can group a person's rooms without asking
   again. **Absent** when no contact matches (a group, a stranger, a server

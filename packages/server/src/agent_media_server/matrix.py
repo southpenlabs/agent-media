@@ -1133,14 +1133,56 @@ def _join_speech(thread: str, messages: list[dict]) -> None:
     except Exception as e:  # noqa: BLE001 — no Play is the cost, not the thread
         log.warning("matrix %s: speech unreadable: %s", thread[:8], e)
         return
+    live = _live_turn(thread)
     for m in messages:
         row = rows.get(m["id"])
-        if row is None:
+        now = live is not None and (
+            (row is not None and live.get("history_id") == row["id"])
+            or (live.get("matrix_event") and live["matrix_event"] == m["id"]))
+        if row is None and not now:
             continue
-        ex = row["extras"]
-        m["spoken"] = {"id": row["id"], "key": "", "at": row["started_at"],
+        ex = row["extras"] if row is not None else {}
+        m["spoken"] = {"id": row["id"] if row is not None else None, "key": "",
+                       "at": row["started_at"] if row is not None else live.get("at"),
                        **({"unheard": True} if ex.get("held") and not ex.get("heard")
-                          else {})}
+                          and not now else {})}
+        if now:
+            # Being read out now, live or by its Play: the clock the app bolds
+            # and follows by, as an agent's reply has (transcript._spoken)
+            # (David, 14 Nov 2026: "let's add follow along to people messages").
+            m["spoken"]["live"] = _live_fields(live, m)
+            live = None
+
+
+def _live_turn(thread: str) -> dict | None:
+    from agent_media_core import book_tracks
+
+    try:
+        return book_tracks._live_turn(thread)
+    except Exception as e:  # noqa: BLE001 — no bold is the cost, not the thread
+        log.warning("matrix %s: live speech unreadable: %s", thread[:8], e)
+        return None
+
+
+def _live_fields(live: dict, m: dict) -> dict:
+    """`spoken.live` for a person's message. Its words are read as "<name>:
+    <words>" (intake-matrix `_speak_text`), so the first sentence starts with
+    a name the message does not show: taken off, or the app finds no sentence
+    in the text and draws the spoken ones instead of the message. The timing
+    is unchanged — the bold simply holds on the first sentence while the name
+    is said."""
+    from .transcript import LIVE_FIELDS
+
+    out = {k: live.get(k) for k in LIVE_FIELDS}
+    sentences = list(out.get("sentences") or [])
+    text = next((p.get("text") or "" for p in m.get("parts") or []
+                 if p.get("type") == "text"), "").lstrip()
+    if sentences and ": " in sentences[0]:
+        name, rest = sentences[0].split(": ", 1)
+        if len(name) <= 80 and not text.startswith(name + ":"):
+            sentences[0] = rest
+    out["sentences"] = sentences
+    return out
 
 
 def envelope(r: Room, *, limit: int, before: str = "", around: str = "",
