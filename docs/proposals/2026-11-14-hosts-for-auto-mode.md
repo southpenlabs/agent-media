@@ -89,6 +89,40 @@ scp, rsync, the server's own jobs) is administering their own machines.
 3. **`hosts` in agent-media.** The profile row, the scheduled refresh and
    the tag, beside `messaging`.
 
+## Roles: the server sets them, Drupal caps them
+
+Chosen 14 Nov 2026 (David, question card: "Both, Drupal as a ceiling").
+Today each server keeps a role for each paired device (admin, member,
+guest; devices.py), and sasonica.com has no roles or permissions of its own
+(`sasonica_oidc` defines none and checks none; its source is
+`southpenlabs/websites`, `sites/sasonica`).
+
+- **The server stays the authority** for who has which role there. A
+  server signed into with no account (paired by QR) has only its own roles,
+  as now, and works with sasonica.com down.
+- **Drupal sets a ceiling per account.** Three permissions in
+  `sasonica_oidc.permissions.yml`, given to Drupal roles:
+  `sasonica server admin` (may be admin on a server), `sasonica server
+  member` (at most member), and none (at most guest). The ceiling is the
+  highest the account's roles grant. Every signed-in account gets
+  `sasonica server admin` through the authenticated role at first, so
+  nothing changes for anyone today; a role without it (a shared or hosted
+  account, a child's) lowers the ceiling.
+- **The server applies it.** An account device's effective role is the
+  lower of its own role and the account's ceiling: `role_of()` takes
+  `min(local, ceiling)`. The ceiling arrives as a claim in the token at
+  sign-in (`sasonica_role_ceiling`) and is refreshed with the daily report,
+  whose answer carries it. An account with no answer yet keeps its last
+  ceiling; one never seen has none, so the local role holds.
+- **It only ever lowers.** A ceiling can take admin away; it never makes
+  anyone admin. Making someone admin of a home server still needs that
+  server. A compromised sasonica.com account can lock its owner out of
+  admin, but cannot give itself a server.
+- **The report carries the result.** Each server reports the account's
+  effective role on it (`role`) and its paired hosts (`hosts`).
+  `GET /api/servers` returns them, and the hosts line is built from the
+  servers where it is `admin`.
+
 ## What goes
 
 - The hand-written host line in red2's settings, once `hosts` writes its
