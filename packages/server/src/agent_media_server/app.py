@@ -463,7 +463,7 @@ CORS_PATHS = CORS_PATHS | AUDIO_PATHS
 
 # What is playing, and its controls: the Media tab (music.py). The same
 # arrangement.
-MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions",
+MUSIC_PATHS = frozenset({"/music", "/music/recent", "/music/radio", "/music/channel", "/music/versions", "/music/voted",
                          "/music/discover", "/music/brainz"})
 CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
@@ -4705,6 +4705,12 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
             q = parse_qs(h.path.partition("?")[2])
             one = lambda k: (q.get(k) or [""])[0].strip()  # noqa: E731
             ok, detail = music.brainz(_bearer(h), one("search"), one("artist"), one("album"), one("name"))
+    elif path == "/music/voted":
+        # One song's card state, read only (music.voted): Sing it out's keys.
+        if method != "GET":
+            return False
+        q = parse_qs(h.path.partition("?")[2])
+        ok, detail = music.voted(_bearer(h), (q.get("uri") or [""])[0])
     elif path == "/music/versions":
         if method != "GET":
             return False

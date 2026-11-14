@@ -839,6 +839,20 @@ def test_a_songs_rotation_is_turned_up_and_down(server, signed_in, audio_host, p
     assert player == []
 
 
+def test_a_songs_card_state_is_read_without_changing_it(server, signed_in, audio_host, player):
+    """GET /music/voted: what an action's `voted` says, for a song in no list
+    (Sing it out's), before any key is pressed (David, 14 Nov 2026)."""
+    res, obj = call(server, "GET", "/music/voted?uri=" + OTHER, headers=AUTH)
+    assert res.status == 200 and obj["voted"]["rotation"] in (0, None) and obj["voted"]["liked"] is False
+    call(server, "POST", "/music", {"action": "rotation", "uri": OTHER, "step": 1}, AUTH)
+    call(server, "POST", "/music", {"action": "rotation", "uri": OTHER, "step": 1}, AUTH)
+    res, obj = call(server, "GET", "/music/voted?uri=" + OTHER, headers=AUTH)
+    assert obj["voted"]["rotation"] == 2 and obj["voted"]["uri"] == OTHER
+    assert call(server, "GET", "/music/voted?uri=file:///x", headers=AUTH)[0].status == 400
+    assert call(server, "POST", "/music/voted?uri=" + OTHER, {}, AUTH)[0].status in (404, 405)
+    assert player == []
+
+
 def test_the_pickers_honour_a_songs_rotation(server, signed_in, monkeypatch):
     """The backing music's favourite (and so Sing it out's song) and a
     station's refill weigh a song by its rotation."""

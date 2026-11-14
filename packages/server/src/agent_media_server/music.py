@@ -1275,6 +1275,23 @@ def channel(bearer: str, name: str = "", url: str = "", vid: str = "") -> tuple[
     return True, {"channel": got}
 
 
+def voted(bearer: str, uri: str = "") -> tuple[bool, dict]:
+    """`GET /music/voted?uri=…` — gated like /music/recent: one song's card
+    state, the `voted` an action answers with (liked, disliked,
+    bed_suggested, rotation, moods), read without changing anything. For a
+    song that is in no list, such as the one Sing it out sings (David, 14
+    Nov 2026: "I'd also like to be able to pull up or down on its rating
+    counter"): the app shows its rotation and backing-music state before a
+    key is pressed."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    uri = (uri or "").strip()
+    if not uri.startswith(("yt:", "http://", "https://")):
+        return False, {"error": "uri must be a yt: or web address", "status": 400}
+    return True, {"voted": _voted(uri)}
+
+
 def versions(bearer: str, uri: str = "", title: str = "") -> tuple[bool, dict]:
     """`GET /music/versions?uri=…[&title=…]` — gated like /music/recent:
     other recordings of the song (live, acoustic, remix, cover, remaster,

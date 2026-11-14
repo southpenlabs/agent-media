@@ -4844,6 +4844,15 @@ cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
   every `/music` answer has `"rotation"`: what is playing's level (null
   when it is no YouTube song).
   With no station it is `next`.
+- **One song's card state, read only** (14 Nov 2026; David: "I'd also
+  like to be able to pull up or down on its rating counter"):
+  `GET /music/voted?uri=<yt: or web address>` (gated like /music/recent)
+  → `{"ok": true, "voted": {"uri", "liked", "disliked", "bed_suggested",
+  "rotation", "moods"}}`, the `voted` an action answers with, changing
+  nothing: for a song in no list, such as the one Sing it out sings, so the
+  app shows its rotation and backing-music state before a key is pressed.
+  400 for another `uri`. `GET /features` `music_voted` says the server has
+  it.
 - **A song inside a mix** (12 Nov 2026; David, 11–12 Nov: songs inside a
   YouTube mix "should be liked and rotated as songs in their own right";
   `agent_media_core.mix_songs`, features `mix_songs`). A clip with two or
@@ -5669,6 +5678,7 @@ local look, never a network call:
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Outros", formerly "Sung out") (8 Nov 2026) |
 | `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
 | `storage` | always: `GET`/`POST /storage` (§6.5, 14 Nov 2026) — how long rendered clips, the music log and play history are kept, and the scheduled jobs' last runs, for Settings → Storage |
+| `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
