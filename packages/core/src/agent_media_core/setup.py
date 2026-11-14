@@ -1750,6 +1750,24 @@ def _hook_installed(path: Path, match: str) -> bool:
     return False
 
 
+def _through_current(path: str) -> str:
+    """`path` inside one release (`<root>/releases/<sha>/…`) named through
+    `<root>/current/…` instead, else as it is. Run from a release, the
+    interpreter is that release's own, by its real path, so the hooks were
+    written into that one folder; `media update` keeps three releases, and when
+    it pruned that one every hook failed and no reply was spoken or filed
+    (14 Nov 2026, from 13:26: replies had no Play)."""
+    try:
+        from . import release
+
+        rel = Path(path).relative_to(release.releases_dir())
+    except Exception:  # noqa: BLE001 — not in a release
+        return path
+    if len(rel.parts) < 2:
+        return path
+    return str(release.current_link().joinpath(*rel.parts[1:]))
+
+
 def hook_command(name: str = CLAUDE_HOOK_COMMAND) -> str:
     """The speech hook as a path a hook can actually run.
 
@@ -1764,6 +1782,7 @@ def hook_command(name: str = CLAUDE_HOOK_COMMAND) -> str:
     found = str(beside) if beside.exists() else shutil.which(name)
     if not found:
         return name
+    found = _through_current(found)
     # `$HOME/...`, not this user's expanded path: hooks run through a shell,
     # and the same settings file is read on machines whose home is elsewhere.
     home = str(Path.home())

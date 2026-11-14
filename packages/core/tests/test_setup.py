@@ -962,6 +962,23 @@ def test_the_hook_is_named_by_a_path_a_hook_can_run(monkeypatch, tmp_path):
     assert setup.hook_command() == setup.CLAUDE_HOOK_COMMAND
 
 
+def test_a_hook_written_from_a_release_names_current(monkeypatch, tmp_path):
+    """Run from a release, the interpreter is that release's own: the hook
+    is named through `current`, so pruning that release does not break it
+    (14 Nov 2026: hooks pinned to releases/403b589c4ac7 failed once it went,
+    and no reply was spoken or filed)."""
+    home = tmp_path / "home"
+    rel = home / ".local" / "share" / "agent-media"
+    binx = rel / "releases" / "403b589c4ac7" / ".venv" / "bin"
+    binx.mkdir(parents=True)
+    (binx / setup.CLAUDE_HOOK_COMMAND).write_text("#!/bin/sh\n")
+    monkeypatch.setenv("MEDIA_RELEASE_ROOT", str(rel))
+    monkeypatch.setattr(setup.sys, "executable", str(binx / "python3"))
+    monkeypatch.setattr(setup.Path, "home", classmethod(lambda cls: home))
+    assert setup.hook_command() == \
+        f"$HOME/.local/share/agent-media/current/.venv/bin/{setup.CLAUDE_HOOK_COMMAND}"
+
+
 def test_the_loopback_bridges_belong_where_the_phone_is():
     """They expose THIS device's own mpv on 127.0.0.1 for apps on the same
     phone. Declaring no roles means "wanted everywhere", which is how red5
