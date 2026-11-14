@@ -37,6 +37,12 @@ allow and deny rules decide, the user's do not apply, the user's hooks still
 run, and anything else is a card. The folder must be trusted once
 (Claude Code's trust dialog) or its allow rules are ignored.
 
+## Step 2: wakes (proposed)
+
+A message for a thread and when to send it (boot, a time, an interval, an
+event), kept by sessiond and fired through `wake`, with a quiet heartbeat:
+[wakes](2026-11-14-wakes.md).
+
 ## Later
 
 - **Routines in the app** (roadmap 11): make, list and pause them from the
