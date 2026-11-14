@@ -93,7 +93,11 @@ def test_generic_hook_engine_does_not_mask_a_conversation_voice(monkeypatch):
     monkeypatch.delenv("CODEX_TTS_VOICE", raising=False)
     monkeypatch.setattr(_hook_stdin, "_load_env_file", lambda _: None)
     submitted = []
-    monkeypatch.setattr(_hook_stdin, "submit_event", submitted.append)
+    # A conversation's reply plays through Claude Code's Stop path.
+    from agent_media_core.intake import hook_claude_code, toast
+
+    monkeypatch.setattr(hook_claude_code, "_play_detached", submitted.append)
+    monkeypatch.setattr(toast, "should_hold", lambda s: False)
 
     assert _hook_stdin.run(Source.CODEX, "CODEX", text="A reply",
                            metadata={"session": A}) == 0
@@ -110,7 +114,11 @@ def test_explicit_hook_engine_still_wins_over_conversation_voice(monkeypatch):
     monkeypatch.setenv("CODEX_TTS_ENGINE", "kokoro")
     monkeypatch.setattr(_hook_stdin, "_load_env_file", lambda _: None)
     submitted = []
-    monkeypatch.setattr(_hook_stdin, "submit_event", submitted.append)
+    # A conversation's reply plays through Claude Code's Stop path.
+    from agent_media_core.intake import hook_claude_code, toast
+
+    monkeypatch.setattr(hook_claude_code, "_play_detached", submitted.append)
+    monkeypatch.setattr(toast, "should_hold", lambda s: False)
 
     assert _hook_stdin.run(Source.CODEX, "CODEX", text="A reply",
                            metadata={"session": A}) == 0

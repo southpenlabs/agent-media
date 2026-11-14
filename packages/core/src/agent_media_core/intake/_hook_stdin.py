@@ -70,6 +70,22 @@ def run(source: Source, env_prefix: str, *, text: str | None = None,
             f"{env_prefix}_TTS_VOICE_{voice_engine.upper().replace('-', '_')}")
     voice = voice or os.environ.get(f"{env_prefix}_TTS_VOICE")
 
+    session = str((metadata or {}).get("session") or "")
+    if session:
+        # A reply in a conversation: through Claude Code's Stop path, so its
+        # `[[replies:]]`/`[[actions:]]` become the reply box's chips, its
+        # `[[sound:]]`/`[[tune:]]`/`[[visual:]]` act rather than vanish or
+        # are read out, and the conversation's speech level and toast hold
+        # apply — with this harness's own voice and engine, as before.
+        from .hook_claude_code import _handle_stop
+
+        extra = {k: v for k, v in (metadata or {}).items() if k not in ("session", "cwd")}
+        payload = {"session_id": session, "last_assistant_message": raw}
+        if (metadata or {}).get("cwd"):
+            payload["cwd"] = metadata["cwd"]
+        return _handle_stop(payload, source=source, voice=voice, engine=engine,
+                            session_voice=False, extra=extra)
+
     submit_event(Event(
         text=cleaned,
         source=source,

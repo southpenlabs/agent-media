@@ -364,9 +364,12 @@ def test_antigravity_and_rate_limit_warning_notifications(host, monkeypatch):
 
     # Antigravity streamed reply is preserved for speech even when result.response is empty
     # or when agy reports status='ERROR' from an earlier failed step in the trajectory.
-    from agent_media_core.intake import _hook_stdin
+    # A reply in a conversation is played through Claude Code's Stop path
+    # (_hook_stdin.run → hook_claude_code._handle_stop).
+    from agent_media_core.intake import hook_claude_code, toast
     spoken = []
-    monkeypatch.setattr(_hook_stdin, "submit_event", lambda ev, **kw: spoken.append((ev.metadata.get("session"), ev.text, ev.metadata.get("dedup_key"))))
+    monkeypatch.setattr(toast, "should_hold", lambda s: False)
+    monkeypatch.setattr(hook_claude_code, "_play_detached", lambda ev, **kw: spoken.append((ev.metadata.get("session"), ev.text, ev.metadata.get("dedup_key"))))
     s.agy_queue.append("u1")
     antigravity_adapter.event(host.sup, s, {
         "event": "step_update",

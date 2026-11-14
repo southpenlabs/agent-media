@@ -1468,12 +1468,16 @@ def _handle_stop_failure(payload: dict) -> int:
 
 
 def _handle_stop(payload: dict, *, source: Source = Source.CLAUDE_CODE,
-                 voice: Optional[str] = None) -> int:
+                 voice: Optional[str] = None, engine: Optional[str] = None,
+                 session_voice: bool = True, extra: Optional[dict] = None) -> int:
     """Stop path: get the assistant's final text and speak it (detached).
 
-    opencode's hook hands its reply here too (`source`, and its own
-    `OPENCODE_TTS_VOICE` as `voice`), so its markers, speech level, toast
-    hold and follow-up work as a Claude reply's do (intake/hook_opencode.py)."""
+    The other harnesses hand their replies here too (`_hook_stdin.run`,
+    intake/hook_opencode.py): `source`, their own `<PREFIX>_TTS_VOICE` and
+    `_ENGINE` as `voice` and `engine`, no voice picked by the tmux session
+    (`session_voice`, which only Claude's replies ever had) and their own
+    metadata (`extra`), so their markers, speech level, toast hold and
+    follow-up work as a Claude reply's do."""
     # Prefer the text straight off the Stop payload — no transcript read, parse,
     # or flush-retry. `last_assistant_message` is "the full text of Claude's
     # response" (Stop/SubagentStop only).
@@ -1519,7 +1523,7 @@ def _handle_stop(payload: dict, *, source: Source = Source.CLAUDE_CODE,
     # backgrounded process and return immediately. Dedup, the stop stamp, and all
     # now_playing writes happen there on a fresh StateStore (see _play_now), so
     # the parent opens no DB connection to fork across.
-    metadata = {"kind": "stop", "session": payload.get("session_id") or "",
+    metadata = {**(extra or {}), "kind": "stop", "session": payload.get("session_id") or "",
                 **_source_place(payload.get("session_id") or "")}
     # The folder the agent works in: its `reply` tone is in that project's
     # key (earcons.reply_key).
@@ -1613,7 +1617,8 @@ def _handle_stop(payload: dict, *, source: Source = Source.CLAUDE_CODE,
     metadata["voice_from"] = "session"
     event = Event(text=text, source=source,
                   priority=Priority.HIGH if level == "interrupt" else Priority.NORMAL,
-                  voice=voice or voice_for_session(_session_name()),
+                  voice=voice or (voice_for_session(_session_name()) if session_voice else None),
+                  engine=engine,
                   metadata=metadata)
     if os.environ.get("MEDIA_HOOK_HOLD"):
         # sessiond's second try at a reply whose first hook died with its

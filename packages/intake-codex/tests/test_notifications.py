@@ -18,7 +18,13 @@ def events(monkeypatch):
     return captured
 
 
-def test_notification_metadata_and_text(events):
+def test_notification_metadata_and_text(events, monkeypatch):
+    # A reply in a conversation goes through Claude Code's Stop path
+    # (_hook_stdin.run), which plays it detached.
+    from agent_media_core.intake import hook_claude_code, toast
+
+    monkeypatch.setattr(hook_claude_code, "_play_detached", events.append)
+    monkeypatch.setattr(toast, "should_hold", lambda s: False)
     assert codex.main([json.dumps({
         "type": "agent-turn-complete", "last-assistant-message": "Hello world",
         "thread-id": "01a0a6f1-ed4b-7f91-8d63-a61653a846f9",
@@ -28,10 +34,9 @@ def test_notification_metadata_and_text(events):
     assert len(events) == 1
     assert events[0].text == "Hello world"
     assert events[0].source == Source.CODEX
-    assert events[0].metadata == {
-        "kind": "stop", "session": "01a0a6f1-ed4b-7f91-8d63-a61653a846f9",
-        "turn_id": "turn-456", "cwd": "/home/x/work",
-    }
+    md = events[0].metadata
+    assert md["kind"] == "stop" and md["session"] == "01a0a6f1-ed4b-7f91-8d63-a61653a846f9"
+    assert md["turn_id"] == "turn-456" and md["cwd"] == "/home/x/work"
 
 
 def test_thread_id_that_is_not_a_session_is_dropped(events):

@@ -177,28 +177,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def speak(session: str, text: str, cwd: str = "") -> int:
-    """The reply, through Claude Code's Stop path (hook_claude_code
-    `_handle_stop`): its `[[replies:]]`, `[[actions:]]`, `[[sound:]]`,
-    `[[tune:]]` and `[[visual:]]` markers, the conversation's speech level
-    and toast hold, and the follow-up, as a Claude reply gets them. The
-    switches `_hook_stdin.run` honoured are kept: MEDIA_HOOK_ENABLED,
-    OPENCODE_TTS_ENABLED, OPENCODE_TTS_VOICE."""
-    import os
+    """The reply, spoken as every harness's is (`_hook_stdin.run`, which
+    hands a conversation's reply to Claude Code's Stop path: its markers,
+    speech level, toast hold and follow-up), with the OPENCODE_TTS_*
+    switches."""
+    from ._hook_stdin import run
 
-    from ._env import load_env_file
-    from .hook_claude_code import _handle_stop
-
-    if os.environ.get("MEDIA_HOOK_ENABLED", "1") == "0":
-        return 0
-    if os.environ.get("OPENCODE_TTS_ENABLED", "1") == "0":
-        return 0
-    load_env_file("hook-opencode")
-    payload = {"session_id": session, "last_assistant_message": text}
-    if cwd:
-        payload["cwd"] = cwd  # the reply tone's key (one server holds every folder)
-    return _handle_stop(payload,
-                        source=Source.OPENCODE,
-                        voice=os.environ.get("OPENCODE_TTS_VOICE") or None)
+    # The folder is the reply tone's key (one server holds every folder).
+    return run(Source.OPENCODE, "OPENCODE", text=text,
+               metadata={"session": session, **({"cwd": cwd} if cwd else {})})
 
 
 if __name__ == "__main__":

@@ -56,13 +56,22 @@ give it a sessiond backend of its own.
    thread because it answers only at the end of the turn. Any other `/word`
    is sent as words. Checked against opencode 1.19.5: a user command and a
    skill both run through it.
-7. **Background agents.** sessiond refuses list and stop for opencode
-   ("no background agents"). opencode's subagents are child sessions
-   (`parent_id`), so listing them and aborting one maps directly.
+7. **Background agents.** Done (15 Nov 2026): an opencode thread's agents
+   strip is its `task` tool's calls (`agents.opencode_agents`). Each one's
+   part names the child session it runs in, which becomes the row's id, plus
+   what it was asked and its status. Its steps are the child's tool calls,
+   and its log is the child session read as a thread. Stop aborts the child
+   session through sessiond, and only a child of that chat. A message asks
+   the main agent to resume the subagent with the task tool and its
+   `task_id`. The part's shape is what opencode 1.19.5 wrote for a real
+   `general` subagent.
 8. **Relocate.** A chat cannot be moved to another folder (opencode keeps
    sessions per directory). This is rarely needed; leave it.
-9. **The other harnesses have the gap item 2 fixed for opencode.** Codex,
-   pi, Gemini CLI and Grok are told the notes (`note_for`), but their
-   replies go through the generic `_hook_stdin.run`. That drops their reply
-   chips and reads a `[[visual:]]` marker aloud. The same change applies to
-   each.
+9. **The other harnesses' replies.** Done (15 Nov 2026): `_hook_stdin.run`,
+   which Codex, pi, Gemini CLI, Grok, Antigravity and opencode all speak
+   through, hands a reply that names its conversation to Claude Code's Stop
+   path (`_handle_stop` with the harness's `source`, its own
+   `<PREFIX>_TTS_VOICE`/`_ENGINE`, no tmux-session voice and its own
+   metadata). So their `[[replies:]]` and `[[actions:]]` become chips, a
+   `[[visual:]]` is drawn rather than read aloud, and the speech level and
+   toast hold apply. A reply with no conversation is submitted as before.
