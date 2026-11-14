@@ -1404,7 +1404,7 @@ def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
 
     if not driver.headless_enabled() and not any(r.get("agent") == "antigravity" for r in sessiond.records()):
         return []
-    views = [v for v in driver.headless_driver().rows()
+    views = [v for v in driver.headless_driver().all_rows()
              if v.get("session") and v["session"] not in seen
              and (driver.headless_enabled() or v.get("agent") == "antigravity")]
     live = [v for v in views if v.get("live")]

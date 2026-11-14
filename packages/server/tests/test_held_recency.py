@@ -23,6 +23,9 @@ class FakeHeadless:
     def rows(self, live=False):
         return self.views
 
+    def all_rows(self):
+        return self.views
+
 
 def _view(sid, last, held=(), live=False):
     return {"session": sid, "agent": "claude", "cwd": "/tmp", "state": "parked",

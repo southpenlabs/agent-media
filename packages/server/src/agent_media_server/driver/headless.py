@@ -435,6 +435,23 @@ class HeadlessDriver:
             return []
         return [{**rec, "live": False} for rec in sessiond.records()]
 
+    def all_rows(self) -> list[dict]:
+        """Every session, as `rows()` gives them, with only the live ones
+        asked of sessiond: an ended session's view is its record on disk
+        plus `live: false` (checked field by field on red2, 14 Nov 2026: 706
+        ended, no difference), and `sessiond.records()` keeps those parsed.
+        The whole list over the socket was 0.82 MB a call, for the thread
+        list and search. With sessiond down, the records, none live."""
+        from .. import sessiond
+
+        r = call("list", timeout=5.0, live=True)
+        recs = sessiond.records()
+        if not r.get("ok"):
+            return [{**rec, "live": False} for rec in recs]
+        live = [v for v in r.get("sessions") or [] if v.get("live")]
+        ids = {v.get("session") for v in live}
+        return live + [{**rec, "live": False} for rec in recs if rec.get("session") not in ids]
+
     def state(self, session: str) -> dict:
         v = self.view(session)
         return {"state": v["state"], "live": v["live"], "pane": None}

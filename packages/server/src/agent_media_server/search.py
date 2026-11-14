@@ -1547,7 +1547,7 @@ def _owned_headless() -> set[str]:
     if not driver.headless_enabled():
         return set()
     try:
-        return {str(v.get("session")) for v in driver.headless_driver().rows() if v.get("session")}
+        return {str(v.get("session")) for v in driver.headless_driver().all_rows() if v.get("session")}
     except Exception:  # noqa: BLE001
         return set()
 

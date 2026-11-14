@@ -90,6 +90,9 @@ class FakeHeadless:
     def rows(self, live=False):
         return [self.v]
 
+    def all_rows(self):
+        return [self.v]
+
     def view(self, session):
         from agent_media_server.driver.headless import contract_state
 
