@@ -124,7 +124,12 @@ def _engine_and_voice(event: Event, target: Target) -> tuple[str, Optional[str]]
     """The engine and voice a reply to `target` renders in here: the app's
     choice of a Microsoft voice for the server (render/device.py), unless
     the event names its own engine or voice, else the configured ones."""
-    if not event.engine and (not event.voice or (event.metadata or {}).get("voice_from") == "session"):
+    # A voice the hook gave by itself (its pane's workspace voice,
+    # voice_from "session") is not a choice: the thread's own voice and the
+    # app's choice for the target both come before it (David, 15 Nov 2026:
+    # Alloy chosen, the reply in a pane's Libby).
+    automatic = (event.metadata or {}).get("voice_from") == "session"
+    if not event.engine and (not event.voice or automatic):
         from .. import session_voice
 
         own = session_voice.voice_for(_source_session(event.metadata))
@@ -137,7 +142,8 @@ def _engine_and_voice(event: Event, target: Target) -> tuple[str, Optional[str]]
             routed = None if on_device else device_voice.engine_voice(own)
             if routed:
                 return routed
-    chosen = None if event.engine or event.voice else device_voice.server_choice(target.name)
+    chosen = (None if event.engine or (event.voice and not automatic)
+              else device_voice.server_choice(target.name))
     if chosen:
         return chosen
     engine = _resolve_engine(event)

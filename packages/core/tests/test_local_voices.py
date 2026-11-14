@@ -148,3 +148,31 @@ def test_undownloaded_voices_are_offered_with_their_size(monkeypatch):
     assert (by["piper:en_GB-alba-medium"]["installed"], by["piper:en_GB-alba-medium"]["size_bytes"]) == (False, 50)
     # Only installed ones render.
     assert [v["name"] for v in local_voices.voices()] == ["piper:en_GB-cori-high"]
+
+
+def test_a_panes_own_voice_does_not_beat_the_apps_choice(monkeypatch):
+    """A reply from a tmux pane carries the pane's workspace voice
+    (voice_from "session"); the voice chosen in the app still wins, as it
+    does for a thinking readout, which carries none (15 Nov 2026: Alloy
+    chosen, the reply said in Libby)."""
+    from agent_media_core import session_voice
+    from agent_media_core.intake import submit
+    from agent_media_core.types import Event, Source
+
+    monkeypatch.delenv("MEDIA_RENDER_ENGINE", raising=False)
+    monkeypatch.delenv("CLAUDE_TTS_ENGINE", raising=False)
+    monkeypatch.setattr(session_voice, "voice_for", lambda s: None)
+    sas = Target(name="sasonica")
+    device_voice.set_override("sasonica", "server", "kokoro:af_alloy")
+    reply = Event(source=Source.CLAUDE_CODE, text="Hi.", voice="en-GB-LibbyNeural",
+                  metadata={"voice_from": "session"})
+    assert submit._engine_and_voice(reply, sas) == ("kokoro", "af_alloy")
+    thinking = Event(source=Source.CLAUDE_CODE, text="Hmm.")
+    assert submit._engine_and_voice(thinking, sas) == ("kokoro", "af_alloy")
+    # A voice the event really names still wins.
+    own = Event(source=Source.CLAUDE_CODE, text="Hi.", voice="en-US-AvaNeural")
+    assert submit._engine_and_voice(own, sas) == ("edge", "en-US-AvaNeural")
+    # With no choice in the app, the pane's voice is used as before.
+    device_voice.set_override("sasonica", "phone", None)
+    engine, voice = submit._engine_and_voice(reply, Target(name="rooms"))
+    assert voice == "en-GB-LibbyNeural"
