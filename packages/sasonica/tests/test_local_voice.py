@@ -56,3 +56,31 @@ def test_mac_and_windows_are_told_and_nothing_runs(ran, monkeypatch, capsys, pla
     assert install._local_voice(["sasonica"], _a("kokoro:af_alloy")) == 0
     assert ran == []
     assert "Linux only for now" in capsys.readouterr().out
+
+
+def test_an_install_at_a_terminal_asks_once_no_by_default(monkeypatch, tmp_path):
+    """One plain question, "Install local voices?" (David, 15 Nov 2026: no
+    unnecessary options up front): asked only on Linux, at a terminal, when
+    Kokoro is not here, and only a yes downloads."""
+    monkeypatch.setattr(install.sys, "platform", "linux")
+    monkeypatch.setattr(install, "_windows", lambda: False)
+    monkeypatch.setattr(install, "_config_home", lambda: tmp_path)
+    monkeypatch.setattr(install.sys.stdout, "isatty", lambda: True, raising=False)
+    answers = []
+    monkeypatch.setattr(install, "_tty_answer", lambda q: answers.pop(0))
+    answers[:] = ["\n"]
+    assert install._ask_local_voices(_a(None)) is False, "no is the default"
+    answers[:] = ["y\n"]
+    assert install._ask_local_voices(_a(None)) is True
+    answers[:] = ["y\n"]
+    assert install._ask_local_voices(_a(None, dry_run=True)) is False and answers == ["y\n"]
+    unit = tmp_path / "systemd" / "user" / "agent-media-kokoro-tts.service"
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Unit]\n")
+    assert install._ask_local_voices(_a(None)) is False, "here already"
+    unit.unlink()
+    monkeypatch.setattr(install.sys.stdout, "isatty", lambda: False, raising=False)
+    assert install._ask_local_voices(_a(None)) is False, "no one watching"
+    monkeypatch.setattr(install.sys, "platform", "darwin")
+    monkeypatch.setattr(install.sys.stdout, "isatty", lambda: True, raising=False)
+    assert install._ask_local_voices(_a(None)) is False

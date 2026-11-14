@@ -50,8 +50,10 @@ has the binary instead of a checkout:
      checked against pinned sha256s, made the render fallback (default voice
      af_alloy) — `media-setup voices kokoro:<voice> --fallback`, one code
      path. `--local-voice off` removes the unit (the model stays). A Mac and
-     Windows are told it is not there yet. Without the flag nothing is
-     downloaded.
+     Windows are told it is not there yet. Without the flag, an install at
+     a terminal asks once, "Install local voices? [y/N]" (Kokoro, all its
+     voices in one download), unless it is here already; no is the default,
+     and with no terminal nothing is asked or downloaded.
 
 Safe to run again, and run again after replacing the binary: shims point at
 the binary's path, not at a version.
@@ -535,6 +537,54 @@ def _local_voice(me: list[str], a) -> int:
     return rc
 
 
+def _kokoro_here() -> bool:
+    from agent_media_core import setup_voices
+
+    unit = _config_home() / "systemd" / "user" / setup_voices.UNITS["kokoro"]
+    return unit.exists()
+
+
+def _tty_answer(question: str) -> str:
+    """One line typed at the terminal: stdin when it is one, else /dev/tty
+    (curl | bash), else "" — no terminal, no question."""
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            return input(question)
+        except EOFError:
+            return ""
+    try:
+        with open("/dev/tty", "r+") as tty:
+            tty.write(question)
+            tty.flush()
+            return tty.readline()
+    except OSError:
+        return ""
+
+
+def _ask_local_voices(a) -> bool:
+    """The one plain choice an interactive install offers about voices
+    (David, 15 Nov 2026: "It's meant to be a user-friendly system, so I
+    don't want to make too many unnecessary options up front"): local
+    voices, which is Kokoro, every one of its voices in one download, made
+    the voice used when the online one fails. Piper's voices are downloaded
+    one at a time from the app's voice settings instead. Linux only, not
+    asked when Kokoro is here already, in a dry run, or with no terminal;
+    no is the default, so nothing is downloaded without a yes."""
+    if sys.platform == "darwin" or _windows() or a.dry_run or _kokoro_here():
+        return False
+    # Someone watching: the output goes to a terminal (curl | bash keeps
+    # stdout on it; a script's or a test's is captured).
+    if not (sys.stdout is not None and sys.stdout.isatty()):
+        return False
+    print("== Local voices")
+    print("  A voice that runs on this computer: it keeps speaking when the online voice")
+    print("  is down, and more voices to choose from in the app (Kokoro: one download of")
+    print("  about 355 MB, about 540 MB of memory while it runs). You can add it later with")
+    print("  `sasonica install --local-voice kokoro`.")
+    answer = _tty_answer("  Install local voices? [y/N] ").strip().lower()
+    return answer in ("y", "yes")
+
+
 def _env_value(lines: list[str], key: str) -> str:
     for line in lines:
         if line.startswith(key + "="):
@@ -695,6 +745,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.local_speech:
         _local_speech(binary, a)
+    if not a.local_voice and _ask_local_voices(a):
+        a.local_voice = local_voice_arg("kokoro")
     if a.local_voice:
         _local_voice(me, a)
 
