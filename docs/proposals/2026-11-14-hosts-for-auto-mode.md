@@ -73,14 +73,19 @@ scp, rsync, the server's own jobs) is administering their own machines.
 
 ## What it needs that is not there
 
-1. **A read on the issuer.** The servers report is write-only from the
-   server's side. The Account page reads the list, so the data is there; a
-   `GET {iss}/api/servers` for the account's own token, returning each
-   server's name, the account's role on it and its paired hosts, is the
-   Drupal module's part. (Not checked: whether the module already has one.)
-2. **The role in the report.** Today the report sends the account's devices
-   by name and build. It would add the account's role on this server and
-   the names of the jobs workers paired here.
+1. **The read is there.** sasonica.com runs on red4, and its
+   `sasonica_oidc` module (in the `sasonica-code` volume) already has
+   `GET /api/servers` (ServersApiController::get, OAuth2, the account's own
+   token): `{ok, servers: [{id, name, api, web, devices, last_seen}]}`. A
+   server already keeps that token's refresh token from sign-in
+   (servers_report.py), so it can ask with no new credential.
+2. **The role and the hosts are not.** `report()` keeps only id, name, api,
+   web, devices and last_seen, and the server sends no role. The report
+   would add the account's role on this server (`role`) and the names of
+   the jobs workers paired here (`hosts`), and `report()` would keep the
+   two (a small change to the module, and to its `devices()`-style
+   sanitising). Until then, the line can be built from the account's
+   servers alone, with the role read locally on each server.
 3. **`hosts` in agent-media.** The profile row, the scheduled refresh and
    the tag, beside `messaging`.
 
