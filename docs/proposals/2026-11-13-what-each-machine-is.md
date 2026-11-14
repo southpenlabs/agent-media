@@ -219,9 +219,18 @@ with it (item 3 above).
    so `render` is not yet untrue. Taking them out by hand would have broken
    the worker pairing the move plan has for red5; step 2 is what lets them
    go.
-2. `server` and `sessions`: the roles, the two templates' `roles` files, the
-   session host's gate. A host that declares neither keeps what it has
-   (the same rule that brought roles in: unconfigured filters nothing).
+2. **Built 14 Nov 2026**: `server` and `sessions` are known roles; the
+   session host `requires: sessions` (with `requires-env: MEDIA_HEADLESS`
+   as before); a host declaring `origin` with MEDIA_HEADLESS on is taken
+   to have `sessions` for a release (`setup.effective_roles`), and
+   install-services says to declare it; a fresh Sasonica install declares
+   `server, sessions, origin`. `session-reap` stays on `origin`: it closes
+   tmux panes, which are where replies are produced, not a session host's.
+   `server` gates nothing until the canvas has a template (step 3). red2
+   declares `["server", "sessions", "origin", "render"]`. **red5 is left
+   as it is** until it runs this code: with an older release, a red5
+   declaring `sessions` without `origin` would lose its session host at the
+   next install-services.
 3. Templates for the canvas and the tunnel, with fewer-services §4c/§5.
 4. `[host] name` and `address`.
 5. The move rewrites the declaration; doctor checks against it.

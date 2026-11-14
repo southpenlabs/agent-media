@@ -1308,3 +1308,43 @@ def test_prune_runit_unlinks_ours_and_moves_a_local_service_aside(tmp_path,
     assert not (sv / "unwanted").is_symlink()
     # The template itself survives being unlinked from the service root.
     assert (setup.service_templates_dir() / "unwanted" / "run").is_file()
+
+
+# --- the server and sessions roles (14 Nov 2026) ------------------------------
+
+def _headless(monkeypatch, on: bool):
+    monkeypatch.setattr(setup, "_env_file_has", lambda key: on and key == "MEDIA_HEADLESS")
+
+
+def test_the_session_host_wants_sessions(monkeypatch):
+    _headless(monkeypatch, True)
+    assert setup.service_wanted("media-sessiond", {"sessions"}) == (True, "roles match")
+    assert setup.service_wanted("media-sessiond", {"server", "sessions"})[0] is True
+    wanted, why = setup.service_wanted("media-sessiond", {"render"})
+    assert wanted is False and "sessions" in why
+
+
+def test_origin_with_headless_on_still_has_its_session_host(monkeypatch):
+    _headless(monkeypatch, True)
+    wanted, why = setup.service_wanted("media-sessiond", {"render", "origin"})
+    assert wanted is True and "declare sessions" in why
+
+
+def test_without_headless_there_is_no_session_host_whatever_the_roles(monkeypatch):
+    _headless(monkeypatch, False)
+    assert setup.service_wanted("media-sessiond", {"sessions"})[0] is False
+    assert setup.service_wanted("media-sessiond", {"origin"})[0] is False
+
+
+def test_sessions_is_implied_only_by_origin_and_headless(monkeypatch):
+    _headless(monkeypatch, True)
+    assert setup.effective_roles({"origin"}) == ({"origin", "sessions"}, {"sessions"})
+    assert setup.effective_roles({"render"}) == ({"render"}, set())
+    assert setup.effective_roles({"sessions"}) == ({"sessions"}, set())
+    _headless(monkeypatch, False)
+    assert setup.effective_roles({"origin"}) == ({"origin"}, set())
+
+
+def test_the_new_roles_are_known():
+    from agent_media_core import config
+    assert {"server", "sessions"} <= set(config.KNOWN_ROLES)

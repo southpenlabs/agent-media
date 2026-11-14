@@ -610,6 +610,7 @@ def service_wanted(name: str, roles: set[str] | None) -> tuple[bool, str]:
         return False, f"needs {env_gate} in agent-media.env"
     if roles is None:
         return True, "no host roles declared"
+    roles, implied = effective_roles(roles)
     requires, conflicts = service_roles(name)
     any_of = service_roles_any(name)
     if not requires and not conflicts and not any_of:
@@ -622,7 +623,21 @@ def service_wanted(name: str, roles: set[str] | None) -> tuple[bool, str]:
     clash = conflicts & roles
     if clash:
         return False, f"conflicts with role {'+'.join(sorted(clash))}"
+    if implied & (requires | any_of):
+        return True, ("roles match (sessions taken from origin and MEDIA_HEADLESS: "
+                      "declare sessions in [host] roles)")
     return True, "roles match"
+
+
+def effective_roles(roles: set[str]) -> tuple[set[str], set[str]]:
+    """`(roles, implied)`: the declared ones, plus `sessions` for a host that
+    declares `origin` and has MEDIA_HEADLESS on — what gated the session host
+    before `sessions` was a role (14 Nov 2026), so a host that has not said
+    it yet keeps its session host. For a release; then only the declared."""
+    implied: set[str] = set()
+    if "sessions" not in roles and "origin" in roles and _env_file_has("MEDIA_HEADLESS"):
+        implied.add("sessions")
+    return roles | implied, implied
 
 
 def tmux_dir() -> Path:

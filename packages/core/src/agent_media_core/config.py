@@ -69,7 +69,11 @@ ROLES_ENV = "MEDIA_ROLES"
 
 LEGACY_ROLES_NAME = "agent-media-roles"
 
-KNOWN_ROLES = ("observe", "render", "origin")
+#: `server`: the app pairs with this machine. `sessions`: agent chats run
+#: here (a server's own, or a worker's for another server). The first three
+#: are about sound (setup.py, "Host roles");
+#: docs/proposals/2026-11-13-what-each-machine-is.md has the two new ones.
+KNOWN_ROLES = ("observe", "render", "origin", "server", "sessions")
 
 
 def legacy_roles_path() -> Path:

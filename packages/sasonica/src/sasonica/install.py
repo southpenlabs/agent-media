@@ -606,7 +606,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print("== This host's config")
     if not (_config_home() / "agent-media" / "config.toml").exists():
-        _run([*me, "media-setup", "init", "--roles", "origin"], dry_run=a.dry_run)
+        # The app pairs here, chats run here, replies come from here
+        # (docs/proposals/2026-11-13-what-each-machine-is.md).
+        _run([*me, "media-setup", "init", "--roles", "server,sessions,origin"], dry_run=a.dry_run)
     env_file = _config_home() / "agent-media.env"
     lines = env_file.read_text().splitlines() if env_file.exists() else []
     if not any(line.startswith("MEDIA_HEADLESS=") for line in lines):

@@ -1,6 +1,8 @@
-# Headless sessions run where the agents and their logins are — the host
-# replies come from. Only once the feature is switched on there: without
-# MEDIA_HEADLESS in agent-media.env the service is skipped, never installed
-# and idle.
-requires: origin
+# Agent chats run on a host that declares `sessions`: the server's own, or
+# a worker's for another server (docs/proposals/2026-11-13-what-each-machine-is.md).
+# Before that role it was `origin`, and a host that declares `origin` with
+# MEDIA_HEADLESS on is still taken to have `sessions` (setup.effective_roles).
+# Only once the feature is switched on there: without MEDIA_HEADLESS in
+# agent-media.env the service is skipped, never installed and idle.
+requires: sessions
 requires-env: MEDIA_HEADLESS
