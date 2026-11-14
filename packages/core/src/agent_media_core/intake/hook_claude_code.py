@@ -1467,8 +1467,13 @@ def _handle_stop_failure(payload: dict) -> int:
     return 0
 
 
-def _handle_stop(payload: dict) -> int:
-    """Stop path: get the assistant's final text and speak it (detached)."""
+def _handle_stop(payload: dict, *, source: Source = Source.CLAUDE_CODE,
+                 voice: Optional[str] = None) -> int:
+    """Stop path: get the assistant's final text and speak it (detached).
+
+    opencode's hook hands its reply here too (`source`, and its own
+    `OPENCODE_TTS_VOICE` as `voice`), so its markers, speech level, toast
+    hold and follow-up work as a Claude reply's do (intake/hook_opencode.py)."""
     # Prefer the text straight off the Stop payload — no transcript read, parse,
     # or flush-retry. `last_assistant_message` is "the full text of Claude's
     # response" (Stop/SubagentStop only).
@@ -1606,9 +1611,9 @@ def _handle_stop(payload: dict) -> int:
     if level == "quiet":
         metadata["held"] = True
     metadata["voice_from"] = "session"
-    event = Event(text=text, source=Source.CLAUDE_CODE,
+    event = Event(text=text, source=source,
                   priority=Priority.HIGH if level == "interrupt" else Priority.NORMAL,
-                  voice=voice_for_session(_session_name()),
+                  voice=voice or voice_for_session(_session_name()),
                   metadata=metadata)
     if os.environ.get("MEDIA_HOOK_HOLD"):
         # sessiond's second try at a reply whose first hook died with its

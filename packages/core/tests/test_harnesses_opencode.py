@@ -145,8 +145,8 @@ def spoken(store, tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     said = []
-    monkeypatch.setattr(hook_opencode, "run",
-                        lambda source, prefix, *, text, metadata: said.append((text, metadata)) or 0)
+    monkeypatch.setattr(hook_opencode, "speak",
+                        lambda session, text, cwd="": said.append((text, session, cwd)) or 0)
     return hook_opencode, said
 
 
@@ -154,7 +154,41 @@ def test_the_hook_speaks_a_reply_once(spoken):
     hook, said = spoken
     assert hook.main(["--session", OC]) == 0
     assert hook.main(["--session", OC]) == 0
-    assert said == [("Done.", {"session": OC})]
+    assert said == [("Done.", OC, "/home/x/scratch")]
+
+
+def test_a_reply_goes_through_claudes_stop_path(store, tmp_path, monkeypatch):
+    """Markers, speech level and toast hold as a Claude reply's: its
+    `[[replies:]]` become the reply box's chips, not words."""
+    from agent_media_core.intake import hook_claude_code, hook_opencode
+
+    for var in list(__import__("os").environ):
+        if var.startswith(("MEDIA_", "RELAY_", "OPENCODE_")):
+            monkeypatch.delenv(var)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    played = []
+    monkeypatch.setattr(hook_claude_code, "_play_detached", played.append)
+    from agent_media_core.intake import toast
+    monkeypatch.setattr(toast, "should_hold", lambda s: False)
+    assert hook_opencode.speak(OC, "All done.\n\n[[replies: Ship it | Wait]]", cwd="/w") == 0
+    (ev,) = played
+    assert ev.text == "All done."
+    assert ev.source.name == "OPENCODE"
+    assert ev.metadata["followup_replies"] == ["Ship it", "Wait"]
+    assert ev.metadata["session"] == OC and ev.metadata["cwd"] == "/w"
+
+
+def test_the_switches_still_silence_it(store, monkeypatch):
+    from agent_media_core.intake import hook_claude_code, hook_opencode
+
+    called = []
+    monkeypatch.setattr(hook_claude_code, "_handle_stop", lambda *a, **k: called.append(a) or 0)
+    monkeypatch.setenv("OPENCODE_TTS_ENABLED", "0")
+    assert hook_opencode.speak(OC, "hi") == 0
+    assert called == []
 
 
 def test_a_subagents_idle_is_not_spoken(spoken, store):
