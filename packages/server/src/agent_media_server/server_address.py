@@ -372,7 +372,7 @@ def rename(new: str, also: list[str], *, check: bool = True, dry_run: bool = Fal
         out(f"  wrote {name} (a copy kept as …bak-rename-{stamp})")
     if added:
         out(f"  tunnel ingress: added {', '.join(added)} — restart the tunnel "
-            "(systemctl --user restart sasonica-tunnel) and route their DNS to it")
+            "(media restart-services --only tunnel --after 10) and route their DNS to it")
     try:
         from . import servers_report
 

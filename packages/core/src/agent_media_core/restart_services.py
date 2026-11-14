@@ -89,7 +89,9 @@ ALIASES = {"canvas": ("server", "visual-canvas", "canvas-local", "sasonica-canva
 PREFIXES = ("agent-media-", "media-")
 #: Services a restart of which cuts off a reply being spoken (short names).
 SPEECH = ("tts-shim", "tts-shim-private", "sink-speech", "speech-state", "clips",
-          "am-snapfifo@am")
+          "am-snapfifo@am",
+          # The public route: the phone's frames come through it.
+          "tunnel")
 #: The session holder; restarting it ends every chat it holds.
 SESSIOND = "sessiond"
 #: sessiond session states in which a turn is under way.

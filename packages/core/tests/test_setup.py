@@ -1348,3 +1348,17 @@ def test_sessions_is_implied_only_by_origin_and_headless(monkeypatch):
 def test_the_new_roles_are_known():
     from agent_media_core import config
     assert {"server", "sessions"} <= set(config.KNOWN_ROLES)
+
+
+def test_the_server_and_its_tunnel_go_where_the_host_declares_server(monkeypatch):
+    public = {"on": True}
+    monkeypatch.setattr(setup, "_env_file_has",
+                        lambda key: key == "MEDIA_VISUAL_PUBLIC" and public["on"])
+    assert setup.service_wanted("media-server", {"server"}) == (True, "roles match")
+    assert setup.service_wanted("media-server", {"sessions"})[0] is False
+    assert setup.service_wanted("media-tunnel", {"server"}) == (True, "roles match")
+    public["on"] = False                     # no public listener: nothing to point at
+    wanted, why = setup.service_wanted("media-tunnel", {"server"})
+    assert wanted is False and "MEDIA_VISUAL_PUBLIC" in why
+    assert setup._systemd_unit_name("media-server") == "agent-media-server.service"
+    assert setup._systemd_unit_name("media-tunnel") == "agent-media-tunnel.service"

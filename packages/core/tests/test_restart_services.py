@@ -366,3 +366,11 @@ def test_the_templates_server_unit_is_canvas_and_server_too(host, monkeypatch):
     assert _run("--only", "server") == 0
     assert host.restarts()[-1] == "agent-media-server.service"
     assert rs.short_name("agent-media-server") == "canvas"
+
+
+def test_the_tunnel_waits_for_a_reply_being_spoken(host, monkeypatch):
+    """agent-media-tunnel is the phone's way to the server: restarting it
+    while a reply is spoken drops the frames, as the server's restart does."""
+    monkeypatch.setenv("FAKE_UNITS", "agent-media-server agent-media-tunnel")
+    svc = rs.Service("agent-media-tunnel", "up", "systemd")
+    assert svc.short == "tunnel" and rs.is_speech(svc)

@@ -295,7 +295,12 @@ With the app as the player, and every endpoint folded in:
 agent-media-server.service     the canvas, the app routes, the frames hubs,
                                the endpoints, the scheduler
 agent-media-sessiond.service   MEDIA_HEADLESS=1
-sasonica-tunnel.service        cloudflared, the public route
+agent-media-tunnel.service     cloudflared, the public route
 ```
+
+The server and the tunnel are templates since 14 Nov 2026
+(`packages/core/services/media-server`, `media-tunnel`), installed where
+`[host] roles` include `server`; the tunnel is a named one when the host has
+`~/.cloudflared/config.yml`, else the quick tunnel.
 
 Plus `sink-speech` and `am-sinks` only if the host drives its own speakers.

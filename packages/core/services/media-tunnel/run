@@ -1,0 +1,29 @@
+#!/bin/sh
+# media-tunnel — the server's public route: cloudflared, outbound, to the
+# app-routes-only listener (MEDIA_VISUAL_PUBLIC). Installed beside
+# media-server where the host declares `server` and has a public listener; it
+# was the hand-placed `sasonica-tunnel.service` until 14 Nov 2026
+# (docs/proposals/2026-11-13-the-canvas-becomes-the-server.md, change 2).
+#
+# A named tunnel when the host has one (its own domain, its DNS routed to the
+# tunnel): MEDIA_TUNNEL_CONFIG, default ~/.cloudflared/config.yml, whose
+# ingress names the public listener. Else the quick tunnel `sasonica install`
+# uses (media-tunnel run: a trycloudflare.com name, published to the lookup).
+#
+#   MEDIA_CLOUDFLARED     the cloudflared to run (default ~/.local/bin/cloudflared, else PATH)
+#   MEDIA_TUNNEL_CONFIG   a named tunnel's config (default ~/.cloudflared/config.yml)
+exec 2>&1
+set -a
+[ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
+set +a
+conf="${MEDIA_TUNNEL_CONFIG:-$HOME/.cloudflared/config.yml}"
+if [ -f "$conf" ]; then
+    cf="${MEDIA_CLOUDFLARED:-$HOME/.local/bin/cloudflared}"
+    [ -x "$cf" ] || cf="$(command -v cloudflared || true)"
+    if [ -z "$cf" ]; then
+        echo "media-tunnel: $conf names a tunnel but there is no cloudflared" >&2
+        exit 2
+    fi
+    exec "$cf" --no-autoupdate tunnel --config "$conf" run
+fi
+exec media-tunnel run

@@ -1,0 +1,4 @@
+# The public route of a host that declares `server`, where it has a public
+# listener for the tunnel to point at.
+requires: server
+requires-env: MEDIA_VISUAL_PUBLIC
