@@ -21,6 +21,14 @@ set -a
 [ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
 [ -f "$HOME/.config/agent-media/matrix.env" ] && . "$HOME/.config/agent-media/matrix.env"
 set +a
+# The tools it runs live beside the user's own: ~/.local/bin (the phone's
+# agent-phone-adb for the contacts, amux) and fnm's node. The old unit put
+# them on its PATH; the generated unit names only the venv and the system.
+for d in "$HOME/.local/share/fnm/aliases/default/bin" "$HOME/.local/bin"; do
+    [ -d "$d" ] || continue
+    case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d" ;; esac
+done
+export PATH
 bind="${MEDIA_VISUAL_BIND:-127.0.0.1}"
 if [ "$bind" = tailnet ]; then
     f="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/tailnet-ip.env"
