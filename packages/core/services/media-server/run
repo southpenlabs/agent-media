@@ -17,9 +17,25 @@
 #   MEDIA_PUBLIC_URL, MEDIA_WEB_APP_DIR, MEDIA_TIMELINE_SOURCES … as before
 # and ~/.config/agent-media/matrix.env when it exists (the Matrix rooms).
 exec 2>&1
+# A server with settings of its own: when ~/.config/agent-media/server.env
+# (MEDIA_SERVER_ENV) exists, the server runs with that file alone — not
+# agent-media.env, not matrix.env, and none of what the unit loaded — for a
+# second, small server on a machine whose agent-media.env is another
+# install's (red5's, 14 Nov 2026). Name its own XDG_STATE_HOME there for a
+# server of its own (its own id, devices and history).
+own="${MEDIA_SERVER_ENV:-$HOME/.config/agent-media/server.env}"
+if [ -f "$own" ] && [ -z "${MEDIA_ENV_ONLY:-}" ]; then
+    exec env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" LANG="${LANG:-C.UTF-8}" \
+        XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" PATH="$PATH" \
+        MEDIA_ENV_FILE="$own" MEDIA_ENV_ONLY=1 MEDIA_SERVER_ENV="$own" /bin/sh "$0"
+fi
 set -a
-[ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
-[ -f "$HOME/.config/agent-media/matrix.env" ] && . "$HOME/.config/agent-media/matrix.env"
+if [ -n "${MEDIA_ENV_ONLY:-}" ]; then
+    . "$MEDIA_SERVER_ENV"
+else
+    [ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
+    [ -f "$HOME/.config/agent-media/matrix.env" ] && . "$HOME/.config/agent-media/matrix.env"
+fi
 set +a
 # The tools it runs live beside the user's own: ~/.local/bin (the phone's
 # agent-phone-adb for the contacts, amux) and fnm's node. The old unit put

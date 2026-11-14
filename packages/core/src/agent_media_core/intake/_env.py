@@ -152,6 +152,12 @@ def load_env_file(label: str = "hook") -> None:
         str(Path.home() / ".config" / "agent-audio-relay.env"),
         str(_PACKAGE_DEFAULTS),
     ]
+    # MEDIA_ENV_ONLY=1: MEDIA_ENV_FILE and the shipped defaults alone, not the
+    # machine's own file — a second server on a machine whose agent-media.env
+    # is another install's (red5's small server, 14 Nov 2026: that file is
+    # the old full server's, and its live chats read it too).
+    if (os.environ.get("MEDIA_ENV_ONLY") or "").strip() == "1" and os.environ.get("MEDIA_ENV_FILE"):
+        candidates = [os.environ["MEDIA_ENV_FILE"], str(_PACKAGE_DEFAULTS)]
     for path in candidates:
         if not path:
             continue
