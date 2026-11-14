@@ -41,6 +41,9 @@ ALIASES = {
     # Sasonica Shell's `devices` is this too; with Shell beside the server,
     # `sasonica devices` is still the same command.
     "devices": ("media-visual-canvas", ["devices"]),
+    # What this machine is in the setup and what it knows of the others,
+    # for an assistant to read first (the sasonica-map skill).
+    "map": ("media", ["map"]),
 }
 
 

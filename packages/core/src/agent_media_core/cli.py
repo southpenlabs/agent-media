@@ -11663,6 +11663,12 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="run it even where its gate says it is not wanted")
     sc.set_defaults(func=cmd_schedule)
 
+    mp = sub.add_parser("map",
+                        help="what this machine is in a Sasonica setup (roles, its server "
+                             "and shell, services) and the other machines it knows")
+    mp.add_argument("--json", action="store_true")
+    mp.set_defaults(func=lambda a: __import__("agent_media_core.host_map", fromlist=["main"])
+                    .main(as_json=a.json))
     ah = sub.add_parser("automode-hosts",
                         help="refresh Claude Code auto mode's line of the machines "
                              "your Sasonica account administers (only one that is "
