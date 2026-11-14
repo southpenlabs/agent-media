@@ -10358,6 +10358,15 @@ def _scan_local() -> "list[str]":
         print(f"  {copy_note(facts)}")
     if facts.get("layout"):
         print(f"  layout: {facts['layout']} ({facts.get('layout_why', '')})")
+    # The server's size, said and never counted as a problem: the canvas
+    # overhaul is measured on it (server_health).
+    try:
+        from . import server_health
+        sf = server_health.facts()
+        if sf:
+            print(f"  {server_health.line(sf)}")
+    except Exception:  # noqa: BLE001 — a line of information, never a failed doctor
+        pass
     return problems
 
 
