@@ -44,7 +44,14 @@ has the binary instead of a checkout:
      media-sink-speech`) on the speech pipe, restarted when it fails. Speech
      still goes to the phone until you pick "This computer" in the app.
      `--local-speech off` removes it. Without mpv on PATH it says how to get
-     it (winget) and leaves the rest of the install alone.
+     it (winget) and leaves the rest of the install alone;
+  7. with --local-voice kokoro[:<voice>], on Linux: a local voice, the Kokoro
+     server as a systemd user unit on 127.0.0.1:8880, its model fetched and
+     checked against pinned sha256s, made the render fallback (default voice
+     af_alloy) — `media-setup voices kokoro:<voice> --fallback`, one code
+     path. `--local-voice off` removes the unit (the model stays). A Mac and
+     Windows are told it is not there yet. Without the flag nothing is
+     downloaded.
 
 Safe to run again, and run again after replacing the binary: shims point at
 the binary's path, not at a version.
@@ -489,6 +496,45 @@ def _local_speech(binary: str, a) -> int:
     return 0
 
 
+def local_voice_arg(text: str) -> str:
+    """--local-voice's value: `off`, `kokoro` or `kokoro:<voice>`."""
+    t = text.strip()
+    if t == "off":
+        return t
+    engine, _, voice = t.partition(":")
+    if engine != "kokoro":
+        raise argparse.ArgumentTypeError("kokoro[:<voice>] or off (Piper comes later)")
+    from agent_media_core import setup_voices
+    try:
+        setup_voices.parse_spec(t)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
+    return t if voice else f"kokoro:{setup_voices.KOKORO_DEFAULT_VOICE}"
+
+
+def _local_voice(me: list[str], a) -> int:
+    """--local-voice kokoro[:<voice>] | off: a Kokoro server on this computer,
+    the same code path as `media-setup voices` (one installer), with the
+    server's render fallback set to it. Never fails the rest of the install:
+    what went wrong is said, and its status returned for the exit code."""
+    print("== Local voice")
+    if sys.platform == "darwin" or _windows():
+        # media-setup voices writes systemd units only; a launchd agent or a
+        # logon task for it is not written yet.
+        print("  Linux only for now: on a Mac or Windows the local voice (Kokoro) is not "
+              "installed by this yet. Nothing was downloaded; speech uses the online voice.")
+        return 0
+    if a.local_voice == "off":
+        return _run([*me, "media-setup", "voices", "--remove", "kokoro"]
+                    + (["--dry-run"] if a.dry_run else []), dry_run=False)
+    print("  Kokoro: about 355 MB to download (once), about 540 MB of memory while it runs")
+    rc = _run([*me, "media-setup", "voices", a.local_voice, "--fallback"]
+              + (["--dry-run"] if a.dry_run else []), dry_run=False)
+    if rc:
+        print("  the local voice was not installed (above); the rest of the install stands")
+    return rc
+
+
 def _env_value(lines: list[str], key: str) -> str:
     for line in lines:
         if line.startswith(key + "="):
@@ -581,6 +627,12 @@ def main(argv: list[str] | None = None) -> int:
                          "(your own mpv, started at logon); `off` removes it. "
                          "Speech still goes to the phone until you choose this "
                          "computer in the app")
+    ap.add_argument("--local-voice", type=local_voice_arg, metavar="kokoro[:VOICE]|off",
+                    help="Linux: also install a local voice, Kokoro (about 355 MB, "
+                         "checked against pinned sha256s), as a service on 127.0.0.1, "
+                         "and make it the voice used when the online one fails "
+                         "(default voice af_alloy); `off` removes the service. "
+                         "Without it nothing is downloaded")
     ap.add_argument("--signed-out", nargs="?", const="on", choices=("on", "off"),
                     help="Windows and Mac: start the services with the computer and keep "
                          "them running when nobody is signed in (asks for an administrator "
@@ -643,6 +695,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.local_speech:
         _local_speech(binary, a)
+    if a.local_voice:
+        _local_voice(me, a)
 
     if a.no_services:
         return 0
