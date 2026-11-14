@@ -260,6 +260,29 @@ fewer-services. Step 6 stands alone.
   id is the check, and `media doctor` on a `server` host should say when
   sasonica.com lists its id at another address.
 
+## red5's small server (built 14 Nov 2026)
+
+David chose on a question card: the name `red5-ryer.sasonica.com`, a
+settings file of its own, and pairing, Home and the shell's sign-in cards
+only. So:
+
+- **Settings of its own** (9f1cb5ba, 62ce3cef): when
+  `~/.config/agent-media/server.env` exists, the media-server template runs
+  the server with that file alone (a clean environment, `MEDIA_ENV_ONLY=1`,
+  which `load_env_file` honours), and install-services reads a gate there
+  too. red5's agent-media.env is the old full server's and its live chats
+  read it; it is untouched.
+- **A server of its own**: `XDG_STATE_HOME` in that file gives it a fresh
+  state folder, so its own id, devices and history. red5's old state (the
+  copy of red2's, 3.4 GB) stays where it was, the rollback and the backup.
+- **Small**: search indexing, contacts, Matrix, catch-up, the scheduler and
+  headless chats are off there; 48 MB resident at start.
+- **Its address**: a CNAME `red5-ryer.sasonica.com` to red5's existing
+  named tunnel, now run by the `media-tunnel` template; red5.sasonica.com
+  stays red2's.
+- red5 declares `["server", "render", "origin"]`. Its worker pairing to
+  red2 (`sessions`) is still to do.
+
 ## Decisions (David, 13 Nov 2026, on a question card)
 
 1. **The file: TOML, the one that exists.** "most likely option one but
