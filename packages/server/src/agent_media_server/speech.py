@@ -607,6 +607,14 @@ def unheard_counts() -> dict[str, int]:
         return counts
 
 
+#: How far back the list's Play keys look, in spoken rows: about a week. It was
+#: 400, which had come to cover about 16 hours, so a thread's unheard replies
+#: lost their Play by the next morning though nothing had heard them (David, 14
+#: Nov 2026: "a whole heap of unheard play buttons that have disappeared").
+#: 4,000 rows count in about 0.2 s, and the answer is cached for _UNHEARD_TTL_S.
+UNHEARD_ROWS = 4000
+
+
 def _count_unheard() -> dict[str, int]:
     from agent_media_core import reply_position
     from agent_media_core.private import hidden
@@ -614,7 +622,7 @@ def _count_unheard() -> dict[str, int]:
     from agent_media_core.state import StateStore
 
     try:
-        rows = StateStore().recent_history(sink="speech", limit=400)
+        rows = StateStore().recent_history(sink="speech", limit=UNHEARD_ROWS)
     except Exception as e:  # noqa: BLE001 — none counted, not a 500
         print(f"unheard counts: {e}", file=sys.stderr)
         return {}

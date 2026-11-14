@@ -111,3 +111,15 @@ def test_sessions_state_carries_unheard(monkeypatch):
     monkeypatch.setattr(speech, "unheard_counts", lambda: {A: 1})
     ok, out = sessions.session_states("tok")
     assert ok and out["unheard"] == {A: 1}
+
+
+def test_an_unheard_reply_keeps_its_play_past_a_busy_day(monkeypatch):
+    """A held reply with 1,000 newer spoken rows after it is still counted:
+    the window was 400 rows, about 16 hours, and the list's Play went by the
+    next morning though nothing had heard it (14 Nov 2026)."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 5000
+    _add("Waiting since yesterday.", at=t, kind="stop", held=True)
+    for i in range(1000):
+        _add(f"Spoken {i}.", session=B, at=t + 1 + i, kind="stop", heard=True)
+    assert speech.unheard_counts() == {A: 1}
