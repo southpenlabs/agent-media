@@ -509,7 +509,7 @@ def test_the_follower_stops_the_replay_for_a_question(monkeypatch):
                                                 "writer_pid": os.getpid()})
     stopped: list = []
     monkeypatch.setattr(cli.ipc, "command",
-                        lambda sock, *args, **k: stopped.append(args))
+                        lambda sock, *args, **k: _not_a_read(stopped, args))
     high = _waiter(S._PRIO_RANK[Priority.HIGH], "%3", NEW)
     try:
         started = time.monotonic()
@@ -525,6 +525,13 @@ def test_the_follower_stops_the_replay_for_a_question(monkeypatch):
         token.release()
 
 
+def _not_a_read(stopped: list, args: tuple) -> None:
+    """A command the follower sent, kept unless it only asked (the frames
+    hub's reported-at, `cli._phone_confirmed`): a read moves nothing."""
+    if args[:1] != ("get_property",):
+        stopped.append(args)
+
+
 def test_the_follower_keeps_the_voice_from_an_ordinary_reply(monkeypatch):
     """An ordinary reply waiting does not end the replay: it runs to the end
     of its timeline."""
@@ -535,7 +542,7 @@ def test_the_follower_keeps_the_voice_from_an_ordinary_reply(monkeypatch):
                                                 "writer_pid": os.getpid()})
     stopped: list = []
     monkeypatch.setattr(cli.ipc, "command",
-                        lambda sock, *args, **k: stopped.append(args))
+                        lambda sock, *args, **k: _not_a_read(stopped, args))
     normal = _waiter(S._PRIO_RANK[Priority.NORMAL], "%1", NEW)
     try:
         started = time.monotonic()
@@ -558,7 +565,7 @@ def test_the_follower_stops_the_replay_for_end_of_reply(monkeypatch):
                                                 "writer_pid": os.getpid()})
     stopped: list = []
     monkeypatch.setattr(cli.ipc, "command",
-                        lambda sock, *args, **k: stopped.append(args))
+                        lambda sock, *args, **k: _not_a_read(stopped, args))
     S._nav_flag_path(APP).write_text(str(sys.maxsize))
     started = time.monotonic()
     rc = cli.cmd_replay_track(argparse.Namespace(
@@ -579,7 +586,7 @@ def test_the_follower_leaves_a_sentence_step_alone(monkeypatch):
                                                 "writer_pid": os.getpid()})
     stopped: list = []
     monkeypatch.setattr(cli.ipc, "command",
-                        lambda sock, *args, **k: stopped.append(args))
+                        lambda sock, *args, **k: _not_a_read(stopped, args))
     S._nav_flag_path(APP).write_text("1")
     cli.cmd_replay_track(argparse.Namespace(
         sentences=json.dumps(["One.", "Two."]), offsets=json.dumps([0.0, 0.2]),
@@ -657,7 +664,7 @@ def test_an_older_reply_does_not_end_a_replay(monkeypatch):
                                                 "writer_pid": os.getpid()})
     stopped: list = []
     monkeypatch.setattr(cli.ipc, "command",
-                        lambda sock, *args, **k: stopped.append(args))
+                        lambda sock, *args, **k: _not_a_read(stopped, args))
     cli.cmd_replay_track(argparse.Namespace(
         sentences=json.dumps(["One.", "Two."]), offsets=json.dumps([0.0, 0.2]),
         pane="", durations=json.dumps([0.6]), lock_fd=-1))

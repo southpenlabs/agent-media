@@ -598,6 +598,40 @@ def _peer_closed(sock) -> bool:
         return True
 
 
+def _unheard_for_opened(session: str) -> int | None:
+    """With no waiting toast left, the first of the unheard replies the thread
+    ends on (cli._oldest_unheard: what its Play key and a notification's Play
+    read), no older than the opened toasts' TTL, in a thread whose replies wait
+    for a Play (pocket, normal), else None. An open used to take every toast
+    of the thread, so a reply not heard to its end that time never played on
+    an open again (David, 14 Nov 2026: unheard replies "aren't auto playing on
+    opening of the thread"; "Yes, all unheard")."""
+    try:
+        from agent_media_core.cli import _oldest_unheard
+        from agent_media_core.intake import toast
+        from agent_media_core.speak_priority import HOLDS, level_of
+
+        if level_of(session) not in HOLDS:
+            return None
+        from agent_media_core.state import StateStore
+
+        np = StateStore().get_now_playing("speech") or {}
+        ex = np.get("extras") if isinstance(np.get("extras"), dict) else {}
+        if np and (ex.get("source_session") or ex.get("session")) == session:
+            # Opened again while its reply is being read (or paused): left be,
+            # as the taken toasts left it, not started over.
+            return None
+        row = _oldest_unheard(session)
+        if row is None:
+            return None
+        if float(row.get("started_at") or 0) < time.time() - toast._open_ttl():
+            return None
+        return int(row["id"])
+    except Exception:  # noqa: BLE001 — nothing found plays nothing
+        log.exception("thread %s opened: could not look for its unheard replies", session[:8])
+        return None
+
+
 def _play_waiting(session: str, device: str = "", after: bool = False) -> None:
     """The thread was opened: play its held Normal replies that have never
     been played, oldest first (core's toast.take_for_opened gives the first;
@@ -625,6 +659,8 @@ def _play_waiting(session: str, device: str = "", after: bool = False) -> None:
         from agent_media_core.intake import toast
 
         rid = toast.take_for_opened(session)
+        if rid is None:
+            rid = _unheard_for_opened(session)
         if rid is None:
             return
         if after:

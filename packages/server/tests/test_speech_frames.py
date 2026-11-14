@@ -638,3 +638,18 @@ def test_a_report_that_lists_the_phones_queue_is_taken_whole():
     # Nor one from a report behind the frames.
     m.report({"pos": 0, "count": 1, "entries": ["x"]}, current=False)
     assert m.path() == song
+
+
+def test_the_hub_says_when_the_phone_last_reported(endpoint):
+    """`user-data/agent-media/reported-at`: 0 before the phone has said a
+    word, then the time of its last report — what a replay's follower asks
+    before it counts a reply heard (14 Nov 2026)."""
+    _listening()
+    ipc = Ipc(endpoint)
+    ipc("loadfile", "tts:a", "replace")
+    assert ipc("get_property", "user-data/agent-media/reported-at")["data"] == 0
+    before = time.time()
+    speech_frames.report("d_test", {"seq": speech_frames.seq(), "pos": 0, "count": 1,
+                                    "idle": False, "time_pos": 0.2})
+    at = ipc("get_property", "user-data/agent-media/reported-at")["data"]
+    assert before - 1 <= at <= time.time() + 1

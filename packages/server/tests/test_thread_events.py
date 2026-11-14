@@ -674,3 +674,44 @@ def test_the_name_follows_a_rename_made_elsewhere(server, signed_in, convo, monk
     assert res.status == 200
     assert st.next("title") == {"title": "Chosen here"}
     st.close()
+
+
+def test_an_open_with_no_waiting_toast_plays_the_unheard_replies(monkeypatch):
+    """An earlier open took the thread's toasts, but a reply was never heard:
+    this open plays the first of the unheard replies the thread ends on, as
+    its Play would, in a thread that holds; a quiet thread's stay quiet, and
+    one older than the opened toasts' TTL waits (14 Nov 2026)."""
+    import subprocess
+
+    from agent_media_core import cli, speak_priority
+    from agent_media_core.intake import toast
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    monkeypatch.setattr(cli, "_row_has_audio", lambda r: True)
+    monkeypatch.setattr(toast, "take_for_opened", lambda s: None)
+    level = ["normal"]
+    monkeypatch.setattr(speak_priority, "level_of", lambda s: level[0])
+    first = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time() - 60,
+                           target="sasonica", source="claude-code", text="one",
+                           extras={"held": True, "source_session": SID})
+    st.add_history(sink="speech", uri="/x.mp3", started_at=time.time() - 30,
+                   target="sasonica", source="claude-code", text="two",
+                   extras={"held": True, "source_session": SID})
+    ran: list = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: ran.append(argv))
+    thread_events._play_waiting(SID, "p8a")
+    assert ran and ran[0][-3:] == ["--id", str(first), "--resume"]
+    ran.clear()
+    level[0] = "quiet"
+    thread_events._play_waiting(SID, "p8a")
+    assert ran == []
+    level[0] = "normal"
+    st.set_now_playing("speech", "/x.mp3", time.time(), target="sasonica",
+                       extras={"source_session": SID, "history_id": first})
+    thread_events._play_waiting(SID, "p8a")
+    assert ran == [], "opened again while its reply is read: not started over"
+    st.clear_now_playing("speech")
+    monkeypatch.setattr(toast, "_open_ttl", lambda: 10)
+    thread_events._play_waiting(SID, "p8a")
+    assert ran == []

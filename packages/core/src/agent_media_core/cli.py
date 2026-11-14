@@ -3845,6 +3845,23 @@ def _replay_row(row: dict, from_sentence: Optional[int] = None,
             replay_lock.release()
 
 
+def _phone_confirmed(since: float) -> bool:
+    """Has the player said anything since `since` (time.time())? A phone on
+    speech frames is answered by the server's model of it, whose playhead runs
+    on by the clock, so a reply it never played reads as played to the end
+    and was marked heard (David, 14 Nov 2026: unheard replies gone, never
+    heard). The hub says when the phone last reported (speech_frames
+    REPORTED_AT); any other player has no such property and is believed, as
+    before."""
+    try:
+        at = ipc.get_property(_sock(), "user-data/agent-media/reported-at")
+    except Exception:  # noqa: BLE001 — not a frames hub: its own word stands
+        return True
+    if not isinstance(at, (int, float)) or isinstance(at, bool):
+        return True
+    return float(at) >= since
+
+
 def _mark_heard(row_id: Optional[int]) -> None:
     """A held reply has now been heard: the transcript drops its big Play
     (session_feed.Turn.unheard). Best effort — the mark is cosmetic."""
@@ -5392,7 +5409,7 @@ def _follow_replay(a) -> int:
                 # On its last sentence, the player going idle is just the
                 # end: nothing to pick up — and, heard playing it, a held
                 # reply has been heard.
-                if reached.is_set():
+                if reached.is_set() and _phone_confirmed(follow_began):
                     _mark_heard(heard_id)
                     _finish()
                     return _then() if _then_row() is not None else 0
@@ -5435,7 +5452,8 @@ def _follow_replay(a) -> int:
                 # Heard out — or, from a player that never once answered
                 # (refusals are this lane's weather), the clock is all
                 # there is to go on.
-                if reached.is_set() or not answered.is_set():
+                if (reached.is_set() or not answered.is_set()) \
+                        and _phone_confirmed(follow_began):
                     _mark_heard(heard_id)
                     _finish()
                     # The phone lane (David, 16 Oct 2026: opening a thread
@@ -5551,7 +5569,7 @@ def _follow_replay(a) -> int:
                 if bool(ipc.get_property(_sock(), "idle-active")):
                     _finish()
                     if heard_id is not None and read_idx[0] is None \
-                            and _heard_out(last_snap):
+                            and _heard_out(last_snap) and _phone_confirmed(follow_began):
                         _mark_heard(heard_id)
                     # A question the listener answered while it played has
                     # had its answer: the reply queued behind it is not due.

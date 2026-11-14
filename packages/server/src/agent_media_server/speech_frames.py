@@ -88,6 +88,12 @@ USER_DATA = "user-data/"
 RINGER = "user-data/agent-media/ringer"
 #: The phone's own word beyond the player's (`extra` in its report), read-only.
 REPORT = "user-data/agent-media/report"
+#: When the phone last reported on this channel (time.time(), 0 for never):
+#: a replay counts as heard only once the phone has said something since it
+#: began (cli `_phone_confirmed`). The model runs the playhead on by the
+#: clock, so it reads as played to the end even when the phone never played
+#: it (David, 14 Nov 2026: unheard replies gone, never heard).
+REPORTED_AT = "user-data/agent-media/reported-at"
 #: Set and ignored, as the app's MpvServer does.
 INERT = ("gapless-audio", "audio-device", "keep-open", "idle")
 
@@ -697,6 +703,8 @@ def _stored(name: str) -> bool:
 
 def _get(name: str, hub: "_Hub"):
     m = hub.model
+    if name == REPORTED_AT:
+        return float(hub.reported_at or 0)
     if name == RINGER and m.ringer is not None:
         return m.ringer
     if name == REPORT:

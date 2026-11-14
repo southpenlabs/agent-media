@@ -11448,6 +11448,23 @@ through the thread (opened and left at once, on the way to another) had its
 question read out while David was on a different thread
 (`thread_events._play_if_stayed`).
 
+**Every unheard reply, not only new ones (14 Nov 2026).** An open takes all of
+the thread's waiting toasts, so a reply not heard to its end that time used to
+wait for its Play for good. With no toast left, an open in a thread that holds
+(pocket, normal) plays the first of the unheard replies the thread ends on —
+what its Play key, the list's Play and `replay-unheard` read — when it is no
+older than `MEDIA_TOAST_OPEN_TTL` (three days), and not while that thread's
+reply is being read or is paused (`thread_events._unheard_for_opened`). A
+quiet thread's stay quiet.
+
+**Heard means the phone said so (14 Nov 2026).** On speech frames the hub
+answers for the phone from its model, whose playhead runs on by the clock, so
+a replay the phone never played read as played to the end and lost its
+unheard. The hub answers `user-data/agent-media/reported-at` (when the phone
+last reported, 0 for never), and a replay's follower marks its reply heard
+only when that is after the replay began (`cli._phone_confirmed`); another
+player has no such property and is believed as before.
+
 **From where it was left (3 Nov 2026).** A reply played on the open starts
 at its resume position (`media replay --id N --resume`,
 `agent_media_core.reply_position`): the first sentence not heard, from
