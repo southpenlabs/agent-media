@@ -117,3 +117,23 @@ def test_a_working_opencode_chat_counts_its_running_subagents_as_work(db):
     s = sessiond.Session(OC, "/p", agent="opencode")
     s.state = "working"
     assert [t["id"] for t in s.work()["tasks"]] == [KID]
+
+
+def test_an_opencode_limit_is_its_providers_not_every_opencode_chats(db, tmp_path, monkeypatch):
+    from agent_media_server import sessiond
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    assert sessiond.oc_quota_agent("opencode/big-pickle") == "opencode:opencode"
+    assert sessiond.oc_quota_agent("gateway/qwen") == "opencode:gateway"
+    put(db, OC, 1, "assistant", [])
+    with sqlite3.connect(db) as c:
+        c.execute("update message set data = ? where session_id = ?",
+                  (json.dumps({"role": "assistant", "providerID": "anthropic"}), OC))
+    assert sessiond.oc_quota_agent("", session=OC) == "opencode:anthropic"
+    assert sessiond.oc_quota_agent("") == "opencode"
+    (tmp_path / "cfg" / "opencode").mkdir(parents=True)
+    (tmp_path / "cfg" / "opencode" / "opencode.json").write_text('{"model": "gateway/x"}')
+    assert sessiond.oc_quota_agent("") == "opencode:gateway"
+    s = sessiond.Session(OC, "/p", agent="opencode", model="opencode/big-pickle")
+    assert s.quota_agent() == "opencode:opencode"
+    assert sessiond.Session("x", "/p").quota_agent() == "claude"

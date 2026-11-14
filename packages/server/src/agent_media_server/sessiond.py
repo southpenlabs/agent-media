@@ -692,6 +692,14 @@ class Session:
             return False
         return (now or time.time()) - self.task_ended_at < task_wake_grace_s()
 
+    def quota_agent(self) -> str:
+        """Whose usage limit this session waits on: its agent, and for
+        opencode the provider it runs on (`opencode:<provider>`), since one
+        free model's daily limit says nothing about another provider's."""
+        if self.agent != "opencode":
+            return self.agent
+        return oc_quota_agent(self.model, session=self.id)
+
     def task_list(self, now: float | None = None) -> list[dict]:
         """The tasks that count (`active_tasks`), with what each is."""
         now = now or time.time()
@@ -1021,6 +1029,32 @@ def _write_squeeze(rec: "dict | None") -> None:
         pass
 
 
+def oc_quota_agent(model: str = "", *, session: str = "") -> str:
+    """`opencode:<provider>` for a model `provider/model`, else the provider
+    the session's last step ran on, else opencode's default model's; plain
+    `opencode` when none is known."""
+    provider = model.split("/", 1)[0] if "/" in (model or "") else ""
+    if not provider and session:
+        from agent_media_core import harnesses
+
+        rows = harnesses.opencode_rows(
+            "select json_extract(data, '$.providerID') from message where session_id = ? "
+            "and json_extract(data, '$.role') = 'assistant' "
+            "order by time_created desc limit 1", (session,))
+        provider = str(rows[0][0] or "") if rows else ""
+    if not provider:
+        # The user's configured default, read from its file: never by running
+        # opencode, which can take a minute (this runs in the tick).
+        try:
+            cfg = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+            default = str(json.loads((cfg / "opencode" / "opencode.json").read_text())
+                          .get("model") or "")
+        except (OSError, ValueError, AttributeError):
+            default = ""
+        provider = default.split("/", 1)[0] if "/" in default else ""
+    return f"opencode:{provider}" if provider else "opencode"
+
+
 def _oc_running_agents(session: str) -> list[dict]:
     """An opencode chat's subagents still running (its `task` tool's calls,
     agents.opencode_agents), as `task_list` rows: they die with its turn."""
@@ -1236,7 +1270,9 @@ def _emit_quota_limit(agent: str, reset: float | None, text: str, *, session: st
         from . import alerts, notes
         agent = str(agent or "claude")
         reset_str = _reset_clock(reset) if reset else "unknown"
-        title = f"{agent.capitalize()} usage limit reached (resets {reset_str})"
+        name, _sep, provider = agent.partition(":")   # opencode:<provider>
+        title = (f"{name.capitalize()}{f' ({provider})' if provider else ''} usage limit "
+                 f"reached (resets {reset_str})")
         detail = (str(text or "").strip()[:240] or title) + " Sessions will resume automatically at the reset."
         alerts.report({
             "id": f"quota.{agent}",
@@ -1674,7 +1710,7 @@ class Supervisor:
             for s in self.sessions.values():
                 cut = s.cut_off or {}
                 if rec and (
-                        q.limited(rec=rec, agent=s.agent) is not None
+                        q.limited(rec=rec, agent=s.quota_agent()) is not None
                         or q.waiting_entry(s.id, rec) is not None):
                     continue
                 if cut.get("why") == "quota" and not cut.get("due"):
@@ -1769,7 +1805,7 @@ class Supervisor:
         else:
             q = _quota()
             rec = q.read() if q.path().exists() else None
-            if rec and q.limited(rec=rec, agent=s.agent) is not None:
+            if rec and q.limited(rec=rec, agent=s.quota_agent()) is not None:
                 why = "quota"
         if not why and before:
             self._deliver(session)
@@ -2022,8 +2058,8 @@ class Supervisor:
                                 text=str(text or "")[:200],
                                 source="event" if (s.limit_info or {}).get("resetsAt")
                                 else "text",
-                                agent=s.agent)
-            _emit_quota_limit(s.agent, reset, str(text or ""), session=s.id, cwd=s.cwd)
+                                agent=s.quota_agent())
+            _emit_quota_limit(s.quota_agent(), reset, str(text or ""), session=s.id, cwd=s.cwd)
         except OSError as e:
             log.warning("sessiond: could not write the usage limit's record (%s)", e)
 
@@ -3042,7 +3078,8 @@ class Supervisor:
             if self.draining():
                 raise Refused(RESTART_REFUSED, "restart_pending")
             q = _quota()
-            lim = q.limited(agent="opencode") if q.path().exists() else None
+            # The provider this chat would run on: another's limit leaves it free.
+            lim = q.limited(agent=oc_quota_agent(model)) if q.path().exists() else None
             if lim:
                 raise Refused(QUOTA_REFUSED.format(at=_clock(float(lim["resets_at"]))),
                               "quota_limited", quota=q.view(rec=lim))
