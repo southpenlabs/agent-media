@@ -787,6 +787,12 @@ class StateStore:
             cur.execute(sql, (*args, max(1, int(limit))))
             return [self._speech_music_row(r) for r in cur.fetchall()]
 
+    def count_speech_music(self, before: float) -> int:
+        """How many rows started before `before` (a dry run's count)."""
+        with self._cursor() as cur:
+            cur.execute("SELECT count(*) FROM speech_music WHERE started_at < ?", (float(before),))
+            return int(cur.fetchone()[0])
+
     def prune_speech_music(self, before: float) -> int:
         """Delete the rows started before `before` (epoch s); how many went.
         Only ever on request: the log is kept."""

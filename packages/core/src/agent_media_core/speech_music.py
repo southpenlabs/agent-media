@@ -203,7 +203,8 @@ def recent(limit: int = 50, kind: Optional[str] = None, since: Optional[float] =
 
 def prune(older_than_s: float, store=None) -> int:
     """Delete what started more than `older_than_s` seconds ago; how many
-    rows went. Never run by itself: everything is kept until asked."""
+    rows went. Kept until asked: here, or by the nightly state-gc once
+    Settings → Storage sets an age (retention.py `music_log`)."""
     older_than_s = float(older_than_s)
     if older_than_s < 0:
         raise ValueError("an age is not negative")

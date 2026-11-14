@@ -45,6 +45,9 @@ never a network call, so the app can ask on every start.
             (speech_music.py, 14 Nov 2026): POST /speech/music-bed/song takes
             `event` ended, stopped, skipped and volume, `kind`, `pos_s` and
             `log_id`, and GET /speech/music/log reads it; always true here
+  storage   GET|POST /storage (storage.py, 14 Nov 2026): how long the server
+            keeps rendered clips, the music log and play history, and its
+            scheduled jobs' last runs, for Settings → Storage; always true here
   music_chapters  a mix's chapters are songs (music_chapters.py, 8 Nov 2026):
             GET /music/recent music rows carry `chapters` (artist, song,
             album, genre, start each) and `mix`, and POST /music
@@ -184,7 +187,7 @@ def _play_gate() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch}

@@ -175,3 +175,8 @@ David, 14 Nov 2026, on a question card:
 ## Progress
 
 - 14 Nov 2026: decided as above; step one begun.
+- 14 Nov 2026: step one done — the server (26b3352c) and the app
+  (sasonica-app 80ff8f4d: endings reported, the line under Recently played,
+  the Music log page). Pruning from the app is Settings → Storage
+  (Advanced), with the other ages the server prunes by (`/storage`,
+  retention.py; David: "Maybe only for advanced mode").

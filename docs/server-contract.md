@@ -3661,9 +3661,53 @@ written as it starts (and again when a replay plays one: `why.replay`),
 Sing it in's with the bed whose mix carries it, a tune's when it is asked
 of a player; Sing it out's when the app reports it. A bed ends with its
 reading: `stopped` when the listener cut the reading short. Everything is
-kept: rows go only when asked (`media music log --prune 90d`; the same
+kept unless an age is set (`POST /storage` `music_log`, pruned by the nightly
+state-gc) or a prune is asked for (`media music log --prune 90d`; the same
 command without `--prune` prints the log). `GET /features`
 `speech_music_log` says the server has this.
+
+#### `GET` / `POST /storage` — gated; setting is an admin's (14 Nov 2026)
+
+How long this server keeps what it prunes, for the app's Settings →
+Storage, shown only in Advanced (`storage.py`, `agent_media_core/retention.py`;
+David, 14 Nov 2026: "should we include some other pruning features with
+it?" — "Maybe only for advanced mode"). GET answers any signed-in device:
+
+```json
+{"ok": true,
+ "keeps": [
+  {"key": "clips", "days": 7.0, "default": 7.0, "set": false, "forever": false,
+   "min": 1.0, "max": 3650.0, "job": "audio-prune", "last_run": {"at": 1794700000.0, "ok": true}},
+  {"key": "music_log", "days": null, "default": null, "set": false, "forever": true,
+   "min": 1.0, "max": 3650.0, "job": "state-gc", "last_run": null},
+  {"key": "history", "days": 365.0, "default": null, "set": true, "forever": true,
+   "min": 7.0, "max": 3650.0, "job": "state-gc", "last_run": null}],
+ "jobs": [
+  {"name": "state-gc", "what": "prune the state DB", "skip": null,
+   "last_run": {"at": 1794700000.0, "ok": true, "seconds": 1.2}}]}
+```
+
+| `keeps[].key` | What goes past the age | Default |
+| --- | --- | --- |
+| `clips` | rendered speech clips (an old reply then no longer replays in its voice; the built music-bed files never go) | `MEDIA_AUDIO_KEEP_DAYS`, else 7; never for ever |
+| `music_log` | rows of the log of music around speech (`GET /speech/music/log`) | for ever |
+| `history` | music and book play rows (Recently played); speech rows are never deleted | for ever |
+
+`days` is the age in force (`null` for ever), `default` what it is with
+nothing set, `set` whether one is, `min`/`max` the range a POST takes,
+`forever` whether `null` is allowed; `job` is the scheduled job that prunes
+it and `last_run` that job's last run (`ok`: it exited 0), `null` when it
+has not run here. `jobs` is every scheduled job this host has (`media
+schedule list`): `what` it does, `skip` why it does not run here (`null`
+when it does), its last run.
+
+`POST {"key", "days"}` sets one: a number of days within `min`–`max`,
+`null` for ever where `forever`, or `"default"` → the same answer as GET;
+400 for an unknown key or a value out of range or of the wrong kind; 403
+from a device that is not an admin (it is the whole server's). Nothing is
+deleted on the request: the jobs prune at their own time (state-gc 03:20,
+audio-prune 04:10). `media state-gc --days` and `--music-log-days` still
+override for one run. `GET /features` `storage` says the server has this.
 
 #### `POST /speech/ctl` — gated
 
@@ -5620,6 +5664,7 @@ local look, never a network call:
 | `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
 | `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
+| `storage` | always: `GET`/`POST /storage` (§6.5, 14 Nov 2026) — how long rendered clips, the music log and play history are kept, and the scheduled jobs' last runs, for Settings → Storage |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |

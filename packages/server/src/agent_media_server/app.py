@@ -429,7 +429,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -1962,6 +1962,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         _json(h, 200, {"ok": True, **thread_events.open_threads()})
         return True
+    if path == "/storage":
+        # Settings → Storage (Advanced): how long the server keeps what it prunes (storage.py).
+        from . import storage
+
+        ok, detail = storage.handle(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        return True
     if path == "/feedback/settings":
         # Settings' "Send What's new replies to the Sasonica team" (feedback.py).
         from . import feedback
@@ -3311,6 +3318,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_say(h)
     elif path == "/speech/say":
         _speech_say(h)
+    elif path == "/storage":
+        # Settings → Storage: one age set (storage.py; an admin's).
+        from . import storage
+
+        ok, detail = storage.handle(_bearer(h), _read_json(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/feedback/settings":
         # Settings' switch: send What's new replies on, or not (feedback.py).
         from . import feedback

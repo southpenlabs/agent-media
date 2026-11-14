@@ -21,7 +21,6 @@ job (docs/proposals/2026-11-12-fewer-services.md §4b).
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
@@ -35,10 +34,11 @@ DEFAULT_DAYS = 7.0
 
 
 def keep_days() -> float:
-    try:
-        return float(os.environ.get("MEDIA_AUDIO_KEEP_DAYS") or DEFAULT_DAYS)
-    except ValueError:
-        return DEFAULT_DAYS
+    """The age set in Settings → Storage (retention.py `clips`), else
+    MEDIA_AUDIO_KEEP_DAYS, else 7."""
+    from . import retention
+
+    return retention.days("clips") or DEFAULT_DAYS
 
 
 def protected(name: str) -> bool:

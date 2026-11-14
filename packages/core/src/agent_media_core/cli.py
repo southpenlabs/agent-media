@@ -9927,13 +9927,26 @@ def _ago(seconds: float) -> str:
 
 def cmd_state_gc(a) -> int:
     """Apply the state DB's retention policy. See StateStore.gc for the rules."""
-    res = StateStore().gc(errors_days=a.errors_days, other_days=a.days,
-                          clip_days=a.clip_days, dry_run=a.dry_run)
+    from . import retention
+
+    # The ages set in Settings → Storage (retention.py) unless given here:
+    # play rows and the music log are kept for ever unless one is set.
+    other_days = a.days if a.days is not None else retention.days("history")
+    log_days = a.music_log_days if a.music_log_days is not None else retention.days("music_log")
+    store = StateStore()
+    res = store.gc(errors_days=a.errors_days, other_days=other_days,
+                   clip_days=a.clip_days, dry_run=a.dry_run)
+    res["music_log"] = 0
+    if log_days is not None:
+        before = time.time() - log_days * 86400
+        res["music_log"] = (store.count_speech_music(before) if a.dry_run
+                            else store.prune_speech_music(before))
     if getattr(a, "json", False):
         print(json.dumps(res))
         return 0
     verb = "would free" if a.dry_run else "freed"
     print(f"errors: {res['errors']}  play rows: {res['history']}  "
+          f"music log rows: {res['music_log']}  "
           f"clip lists stripped: {res['clips']}  "
           f"{verb} {res['bytes'] / 1e6:.1f}MB of extras")
     return 0
@@ -11599,8 +11612,11 @@ def _build_parser() -> argparse.ArgumentParser:
                              "(old errors and play rows, dead clip lists)")
     sg.add_argument("--days", type=float, default=None,
                     help="delete non-speech play rows older than this "
-                         "(default: keep them all); speech rows are never "
-                         "deleted")
+                         "(default: Settings → Storage's age, else keep them "
+                         "all); speech rows are never deleted")
+    sg.add_argument("--music-log-days", type=float, default=None,
+                    help="delete music log rows older than this (default: "
+                         "Settings → Storage's age, else keep them all)")
     sg.add_argument("--errors-days", type=float, default=30.0,
                     help="delete errors older than this (default 30)")
     sg.add_argument("--clip-days", type=float, default=30.0,
