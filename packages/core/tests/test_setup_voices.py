@@ -200,3 +200,13 @@ def test_dry_run_writes_nothing(env):
     assert env.downloads == []
     assert not env.unit.exists() and not env.envfile.exists()
     assert not (env.root / "kokoro").exists()
+
+
+def test_a_hand_made_kokoro_unit_on_the_port_stops_it_before_the_unit(env, capsys):
+    (env.tmp / "units").mkdir()
+    (env.tmp / "units" / "kokoro-tts.service").write_text("[Service]\n")
+    assert _main("kokoro") == 1
+    assert not env.unit.exists()
+    assert not any("enable" in c for c in env.calls)
+    assert "systemctl --user disable --now kokoro-tts.service" in capsys.readouterr().out
+    assert (env.root / "kokoro" / "models" / "kokoro-v1.0.onnx").exists()   # kept for the rerun

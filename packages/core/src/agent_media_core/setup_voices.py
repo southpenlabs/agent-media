@@ -69,6 +69,8 @@ PIPER_SPEC = "piper-tts[http]>=1.3,<2"
 UNITS = {"kokoro": "agent-media-kokoro-tts.service",
          "piper": "agent-media-piper-tts.service"}
 ENGINES = tuple(UNITS)
+#: The hand-made unit red2 and red5 ran before this (same port).
+LEGACY_KOKORO_UNIT = "kokoro-tts.service"
 
 _KOKORO_VOICE = re.compile(r"^[a-z][fm]_[a-z0-9]+$")
 _PIPER_VOICE = re.compile(r"^[a-z]{2,3}_[A-Z]{2}-[A-Za-z0-9_]+-(x_low|low|medium|high)$")
@@ -426,6 +428,16 @@ def install_kokoro(voice: str, *, from_dir: Path | None, fallback: bool, dry_run
     if not _place_kokoro_files(models, from_dir, dry_run=dry_run):
         return 1
     unit = UNITS["kokoro"]
+    legacy = _setup.systemd_user_dir() / LEGACY_KOKORO_UNIT
+    if legacy.exists():
+        # The hand-made server this replaces holds the same port; never
+        # stopped for the user, since it may be what renders right now.
+        _say(f"  {legacy} (a hand-made Kokoro server) is here too and takes port "
+             f"{KOKORO_PORT}: stop it first —\n"
+             f"    systemctl --user disable --now {LEGACY_KOKORO_UNIT}\n"
+             f"  then run this again (what is installed so far stays)")
+        if not dry_run:
+            return 1
     changed = _write_if_changed(_setup.systemd_user_dir() / unit,
                                 kokoro_unit(exec_start, models, voice), dry_run=dry_run)
     _say(f"  unit: {_setup.systemd_user_dir() / unit}" + ("" if changed else " (unchanged)"))
