@@ -162,10 +162,14 @@ def send(session: str, text: str, *, wait: float = 0.0) -> tuple[int, dict]:
         time.sleep(min(POLL_S, max(0.05, deadline - time.monotonic())))
 
 
+#: The agents sessiond holds headless (sessiond.py `start`).
+AGENTS = ("claude", "opencode", "antigravity")
+
+
 def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
           persona: str = "", role: str = "", permissions: str = "",
-          host: str = "") -> tuple[int, dict]:
-    """A fresh headless Claude session in `cwd` with `text` as its first
+          host: str = "", agent: str = "claude") -> tuple[int, dict]:
+    """A fresh headless session in `cwd` with `text` as its first
     message; `(rc, answer)` with the session id and its thread link. Filed
     under the workspace a new chat from the app would get (send.ask), and
     through sessiond's own `start`, so its refusals hold (a usage limit, a
@@ -177,7 +181,10 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     public render: a session started from another, or from a timer, is never
     a private thread. `permissions` names its profile (permissions.py:
     strict, normal, folder); empty is the host's. `host` runs it on that
-    host (roadmap 56; no persona there yet)."""
+    host (roadmap 56; no persona there yet). `agent` is Claude Code by
+    default, or opencode or Antigravity (`AGENTS`), with that agent's own
+    model ids (session_settings.clean_new); only Claude goes to another
+    host yet."""
     from agent_media_core import layout
     from agent_media_core.intake.context import thread_link_base
 
@@ -186,7 +193,13 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     cwd = _real(cwd)
     if not os.path.isdir(cwd):
         return RC_NONE, {"error": f"no folder {cwd}", "code": "none"}
-    model, mode = session_settings.clean_new("claude", model, "plan" if plan else "")
+    agent = (agent or "claude").strip()
+    if agent not in AGENTS:
+        return RC_USAGE, {"error": f"agent must be one of {', '.join(AGENTS)}", "code": "agent"}
+    want = (model or "").strip()
+    model, mode = session_settings.clean_new(agent, model, "plan" if plan else "")
+    if want and not model:
+        return RC_USAGE, {"error": f"{want!r} is not a model {agent} takes here", "code": "model"}
     persona, role = (persona or "").strip(), (role or "").strip()
     host = (host or "").strip()
     from .sessiond_remote import is_local
@@ -195,23 +208,26 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         host = "local"      # this host, never the default one (sessiond_remote)
     if host and host != "local" and (persona or role):
         return RC_USAGE, {"error": "a persona cannot start on another host yet", "code": "persona"}
+    if host and host != "local" and agent != "claude":
+        return RC_USAGE, {"error": f"{agent} cannot start on another host yet", "code": "agent"}
     prompt_file = None
     if persona or role:
         from . import personas
 
-        why = personas.check(persona, role, agent="claude", rows=personas.described())
+        why = personas.check(persona, role, agent=agent, rows=personas.described())
         if why:
             return RC_USAGE, {"error": why, "code": "persona"}
-        made_it, rendered = personas.render(persona, role, "claude", "public")
+        made_it, rendered = personas.render(persona, role, agent, "public")
         if not made_it:
             return RC_FAILED, {"error": f"could not render the persona: {rendered}",
                                "code": "persona"}
-        if _call("ping", timeout=3.0).get("system_prompt") is True:
+        if personas.via(agent) == "system_prompt" \
+                and _call("ping", timeout=3.0).get("system_prompt") is True:
             prompt_file = personas.write(rendered)
         else:
             text = personas.prepend(rendered, text)
     workspace = layout.workspace_for(layout.place_host(cwd), cwd)
-    r = _call("start", cwd=cwd, text=text, agent="claude", workspace=workspace, model=model,
+    r = _call("start", cwd=cwd, text=text, agent=agent, workspace=workspace, model=model,
               mode=mode, permissions=permissions,
               timeout=240.0 if host and host != "local" else 30.0,
               **({"host": host} if host else {}),
@@ -219,7 +235,8 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     if not r.get("ok"):
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
     sid = str(r.get("session") or "")
-    out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid}
+    out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid,
+           **({"agent": agent} if agent != "claude" else {})}
     if r.get("host"):
         out["host"] = r["host"]
     if persona or role:
@@ -260,8 +277,11 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("text", nargs="*", help="the first message; '-' or nothing reads stdin")
     st.add_argument("--from", dest="sender", default="",
                     help="who it is from: prefixed as '[From Name]' unless the text has one")
+    st.add_argument("--agent", default="claude", choices=AGENTS,
+                    help="which agent runs it (default: claude)")
     st.add_argument("--model", default="", help="opus | sonnet | haiku | fable (default: "
-                                                "Claude's own)")
+                                                "Claude's own); for opencode a provider/model "
+                                                "id it lists")
     st.add_argument("--plan", action="store_true", help="start in plan mode")
     st.add_argument("--persona", default="", help="start as this persona (agent-personas id)")
     st.add_argument("--role", default="", help="with this role (e.g. reviewer)")
@@ -383,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         return RC_FAILED
     if a.cmd == "start":
         rc, ans = start(a.cwd, text, model=a.model, plan=a.plan, persona=a.persona,
-                        role=a.role, permissions=a.permissions, host=a.host)
+                        role=a.role, permissions=a.permissions, host=a.host, agent=a.agent)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:

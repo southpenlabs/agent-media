@@ -43,8 +43,10 @@ give it a sessiond backend of its own.
    in plan mode does the same, or gets `--agent plan` in a pane.
    `session_settings` reports `can.plan`. Checked against opencode 1.19.5:
    asked to write a file, it wrote a plan instead.
-5. **`media session start --agent opencode`.** Only the app can start a
-   headless opencode chat. Agent mail and other sessions cannot.
+5. **`media session start --agent opencode`.** Done (14 Nov 2026):
+   `--agent claude|opencode|antigravity`, with that agent's own model ids
+   (`--model opencode/big-pickle`; a model the agent doesn't take is refused,
+   not dropped) and `--plan`. Only Claude goes to another host yet.
 6. **The slash menu.** `GET /commands` is Claude Code's list. opencode's
    server has its own command list, which could be served the same way for
    an opencode thread.

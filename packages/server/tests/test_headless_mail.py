@@ -266,3 +266,22 @@ def test_wake_starts_with_the_permission_profile_it_is_given(host, capsys):
     rc, d = run(capsys, "wake", str(host.work), "--permissions", "folder", "reply: hi")
     assert rc == 0 and d["woke"] == "started"
     assert sessiond.read_record(d["session"])["permissions"] == "folder"
+
+
+def test_start_names_its_agent_and_checks_that_agents_model(host, capsys, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hm, "_call", lambda op, **kw: calls.append((op, kw)) or {
+        "ok": True, "session": "ses_" + "a" * 26})
+    rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--plan",
+                "--model", "opencode/big-pickle", "hi")
+    assert rc == 0 and d["agent"] == "opencode" and d["session"].startswith("ses_")
+    (op, kw), = [c for c in calls if c[0] == "start"]
+    assert op == "start" and kw["agent"] == "opencode" and kw["mode"] == "plan"
+    assert kw["model"] == "opencode/big-pickle"
+    calls.clear()
+    rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--model", "opus", "hi")
+    assert rc == 2 and "not a model opencode takes" in d["error"]
+    assert not [c for c in calls if c[0] == "start"]
+    rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--host", "red5", "hi")
+    assert rc == 2 and "another host" in d["error"]
+    assert not [c for c in calls if c[0] == "start"]
