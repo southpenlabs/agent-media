@@ -97,6 +97,12 @@ def test_the_pooled_server_serves_a_request_beside_an_open_stream(monkeypatch):
             c.request("GET", "/")
             names.append(c.getresponse().read().decode())
             c.close()
+            # The worker answers inside the job and only then goes back to
+            # waiting: a client that connects again in that gap rightly gets
+            # a second worker. Wait until it is back, so what is tested is
+            # reuse, not that race (flaky 1 in 6, found by sasonica-app
+            # f5d66634). The stream's worker is never idle; the other is.
+            assert _wait(lambda: srv.pool.stats()["idle"] >= 1)
         assert all(n.startswith("http-") for n in names)
         assert len(set(names)) == 1           # one warm worker took all five
     finally:
