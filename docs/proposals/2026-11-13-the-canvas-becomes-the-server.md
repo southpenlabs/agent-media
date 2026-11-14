@@ -265,8 +265,15 @@ this file, as fewer-services did with its §4d.
   PATH the generated unit lacks. Swapped by a detached script that would
   have put the old unit back on failure; the old unit and its drop-ins are
   in `~/.config/systemd/user/retired-20261114/`. `--only canvas` and
-  `--only server` both name it. The tunnel is still the hand-placed
-  `sasonica-tunnel.service`: its template is the next piece. Found on the
+  `--only server` both name it. **The tunnel followed at 19:01**
+  (3ee5f550, a084e080): `media-tunnel` (`requires: server` and
+  `MEDIA_VISUAL_PUBLIC`) installs `agent-media-tunnel.service`, the named
+  tunnel where the host has `~/.cloudflared/config.yml`, else the quick
+  tunnel; its restart waits for a reply being spoken. red2 rebooted at
+  19:04 (not part of this work) and the generated unit, without the old
+  one's wait for network-online, failed six times on DNS before it held:
+  its start script now waits for DNS. Both hand-placed units are in
+  `retired-20261114/`; nothing of the server is placed by hand now. Found on the
   way: red2's `MEDIA_VISUAL_URL` still named red5, so replies' pictures
   had been pushed to a stopped server since the move; it names red2 now.
   The pool's measurements restart from the swap (reports at 21:42 tonight

@@ -233,8 +233,8 @@ with it (item 3 above).
    next install-services.
 3. Templates for the canvas and the tunnel, with fewer-services §4c/§5.
    **The canvas's done 14 Nov 2026**: `agent-media-server` from the
-   `media-server` template, `requires: server`, live on red2. The
-   tunnel's is still to do.
+   `media-server` template, `requires: server`, live on red2, and the
+   tunnel's (`agent-media-tunnel`, `media-tunnel`) since 19:01 the same day.
 4. `[host] name` and `address`.
 5. The move rewrites the declaration; doctor checks against it.
 6. Shell sign-ins through the worker, if still wanted by then.
