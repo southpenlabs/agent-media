@@ -4667,8 +4667,14 @@ most once a second; lookups kept a week, searches a day
   is listed once, a bracketed take ("(live)", "(remastered)") folded into
   it; `album_id` is the discography's album of that name, or null. Albums
   are only the discography's Albums and EPs, so bootlegs and live tapes
-  stay out. Empty lists when ListenBrainz has no listens. The artist's
-  page in the app (a channel's page) shows both.
+  stay out; the rest listened to, other than its singles and compilations
+  (live albums, bootlegs, recorded shows: `"live": [{"id", "title",
+  "artist", "type", "date", "year", "art", "listens"}]`, ten) is a list of
+  its own. `"similar": [{"id", "name", "type", "disambiguation"}]` (twelve)
+  is ListenBrainz Labs' artists listened to in the same sessions
+  (`labs.api.listenbrainz.org/similar-artists`), empty when Labs fails.
+  Empty lists when ListenBrainz has no listens. The artist's page in the
+  app (a channel's page) shows them all.
 - `POST /music/brainz {"album": <mbid>, "from"?: n}` (as `POST /music`'s
   gate) plays the album in order: its first track (or track `from`) found and
   played as a Discover row is (`find`), the rest found and queued one by one

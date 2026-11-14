@@ -13,7 +13,9 @@
   popular(mbid)     an artist's most-played songs and albums, by
                     ListenBrainz's listen counts (MusicBrainz keeps no
                     popularity); albums are those of the discography's
-                    Albums and EPs, so bootlegs and live tapes stay out
+                    Albums and EPs, and the live albums, bootlegs and
+                    tapes listened to are a list of their own; and
+                    artists similar to them (ListenBrainz Labs)
 
 MusicBrainz asks for a User-Agent naming the app with a contact, and at
 most one call a second (spaced here, `_get`). Lookups are kept a week on
@@ -38,6 +40,9 @@ from typing import Optional
 
 MB = "https://musicbrainz.org/ws/2"
 LB_POPULAR = "https://api.listenbrainz.org/1/popularity"
+#: ListenBrainz Labs' similar artists, from listening sessions (the algorithm its own pages use).
+LB_SIMILAR = ("https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids={mbid}&algorithm="
+              "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30")
 CAA_GROUP = "https://coverartarchive.org/release-group"
 CAA_RELEASE = "https://coverartarchive.org/release"
 USER_AGENT = "agent-media/1 ( https://github.com/southpenlabs/agent-media )"
@@ -46,6 +51,8 @@ LOOKUP_TTL_S = 7 * 86400.0
 SEARCH_TTL_S = 86400.0
 POPULAR_TRACKS = 10
 POPULAR_ALBUMS = 8
+POPULAR_LIVE = 10
+SIMILAR = 12
 #: Discography sections, in order.
 SECTIONS = ("album", "ep", "single", "live", "compilation")
 
@@ -271,12 +278,20 @@ def artist_by_name(name: str) -> Optional[dict]:
 
 def popular(mbid: str) -> dict:
     """An artist's most-played: `{tracks: [{title, artist, album, album_id,
-    length_s, listens, art}], albums: [<a discography row> + listens]}`,
+    length_s, listens, art}], albums: [<a discography row> + listens],
+    live: [{id, title, artist, type, date, year, art, listens}],
+    similar: [{id, name, type, disambiguation}]}`,
     most listened first, from ListenBrainz (David, 14 Nov 2026: "a list of
     their popular tracks and albums ... From music brains or something").
     A song is listed once (its live and remastered takes folded into the
     most-played one); an album only when the discography has it under
-    Albums or EPs. Empty lists when ListenBrainz has no listens for them."""
+    Albums or EPs; the rest listened to, other than its singles and
+    compilations (live albums, bootlegs, recorded shows), are `live` (David,
+    14 Nov 2026: "add the bootlegs and Live tapes down below"). `similar` is
+    ListenBrainz Labs' artists listened to in the same sessions, most
+    similar first ("Is there a similar artists option?"); a Labs failure
+    leaves it empty and the rest stands. Empty lists
+    when ListenBrainz has no listens for them."""
     mbid = _mbid(mbid)
 
     def lb(kind: str) -> list:
@@ -304,14 +319,37 @@ def popular(mbid: str) -> dict:
                            "listens": int(r.get("total_listen_count") or 0), "art": art})
             if len(tracks) >= POPULAR_TRACKS:
                 break
-        listens = {str(g.get("release_group_mbid")): int(g.get("total_listen_count") or 0)
-                   for g in lb("top-release-groups-for-artist") if isinstance(g, dict)}
+        groups = [g for g in lb("top-release-groups-for-artist") if isinstance(g, dict) and g.get("release_group_mbid")]
+        listens = {str(g["release_group_mbid"]): int(g.get("total_listen_count") or 0) for g in groups}
         disco = artist(mbid)
+        studio = {a["id"] for s in disco["sections"] if s["type"] in ("album", "ep", "single", "compilation")
+                  for a in s["albums"]}
+        live = []
+        for g in groups:
+            gid = str(g["release_group_mbid"])
+            if gid in studio or not listens[gid]:
+                continue
+            rg = g.get("release_group") or {}
+            date = rg.get("date") or None
+            live.append({"id": gid, "title": str(rg.get("name") or ""), "artist": (g.get("artist") or {}).get("name") or None,
+                         "type": "live", "date": date, "year": _year(date),
+                         "art": f"{CAA_GROUP}/{gid}/front-250", "listens": listens[gid]})
+        live.sort(key=lambda a: -a["listens"])
         albums = [{**a, "listens": listens[a["id"]]} for s in disco["sections"] if s["type"] in ("album", "ep")
                   for a in s["albums"] if listens.get(a["id"])]
         albums.sort(key=lambda a: -a["listens"])
         by_title = {_fold(a["title"]): a["id"] for s in disco["sections"] for a in s["albums"]}
         for t in tracks:
             t["album_id"] = by_title.get(_fold(t["album"] or ""))
-        return {"tracks": tracks, "albums": albums[:POPULAR_ALBUMS]}
-    return _kept(f"p:{mbid}", LOOKUP_TTL_S, ask)
+        try:
+            code, got = _get(LB_SIMILAR.format(mbid=mbid))
+            rows = got if code == 200 and isinstance(got, list) else []
+        except OSError:
+            rows = []
+        similar = [{"id": r["artist_mbid"], "name": str(r.get("name") or ""), "type": r.get("type") or None,
+                    "disambiguation": r.get("comment") or None}
+                   for r in rows if isinstance(r, dict) and r.get("artist_mbid") and r.get("name")
+                   and r["artist_mbid"] != mbid][:SIMILAR]
+        return {"tracks": tracks, "albums": albums[:POPULAR_ALBUMS],
+                "live": [a for a in live if a["title"]][:POPULAR_LIVE], "similar": similar}
+    return _kept(f"p3:{mbid}", LOOKUP_TTL_S, ask)

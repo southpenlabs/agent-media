@@ -26,6 +26,10 @@ def fake(asked):
         u = urllib.parse.urlsplit(url)
         if u.netloc == "api.listenbrainz.org":
             return listenbrainz(u.path)
+        if u.netloc == "labs.api.listenbrainz.org":
+            assert urllib.parse.parse_qs(u.query)["artist_mbids"] == [A]
+            return 200, [{"artist_mbid": "n1", "name": "Nirvana", "comment": "US grunge band", "type": "Group"},
+                         {"artist_mbid": A, "name": "Radiohead"}, {"artist_mbid": "p1", "name": "Portishead"}]
         q = urllib.parse.parse_qs(u.query)
         assert q["fmt"] == ["json"]
         p = u.path.removeprefix("/ws/2/")
@@ -68,10 +72,12 @@ def listenbrainz(path):
         return 200, [rec("Karma Police", "OK Computer", 300), rec("Creep", "Pablo Honey", 200),
                      rec("Karma Police (live)", "I Might Be Wrong", 150), rec("Airbag", "OK Computer", 100)]
     if path == f"/1/popularity/top-release-groups-for-artist/{A}":
-        return 200, [{"release_group_mbid": "bootleg-tape", "total_listen_count": 999},
+        return 200, [{"release_group_mbid": "bootleg-tape", "total_listen_count": 999, "artist": {"name": "Radiohead"},
+                      "release_group": {"name": "1995-04-25: Live Europe 1", "date": "1995-04-25", "type": "Album"}},
+                     {"release_group_mbid": "x2", "total_listen_count": 70, "release_group": {"name": "Creep"}},
                      {"release_group_mbid": "x1", "total_listen_count": 50},
                      {"release_group_mbid": RG, "total_listen_count": 900},
-                     {"release_group_mbid": "x3", "total_listen_count": 80}]
+                     {"release_group_mbid": "x3", "total_listen_count": 80, "release_group": {"name": "I Might Be Wrong"}}]
     return 404, None
 
 
@@ -119,6 +125,11 @@ def test_popular_songs_and_albums(server, signed_in, brainz):
     assert obj["tracks"][0]["art"] == f"https://coverartarchive.org/release/{R1}/front-250"
     assert [(a["title"], a["listens"]) for a in obj["albums"]] == [("OK Computer", 900), ("Pablo Honey", 50)], \
         "only the discography's albums and EPs: no bootleg, no live album"
+    assert [(a["title"], a["year"], a["listens"]) for a in obj["live"]] == [
+        ("1995-04-25: Live Europe 1", 1995, 999), ("I Might Be Wrong", None, 80)], \
+        "the bootleg and the live album below, by listens; the single not among them"
+    assert [(a["id"], a["name"], a["disambiguation"]) for a in obj["similar"]] == [
+        ("n1", "Nirvana", "US grunge band"), ("p1", "Portishead", None)], "never themselves"
     n = len(brainz)
     call(server, "GET", f"/music/brainz?popular={A}", headers=AUTH)
     assert len(brainz) == n, "kept a week"
