@@ -113,6 +113,87 @@ model on them overnight. This copies its shape:
 4. **Steering:** tune picker and radio mood weighting, each its own
    change.
 
+## Step 1 results (14 Nov 2026, red2)
+
+David chose all three: personal use first, ask MTG, look at open models.
+
+**The spike.** Essentia 2.1-beta6 (`essentia-tensorflow`, in its own
+Python 3.11 venv outside the repo, `~/.local/share/agent-media-essentia/`),
+MusiCNN-MSD embedding with the five mood heads and the emoMusic
+valence/arousal head (scaled from 1–9 to 0–1). It scored 30 s clips
+(60–90 s into each song) of 20 of David's most-played songs. The whole
+run took 24 s, about **1 s per song** on CPU, with models loading in
+0.1 s. Sorted by valence:
+
+| song | valence | arousal | happy | sad | relaxed | aggressive | party |
+|---|---|---|---|---|---|---|---|
+| AC/DC - Thunderstruck | 0.67 | 0.71 | 0.89 | 0.00 | 0.00 | 0.95 | 0.99 |
+| R.E.M. - Losing My Religion | 0.65 | 0.61 | 0.99 | 0.23 | 0.01 | 0.04 | 0.14 |
+| Eagles - Take It Easy | 0.61 | 0.57 | 0.99 | 0.28 | 0.07 | 0.01 | 0.12 |
+| Tears For Fears - Everybody Wants To Rule The World | 0.60 | 0.62 | 0.91 | 0.00 | 0.25 | 0.01 | 0.73 |
+| CCR - Have You Ever Seen The Rain | 0.58 | 0.56 | 0.97 | 0.43 | 0.14 | 0.02 | 0.42 |
+| John Mellencamp - Jack & Diane | 0.58 | 0.56 | 0.90 | 0.63 | 0.60 | 0.00 | 0.19 |
+| Eagles - Hotel California | 0.55 | 0.49 | 0.79 | 0.85 | 0.65 | 0.01 | 0.47 |
+| Morcheeba - The Sea | 0.54 | 0.49 | 0.90 | 0.19 | 0.21 | 0.01 | 0.03 |
+| 4 Non Blondes - What's Up | 0.54 | 0.54 | 0.78 | 0.69 | 0.24 | 0.03 | 0.37 |
+| Télépopmusik - Breathe | 0.51 | 0.44 | 0.32 | 0.07 | 0.97 | 0.00 | 0.03 |
+| Massive Attack - Unfinished Sympathy | 0.50 | 0.46 | 0.45 | 0.29 | 0.70 | 0.00 | 0.31 |
+| The Who - My Generation | 0.49 | 0.58 | 0.78 | 0.09 | 0.27 | 0.17 | 0.33 |
+| The Animals - House Of The Rising Sun | 0.48 | 0.47 | 0.78 | 0.80 | 0.39 | 0.00 | 0.00 |
+| Camila Cabello - Havana | 0.47 | 0.51 | 0.82 | 0.51 | 0.38 | 0.00 | 0.54 |
+| Massive Attack - Teardrop | 0.45 | 0.41 | 0.07 | 0.28 | 0.89 | 0.00 | 0.06 |
+| Mazzy Star - Fade Into You | 0.43 | 0.33 | 0.24 | 0.98 | 0.93 | 0.00 | 0.00 |
+| Guns N' Roses - November Rain | 0.42 | 0.43 | 0.05 | 0.88 | 0.87 | 0.06 | 0.02 |
+| Nils Frahm - Says | 0.42 | 0.28 | 0.02 | 0.12 | 1.00 | 0.00 | 0.00 |
+| Debussy - Clair de Lune | 0.38 | 0.22 | 0.00 | 1.00 | 1.00 | 0.00 | 0.00 |
+| Hammock - Tremendum | 0.28 | 0.33 | 0.00 | 0.08 | 1.00 | 0.03 | 0.00 |
+
+What the numbers show:
+
+- **Energy (arousal) reads right.** Thunderstruck is highest, and Clair
+  de Lune, Nils Frahm and Hammock are lowest.
+- **Valence is squeezed** into 0.28–0.67, so it needs rescaling (a rank
+  across the library, not raw numbers).
+- **It hears the music, not the words.** Losing My Religion and Hotel
+  California score as cheerful because of their bright sound.
+- **The five mood heads are the more telling line.** Mazzy Star is "sad,
+  relaxed"; Thunderstruck is "aggressive, party".
+- One 30 s clip may be unrepresentative. In production, average three
+  clips taken across the song.
+
+**Open models** (web research by a subagent; the licences are as listed
+on each model's page):
+
+- **No published mood dataset is clear for commercial training.**
+  MTG-Jamendo, emoMusic and DEAM are non-commercial; PMEmo has no named
+  licence. MERT, MuQ and music2emo weights are non-commercial too.
+- **LAION CLAP** (`larger_clap_music`, Apache-2.0 on Hugging Face; code
+  CC0) is the most shippable embedding. Its training audio is murky, and
+  zero-shot prompts are poor at mood (r = 0.08 against human ratings in
+  GlobalMood, arXiv 2505.09539).
+- **AcousticBrainz's per-recording mood outputs are CC0.** That makes
+  them the one commercially safe source of mood labels: frozen in 2022,
+  keyed by MBID, noisy.
+- The best shippable route is CLAP embeddings with a small head we train
+  on AcousticBrainz's CC0 labels plus David's own ratings. OpenL3 (MIT
+  code, CC BY weights) is the fallback embedding.
+- Unverified: whether the msclap and MusicFM weights carry the licence
+  their pages say, the official DEAM text, VGGish's licence, and any CPU
+  timing other than Essentia's.
+
+**Draft to MTG** (not sent; David to approve), to the contact on
+https://essentia.upf.edu/models.html:
+
+> Subject: Commercial licence for Essentia mood models
+>
+> Hello — South Pen Labs makes Sasonica, an app that plays music alongside
+> coding agents. We would like to score songs for mood on the user's own
+> server with your MusiCNN-MSD embedding and the mood_happy, mood_sad,
+> mood_relaxed, mood_aggressive, mood_party and emomusic heads, running
+> Essentia as a separate process. Could you tell us what a proprietary
+> licence for those models would cost for a small commercial product,
+> and its terms (per-install, per-seat, or flat)? Thank you.
+
 ## Open questions
 
 - Personal-use gated for now, or ask MTG about a commercial licence first?
