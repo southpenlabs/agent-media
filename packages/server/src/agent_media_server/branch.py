@@ -8,7 +8,9 @@ chose to be offered both, each time, from the long press on a reply:
   Code does it itself — `--resume <session> --fork-session
   --resume-session-at <record>` — so the transcript is never cut by hand;
   sessiond starts it under a new id (sessiond.py `fork_from`), headless,
-  in the folder the thread ran in. Claude Code chats only.
+  in the folder the thread ran in. An opencode chat is branched by
+  opencode's own fork (`POST /session/:id/fork`, which keeps every message
+  before the one it is given): `opencode_cut` finds that message.
 * **from before your message** (`mode: "before"`, 6 Nov 2026): a hold on
   one of your own messages, then Branch: a new chat that remembers the
   conversation up to the reply before that message, and the message's words
@@ -100,6 +102,52 @@ def fork_before(session: str, mid: str) -> tuple[bool, str]:
     return False, ""
 
 
+def opencode_cut(session: str, mid: str, mode: str) -> tuple[bool, str]:
+    """Where opencode's fork of `session` cuts for a branch from message
+    `mid`: `(found, message id)`, the fork keeping every message before it.
+    "history": the person's next message after the reply (`mid` is the
+    reply's first step; its later steps are kept), "" when the reply is the
+    last thing said (keep all). "before": `mid` itself, one of the person's
+    messages; "" when it is the first (nothing to keep)."""
+    from agent_media_core import harnesses
+
+    rows = harnesses.opencode_rows(
+        "select id, json_extract(data, '$.role') from message where session_id = ? "
+        "order by time_created, id", (session,))
+    ids = [str(i) for i, _ in rows]
+    if not mid or mid not in ids:
+        return False, ""
+    at = ids.index(mid)
+    if mode == "before":
+        if rows[at][1] != "user":
+            return False, ""
+        return True, (mid if any(r == "user" for _, r in rows[:at]) else "")
+    nxt = next((str(i) for i, r in rows[at + 1:] if r == "user"), "")
+    return True, nxt
+
+
+def _opencode_branch(session: str, mid: str, text: str, bearer: str,
+                     mode: str) -> tuple[bool, dict]:
+    from . import send
+
+    found, at = opencode_cut(session, mid, mode)
+    if not found:
+        return False, {"error": "that message is not in this chat", "status": 404}
+    if mode == "before" and not at:
+        # Your first message: nothing to remember, a fresh chat in its folder.
+        ok, detail = send.reply(text, bearer, mode="branch", session=session)
+    else:
+        cwd = sessions.transcript_cwd(session)
+        if not cwd:
+            return False, {"error": "this chat's folder is not known", "status": 409}
+        ok, detail = driver.headless_driver().start(agent="opencode", cwd=cwd, text=text,
+                                                     fork_from=session, fork_at=at)
+    if ok:
+        detail["branched"] = True
+        detail["from"] = {"session": session, "id": mid}
+    return ok, detail
+
+
 def session_branch(session: str, mid: str, text: str, bearer: str, *,
                    mode: str = "history", quote: str = "") -> tuple[bool, dict]:
     """`{"session", "id", "text", "mode", "quote"?}` → `{"session": <the new
@@ -119,8 +167,12 @@ def session_branch(session: str, mid: str, text: str, bearer: str, *,
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    from agent_media_core import harnesses
+
+    if harnesses.is_opencode(session):
+        return _opencode_branch(session, (mid or "").strip(), text, bearer, mode)
     if not transcript.transcript_path(session):
-        return False, {"error": "only a Claude Code chat can be branched with its history",
+        return False, {"error": "only a Claude Code or opencode chat can be branched with its history",
                        "status": 409}
     mid = (mid or "").strip()
     if mode == "before":

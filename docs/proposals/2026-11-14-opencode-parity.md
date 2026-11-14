@@ -75,3 +75,23 @@ give it a sessiond backend of its own.
    metadata). So their `[[replies:]]` and `[[actions:]]` become chips, a
    `[[visual:]]` is drawn rather than read aloud, and the speech level and
    toast hold apply. A reply with no conversation is submitted as before.
+
+## Second round (15 Nov 2026)
+
+David, 15 Nov 2026, after asking what opencode still couldn't do: "okay,
+let's get them working for opencode".
+
+10. **Branching with its history.** Done: a branch of an opencode thread
+    is opencode's own fork (`POST /session/:id/fork`). Measured on 1.19.5,
+    it keeps every message before the one it is given, or all of them when
+    given none. `branch.opencode_cut` picks the message. With its history,
+    that is your next message after the reply. From before your message,
+    it is that message. sessiond makes the fork, gives it the chat's
+    permission rules (`PATCH`, since a fork takes none of its own), and
+    sends the first message.
+11. **Running on another machine.** Not yet.
+12. **Moving a chat to another folder.** Not yet.
+13. **Personas in the system prompt.** Not yet.
+14. **Cut-off background agents named on resume.** Not yet.
+15. **Plan and Stop for opencode in a terminal pane.** Not yet.
+16. **A slash menu before the first chat in a folder.** Not yet.

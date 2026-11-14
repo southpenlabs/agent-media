@@ -297,6 +297,19 @@ def test_stopping_a_subagent_aborts_its_child_session_and_nothing_else(host, tmp
     assert not any(r[1].startswith(f"/session/{other}/abort") for r in requests(host))
 
 
+def test_a_branch_is_opencodes_fork_given_the_chats_rules(host, monkeypatch):
+    sid = start(host, "hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    new = start(host, "and then?", fork_from=sid, fork_at="msg_cut")
+    assert new != sid
+    fork = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/fork")][-1]
+    assert fork[0] == "POST" and fork[2] == {"messageID": "msg_cut"}
+    assert any(r[1].startswith(f"/session/{new}/prompt_async") for r in requests(host))
+    whole = start(host, "again", fork_from=sid, fork_at="")
+    assert [r for r in requests(host) if r[1].startswith(f"/session/{sid}/fork")][-1][2] == {}
+    assert host.sup.get(whole)["agent"] == "opencode"
+
+
 def test_the_server_needs_its_password(host):
     import urllib.error
     import urllib.request

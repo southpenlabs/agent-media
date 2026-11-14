@@ -3027,7 +3027,8 @@ class Supervisor:
                               "quota_limited", quota=q.view(rec=lim))
             return self._oc_start(cwd, text, workspace=workspace,
                                   permissions=perms.mode(permissions), model=model,
-                                  mode="plan" if mode == "plan" else "")
+                                  mode="plan" if mode == "plan" else "",
+                                  fork_from=fork_from, fork_at=fork_at)
         # A restart pending (David, 11 Nov 2026, screenshot: a new chat
         # refused with "start the chat again once it has" — "this should
         # happen automatically"): the chat is made now and its first message
@@ -3644,7 +3645,11 @@ class Supervisor:
         log.info("sessiond: opencode serve exited %s", rc)
 
     def _oc_start(self, cwd: str, text: str, *, workspace: str, permissions: str,
-                  model: str, mode: str = "") -> dict:
+                  model: str, mode: str = "", fork_from: str = "", fork_at: str = "") -> dict:
+        """A new opencode chat; with `fork_from`, a branch with its history:
+        opencode's own fork of that session, keeping every message before
+        `fork_at` (a message id), or all of them when it is empty
+        (branch.py works out which)."""
         from . import sessiond_opencode as oc
 
         if not os.path.isdir(cwd):
@@ -3652,9 +3657,17 @@ class Supervisor:
         proc = self.oc.ensure()
         body: dict = {}
         rules = oc.ruleset(permissions)
-        if rules:
-            body["permission"] = rules
-        info = self.oc.call("POST", "/session", body, directory=cwd)
+        if fork_from:
+            info = self.oc.call("POST", f"/session/{fork_from}/fork",
+                                {"messageID": fork_at} if fork_at else {}, directory=cwd)
+            fid = str((info or {}).get("id") or "")
+            if fid and rules:
+                # A fork takes no rules of its own; given them before its first word.
+                self.oc.call("PATCH", f"/session/{fid}", {"permission": rules}, directory=cwd)
+        else:
+            if rules:
+                body["permission"] = rules
+            info = self.oc.call("POST", "/session", body, directory=cwd)
         sid = str((info or {}).get("id") or "")
         if not sid:
             raise Refused("opencode did not make a session", "spawn_failed")

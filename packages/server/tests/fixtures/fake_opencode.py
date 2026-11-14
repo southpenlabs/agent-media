@@ -135,6 +135,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=run_prompt, args=(directory, parts[1], text),
                              daemon=True).start()
             return self._send(204)
+        if method == "POST" and len(parts) == 3 and parts[0] == "session" and parts[2] == "fork":
+            sid = "ses_" + uuid.uuid4().hex[:26]
+            SESSIONS[sid] = {"id": sid, "directory": directory, "forked_from": parts[1],
+                             "body": body}
+            return self._send(200, {"id": sid, "directory": directory})
         if method == "GET" and parts == ["command"]:
             # As opencode 1.19.5 lists them: built-ins, the user's, skills.
             return self._send(200, [
