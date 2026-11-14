@@ -133,3 +133,28 @@ def test_the_settings_file_beats_the_environment(tmp_path, monkeypatch):
     assert [c["name"] for c in stt.choices()] == ["groq", "openai", "openrouter", "gemini"]
     with pytest.raises(ValueError):
         stt.save_settings(chosen="whisperer")
+
+
+def test_a_local_server_that_is_down_passes_the_clip_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDIA_STT_URL", "http://127.0.0.1:52625/v1")
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    monkeypatch.setattr(stt.shutil, "which", lambda _: None)
+    tried = []
+
+    def post(url, data, headers):
+        tried.append(url)
+        if url.startswith("http://127.0.0.1"):
+            raise stt.SttError("could not be reached (refused)")
+        return {"text": "pick up some milk"}
+
+    monkeypatch.setattr(stt, "_post", post)
+    clip = tmp_path / "voice-clip-3.ogg"
+    clip.write_bytes(b"OggS fake")
+    assert stt.transcribe(clip) == "pick up some milk"
+    assert tried == ["http://127.0.0.1:52625/v1/audio/transcriptions",
+                     "https://api.groq.com/openai/v1/audio/transcriptions"]
+    # A service chosen by name is the only one tried.
+    monkeypatch.setenv("MEDIA_STT_PROVIDER", "custom")
+    clip.write_bytes(b"OggS other")
+    with pytest.raises(stt.SttError, match="custom: could not be reached"):
+        stt.transcribe(clip)

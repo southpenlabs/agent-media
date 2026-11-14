@@ -13,7 +13,8 @@ Two kinds of service:
 * **A model that hears** (`/chat/completions` with `input_audio`):
   Gemini, straight from Google or through OpenRouter.
 
-Tried in this order, the first with what it needs:
+Tried in this order, the first with what it needs; when it fails (a local
+server that is down, a refusal) the clip goes to the next one set up:
 
   custom      MEDIA_STT_URL (MEDIA_STT_KEY if it wants one)
   groq        GROQ_API_KEY          whisper-large-v3-turbo
@@ -215,8 +216,16 @@ def provider() -> dict | None:
     """The service in use: `{"name", "kind", "base", "key", "model", "from"}`,
     or None when none is set up (or it is turned off). `from` is where the
     key came from: "settings", "env" or "gateway"."""
+    return next(iter(_candidates()), None)
+
+
+def _candidates() -> list[dict]:
+    """Every service set up, in order, as provider() describes one: only the
+    chosen one when the app or MEDIA_STT_PROVIDER names one, else the order
+    above — so a local server that is down is passed over for the next."""
     if os.environ.get("MEDIA_STT", "1") == "0":
-        return None
+        return []
+    out = []
     saved = _load()
     want = saved["chosen"] if saved["chosen"] != "auto" else \
         os.environ.get("MEDIA_STT_PROVIDER", "").strip().lower()
@@ -230,9 +239,9 @@ def provider() -> dict | None:
             base = os.environ["MEDIA_STT_URL"].strip().rstrip("/")
         model = (saved["models"].get(name) or os.environ.get("MEDIA_STT_MODEL", "").strip()
                  or model)
-        return {"name": name, "kind": kind, "base": base, "key": key, "model": model,
-                "from": src}
-    return None
+        out.append({"name": name, "kind": kind, "base": base, "key": key, "model": model,
+                    "from": src})
+    return out
 
 
 def status() -> dict:
@@ -330,8 +339,8 @@ def _cache_dir() -> Path:
 def transcribe(audio_path: str | os.PathLike, *, language: str = "") -> str:
     """The words in the clip at `audio_path`, by the service in use. Raises
     SttError when none is set up, the clip is too big, or the service fails."""
-    p = provider()
-    if p is None:
+    order = _candidates()
+    if not order:
         raise SttError("no speech-to-text is set up")
     path = Path(audio_path)
     if not path.is_file():
@@ -344,7 +353,16 @@ def transcribe(audio_path: str | os.PathLike, *, language: str = "") -> str:
         return cached.read_text()
     with tempfile.TemporaryDirectory() as tmp:
         audio, fmt = _small(path, Path(tmp))
-        words = (_transcriptions if p["kind"] == "transcriptions" else _chat)(p, audio, fmt, language)
+        failed: list[str] = []
+        for p in order:
+            try:
+                words = (_transcriptions if p["kind"] == "transcriptions" else _chat)(
+                    p, audio, fmt, language)
+                break
+            except SttError as e:
+                failed.append(f"{p['name']}: {e}")
+        else:
+            raise SttError("; ".join(failed))
     words = " ".join(words.split())
     try:
         cached.parent.mkdir(parents=True, exist_ok=True)
