@@ -16,6 +16,16 @@ exec 2>&1
 set -a
 [ -f "$HOME/.config/agent-media.env" ] && . "$HOME/.config/agent-media.env"
 set +a
+# DNS first: cloudflared looks its edge up once and exits when that fails,
+# and at boot the resolver can come up after us. red2 rebooted at 19:04 on
+# 14 Nov 2026 and the tunnel failed six times in 17 s, one short of systemd
+# giving up on it (the old hand-placed unit waited for network-online).
+if command -v getent >/dev/null 2>&1; then
+    i=0
+    until getent ahosts region1.v2.argotunnel.com >/dev/null 2>&1 || [ "$i" -ge 90 ]; do
+        sleep 1; i=$((i + 1))
+    done
+fi
 conf="${MEDIA_TUNNEL_CONFIG:-$HOME/.cloudflared/config.yml}"
 if [ -f "$conf" ]; then
     cf="${MEDIA_CLOUDFLARED:-$HOME/.local/bin/cloudflared}"
