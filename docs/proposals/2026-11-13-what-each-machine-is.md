@@ -232,6 +232,9 @@ with it (item 3 above).
    declaring `sessions` without `origin` would lose its session host at the
    next install-services.
 3. Templates for the canvas and the tunnel, with fewer-services §4c/§5.
+   **The canvas's done 14 Nov 2026**: `agent-media-server` from the
+   `media-server` template, `requires: server`, live on red2. The
+   tunnel's is still to do.
 4. `[host] name` and `address`.
 5. The move rewrites the declaration; doctor checks against it.
 6. Shell sign-ins through the worker, if still wanted by then.

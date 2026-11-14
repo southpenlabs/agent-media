@@ -255,6 +255,23 @@ this file, as fewer-services did with its §4d.
   (2,731 contacts). Not "parse as the rows stream in": skipping the read
   saves all of it on most passes, and parsing is 0.7 s of the 20.
 
+- **Step 5, the name and the template, done on red2 14 Nov 2026 18:42**
+  (275e20bf, abac2ed4): `packages/core/services/media-server`
+  (`requires: server`) installs `agent-media-server.service`; its settings
+  moved from the old unit's five drop-ins into red2's agent-media.env
+  (`MEDIA_VISUAL_BIND=tailnet`, the public listener, the web app, the
+  timeline sources, the contacts export), matrix.env is read by the start
+  script, and the start script adds `~/.local/bin` and fnm's node to the
+  PATH the generated unit lacks. Swapped by a detached script that would
+  have put the old unit back on failure; the old unit and its drop-ins are
+  in `~/.config/systemd/user/retired-20261114/`. `--only canvas` and
+  `--only server` both name it. The tunnel is still the hand-placed
+  `sasonica-tunnel.service`: its template is the next piece. Found on the
+  way: red2's `MEDIA_VISUAL_URL` still named red5, so replies' pictures
+  had been pushed to a stopped server since the move; it names red2 now.
+  The pool's measurements restart from the swap (reports at 21:42 tonight
+  and 18:42 on 15 Nov).
+
 ## Decisions (David, 13 Nov 2026: "they all sound like excellent ideas")
 
 1. **Go ahead in this order**, starting with steps 1 and 2.
