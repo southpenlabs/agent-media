@@ -6571,11 +6571,19 @@ sasonica-shell `docs/tools-and-approvals.md` §6. Pinned by
 
 ```
 GET  /shell/signins            gated (may_control_speech)
-  → {"ok", "signins": [{"id", "code", "client", "host", "at"}], "shell": bool}
+  → {"ok", "signins": [{"id", "code", "client", "host", "at", "machine"}], "shell": bool}
 POST /shell/signin {"id", "approve": bool}     a device with the enrol bit (§9)
   → {"ok", "id", "status": "approved"|"denied"}
   → 400 not an id · 403 not_enrolled · 409 no shell here · 404 not waiting (expired)
 ```
+
+**Other machines' shells** (14 Nov 2026): a server also lists and decides
+the sign-ins of shells it looks after for machines with no Sasonica server
+of their own, each configured in `<sasonica conf>/shells/<machine>/` (`env`
+and `relay.key`, copied there when that shell was set up from this server).
+`machine` is that machine's name, `""` for this server's own shell; the
+decision is signed with that machine's key and sent to its Worker. red2
+looks after red3's and red4's.
 
 ```
 GET  /shell                    gated (may_control_speech)

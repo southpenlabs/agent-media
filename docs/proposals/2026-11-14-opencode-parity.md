@@ -37,9 +37,12 @@ give it a sessiond backend of its own.
 
 ## Still to do, in order
 
-4. **Plan mode.** opencode has a built-in `plan` agent. sessiond could send
-   `"agent": "plan"` on the prompt (`_oc_send`'s body) and report `can.plan`
-   (harness-composer-controls.md says "Not exposed").
+4. **Plan mode.** Done (14 Nov 2026): a headless chat in plan mode names
+   opencode's `plan` agent on each prompt (`_oc_send`). The Plan chip
+   switches it, and it takes effect from the next prompt. A new chat started
+   in plan mode does the same, or gets `--agent plan` in a pane.
+   `session_settings` reports `can.plan`. Checked against opencode 1.19.5:
+   asked to write a file, it wrote a plan instead.
 5. **`media session start --agent opencode`.** Only the app can start a
    headless opencode chat. Agent mail and other sessions cannot.
 6. **The slash menu.** `GET /commands` is Claude Code's list. opencode's

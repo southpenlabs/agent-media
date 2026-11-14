@@ -10,7 +10,7 @@ As of 20 October 2026:
 | --- | --- | --- |
 | Claude Code | Existing pane and headless controls | Existing controls |
 | Codex | Native picker, conversation only | Native collaboration mode |
-| opencode | Existing model controls | Not exposed |
+| opencode | Existing model controls | Headless: opencode's `plan` agent, named on each prompt (`--agent plan` for a new chat in a pane) |
 | pi | Existing model controls | Not exposed |
 | Grok | Native `/model` command | Not exposed |
 | Antigravity | Native `agy models` list (`--model` on start and resume) | Native `--mode plan` (`--mode plan` on start and resume) |

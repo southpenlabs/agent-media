@@ -57,9 +57,37 @@ def _read_env(path: Path) -> dict[str, str]:
 
 def _shell() -> dict | None:
     """The Worker URL, runner token and relay key, or None without a shell here."""
-    env = _read_env(_conf_dir() / "env")
+    return _shell_at(_conf_dir())
+
+
+def _shells() -> list[dict]:
+    """This machine's shell, then each shell this server looks after for a
+    machine with no Sasonica server of its own: `<conf>/shells/<machine>/env`
+    (and its relay.key), copied there when that shell was set up from here
+    (red3 and red4, 14 Nov 2026: a sign-in to their shells reaches the phone
+    through red2's server). Each carries `machine`, "" for this one's."""
+    out = []
+    own = _shell()
+    if own:
+        out.append({**own, "machine": ""})
+    root = _conf_dir() / "shells"
+    try:
+        dirs = sorted(d for d in root.iterdir() if d.is_dir())
+    except OSError:
+        dirs = []
+    for d in dirs:
+        sh = _shell_at(d)
+        if sh:
+            out.append({**sh, "machine": d.name})
+    return out
+
+
+def _shell_at(conf: Path) -> dict | None:
+    env = _read_env(conf / "env")
     url, token = env.get("SASONICA_WORKER_URL", ""), env.get("SASONICA_RUNNER_TOKEN", "")
-    key_file = Path(os.path.expanduser(env.get("SASONICA_KEY_FILE") or str(_conf_dir() / "relay.key")))
+    key_file = Path(os.path.expanduser(env.get("SASONICA_KEY_FILE") or str(conf / "relay.key")))
+    if not key_file.exists():
+        key_file = conf / "relay.key"
     try:
         key = key_file.read_text().strip()
     except OSError:
@@ -92,17 +120,18 @@ def waiting(*, fresh: bool = False) -> list[dict]:
     with _LOCK:
         if not fresh and now - _CACHE[0] < CACHE_S:
             return list(_CACHE[1])
-    shell = _shell()
     rows: list[dict] = []
-    if shell:
+    for shell in _shells():
         try:
             got = _runner(shell, {"op": "signins"}, timeout=4.0).get("signins") or []
         except (OSError, ValueError):
             got = []
-        rows = [{"id": str(r.get("id")), "code": str(r.get("code") or ""),
-                 "client": str(r.get("client_name") or ""), "host": str(r.get("client_host") or ""),
-                 "at": str(r.get("created_at") or "")}
-                for r in got if isinstance(r, dict) and _ID.fullmatch(str(r.get("id") or ""))]
+        rows += [{"id": str(r.get("id")), "code": str(r.get("code") or ""),
+                  "client": str(r.get("client_name") or ""), "host": str(r.get("client_host") or ""),
+                  "at": str(r.get("created_at") or ""),
+                  # Whose shell: "" for this machine's, else the machine's name.
+                  "machine": shell["machine"]}
+                 for r in got if isinstance(r, dict) and _ID.fullmatch(str(r.get("id") or ""))]
     with _LOCK:
         _CACHE = (now, rows)
     return list(rows)
@@ -140,7 +169,7 @@ def listing(bearer: str) -> tuple[bool, dict]:
     if not ok:
         return False, detail
     # Cached a few seconds: every screen of the app asks while it is open.
-    return True, {"signins": waiting(), "shell": _shell() is not None}
+    return True, {"signins": waiting(), "shell": bool(_shells())}
 
 
 def decide(sid: str, approve: bool, bearer: str) -> tuple[bool, dict]:
@@ -153,9 +182,15 @@ def decide(sid: str, approve: bool, bearer: str) -> tuple[bool, dict]:
     sid = (sid or "").strip()
     if not _ID.fullmatch(sid):
         return False, {"error": "not a sign-in id", "status": 400}
-    shell = _shell()
-    if not shell:
+    shells = _shells()
+    if not shells:
         return False, {"error": "Sasonica Shell is not set up on this machine", "status": 409}
+    # The shell the sign-in waits on: from the listing, asked afresh when it
+    # is not there; this machine's when none says.
+    rows = {r["id"]: r.get("machine", "") for r in waiting()}
+    if sid not in rows:
+        rows = {r["id"]: r.get("machine", "") for r in waiting(fresh=True)}
+    shell = next((sh for sh in shells if sh["machine"] == rows.get(sid, "")), shells[0])
     decision = "approve" if approve else "deny"
     sig = hmac.new(shell["key"].encode(), f"signin\n{sid}\n{decision}".encode(),
                    hashlib.sha256).hexdigest()

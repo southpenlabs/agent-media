@@ -12,7 +12,8 @@ Hermes and Gemini currently hide the chips. opencode has a model chip too: a new
 chat's sheet is its free models (`new_sheet`, opencode_models.py) and `/ask`
 starts it with `-m`; a running one in a pane is switched through its own
 picker (the opencode section below), a headless one sends the new model with
-its next prompt (sessiond_opencode.py). No plan mode for it. So has pi: the
+its next prompt (sessiond_opencode.py), and a headless one has plan mode: opencode's
+`plan` agent, named on each prompt. So has pi: the
 sheet is what `pi --list-models` lists for the chat's harness profile
 (pi_models.py), `/ask` starts it with `--provider`/`--model`, and a running
 one is told `/model <provider/model>` (the pi section below). pi is always a
@@ -76,12 +77,12 @@ def alias_of(model_id: str) -> str:
 
 def clean_new(agent: str, model: str, mode: str) -> tuple[str, str]:
     """A new chat's model and mode as `ask` passes them on: Claude's, an alias
-    from the sheet; opencode's, a `provider/model` id (opencode_models.py) and
-    no plan mode. Anything else is dropped, not guessed."""
+    from the sheet; opencode's, a `provider/model` id (opencode_models.py),
+    its plan mode the `plan` agent. Anything else is dropped, not guessed."""
     if agent == "opencode":
         from agent_media_core import opencode_models
 
-        return opencode_models.allowed(model), ""
+        return opencode_models.allowed(model), ("plan" if mode == "plan" else "")
     if agent == "pi":
         from agent_media_core import pi_models
 
@@ -134,13 +135,14 @@ def state(session: str) -> dict:
                     "can": {"model": bool(offered or mid), "plan": True}}
         if v.get("agent") == "opencode":
             # Its model rides on each prompt (sessiond_opencode.py): the one
-            # chosen, else what its last reply ran on. No plan mode.
+            # chosen, else what its last reply ran on. Plan mode is opencode's
+            # `plan` agent, named on each prompt too.
             from agent_media_core import opencode_models
 
             model = str(v.get("model") or "") or opencode_models.current(session)
             return {"agent": "opencode", "live": bool(v.get("live")), "model": model,
-                    "model_id": model, "plan": False, "driver": driver.HEADLESS,
-                    "can": {"model": True, "plan": False}}
+                    "model_id": model, "plan": v.get("mode") == "plan",
+                    "driver": driver.HEADLESS, "can": {"model": True, "plan": True}}
         mid = str(v.get("init_model") or "")
         model = str(v.get("model") or "") or alias_of(mid)
         # What the process last said wins while it runs (approving a plan
@@ -462,7 +464,8 @@ def new_sheet(agent: str = "claude", profile: str = "") -> dict:
         from agent_media_core import opencode_models
 
         offered, default = opencode_models.models()
-        return {"models": offered, "default": opencode_models.default_note(offered, default)}
+        return {"models": offered, "default": opencode_models.default_note(offered, default),
+                "can": {"model": True, "plan": True}}
     if agent == "pi":
         from agent_media_core import harness_profiles, pi_models
 

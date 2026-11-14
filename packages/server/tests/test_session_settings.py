@@ -191,8 +191,8 @@ def test_opencode_sheet_is_the_free_tool_users_its_own_first():
     assert om.default_note(om.sheet(LISTING), "gateway/x") == "gateway/x"
 
 
-def test_an_opencode_chat_takes_a_model_id_and_nothing_else():
-    assert ss.clean_new("opencode", "opencode/big-pickle", "plan") == ("opencode/big-pickle", "")
+def test_an_opencode_chat_takes_a_model_id_and_plan_mode():
+    assert ss.clean_new("opencode", "opencode/big-pickle", "plan") == ("opencode/big-pickle", "plan")
     assert ss.clean_new("opencode", "openrouter/qwen/qwen3.8-27b:free", "") == (
         "openrouter/qwen/qwen3.8-27b:free", "")
     for bad in ("--help", "big-pickle", "opencode/x; rm -rf ~", "opencode/$(id)", "a/-b"):

@@ -3026,7 +3026,8 @@ class Supervisor:
                 raise Refused(QUOTA_REFUSED.format(at=_clock(float(lim["resets_at"]))),
                               "quota_limited", quota=q.view(rec=lim))
             return self._oc_start(cwd, text, workspace=workspace,
-                                  permissions=perms.mode(permissions), model=model)
+                                  permissions=perms.mode(permissions), model=model,
+                                  mode="plan" if mode == "plan" else "")
         # A restart pending (David, 11 Nov 2026, screenshot: a new chat
         # refused with "start the chat again once it has" — "this should
         # happen automatically"): the chat is made now and its first message
@@ -3336,12 +3337,15 @@ class Supervisor:
         with self.lock:
             s = self._get(session)
             if s.agent == "opencode":
-                # Its model rides on every prompt; it has no plan mode here.
+                # Its model and its agent (plan mode is the `plan` agent)
+                # ride on every prompt (`_oc_send`): the next one takes them.
                 if model is not None:
                     s.model = model
+                if mode is not None:
+                    s.mode = "plan" if mode == "plan" else ""
                 self._save(s)
-                return {"session": session, "model": s.model, "mode": "",
-                        "told": model is not None, **self._brief(s)}
+                return {"session": session, "model": s.model, "mode": s.mode,
+                        "told": model is not None or mode is not None, **self._brief(s)}
             if s.agent == "antigravity":
                 if s.state in ("starting", "working", "approval"):
                     raise Refused("wait for this turn before changing Antigravity settings", "busy")
@@ -3640,7 +3644,7 @@ class Supervisor:
         log.info("sessiond: opencode serve exited %s", rc)
 
     def _oc_start(self, cwd: str, text: str, *, workspace: str, permissions: str,
-                  model: str) -> dict:
+                  model: str, mode: str = "") -> dict:
         from . import sessiond_opencode as oc
 
         if not os.path.isdir(cwd):
@@ -3656,7 +3660,7 @@ class Supervisor:
             raise Refused("opencode did not make a session", "spawn_failed")
         with self.lock:
             s = Session(sid, cwd, agent="opencode", workspace=workspace,
-                        permissions=permissions, model=model)
+                        permissions=permissions, model=model, mode=mode)
             s.first_text = " ".join(text.split())[:200]
             self.sessions[sid] = s
             self._oc_attach(s, proc)
@@ -3690,6 +3694,10 @@ class Supervisor:
         ref = oc.model_ref(s.model)
         if ref:
             body["model"] = ref
+        # Plan mode is opencode's own `plan` agent (no edits, asks before
+        # running commands); otherwise its default agent (`build`).
+        if s.mode == "plan":
+            body["agent"] = "plan"
         self.oc.call("POST", f"/session/{s.id}/prompt_async", body, directory=s.cwd)
         with self.lock:
             s.turns += 1

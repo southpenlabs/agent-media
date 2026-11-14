@@ -220,12 +220,38 @@ def test_the_model_chip_changes_the_next_prompts_model(host):
     wait_for(lambda: state(host, sid) == "waiting")
     st = session_settings.state(sid)
     assert st["agent"] == "opencode" and st["driver"] == driver.HEADLESS
-    assert st["can"] == {"model": True, "plan": False}
+    assert st["can"] == {"model": True, "plan": True}
     ok, d = driver.headless_driver().configure(sid, model="opencode/other-free")
     assert ok and d["told"]
     driver.headless_driver().send(sid, "next", "next")
     last = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
     assert last[2]["model"] == {"providerID": "opencode", "modelID": "other-free"}
+
+
+def test_plan_mode_is_opencodes_plan_agent_on_each_prompt(host):
+    from agent_media_server import session_settings
+
+    sid = start(host, "hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    first = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
+    assert "agent" not in first[2]  # opencode's default agent, build
+    ok, d = driver.headless_driver().configure(sid, mode="plan")
+    assert ok and d["told"]
+    assert session_settings.state(sid)["plan"] is True
+    driver.headless_driver().send(sid, "plan it", "plan it")
+    last = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
+    assert last[2]["agent"] == "plan"
+    wait_for(lambda: state(host, sid) == "waiting")
+    driver.headless_driver().configure(sid, mode="")
+    driver.headless_driver().send(sid, "do it", "do it")
+    last = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
+    assert "agent" not in last[2]
+
+
+def test_a_chat_started_in_plan_mode_asks_the_plan_agent(host):
+    sid = start(host, "plan first", mode="plan")
+    first = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")][-1]
+    assert first[2]["agent"] == "plan"
 
 
 def test_the_server_needs_its_password(host):
