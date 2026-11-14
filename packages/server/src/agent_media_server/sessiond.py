@@ -705,7 +705,8 @@ class Session:
         "tasks" (task_list), "queued" (messages the CLI holds), "last_text"}`."""
         turn = self.state in ("starting", "working")
         question = bool(self.pending) or self.state == "approval"
-        tasks = self.task_list()
+        tasks = self.task_list() if self.agent != "opencode" else \
+            (_oc_running_agents(self.id) if turn else [])
         if not (turn or question or tasks or self.queued):
             return None
         return {"state": self.state, "turn": turn, "question": question, "tasks": tasks,
@@ -1020,6 +1021,19 @@ def _write_squeeze(rec: "dict | None") -> None:
         pass
 
 
+def _oc_running_agents(session: str) -> list[dict]:
+    """An opencode chat's subagents still running (its `task` tool's calls,
+    agents.opencode_agents), as `task_list` rows: they die with its turn."""
+    try:
+        from . import agents
+
+        rows = agents.opencode_agents(session, live=True) or []
+    except Exception:  # noqa: BLE001 — a cut-off says less, never fails
+        return []
+    return [{"id": r["id"], "type": "local_agent", "description": r.get("description") or ""}
+            for r in rows if r.get("status") == "running"]
+
+
 def resume_note(s: "Session", cut: dict) -> str:
     """The message a session cut off by a restart is resumed with: what was
     running, and what to do about it."""
@@ -1104,7 +1118,13 @@ def resume_note(s: "Session", cut: dict) -> str:
     else:
         note = (tag + "The session host restarted while you were working: "
                 + "; ".join(what or ["work in progress"]) + ". Pick up where you left off.")
-    if agents_cut:
+    if agents_cut and s.agent == "opencode":
+        note += (" These subagents were stopped part-way; continue each with the task "
+                 "tool, resuming it with its task_id (it keeps what it did — don't start "
+                 "a new one), then tell David you did: "
+                 + "; ".join(f"\u201c{t.get('description') or 'a subagent'}\u201d → {t['id']}"
+                             for t in agents_cut) + ".")
+    elif agents_cut:
         where = _subagents_where(s.id)
         note += (" These background agents were stopped part-way; continue each with "
                  "SendMessage to its id (it resumes from its own transcript — don't start "
@@ -1536,7 +1556,7 @@ class Supervisor:
         idle and `begin_stop` would let it sleep. Its cut-off (why "drain",
         due at once) has `resume_note` pick it up after the restart — or
         after the drain gives up — with what it was doing."""
-        if s.agent != "claude" or (s.cut_off or {}).get("why") in ("quota", "drain"):
+        if s.agent not in ("claude", "opencode") or (s.cut_off or {}).get("why") in ("quota", "drain"):
             return
         rec = self.draining()
         if not rec:
@@ -1550,7 +1570,8 @@ class Supervisor:
         if not told:
             return
         s.cut_off = {"state": s.state, "turn": True, "question": False,
-                     "tasks": s.task_list(now), "queued": len(s.queued),
+                     "tasks": s.task_list(now) if s.agent != "opencode" else [],
+                     "queued": len(s.queued),
                      "last_text": s.last_text, "at": round(now, 3), "why": "drain",
                      "restart": str(rec.get("id") or ""), "due": True}
         log.info("sessiond: %s ended its turn for the pending restart; it will be "
@@ -3898,6 +3919,9 @@ class Supervisor:
             elif t == "session.idle":
                 s.set_state("approval" if s.pending else "waiting")
                 s.last_result = {"subtype": "success", "is_error": False}
+                # Told by a drained restart to end its turn (the plugin's
+                # restart note): resumed after it, as a Claude chat is.
+                self._drain_cut(s, now)
                 if s.turns >= 1 and not s.auto_titled:
                     s.auto_titled = True
                     threading.Thread(target=self._auto_title, args=(s,), daemon=True,

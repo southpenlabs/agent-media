@@ -96,3 +96,24 @@ def test_no_messages_is_none_and_no_tasks_is_empty(db):
 def test_a_message_to_one_asks_for_its_task_tool_with_its_id():
     words = agent_actions.message_words({"id": KID, "description": "count files"}, "also dirs")
     assert f"task_id {KID}" in words and "also dirs" in words and "SendMessage" not in words
+
+
+def test_a_cut_off_opencode_chat_is_told_to_resume_its_subagents_with_the_task_tool(db):
+    from agent_media_server import sessiond
+
+    put(db, OC, 1, "assistant", [task(KID, "running")])
+    assert sessiond._oc_running_agents(OC) == [
+        {"id": KID, "type": "local_agent", "description": "count files"}]
+    s = sessiond.Session(OC, "/p", agent="opencode")
+    note = sessiond.resume_note(s, {"turn": True, "tasks": sessiond._oc_running_agents(OC),
+                                    "why": "crash", "at": 0})
+    assert f"task_id" in note and KID in note and "SendMessage" not in note
+
+
+def test_a_working_opencode_chat_counts_its_running_subagents_as_work(db):
+    from agent_media_server import sessiond
+
+    put(db, OC, 1, "assistant", [task(KID, "running")])
+    s = sessiond.Session(OC, "/p", agent="opencode")
+    s.state = "working"
+    assert [t["id"] for t in s.work()["tasks"]] == [KID]

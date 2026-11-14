@@ -92,6 +92,11 @@ let's get them working for opencode".
 11. **Running on another machine.** Not yet.
 12. **Moving a chat to another folder.** Not yet.
 13. **Personas in the system prompt.** Not yet.
-14. **Cut-off background agents named on resume.** Not yet.
+14. **Resumed after a restart, cut-off subagents named.** Done: an opencode
+    chat that a drained restart told to end its turn was never resumed
+    (`_drain_cut` was Claude-only). Now it is, on its idle event. A chat cut
+    off mid-turn counts its running `task` subagents as work
+    (`_oc_running_agents`), and the resume names each one, to be continued
+    with the task tool and its `task_id`.
 15. **Plan and Stop for opencode in a terminal pane.** Not yet.
 16. **A slash menu before the first chat in a folder.** Not yet.
