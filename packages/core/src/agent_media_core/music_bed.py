@@ -1530,6 +1530,19 @@ def _note_now(plan: Optional[Plan], playing: bool) -> None:
         pass
 
 
+#: The mix the last `start` on this thread handed its under player.
+_started = threading.local()
+
+
+def last_mix() -> Optional[dict]:
+    """The mix (music_bed_mix.params) the last `start` on this thread handed
+    its under player, None when it handed none (a streaming bed, its
+    stand-in, nothing started). For the log of music around speech
+    (speech_music.bed_started), which keeps how a bed was mixed and whether
+    it was sung in."""
+    return getattr(_started, "mix", None)
+
+
 def start(plan: Plan, target=None, sink=None, long: bool = False,
           sing_in: bool = False) -> tuple[bool, Optional[Callable[[], None]]]:
     """Start `plan` under the reading about to begin on `target`.
@@ -1544,6 +1557,7 @@ def start(plan: Plan, target=None, sink=None, long: bool = False,
     is spoken (to his earbuds) goes without one. Not written down — a bed is
     never offered back."""
     from . import play_gate
+    _started.mix = None
     try:
         play_gate.check(f"bed:{getattr(plan, 'style', '') or ''}", kind="bed",
                         target=getattr(target, "name", "") or "", record=False)
@@ -1578,9 +1592,10 @@ def start(plan: Plan, target=None, sink=None, long: bool = False,
         # `long`: a long reply (music_bed_vocal.is_long), which a favourite
         # sings out after; with `sing_in` (music_bed_vocal.may_sing_in), and
         # is sung in with before its first word.
-        if plan.path is None or not play_under(plan.path, target, sink,
-                                               music_bed_mix.for_plan(plan, long, sing_in)):
+        mix = music_bed_mix.for_plan(plan, long, sing_in) if plan.path is not None else None
+        if plan.path is None or not play_under(plan.path, target, sink, mix):
             return False, None
+        _started.mix = mix
         _note_now(plan, True)
         return True, lambda quick=False: _note_now(None, False)
     except Exception as e:  # noqa: BLE001 — a bed must never cost a reply

@@ -283,6 +283,7 @@ def start(spec: Optional[dict], target, sink) -> tuple[bool, Optional[Callable]]
             from . import music_bed as mb
             under, stop = mb.start(plan, target, sink, long=bool(spec.get("long")))
             if under or stop is not None:
+                _log(spec, plan, under, stop)
                 return under, stop
         tone = spec.get("tone")
         if tone:
@@ -291,6 +292,25 @@ def start(spec: Optional[dict], target, sink) -> tuple[bool, Optional[Callable]]
     except Exception as e:  # noqa: BLE001
         log.warning("music-bed replay: starting: %s", e)
     return False, None
+
+
+def _log(spec: dict, plan, under: bool, stop) -> None:
+    """A bed played again under a replay is a new row in the log of music
+    around speech (speech_music; David, 14 Nov 2026: "Maybe we need to keep
+    a log of Sing it out"): the reply replayed for its music is one of the
+    things it is kept for. `spec["reply"]` (`history_id`, `session`) is the
+    replayed row, where the caller knows it; the rows written are left in
+    `spec["log"]` for whoever ends the replay (speech_music.bed_ended)."""
+    try:
+        from . import music_bed as mb
+        from . import speech_music
+        reply = spec.get("reply") if isinstance(spec.get("reply"), dict) else {}
+        spec["log"] = speech_music.bed_started(
+            plan, record(plan, under, stop), mb.last_mix(),
+            session=reply.get("session") or None,
+            history_id=reply.get("history_id") or None, why={"replay": True})
+    except Exception as e:  # noqa: BLE001 — the log is never worth the replay
+        log.debug("music-bed replay: not logged: %s", e)
 
 
 def to_json(spec: Optional[dict]) -> Optional[dict]:

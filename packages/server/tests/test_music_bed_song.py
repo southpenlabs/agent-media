@@ -94,7 +94,9 @@ def test_a_dislike_stays_out_of_the_history(server, signed_in, favourites):
     assert obj["items"] == []
 
 
-@pytest.mark.parametrize("body", [{"key": "k1", "event": "ended"}, {"event": "started"}])
+# `ended` is an event since 14 Nov 2026 (the log of music around speech,
+# test_speech_music_log.py); one nobody defined is still turned away.
+@pytest.mark.parametrize("body", [{"key": "k1", "event": "exploded"}, {"event": "started"}])
 def test_an_unknown_event_is_400(server, signed_in, favourites, body):
     res, obj = call(server, "POST", "/speech/music-bed/song", body, AUTH)
     assert res.status == 400 and obj["ok"] is False

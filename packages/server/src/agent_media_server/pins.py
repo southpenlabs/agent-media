@@ -331,8 +331,18 @@ def speech_music_bed(bearer: str, choice=_UNSET, source=_UNSET,
     return True, music_bed.status()
 
 
+#: What the app may report of a song around a reply (`event`): its start,
+#: the three ways it stops, and a turn of the volume.
+SONG_EVENTS = ("started", "ended", "stopped", "skipped", "volume")
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
+
+
 def speech_music_bed_song(bearer: str, key=None, verdict=None, event=None,
-                          title=None, artist=None, video_id=None) -> tuple[bool, dict]:
+                          title=None, artist=None, video_id=None, kind=None,
+                          pos_s=None, level=None, delta=None, log_id=None) -> tuple[bool, dict]:
     """`POST /speech/music-bed/song {"key", "verdict"}`: his word on a
     favourite sung out after a long reply (David, 31 Oct 2026: "The new
     singing it out feature is awesome!"). `like` records a like, so it ranks
@@ -346,29 +356,68 @@ def speech_music_bed_song(bearer: str, key=None, verdict=None, event=None,
     /music/radio) put the song in the music history once, with its thread.
     `{"key", "event": "started"}` is the app's report that the song began
     singing out, for the Sung out list. `title`, `artist` and `video_id`
-    may come with either, for a key the favourites no longer know."""
-    from agent_media_core import music_bed_favourites as fav
-    from agent_media_core import music_sung
+    may come with either, for a key the favourites no longer know.
 
-    if event is not None and event != "started":
-        return False, {"error": "event must be started", "status": 400}
+    Since 14 Nov 2026 (David: "Maybe we need to keep a log of Sing it out";
+    speech_music, /features `speech_music_log`) the app also says how it
+    ended: `event` `ended` (it ran to its end), `stopped` (with `pos_s`),
+    `skipped`, and `volume` (`level`, 0 to 100, or `delta`), which is noted
+    on the song's row and moves nothing. `kind` says what played — `sing_out`
+    (the default: what an app from before means), `tune` for the reply's
+    tune (its `key` the hand-off entry's `id`), `bed`, `sing_in` — and
+    `log_id`, a row's id from an earlier answer, names the row outright.
+    Everything above is also written to the log: a start is a row, a
+    verdict its outcome. The log is best-effort: a report whose row is not
+    found is still answered 200, with `log_id` null."""
+    from agent_media_core import music_bed_favourites as fav
+    from agent_media_core import music_sung, speech_music
+
+    if kind is not None and kind not in speech_music.KINDS:
+        return False, {"error": "kind must be " + ", ".join(speech_music.KINDS), "status": 400}
+    if event is not None and event not in SONG_EVENTS:
+        return False, {"error": "event must be " + ", ".join(SONG_EVENTS), "status": 400}
     if event is None and verdict not in fav.VERDICTS + ("kept",):
         return False, {"error": "verdict must be like, dislike or kept", "status": 400}
+    if log_id is not None and (not isinstance(log_id, int) or isinstance(log_id, bool)
+                               or log_id <= 0):
+        return False, {"error": "log_id must be a row's id", "status": 400}
+    kind = kind or "sing_out"
+    # A song sung out is known by its favourite's key, as before; the new
+    # reports may name their row instead.
+    logged = event is not None and not (event == "started" and kind == "sing_out")
     if not isinstance(key, str) or not key:
-        return False, {"error": "key must be a favourite's key", "status": 400}
+        if not (logged and log_id is not None and key is None):
+            return False, {"error": "key must be a favourite's key", "status": 400}
+    if pos_s is not None and (not _number(pos_s) or pos_s < 0):
+        return False, {"error": "pos_s must be seconds, 0 or more", "status": 400}
+    if event == "volume":
+        if level is None and delta is None:
+            return False, {"error": "volume needs a level (0 to 100) or a delta", "status": 400}
+        if level is not None and not (_number(level) and 0 <= level <= 100):
+            return False, {"error": "level must be 0 to 100", "status": 400}
+        if delta is not None and not _number(delta):
+            return False, {"error": "delta must be a number", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
         return False, err
     said = {k: v for k, v in (("title", title), ("artist", artist), ("video_id", video_id))
             if isinstance(v, str) and v}
+    match = log_id if log_id is not None else {"kind": kind, "track_key": key}
     try:
+        if logged:
+            return True, _song_logged(event, kind, key, match, said, pos_s, level, delta)
         if event == "started":
             e = music_sung.started(key, **said)
-            return True, {"key": key, "event": event, "session": e.get("session")}
+            row = speech_music.sung_out(key, title=e.get("title") or "",
+                                        artist=e.get("artist") or "", session=e.get("session"))
+            return True, {"key": key, "event": event, "session": e.get("session"),
+                          "log_id": row or None}
         if verdict == "kept":
             music_sung.engaged(key, "kept", **said)
+            speech_music.end(match, "kept")
             return True, {"key": key, "verdict": verdict}
         out = fav.verdict(key, verdict)
+        speech_music.end(match, "liked" if verdict == "like" else "disliked")
         if verdict == "like":
             try:
                 music_sung.engaged(key, "like", **said)
@@ -379,6 +428,78 @@ def speech_music_bed_song(bearer: str, key=None, verdict=None, event=None,
         return False, {"error": str(e), "status": 400}
     except OSError as e:
         return False, {"error": f"could not save it ({e})", "status": 500}
+
+
+def _song_logged(event: str, kind: str, key, match, said: dict, pos_s, level, delta) -> dict:
+    """The reports that only the log takes (speech_music): how a song
+    ended, a turn of its volume, and the start of anything but a Sing it
+    out. The answer, with the row's id (None when none was found or
+    written). A volume is a note on the row: no level anywhere is set."""
+    from agent_media_core import speech_music
+
+    if event == "started":
+        # The server wrote the row when it asked a player (a tune, a bed);
+        # the app's report says the phone began it. A song the server has
+        # no row for gets one.
+        row = speech_music.find(match, speech_music.SAME_S)
+        if row is not None:
+            done = speech_music.note(row["id"], {"what": "started"})
+        elif isinstance(match, dict):
+            done = speech_music.start(kind, track_key=key, title=said.get("title", ""),
+                                      artist=said.get("artist", ""), source="app",
+                                      why={"reported": "app"})
+        else:
+            done = 0
+    elif event == "volume":
+        what = {"what": "volume"}
+        if level is not None:
+            what["level"] = level
+        if delta is not None:
+            what["delta"] = delta
+        if pos_s is not None:
+            what["pos_s"] = pos_s
+        done = speech_music.note(match, what)
+    else:
+        done = speech_music.end(match, event, pos_s)
+    return {"key": key, "event": event, "kind": kind, "log_id": done or None}
+
+
+#: `GET /speech/music/log`: how many rows by default, and at most.
+MUSIC_LOG_DEFAULT = 50
+MUSIC_LOG_MAX = 500
+
+
+def speech_music_log(bearer: str, limit=None, kind=None, since=None) -> tuple[bool, dict]:
+    """`GET /speech/music/log?limit=&kind=&since=`: the log of music around
+    speech (speech_music; David, 14 Nov 2026: "Maybe we need to keep a log
+    of Sing it out"), newest first — each bed, Sing it in, Sing it out and
+    reply tune with its track, why it was chosen, how it was mixed and how
+    it ended, and `thread_title`, the reply's thread's title where its
+    history row has one. `kind` one of the four; `since` an epoch time.
+    Gated like `POST /speech/music-bed`: titles are the conversations'."""
+    from agent_media_core import speech_music
+
+    try:
+        n = int(limit) if limit not in (None, "") else MUSIC_LOG_DEFAULT
+    except (TypeError, ValueError):
+        return False, {"status": 400, "error": "limit is a number"}
+    try:
+        after = float(since) if since not in (None, "") else None
+    except (TypeError, ValueError):
+        return False, {"status": 400, "error": "since is a time in seconds"}
+    kind = kind or None
+    if kind is not None and kind not in speech_music.KINDS:
+        return False, {"status": 400, "error": "kind must be " + ", ".join(speech_music.KINDS)}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    try:
+        rows = speech_music.with_titles(
+            speech_music.recent(max(1, min(MUSIC_LOG_MAX, n)), kind, after))
+    except Exception as e:  # noqa: BLE001 — an empty list, not a 500
+        print(f"speech/music/log: {e}", file=sys.stderr)
+        rows = []
+    return True, {"items": rows}
 
 
 def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:

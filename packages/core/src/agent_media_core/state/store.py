@@ -119,6 +119,30 @@ CREATE TABLE IF NOT EXISTS likes (
 );
 CREATE INDEX IF NOT EXISTS likes_at_idx ON likes (at);
 
+-- The music that played around a spoken reply, and how each thing ended
+-- (speech_music.py; David, 14 Nov 2026: "Maybe we need to keep a log of
+-- Sing it out"). One row per thing that played: the bed under a long reply,
+-- Sing it in, Sing it out, the reply tune. Kept until someone asks for a
+-- prune (`media music log --prune`). `why`, `mix` and `events` are JSON.
+CREATE TABLE IF NOT EXISTS speech_music (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at REAL NOT NULL,
+    kind       TEXT NOT NULL,             -- 'bed' | 'sing_in' | 'sing_out' | 'tune'
+    history_id INTEGER,                   -- the reply's history row
+    session    TEXT,                      -- the reply's thread
+    track_key  TEXT,                      -- our own id: favourite key, library id, uri
+    artist     TEXT,
+    title      TEXT,
+    source     TEXT,                      -- 'favourites', 'library', 'generated', …
+    why        TEXT,                      -- why it was chosen
+    mix        TEXT,                      -- the switches and level it played with
+    ended_at   REAL,
+    outcome    TEXT,                      -- 'ended' | 'stopped' | 'skipped' | 'kept' | …
+    pos_s      REAL,                      -- how far in when it ended
+    events     TEXT                       -- small timestamped notes (a volume change)
+);
+CREATE INDEX IF NOT EXISTS speech_music_started_idx ON speech_music (started_at);
+
 -- Book channel playlists: an ordered list of part URIs plus a remembered
 -- cursor (which part). Per-part within-offset resume reuses resume_pos
 -- above (keyed by URI), so a playlist only needs to remember which part;
@@ -645,6 +669,129 @@ class StateStore:
             args += (chapter,)
         with self._cursor() as cur:
             cur.execute(sql, args)
+            return int(cur.rowcount or 0)
+
+    # ---- speech_music (the music around a reply; speech_music.py) ---------
+
+    _SPEECH_MUSIC_COLS = ("id", "started_at", "kind", "history_id", "session",
+                          "track_key", "artist", "title", "source", "why", "mix",
+                          "ended_at", "outcome", "pos_s", "events")
+    #: What a caller may match a row by, or set on one.
+    _SPEECH_MUSIC_MATCH = ("kind", "history_id", "session", "track_key")
+    _SPEECH_MUSIC_SET = ("history_id", "session", "ended_at", "outcome", "pos_s")
+
+    @staticmethod
+    def _speech_music_row(row) -> dict:
+        d = dict(zip(StateStore._SPEECH_MUSIC_COLS, row))
+        for k, empty in (("why", {}), ("mix", {}), ("events", [])):
+            try:
+                d[k] = json.loads(d[k]) if d[k] else empty
+            except (json.JSONDecodeError, TypeError):
+                d[k] = empty
+        return d
+
+    def add_speech_music(self, kind: str, *, started_at: Optional[float] = None,
+                         history_id: Optional[int] = None, session: str = "",
+                         track_key: str = "", artist: str = "", title: str = "",
+                         source: str = "", why: Optional[dict] = None,
+                         mix: Optional[dict] = None) -> int:
+        """Record one thing that began to play around a reply; its id."""
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO speech_music "
+                "(started_at, kind, history_id, session, track_key, artist, title, "
+                " source, why, mix, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (float(started_at if started_at is not None else time.time()), kind,
+                 None if history_id is None else int(history_id), session or None,
+                 track_key or None, artist or None, title or None, source or None,
+                 json.dumps(why or {}), json.dumps(mix or {}), "[]"))
+            return int(cur.lastrowid or 0)
+
+    def speech_music_row(self, row_id: int) -> Optional[dict]:
+        with self._cursor() as cur:
+            cur.execute(f"SELECT {', '.join(self._SPEECH_MUSIC_COLS)} FROM speech_music"
+                        " WHERE id = ?", (int(row_id),))
+            r = cur.fetchone()
+        return self._speech_music_row(r) if r else None
+
+    def find_speech_music(self, match: dict, since: Optional[float] = None) -> Optional[dict]:
+        """The newest row whose columns equal `match` (kind, history_id,
+        session, track_key), started at or after `since`; None with none."""
+        where, args = [], []
+        for k, v in (match or {}).items():
+            if k not in self._SPEECH_MUSIC_MATCH:
+                raise ValueError(f"cannot match on {k}")
+            where.append(f"{k} = ?")
+            args.append(v)
+        if not where:
+            return None
+        if since is not None:
+            where.append("started_at >= ?")
+            args.append(float(since))
+        with self._cursor() as cur:
+            cur.execute(f"SELECT {', '.join(self._SPEECH_MUSIC_COLS)} FROM speech_music"
+                        f" WHERE {' AND '.join(where)}"
+                        " ORDER BY started_at DESC, id DESC LIMIT 1", args)
+            r = cur.fetchone()
+        return self._speech_music_row(r) if r else None
+
+    def update_speech_music(self, row_id: int, *, event: Optional[dict] = None,
+                            **cols) -> bool:
+        """Set columns of one row (history_id, session, ended_at, outcome,
+        pos_s) and, with `event`, add it to the row's notes: one write, so
+        two reports of the same song do not lose each other's note."""
+        for k in cols:
+            if k not in self._SPEECH_MUSIC_SET:
+                raise ValueError(f"cannot set {k}")
+        conn = self._conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            r = conn.execute("SELECT events FROM speech_music WHERE id = ?",
+                             (int(row_id),)).fetchone()
+            if r is None:
+                conn.execute("ROLLBACK")
+                return False
+            sets, args = [f"{k} = ?" for k in cols], list(cols.values())
+            if event is not None:
+                try:
+                    events = json.loads(r[0]) if r[0] else []
+                except (json.JSONDecodeError, TypeError):
+                    events = []
+                events.append(event)
+                sets.append("events = ?")
+                args.append(json.dumps(events))
+            if sets:
+                conn.execute(f"UPDATE speech_music SET {', '.join(sets)} WHERE id = ?",
+                             (*args, int(row_id)))
+            conn.execute("COMMIT")
+            return True
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    def list_speech_music(self, limit: int = 50, kind: Optional[str] = None,
+                          since: Optional[float] = None) -> list[dict]:
+        """The log, newest first: of one `kind`, started at or after `since`."""
+        where, args = [], []
+        if kind:
+            where.append("kind = ?")
+            args.append(kind)
+        if since is not None:
+            where.append("started_at >= ?")
+            args.append(float(since))
+        sql = f"SELECT {', '.join(self._SPEECH_MUSIC_COLS)} FROM speech_music"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY started_at DESC, id DESC LIMIT ?"
+        with self._cursor() as cur:
+            cur.execute(sql, (*args, max(1, int(limit))))
+            return [self._speech_music_row(r) for r in cur.fetchall()]
+
+    def prune_speech_music(self, before: float) -> int:
+        """Delete the rows started before `before` (epoch s); how many went.
+        Only ever on request: the log is kept."""
+        with self._cursor() as cur:
+            cur.execute("DELETE FROM speech_music WHERE started_at < ?", (float(before),))
             return int(cur.rowcount or 0)
 
     _BOOKMARK_PENDING_PREFIX = "bookmark_pending:"

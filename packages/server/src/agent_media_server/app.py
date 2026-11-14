@@ -429,7 +429,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/voice", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -2495,6 +2495,14 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Music under a long reading (music_bed.py): off, auto or a mood.
         ok, detail = pins.speech_music_bed(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/music/log":
+        # The log of music around speech: what played and how it ended
+        # (speech_music.py).
+        q = parse_qs(query)
+        ok, detail = pins.speech_music_log(_bearer(h), (q.get("limit") or [None])[0],
+                                           (q.get("kind") or [None])[0],
+                                           (q.get("since") or [None])[0])
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/stt":
         # Which speech-to-text this host uses for dictation (stt_settings.py).
         from . import stt_settings
@@ -4321,14 +4329,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/music-bed/song":
         # Like, dislike or keep the favourite a long reply sang out, or its
-        # start reported (music_sung).
+        # start reported (music_sung); and how a song around a reply ended,
+        # for the log (speech_music).
         body = _read_json(h) or {}
         ok, detail = pins.speech_music_bed_song(_bearer(h), key=body.get("key"),
                                                 verdict=body.get("verdict"),
                                                 event=body.get("event"),
                                                 title=body.get("title"),
                                                 artist=body.get("artist"),
-                                                video_id=body.get("video_id"))
+                                                video_id=body.get("video_id"),
+                                                kind=body.get("kind"),
+                                                pos_s=body.get("pos_s"),
+                                                level=body.get("level"),
+                                                delta=body.get("delta"),
+                                                log_id=body.get("log_id"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # Settings' Voice: this phone's or the server's.

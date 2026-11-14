@@ -4251,6 +4251,7 @@ def _submit_event(event: Event,
     bed_stop = None      # likewise: what ends the bed (Mopidy's tracks, its credit)
     bed_song = None      # the song the bed played, for the row (music_bed_song)
     bed_rec = None       # the bed as it played, for a replay (music_bed_replay)
+    bed_log: dict = {}   # its rows in the log of music around speech (speech_music)
     under_tone = ""      # the tone it takes without a bed, likewise
     def _allowed() -> bool:
         try:
@@ -5032,6 +5033,10 @@ def _submit_event(event: Event,
             text=_text(),
             extras=extras,
         )
+        if bed_log and row:
+            # The bed's row in the log learns its reply (speech_music).
+            from .. import speech_music
+            speech_music.reply_known(bed_log, row, source_session, store=state)
         # The turn just ended, which is the only moment anything knows the
         # conversation *might* be over. Push the publish deadline out; the last
         # turn to do so is the one that gets to fire. Detached and never
@@ -5385,6 +5390,20 @@ def _submit_event(event: Event,
                 from .. import music_bed_replay
                 bed_rec = music_bed_replay.record(bed_plan, bed_tone, bed_stop,
                                                   _bed_kind)
+                # The log of music around speech (speech_music; David, 14 Nov
+                # 2026: "Maybe we need to keep a log of Sing it out"): the
+                # bed as it starts, and Sing it in with it. Only written
+                # down: nothing is chosen by it. A private reading names no
+                # thread.
+                if bed_rec:
+                    from .. import speech_music
+                    bed_log = speech_music.bed_started(
+                        bed_plan, bed_rec, music_bed.last_mix(),
+                        session=None if _private(event) else source_session,
+                        why={"topic": True} if (bed_plan.source == "favourites"
+                                                and not _private(event)
+                                                and music_bed.topic_on()) else None,
+                        store=state)
                 if not bed_tone and bed_stop is None and (reply_tone or people_tone):
                     if _ducked is None:
                         from .. import music_bed
@@ -6366,6 +6385,11 @@ def _submit_event(event: Event,
                         bed_stop()
                 except Exception:  # noqa: BLE001 — never cost the cleanup
                     log.debug("music bed stop failed", exc_info=True)
+            if bed_log:
+                # How the bed ended, for the log (speech_music): with the
+                # reading, or stopped when the listener cut it short.
+                from .. import speech_music
+                speech_music.bed_ended(bed_log, cut=bool(ended_by_cut), store=state)
             # A claim still in flight (before_speech raised) must finish
             # before it is released, or it would land after and hold the
             # broker for its whole TTL. It may be waiting for a lead that is

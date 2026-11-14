@@ -3976,7 +3976,17 @@ def _seek_when_loaded(sock, secs: float, tries: int = 20) -> bool:
     return False
 
 
-def _replay_under(ex: dict, speech_target: Target, sink) -> str:
+def _replayed(spec, reply: Optional[dict]):
+    """`spec` (music_bed_replay.resolve) with the row being replayed on it,
+    when it has a bed to play: the bed's row in the log of music around
+    speech names its reply (speech_music)."""
+    if isinstance(spec, dict) and spec.get("plan") is not None and reply:
+        spec["reply"] = reply
+    return spec
+
+
+def _replay_under(ex: dict, speech_target: Target, sink,
+                  row_id: Optional[int] = None) -> str:
     """Start what was under the reply on a phone now, or hand it to the
     follower: the JSON for its `--under` ("" for nothing to hand on). Only
     a row that recorded one, or an agent's reply that recorded nothing (a
@@ -3989,10 +3999,12 @@ def _replay_under(ex: dict, speech_target: Target, sink) -> str:
     # where its spoken copy had (David, 3 Nov 2026).
     if not recorded and (ex.get("listener") or not ex.get("cwd")):
         return ""
+    reply = ({"history_id": int(row_id), "session": str(ex.get("source_session") or "")}
+             if row_id else None)
     try:
         if str(_socket_for(speech_target)).startswith("tcp://"):
             from . import music_bed_replay
-            music_bed_replay.start(music_bed_replay.resolve(ex, speech_target),
+            music_bed_replay.start(_replayed(music_bed_replay.resolve(ex, speech_target), reply),
                                    speech_target, sink)
             return ""
         # Resolved by the follower, so the probe for other audio does not
@@ -4001,7 +4013,8 @@ def _replay_under(ex: dict, speech_target: Target, sink) -> str:
         keys = (("bed", "under_tone", "thinking") if recorded
                 else ("cwd", "clip_durations_s", "clip_uris"))
         return json.dumps({"ex": {k: ex[k] for k in keys if ex.get(k)},
-                           "target": speech_target.name})
+                           "target": speech_target.name,
+                           **({"reply": reply} if reply else {})})
     except Exception as e:  # noqa: BLE001 — never cost the replay
         print(f"media replay: no music under it ({e})", file=sys.stderr)
         return ""
@@ -4047,7 +4060,7 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
     # it as the reply sounds and ends it with the reply. This host's players
     # get it from the follower, which lasts as long as the replay and fades
     # it out at its end; with no follower (no clip lengths), none.
-    under_arg = _replay_under(ex, speech_target, sink)
+    under_arg = _replay_under(ex, speech_target, sink, row.get("id"))
     # Push the whole turn in ONE batched round-trip (stop/clear/append-all/
     # unpause/jump-to-0) rather than 1 play + N queues + 2 state-sets — each a
     # ~600ms hop over the phone bridge. Traversing (< / >) or replaying a long
@@ -4884,7 +4897,8 @@ def cmd_replay_track(a) -> int:
             from . import music_bed_replay
             data = json.loads(raw)
             target = Target(name=str(data.get("target") or _speech_target().name))
-            spec = music_bed_replay.resolve(data.get("ex") or {}, target)
+            spec = _replayed(music_bed_replay.resolve(data.get("ex") or {}, target),
+                             data.get("reply") if isinstance(data.get("reply"), dict) else None)
         except Exception:  # noqa: BLE001 — never cost the replay
             spec = None
     if not spec:
@@ -4935,6 +4949,9 @@ def cmd_replay_track(a) -> int:
                 stop()
             except Exception:  # noqa: BLE001
                 pass
+        # How the replay's bed ended, for the log of music around speech.
+        from . import speech_music
+        speech_music.bed_ended(spec.get("log"), cut=quick)
         if prev_term is not None:
             try:
                 _signal.signal(_signal.SIGTERM, prev_term)
@@ -7183,9 +7200,63 @@ def _cmd_music_mood(a) -> int:
     return 0
 
 
+def _music_log_line(r: dict) -> str:
+    """One row of the log of music around speech, for a terminal."""
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(r.get("started_at") or 0)))
+    title, artist = r.get("title") or "", r.get("artist") or ""
+    name = f"{title} — {artist}" if title and artist else title or artist or (r.get("track_key") or "?")
+    how = r.get("outcome") or "playing?"
+    if r.get("pos_s") is not None:
+        pos = int(float(r["pos_s"]))
+        how += f" at {pos // 60}:{pos % 60:02d}"
+    turns = sum(1 for e in r.get("events") or [] if isinstance(e, dict) and e.get("what") == "volume")
+    if turns:
+        how += f", volume ×{turns}"
+    thread = r.get("thread_title") or ""
+    return (f"{r.get('id'):>5}  {when}  {r.get('kind') or '':<8}  {name}"
+            f"  [{r.get('source') or '?'}]  {how}" + (f"  ({thread})" if thread else ""))
+
+
+def _cmd_music_log(a) -> int:
+    """`media music log [-n 20] [--kind …] [--json] [--prune <age>]`: the
+    log of music around speech (speech_music.py; David, 14 Nov 2026: "Maybe
+    we need to keep a log of Sing it out") — each bed, Sing it in, Sing it
+    out and reply tune, newest first, with how it ended. `--prune 90d`
+    deletes what is older and says how many rows went; it asks nothing, and
+    nothing is ever pruned without it ("everything maybe with a pruning
+    option")."""
+    from . import speech_music
+
+    as_json = bool(getattr(a, "json", False))
+    age = (getattr(a, "prune", "") or "").strip()
+    if age:
+        try:
+            went = speech_music.prune(speech_music.age_s(age))
+        except ValueError as e:
+            print(f"media music log: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps({"pruned": went}) if as_json
+              else f"{went} row{'' if went == 1 else 's'} pruned")
+        return 0
+    rows = speech_music.with_titles(
+        speech_music.recent(max(1, int(getattr(a, "n", 20) or 20)),
+                            getattr(a, "kind", None) or None))
+    if as_json:
+        print(json.dumps({"items": rows}))
+        return 0
+    if not rows:
+        print("nothing logged yet")
+    for r in rows:
+        print(_music_log_line(r))
+    return 0
+
+
 def cmd_music(a) -> int:
     from .route import coerce_content_type, detect_content_type
 
+    if a.action == "log":
+        # Reads the state store only: before any player is looked for.
+        return _cmd_music_log(a)
     m = SinkMusicRouter(SinkMusic())
     if a.action == "status" and getattr(a, "json", False):
         # Structured read for a control surface. Kept ahead of the formatted
@@ -11036,7 +11107,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
                             "chapters", "chapter", "radio", "dislike",
-                            "bed", "bed-off", "bed-list", "held", "mood"))
+                            "bed", "bed-off", "bed-list", "held", "mood", "log"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "
@@ -11094,6 +11165,14 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="for 'bookmark': finish a range from the last bookmark")
     s.add_argument("--slot", default="",
                    help="for 'bookmark': named register (e.g. 1, 2) for overlapping ranges")
+    s.add_argument("-n", type=int, default=20, metavar="ROWS",
+                   help="for 'log': how many rows (20)")
+    s.add_argument("--kind", choices=("bed", "sing_in", "sing_out", "tune"),
+                   help="for 'log': only the music under replies, Sing it in, "
+                        "Sing it out or the reply tunes")
+    s.add_argument("--prune", default="", metavar="AGE",
+                   help="for 'log': delete what is older than AGE (90d, 12w, 6m, "
+                        "1y) and print how many rows went; asks nothing")
     s.add_argument("--title", default="", help=argparse.SUPPRESS)
     s.add_argument("--where", type=target_name,
                    choices=("default", "auto", "local", "rooms", "phone", "sasonica", "handoff"),

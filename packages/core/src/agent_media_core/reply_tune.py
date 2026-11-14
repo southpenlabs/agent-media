@@ -249,8 +249,25 @@ def _after_reply(event, row: int) -> Optional[str]:
     if why:
         return _skip(why, line)
     _record(entry)
+    _log(line, artist, title, r, entry["level"], row=row, session=entry["session"])
     log.info("reply tune %r played on %s", line, r)
     return None
+
+
+def _log(line: str, artist: str, title: str, r: str, start_level: int, *,
+         row: Optional[int] = None, session=None, held: bool = False) -> None:
+    """A tune asked of a player goes in the log of music around speech
+    (speech_music; David, 14 Nov 2026: "Maybe we need to keep a log of Sing
+    it out" — until now only the last tune's time was kept, for the
+    cooldown). The track is named by the agent's own line and our id for it
+    (`_song_id`, the hand-off entry's `id`, which the app reports its ending
+    by), on either route: nothing Spotify answered is kept here. Never
+    raises (speech_music.start)."""
+    from . import speech_music
+    speech_music.start("tune", history_id=row or None, session=session or None,
+                       track_key=_song_id(line), artist=artist, title=title, source=r,
+                       why={"asked": "held" if held else "reply", "line": line},
+                       mix={"level": start_level})
 
 
 #: A held tune's uri in play_gate's list: the line, asked of the route again.
@@ -277,6 +294,8 @@ def play_now(line: str) -> Optional[str]:
     from . import play_gate
     with play_gate.request(force=True):
         why, _ = _play_route(r, line, artist, title, level())
+    if why is None:
+        _log(line, artist, title, r, level(), held=True)
     return why
 
 

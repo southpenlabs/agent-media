@@ -3048,6 +3048,41 @@ entry's `original_id`; `""` when there is none, and then no radio button).
   into one, so radio from it is listed once. The app reports only while it
   runs (the WebView is up); a song sung out with the app closed is not
   reported. `GET /features` `music_sung` says the server has all this.
+- **How it ended, for the log (14 Nov 2026)** (`speech_music.py`; David:
+  "Maybe we need to keep a log of Sing it out"). The server keeps one log
+  of the music that plays around a spoken reply (the store's
+  `speech_music` table; read with `GET /speech/music/log`, §6.5) and the
+  same route takes the app's word on how each song ended. Beside `started`,
+  `event` may be:
+
+  | `event` | Body | Meaning |
+  | --- | --- | --- |
+  | `ended` | `pos_s`? | it ran to its end |
+  | `stopped` | `pos_s` (seconds in; optional) | the listener stopped it |
+  | `skipped` | `pos_s`? | skipped for what came next |
+  | `volume` | `level` (0 to 100, as the reply tune's `level`) or `delta` (a number), `pos_s`? | a turn of the volume: **noted on the row only**, the server moves no level by it (David: "Note it only") |
+
+  `kind` says what played: `"sing_out"` (the default, so an app from before
+  means what it meant), `"tune"` for the reply's tune (its `key` is the
+  hand-off entry's `id`), `"bed"` or `"sing_in"`; 400 for any other. The
+  row is the newest of that `kind` with that `key`, or the one `log_id`
+  names (the `log_id` of an earlier answer; with it `key` may be left
+  out). → `{"ok": true, "key", "event", "kind", "log_id"}`. The log is
+  best-effort: a report whose row is not found is still 200, with
+  `"log_id": null`. `started` with a `kind` other than `sing_out` notes
+  the start on the row the server wrote when it asked the player (within
+  15 minutes), or writes one (`source: "app"`) when it has none. 400 for an
+  `event` not listed, a `pos_s` that is not a number of 0 or more, a
+  `volume` with neither `level` nor `delta`, a `level` outside 0 to 100,
+  or a `log_id` that is not a positive integer.
+  What an app from before sends is answered as before and is also
+  written down: `{"key", "event": "started"}` writes the Sing it out's row
+  (its answer gains `"log_id"`; a second report within 15 minutes is the
+  same row), and `kept`, `like` and `dislike` set that row's `outcome`
+  (`kept`, `liked`, `disliked`; their answers are unchanged). `kept` and
+  `liked` leave the row open, since the song plays on; a later `ended` or
+  `stopped` closes it and leaves the verdict standing. `GET /features`
+  `speech_music_log` says the server takes these reports.
 - **Radio from the song**: `POST /music/radio {"from_song": "<key>",
   "video_id"?}` (the same as `POST /music {"action": "radio", "from_song",
   "video_id"?}`, §6.9a Radio) starts a YouTube Mix station seeded with the
@@ -3566,6 +3601,63 @@ One row per reply: a held copy beside the one spoken (the same
 An older server answers 404, and `GET /features` says `speech_recent` on
 one that has it: the app shows the list, and the Replay strip's key to it,
 only then.
+
+#### `GET /speech/music/log` — gated (like `POST /speech/music-bed`) (14 Nov 2026)
+
+The log of music around speech (`speech_music.py`; David, 14 Nov 2026:
+"Maybe we need to keep a log of Sing it out ... I'd like more intelligence
+around song choice, including the backing music for replies";
+docs/proposals/2026-11-14-music-around-speech.md, step one): one row for
+each thing that played around a reply, newest first, with how it ended.
+It only records: nothing chooses music by it yet.
+
+```json
+{"ok": true, "items": [
+  {"id": 41, "started_at": 1794700212.4, "kind": "sing_out", "history_id": 26110,
+   "session": "66d8…", "thread_title": "Music around speech",
+   "track_key": "k1", "artist": "Massive Attack", "title": "Angel",
+   "source": "favourites", "why": {"after": "bed", "bed_id": 40}, "mix": {},
+   "ended_at": 1794700260.0, "outcome": "kept", "pos_s": 47.6,
+   "events": [{"at": 1794700230.1, "what": "kept"},
+              {"at": 1794700241.0, "what": "volume", "level": 40},
+              {"at": 1794700260.0, "what": "stopped", "pos_s": 47.6}]},
+  {"id": 40, "started_at": 1794700150.0, "kind": "bed", "history_id": 26110,
+   "session": "66d8…", "thread_title": "Music around speech",
+   "track_key": "k1", "artist": "Massive Attack", "title": "Angel",
+   "source": "favourites",
+   "why": {"source": "favourites", "style": "auto", "for": "reply", "topic": true},
+   "mix": {"gain_db": -3.0, "carve_db": 3.0, "intro_ms": 1500.0, "kind": "reply",
+           "outro": false, "sing_in": false, "sing_out": true},
+   "ended_at": 1794700212.0, "outcome": "ended", "pos_s": 62.0, "events": [
+     {"at": 1794700212.0, "what": "ended", "pos_s": 62.0}]}]}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | the row; the `log_id` of `POST /speech/music-bed/song` |
+| `started_at` | epoch seconds, when it began (or was asked of its player) |
+| `kind` | `bed` (the music under a long reply, `/speech/music-bed`), `sing_in`, `sing_out`, `tune` (the reply's `[[tune: …]]`) |
+| `history_id` | the reply's speech-history row, `null` when not known (a private reading, a held tune played later) |
+| `session` | the reply's thread, or `null` |
+| `thread_title` | the title the reply's history row was spoken under, `null` without one |
+| `track_key` | our own id for the track: the favourite's key, a library track's address, `yt:<id>` for a streaming one, `generated:<mood>`, the tune's hand-off `id`; `null` when none |
+| `artist`, `title` | as known (`null` for none); a reply tune's are the agent's own line, on either route |
+| `source` | `favourites`, `library`, `stream`, `generated` (a bed); `handoff` or `spotify` (a tune's route); `app` (a row written from the app's report alone) |
+| `why` | what the choosing code knew: a bed's `source`, `style`, `for` (reply, people, question, alert), `topic` (the reply's words were offered to the match), `fell_back_to`, `replay`; a tune's `line`; `{}` when nothing |
+| `mix` | how it was played, where known: a bed's levels and switches (`sing_in` / `sing_out` say the mix carried them), Sing it in's timing, a tune's `level`; `{}` otherwise |
+| `ended_at`, `outcome`, `pos_s` | how it ended, each `null` until known: `outcome` one of `ended`, `stopped`, `skipped`, `kept`, `liked`, `disliked`, `replaced`; `pos_s` seconds in (a bed loops, so its is the time it played) |
+| `events` | every report about it in order, `{at, what, …}`: its endings and verdicts, and each `volume` turn (`level` or `delta`), which is only ever a note |
+
+`?limit=` (default 50, at most 500), `?kind=` (one of the four) and
+`?since=` (epoch seconds: rows started at or after it); 400 for a `limit`
+or `since` that is not a number or an unknown `kind`. A bed's row is
+written as it starts (and again when a replay plays one: `why.replay`),
+Sing it in's with the bed whose mix carries it, a tune's when it is asked
+of a player; Sing it out's when the app reports it. A bed ends with its
+reading: `stopped` when the listener cut the reading short. Everything is
+kept: rows go only when asked (`media music log --prune 90d`; the same
+command without `--prune` prints the log). `GET /features`
+`speech_music_log` says the server has this.
 
 #### `POST /speech/ctl` — gated
 
@@ -5521,6 +5613,7 @@ local look, never a network call:
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
 | `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Sung out") (8 Nov 2026) |
+| `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
