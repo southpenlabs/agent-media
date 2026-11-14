@@ -3197,6 +3197,35 @@ then on the voice carries `rtf` and `live` (`rtf` under 0.8). The app
 plays the clip in the page, not through the speech target.
 `/session/voice` carries the same. In `CORS_PATHS`.
 
+**Download on demand** (15 Nov 2026, step 4): the list also offers this
+server's voices that a download would bring, `installed: false` with
+`size_bytes`: a Piper voice its own files (Piper's catalog, voices.json,
+from Piper's server here or Hugging Face, kept a day in
+`<state_dir>/piper-voices.json`; one voice per speaker, the best quality);
+while Kokoro is not here, every Kokoro voice at the whole model's size (one
+download covers all). Such a voice cannot be chosen (400 "… is not
+downloaded yet", here and on `/session/voice`). The answer carries
+`providers: [{"id", "name", "kind": "local"|"online"|"phone"|"cloud",
+"status": "ready"|"not installed"|"downloading"|"failed", "size_bytes",
+"progress": 0..1|null, "error"?, "licence"?}]` (Kokoro and Piper first,
+then the others present) and `can_download` (an admin device).
+
+`POST /speech/voice/download {"voice"}` → 202, the same body as GET with
+the provider `downloading`: `media-setup voices <provider>:<voice>`
+(setup_voices.py) runs as the transient user unit
+`agent-media-voice-download-<provider>`, so a restart of this server does
+not cut it, its log and exit status in `<state_dir>/voice-downloads/`.
+One job per provider: a second POST while it runs is 202 and starts
+nothing. `progress` is Kokoro's files so far (Piper's is null). A
+non-zero exit leaves the provider `failed` with the log's last line as
+`error` until the next try. 403 `not_admin` for a member or guest; 400
+"no such voice", "already downloaded", or a voice that is not this
+server's to download; 507 "needs N MB, M free" (with 200 MB to spare);
+501 without systemd-run. A download never changes the voice in use.
+Pinned by `packages/server/tests/test_reap.py`,
+`packages/server/tests/test_roles.py` and
+`packages/core/tests/test_local_voices.py`.
+
 `languages` groups them: `[{"code": "en", "name": "English", "accents":
 [{"locale": "en-AU", "name": "Australia", "voices": [<voice>]}]}]` —
 English first, then by name; Australia first within English, the rest by

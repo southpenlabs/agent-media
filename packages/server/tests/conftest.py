@@ -296,6 +296,21 @@ def _clean_media_env(monkeypatch, tmp_path, request):
 
     monkeypatch.setattr(local_voices, "_ASK", {p: (lambda base: None) for p in local_voices.PROVIDERS})
     local_voices.clear_cache()
+    monkeypatch.setattr(local_voices, "_fetch_piper_catalog",
+                        lambda: (_ for _ in ()).throw(OSError("offline in tests")))
+    monkeypatch.setattr(local_voices, "_piper_catalog_try", 0.0)
+    monkeypatch.setattr(local_voices, "_catalog_path",
+                        lambda: tmp_path / "piper-voices-test.json")
+    # Kokoro not installed would offer its every voice to download: none
+    # here unless a test lists some.
+    monkeypatch.setattr(local_voices, "KOKORO_VOICES", ())
+    # A voice download would start a systemd unit: never here.
+    from agent_media_server import voice_downloads
+
+    def _no_units(argv):
+        raise OSError("no systemd in tests")
+
+    monkeypatch.setattr(voice_downloads, "runner", _no_units)
     # The search index lives under the state dir above; forget the last
     # test's connection and its short-lived caches.
     from agent_media_server import search

@@ -524,6 +524,8 @@ def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
               if voice is not None else None)
     if voice is not None and not chosen:
         return False, {"error": "no such voice", "status": 400}
+    if chosen and chosen.get("installed", True) is False:
+        return False, {"error": f"{chosen['label']} is not downloaded yet", "status": 400}
     if chosen and mode is not None and mode not in chosen["where"]:
         if mode == "server":
             return False, {"error": f"{chosen['label']} is only on the phone: "
@@ -545,12 +547,14 @@ def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
             device.set_override(target, mode, keep)
         except OSError as e:
             return False, {"error": f"could not save the voice ({e})", "status": 500}
-    from . import voice_samples
+    from . import voice_downloads, voice_samples
 
     # A Play button's clip and the speed measured here (voice-picker step 2);
     # `voices` and `languages` hold the same entries.
     voice_samples.annotate(voices)
     return True, {"target": target,
+                  "providers": voice_downloads.providers(voices),
+                  "can_download": user.get("role", "admin") == "admin" or not user.get("device"),
                   "mode": "phone" if device.renders_on_device(target) else "server",
                   "voice": device.voice_for(target),
                   "can_phone": device.can_render(target),
@@ -573,6 +577,30 @@ def speech_voice_sample(bearer: str, voice: str) -> tuple[bool, dict]:
     if not chosen:
         return False, {"error": "no such voice", "status": 404}
     return voice_samples.render(chosen)
+
+
+def speech_voice_download(bearer: str, voice) -> tuple[bool, dict]:
+    """`POST /speech/voice/download {"voice"}`: fetch a voice this server
+    does not have yet (voice_downloads.py), admins only; answers as GET
+    /speech/voice, the provider now downloading. Never changes the voice in
+    use."""
+    from agent_media_core.render import device
+
+    from . import voice_downloads
+
+    user, err = auth.may_admin(bearer)
+    if not user:
+        return False, err
+    chosen = device.find_voice(voice) if isinstance(voice, str) and voice else None
+    if not chosen:
+        return False, {"error": "no such voice", "status": 400}
+    ok, detail = voice_downloads.start(chosen)
+    if not ok:
+        return False, detail
+    ok, detail = speech_voice(bearer)
+    if ok:
+        detail["status"] = 202
+    return ok, detail
 
 
 def settings_language(bearer: str, language=None, accents=None) -> tuple[bool, dict]:

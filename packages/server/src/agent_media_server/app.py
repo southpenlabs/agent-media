@@ -190,6 +190,7 @@ except /pair, which is how a device gets its token):
   GET|POST /speech/speed-reset {"reset"} → whether the speech rate goes
                   back to 1× as each reply ends; the server's (speech_speed.py)
   GET /speech/voice/sample?voice=<name> → a voice's sample (mp3), made once
+  POST /speech/voice/download {"voice"} → 202, a voice this server lacks fetched (admin)
   GET|POST /speech/voice {"mode", "voice"?} → the speech target's replies
                   rendered on the phone (Android TTS) or by the server, and
                   in which voice, by language and accent (render/device.py,
@@ -430,7 +431,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -4399,6 +4400,11 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                                                 delta=body.get("delta"),
                                                 log_id=body.get("log_id"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/voice/download":
+        # A voice this server does not have yet, fetched (voice_downloads.py).
+        body = _read_json(h) or {}
+        ok, detail = pins.speech_voice_download(_bearer(h), body.get("voice"))
+        _json(h, detail.pop("status", 202) if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/voice":
         # Settings' Voice: this phone's or the server's.
         body = _read_json(h) or {}

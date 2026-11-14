@@ -135,3 +135,13 @@ def test_pair_role_at_the_desk(capsys):
     capsys.readouterr()
     (code,) = devices._read(devices.codes_path(), {}).values()
     assert code["role"] == "guest" and code["enrol"] is False
+
+
+def test_downloading_a_voice_is_for_admins(server):
+    """A voice download changes what the server has (voice-picker step 4)."""
+    member = _paired(server, role="member")
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "kokoro:af_alloy"},
+                    _auth(member["token"]))
+    assert res.status == 403 and got["code"] == "not_admin"
+    res, got = call(server, "GET", "/speech/voice", headers=_auth(member["token"]))
+    assert got["can_download"] is False

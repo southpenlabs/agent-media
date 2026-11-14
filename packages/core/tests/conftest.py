@@ -287,7 +287,7 @@ def _no_follow_pane(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_voice_list_fetch(monkeypatch):
+def _no_voice_list_fetch(monkeypatch, tmp_path):
     """Microsoft's voice list is fetched over the network (render/device.py):
     offline here, so the built-in list serves. Tests of the fetch put their
     own in."""
@@ -305,6 +305,14 @@ def _no_voice_list_fetch(monkeypatch):
 
     monkeypatch.setattr(local_voices, "_ASK", {p: (lambda base: None) for p in local_voices.PROVIDERS})
     local_voices.clear_cache()
+    monkeypatch.setattr(local_voices, "_fetch_piper_catalog",
+                        lambda: (_ for _ in ()).throw(OSError("offline in tests")))
+    monkeypatch.setattr(local_voices, "_piper_catalog_try", 0.0)
+    monkeypatch.setattr(local_voices, "_catalog_path",
+                        lambda: tmp_path / "piper-voices-test.json")
+    # Kokoro not installed would offer its every voice to download: none
+    # here unless a test lists some.
+    monkeypatch.setattr(local_voices, "KOKORO_VOICES", ())
 
 
 @pytest.fixture(autouse=True)

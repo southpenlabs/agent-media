@@ -186,6 +186,104 @@ def voices() -> list[dict]:
     return out
 
 
+# --- what can be downloaded (voice-picker step 4) ---------------------------
+
+#: Kokoro is one download for all its voices: the model and the voices file
+#: (setup_voices.KOKORO_FILES), about 354 MB.
+KOKORO_DOWNLOAD_BYTES = 325_532_387 + 28_214_398
+#: Piper's catalog: every voice with its files and their sizes.
+PIPER_CATALOG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json"
+PIPER_CATALOG_NAME = "piper-voices.json"
+PIPER_CATALOG_TTL_S = 24 * 3600
+PIPER_CATALOG_RETRY_S = 600
+LICENCES = {"kokoro": "Apache-2.0", "piper": "per voice"}
+
+_piper_catalog_try = 0.0
+
+
+def _fetch_piper_catalog() -> dict:
+    """Piper's voices.json: from Piper's own server here when it runs (its
+    GET /all-voices), else Hugging Face. Raises when neither answers."""
+    try:
+        data = _get_json(f"{base_url('piper')}/all-voices")
+        if isinstance(data, dict) and data:
+            return data
+    except Exception:  # noqa: BLE001 — not running: ask Hugging Face
+        pass
+    req = urllib.request.Request(PIPER_CATALOG_URL, headers={"User-Agent": "agent-media"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("not a voice catalog")
+    return data
+
+
+def _catalog_path():
+    from .._paths import state_dir
+
+    return state_dir() / PIPER_CATALOG_NAME
+
+
+def piper_catalog() -> dict:
+    """{voice: size_bytes} of every Piper voice: kept a day in the state dir,
+    the stale copy (or nothing) when it cannot be had."""
+    global _piper_catalog_try
+    path = _catalog_path()
+    try:
+        cached = json.loads(path.read_text())
+        stale, fetched = dict(cached["voices"]), float(cached.get("fetched") or 0)
+    except (OSError, ValueError, KeyError, TypeError):
+        stale, fetched = {}, 0.0
+    now = time.time()
+    if stale and now - fetched < PIPER_CATALOG_TTL_S:
+        return stale
+    if now - _piper_catalog_try < PIPER_CATALOG_RETRY_S:
+        return stale
+    _piper_catalog_try = now
+    try:
+        raw = _fetch_piper_catalog()
+    except Exception:  # noqa: BLE001 — offline
+        return stale
+    fresh = {}
+    for key, entry in raw.items():
+        files = (entry or {}).get("files") or {}
+        fresh[str(key)] = sum(int((f or {}).get("size_bytes") or 0) for f in files.values())
+    if fresh:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(f".tmp.{os.getpid()}")
+            tmp.write_text(json.dumps({"fetched": now, "voices": fresh}))
+            tmp.replace(path)
+        except OSError:
+            pass
+        return fresh
+    return stale
+
+
+def offered() -> list[dict]:
+    """Every local voice the picker offers: installed ones, and those that a
+    download would bring (`installed: false`, `size_bytes` what it costs).
+    A Kokoro voice costs the whole model while Kokoro is not here."""
+    out: list[dict] = []
+    have = installed("kokoro")
+    for name in (have if have is not None else KOKORO_VOICES):
+        v = kokoro_voice(name)
+        if v:
+            if have is None:
+                v.update(installed=False, size_bytes=KOKORO_DOWNLOAD_BYTES)
+            out.append(v)
+    have_piper = set(installed("piper") or [])
+    catalog = piper_catalog()
+    for name in sorted(set(catalog) | have_piper):
+        v = piper_voice(name)
+        if not v:
+            continue
+        if name not in have_piper:
+            v.update(installed=False, size_bytes=int(catalog.get(name) or 0))
+        out.append(v)
+    return out
+
+
 def split(name: str) -> Optional[tuple[str, str]]:
     """`kokoro:af_alloy` → ("kokoro", "af_alloy") for a provider rendered by
     an engine of the same name, else None."""

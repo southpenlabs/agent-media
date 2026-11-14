@@ -1041,6 +1041,81 @@ def test_a_voice_has_a_sample_made_once_and_timed(server, shelf, signed_in, type
     assert typed == []
 
 
+def test_a_voice_not_here_can_be_downloaded(server, shelf, signed_in, typed, monkeypatch, tmp_path):
+    """Download on demand (voice-picker step 4): Kokoro not installed lists
+    its voices undownloaded at the model's size; POST starts one systemd
+    job per provider, never two; the provider shows downloading, then
+    failed with the log's last line. No unit runs: the runner is faked."""
+    import subprocess
+
+    from agent_media_core.render import local_voices
+    from agent_media_server import voice_downloads
+
+    monkeypatch.setattr(voice_downloads, "_dir", lambda: tmp_path / "dl")
+    monkeypatch.setattr(local_voices, "KOKORO_VOICES", ("af_alloy", "bf_emma"))
+    monkeypatch.setattr(local_voices, "piper_catalog",
+                        lambda: {"en_GB-cori-high": 63_000_000, "en_GB-cori-medium": 20_000_000})
+    monkeypatch.setattr(voice_downloads.shutil, "which", lambda name: "/usr/bin/" + name)
+    active = [False]
+    started = []
+
+    def runner(argv):
+        if argv[:2] == ["systemctl", "--user"]:
+            return subprocess.CompletedProcess(argv, 0, "active\n" if active[0] else "inactive\n", "")
+        started.append(argv)
+        active[0] = True
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(voice_downloads, "runner", runner)
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    kokoro = next(p for p in obj["providers"] if p["id"] == "kokoro")
+    assert (kokoro["status"], kokoro["size_bytes"]) == ("not installed", local_voices.KOKORO_DOWNLOAD_BYTES)
+    assert obj["can_download"] is True
+    alloy = next(v for v in obj["voices"] if v["name"] == "kokoro:af_alloy")
+    assert alloy["installed"] is False and alloy["size_bytes"] == local_voices.KOKORO_DOWNLOAD_BYTES
+    cori = [v for v in obj["voices"] if v["name"].startswith("piper:en_GB-cori")]
+    assert [v["name"] for v in cori] == ["piper:en_GB-cori-high"], "one per speaker, best quality"
+    assert {p["id"] for p in obj["providers"]} >= {"kokoro", "piper", "edge"}
+    # Not downloaded: cannot be chosen.
+    res, got = call(server, "POST", "/speech/voice", {"mode": "server", "voice": "kokoro:af_alloy"}, AUTH)
+    assert res.status == 400 and "not downloaded" in got["error"]
+    # Too little room.
+    monkeypatch.setattr(voice_downloads, "_free_bytes", lambda: 100_000_000)
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "kokoro:af_alloy"}, AUTH)
+    assert res.status == 507 and "MB free" in got["error"]
+    monkeypatch.setattr(voice_downloads, "_free_bytes", lambda: 50_000_000_000)
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "kokoro:af_alloy"}, AUTH)
+    assert res.status == 202, got
+    kokoro = next(p for p in got["providers"] if p["id"] == "kokoro")
+    assert kokoro["status"] == "downloading"
+    assert len(started) == 1 and started[0][0] == "systemd-run"
+    assert "--unit=agent-media-voice-download-kokoro" in started[0]
+    assert "kokoro:af_alloy" in started[0]
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "kokoro:bf_emma"}, AUTH)
+    assert res.status == 202 and len(started) == 1, "one job per provider"
+    # It ends badly: failed, with the log's last line.
+    active[0] = False
+    (tmp_path / "dl" / "kokoro.log").write_text("…\n  kokoro-v1.0.onnx: download failed: timed out\n")
+    (tmp_path / "dl" / "kokoro.exit").write_text("1\n")
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    kokoro = next(p for p in obj["providers"] if p["id"] == "kokoro")
+    assert kokoro["status"] == "failed" and "timed out" in kokoro["error"]
+    # Bad asks.
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "edge:en-GB-RyanNeural"}, AUTH)
+    assert res.status == 400
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "nope"}, AUTH)
+    assert res.status == 400 and got["error"] == "no such voice"
+    # Installed now: already downloaded.
+    monkeypatch.setattr(local_voices, "_ASK", {"kokoro": lambda b: ["af_alloy"], "piper": lambda b: None})
+    local_voices.clear_cache()
+    res, got = call(server, "POST", "/speech/voice/download", {"voice": "kokoro:af_alloy"}, AUTH)
+    assert res.status == 400 and got["error"] == "already downloaded"
+    res, obj = call(server, "GET", "/speech/voice", headers=AUTH)
+    assert next(p for p in obj["providers"] if p["id"] == "kokoro")["status"] == "ready"
+    assert "/speech/voice/download" in app.CORS_PATHS
+    assert typed == []
+
+
 def test_the_language_is_the_servers(server, shelf, signed_in, monkeypatch):
     res, obj = call(server, "GET", "/settings/language", headers=AUTH)
     assert res.status == 200 and obj["language"] == "en"

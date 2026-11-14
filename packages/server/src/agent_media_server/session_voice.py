@@ -31,6 +31,9 @@ def setting(session: str, bearer: str, *, body: dict | None = None) -> tuple[boo
         if voice is not None and (not isinstance(voice, str) or
                                   not any(v["name"] == voice for v in voices)):
             return False, {"error": "choose one of the offered voices", "status": 400}
+        if voice is not None and any(v["name"] == voice and v.get("installed", True) is False
+                                     for v in voices):
+            return False, {"error": "that voice is not downloaded yet", "status": 400}
         try:
             session_voice.set_voice(session, voice)
         except OSError:
@@ -41,9 +44,10 @@ def setting(session: str, bearer: str, *, body: dict | None = None) -> tuple[boo
     chosen = None if phone else device.server_choice(target)
     if chosen:
         default = f"{chosen[0]}:{chosen[1]}"
-    from . import voice_samples
+    from . import voice_downloads, voice_samples
 
     voice_samples.annotate(voices)
     own = session_voice.voice_for(session)
     return True, {"session": session, "voice": own, "default_voice": default,
-                  "effective_voice": own or default, "voices": voices, "languages": languages}
+                  "effective_voice": own or default, "voices": voices, "languages": languages,
+                  "providers": voice_downloads.providers(voices)}

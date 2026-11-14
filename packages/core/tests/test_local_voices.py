@@ -124,3 +124,27 @@ def test_a_threads_local_voice_applies_while_the_server_renders(monkeypatch):
     device_voice.set_override("sasonica", "phone", "edge:en-GB-RyanNeural")
     engine, _voice = submit._engine_and_voice(ev, sas)
     assert engine != "kokoro"
+
+
+def test_the_piper_catalog_is_kept_a_day_with_each_voices_size(monkeypatch, tmp_path):
+    raw = {"en_GB-cori-high": {"files": {"a.onnx": {"size_bytes": 60}, "a.json": {"size_bytes": 3}}},
+           "en_US-amy-low": {"files": {"b.onnx": {"size_bytes": 20}}}}
+    calls = []
+    monkeypatch.setattr(local_voices, "_fetch_piper_catalog", lambda: calls.append(1) or raw)
+    assert local_voices.piper_catalog() == {"en_GB-cori-high": 63, "en_US-amy-low": 20}
+    assert local_voices.piper_catalog() == {"en_GB-cori-high": 63, "en_US-amy-low": 20}
+    assert calls == [1], "kept"
+
+
+def test_undownloaded_voices_are_offered_with_their_size(monkeypatch):
+    _serve(monkeypatch, kokoro=None, piper=["en_GB-cori-high"])
+    monkeypatch.setattr(local_voices, "KOKORO_VOICES", ("af_alloy", "bf_emma"))
+    monkeypatch.setattr(local_voices, "piper_catalog",
+                        lambda: {"en_GB-cori-high": 63, "en_GB-alba-medium": 50})
+    by = {v["name"]: v for v in local_voices.offered()}
+    assert by["kokoro:af_alloy"]["installed"] is False
+    assert by["kokoro:af_alloy"]["size_bytes"] == local_voices.KOKORO_DOWNLOAD_BYTES
+    assert by["piper:en_GB-cori-high"]["installed"] is True
+    assert (by["piper:en_GB-alba-medium"]["installed"], by["piper:en_GB-alba-medium"]["size_bytes"]) == (False, 50)
+    # Only installed ones render.
+    assert [v["name"] for v in local_voices.voices()] == ["piper:en_GB-cori-high"]

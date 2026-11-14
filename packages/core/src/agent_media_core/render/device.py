@@ -155,6 +155,10 @@ def edge_voices() -> list[dict]:
     except (OSError, ValueError, KeyError, TypeError):
         stale, fetched = [], 0.0
     now = time.time()
+    for v in stale:
+        # A list kept before voices named their provider.
+        if isinstance(v, dict):
+            v.setdefault("provider", "edge")
     if stale and now - fetched < EDGE_CACHE_TTL_S:
         return stale
     if now - _last_fetch_try >= EDGE_RETRY_S:
@@ -175,6 +179,17 @@ def edge_voices() -> list[dict]:
     return stale or _builtin_edge_voices()
 
 
+_QUALITY = {"x_low": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def _rank(v: dict) -> tuple:
+    """Which of one speaker's voices is kept: one already here, then
+    Microsoft's multilingual, then Piper's best quality."""
+    name = v["name"]
+    return (v.get("installed", True) is not False, "Multilingual" in name,
+            _QUALITY.get(name.rsplit("-", 1)[-1], 0) if name.startswith("piper:") else 0)
+
+
 def _one_per_speaker(all_voices: list) -> list:
     """One voice per speaker in a country. Microsoft publishes some twice —
     en-US-AvaNeural and en-US-AvaMultilingualNeural, the same person — and
@@ -184,9 +199,10 @@ def _one_per_speaker(all_voices: list) -> list:
     (find_voice looks at everything) for anyone who had chosen it."""
     best: dict = {}
     for v in all_voices:
-        key = (v["locale"], v["label"])
+        # Per provider: Kokoro's Eric is not Microsoft's.
+        key = (v.get("provider") or "", v["locale"], v["label"])
         have = best.get(key)
-        if have is None or ("Multilingual" in v["name"] and "Multilingual" not in have["name"]):
+        if have is None or _rank(v) > _rank(have):
             best[key] = v
     keep = {id(v) for v in best.values()}
     return [v for v in all_voices if id(v) in keep]
@@ -207,7 +223,7 @@ def languages(all_voices: Optional[list] = None) -> list[dict]:
     people. They stay the phone's fallback (FALLBACK_VOICE), and a stored
     choice of one still renders."""
     if all_voices is None:
-        all_voices = edge_voices() + local_voices.voices()
+        all_voices = edge_voices() + local_voices.offered()
     by_locale: dict[str, list] = {}
     for v in _one_per_speaker(all_voices):
         by_locale.setdefault(v["locale"], []).append(v)
@@ -246,7 +262,7 @@ def find_voice(name: str, all_voices: Optional[list] = None) -> Optional[dict]:
     """A voice by name: any on offer, or one of Google's — not offered, but a
     choice made before they were taken off the list is still a choice."""
     if all_voices is None:
-        all_voices = (voices() + edge_voices() + local_voices.voices()
+        all_voices = (voices() + edge_voices() + local_voices.offered()
                       + [dict(v) for v in GOOGLE_VOICES])
     for v in all_voices:
         if v["name"] == name:
