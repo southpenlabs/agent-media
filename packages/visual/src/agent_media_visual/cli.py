@@ -48,7 +48,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from agent_media_core.intake._env import load_env_file
 
-from .canvas import DEFAULT_PORT, _amux_token
+from .canvas import DEFAULT_PORT, _host_token
 from .engines import generate_image, needs_shaping
 from .generate import shape_prompt, shape_story
 from .state import gc_spool, save_push, spool_dir
@@ -71,10 +71,10 @@ def _image_ref(name: str, targets: list[str]) -> str:
 
 
 def _push_one(base: str, payload: dict) -> str:
-    # /show is token-gated (same amux token the pairing flow installs on
-    # phones); a canvas on another host must share this host's token.
+    # /show is token-gated (the host key the pairing flow installs in
+    # browsers); a canvas on another host must share this host's key.
     headers = {"Content-Type": "application/json"}
-    token = _amux_token()
+    token = _host_token()
     if token:
         headers["X-Auth-Token"] = token
     req = urllib.request.Request(

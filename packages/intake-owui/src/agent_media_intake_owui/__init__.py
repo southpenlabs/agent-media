@@ -13,8 +13,9 @@ Environment (matches the canvas server / CLI so a paired host "just works"):
     MEDIA_VISUAL_URL             canvas push target(s) the `media` CLI uses;
                                  the first entry is borrowed when set
     MEDIA_VISUAL_PORT            listen port (default 8781) for the loopback default
-    AMUX_AUTH_TOKEN              amux token (env wins over ~/.amux/auth_token;
-                                 "none" means the token was deliberately dropped)
+    MEDIA_HOST_TOKEN             the host's key (agent_media_core.host_token; env
+                                 wins over its file, AMUX_AUTH_TOKEN still read;
+                                 "none" means the key was deliberately dropped)
     MEDIA_VISUAL_TRUST_TAILNET   "1" → canvas trusts the tailnet, so /input needs
                                  no token and the amux_token valve stays blank
 """
@@ -26,18 +27,13 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 
 def _amux_token() -> str:
-    """Same resolution the canvas server uses (env wins, then ~/.amux)."""
-    tok = os.environ.get("AMUX_AUTH_TOKEN", "")
-    if tok:
-        return "" if tok.lower() == "none" else tok
-    try:
-        return (Path.home() / ".amux" / "auth_token").read_text().strip()
-    except OSError:
-        return ""
+    """The host's key, as the canvas server reads it (host_token); the
+    Pipe's valve keeps its old name, amux_token."""
+    from agent_media_core import host_token
+    return host_token.read()
 
 
 def _trust_tailnet() -> bool:
@@ -63,7 +59,7 @@ def _pair() -> int:
     elif trust:
         print("  amux_token      (leave blank — canvas trusts the tailnet)")
     else:
-        print("  amux_token      (NONE FOUND — no ~/.amux/auth_token and "
+        print("  amux_token      (NONE FOUND — no host key and "
               "MEDIA_VISUAL_TRUST_TAILNET != 1; /input will stay closed)")
     print("  default_target  speaker        # or amux:<session-name>")
     return 0 if (token or trust) else 1
@@ -84,7 +80,7 @@ def _check() -> int:
     if _amux_token() or _trust_tailnet():
         print("✓ /input is authorized (token present or tailnet-trusted)")
         return 0
-    print("✗ /input has no credential — run on the host with ~/.amux/auth_token "
+    print("✗ /input has no credential — run on the server's host (it makes its key) "
           "or set MEDIA_VISUAL_TRUST_TAILNET=1", file=sys.stderr)
     return 1
 

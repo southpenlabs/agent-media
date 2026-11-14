@@ -1,7 +1,7 @@
 """Ask the phone for something, and wait for David's answer (server-contract.md §6.21).
 
 The agent's half of the phone as its eyes and hands: `POST /phone/ask` to
-the server on this host with the host's own token (~/.amux/auth_token),
+the server on this host with the host's own key (host_token),
 then long-poll `GET /phone/ask?id=` until the phone answers, David says no,
 or the time runs out. Used by the `phone_ask` MCP tool. David, 1 Oct 2026
 (docs/proposals/2026-10-01-the-phone-as-eyes-and-hands.md).
@@ -32,13 +32,9 @@ SHARED_FRESH_S = 30 * 60
 
 
 def _token() -> str:
-    tok = os.environ.get("AMUX_AUTH_TOKEN", "")
-    if tok:
-        return "" if tok.lower() == "none" else tok
-    try:
-        return (Path.home() / ".amux" / "auth_token").read_text().strip()
-    except OSError:
-        return ""
+    """The host's own key (host_token)."""
+    from . import host_token
+    return host_token.read()
 
 
 def _base() -> str:

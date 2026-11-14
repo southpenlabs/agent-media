@@ -147,7 +147,7 @@ def test_failures_are_rate_limited_per_address(server):
 @pytest.fixture()
 def amux(monkeypatch, tmp_path):
     """A host amux token and a canvas pairing code, both throwaway."""
-    monkeypatch.setattr(canvas, "_amux_token", lambda: "AMUX-SECRET-TOKEN")
+    monkeypatch.setattr(canvas, "_host_token", lambda: "AMUX-SECRET-TOKEN")
     path = tmp_path / "spool-pair-code"
     monkeypatch.setattr(canvas, "_pair_code_path", lambda: path)
     path.write_text("a1b2c3d4")
@@ -292,7 +292,7 @@ def test_lookup_never_matches_nothing():
 def test_pair_device_cli_prints_both_links(capsys, monkeypatch):
     monkeypatch.setattr(canvas, "_qr", lambda url: f"[QR {url}]")
     # Must not need (or touch) the amux token or the spool's pair code.
-    monkeypatch.setattr(canvas, "_amux_token", lambda: "")
+    monkeypatch.setattr(canvas, "_host_token", lambda: "")
     monkeypatch.setattr(canvas, "_pair_code_path",
                         lambda: (_ for _ in ()).throw(AssertionError("spool touched")))
     assert canvas._cmd_pair(["--device", "Pixel 8a", "--host", "red5", "--port", "8781"]) == 0
@@ -360,7 +360,7 @@ def test_pair_device_prefers_a_running_quick_tunnel(capsys, monkeypatch):
 
 def test_pair_without_device_is_unchanged(capsys, monkeypatch, tmp_path):
     monkeypatch.setattr(canvas, "_qr", lambda url: "")
-    monkeypatch.setattr(canvas, "_amux_token", lambda: "t")
+    monkeypatch.setattr(canvas, "_host_token", lambda: "t")
     path = tmp_path / "pair-code"
     monkeypatch.setattr(canvas, "_pair_code_path", lambda: path)
     assert canvas._cmd_pair(["--host", "red5", "--port", "8781"]) == 0

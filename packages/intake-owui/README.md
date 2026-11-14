@@ -72,7 +72,7 @@ the thread so a fire-and-forget turn still gets a meaningful ack.
 | `MEDIA_CANVAS_URL` | — | explicit canvas base URL (wins over everything) |
 | `MEDIA_VISUAL_URL` | — | the `media` CLI's push target(s); first entry borrowed |
 | `MEDIA_VISUAL_PORT` | `8781` | port for the loopback default URL |
-| `AMUX_AUTH_TOKEN` | `~/.amux/auth_token` | amux token (env wins; `none` = dropped) |
+| `MEDIA_HOST_TOKEN` | `~/.config/agent-media/host_token` | the host's key, which the server makes (env wins; `AMUX_AUTH_TOKEN` and `~/.amux/auth_token` still read; `none` = dropped) |
 | `MEDIA_VISUAL_TRUST_TAILNET` | off | `1` → canvas trusts the tailnet, no token needed |
 
 ## Scope / caveats
@@ -83,7 +83,8 @@ the thread so a fire-and-forget turn still gets a meaningful ack.
   will only voice the short "↳ sent" ack. For a real conversational turn (wait
   for the reply, stream it back), use `completions-shim` instead.
 - **Auth**: `/input` is keystroke injection, so it's token-guarded. `pair`
-  reads `~/.amux/auth_token` (or `AMUX_AUTH_TOKEN`). The alternative is running
+  reads the host's key (`~/.config/agent-media/host_token`, made by the server; the
+  old `~/.amux/auth_token` still works). The alternative is running
   the canvas with `MEDIA_VISUAL_TRUST_TAILNET=1`, in which case leave the
   `amux_token` valve blank.
 - **No double-speak**: keep OWUI's TTS disabled so the only voice is

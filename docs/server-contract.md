@@ -167,10 +167,17 @@ Audiobookshelf (`auth_abs`: `POST /api/authorize`, `MEDIA_REPLY_USERS`,
 (David: "I'd like to move away from audiobookshelf"), and that fallback went
 with it: device tokens are the only app credential.
 
-### 4.2 The amux token — desk routes
+### 4.2 The host key — desk routes
 
 `X-Auth-Token: <token>` or `Authorization: Bearer <token>`, where the token
-is `~/.amux/auth_token`. Guards `/input`, `/show`, `/ctl`, `/say`, `/play`.
+is the host's key (`agent_media_core.host_token`): `MEDIA_HOST_TOKEN`, else
+`~/.config/agent-media/host_token`, which the server writes when it starts
+and the host has none — adopting amux's `~/.amux/auth_token` where there is
+one, so amux, browsers paired before and other hosts that send it keep
+working; `AMUX_AUTH_TOKEN` and that file are still read when there is no key
+of its own. Until 14 Nov 2026 the key was amux's token only, and a host
+without amux (red2, after the server moved there) had every desk route shut.
+Guards `/input`, `/show`, `/ctl`, `/say`, `/play`, `/jobs/run`.
 With no token configured, those routes are closed. `MEDIA_VISUAL_TRUST_TAILNET=1`
 drops the check entirely (a testing switch). The only way a browser gets
 this token is `GET /pair` (appendix). **It is never an app credential.**
@@ -6912,7 +6919,7 @@ Pinned by `packages/server/tests/test_phone.py`; the frame by
 `docs/proposals/2026-10-01-the-phone-as-eyes-and-hands.md`.
 
 - `POST /phone/ask {kind, why, session?, params?}` — **the host's own token only**
-  (`X-Auth-Token` or `Authorization: Bearer`, `~/.amux/auth_token`), never
+  (`X-Auth-Token` or `Authorization: Bearer`, the host key, §4.2), never
   a device's: an agent asks, a phone does not. `kind`: `photo` | `location`
   | `dnd`; `why`: one sentence, shown as-is, ≤ 200 characters, 400 when
   empty; `session` names the thread (the tool finds its own). → `{ask}`.
@@ -12451,7 +12458,7 @@ Opening the canvas port publicly puts §4.2's desk routes there too, and
   so the token is enforced. That flag drops the check *entirely*, including
   `/input` — it must never be set on a host reachable from outside the mesh.
   A `media doctor` check for "trust-tailnet on + a proxy in front" is owed.
-- The token is `~/.amux/auth_token`, 43 chars of `token_urlsafe(32)`, so
+- The token is the host key (§4.2), 43 chars of `token_urlsafe(32)`, so
   entropy is not the problem.
 
 What is owed before exposure:

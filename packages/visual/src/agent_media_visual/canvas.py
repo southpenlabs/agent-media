@@ -361,17 +361,13 @@ def channel_status(channel: str) -> dict:
 # POST /input types text into a Claude session: the *last speaker's* tmux pane
 # by default (the same source_pane the popup's go-to-source uses), or a named
 # amux session via `amux send`. This is remote keystroke injection, so unlike
-# the transport controls it requires amux's own auth token — one credential
-# for both dashboards (~/.amux/auth_token / AMUX_AUTH_TOKEN).
+# the transport controls it requires the host's own key (agent_media_core.
+# host_token: the server's, which adopts amux's token where amux runs, so
+# one credential still serves both dashboards).
 
-def _amux_token() -> str:
-    tok = os.environ.get("AMUX_AUTH_TOKEN", "")
-    if tok:
-        return "" if tok.lower() == "none" else tok
-    try:
-        return (Path.home() / ".amux" / "auth_token").read_text().strip()
-    except OSError:
-        return ""
+def _host_token() -> str:
+    from agent_media_core import host_token
+    return host_token.read()
 
 
 def _authorized(handler: "Handler") -> bool:
@@ -380,7 +376,7 @@ def _authorized(handler: "Handler") -> bool:
     # against a site your browser visits POSTing keystrokes into your agents.
     if (os.environ.get("MEDIA_VISUAL_TRUST_TAILNET") or "").strip() == "1":
         return True
-    token = _amux_token()
+    token = _host_token()
     if not token:
         return False  # no token configured → the input surface stays closed
     got = (handler.headers.get("X-Auth-Token")
@@ -608,8 +604,8 @@ def _cmd_pair(argv: list[str]) -> int:
                                 server=args.server, tunnelled=tunnelled, lookup=lookup,
                                 jobs=args.jobs, role=args.role, sessions=args.sessions)
 
-    if not _amux_token():
-        print("no amux token on this host (~/.amux/auth_token) — nothing to pair.",
+    if not _host_token():
+        print("no host key on this host (media-visual-canvas makes one when it starts) — nothing to pair.",
               file=sys.stderr)
         return 1
 
@@ -1813,9 +1809,9 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
             self._json(200, {"pane": pane, "turns": _pane_turns(pane)})
         elif path == "/pair":
             code = (parse_qs(query).get("c") or [""])[0]
-            token = _amux_token()
+            token = _host_token()
             if not token:
-                self._send(503, b"no amux token configured on the host\n",
+                self._send(503, b"no host key configured on the host\n",
                            "text/plain")
             elif _pair_consume(code):
                 self._send(200, (_PAIR_PAGE % json.dumps(token)).encode(),
@@ -2317,6 +2313,13 @@ def main() -> None:
                     help="also serve the app routes only (PublicHandler) here, "
                          "for a tunnel or proxy; e.g. 127.0.0.1:8789")
     args = ap.parse_args()
+    # The host's key for the desk routes: made here when the host has none
+    # (adopting amux's where amux runs), so a server moved to a new host is
+    # not left with every desk route shut (host_token; red2, 14 Nov 2026).
+    from agent_media_core import host_token as _host_token_mod
+    if not _host_token_mod.ensure():
+        print("canvas: no host key, and none could be written — the desk routes "
+              "stay shut", file=sys.stderr)
     _last_clip_load()      # a restart should not empty the transcript
     # A thread per connection, or a pool of them (http_pool, MEDIA_SERVER_POOL).
     from agent_media_server import http_pool

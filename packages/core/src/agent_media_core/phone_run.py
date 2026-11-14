@@ -34,17 +34,12 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 
 def _token() -> str:
-    tok = os.environ.get("AMUX_AUTH_TOKEN", "")
-    if tok:
-        return "" if tok.lower() == "none" else tok
-    try:
-        return (Path.home() / ".amux" / "auth_token").read_text().strip()
-    except OSError:
-        return ""
+    """The host's own key (host_token)."""
+    from . import host_token
+    return host_token.read()
 
 
 def _base() -> str:
