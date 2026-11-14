@@ -1,0 +1,3 @@
+# The app pairs with a host that declares `server`
+# (docs/proposals/2026-11-13-what-each-machine-is.md).
+requires: server

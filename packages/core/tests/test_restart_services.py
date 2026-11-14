@@ -355,3 +355,14 @@ def test_a_runit_service_is_ours_by_its_run_too(tmp_path, monkeypatch):
     assert cli._run_is_ours(sv / "phone-jobs", root)
     assert cli._run_is_ours(sv / "canvas-local", root)
     assert not cli._run_is_ours(sv / "sshd", root)
+
+
+def test_the_templates_server_unit_is_canvas_and_server_too(host, monkeypatch):
+    """`agent-media-server` (the template, 14 Nov 2026) answers to `canvas`,
+    as the hand-placed `agent-media-visual-canvas` did, and to `server`."""
+    monkeypatch.setenv("FAKE_UNITS", "agent-media-sessiond agent-media-server agent-media-tts-shim")
+    assert _run("--only", "canvas") == 0
+    assert host.restarts() == ["agent-media-server.service"]
+    assert _run("--only", "server") == 0
+    assert host.restarts()[-1] == "agent-media-server.service"
+    assert rs.short_name("agent-media-server") == "canvas"

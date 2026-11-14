@@ -1,3 +1,6 @@
+# Superseded 14 Nov 2026 by the media-server template (agent-media-server.service,
+# packages/core/services/media-server): kept for hosts still running this unit,
+# some of which link it from the checkout.
 [Unit]
 Description=agent-media visual canvas — SSE image page shown alongside spoken replies (tailnet-only)
 After=network-online.target tailnet-ip.service

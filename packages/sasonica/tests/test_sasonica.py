@@ -145,8 +145,11 @@ def test_the_tunnel_is_skipped_where_the_phone_has_a_way_in(tmp_path, monkeypatc
     assert install.tunnel_skip_reason(_args(tmp_path, no_tunnel=True), []) == "--no-tunnel"
     units = tmp_path / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
-    (units / install.CHECKOUT_CANVAS_UNIT).write_text("")
-    assert "checkout" in install.tunnel_skip_reason(a, [])            # red5
+    for unit in install.CHECKOUT_SERVER_UNITS:                       # the template's, then the old one
+        (units / unit).write_text("")
+        assert unit in install.tunnel_skip_reason(a, [])               # red2, red5
+        (units / unit).unlink()
+    (units / install.CHECKOUT_SERVER_UNITS[0]).write_text("")
     (tmp_path / ".cloudflared").mkdir()
     (tmp_path / ".cloudflared" / "config.yml").write_text("tunnel: x\n")
     assert "named tunnel" in install.tunnel_skip_reason(a, [])

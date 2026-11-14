@@ -265,8 +265,9 @@ red2: it was set on red5 on 11 Nov and must be unset on the new server.
 
 **Hand-made systemd drop-ins are backed up but not written.** A
 `*.service.d/*.conf` that is not the generated `zz-agent-media-release.conf`
-was put there by hand — `agent-media-visual-canvas.service.d/servers.conf`
-carries `MEDIA_PUBLIC_URL` — so it is kept, because no reinstall reproduces
+was put there by hand — the old `agent-media-visual-canvas.service.d/servers.conf`
+carried `MEDIA_PUBLIC_URL`; the template's `agent-media-server` (14 Nov 2026)
+reads it from the env file — so it is kept, because no reinstall reproduces
 it. It is not restored unasked, because it names the old machine's paths and
 would break the new machine's services. The way to get these across is
 `media-setup install-services` from the release and then `media server

@@ -7,8 +7,9 @@ held 963 MB three hours after a start, 811 MB of it in 63 glibc arenas, and
 nothing reported it. Read from /proc for the unit's main process, so it
 costs no request to the server and works while the server is stuck.
 
-`MEDIA_SERVER_UNIT` names the unit (default the canvas's). A host without
-systemd, or without that unit running, has nothing to say: `facts()` is None.
+`MEDIA_SERVER_UNIT` names the unit; else the template's `agent-media-server`
+when it runs, else the older hand-placed canvas unit. A host without systemd,
+or without that unit running, has nothing to say: `facts()` is None.
 """
 
 from __future__ import annotations
@@ -17,14 +18,22 @@ import os
 import re
 import subprocess
 
-DEFAULT_UNIT = "agent-media-visual-canvas.service"
+DEFAULT_UNIT = "agent-media-server.service"
+#: The hand-placed unit the template replaced (14 Nov 2026).
+OLD_UNIT = "agent-media-visual-canvas.service"
 #: Resident memory past this is called high in the line (not a failure).
 WARN_MB = 1024
 _ARENA_ALIGN = 64 << 20
 
 
 def unit() -> str:
-    return (os.environ.get("MEDIA_SERVER_UNIT") or "").strip() or DEFAULT_UNIT
+    named = (os.environ.get("MEDIA_SERVER_UNIT") or "").strip()
+    if named:
+        return named
+    for u in (DEFAULT_UNIT, OLD_UNIT):
+        if _show(u, "ActiveState").get("ActiveState") == "active":
+            return u
+    return DEFAULT_UNIT
 
 
 def _show(name: str, *props: str) -> dict[str, str]:

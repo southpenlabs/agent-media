@@ -429,3 +429,29 @@ def test_a_server_that_reads_email_with_no_mail_here_is_a_problem(monkeypatch):
     f = {}
     cli._mail_store_facts(f, False)
     assert f == {}
+
+
+def test_the_templates_server_reads_email_from_the_env_file(monkeypatch, tmp_path):
+    """The template's agent-media-server sets nothing in its unit: the email
+    switch is in agent-media.env (14 Nov 2026)."""
+    import shutil
+    import subprocess
+
+    class R:
+        def __init__(self, out):
+            self.stdout, self.returncode = out, 0
+
+    monkeypatch.delenv("MEDIA_TIMELINE_NOTMUCH", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: R("PATH=/bin")
+                        if argv[:3] == ["systemctl", "--user", "show"] else R("12"))
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/notmuch")
+    envf = tmp_path / "agent-media.env"
+    envf.write_text("MEDIA_X=1\nMEDIA_TIMELINE_SOURCES=texts,email\n")
+    monkeypatch.setenv("MEDIA_ENV_FILE", str(envf))
+    f: dict = {}
+    cli._mail_store_facts(f, True)
+    assert f["mail_store"] == "ok"
+    envf.write_text("MEDIA_TIMELINE_SOURCES=texts\n")
+    f = {}
+    cli._mail_store_facts(f, True)
+    assert f == {}

@@ -80,10 +80,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 #: Short names that are not just the unit name less its prefix. `canvas` is
-#: red5's `agent-media-visual-canvas`, the phone's loopback `canvas-local`
+#: a checkout's `agent-media-server` (the template, from 14 Nov 2026) or the
+#: older `agent-media-visual-canvas`, the phone's loopback `canvas-local`
 #: and an Android install's `sasonica-canvas`, so `--only canvas` means the
-#: canvas wherever it runs.
-ALIASES = {"canvas": ("visual-canvas", "canvas-local", "sasonica-canvas")}
+#: server wherever it runs, and `--only server` means the same.
+ALIASES = {"canvas": ("server", "visual-canvas", "canvas-local", "sasonica-canvas")}
 #: Prefixes a short name drops: systemd's `agent-media-x`, runit's `media-x`.
 PREFIXES = ("agent-media-", "media-")
 #: Services a restart of which cuts off a reply being spoken (short names).
@@ -199,8 +200,12 @@ def resolve(only: "Optional[list[str]]", svcs: list[Service]
     wanted, unknown = set(), []
     for raw in only:
         n = raw.strip().removesuffix(".service")
-        hits = [s for s in svcs if n in (s.name, s.short)
-                or s.name in ALIASES.get(n, ())]
+        # A service's own full name means that one; otherwise any of an
+        # alias's names means the alias (`server`, `visual-canvas` and
+        # `canvas` are one service, wherever it runs).
+        hits = [s for s in svcs if n == s.name] or [
+            s for s in svcs if n == s.short or short_name(n) == s.short
+            or s.name in ALIASES.get(n, ())]
         if not hits:
             unknown.append(raw)
         wanted.update(id(s) for s in hits)

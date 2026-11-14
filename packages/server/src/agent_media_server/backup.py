@@ -258,8 +258,8 @@ def manifest(roots: dict[str, Path] | None = None) -> list[Item]:
                               "copy of what was said in that voice"))
 
     # Hand-made systemd drop-ins: tiny, and they hold settings that no release
-    # reinstall can reproduce -- `agent-media-visual-canvas.service.d/servers.conf`
-    # carries MEDIA_PUBLIC_URL. Backed up, but not restored unasked: they name
+    # reinstall can reproduce -- the old `agent-media-visual-canvas.service.d/servers.conf`
+    # carried MEDIA_PUBLIC_URL (the template's server reads it from the env file). Backed up, but not restored unasked: they name
     # this machine's paths, and the way to get them onto a new one is
     # `media-setup install-services` and then `media server rename`.
     units = home / ".config" / "systemd" / "user"

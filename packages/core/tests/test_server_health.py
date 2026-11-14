@@ -34,3 +34,13 @@ def test_facts_read_this_process(monkeypatch):
 def test_the_unit_can_be_named(monkeypatch):
     monkeypatch.setenv("MEDIA_SERVER_UNIT", "agent-media-server.service")
     assert sh.unit() == "agent-media-server.service"
+
+
+def test_the_templates_unit_is_preferred_and_the_old_one_found(monkeypatch):
+    monkeypatch.delenv("MEDIA_SERVER_UNIT", raising=False)
+    active = {"agent-media-visual-canvas.service"}
+    monkeypatch.setattr(sh, "_show", lambda name, *p: {
+        "ActiveState": "active" if name in active else "inactive"})
+    assert sh.unit() == "agent-media-visual-canvas.service"
+    active.add("agent-media-server.service")
+    assert sh.unit() == "agent-media-server.service"

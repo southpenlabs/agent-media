@@ -8715,7 +8715,8 @@ def selfcheck_facts() -> "dict[str, str]":
     if parked:
         facts["parked"] = ",".join(parked)   # reported, never a problem
     _agent_mail_facts(facts, any(s == "up" and n.endswith("sessiond") for n, s in services))
-    _mail_store_facts(facts, any(s == "up" and n.endswith("visual-canvas") for n, s in services))
+    _mail_store_facts(facts, any(s == "up" and n.endswith(("visual-canvas", "agent-media-server"))
+                                 for n, s in services))
     loops = _crash_loops()
     if loops:
         facts["crashloop"] = ",".join(f"{n}:{c}" for n, c in loops)
@@ -9200,14 +9201,27 @@ def _mail_store_facts(facts: "dict[str, str]", server_here: bool) -> None:
 
     if not server_here:
         return
-    try:
-        env = subprocess.run(["systemctl", "--user", "show", "agent-media-visual-canvas",
-                              "-p", "Environment", "--value"], capture_output=True, text=True,
-                             timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return
-    srcs = next((w.split("=", 1)[1] for w in env.split()
-                 if w.startswith("MEDIA_TIMELINE_SOURCES=")), "")
+    # The old hand-placed unit set it in a drop-in; the template's server
+    # reads it from agent-media.env (14 Nov 2026).
+    srcs = ""
+    for unit in ("agent-media-server", "agent-media-visual-canvas"):
+        try:
+            env = subprocess.run(["systemctl", "--user", "show", unit,
+                                  "-p", "Environment", "--value"], capture_output=True, text=True,
+                                 timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        srcs = srcs or next((w.split("=", 1)[1] for w in env.split()
+                             if w.startswith("MEDIA_TIMELINE_SOURCES=")), "")
+    if not srcs:
+        from pathlib import Path
+        env_file = Path(os.environ.get("MEDIA_ENV_FILE") or Path.home() / ".config" / "agent-media.env")
+        try:
+            for line in env_file.read_text().splitlines():
+                if line.startswith("MEDIA_TIMELINE_SOURCES="):
+                    srcs = line.split("=", 1)[1].strip().strip('"\'')
+        except OSError:
+            pass
     if "email" not in [x.strip() for x in srcs.split(",")]:
         return
     exe = os.environ.get("MEDIA_TIMELINE_NOTMUCH") or shutil.which("notmuch")

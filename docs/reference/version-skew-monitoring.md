@@ -482,7 +482,8 @@ media restart-services --host p8a --only canvas --dry-run
 NAME is the worker device's id, its whole name (`p8a Termux jobs`) or the
 first word of its name, in any case: `p8a`. The device must be red5's
 `MEDIA_PHONE_JOBS_DEVICE`. `canvas` means the canvas wherever it runs: the
-phone's `canvas-local` here, red5's `agent-media-visual-canvas`. The caller
+phone's `canvas-local` here, a checkout's `agent-media-server` (the older
+`agent-media-visual-canvas` before 14 Nov 2026; `server` names it too). The caller
 waits up to 60 s for the phone to say it did, scheduled or refused the
 restart. A restart now waits out its 20 s health check first. If the
 worker itself (`--only phone-jobs`) is among the services, it restarts

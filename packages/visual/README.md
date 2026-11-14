@@ -87,8 +87,13 @@ nothing new to configure.
 
 ## Run
 
-The canvas runs as a systemd user service (see `systemd/`), bound to the
-Tailscale IP only — same privacy posture as the clip server on 8780:
+The canvas is the Sasonica server, and since 14 Nov 2026 it is installed
+like the other services: on a host whose `[host] roles` include `server`,
+`media-setup install-services media-server` writes `agent-media-server.service`
+from `packages/core/services/media-server/` (its settings are in
+`~/.config/agent-media.env`: `MEDIA_VISUAL_BIND` — an address or `tailnet` —
+`MEDIA_VISUAL_PORT`, `MEDIA_VISUAL_PUBLIC`, `MEDIA_PUBLIC_URL`…). The
+hand-placed unit below is how it ran before, kept for hosts not yet moved:
 
 ```sh
 # Linked, not copied: a copy is drift that no `git pull` reaches (media doctor

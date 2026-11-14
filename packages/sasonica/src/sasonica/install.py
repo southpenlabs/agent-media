@@ -29,7 +29,8 @@ has the binary instead of a checkout:
      ~/Library/Logs/sasonica), logon tasks on Windows (Task Scheduler →
      Sasonica: canvas, sessiond, quick-tunnel; registered from task XML so
      they restart when they fail; an older install's tasks are replaced). Not when the host already runs a canvas from a
-     checkout (agent-media-visual-canvas.service), unless --force.
+     checkout (agent-media-server.service, or the older
+     agent-media-visual-canvas.service), unless --force.
      Kept running when nobody is logged in: on Linux, lingering is checked
      and turned on (`loginctl enable-linger`), else the sudo line to do it
      is printed; on Windows and a Mac, `--signed-out` (once, remembered)
@@ -70,9 +71,16 @@ TUNNEL_UNIT = {"sasonica-quick-tunnel": ("tunnel", "Sasonica quick tunnel: the p
 #: Where the app-routes-only listener goes, for the tunnel (loopback only:
 #: CF-Connecting-IP is believed from a loopback peer alone).
 PUBLIC_LISTEN = "127.0.0.1:8789"
-#: A checkout's canvas unit (packages/visual/systemd): a host with it already
-#: serves 8781.
-CHECKOUT_CANVAS_UNIT = "agent-media-visual-canvas.service"
+#: A checkout's server unit: a host with it already serves 8781. The
+#: template's (`media-setup install-services` on a `server` host, 14 Nov
+#: 2026), or the hand-placed one it replaced (packages/visual/systemd).
+CHECKOUT_SERVER_UNITS = ("agent-media-server.service", "agent-media-visual-canvas.service")
+
+
+def _checkout_server_unit() -> str:
+    """The checkout's server unit this host has, or ""."""
+    units = _config_home() / "systemd" / "user"
+    return next((u for u in CHECKOUT_SERVER_UNITS if (units / u).exists()), "")
 
 
 def _config_home() -> Path:
@@ -496,8 +504,8 @@ def tunnel_skip_reason(a, env_lines: list[str]) -> str:
         return "MEDIA_VISUAL_PAIR_SERVER is set: the phone already has a way in"
     if (Path.home() / ".cloudflared" / "config.yml").exists():
         return "~/.cloudflared/config.yml: this host runs its own named tunnel"
-    if (_config_home() / "systemd" / "user" / CHECKOUT_CANVAS_UNIT).exists() and not a.force:
-        return f"{CHECKOUT_CANVAS_UNIT}: a checkout install serves this host"
+    if _checkout_server_unit() and not a.force:
+        return f"{_checkout_server_unit()}: a checkout install serves this host"
     return ""
 
 
@@ -656,8 +664,8 @@ def main(argv: list[str] | None = None) -> int:
               + (", and `sasonica tunnel`" if "sasonica-quick-tunnel" in a.units else ""))
         return 0
     units = _config_home() / "systemd" / "user"
-    if (units / CHECKOUT_CANVAS_UNIT).exists() and not a.force:
-        print(f"  {CHECKOUT_CANVAS_UNIT} already serves this host (a checkout install); "
+    if _checkout_server_unit() and not a.force:
+        print(f"  {_checkout_server_unit()} already serves this host (a checkout install); "
               "left alone — --force installs sasonica's beside it")
         return 0
     for name, (word, what) in a.units.items():

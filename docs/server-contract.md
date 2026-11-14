@@ -7419,8 +7419,9 @@ task), each its own device:
   phone, may, connected, takes}]}`; `media jobs list` on the server.
 
 `canvas` names the canvas wherever it runs: `canvas-local` on the phone,
-`agent-media-visual-canvas` on red5, `sasonica-canvas` on an Android
-install. So restarting the phone's canvas, on red5, is:
+`agent-media-server` on a checkout's server (`agent-media-visual-canvas`
+before 14 Nov 2026), `sasonica-canvas` on an Android install; `server` is
+the same name. So restarting the phone's canvas, on red5, is:
 
     media restart-services --host p8a --only canvas
 
