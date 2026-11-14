@@ -1,6 +1,6 @@
 ---
 name: sasonica-map
-description: What this machine is in the Sasonica setup — its roles, whether the Sasonica server runs here and at what address, its Sasonica Shell, the agent-media services running, and the other machines it knows. Run `sasonica map` before looking around a host or deciding which machine to act on.
+description: What this machine is in the Sasonica setup — its roles, whether the Sasonica server runs here and at what address, its Sasonica Shell, the agent-media services running, and the other machines it knows. Run `media map` before looking around a host or deciding which machine to act on.
 ---
 
 # sasonica-map
@@ -8,7 +8,8 @@ description: What this machine is in the Sasonica setup — its roles, whether t
 Run this first:
 
 ```sh
-sasonica map          # or: media map; --json for the same as data
+media map          # --json for the same as data; `sasonica map` where
+                   # Sasonica's server command is installed
 ```
 
 It is read live from this machine's own setup, so it is current even after

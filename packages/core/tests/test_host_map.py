@@ -21,7 +21,7 @@ def test_the_map_reads_roles_server_shell_and_peers(tmp_path, monkeypatch):
         restart_services.Service("agent-media-server", "up", "systemd"),
         restart_services.Service("agent-media-sessiond", "parked", "systemd")])
     m = host_map.build()
-    assert m["roles"] == ["server"]
+    assert m["roles"] == ["server"] and m["implied_roles"] == []
     assert m["server"] == {"url": "https://small.example.com", "own_settings": True, "running": True}
     assert m["shell"] == {"mcp": "https://shell-small.example.com/mcp", "skills": ["speak"]}
     assert m["peers"] == [{"alias": "other", "host": "box2", "roles": ["sessions"]}]

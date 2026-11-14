@@ -42,11 +42,14 @@ def build() -> dict:
     own = home / "agent-media" / "server.env"
     shared = home / "agent-media.env"
     roles = config.host_roles()
+    implied: list[str] = []
     try:
         from .setup import effective_roles
-        eff = sorted(effective_roles(set(roles))[0]) if roles is not None else None
+        if roles is not None:
+            implied = sorted(effective_roles(set(roles))[1])
     except Exception:  # noqa: BLE001 — the map is information, never a failure
-        eff = sorted(roles) if roles is not None else None
+        pass
+    eff = sorted(roles) if roles is not None else None
     server_url = _env_value(own, "MEDIA_PUBLIC_URL") or _env_value(shared, "MEDIA_PUBLIC_URL")
     shell_env = Path(os.environ.get("SASONICA_CONF") or home / "sasonica") / "env"
     worker = _env_value(shell_env, "SASONICA_WORKER_URL").rstrip("/")
@@ -65,6 +68,10 @@ def build() -> dict:
     return {
         "host": socket.gethostname().split(".")[0],
         "roles": eff,
+        # Taken from origin and MEDIA_HEADLESS for a host that has not
+        # declared `sessions` yet (setup.effective_roles): said apart, since
+        # it says what the installer would do, not what runs.
+        "implied_roles": implied,
         "server": {"url": server_url or None,
                    "own_settings": own.exists(),
                    "running": any(s["short"] == "canvas" and s["state"] == "up" for s in services)},
@@ -90,6 +97,8 @@ def render(m: dict) -> str:
         out.append("  roles: none declared (every service installs, as on a fresh host)")
     else:
         out.append("  roles: " + (", ".join(f"{r} ({ROLE_WORDS.get(r, r)})" for r in m["roles"]) or "none"))
+        for r in m.get("implied_roles") or []:
+            out.append(f"  implied: {r}, from origin and MEDIA_HEADLESS (not declared; check the services below)")
     srv = m["server"]
     if srv["url"] or srv["running"]:
         bits = [srv["url"] or "no public address"]
