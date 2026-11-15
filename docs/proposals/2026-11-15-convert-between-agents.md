@@ -74,6 +74,38 @@ the first thing I asked you?", and check the answer.
 * **App** (sasonica-app): "Continue in…" on a thread's menu, and an agent
   picker in the Branch sheet, both listing `/features convert`'s targets.
 
+## Trial of txcript (15 Nov 2026)
+
+Found after the above: txcript (skillsynchq/txcript, Apache-2.0, a Rust
+binary) already reads and writes Claude Code, Codex, opencode and pi among
+others. `txcript continue <id> --from <a> --with <b> --no-resume` writes the
+copy in b's own store and prints the id to resume; `<id>#<range>` cuts it,
+which is Branch's case. It carries tool calls and reasoning where the
+target can take them. So the plan becomes: run txcript as a separate
+process for the writing, pinned and checksummed like opencode, and write
+our own converter only where it fails.
+
+The trial used 0.14.4 (x86_64 linux, sha256 b6183c80…cd7fd). A small chat
+was started in each agent, in a scratch git folder with hooks off: a secret
+word, then a tool read of a file holding a gate code. Each chat was
+converted into the other three, and each copy was resumed and asked for the
+word and the code with no tools. Ten of the twelve passed:
+
+| from \ into | Claude | Codex | opencode | pi |
+|---|---|---|---|---|
+| Claude | — | pass | pass | pass |
+| Codex | word only: the tool result is lost | — | import refused | pass |
+| opencode | pass | pass | — | pass |
+| pi | pass | pass | pass | — |
+
+Both failures are Codex's code-mode tool calls (`custom_tool_call` whose
+input is a JS string such as `tools.exec_command({...})`). opencode's import
+wants an object for the input, and the Claude copy keeps the call but not
+its output. That is a bug upstream, kept with a repro, rather than a reason
+to write our own. Smaller: txcript names Codex rollouts by UTC time where
+Codex uses local time. Not yet tried: a long real chat, Gemini and Grok
+sources.
+
 ## Steps
 
 1. `agent_media_core/convert.py`: the fold to "what crosses" and the
