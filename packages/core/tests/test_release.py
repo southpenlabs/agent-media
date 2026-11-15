@@ -415,6 +415,27 @@ def test_update_restarts_only_the_units_whose_code_changed(rel, monkeypatch):
     assert rs.read_pending() is None
 
 
+def test_a_unit_that_starts_from_the_release_itself_is_restarted_too(rel, monkeypatch):
+    """A generated unit whose ExecStart is already under `current` has no
+    drop-in of ours, yet runs the release: an update restarts it when its
+    code changed (agent-media-server, 15 Nov 2026), and leaves it when not."""
+    monkeypatch.setenv("FAKE_UNITS", "agent-media-sessiond agent-media-feed agent-media-own")
+    _in_mode(rel, monkeypatch)
+    rel.unit("agent-media-own.service", "[Service]\nExecStart=%h/../../data/current/.venv/bin/media-feed --port 2\n"
+             .replace("%h/../../data", str(rel.root)))
+    assert "agent-media-own.service" in release.native_units()
+    assert "agent-media-own.service" not in release.mode_units()
+    rel.unit("agent-media-job.service", "[Service]\nType=oneshot\nExecStart=%s/current/.venv/bin/media-feed --once\n" % rel.root)
+    assert "agent-media-job.service" not in release.native_units()   # a timer's job: never restarted
+    rel.commit({"packages/core/src/agent_media_core/feed.py": "from .util import X\nZ = 5\n"})
+    assert release.update(emit=lambda s: None) == 0
+    assert sorted(rel.host.restarts()) == ["agent-media-feed.service", "agent-media-own.service"]
+    rel.commit({"docs/notes.md": "words\n"})
+    before = len(rel.host.restarts())
+    assert release.update(emit=lambda s: None) == 0
+    assert rel.host.restarts()[before:] == []           # a docs change restarts nothing
+
+
 def test_the_session_host_is_drained_and_goes_last(rel, monkeypatch):
     _in_mode(rel, monkeypatch)
     rel.commit({"packages/core/src/agent_media_core/util.py": "X = 3\n"})

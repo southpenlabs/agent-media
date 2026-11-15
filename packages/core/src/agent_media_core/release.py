@@ -1270,11 +1270,45 @@ def status_lines(st: "Optional[dict]" = None) -> "list[str]":
 # --- update, rollback ------------------------------------------------------------------
 
 
+def native_units(udir: "Optional[Path]" = None) -> "dict[str, str]":
+    """Unit → command, for the service units installed to start from the
+    release itself (the generated templates, whose ExecStart is under
+    `current`, `%h/…` spelled or not) with no drop-in of ours. They run the
+    release in use as much as the units in release mode do, so an update
+    restarts them on the same rule; before 15 Nov 2026 it never looked at
+    them, and agent-media-server, the speech sink and others ran the release
+    before until something else restarted them. A oneshot is left out, and a
+    stopped one is left alone by restart-services as any stopped unit."""
+    udir = udir or systemd_dir()
+    cur = str(current_link())
+    home = os.path.expanduser("~")
+    listed = read_manifest()["units"]
+    try:
+        names = sorted(p.name for p in udir.iterdir()
+                       if p.name.endswith(".service") and (p.is_file() or p.is_symlink()))
+    except OSError:
+        return {}
+    out = {}
+    for u in names:
+        if u in listed:
+            continue
+        # A oneshot (a timer's job: backup, state-gc) starts afresh from the
+        # release in use each run; restarting one caught running would cut it.
+        if any(sec == "Service" and k == "Type" and v == "oneshot"
+               for sec, k, v in _unit_lines(udir / u)):
+            continue
+        cmd = plan_unit(u, Path(cur), udir=udir, to=Path(cur)).command.replace("%h/", home + "/")
+        if cur + "/" in cmd:
+            out[u] = cmd
+    return out
+
+
 def _mode_commands() -> "dict[str, str]":
-    """Unit → command, for the units in release mode."""
+    """Unit → command, for the units in release mode and those that start
+    from the release by their own unit file (`native_units`)."""
     man = read_manifest()
     udir = systemd_dir()
-    out = {}
+    out = native_units(udir)
     for u, rec in man["units"].items():
         out[u] = plan_unit(u, Path(rec.get("checkout") or ""), udir=udir).command
     return out

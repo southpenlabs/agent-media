@@ -69,7 +69,12 @@ another is met from the same commit.
 3. Point `current` at it (the old one becomes `previous`).
 4. Restart the units in release mode whose code changed, through
    `restart-services`: its busy checks, its health check, and for the
-   session host its drain, last. Never a bare `systemctl restart`.
+   session host its drain, last. Never a bare `systemctl restart`. A unit
+   installed to start from `current` itself (a generated template such as
+   agent-media-server or the speech sink, no drop-in of ours) counts as in
+   release mode here, except a `Type=oneshot` timer job, which starts from
+   the release in use each time it runs (15 Nov 2026: until then such units
+   kept the release before until something else restarted them).
 5. If a restarted unit does not come up, point `current` back, restart
    those units again, and raise the alert `release.<host>`. Exit 1.
 
