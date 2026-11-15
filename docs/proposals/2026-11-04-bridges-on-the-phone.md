@@ -208,3 +208,21 @@ account, `davidj4tech/sasonica-bridges`, beside `sasonica-personal-use` (same
 owner and licence, but a server add-on for one install, where this is an
 Android app for public users); the add-on's README to point at it as the
 phone's `messaging-bridges`.
+
+## Step 2b, our connector (15 Nov 2026)
+
+`davidj4tech/sasonica-bridges` (pushed, private): `localmatrix`, a
+`bridgev2.MatrixConnector` with no homeserver writing rooms, messages,
+edits, reactions, redactions, receipts, media and state into its own
+SQLite store; an entry point in place of `mxmain`; a local API (a 0600
+Unix socket, or 127.0.0.1 with a token: chats, messages, send, react, read,
+media, an event stream, the network's sign-in steps). 2,578 lines of ours
+and 883 of tests; a fake network proves both directions without an account.
+android/arm64: 34 MB stripped. Choices bridgev2 forced are in its
+`docs/design.md`.
+
+Before a first real run: mautrix-meta has no QR sign-in (cookies from a
+signed-in messenger.com, or the app's username-and-password flow, which can
+meet two-factor and Meta's checkpoints); no app shell yet, so the first run
+is the binary started by hand on p8a; sending media, edits and deletes from
+the API still to add.
