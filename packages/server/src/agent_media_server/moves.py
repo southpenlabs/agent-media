@@ -15,8 +15,11 @@ What a move does, in order:
 2. **Moves the transcript.** `claude --resume <id>` only finds a session
    from the directory it ran in — transcripts are filed under
    `~/.claude/projects/<encoded cwd>/` — so a session that is to come back
-   in a new directory has to be filed under that one. Claude Code only;
-   Codex, pi and Hermes keep their own stores and are moved by (1) alone.
+   in a new directory has to be filed under that one. Claude Code, and
+   opencode, which works in a session's own folder whatever it is asked
+   from, so it is exported and imported under the new one (core
+   opencode_move.py); Codex, pi and Hermes keep their own stores and are
+   moved by (1) alone.
 3. **Restarts a live session there.** The pane is closed and reopened with
    `--resume` in the new directory, in the tmux session the new project
    uses. Claude Code cannot change its own cwd mid-session, so this is the
@@ -146,8 +149,15 @@ def move_transcript(session: str, cwd: str) -> str:
     The sidecar directory beside it (`<session>/`, where subagent transcripts
     go) travels with it. Nothing to move — another harness, or a session
     whose file has already gone — is not an error: the override alone still
-    moves the thread.
+    moves the thread. An opencode session is moved in opencode's own store
+    (core opencode_move.py; sessiond has done it already for a chat it holds).
     """
+    from agent_media_core import harnesses
+
+    if harnesses.is_opencode(session):
+        from agent_media_core import opencode_move
+
+        return opencode_move.move(session, cwd)
     root = claude_root()
     hits = sorted(root.glob(f"*/{session}.jsonl"),
                   key=lambda f: f.stat().st_mtime, reverse=True)

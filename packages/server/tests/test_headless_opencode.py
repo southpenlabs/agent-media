@@ -322,6 +322,29 @@ def test_a_persona_is_opencodes_system_prompt_on_every_prompt(host, tmp_path):
     assert driver.headless_driver().takes_system_prompt("opencode")
 
 
+def test_relocate_moves_the_chat_in_opencodes_store_unless_it_is_busy(host, tmp_path, monkeypatch):
+    from agent_media_core import opencode_move
+
+    moved = []
+    monkeypatch.setattr(opencode_move, "move",
+                        lambda sid, cwd, **kw: moved.append((sid, cwd, kw.get("program"))) or "")
+    sid = start(host, "slow")
+    wait_for(lambda: state(host, sid) == "working")
+    new = tmp_path / "elsewhere"
+    new.mkdir()
+    with pytest.raises(sessiond.Refused):
+        host.sup.relocate(sid, str(new))              # mid-turn: the move waits
+    host.sup.interrupt(sid)
+    wait_for(lambda: state(host, sid) == "waiting")
+    r = host.sup.relocate(sid, str(new))
+    assert r["relocated"] and r["cwd"] == str(new) and host.sup.get(sid)["cwd"] == str(new)
+    assert moved and moved[-1][:2] == (sid, str(new))
+    monkeypatch.setattr(opencode_move, "move", lambda sid, cwd, **kw: "export failed")
+    with pytest.raises(sessiond.Refused):
+        host.sup.relocate(sid, str(host.work))
+    assert host.sup.get(sid)["cwd"] == str(new)       # left where it was
+
+
 def test_the_server_needs_its_password(host):
     import urllib.error
     import urllib.request

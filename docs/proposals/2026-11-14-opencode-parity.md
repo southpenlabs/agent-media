@@ -95,11 +95,17 @@ let's get them working for opencode".
     Claude transcript mirror, since sessiond_remote syncs a Claude JSONL
     and opencode keeps a database. It also needs the reply spoken here on
     its idle event, and `start` let through for opencode.
-12. **Moving a chat to another folder.** Can't be done through opencode
-    (measured on 1.19.5): a prompt sent from another folder still runs in
-    the session's own folder, and so does a fork made from there. Only
-    editing opencode's database under a running server would move it, which
-    we won't do. The thread's folder override still moves it in the app.
+12. **Moving a chat to another folder.** Done (David, 15 Nov 2026: "We
+    really need to be able to move a chat between projects"). A prompt or a
+    fork sent from another folder still runs in the session's own folder.
+    opencode's own `export` and `import` do move it, though: the session
+    keeps its id and its history, and runs in the new folder from its next
+    message. That was measured on 1.19.5, with the server left running. The
+    move is `agent_media_core/opencode_move.py`, which exports the chat,
+    sets its `directory` and `projectID`, and imports it. sessiond's
+    `relocate` uses it for a chat it holds (refused mid-turn or with a card
+    up, as Claude's is). moves.py uses it for a pane or an ended chat, and
+    the pane reopens in the new folder.
 13. **Personas in the system prompt.** Done: a headless opencode chat sends
     the persona's render as `system` with every prompt. In a pane, which
     has no flag for it, the render still goes before the first message.

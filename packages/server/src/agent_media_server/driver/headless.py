@@ -593,7 +593,9 @@ class HeadlessDriver:
         to be restarted to take it."""
         from .. import sessiond
 
-        r = call("relocate", session=session, cwd=cwd, timeout=30.0)
+        # An opencode chat is exported and imported (opencode_move.py): a
+        # long one takes longer than a parked Claude's record rewrite.
+        r = call("relocate", session=session, cwd=cwd, timeout=300.0)
         if r.get("ok"):
             return ""
         code = r.get("code")

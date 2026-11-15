@@ -3520,13 +3520,10 @@ class Supervisor:
         cwd = (cwd or "").strip()
         if not cwd or not os.path.isdir(cwd):
             raise Refused(f"no such directory {cwd!r}", "bad_cwd")
+        if self._agent(session) == "opencode":
+            return self._oc_relocate(session, cwd)
         with self.lock:
             s = self._get(session)
-            if s.agent == "opencode":
-                # opencode's server keeps its sessions per directory: not
-                # movable from here, and the thread moves by its override.
-                return {"session": session, "cwd": s.cwd, "relocated": False,
-                        **self._brief(s)}
             if s.live:
                 if s.state in ("working", "starting", "approval") or s.pending \
                         or s.queued:
@@ -3905,6 +3902,30 @@ class Supervisor:
         self.oc.call("POST", f"/session/{task_id}/abort", directory=s.cwd)
         with self.lock:
             return {"session": session, "stopped": True, "why": None, **self._brief(s)}
+
+    def _oc_relocate(self, session: str, cwd: str) -> dict:
+        """Move an opencode chat to `cwd`: opencode keeps working in a
+        session's own folder whatever folder it is asked from, so it is
+        exported and imported under the new one (core opencode_move.py; same
+        id and history). Not mid-turn or with a card up (`busy`); the server
+        need not stop (measured on 1.19.5: its next prompt ran in the new
+        folder)."""
+        from agent_media_core import opencode_move
+
+        with self.lock:
+            s = self._get(session)
+            if s.state in ("working", "starting", "approval") or s.pending:
+                raise Refused(f"session {session[:8]} is working", "busy")
+            if s.cwd == cwd:
+                return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
+        exe = self.oc._program()
+        why = opencode_move.move(session, cwd, program=exe, env=self._base_env(exe))
+        if why:
+            raise Refused(f"could not move it: {why}", "refused")
+        with self.lock:
+            s.cwd = cwd
+            self._save(s)
+            return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
 
     def oc_commands(self, cwd: str) -> list[dict]:
         """The slash menu for an opencode chat in `cwd` (`Host.commands`)."""
