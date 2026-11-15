@@ -16,7 +16,10 @@ has the binary instead of a checkout:
      cloudflared) to ~/.opencode/bin when there is none, any version on PATH
      left alone, not on Android, --no-opencode to skip (sasonica/opencode.py);
      then the hooks: opencode's plugin, Claude Code's settings (optional),
-     for those installed. With neither, it says how to add one;
+     for those installed. With neither, it says how to add one. And txcript,
+     which copies a chat into another agent (`media session convert`),
+     fetched the same way to the shims' folder, --no-txcript to skip
+     (sasonica/txcript.py);
   4. a quick tunnel, so the phone reaches this computer from anywhere with no
      tailnet and no account (roadmap item 15): cloudflared, fetched to
      ~/.local/bin and checked against its pinned sha256, and the app-routes-
@@ -685,6 +688,23 @@ def _agents_step(me: list[str], a) -> None:
         print("  Claude Code: not installed (optional; wired when it is)")
     if not oc and not claude:
         print(opencode.ADD_AN_AGENT)
+    _txcript_step(a)
+
+
+def _txcript_step(a) -> None:
+    """txcript, for copying a chat into another agent (sasonica/txcript.py).
+    A failure says so and the install goes on: only converting needs it."""
+    from sasonica import txcript
+
+    if a.no_txcript:
+        tx = txcript.found(a.bin_dir)
+        print(f"  txcript: {tx + ' (already there)' if tx else 'skipped (--no-txcript)'}")
+        return
+    try:
+        _, what = txcript.fetch_txcript(a.bin_dir, dry_run=a.dry_run)
+    except OSError as e:
+        what = f"download failed: {e}"
+    print(f"  txcript: {what}")
 
 
 def _run(argv: list[str], *, dry_run: bool) -> int:
@@ -710,6 +730,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-opencode", action="store_true",
                     help="do not fetch opencode, the default agent (for scripted installs); "
                          "one already here is wired all the same")
+    ap.add_argument("--no-txcript", action="store_true",
+                    help="do not fetch txcript, which copies a chat into another agent "
+                         "(media session convert)")
     ap.add_argument("--force", action="store_true",
                     help="replace commands and services a checkout install put there")
     ap.add_argument("--local-speech", nargs="?", const="on", choices=("on", "off"),

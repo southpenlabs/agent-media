@@ -11,7 +11,8 @@
 # the x64 emulation, David 16 Oct 2026), checked against SHA256SUMS and put at
 # %USERPROFILE%\.local\bin\sasonica.exe; then `sasonica install` (shims for
 # every command, this machine's config, opencode as the default agent when
-# there is none, the agents' hooks, logon tasks
+# there is none, the agents' hooks, txcript for copying a chat into another
+# agent, logon tasks
 # under Task Scheduler → Sasonica, a quick tunnel among them) and a pairing
 # QR code for the app.
 # Running it again updates. docs/proposals/2026-09-29-single-binary.md.

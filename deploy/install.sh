@@ -9,7 +9,8 @@
 #   - Linux (x86_64, arm64) → the server as one file, from the server-latest
 #     release (deploy/binary/build.sh), put at ~/.local/bin/sasonica; then
 #     `sasonica install` (shims, config, opencode as the default agent when
-#     there is none, the agents' hooks, a quick tunnel, systemd --user
+#     there is none, the agents' hooks, txcript for copying a chat into
+#     another agent, a quick tunnel, systemd --user
 #     services) and a pairing QR code for the app, naming the tunnel's https
 #     address;
 #   - a Mac (Apple silicon) → the same, as sasonica-macos-aarch64, with

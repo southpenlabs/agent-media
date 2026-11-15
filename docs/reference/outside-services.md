@@ -91,6 +91,7 @@ Sorted with what blocks a public release first. 50 rows.
 | 48 | kokoro-onnx GitHub release (model files) | the local Kokoro voice: `media-setup voices kokoro`, `sasonica install --local-voice` | none | fetched once on request, checked against pinned sha256s | nothing: the model is Apache-2.0 and kokoro-onnx MIT; keep the credit in NOTICE | **No, not gated** |
 | 49 | Hugging Face (rhasspy/piper-voices) | Piper voices: `media-setup voices piper:<voice>` | none | fetched on request by Piper's own downloader | **Needs work**: each voice has its own licence (its MODEL_CARD), some non-commercial; show it beside the voice (the picker's `licence`) and keep non-commercial ones out of a paid default | **No, not gated** |
 | 50 | opencode GitHub release (anomalyco/opencode, formerly sst/opencode) | opencode, the default agent: `sasonica install` fetches it when none is here (`--no-opencode` skips) | none | fetched once at install, pinned v1.19.5, checked against pinned sha256s | nothing: opencode is MIT. Its free models are opencode's own service, under row 10 | **No, not gated** |
+| 51 | txcript GitHub release (skillsynchq/txcript) | copying a chat into another agent (`media session convert`): `sasonica install` fetches it when none is here (`--no-txcript` skips) | none | fetched once at install, pinned v0.14.4, checked against pinned sha256s; runs locally, reading and writing the agents' own stores, nothing sent anywhere | nothing: txcript is Apache-2.0, run as a separate program | **No, not gated** |
 
 ## The services, one by one
 
@@ -634,6 +635,22 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** nothing for the download. Move the pin forward with a
   release's digests (`gh release view v<version> -R anomalyco/opencode --json
   assets`).
+
+### 51. txcript's release
+
+- **Used for:** copying a chat into another agent, which resumes it as its
+  own history (`media session convert`, `agent_media_server/convert.py`).
+  `sasonica install` (`packages/sasonica/src/sasonica/txcript.py`) fetches it
+  from https://github.com/skillsynchq/txcript/releases when none is on PATH,
+  pinned at v0.14.4 and checked against the sha256s in
+  `txcript.TXCRIPT_ASSETS`, into the shims' folder. Not on Android or a musl
+  Linux (no build), and not with `--no-txcript`.
+- **Terms:** txcript is Apache-2.0 (https://github.com/skillsynchq/txcript).
+  It runs as a separate program, reading and writing the agents' own session
+  stores on this computer; it sends nothing anywhere.
+- **Production:** nothing. Move the pin forward with a release's digests
+  (`gh release view v<version> -R skillsynchq/txcript --json assets`), after
+  re-running the trial in `docs/proposals/2026-11-15-convert-between-agents.md`.
 
 ### Related repositories
 

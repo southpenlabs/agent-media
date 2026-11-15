@@ -126,8 +126,14 @@ a copy must hold.
    patterns now take (harnesses, sessions, seam, activity), so it lists and
    reads as an opencode thread. Checked end to end: a Claude chat copied
    into opencode, read by the server, resumed, remembered its word.
-2. The installer fetches txcript pinned and checksummed, as it does
-   opencode (and an outside-services row for the download).
+2. **Done (15 Nov 2026).** `sasonica install` fetches txcript 0.14.4 into
+   the shims' folder, pinned and checked against each asset's sha256 as it
+   does opencode (sasonica/txcript.py): linux x86_64 and arm64 (glibc),
+   macOS arm64 and x64, Windows x64 (and ARM64 under emulation). One already
+   on PATH is left alone, `--no-txcript` skips, Android and musl say there
+   is no build, a failure is said and the install goes on. Outside-services
+   row 51. A checkout install (`media-setup`) does not fetch it: put txcript
+   on PATH or set `MEDIA_TXCRIPT`.
 3. `POST /session/convert`, `/features convert`, Branch's `agent` (txcript's
    `<id>#<range>` cut at the reply), the thread's `converted_from`, a
    contract section.

@@ -197,7 +197,7 @@ def ran(monkeypatch):
 
 
 def _a(home, **kw):
-    a = dict(no_opencode=False, dry_run=False, bin_dir=home / ".local" / "bin")
+    a = dict(no_opencode=False, no_txcript=True, dry_run=False, bin_dir=home / ".local" / "bin")
     a.update(kw)
     return argparse.Namespace(**a)
 
