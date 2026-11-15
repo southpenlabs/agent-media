@@ -1413,3 +1413,14 @@ def test_the_servers_own_file_gates_its_services(tmp_path, monkeypatch):
     assert setup._env_file_has("MEDIA_VISUAL_PUBLIC") is False
     own.write_text("MEDIA_VISUAL_PUBLIC=127.0.0.1:8789\n")
     assert setup._env_file_has("MEDIA_VISUAL_PUBLIC") is True
+
+
+def test_check_treats_tmux_and_the_feature_tools_as_optional(tmp_path, monkeypatch, capsys):
+    """#491: a host with no tmux (headless-only, Windows, Termux) passes."""
+    monkeypatch.setattr(setup, "systemd_user_dir", lambda: tmp_path)
+    _which_without(monkeypatch, "tmux", "mpv", "ffmpeg", "cloudflared", "mpc", "jq")
+    assert setup.cmd_check(argparse.Namespace(rooms=False)) == 0
+    out = capsys.readouterr().out
+    assert "optional tmux" in out
+    _which_without(monkeypatch, "claude")
+    assert setup.cmd_check(argparse.Namespace(rooms=False)) == 1

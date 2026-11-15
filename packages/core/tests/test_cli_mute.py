@@ -12,6 +12,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TTS_POPUP_PANE", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for k in ("CLAUDE_CODE_SESSION_ID", "MEDIA_SESSIOND_SESSION",
+              "MEDIA_SOURCE_SESSION", "MEDIA_SOURCE_WORKSPACE"):
+        monkeypatch.delenv(k, raising=False)
     # Deterministic tmux: pretend %1/%2 are live, %9 is dead; sessions resolve.
     monkeypatch.setattr(cli, "_live_panes", lambda: ["%1", "%2"])
     monkeypatch.setattr(cli, "_spoken_pane", lambda: "%2")
@@ -151,3 +155,30 @@ def test_status_prunes_dead_and_tags(env, capsys):
     assert "%9" not in out               # pruned
     assert "session work:: muted" in out
     assert env.get_mute("pane", "%9") is None
+
+
+def test_outside_tmux_an_agent_mutes_its_own_thread(env, monkeypatch, capsys):
+    """#491 step 2: no pane, so the conversation is muted by its session id
+    (its speech level goes to quiet) and unmuting gives it back."""
+    from agent_media_core import speak_priority
+    monkeypatch.setenv("MEDIA_SESSIOND_SESSION", "t-1")
+    assert cli.main(["mute-pane", "on"]) == 0
+    assert speak_priority.level_of("t-1") == "quiet"
+    assert cli.main(["mute-pane"]) == 0          # toggle back
+    assert speak_priority.level_of("t-1") != "quiet"
+    assert "thread t-1: unmuted" in capsys.readouterr().out
+
+
+def test_thread_flag_names_any_conversation(env):
+    from agent_media_core import speak_priority
+    assert cli.main(["mute-pane", "--thread", "t-2", "on"]) == 0
+    assert speak_priority.level_of("t-2") == "quiet"
+    assert cli.main(["mute-pane", "--thread", "t-2", "off"]) == 0
+    assert speak_priority.level_of("t-2") != "quiet"
+
+
+def test_session_scope_outside_tmux_is_the_workspace(env, monkeypatch):
+    monkeypatch.setenv("MEDIA_SOURCE_WORKSPACE", "p-agent-media")
+    assert cli.main(["mute-pane", "--session", "on"]) == 0
+    assert env.get_mute("session", "p-agent-media") is True
+    assert env.resolve_mute("", "p-agent-media") is True

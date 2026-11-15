@@ -2466,7 +2466,8 @@ def cmd_speech_flush(a) -> int:
 def _hold_owner(explicit: str | None) -> str | None:
     """Who this hold belongs to.
 
-    Explicit wins; then MEDIA_SPEECH_HOLD_OWNER; then the tmux pane, so that
+    Explicit wins; then MEDIA_SPEECH_HOLD_OWNER; then the agent's session
+    id; then the tmux pane, so that
     several sessions each hold their own without anybody having to invent a
     name. Falling back to the pane matters because the common case is now N
     Claude sessions in N panes: with one shared marker the second session to
@@ -2480,6 +2481,12 @@ def _hold_owner(explicit: str | None) -> str | None:
     env = os.environ.get("MEDIA_SPEECH_HOLD_OWNER", "").strip()
     if env:
         return env
+    # The conversation, by its session id, so a hold follows the chat and a
+    # headless one (no pane) holds its own too (#491 step 2).
+    session = (os.environ.get("CLAUDE_CODE_SESSION_ID")
+               or os.environ.get("MEDIA_SESSIOND_SESSION") or "").strip()
+    if session and re.fullmatch(r"[A-Za-z0-9_-]+", session):
+        return "s-" + session[:36]
     pane = os.environ.get("TMUX_PANE", "").strip()
     if pane:
         # "%42" -> "pane42": the marker is a filename, and '%' is legal but
@@ -2662,6 +2669,7 @@ def _silence_current_if_covered(scope: str, key: str) -> bool:
         return False
     ex = np.get("extras") or {}
     covered = (ex.get("source_pane") == key if scope == "pane"
+               else ex.get("source_session") == key if scope == "thread"
                else ex.get("source_tmux_session") == key)
     if covered:
         try:
@@ -2682,14 +2690,35 @@ def cmd_mute_pane(a) -> int:
     also stops the covered pane's currently-playing clip, if any.
     """
     state = StateStore()
+    action = getattr(a, "state", None) or "toggle"
+    thread = getattr(a, "thread", None)
+    # No pane to name (a headless chat, a plain terminal): this conversation
+    # itself, by its session id (#491 step 2: identity by thread).
+    explicit_pane = any(getattr(a, k, None) for k in ("pane", "subject", "current"))
+    if thread is None and not explicit_pane and not os.environ.get("TMUX_PANE") \
+            and not getattr(a, "session", False):
+        from .intake.submit import _source_session
+        thread = _source_session({}) or None
+    if thread:
+        return _mute_thread(thread, action)
+    workspace = os.environ.get("MEDIA_SOURCE_WORKSPACE", "").strip()
+    if getattr(a, "session", False) and not os.environ.get("TMUX_PANE") \
+            and not explicit_pane and workspace:
+        # A headless chat's workspace stands where its tmux session would.
+        new = (action == "on" or (action == "toggle"
+                                  and not bool(state.get_mute("session", workspace))))
+        state.set_mute("session", workspace, new)
+        stopped = _silence_current_if_covered("session", workspace) if new else False
+        print(f"session {workspace}: {'muted' if new else 'unmuted'}"
+              f"{' (stopped current)' if stopped else ''}")
+        return 0
     pane = _mute_target_pane(a)
     if not pane:
         print("media mute-pane: no target pane (not in tmux and nothing "
-              "speaking) — pass --pane %ID", file=sys.stderr)
+              "speaking) — pass --pane %ID or --thread ID", file=sys.stderr)
         return 1
     from .intake.submit import _tmux_session_for_pane
     session = _tmux_session_for_pane(pane)
-    action = getattr(a, "state", None) or "toggle"
 
     if getattr(a, "session", False):
         if not session:
@@ -2715,6 +2744,26 @@ def cmd_mute_pane(a) -> int:
     state.set_mute(scope, key, new)
     stopped = _silence_current_if_covered(scope, key) if new else False
     print(f"{scope} {key}: {'muted' if new else 'unmuted'}"
+          f"{' (stopped current)' if stopped else ''}")
+    return 0
+
+
+def _mute_thread(thread: str, action: str) -> int:
+    """Mute a conversation by its session id: its speech level goes to quiet
+    (speak_priority.py: rendered and archived, never played by itself, the
+    same as a muted pane), and unmuting gives it back to the default."""
+    from . import speak_priority
+    muted = speak_priority.level_of(thread) == "quiet"
+    new = True if action == "on" else False if action == "off" else not muted
+    if new:
+        speak_priority.set_level(thread, "quiet", keep=True)
+    elif muted:
+        speak_priority.clear_level(thread)
+        if speak_priority.level_of(thread) == "quiet":
+            # Its fallback (a Matrix room's person) is quiet: say so plainly.
+            speak_priority.set_level(thread, "normal", keep=True)
+    stopped = _silence_current_if_covered("thread", thread) if new else False
+    print(f"thread {thread}: {'muted' if new else 'unmuted'}"
           f"{' (stopped current)' if stopped else ''}")
     return 0
 
@@ -10910,6 +10959,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("resume").set_defaults(func=cmd_resume)
     sub.add_parser("stop").set_defaults(func=cmd_stop)
     sub.add_parser("mute", help="toggle mute").set_defaults(func=cmd_mute)
+    p_mp.add_argument("--thread", metavar="SESSION_ID",
+                      help="mute a conversation by its session id (its speech level "
+                           "goes to quiet); the default outside tmux is this agent's own")
 
     p_mp = sub.add_parser("mute-pane",
                           help="durable per-pane (or --session) speech mute")

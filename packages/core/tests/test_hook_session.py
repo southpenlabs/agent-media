@@ -38,9 +38,9 @@ def test_stop_forwards_session_id(tmp_path, monkeypatch):
 def test_notification_forwards_session_id(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     seen = _capture_submit(monkeypatch)
-    monkeypatch.setattr(H, "_client_focused_recently", lambda within: False)
+    monkeypatch.setattr(H, "_client_focused_recently", lambda *a: False)
     monkeypatch.setattr(H, "_session_name", lambda: "")
-    monkeypatch.setattr(H, "_notif_label", lambda sess: "")
+    monkeypatch.setattr(H, "_notif_label", lambda *a: "")
 
     assert H._handle_notification({"message": "Claude is waiting",
                                    "session_id": "notif-sess"}) == 0
@@ -92,8 +92,8 @@ def test_ask_read_once_across_pretooluse_and_notification(tmp_path, monkeypatch)
     # Isolate _claim_once from history dedup and environment noise.
     monkeypatch.setattr(H, "_dedup_seen", lambda *a, **k: False)
     monkeypatch.setattr(H, "_session_name", lambda: "")
-    monkeypatch.setattr(H, "_ask_location_label", lambda: "")
-    monkeypatch.setattr(H, "_client_pane_focused", lambda: False)
+    monkeypatch.setattr(H, "_ask_location_label", lambda *a: "")
+    monkeypatch.setattr(H, "_client_pane_focused", lambda *a: False)
 
     tool_input = {"questions": [{"question": "Ship it?",
                                  "options": [{"label": "Yes"}, {"label": "No"}]}]}
@@ -247,9 +247,9 @@ def test_codex_question_uses_shared_storage_and_speech(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_ASK_PARTS", "0")
     monkeypatch.setattr(harnesses, "codex_run_scripted", lambda *a: False)
     monkeypatch.setattr(H, "_session_name", lambda: "")
-    monkeypatch.setattr(H, "_ask_location_label", lambda: "")
+    monkeypatch.setattr(H, "_ask_location_label", lambda *a: "")
     monkeypatch.setattr(H, "_source_place", lambda session: {})
-    monkeypatch.setattr(H, "_client_pane_focused", lambda: False)
+    monkeypatch.setattr(H, "_client_pane_focused", lambda *a: False)
     from agent_media_core import question_gate
     monkeypatch.setattr(question_gate, "answerable", lambda session: True)
     seen = _capture_submit(monkeypatch)
@@ -298,3 +298,40 @@ def test_a_sound_marker_and_quotes_ride_along(tmp_path, monkeypatch):
     assert "[[" not in ev.text and "sound" not in ev.text
     assert ev.metadata["sound"] == "done"
     assert ev.metadata["quoted"] == ["All good on my side."]
+
+
+# --- #491 step 2: attention and labels by thread, not pane -------------------
+
+def test_no_pane_labels_by_thread_unless_it_is_on_screen(monkeypatch):
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("MEDIA_NOTIF_LABEL", raising=False)
+    monkeypatch.setattr(H, "_thread_title", lambda s: "Fix the footer" if s else "")
+    on_screen = {"t-1": False}
+    monkeypatch.setattr(H, "_thread_on_screen", lambda s: on_screen.get(s, False))
+    assert H._notif_label("", "t-1") == "Fix the footer"
+    assert H._ask_location_label("t-1") == "Fix the footer"
+    on_screen["t-1"] = True
+    assert H._notif_label("", "t-1") == ""
+    assert H._ask_location_label("t-1") == ""
+    monkeypatch.setenv("MEDIA_NOTIF_LABEL", "0")
+    on_screen["t-1"] = False
+    assert H._notif_label("", "t-1") == ""
+
+
+def test_thread_open_in_the_app_is_attention_without_tmux(monkeypatch):
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.setattr(H, "_thread_on_screen", lambda s: s == "t-1")
+    assert H._client_focused_recently(180, "t-1") is True
+    assert H._client_pane_focused("t-1") is True
+    assert H._client_focused_recently(180, "t-2") is False
+    assert H._client_pane_focused("t-2") is False
+
+
+def test_pending_question_voice_is_the_threads_own(monkeypatch):
+    from agent_media_core import session_voice
+    monkeypatch.setattr(session_voice, "voice_for",
+                        lambda s: "edge:en-US-AlloyNeural" if s == "t-1" else None)
+    monkeypatch.setattr(H, "voice_for_session", lambda sess: "hashed" if sess else None)
+    assert H.thread_voice("t-1", "work") == "edge:en-US-AlloyNeural"
+    assert H.thread_voice("t-2", "work") == "hashed"
+    assert H.thread_voice("", "") is None

@@ -211,12 +211,53 @@ def voice_for_session(sess: str) -> Optional[str]:
     return pool[h % len(pool)]
 
 
+def thread_voice(session: str, sess: str = "") -> Optional[str]:
+    """The voice a conversation speaks in where nothing on the event names
+    one: the thread's own (session_voice, chosen in the app), else the
+    workspace's automatic voice (`voice_for_session`) as the last resort
+    (#491 step 2: identity by thread, not by where the process runs)."""
+    if session:
+        try:
+            from .. import session_voice
+            own = session_voice.voice_for(session)
+            if own:
+                return own
+        except Exception:  # noqa: BLE001
+            pass
+    return voice_for_session(sess)
+
+
 #: Named without the underscore since `media say` asks too: an agent's own
 #: aside is spoken in the voice of the conversation it belongs to.
 _voice_for_session = voice_for_session
 
 
-def _notif_label(sess: str) -> str:
+def _thread_on_screen(session: str) -> bool:
+    """Is this conversation open in the app (core's watching.py)? The
+    attention signal that needs no tmux: a thread on screen is where its
+    notification is seen (#491 step 2, 15 Nov 2026). Never raises."""
+    if not session:
+        return False
+    try:
+        from .. import watching
+        return watching.is_open(session)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _thread_label(session: str) -> str:
+    """The label of a conversation with no pane: its thread's name, unless
+    the thread is on screen in the app, where it is the current one and
+    naming it is noise (as a pane's label drops the session being worked
+    in). "" when labelling is off or there is no name."""
+    if os.environ.get("MEDIA_NOTIF_LABEL", "1") == "0" or not session:
+        return ""
+    if _thread_on_screen(session):
+        return ""
+    return _thread_title(session)
+
+
+def _notif_label(sess: str, session: str = "") -> str:
     """Build a "where am I" prefix for the notification text.
 
     Includes:
@@ -226,15 +267,15 @@ def _notif_label(sess: str) -> str:
       - pane title when set (via `select-pane -T` or terminal escape); omitted
         when empty or identical to the session name.
 
-    Returns "" outside tmux or when the user disabled labelling
-    (MEDIA_NOTIF_LABEL=0). The AskUserQuestion path uses _ask_location_label
+    Outside tmux, the thread's name (`_thread_label`); "" when the user
+    disabled labelling (MEDIA_NOTIF_LABEL=0). The AskUserQuestion path uses _ask_location_label
     instead (hierarchical host/session omission + window-name pane locator).
     """
     if os.environ.get("MEDIA_NOTIF_LABEL", "1") == "0":
         return ""
     pane = os.environ.get("TMUX_PANE")
     if not pane:
-        return ""
+        return _thread_label(session)
 
     pane_title = _tmux(["display-message", "-p", "-t", pane, "#{pane_title}"])
     sess_count_s = _tmux(["list-sessions", "-F", "#{session_name}"])
@@ -279,7 +320,7 @@ def _active_client_session() -> Optional[str]:
     return best_sess
 
 
-def _ask_location_label() -> str:
+def _ask_location_label(session: str = "") -> str:
     """"Where is this question?" prefix for the AskUserQuestion notif.
 
     Announces host / session / pane, but omits — hierarchically, relative to
@@ -293,13 +334,14 @@ def _ask_location_label() -> str:
 
     So a question from the foreground session reads just its pane; one from a
     background session adds the session; one from a host with nobody attached
-    adds the host too. Returns "" outside tmux or when MEDIA_NOTIF_LABEL=0.
+    adds the host too. Outside tmux, the thread's name (`_thread_label`);
+    "" when MEDIA_NOTIF_LABEL=0.
     """
     if os.environ.get("MEDIA_NOTIF_LABEL", "1") == "0":
         return ""
     pane = os.environ.get("TMUX_PANE")
     if not pane:
-        return ""
+        return _thread_label(session)
 
     info = _tmux(["display-message", "-p", "-t", pane,
                   "#{session_name}\t#{window_name}\t#{window_index}\t#{pane_index}"])
@@ -333,7 +375,7 @@ def _ask_location_label() -> str:
     return " / ".join(parts)
 
 
-def _client_focused_recently(within_seconds: int) -> bool:
+def _client_focused_recently(within_seconds: int, session: str = "") -> bool:
     """True if our tmux pane's window is currently displayed by an
     attached client whose user-input activity is within `within_seconds`.
 
@@ -341,7 +383,12 @@ def _client_focused_recently(within_seconds: int) -> bool:
     clearly at the screen and will see the prompt without an audio cue.
     Uses `client_activity` (keystroke/mouse timestamp) — not session or
     window activity, which bumps on assistant output too.
+
+    The thread open in the app counts first (`_thread_on_screen`): that is
+    where the prompt is seen, pane or none.
     """
+    if _thread_on_screen(session):
+        return True
     pane = os.environ.get("TMUX_PANE")
     if not pane:
         return False
@@ -373,7 +420,7 @@ def _client_focused_recently(within_seconds: int) -> bool:
     return False
 
 
-def _client_pane_focused() -> bool:
+def _client_pane_focused(session: str = "") -> bool:
     """True if our pane is *the* pane the user is looking at right now: the
     active pane of its session's active window, with an attached client.
 
@@ -384,7 +431,11 @@ def _client_pane_focused() -> bool:
     from HIGH to NORMAL so it queues behind the current clip instead of
     preempting it. Requires an attached client so a detached (walked-away)
     session still gets the interrupting HIGH cue.
+
+    The thread open in the app is focused the same way (`_thread_on_screen`).
     """
+    if _thread_on_screen(session):
+        return True
     pane = os.environ.get("TMUX_PANE")
     if not pane:
         return False
@@ -826,7 +877,7 @@ def _emit_ask(ask: str, payload: dict, lead: str = "", structure: list | None = 
     it's spoken before the question so the explanation isn't lost to the modal.
     """
     sess = _session_name()
-    label = _ask_location_label()
+    label = _ask_location_label(str(payload.get("session_id") or ""))
     body = f"{lead} {ask}".strip() if lead else ask
     msg = f"{label}: {body}" if label else body
     # Race-safe dedup, claimed *before* the event queues on the playback lock.
@@ -849,7 +900,7 @@ def _emit_ask(ask: str, payload: dict, lead: str = "", structure: list | None = 
     _write_stamp(_stamp_dir() / "notif-last", int(time.time()))
     priority = Priority.NORMAL if (
         os.environ.get("MEDIA_NOTIF_NO_INTERRUPT_FOCUSED", "1") != "0"
-        and _client_pane_focused()) else Priority.HIGH
+        and _client_pane_focused(str(payload.get("session_id") or ""))) else Priority.HIGH
     session = payload.get("session_id") or ""
     # Read in full only where it can be answered (question_gate.py: its
     # thread on screen, black screen mode, hands-free), whatever the level;
@@ -893,7 +944,7 @@ def _keep_pending_ask(payload: dict) -> None:
         pending_asks.record(session, str(payload.get("tool_use_id") or ""),
                             payload.get("tool_input") or {},
                             harness=payload.get("harness") or "claude",
-                            voice=voice_for_session(_session_name()) or "",
+                            voice=thread_voice(session, _session_name()) or "",
                             place=_source_place(session))
     except Exception as e:  # noqa: BLE001 — the phone falls back to the screen
         log.info("hook: could not keep the pending question (%s)", e)
@@ -1112,11 +1163,12 @@ def _handle_notification(payload: dict) -> int:
     # If the user has been at the screen recently, don't nag them with
     # audio — they'll see the prompt. Tunable via env, 0 disables.
     focus_window = int(os.environ.get("MEDIA_NOTIF_FOCUS_SUPPRESS", "180"))
-    if focus_window > 0 and _client_focused_recently(focus_window):
+    session_id = str(payload.get("session_id") or "")
+    if focus_window > 0 and _client_focused_recently(focus_window, session_id):
         return 0
 
     sess = _session_name()
-    label = _notif_label(sess)
+    label = _notif_label(sess, session_id)
     if label:
         msg = f"{label}: {msg}"
 
@@ -1135,7 +1187,7 @@ def _handle_notification(payload: dict) -> int:
     # instead of preempting. Tunable via env, 0 keeps the old always-HIGH behaviour.
     priority = Priority.HIGH
     if os.environ.get("MEDIA_NOTIF_NO_INTERRUPT_FOCUSED", "1") != "0" \
-            and _client_pane_focused():
+            and _client_pane_focused(session_id):
         priority = Priority.NORMAL
 
     submit_event(Event(text=msg, source=Source.CLAUDE_CODE,

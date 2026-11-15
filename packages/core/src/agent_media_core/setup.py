@@ -1561,12 +1561,22 @@ def cmd_install_shell(args: argparse.Namespace) -> int:
 
 # --- Prereq check ----------------------------------------------------------
 
+#: What every install needs (fewer-services §6). mpc and jq are no longer
+#: used on this path and are gone from the list.
 PREREQS: tuple[tuple[str, str], ...] = (
     ("python3", "python (>= 3.11)"),
-    ("mpv",     "mpv (used by sink-speech)"),
-    ("mpc",     "mpd client (sink-music helper)"),
-    ("edge-tts", "edge-tts (default render engine)"),
-    ("jq",      "jq (legacy hook helpers; can drop after full retire)"),
+    ("git",     "releases and `media update` work from a checkout"),
+    ("claude",  "the claude CLI: sessiond runs the chats"),
+)
+
+#: Wanted by one feature each: reported, never a failure. tmux is one of
+#: them — only chats in desk panes use it; a headless-only server, Windows
+#: and the Termux binary run without it (#491: tmux optional).
+OPTIONAL_PREREQS: tuple[tuple[str, str], ...] = (
+    ("cloudflared", "the public route the app pairs with"),
+    ("ffmpeg",  "the music bed, under-mix, meditation, the podcast feed"),
+    ("mpv",     "only for a local or rooms speech target"),
+    ("tmux",    "only for chats in desk panes"),
 )
 
 
@@ -1576,6 +1586,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         if shutil.which(bin_) is None:
             missing.append((bin_, label))
             print(f"  MISSING  {bin_:12} ({label})")
+        else:
+            print(f"  ok       {bin_}")
+    for bin_, label in OPTIONAL_PREREQS:
+        if shutil.which(bin_) is None:
+            print(f"  optional {bin_:12} (not installed: {label})")
         else:
             print(f"  ok       {bin_}")
     # A rooms hub (or `--rooms`, before wiring one) also needs its system packages.

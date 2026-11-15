@@ -254,7 +254,9 @@ Wanted, by feature:
 
 `media-setup check`'s `PREREQS` is stale and should be rewritten to this: it
 demands `mpc` and `jq` (neither is used on this path any more), asks for mpv
-unconditionally, and never mentions ffmpeg.
+unconditionally, and never mentions ffmpeg. **Done 15 Nov 2026:** required is
+python, git and the claude CLI; cloudflared, ffmpeg, mpv and tmux are
+reported as optional and never fail the check (#491: tmux optional).
 
 ## 7. Order of work
 

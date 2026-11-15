@@ -21,6 +21,8 @@ def _state(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.delenv("MEDIA_SPEECH_HOLD_OWNER", raising=False)
     monkeypatch.delenv("TMUX_PANE", raising=False)
+    for k in ("CLAUDE_CODE_SESSION_ID", "MEDIA_SESSIOND_SESSION"):
+        monkeypatch.delenv(k, raising=False)
 
 
 def test_holds_are_independent_and_releasing_one_leaves_the_others():
@@ -115,3 +117,16 @@ def test_explicit_owner_beats_env_and_pane(monkeypatch):
 def test_no_tmux_no_env_means_the_unnamed_marker(monkeypatch):
     from agent_media_core.cli import _hold_owner
     assert _hold_owner(None) is None
+
+
+def test_owner_is_the_conversation_before_the_pane(monkeypatch):
+    """#491 step 2: a hold follows the chat, and a headless one (no pane)
+    holds its own rather than the shared unnamed marker."""
+    from agent_media_core.cli import _hold_owner
+    monkeypatch.setenv("TMUX_PANE", "%42")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "abc-123")
+    assert _hold_owner(None) == "s-abc-123"
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    monkeypatch.delenv("TMUX_PANE")
+    monkeypatch.setenv("MEDIA_SESSIOND_SESSION", "def-456")
+    assert _hold_owner(None) == "s-def-456"
