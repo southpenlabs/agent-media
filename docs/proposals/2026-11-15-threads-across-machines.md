@@ -148,3 +148,43 @@ So the direction is now:
   file is only a working copy while the chat runs (scenario 1 above).
   Reading on demand (scenario 2) would leave search and history depending
   on the worker being up. Not yet decided.
+
+## The general model (15 Nov 2026), drafted from the discussion
+
+David: "I'm thinking about this in many different scenarios because it's
+not just for me. I want this to be a distributable system. I'm thinking
+about how it might work with a central chats and other server's own
+independent chats, which the system is already close to. that's just an
+issue of permission allocation to access servers through Drupal roles.
+there's also the issue of running services, independent of chats like
+media and maps".
+
+Read as rules for any install, not David's machines:
+
+1. **A thread belongs to exactly one server**, the one that started it.
+   That server lists it, speaks it, shows its cards, indexes it and keeps
+   its transcript. No thread is on two servers.
+2. **Any server can have its own chats.** One server can be central for a
+   household or team, and others keep their own independent chats. The
+   app already merges every paired server's list and routes each thread to
+   its owner (sasonica-app `servers.ts`).
+3. **A worker runs chats for a server and owns none.** It can be a machine
+   with no server at all (red3, red4), or one with its own server (red5).
+   Its sessiond tags each chat with the owning server's id, keeps hooks off
+   for it, and its own server, if any, never lists or indexes it. The
+   owning server keeps the transcript. The worker's file is a working copy
+   (scenario 1). Today's mirror is the start of that, and it needs
+   indexing in `search.db` and the hooks gap fixed.
+4. **Who can use which server is the account's business.** sasonica.com
+   (Drupal) roles say which servers an account sees and at what ceiling.
+   `/me/servers` and the ceiling already exist. What's new is roles
+   granting access to a server, not just listing the ones the account
+   owns.
+5. **Services apart from chats (media, maps, …) are capabilities a server
+   advertises.** The app picks a server per capability, not only per
+   thread. Where the choice comes from (the account's settings on
+   sasonica.com, or the home server's answer) is open.
+
+For David's machines that gives red2 as central chats, red5 as a worker
+with a small server of its own (and its own chats if wanted), and red3/red4
+as workers or shells. That is decision 3 kept, with the owner rule.
