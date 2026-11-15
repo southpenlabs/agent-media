@@ -181,6 +181,7 @@ import secrets
 import signal
 import socket
 import socketserver
+import re
 import subprocess
 import sys
 import threading
@@ -1435,6 +1436,24 @@ def _oc_ask_post(s: Session, rid: str, tool_input: dict, raw_answers: object) ->
         pass
 
 
+def _one_live_copy(session: str) -> None:
+    """Refuse to resume `session` while a desk pane or a plain terminal runs
+    it (live_copy.py, #491 step 4): two claudes on one id write one
+    transcript from two histories. sessiond's own children are not counted
+    (it never holds two of one session). `MEDIA_SESSIOND_ONE_COPY=0` turns
+    the check off. A failed check lets the resume go ahead, as before."""
+    if os.environ.get("MEDIA_SESSIOND_ONE_COPY", "1").strip() in ("0", "false", "no"):
+        return
+    try:
+        from agent_media_core import live_copy
+        h = live_copy.holder(session, count_sessiond=False)
+    except Exception:  # noqa: BLE001
+        return
+    if h:
+        raise Refused(f"session {session[:8]} is live in {live_copy.describe(h)}; "
+                      "close it there first, or reply in it", "live_elsewhere", holder=h)
+
+
 class Supervisor:
     """Every headless session this host holds, and the processes behind them."""
 
@@ -2357,6 +2376,8 @@ class Supervisor:
         if not os.path.isdir(s.cwd):
             raise Refused(f"no such directory {s.cwd!r}", "bad_cwd")
         resume = resume and not s.unstarted
+        if resume and s.agent == "claude":
+            _one_live_copy(s.id)
         if s.agent == "antigravity":
             from . import antigravity_adapter
             from agent_media_core import harnesses
@@ -3456,6 +3477,37 @@ class Supervisor:
             return {"session": session, "model": s.model, "mode": s.mode, "told": told,
                     **self._brief(s)}
 
+    def adopt(self, session: str, cwd: str, *, workspace: str = "",
+              agent: str = "claude", server_permissions: str = "") -> dict:
+        """Take an ended desk-born Claude session as this host's own, parked,
+        so its next message resumes it here from its transcript
+        (`--resume`), with no pane: the headless-sessions proposal's §8 rule,
+        "a reply to an ended session that last ran in a pane: pane if a desk
+        client is attached, else headless" (#491 step 3; send.revive_driver
+        decides). Nothing is spawned: the `send` that follows does that, and
+        the one-live-copy check (`_one_live_copy`) refuses it while a pane
+        or a terminal still runs the session. Already held: left as it is."""
+        from . import permissions as perms
+
+        if agent != "claude":
+            raise Refused(f"cannot adopt a {agent} session", "unsupported")
+        if not re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", session or ""):
+            raise Refused("not a session id", "bad_request")
+        if not cwd or not os.path.isdir(cwd):
+            raise Refused(f"no such directory {cwd!r}", "bad_cwd")
+        with self.lock:
+            if session in self.sessions:
+                s = self.sessions[session]
+                return {"session": session, "adopted": False, **self._brief(s)}
+            s = Session(session, cwd, agent=agent, workspace=workspace,
+                        permissions=perms.mode("", server_permissions))
+            s.permissions_default = True
+            s.server_permissions = server_permissions
+            self.sessions[session] = s
+            self._save(s)
+            log.info("sessiond: %s: adopted from the desk (%s)", session[:8], cwd)
+            return {"session": session, "adopted": True, **self._brief(s)}
+
     def relocate(self, session: str, cwd: str) -> dict:
         """Resume `session` in `cwd` from now on (moves.py). Its `--resume`
         runs in `s.cwd`, and Claude Code files the transcript under the
@@ -4103,6 +4155,12 @@ class Supervisor:
                 return {"ok": True, **self.resume(sid)}
             if op == "relocate":
                 return {"ok": True, **self.relocate(sid, str(req.get("cwd") or ""))}
+            if op == "adopt":
+                return {"ok": True, **self.adopt(
+                    sid, str(req.get("cwd") or ""),
+                    workspace=str(req.get("workspace") or ""),
+                    agent=str(req.get("agent") or "claude"),
+                    server_permissions=str(req.get("server_permissions") or ""))}
             if op == "interrupt":
                 return {"ok": True, **self.interrupt(sid, bool(req.get("cancel_queued")))}
             if op == "stop_task":

@@ -10175,7 +10175,11 @@ def cmd_restore(a) -> int:
 
 def cmd_session(a) -> int:
     """`media session list|send`: headless sessions (sessiond) seen and
-    messaged from another session (agent_media_server.headless_mail)."""
+    messaged from another session (agent_media_server.headless_mail).
+    `media session holder <id>`: who runs it now (live_copy.py)."""
+    if a.args and a.args[0] == "holder":
+        from . import live_copy
+        return live_copy.main(a.args[1:])
     mail = _server_module("headless_mail")
     if mail is None:
         return 1

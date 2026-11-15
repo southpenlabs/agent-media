@@ -30,7 +30,7 @@ _STATUS = {"not_found": 404, "not_live": 404, "bad_cwd": 404, "busy": 503, "down
            "spawn_failed": 500, "internal": 500, "empty_text": 400, "bad_request": 400,
            "unsupported": 400, "exists": 409, "not_pending": 409, "lost": 409,
            "refused": 400, "restart_pending": 503, "quota_limited": 503,
-           "host_down": 503, "not_a_worker": 404}
+           "host_down": 503, "not_a_worker": 404, "live_elsewhere": 409}
 
 #: sessiond's states as the contract names them (§6.1 /sessions/state, §11).
 _CONTRACT_STATE = {"starting": "working", "working": "working", "waiting": "waiting",
@@ -115,6 +115,8 @@ def _failed(r: dict, **extra) -> tuple[bool, dict]:
            "status": _STATUS.get(code, 500), "code": code, **extra}
     if isinstance(r.get("quota"), dict):
         out["quota"] = r["quota"]     # the usage limit's reset (§6.2.2)
+    if isinstance(r.get("holder"), dict):
+        out["holder"] = r["holder"]   # who runs it now (live_copy.py, #491 step 4)
     return False, out
 
 
@@ -572,6 +574,17 @@ class HeadlessDriver:
             return _failed(r)
         return True, {"session": session, "pane": None, "live": False,
                       "closed": bool(r.get("closed")), "driver": HEADLESS}
+
+    def adopt(self, session: str, cwd: str, workspace: str = "") -> tuple[bool, dict]:
+        """Take an ended desk-born Claude session as sessiond's, parked: its
+        next `send` resumes it headless from its transcript (sessiond
+        `adopt`, the §8 revive; send.revive_driver decides when)."""
+        r = call("adopt", session=session, cwd=cwd, workspace=workspace, agent="claude",
+                 timeout=15.0)
+        if not r.get("ok"):
+            return _failed(r, session=session, pane=None)
+        return True, {"session": session, "adopted": bool(r.get("adopted")),
+                      "driver": HEADLESS}
 
     def relocate(self, session: str, cwd: str) -> str:
         """Make `session` resume in `cwd` (moves.py). "" when done, else why
