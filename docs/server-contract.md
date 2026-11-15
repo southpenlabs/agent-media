@@ -1690,6 +1690,18 @@ restarts", not as failed. A new chat is not refused (11 Nov 2026; before,
 true, "fresh": true`, and it starts once the host has restarted, as a held
 reply goes; an opencode chat is still refused that way.
 
+**Live somewhere else** (15 Nov 2026, #491 tmux optional): a reply to a
+chat that has ended here but is running in a plain terminal (a `claude`
+started at a desk, outside tmux) is refused 409 `code: "live_elsewhere"`,
+with `holder: {"where": "terminal"|"pane"|"sessiond", "pid", "pane"?}`:
+one live copy per session, since two would write one transcript from two
+histories. Say where it runs ("running in a terminal on the desk") and
+offer nothing to retry. A headless chat picked up at a desk in a tmux pane
+is not refused: the reply is typed into that pane. An ended chat that last
+ran in a pane comes back headless when nobody is at the desk (the
+headless-sessions §8 rule); the answer is the headless one (`driver:
+"headless"`), and the thread is headless from then on.
+
 **Send now** on a held message (3 Nov 2026; David: "a way of overriding
 the hold on a message for a restart"): `POST /session/release
 {"session"}` (gated, CORS) lets that thread through the pending restart.

@@ -107,6 +107,36 @@ def brief(view: dict) -> dict:
             "last_event_at": view.get("last_event_at"), "host": str(view.get("host") or "")}
 
 
+def desk_rows(known: set[str]) -> list[dict]:
+    """The claudes sessiond does not hold: in a desk pane or a plain
+    terminal, from Claude Code's own records (claude_sessions), so a
+    session started with no tmux is listed too (#491 step 4). `known`:
+    sessiond's ids, left out. Never raises."""
+    try:
+        from agent_media_core import live_copy
+        from agent_media_core import claude_sessions
+        recs = claude_sessions.records()
+    except Exception:  # noqa: BLE001
+        return []
+    out, seen = [], set(known)
+    for rec in recs:
+        sid = rec.get("session") or ""
+        if not sid or sid in seen:
+            continue
+        try:
+            if live_copy._by_sessiond(rec):
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        seen.add(sid)
+        where = "pane" if rec.get("pane") else "terminal"
+        out.append({"session": sid, "live": True, "state": where, "cwd": rec.get("cwd") or "",
+                    "title": _title({"session": sid}), "agent": "claude", "card": False,
+                    "tasks": 0, "queued": 0, "last_event_at": None, "host": "",
+                    "where": where, "pane": rec.get("pane") or "", "pid": rec.get("pid")})
+    return out
+
+
 def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
     """The session `target` names: an id or 8+ character prefix of one, or a
     folder's live session (the most recently active). `(view, why_not)`."""
@@ -314,6 +344,9 @@ def _parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
     ls.add_argument("--cwd", default="", help="only this folder's")
+    ls.add_argument("--headless", action="store_true",
+                    help="only sessiond's (default: also claudes in desk panes and "
+                         "plain terminals, from Claude Code's own records)")
     ls.add_argument("--json", action="store_true")
     sd = sub.add_parser("send", help="a message into one, queued behind a running turn; "
                                      "never over a question or permission card")
@@ -365,11 +398,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "list":
         out = [brief(v) for v in views if a.all or v.get("live")]
+        desk = [] if a.headless else desk_rows({b["session"] for b in map(brief, views)})
         if a.cwd:
             want = _real(a.cwd)
             out = [b for b in out if _real(b["cwd"]) == want]
+            desk = [b for b in desk if _real(b["cwd"]) == want]
         if a.json:
-            print(json.dumps({"sessiond": up, "sessions": out}))
+            # The desk ones under their own key, so a reader of "sessions"
+            # (sessiond's, which take `send`) sees what it always did.
+            print(json.dumps({"sessiond": up, "sessions": out, "desk": desk}))
             return 0
         if not up:
             print("sessiond is not answering: these are its records, none live", file=sys.stderr)
@@ -379,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{b['session']}  {'live' if b['live'] else 'parked'}  "
                   f"{', '.join(flags):<24}  {b['cwd']}"
                   + (f" @{b['host']}" if b["host"] else "") + f"  {b['title']}")
+        for b in desk:
+            at = f"pane {b['pane']}" if b["where"] == "pane" else f"terminal pid {b['pid']}"
+            print(f"{b['session']}  live  {at:<24}  {b['cwd']}  {b['title']}")
         return 0
     text = " ".join(a.text).strip()
     if a.cmd == "wake" and a.order and not text:

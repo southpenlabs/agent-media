@@ -6,6 +6,13 @@ answers come from `ps` (a whole table in one call) and `lsof` (a working
 directory). Every function answers "don't know" — [], {} or "" — rather than
 raising, as a read of a process that has just ended does on Linux.
 
+Windows (#491 step 4: discovery without panes) has neither: the process
+table comes from one PowerShell CIM query (`Win32_Process`, its command
+line split the way Windows splits it); a process's environment and working
+directory cannot be read there, so `environ` and `cwd` answer "don't know",
+and callers lean on what the process records itself (Claude Code's
+`~/.claude/sessions/<pid>.json` names its session and cwd).
+
 On a Mac `ps -E` prints a process's environment after its arguments, with
 nothing between them; `environ` keeps the trailing `NAME=value` words, which
 is exact for the markers read here (TMUX_PANE, MEDIA_SESSIOND_SESSION…) and
@@ -37,9 +44,44 @@ def _ps(*args: str) -> str:
         return ""
 
 
+def _windows_processes() -> list[tuple[int, list[str]]]:
+    """`(pid, argv)` from Win32_Process, one PowerShell call. A process
+    with no readable command line (another user's, a system one) is given
+    its executable name alone."""
+    import json
+    import shlex
+
+    script = ("Get-CimInstance Win32_Process | "
+              "Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+    try:
+        raw = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                              script], capture_output=True, text=True, timeout=20).stdout
+        rows = json.loads(raw or "[]")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        try:
+            pid = int(r.get("ProcessId"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        line = str(r.get("CommandLine") or "").strip()
+        try:
+            argv = shlex.split(line, posix=False) if line else []
+        except ValueError:
+            argv = line.split()
+        argv = [a.strip('"') for a in argv] or ([str(r.get("Name"))] if r.get("Name") else [])
+        out.append((pid, argv))
+    return out
+
+
 def processes() -> list[tuple[int, list[str]]]:
     """`(pid, argv)` for every process that can be read."""
     out = []
+    if os.name == "nt":
+        return _windows_processes()
     if has_proc():
         for d in PROC.iterdir():
             if not d.name.isdigit():
@@ -59,6 +101,8 @@ def processes() -> list[tuple[int, list[str]]]:
 
 
 def environ(pid: int) -> dict[str, str]:
+    if os.name == "nt":
+        return {}
     if has_proc():
         try:
             raw = (PROC / str(pid) / "environ").read_bytes().split(b"\0")
@@ -78,6 +122,8 @@ def environ(pid: int) -> dict[str, str]:
 
 def environs() -> dict[int, dict[str, str]]:
     """Every readable process's environment at once (one `ps` on a Mac)."""
+    if os.name == "nt":
+        return {}
     if has_proc():
         return {pid: environ(pid) for pid, _ in processes()}
     out: dict[int, dict[str, str]] = {}
@@ -149,7 +195,10 @@ def image(pid: int) -> str:
 
 
 def cwd(pid: int) -> str:
-    """The process's working directory, resolved; "" when it cannot be read."""
+    """The process's working directory, resolved; "" when it cannot be read
+    (always, on Windows)."""
+    if os.name == "nt":
+        return ""
     if has_proc():
         try:
             return os.path.realpath(os.readlink(PROC / str(pid) / "cwd"))

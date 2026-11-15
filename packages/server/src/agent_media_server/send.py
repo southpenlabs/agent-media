@@ -982,6 +982,13 @@ def _resume_pane(session: str) -> tuple[bool, dict]:
     why = _revive_unready(session, sessions.agent_of(session))
     if why:
         return False, why
+    from . import driver
+
+    if revive_driver(session, sessions.agent_of(session)) == driver.HEADLESS:
+        refused = _adopt_headless(session)
+        if refused:
+            return False, refused
+        return driver.headless_driver().resume(session)
     pane, err = open_window(session, sessions.transcript_cwd(session), resume=True,
                             agent=sessions.agent_of(session))
     if err:
@@ -1326,7 +1333,73 @@ def deliver(session: str, body: str, text: str, *, quote: str = "") -> tuple[boo
         return False, {"error": "this thread is sealed: unseal it first", "status": 423}
     from . import driver
 
-    return driver.for_session(session).send(session, body, text, quote=quote)
+    ok, detail = driver.for_session(session).send(session, body, text, quote=quote)
+    if not ok and detail.get("code") == "live_elsewhere" \
+            and (detail.get("holder") or {}).get("where") == "pane":
+        # sessiond's chat, picked up at the desk (`claude --resume` in a
+        # pane): the pane is where it runs now, so the words go there
+        # (#491: tmux a desk viewer, used while a desk client has it).
+        return _deliver_pane(session, body, text)
+    return ok, detail
+
+
+#: How recently a desk client must have been typed into for an ended
+#: desk-born session to come back in a pane rather than headless.
+REVIVE_DESK_S = 300
+
+
+def _desk_attended() -> bool:
+    """Is someone at the desk: a tmux client typed into within
+    MEDIA_REVIVE_DESK_S (default 300 s)? Attached alone is not present:
+    mosh and ssh clients stay attached for days (intake/toast.py `_desk`)."""
+    try:
+        within = int(os.environ.get("MEDIA_REVIVE_DESK_S") or REVIVE_DESK_S)
+    except ValueError:
+        within = REVIVE_DESK_S
+    try:
+        from agent_media_core.intake import toast
+
+        return toast._desk(within) is not None
+    except Exception:  # noqa: BLE001 — no tmux to ask: nobody at a desk
+        return False
+
+
+def revive_driver(session: str, agent: str) -> str:
+    """Where an ended desk-born session comes back: the headless-sessions
+    proposal's §8 rule, "pane if a desk client is attached, else headless"
+    (#491 step 3, the tmux-optional plan). Headless only for a Claude chat
+    on a host that runs headless (`MEDIA_HEADLESS`); a host with no tmux at
+    all always revives headless. `MEDIA_REVIVE=pane|headless` pins it.
+    Answers driver.PANE or driver.HEADLESS."""
+    from . import driver
+
+    if agent != "claude" or not driver.headless_enabled():
+        return driver.PANE
+    pinned = (os.environ.get("MEDIA_REVIVE") or "").strip().lower()
+    if pinned in (driver.PANE, driver.HEADLESS):
+        return pinned
+    import shutil
+
+    if shutil.which("tmux") is None:
+        return driver.HEADLESS
+    return driver.PANE if _desk_attended() else driver.HEADLESS
+
+
+def _adopt_headless(session: str) -> dict:
+    """Hand an ended desk-born session to sessiond (parked), so the send or
+    resume that follows brings it back headless. {} when done, else the
+    refusal to answer with."""
+    from agent_media_core import layout
+
+    from . import driver
+
+    cwd = sessions.transcript_cwd(session) or os.path.expanduser("~")
+    ok, detail = driver.headless_driver().adopt(
+        session, cwd, layout.workspace_for(layout.place_host(cwd), cwd))
+    if ok:
+        log.info("send: %s revived headless (no one at the desk)", session[:8])
+        return {}
+    return detail or {"error": "the session host did not take it", "status": 502}
 
 
 def _deliver_pane(session: str, body: str, text: str) -> tuple[bool, dict]:
@@ -1345,6 +1418,13 @@ def _deliver_pane(session: str, body: str, text: str) -> tuple[bool, dict]:
         why = _revive_unready(session, agent)
         if why:
             return False, why
+        from . import driver
+
+        if revive_driver(session, agent) == driver.HEADLESS:
+            refused = _adopt_headless(session)
+            if refused:
+                return False, refused
+            return driver.headless_driver().send(session, body, text)
         pane, err = open_window(session, sessions.transcript_cwd(session), resume=True, agent=agent)
         if err:
             return False, {"error": err, "pane": pane or None}

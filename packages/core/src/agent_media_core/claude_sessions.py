@@ -23,13 +23,21 @@ def _root() -> str:
 
 
 def _is_claude(pid: int) -> bool:
-    """Still a claude: a pid file outlives a crash, and pids are reused."""
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            argv0 = fh.read().split(b"\0", 1)[0]
-    except OSError:
+    """Still a claude: a pid file outlives a crash, and pids are reused.
+    Read through procinfo, so a Mac and Windows answer too (#491 step 4)."""
+    from . import procinfo
+
+    if procinfo.has_proc():
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                argv0 = fh.read().split(b"\0", 1)[0]
+        except OSError:
+            return False
+        return os.path.basename(argv0.decode(errors="replace")) == "claude"
+    if not procinfo.alive(pid):
         return False
-    return os.path.basename(argv0.decode(errors="replace")) == "claude"
+    name = procinfo.image(pid)
+    return os.path.splitext(os.path.basename(name.replace("\\", "/")))[0].lower() == "claude"
 
 
 def session_for_pid(pid: int) -> Optional[str]:
@@ -58,6 +66,31 @@ def running() -> list[tuple[int, str, str]]:
         pane = tmux.rsplit(".", 1)[-1] if "." in tmux else ""
         if sid and _is_claude(pid):
             out.append((pid, sid, pane if pane.startswith("%") else ""))
+    return out
+
+
+def records() -> list[dict]:
+    """Every live claude's own record: `{"pid", "session", "pane", "cwd",
+    "entrypoint"}`, in tmux or not — what `running` reads, with the
+    working directory and how it was started kept (#491 step 4: a claude in
+    a plain terminal is found by this, not by tmux)."""
+    out = []
+    for path in glob.glob(os.path.join(_root(), "*.json")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            pid = int(data.get("pid") or 0)
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        sid = str(data.get("sessionId") or "")
+        if not sid or not _is_claude(pid):
+            continue
+        tmux = str(data.get("tmux") or "")
+        pane = tmux.rsplit(".", 1)[-1] if "." in tmux else ""
+        out.append({"pid": pid, "session": sid,
+                    "pane": pane if pane.startswith("%") else "",
+                    "cwd": str(data.get("cwd") or ""),
+                    "entrypoint": str(data.get("entrypoint") or "")})
     return out
 
 

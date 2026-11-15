@@ -285,3 +285,69 @@ def test_start_names_its_agent_and_checks_that_agents_model(host, capsys, monkey
     rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--host", "red5", "hi")
     assert rc == 2 and "another host" in d["error"]
     assert not [c for c in calls if c[0] == "start"]
+
+
+# --- #491 step 4: discovery without panes, one live copy ---------------------
+
+def _desk_claude(monkeypatch, tmp_path, sid, pid=4242, pane=""):
+    from agent_media_core import claude_sessions, procinfo
+    d = tmp_path / "claude-sessions"
+    d.mkdir(exist_ok=True)
+    rec = {"pid": pid, "sessionId": sid, "cwd": str(tmp_path), "entrypoint": "cli"}
+    if pane:
+        rec["tmux"] = f"p:@1.{pane}"
+    (d / f"{pid}.json").write_text(json.dumps(rec))
+    monkeypatch.setenv("CLAUDE_SESSIONS_DIR", str(d))
+    monkeypatch.setattr(claude_sessions, "_is_claude", lambda p: p == pid)
+    real = procinfo.environ
+    monkeypatch.setattr(procinfo, "environ",
+                        lambda p: {"TERM": "xterm"} if p == pid else real(p))
+
+
+def test_list_shows_a_claude_in_a_plain_terminal(host, capsys, monkeypatch, tmp_path):
+    _desk_claude(monkeypatch, tmp_path, "aaaaaaaa-0000-0000-0000-000000000001")
+    rc, d = run(capsys, "list")
+    assert rc == 0
+    (row,) = d["desk"]
+    assert row["session"].startswith("aaaaaaaa") and row["where"] == "terminal"
+    assert d["sessions"] == []
+    rc, d = run(capsys, "list", "--headless")
+    assert d["desk"] == []
+
+
+def test_a_resume_is_refused_while_a_terminal_holds_the_session(host, monkeypatch, tmp_path):
+    sid = start(host, "reply: hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    host.sup.close(sid)
+    wait_for(lambda: not host.sup.sessions[sid].live)
+    _desk_claude(monkeypatch, tmp_path, sid)
+    with pytest.raises(sessiond.Refused) as e:
+        host.sup.resume(sid)
+    assert e.value.code == "live_elsewhere"
+    assert "a terminal (pid 4242)" in e.value.error
+    monkeypatch.setenv("MEDIA_SESSIOND_ONE_COPY", "0")
+    assert host.sup.resume(sid)["opened"] is True
+
+
+# --- #491 step 3: the §8 revive ----------------------------------------------
+
+def test_an_adopted_desk_session_resumes_headless_from_its_transcript(host, tmp_path):
+    sid = "bbbbbbbb-0000-4000-8000-000000000002"
+    got = host.sup.adopt(sid, str(host.work), workspace="p-work")
+    assert got["adopted"] is True and got["live"] is False
+    assert host.sup.adopt(sid, str(host.work))["adopted"] is False   # held: left be
+    host.sup.send(sid, "reply: back")
+    wait_for(lambda: state(host, sid) == "waiting")
+    runs = [json.loads(ln) for ln in (tmp_path / "fake.log").read_text().splitlines()]
+    argv = next(r["argv"] for r in runs if sid in r["argv"])
+    assert argv[argv.index("--resume") + 1] == sid
+    assert sessiond.read_record(sid)["workspace"] == "p-work"
+
+
+def test_adopt_refuses_what_it_cannot_resume(host):
+    with pytest.raises(sessiond.Refused) as e:
+        host.sup.adopt("not-a-session", str(host.work))
+    assert e.value.code == "bad_request"
+    with pytest.raises(sessiond.Refused) as e:
+        host.sup.adopt("bbbbbbbb-0000-4000-8000-000000000003", str(host.work / "gone"))
+    assert e.value.code == "bad_cwd"
