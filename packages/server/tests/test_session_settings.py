@@ -191,6 +191,39 @@ def test_opencode_sheet_is_the_free_tool_users_its_own_first():
     assert om.default_note(om.sheet(LISTING), "gateway/x") == "gateway/x"
 
 
+def test_the_setting_adds_models_after_the_free_ones(monkeypatch):
+    from agent_media_core import opencode_models as om
+
+    # Labelled, unlabelled (the listing's name, else the id's tail), chat
+    # only; a malformed id and a repeat are dropped; a free one is not doubled.
+    setting = ("venice/deepseek-v4-1-flash-uncensored=Venice uncensored, "
+               "!venice/venice-uncensored-1-2, gateway/claude-opus-4-8-liberated, "
+               "not an id, venice/venice-uncensored-1-2, opencode/big-pickle")
+    assert om.extras(LISTING, setting) == [
+        {"id": "venice/deepseek-v4-1-flash-uncensored", "label": "Venice uncensored", "note": ""},
+        {"id": "venice/venice-uncensored-1-2", "label": "venice-uncensored-1-2", "note": "Chat only"},
+        {"id": "gateway/claude-opus-4-8-liberated", "label": "Opus via the gateway", "note": ""},
+        {"id": "opencode/big-pickle", "label": "Big Pickle", "note": ""},
+    ]
+    assert om.extras(LISTING, "") == []
+
+    monkeypatch.setenv("MEDIA_OPENCODE_MODELS", setting)
+    monkeypatch.setattr(om, "_run", lambda argv, timeout: LISTING if argv[0] == "models"
+                        else '{"model": "venice/venice-uncensored-1-2"}')
+    om.forget()
+    try:
+        offered, default = om.models()
+    finally:
+        om.forget()
+    assert [m["id"] for m in offered] == [
+        "opencode/big-pickle", "openrouter/qwen/qwen3.8-27b:free",
+        "venice/deepseek-v4-1-flash-uncensored", "venice/venice-uncensored-1-2",
+        "gateway/claude-opus-4-8-liberated"]
+    assert om.default_note(offered, default) == "venice-uncensored-1-2 · Chat only"
+    # An extra is a model the running chat can be switched to.
+    assert om.label_of("venice/deepseek-v4-1-flash-uncensored", offered) == "Venice uncensored"
+
+
 def test_an_opencode_chat_takes_a_model_id_and_plan_mode():
     assert ss.clean_new("opencode", "opencode/big-pickle", "plan") == ("opencode/big-pickle", "plan")
     assert ss.clean_new("opencode", "openrouter/qwen/qwen3.8-27b:free", "") == (

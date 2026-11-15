@@ -374,7 +374,7 @@ def _configure_opencode(session: str, pane: str, model: str) -> tuple[bool, dict
                        "status": 400}
     label = opencode_models.label_of(model, _opencode_sheet(""))
     if not label:
-        return False, {"error": f"{model} is not one of this host's free models", "status": 400}
+        return False, {"error": f"{model} is not one of the models this host offers", "status": 400}
     err = panes.send(pane, "/models")
     if err:
         return False, {"error": err, "status": 502}

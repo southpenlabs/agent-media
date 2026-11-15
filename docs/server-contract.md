@@ -2515,7 +2515,10 @@ chat's sheet (`default`: Claude Code's line for its default model, or "").
 models that can call tools — its own `opencode/…` at no cost, and
 OpenRouter's `…:free` when the host has a key — `note: "Free"`, opencode's
 own first; `default` names what opencode's config starts on ("Big Pickle ·
-Free" on a bare install). Paid models are not listed. Any other agent →
+Free" on a bare install). Paid models are not listed, except those the
+host names in `MEDIA_OPENCODE_MODELS` (15 Nov 2026): after the free ones, in
+its order, `note: ""`, or `"Chat only"` for one marked as unable to call
+tools; a running chat can be switched to them too. Any other agent →
 `{"models": []}`. `/ask`'s `model` for opencode is a `provider/model` id
 (checked by pattern, then `-m <id>` on its command line); anything else is
 dropped.

@@ -11,6 +11,11 @@ edit a file is not much of one. Everything else the host has keys for can be
 hundreds of models (OpenRouter alone is 300+), so it is not listed; the
 "Default" row is whatever opencode's own config picks, named in its note.
 
+Beyond those, `MEDIA_OPENCODE_MODELS` names models the host always offers,
+after the free ones (`extras`): a gateway's, a paid or uncensored one. Its
+catalog's toolcall flag is not trusted there (Venice's says yes for a model
+that never calls a tool), so the setting says which are chat only.
+
 A price of 0 is only taken as free from those two: a custom provider (a
 local gateway) has no prices at all, which reads as 0 and means "unknown".
 
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -102,6 +108,30 @@ def sheet(listing: str) -> list[dict]:
     return [{"id": m["id"], "label": m["name"], "note": "Free"} for m in free]
 
 
+def extras(listing: str, setting: str | None = None) -> list[dict]:
+    """The models `MEDIA_OPENCODE_MODELS` adds to the sheet, in its order.
+
+    Comma-separated `provider/model`, each optionally `=Label`; a leading `!`
+    marks one that cannot call tools ("Chat only"). With no label, the
+    listing's name for it, else the id's last part. Offered whether or not
+    the listing has it (a model may be missing from a slow or failed
+    listing); a malformed id is dropped.
+    """
+    raw = os.environ.get("MEDIA_OPENCODE_MODELS", "") if setting is None else setting
+    names = {m["id"]: m["name"] for m in parse(listing)} if listing else {}
+    out: list[dict] = []
+    for item in raw.split(","):
+        item = item.strip()
+        chat = item.startswith("!")
+        mid, _, label = item.lstrip("!").partition("=")
+        mid = mid.strip()
+        if not MODEL_ID.fullmatch(mid) or any(m["id"] == mid for m in out):
+            continue
+        out.append({"id": mid, "label": label.strip() or names.get(mid) or mid.rsplit("/", 1)[-1],
+                    "note": "Chat only" if chat else ""})
+    return out
+
+
 def configured() -> str:
     """The model opencode's own config starts on, or "" (then big-pickle)."""
     try:
@@ -111,15 +141,18 @@ def configured() -> str:
 
 
 def models() -> tuple[list[dict], str]:
-    """`(sheet, default)`: the free models, and what "Default" runs."""
+    """`(sheet, default)`: the free models then the extras, and what
+    "Default" runs."""
     global _memo
     with _LOCK:
         at, memo, default = _memo
         if memo and time.time() - at < CACHE_TTL_S:
             return memo, default
-    offered = sheet(_run(["models", "--verbose"], 60.0))
+    listing = _run(["models", "--verbose"], 60.0)
+    free = sheet(listing)
+    offered = free + [m for m in extras(listing) if not any(f["id"] == m["id"] for f in free)]
     default = configured() or FREE_DEFAULT
-    if offered:
+    if free:
         with _LOCK:
             _memo = (time.time(), offered, default)
     return offered, default
@@ -129,7 +162,7 @@ def default_note(offered: list[dict], default: str) -> str:
     """The "Default" row's line: the model's name, and Free when it is."""
     for m in offered:
         if m["id"] == default:
-            return f"{m['label']} · Free"
+            return " · ".join(x for x in (m["label"], m["note"]) if x)
     return default
 
 
