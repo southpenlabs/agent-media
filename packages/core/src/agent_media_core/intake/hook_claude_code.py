@@ -1388,6 +1388,42 @@ def _detach_stdio() -> None:
         pass
 
 
+def _scope_stop(raw: str) -> bool:
+    """Run this Stop hook again in a systemd scope of its own, and True when it
+    was handed over (return now). A chat the session host runs is in the host's
+    cgroup, and so is every process its hooks start, `setsid` or not: a restart
+    of the host kills them all. A reply cut off by the restart's drain went to
+    a hook whose player was still voicing it when the host went down, so it was
+    never filed and had no Play; the host's own recovery ran the hook again in
+    the same cgroup a second before it went, with the same end (David, 15 Nov
+    2026: the turns the 14:06 and 18:02 restarts cut, "no play button"). The
+    copy reads the same payload from stdin and does everything this one would;
+    `MEDIA_HOOK_SCOPED` keeps it from handing over again. Outside a systemd
+    unit (`procinfo.outliving_service` changes nothing there), or when it
+    cannot start the copy, False: the work runs here, as before."""
+    if os.environ.get("MEDIA_HOOK_SCOPED") or os.environ.get("MEDIA_HOOK_NO_DETACH") \
+            or os.environ.get("MEDIA_HOOK_NO_EARLY_DETACH"):
+        return False
+    try:
+        import subprocess
+
+        from ..procinfo import outliving_service
+
+        cmd = [sys.executable, "-m", "agent_media_core.intake.hook_claude_code"]
+        scoped = outliving_service(cmd)
+        if scoped == cmd:
+            return False
+        proc = subprocess.Popen(scoped, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True,
+                                env={**os.environ, "MEDIA_HOOK_SCOPED": "1"})
+        proc.stdin.write(raw.encode("utf-8"))
+        proc.stdin.close()
+        return True
+    except Exception as e:  # noqa: BLE001 — unsure: do it here
+        log.warning("hook: could not hand the Stop to a scope of its own: %s", e)
+        return False
+
+
 def _detach_early() -> bool:
     """Leave Claude Code's process group before the Stop path does anything.
 
@@ -1950,6 +1986,8 @@ def main() -> int:
         if event_name == "Notification":
             return _handle_notification(payload)
         if event_name == "Stop":
+            if _scope_stop(raw):
+                return 0
             if _detach_early():
                 return 0
             return _handle_stop(payload)

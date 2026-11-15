@@ -91,3 +91,28 @@ def test_a_hook_killed_before_handing_on_is_recovered(monkeypatch):
 def test_another_sessions_claim_does_not_count(monkeypatch):
     _claim_as(monkeypatch, "sid-2", done=True)
     assert len(_run(monkeypatch, [])) == 1
+
+
+# ---- whether the recovery filed it (15 Nov 2026) ----------------------------------
+# "Reply recovered" was logged whatever the hook did; a restart then cut the
+# recovered reply off unfiled, and its bubble had no Play. It is read from the
+# history now, after the hook has handed its work on.
+
+def test_a_filed_reply_is_confirmed(monkeypatch, caplog):
+    now = time.time()
+    monkeypatch.setattr(core_state, "StateStore",
+                        lambda: _Store([{"id": 7, "started_at": now, "extras": {"source_session": "sid-1"}}]))
+    with caplog.at_level("INFO", logger="agent-media.sessiond"):
+        assert sessiond.confirm_recovered("sid-1", now - 1) is True
+    assert "reply recovered (row 7)" in caplog.text
+
+
+def test_no_reply_filed_is_said(monkeypatch, caplog):
+    now = time.time()
+    monkeypatch.setattr(sessiond, "RECOVER_FILED_S", 0.0)
+    monkeypatch.setattr(core_state, "StateStore",
+                        lambda: _Store([{"id": 8, "started_at": now, "extras": {"source_session": "other"}},
+                                        {"id": 9, "started_at": now, "extras": {"session": "sid-1", "listener": True}}]))
+    with caplog.at_level("INFO", logger="agent-media.sessiond"):
+        assert sessiond.confirm_recovered("sid-1", now - 1) is False
+    assert "recovery filed no reply" in caplog.text and "reply recovered" not in caplog.text

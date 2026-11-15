@@ -1473,6 +1473,38 @@ def _one_live_copy(session: str) -> None:
                       "close it there first, or reply in it", "live_elsewhere", holder=h)
 
 
+#: How long a recovered reply may take to be filed (rendered first).
+RECOVER_FILED_S = 120.0
+
+
+def confirm_recovered(sid: str, at: float) -> bool:
+    """Log whether the recovery filed the reply: True once a row of `sid`'s
+    since `at` is in the speech history, False (and a warning) when none is
+    within RECOVER_FILED_S."""
+    from agent_media_core.state import StateStore
+
+    deadline = time.time() + RECOVER_FILED_S
+    while True:
+        try:
+            for row in StateStore().recent_history(sink="speech", limit=60):
+                if (row.get("started_at") or 0) < at - 5:
+                    break
+                ex = row.get("extras") or {}
+                if isinstance(ex, str):
+                    ex = json.loads(ex or "{}")
+                if (ex.get("source_session") == sid or ex.get("session") == sid) \
+                        and not ex.get("listener"):
+                    log.info("sessiond: %s reply recovered (row %s)", sid[:8], row.get("id"))
+                    return True
+        except Exception:  # noqa: BLE001 — unread this time; try again
+            log.debug("sessiond: recover %s: history unread", sid[:8], exc_info=True)
+        if time.time() >= deadline:
+            log.warning("sessiond: %s recovery filed no reply within %.0f s: its bubble "
+                        "has no Play", sid[:8], RECOVER_FILED_S)
+            return False
+        time.sleep(3.0)
+
+
 class Supervisor:
     """Every headless session this host holds, and the processes behind them."""
 
@@ -2914,9 +2946,16 @@ class Supervisor:
                            input=json.dumps(payload), text=True, cwd=cwd or None,
                            env={**env, "MEDIA_HOOK_HOLD": "1"}, timeout=120,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log.info("sessiond: %s reply recovered (its Stop hook left no trace)", sid[:8])
         except Exception:  # noqa: BLE001 — best effort, as the hook itself is
             log.warning("sessiond: recover %s failed", sid[:8], exc_info=True)
+            return
+        # The hook hands its work on (its own scope, then a detached child), so
+        # its exit says nothing: whether the reply was filed is read from the
+        # history. "Recovered" was logged whatever happened, and on 15 Nov 2026
+        # it was logged for a reply the restart then cut off unfiled.
+        threading.Thread(target=confirm_recovered, args=(sid, at),
+                         daemon=True, name=f"recovered:{sid[:8]}").start()
+
 
     # -- capacity --
 
