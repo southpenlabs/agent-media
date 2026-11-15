@@ -256,3 +256,16 @@ in `android/shared-aidl/`, behind a user-granted permission. 27 unit tests;
 debug APK 40 MB. Not yet on a device; installed only after the Termux trial
 ends (same test account). Still to come: notifications for new messages,
 release signing.
+
+## On p8a, and step 4 begun (16 Nov 2026)
+
+The Termux run stayed connected all night (a message at 07:46 arrived; the
+logger itself hung on a termux-api call at 23:47, so no night figures).
+Then (David: "OK let's do it") the Termux bridge was signed out and the app
+installed on p8a and signed in to the test account through its own screen:
+connected, ~180 MB for the app process and ~24 MB for the core; a 24 h log
+from red2 over adb (`~/.local/state/bridges-trial/app.tsv`) reports to this
+thread when done. Step 4, Sasonica showing these chats, is the
+sasonica-app session's (agent-mail #634): the companion's bound service is
+at contract v2 (`IBridges.aidl` at sasonica-bridges ed6ea76: chats,
+messages, send, react, read, media, events; failures throw).
