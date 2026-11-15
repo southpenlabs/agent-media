@@ -203,3 +203,8 @@ after asking whether Beeper does one: it does not — its bridges run inside
 the Beeper app, which only Beeper may do (the bridges' `LICENSE.exceptions`).
 Code starts in `~/projects/sasonica-bridges` on red2, AGPL-3.0; private until
 the lawyer has answered who publishes it.
+Where it lives (David, 15 Nov 2026, "agreed"): its own private repo on his
+account, `davidj4tech/sasonica-bridges`, beside `sasonica-personal-use` (same
+owner and licence, but a server add-on for one install, where this is an
+Android app for public users); the add-on's README to point at it as the
+phone's `messaging-bridges`.
