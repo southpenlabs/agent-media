@@ -240,3 +240,19 @@ Meta's account chooser can land a password sign-in on another account
 linked to the same email (it did, and was signed out at once) — the app
 must show the signed-in name before going further. A day's trial of memory,
 battery and reconnects is running (`scripts/watch.sh` → `stats.tsv`).
+
+## Step 3, the app shell (15 Nov 2026)
+
+`android/` in sasonica-bridges (David: "Start the app shell"): "Sasonica
+Bridges", `org.sasonica.bridges`. The Go core ships as
+`lib/arm64-v8a/libsasonicabridges.so` and is exec'd from nativeLibraryDir
+(Syncthing-Android's way); a `specialUse` foreground service runs it,
+restarts it with backoff and shows Connected / Reconnecting / Needs sign-in;
+Compose screens: each account's signed-in name first with "Is this the
+right account?" and Sign out, and a sign-in driven by the bridge's own steps
+(masked secrets, choice lists, QR, a cookie WebView cleared afterwards).
+The AIDL for Sasonica (`IBridges`: status, chats, a callback) is Apache-2.0
+in `android/shared-aidl/`, behind a user-granted permission. 27 unit tests;
+debug APK 40 MB. Not yet on a device; installed only after the Termux trial
+ends (same test account). Still to come: notifications for new messages,
+release signing.
