@@ -10959,9 +10959,6 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("resume").set_defaults(func=cmd_resume)
     sub.add_parser("stop").set_defaults(func=cmd_stop)
     sub.add_parser("mute", help="toggle mute").set_defaults(func=cmd_mute)
-    p_mp.add_argument("--thread", metavar="SESSION_ID",
-                      help="mute a conversation by its session id (its speech level "
-                           "goes to quiet); the default outside tmux is this agent's own")
 
     p_mp = sub.add_parser("mute-pane",
                           help="durable per-pane (or --session) speech mute")
@@ -10973,6 +10970,9 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="target the currently/last speaking pane (legacy)")
     p_mp.add_argument("--subject", action="store_true",
                       help="target the popup subject: now-playing pane, else caller")
+    p_mp.add_argument("--thread", metavar="SESSION_ID",
+                      help="mute a conversation by its session id (its speech level "
+                           "goes to quiet); the default outside tmux is this agent's own")
     p_mp.add_argument("state", nargs="?", choices=["on", "off", "toggle"],
                       default="toggle")
     p_mp.set_defaults(func=cmd_mute_pane)
