@@ -2106,7 +2106,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         qs = parse_qs(query)
         ok, detail = threads.commands_for(qs.get("session", [""])[0],
                                           qs.get("project", [""])[0], _bearer(h),
-                                          cwd=qs.get("cwd", [""])[0])
+                                          cwd=qs.get("cwd", [""])[0],
+                                          agent=qs.get("agent", [""])[0])
         # One line per ask: this is a new route and the app is the only
         # caller, so "did the box even ask?" is the first question every
         # time it does not appear.

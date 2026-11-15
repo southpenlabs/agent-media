@@ -117,7 +117,7 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
 
 
 def commands_for(session: str, project: str, bearer: str,
-                 cwd: str = "") -> tuple[bool, dict]:
+                 cwd: str = "", agent: str = "") -> tuple[bool, dict]:
     """The slash menu for a conversation, or for a project about to start one.
 
     The menu belongs to a directory, not to a conversation: a project's own
@@ -142,7 +142,7 @@ def commands_for(session: str, project: str, bearer: str,
     cwd = cwd or os.path.expanduser("~")
     from agent_media_core import harnesses
 
-    if session and harnesses.is_opencode(session):
+    if (session and harnesses.is_opencode(session)) or (not session and agent == "opencode"):
         # opencode's own commands and skills, as its server lists them
         # (sessiond_opencode `Host.commands`), not Claude Code's.
         from .driver.headless import call

@@ -137,3 +137,32 @@ def test_an_opencode_limit_is_its_providers_not_every_opencode_chats(db, tmp_pat
     s = sessiond.Session(OC, "/p", agent="opencode", model="opencode/big-pickle")
     assert s.quota_agent() == "opencode:opencode"
     assert sessiond.Session("x", "/p").quota_agent() == "claude"
+
+
+def test_the_slash_menu_before_any_server_answered_is_read_from_disk(tmp_path, monkeypatch):
+    from agent_media_server import sessiond_opencode as oc
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    cfg = home / ".config" / "opencode"
+    (cfg / "command").mkdir(parents=True)
+    (cfg / "command" / "hello.md").write_text("---\ndescription: Say hello\n---\nHi $ARGUMENTS\n")
+    (cfg / "skills" / "demo").mkdir(parents=True)
+    (cfg / "skills" / "demo" / "SKILL.md").write_text("---\nname: demo\ndescription: A demo\n---\n")
+    (cfg / "opencode.json").write_text('{"command": {"ship": {"description": "Ship it"}}}')
+    proj = tmp_path / "proj"
+    (proj / ".opencode" / "commands").mkdir(parents=True)
+    (proj / ".opencode" / "commands" / "deploy.md").write_text("---\ndescription: Deploy\n---\n")
+    (proj / ".claude" / "skills" / "local").mkdir(parents=True)
+    (proj / ".claude" / "skills" / "local" / "SKILL.md").write_text("---\ndescription: Local\n---\n")
+    menu = {c["name"]: (c["group"], c["description"]) for c in oc.disk_commands(str(proj))}
+    assert menu["init"][0] == "Commands" and menu["review"][0] == "Commands"
+    assert menu["hello"] == ("Commands", "Say hello") and menu["ship"] == ("Commands", "Ship it")
+    assert menu["deploy"] == ("Commands", "Deploy")
+    assert menu["demo"] == ("Skills", "A demo") and menu["local"] == ("Skills", "Local")
+    # A stopped server with nothing kept gives the same.
+    host = oc.Host.__new__(oc.Host)
+    host.proc = None
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    assert {c["name"] for c in host.commands(str(proj))} == set(menu)

@@ -169,6 +169,50 @@ def menu_of(rows) -> list[dict]:
     return out
 
 
+#: opencode's own commands, as 1.19.5 lists them.
+BUILTIN_COMMANDS = (("init", "guided AGENTS.md setup"),
+                    ("review", "review changes [commit|branch|pr], defaults to uncommitted"))
+
+
+def disk_commands(cwd: str) -> list[dict]:
+    """The slash menu read from disk, for a folder where no opencode server
+    has answered yet (`Host.commands`): its built-ins, the user's and the
+    project's command files (`command/` or `commands/` under
+    ~/.config/opencode and each `.opencode` from `cwd` up), opencode.json's
+    `command` entries, and the skills opencode loads (its own skill folders
+    and Claude's). The server's own list replaces it once one runs there."""
+    from pathlib import Path
+
+    from agent_media_core.slash_menu import _describe
+
+    home = Path.home()
+    cfg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "opencode"
+    here = Path(cwd or home)
+    ups = [here, *here.parents]
+    roots = [cfg] + [d / ".opencode" for d in ups if (d / ".opencode").is_dir()]
+    rows: dict[str, dict] = {n: {"name": n, "description": d, "source": "command"}
+                             for n, d in BUILTIN_COMMANDS}
+    for root in roots:
+        for sub in ("command", "commands"):
+            for f in sorted((root / sub).glob("*.md")):
+                rows[f.stem] = {"name": f.stem, "description": _describe(f), "source": "command"}
+    try:
+        conf = json.loads((cfg / "opencode.json").read_text()).get("command") or {}
+        for name, c in conf.items() if isinstance(conf, dict) else []:
+            rows[str(name)] = {"name": str(name), "source": "command",
+                               "description": str((c or {}).get("description") or "")
+                               if isinstance(c, dict) else ""}
+    except (OSError, ValueError, AttributeError):
+        pass
+    skill_roots = [cfg / "skills", home / ".claude" / "skills"] + \
+        [d / sub / "skills" for d in ups for sub in (".opencode", ".claude")]
+    for root in skill_roots:
+        for f in sorted(root.glob("*/SKILL.md")):
+            rows.setdefault(f.parent.name, {"name": f.parent.name, "description": _describe(f),
+                                            "source": "skill"})
+    return menu_of(list(rows.values()))
+
+
 #: A command or skill name opencode would list: what `/name` is matched by.
 COMMAND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
 
@@ -329,7 +373,8 @@ class Host:
         """The slash menu for an opencode chat in `cwd`: asked of the server
         while it runs, and kept, so a chat whose server is stopped (no chat
         attached) still has the list it last had. Never starts the server
-        (each takes ~480 MB): before any opencode chat ran there, []."""
+        (each takes ~480 MB): before any opencode chat ran there, what its
+        files say (`disk_commands`)."""
         path = _commands_path(cwd)
         if self.up:
             try:
@@ -348,7 +393,7 @@ class Host:
             kept = json.loads(path.read_text())
             return list(kept.get("commands") or [])
         except (OSError, ValueError, AttributeError):
-            return []
+            return disk_commands(cwd)
 
     def _events(self, proc: subprocess.Popen) -> None:
         """Follow `/global/event` while this server runs; reconnect if it drops."""
