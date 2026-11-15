@@ -31,6 +31,13 @@ opencode session is attached the server is stopped, and the next message
 starts it again. The server is bound to 127.0.0.1 with a password of its own
 (`OPENCODE_SERVER_PASSWORD`): on a phone every app can reach loopback.
 
+**opencode 2** (docs/proposals/opencode-v2.md) is told apart when the server
+starts (`GET /api/info` answers with a 2.x `version`): its routes live under
+`/api/`, a session's folder is a `location`, questions are forms, and a turn
+ends in `session.execution.*`. `Host`'s session methods speak whichever it
+is, and `v2_events` turns a v2 event into the v1 payloads `Supervisor.
+_on_oc_event` reads, so the rest of sessiond does not know the difference.
+
 Config (env): MEDIA_SESSIOND_OPENCODE (the binary; default
 `harnesses.program("opencode")`), MEDIA_SESSIOND_OPENCODE_START (seconds to
 wait for it to answer; 60), MEDIA_HEADLESS_OPENCODE_MODEL (`provider/model`
@@ -147,6 +154,134 @@ def question_answers(questions: list[dict], answers: dict) -> list[list[str]]:
     return out
 
 
+# -- opencode 2 ---------------------------------------------------------------
+
+#: v1 permission names as v2 calls them (its migration notes); the rest are
+#: the same in both.
+_V2_ACTION = {"bash": "shell", "task": "subagent", "write": "edit", "patch": "edit"}
+_V1_PERM = {"shell": "bash", "subagent": "task"}
+
+
+def v2_rules(rules: list[dict] | None) -> list[dict] | None:
+    """`ruleset()`'s v1 rules as v2's ordered `permissions` (the last match
+    wins in both). A v1 name with no v2 twin (`todoread`) does no harm."""
+    if not rules:
+        return None
+    out, seen = [], set()
+    for r in rules:
+        rule = {"action": _V2_ACTION.get(r["permission"], r["permission"]),
+                "resource": r["pattern"], "effect": r["action"]}
+        key = (rule["action"], rule["resource"], rule["effect"])
+        if key not in seen:
+            seen.add(key)
+            out.append(rule)
+    return out
+
+
+def v2_permission_props(d: dict) -> dict:
+    """A v2 permission request as v1's `permission.asked` properties
+    (`request_of` reads them)."""
+    meta = d.get("metadata") if isinstance(d.get("metadata"), dict) else {}
+    action = str(d.get("action") or "")
+    resources = [str(x) for x in d.get("resources") or []]
+    perm = _V1_PERM.get(action, action)
+    if perm == "bash" and "command" not in meta and resources:
+        meta = {**meta, "command": " ".join(resources)}
+    src = d.get("source") if isinstance(d.get("source"), dict) else {}
+    return {"id": str(d.get("id") or ""), "sessionID": str(d.get("sessionID") or ""),
+            "permission": perm, "patterns": resources, "metadata": meta,
+            "tool": {"callID": str(src.get("id") or "")}}
+
+
+def v2_question_props(form: dict) -> dict:
+    """A v2 form as v1's `question.asked` properties: a field each, its
+    description the question and its title the header; a multiselect is a
+    multi-select."""
+    qs = []
+    for f in form.get("fields") or []:
+        if not isinstance(f, dict) or f.get("hidden"):
+            continue
+        qs.append({"question": str(f.get("description") or f.get("title") or f.get("key") or ""),
+                   "header": str(f.get("title") or ""),
+                   "options": [{"label": str(o.get("label") or o.get("value") or ""),
+                                "description": str(o.get("description") or "")}
+                               for o in f.get("options") or [] if isinstance(o, dict)],
+                   "multiple": f.get("type") == "multiselect"})
+    tool = ((form.get("metadata") or {}).get("tool") or {}) if isinstance(form.get("metadata"), dict) else {}
+    return {"id": str(form.get("id") or ""), "sessionID": str(form.get("sessionID") or ""),
+            "questions": qs, "tool": {"callID": str((tool or {}).get("id") or "")}}
+
+
+def v2_form_answer(fields: list[dict], questions: list[dict], answers: dict) -> dict:
+    """Claude's answers (`question_answers`' input) as a v2 form's `answer`:
+    each visible field in order takes its question's labels, as the option's
+    value; words that are no label go as they are (a field with `custom`)."""
+    visible = [f for f in fields if isinstance(f, dict) and not f.get("hidden")]
+    picked = question_answers(questions, answers)
+    out: dict = {}
+    for f, labels in zip(visible, picked):
+        by_label = {str(o.get("label") or ""): str(o.get("value") or o.get("label") or "")
+                    for o in f.get("options") or [] if isinstance(o, dict)}
+        vals = [by_label.get(x, x) for x in labels]
+        if f.get("type") == "multiselect":
+            out[f["key"]] = [v for v in vals if v]
+        elif f.get("type") == "boolean":
+            out[f["key"]] = (vals[0] if vals else "").strip().lower() in ("yes", "true", "y", "1")
+        elif f.get("type") in ("number", "integer"):
+            try:
+                out[f["key"]] = int(vals[0]) if f.get("type") == "integer" else float(vals[0])
+            except (ValueError, IndexError):
+                continue
+        else:
+            out[f["key"]] = vals[0] if vals else ""
+    return out
+
+
+def v2_events(obj: dict) -> list[dict]:
+    """One v2 event as the v1 payloads (`{type, properties}`) it stands for;
+    none for the rest (deltas, catalog updates). A turn's end is its
+    `session.execution.*`: succeeded or interrupted is v1's idle, failed its
+    idle and then its error. v2's own `session.idle` is ignored, so an end
+    is never counted twice."""
+    t = str(obj.get("type") or "")
+    d = obj.get("data") if isinstance(obj.get("data"), dict) else {}
+    sid = str(d.get("sessionID") or "")
+    if t == "session.execution.started":
+        return [{"type": "session.status",
+                 "properties": {"sessionID": sid, "status": {"type": "busy"}}}]
+    if t in ("session.execution.succeeded", "session.execution.interrupted"):
+        return [{"type": "session.idle", "properties": {"sessionID": sid}}]
+    if t == "session.execution.failed":
+        err = d.get("error") if isinstance(d.get("error"), dict) else {}
+        # The idle first: it records a success, which the error then replaces.
+        return [{"type": "session.idle", "properties": {"sessionID": sid}},
+                {"type": "session.error",
+                 "properties": {"sessionID": sid,
+                                "error": {"name": str(err.get("type") or "error"),
+                                          "data": {"message": str(err.get("message") or "")}}}}]
+    if t == "permission.asked":
+        return [{"type": "permission.asked", "properties": v2_permission_props(d)}]
+    if t == "permission.replied":
+        return [{"type": "permission.replied",
+                 "properties": {"sessionID": sid, "requestID": str(d.get("requestID") or "")}}]
+    if t == "form.created":
+        form = d.get("form") if isinstance(d.get("form"), dict) else {}
+        return [{"type": "question.asked", "properties": v2_question_props(form)}]
+    if t == "form.replied":
+        return [{"type": "question.replied",
+                 "properties": {"sessionID": sid, "requestID": str(d.get("id") or ""),
+                                "answers": d.get("answer") or {}}}]
+    if t == "form.cancelled":
+        return [{"type": "question.rejected",
+                 "properties": {"sessionID": sid, "requestID": str(d.get("id") or "")}}]
+    return []
+
+
+def _data(out):
+    """v2 wraps an answer in `{"data": …}`."""
+    return out.get("data") if isinstance(out, dict) and "data" in out else out
+
+
 def _commands_path(cwd: str):
     import hashlib
 
@@ -238,6 +373,9 @@ class Host:
         self.lock = threading.Lock()
         self.stderr_tail: collections.deque = collections.deque(maxlen=40)
         self.stopping = False
+        #: The running server is opencode 2 (`GET /api/info`, at start).
+        self.v2 = False
+        self.version = ""
         #: Set while `/global/event` is being read: a prompt sent before it
         #: is would lose its first events (a fast turn's idle, a permission).
         self.listening = threading.Event()
@@ -300,12 +438,14 @@ class Host:
                 tail = " / ".join(list(self.stderr_tail)[-3:])
                 raise Refused(f"opencode's server did not start{': ' + tail if tail else ''}",
                               "spawn_failed")
+            self.v2, self.version = self._detect()
             self.listening.clear()
             threading.Thread(target=self._events, args=(proc,), daemon=True,
                              name="sessiond-opencode-events").start()
             if not self.listening.wait(10):
                 log.warning("sessiond: opencode's event stream is not connected yet")
-            log.info("sessiond: opencode serve pid %d on 127.0.0.1:%d", proc.pid, self.port)
+            log.info("sessiond: opencode serve %s pid %d on 127.0.0.1:%d",
+                     self.version or "1.x", proc.pid, self.port)
             return proc
 
     def _drain(self, proc: subprocess.Popen) -> None:
@@ -380,7 +520,9 @@ class Host:
         path = _commands_path(cwd)
         if self.up:
             try:
-                rows = menu_of(self.call("GET", "/command", directory=cwd, timeout=10.0))
+                rows = menu_of(_data(self.call("GET", "/api/command" + self._where(cwd),
+                                               timeout=10.0)) if self.v2 else
+                               self.call("GET", "/command", directory=cwd, timeout=10.0))
             except Exception as e:  # noqa: BLE001 — the kept list will do
                 log.info("sessiond: opencode commands for %s: %s", cwd, e)
                 rows = []
@@ -397,10 +539,184 @@ class Host:
         except (OSError, ValueError, AttributeError):
             return disk_commands(cwd)
 
+    def _detect(self) -> tuple[bool, str]:
+        """(is opencode 2, its version): 2 answers `/api/info`; 1 does not
+        (its catch-all serves the web app there, not JSON)."""
+        try:
+            status, out = self._call("GET", "/api/info", timeout=5.0)
+        except OSError:
+            return False, ""
+        if status == 200 and isinstance(out, dict) and isinstance(out.get("version"), str):
+            v = out["version"]
+            return v.split(".")[0].isdigit() and int(v.split(".")[0]) >= 2, v
+        return False, ""
+
+    @staticmethod
+    def _where(cwd: str) -> str:
+        """v2's `location` as a query (deepObject)."""
+        return "?" + urllib.parse.urlencode({"location[directory]": cwd}) if cwd else ""
+
+    # -- a session, in whichever version runs --
+
+    def create(self, cwd: str, rules: list[dict] | None, model: str = "") -> str:
+        """A new session in `cwd` under `rules` (v1's shape); its id."""
+        if self.v2:
+            body: dict = {"location": {"directory": cwd}}
+            if rules:
+                body["permissions"] = v2_rules(rules)
+            ref = model_ref(model)
+            if ref:
+                body["model"] = {"id": ref["modelID"], "providerID": ref["providerID"]}
+            info = _data(self.call("POST", "/api/session", body))
+        else:
+            info = self.call("POST", "/session", {"permission": rules} if rules else {},
+                             directory=cwd)
+        return str((info or {}).get("id") or "")
+
+    def fork(self, src: str, at: str, cwd: str, rules: list[dict] | None) -> str:
+        """`src`'s history before message `at` (all of it when empty) as a
+        new session; given `rules` before its first word."""
+        if self.v2:
+            info = _data(self.call("POST", f"/api/session/{src}/fork",
+                                   {"before": at} if at else {}))
+            fid = str((info or {}).get("id") or "")
+            if fid and rules:
+                self.call("PATCH", f"/api/session/{fid}", {"permissions": v2_rules(rules)})
+            return fid
+        info = self.call("POST", f"/session/{src}/fork", {"messageID": at} if at else {},
+                         directory=cwd)
+        fid = str((info or {}).get("id") or "")
+        if fid and rules:
+            # A fork takes no rules of its own.
+            self.call("PATCH", f"/session/{fid}", {"permission": rules}, directory=cwd)
+        return fid
+
+    def prompt(self, sid: str, cwd: str, text: str, *, model: str = "", agent: str = "",
+               system: str = "") -> None:
+        """Send `text`, without waiting for the turn. v2's prompt carries
+        only the words: the model and agent are the session's, set first,
+        and a persona is an instructions entry of the session's own."""
+        ref = model_ref(model)
+        if self.v2:
+            if ref:
+                self.call("POST", f"/api/session/{sid}/model",
+                          {"model": {"id": ref["modelID"], "providerID": ref["providerID"]}})
+            self.call("POST", f"/api/session/{sid}/agent", {"agent": agent or "build"})
+            if system:
+                self.call("PUT", f"/api/experimental/session/{sid}/instructions/entries/"
+                          "agent-media-persona", {"value": system})
+            self.call("POST", f"/api/session/{sid}/prompt", {"text": text})
+            return
+        body: dict = {"parts": [{"type": "text", "text": text}]}
+        if ref:
+            body["model"] = ref
+        if agent:
+            body["agent"] = agent
+        if system:
+            body["system"] = system
+        self.call("POST", f"/session/{sid}/prompt_async", body, directory=cwd)
+
+    def command(self, sid: str, cwd: str, name: str, arguments: str, *, model: str = "",
+                agent: str = "") -> None:
+        """Run command `name`. v1 answers only when the turn is over (the
+        caller runs it on a thread of its own); v2 at once."""
+        if self.v2:
+            ref = model_ref(model)
+            if ref:
+                self.call("POST", f"/api/session/{sid}/model",
+                          {"model": {"id": ref["modelID"], "providerID": ref["providerID"]}})
+            if agent:
+                self.call("POST", f"/api/session/{sid}/agent", {"agent": agent})
+            self.call("POST", f"/api/session/{sid}/command", {"name": name, "text": arguments})
+            return
+        body: dict = {"command": name, "arguments": arguments}
+        if model and "/" in model:
+            body["model"] = model
+        if agent:
+            body["agent"] = agent
+        self.call("POST", f"/session/{sid}/command", body, directory=cwd, timeout=6 * 3600.0)
+
+    def abort(self, sid: str, cwd: str):
+        """End the session's turn; opencode's receipt."""
+        if self.v2:
+            return self.call("POST", f"/api/session/{sid}/interrupt?resume=false")
+        return self.call("POST", f"/session/{sid}/abort", directory=cwd)
+
+    def rename(self, sid: str, cwd: str, title: str) -> bool:
+        """Whether opencode took the title: v2's sessions take none from a
+        client (its own title stands)."""
+        if self.v2:
+            return False
+        self.call("PATCH", f"/session/{sid}", {"title": title}, directory=cwd)
+        return True
+
+    def reply_permission(self, sid: str, cwd: str, rid: str, deny: bool, message: str = "") -> None:
+        if self.v2:
+            body: dict = {"decision": "reject" if deny else "once"}
+            if deny and message:
+                body["message"] = message
+            self.call("POST", f"/api/session/{sid}/permission/{rid}/reply", body)
+            return
+        body = {"reply": "reject" if deny else "once"}
+        if deny and message:
+            body["message"] = message
+        self.call("POST", f"/permission/{rid}/reply", body, directory=cwd)
+
+    def reply_question(self, sid: str, cwd: str, rid: str, questions: list[dict],
+                       answers: dict) -> None:
+        if self.v2:
+            form = _data(self.call("GET", f"/api/session/{sid}/form/{rid}")) or {}
+            self.call("POST", f"/api/session/{sid}/form/{rid}/reply",
+                      {"answer": v2_form_answer(form.get("fields") or [], questions, answers)})
+            return
+        self.call("POST", f"/question/{rid}/reply",
+                  {"answers": question_answers(questions, answers)}, directory=cwd)
+
+    def reject_question(self, sid: str, cwd: str, rid: str) -> None:
+        if self.v2:
+            self.call("DELETE", f"/api/session/{sid}/form/{rid}")
+            return
+        self.call("POST", f"/question/{rid}/reject", directory=cwd)
+
+    def snapshot(self, cwd: str) -> tuple[dict, list[tuple[str, dict]]]:
+        """What the server has now for `cwd`: `{session id: "busy"|…}` for
+        those working, and its open requests as `(kind, v1 properties)`."""
+        if self.v2:
+            active = _data(self.call("GET", "/api/session/active", timeout=10)) or {}
+            status = {k: {"type": "busy"} for k in active} if isinstance(active, dict) else {}
+            q = self._where(cwd)
+            asked = [("permission", v2_permission_props(p)) for p in
+                     _data(self.call("GET", "/api/permission/request" + q, timeout=10)) or []
+                     if isinstance(p, dict)]
+            asked += [("question", v2_question_props(f)) for f in
+                      _data(self.call("GET", "/api/form" + q, timeout=10)) or []
+                      if isinstance(f, dict)]
+            return status, asked
+        status = self.call("GET", "/session/status", directory=cwd, timeout=10) or {}
+        asked = [("permission", p) for p in
+                 self.call("GET", "/permission", directory=cwd, timeout=10) or []]
+        asked += [("question", q) for q in
+                  self.call("GET", "/question", directory=cwd, timeout=10) or []]
+        return (status if isinstance(status, dict) else {}), asked
+
+    def parent_of(self, sid: str) -> str:
+        """v2: the session `sid` is a child of ("" when none or not found)."""
+        try:
+            info = _data(self.call("GET", f"/api/session/{sid}", timeout=10)) or {}
+        except Exception:  # noqa: BLE001 — not found is no parent
+            return ""
+        return str(info.get("parentID") or "")
+
+    def move(self, sid: str, cwd: str) -> None:
+        """v2: the session's folder becomes `cwd` (v1 needs export and
+        import, core opencode_move.py)."""
+        self.call("POST", f"/api/session/{sid}/move", {"directory": cwd})
+
     def _events(self, proc: subprocess.Popen) -> None:
         """Follow `/global/event` while this server runs; reconnect if it drops."""
         while proc.poll() is None and self.proc is proc:
-            req = urllib.request.Request(f"http://127.0.0.1:{self.port}/global/event",
+            path = "/api/event" if self.v2 else "/global/event"
+            req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}",
                                          headers={"Authorization": self._auth(),
                                                   "Accept": "text/event-stream"})
             try:
@@ -415,8 +731,16 @@ class Host:
                             obj = json.loads(raw[5:])
                         except ValueError:
                             continue
-                        payload = obj.get("payload") if isinstance(obj, dict) else None
-                        if isinstance(payload, dict) and payload.get("type") in _TRACKED:
+                        if not isinstance(obj, dict):
+                            continue
+                        if self.v2:
+                            payloads = v2_events(obj)
+                        else:
+                            payload = obj.get("payload")
+                            payloads = [payload] if isinstance(payload, dict) else []
+                        for payload in payloads:
+                            if payload.get("type") not in _TRACKED:
+                                continue
                             try:
                                 self.sup._on_oc_event(payload)
                             except Exception:  # noqa: BLE001 — one odd event must not end the reader

@@ -3738,7 +3738,10 @@ class Supervisor:
                 s = self._get(session)
                 was = s.live
                 if was and s.state == "working":
-                    self._oc_call_quiet("POST", f"/session/{s.id}/abort", directory=s.cwd)
+                    try:
+                        self.oc.abort(s.id, s.cwd)
+                    except Refused as e:
+                        log.info("sessiond: opencode abort %s: %s", s.id[:12], e.error)
                 self._oc_detach(s, "closed")
                 self._oc_stop_if_unused()
                 return {"session": session, "closed": was, **self._brief(s)}
@@ -3817,12 +3820,6 @@ class Supervisor:
                                   for x in self.sessions.values()):
             self.oc.stop()
 
-    def _oc_call_quiet(self, method: str, path: str, **kw) -> None:
-        try:
-            self.oc.call(method, path, **kw)
-        except Refused as e:
-            log.info("sessiond: opencode %s %s: %s", method, path, e.error)
-
     def _oc_host_exited(self, proc: subprocess.Popen, rc: int) -> None:
         """The server ended: its sessions are no longer live — parked when it
         was stopped here, ended when it went by itself."""
@@ -3845,20 +3842,11 @@ class Supervisor:
         if not os.path.isdir(cwd):
             raise Refused(f"no such directory {cwd!r}", "bad_cwd")
         proc = self.oc.ensure()
-        body: dict = {}
         rules = oc.ruleset(permissions)
         if fork_from:
-            info = self.oc.call("POST", f"/session/{fork_from}/fork",
-                                {"messageID": fork_at} if fork_at else {}, directory=cwd)
-            fid = str((info or {}).get("id") or "")
-            if fid and rules:
-                # A fork takes no rules of its own; given them before its first word.
-                self.oc.call("PATCH", f"/session/{fid}", {"permission": rules}, directory=cwd)
+            sid = self.oc.fork(fork_from, fork_at, cwd, rules)
         else:
-            if rules:
-                body["permission"] = rules
-            info = self.oc.call("POST", "/session", body, directory=cwd)
-        sid = str((info or {}).get("id") or "")
+            sid = self.oc.create(cwd, rules, model)
         if not sid:
             raise Refused("opencode did not make a session", "spawn_failed")
         with self.lock:
@@ -3903,18 +3891,11 @@ class Supervisor:
         if cmd:
             self._oc_command(s, *cmd)
         else:
-            body: dict = {"parts": [{"type": "text", "text": text}]}
-            ref = oc.model_ref(s.model)
-            if ref:
-                body["model"] = ref
             # Plan mode is opencode's own `plan` agent (no edits, asks before
             # running commands); otherwise its default agent (`build`).
-            if s.mode == "plan":
-                body["agent"] = "plan"
-            system = _read_text(s.system_prompt_file)
-            if system:
-                body["system"] = system
-            self.oc.call("POST", f"/session/{s.id}/prompt_async", body, directory=s.cwd)
+            self.oc.prompt(s.id, s.cwd, text, model=s.model,
+                           agent="plan" if s.mode == "plan" else "",
+                           system=_read_text(s.system_prompt_file))
         with self.lock:
             s.turns += 1
             if not s.first_text:
@@ -3935,16 +3916,10 @@ class Supervisor:
         the turn is over, so it is called on a thread of its own; the turn's
         states come from the event stream as a prompt's do. A refusal is
         logged and the chat put back to waiting."""
-        body: dict = {"command": name, "arguments": arguments}
-        if s.model and "/" in s.model:
-            body["model"] = s.model
-        if s.mode == "plan":
-            body["agent"] = "plan"
-
         def run() -> None:
             try:
-                self.oc.call("POST", f"/session/{s.id}/command", body, directory=s.cwd,
-                             timeout=6 * 3600.0)
+                self.oc.command(s.id, s.cwd, name, arguments, model=s.model,
+                                agent="plan" if s.mode == "plan" else "")
             except Exception as e:  # noqa: BLE001 — told in the log, the chat goes on
                 log.warning("sessiond: opencode %s: /%s: %s", s.id[:12], name,
                             getattr(e, "error", e))
@@ -3967,10 +3942,14 @@ class Supervisor:
             if not s.live:
                 return {"session": session, "stopped": False, "why": "not live",
                         **self._brief(s)}
-        if not harnesses.opencode_rows(
-                "select 1 from session where id = ? and parent_id = ?", (task_id, session)):
+        if self.oc.v2:
+            ours = self.oc.parent_of(task_id) == session
+        else:
+            ours = bool(harnesses.opencode_rows(
+                "select 1 from session where id = ? and parent_id = ?", (task_id, session)))
+        if not ours:
             raise Refused("no such agent in this chat", "not_found")
-        self.oc.call("POST", f"/session/{task_id}/abort", directory=s.cwd)
+        self.oc.abort(task_id, s.cwd)
         with self.lock:
             return {"session": session, "stopped": True, "why": None, **self._brief(s)}
 
@@ -3989,10 +3968,13 @@ class Supervisor:
                 raise Refused(f"session {session[:8]} is working", "busy")
             if s.cwd == cwd:
                 return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
-        exe = self.oc._program()
-        why = opencode_move.move(session, cwd, program=exe, env=self._base_env(exe))
-        if why:
-            raise Refused(f"could not move it: {why}", "refused")
+        if self.oc.v2 and self.oc.up:
+            self.oc.move(session, cwd)
+        else:
+            exe = self.oc._program()
+            why = opencode_move.move(session, cwd, program=exe, env=self._base_env(exe))
+            if why:
+                raise Refused(f"could not move it: {why}", "refused")
         with self.lock:
             s.cwd = cwd
             self._save(s)
@@ -4009,7 +3991,9 @@ class Supervisor:
         if not live:
             return {"session": session, "renamed": False,
                     "why": "the name is kept here; opencode is told when the chat is next open"}
-        self.oc.call("PATCH", f"/session/{s.id}", {"title": title}, directory=s.cwd)
+        if not self.oc.rename(s.id, s.cwd, title):
+            return {"session": session, "renamed": False,
+                    "why": "the name is kept here; opencode 2 keeps its own title"}
         return {"session": session, "renamed": True, "queued": False, "uuid": ""}
 
     def _oc_interrupt(self, session: str) -> dict:
@@ -4024,7 +4008,7 @@ class Supervisor:
             if s.state not in ("working", "starting"):
                 return {"session": session, "interrupted": False, "why": "not working",
                         **self._brief(s)}
-        out = self.oc.call("POST", f"/session/{s.id}/abort", directory=s.cwd)
+        out = self.oc.abort(s.id, s.cwd)
         with self.cond:
             self.cond.wait_for(lambda: s.state not in ("working", "starting") or not s.live,
                                SETTLE_S)
@@ -4034,24 +4018,17 @@ class Supervisor:
     def _oc_reply(self, s: Session, entry: dict, response: dict) -> None:
         """Claude's answer shape, as opencode's reply to a permission or a
         question."""
-        from . import sessiond_opencode as oc
-
         rid = str(entry.get("request_id") or "")
         deny = response.get("behavior") == "deny"
         if entry.get("oc") == "question":
             if deny:
-                self.oc.call("POST", f"/question/{rid}/reject", directory=s.cwd)
+                self.oc.reject_question(s.id, s.cwd, rid)
                 return
             inp = (entry.get("request") or {}).get("input") or {}
             answers = ((response.get("updatedInput") or {}).get("answers")) or {}
-            self.oc.call("POST", f"/question/{rid}/reply",
-                         {"answers": oc.question_answers(inp.get("questions") or [], answers)},
-                         directory=s.cwd)
+            self.oc.reply_question(s.id, s.cwd, rid, inp.get("questions") or [], answers)
             return
-        body = {"reply": "reject" if deny else "once"}
-        if deny and response.get("message"):
-            body["message"] = str(response["message"])
-        self.oc.call("POST", f"/permission/{rid}/reply", body, directory=s.cwd)
+        self.oc.reply_permission(s.id, s.cwd, rid, deny, str(response.get("message") or ""))
 
     def _oc_answer(self, session: str, request_id: str, entry: dict, response: dict) -> dict:
         with self.lock:
@@ -4073,11 +4050,7 @@ class Supervisor:
             attached = [s for s in self.sessions.values() if s.agent == "opencode" and s.live]
         for cwd in {s.cwd for s in attached}:
             try:
-                status = self.oc.call("GET", "/session/status", directory=cwd, timeout=10) or {}
-                asked = [("permission", p) for p in
-                         self.oc.call("GET", "/permission", directory=cwd, timeout=10) or []]
-                asked += [("question", q) for q in
-                          self.oc.call("GET", "/question", directory=cwd, timeout=10) or []]
+                status, asked = self.oc.snapshot(cwd)
             except Refused as e:
                 log.info("sessiond: opencode reconcile in %s: %s", cwd, e.error)
                 continue
