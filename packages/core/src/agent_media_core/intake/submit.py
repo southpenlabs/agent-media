@@ -4489,6 +4489,10 @@ def _submit_event(event: Event,
     # blind hold's cap, below): written to its row as a stop, so the message
     # keeps its Resume and the thread its paused mark (14 Oct 2026).
     left_paused_at: Optional[int] = None
+    # The sentence a reply was on when its player was emptied from outside
+    # before its last sentence (below, "playlist emptied under us"): written
+    # to its row as a stop, so it keeps a Resume rather than counting as heard.
+    emptied_at: Optional[int] = None
     if thinking and muted:
         playback_lock.release()
         return None
@@ -5022,6 +5026,12 @@ def _submit_event(event: Event,
                     log.info("question gate: holding the cut question failed: %s", e)
             elif stop_at is not None:
                 extras["stopped_at"] = {"sentence": stop_at, "at": time.time()}
+            elif emptied_at is not None:
+                # The player was emptied before the last sentence (the app
+                # restarted under it — an update, 15 Nov 2026 — or the
+                # phone's own Stop): where it was, so the message's ▶ picks
+                # up there (0: from the top, unheard).
+                extras["stopped_at"] = {"sentence": emptied_at, "at": time.time()}
             elif left_paused_at is not None:
                 # Never resumed: the pause outlasted the hold, which is not
                 # the listener being done with it. `paused` is what the
@@ -5994,6 +6004,17 @@ def _submit_event(event: Event,
                                 _player_gone.set()
                                 finished = True
                                 why = "playlist emptied under us"
+                                # Emptied before its last sentence: not heard
+                                # out, so the row keeps where it was (David,
+                                # 15 Nov 2026: an app update cut a reply and
+                                # it counted as heard). On the last sentence
+                                # it stays heard, as before. Our own ways of
+                                # ending (superseded, a yield) are not this.
+                                on_last = rest_was_done and mark_i >= len(clip_data) - 1
+                                if not on_last and not (playback_lock.should_abort()
+                                                        or playback_lock.should_yield()):
+                                    emptied_at = max(0, mark_i)
+                                    why += f" on sentence {emptied_at + 1}"
                                 break
                             if count is not None and count == _handed[0]:
                                 # Still exactly our list: the player ran dry.
