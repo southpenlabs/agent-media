@@ -122,3 +122,29 @@ What that means in practice:
   Search across machines is a fan-out: the app already merges search across
   servers, and red2's `media find` would ask each worker. The transcripts
   go into the backups of the machine they ran on, not red2's.
+
+### Back to one home server for chats (15 Nov 2026), still for discussion
+
+David, after the separate-servers turn: "hmm maybe you were right the first
+time with the one history, one search, one voice thing. As far as chats go
+anyway. it would be good to serve other parts of the app independently...
+like media and maps".
+
+So the direction is now:
+
+- **Chats: option A.** red2 is the one server for chats. Other machines
+  run chats for it as workers. One history, one search, one voice, and no
+  machine's own server lists, speaks or cards a chat red2 started there.
+- **Other parts of the app can be served by other machines.** For example,
+  media from the music machine and maps from wherever their data lives.
+  Under app-stays-generic, the home server's answer says which server
+  serves each part (a `services` map on `/me` or its own endpoint), and the
+  app routes those calls there with that server's token. The app's routing
+  today is per thread (`servers.ts` `routeFor`), so per part is new
+  app-side work.
+- **The transcript question comes back.** One search and history on red2
+  need red2 to have the text. Either red2 keeps a copy (today's mirror,
+  plus indexing it in `search.db`), or red2 keeps the copy and the worker's
+  file is only a working copy while the chat runs (scenario 1 above).
+  Reading on demand (scenario 2) would leave search and history depending
+  on the worker being up. Not yet decided.
