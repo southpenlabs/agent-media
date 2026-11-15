@@ -112,3 +112,12 @@ API) becomes a call from Sasonica to the companion app, not to the server.
   without the cookie sign-in the server-side bridges use.
 - Desktop: Beeper also runs bridges on the desktop. Sasonica has no desktop
   client, so this is phone only for now.
+
+## Started (15 Nov 2026)
+
+David, 15 Nov 2026: "Maybe we should move ahead with moving the Matrix
+Bridges into the app", and, asked whose bridges, "Public builds first": the
+companion app is built and proven on a test account; his six bridges stay on
+red5, untouched, until it has shown it holds up (battery, staying connected
+through Doze), and only then is moving his own decided. Step 1 (how Beeper's
+on-device bridges are built) is under way.
