@@ -121,3 +121,52 @@ companion app is built and proven on a test account; his six bridges stay on
 red5, untouched, until it has shown it holds up (battery, staying connected
 through Doze), and only then is moving his own decided. Step 1 (how Beeper's
 on-device bridges are built) is under way.
+
+## Step 1, what Beeper actually does (15 Nov 2026)
+
+Read at the repos' 13–14 Nov heads; nothing run.
+
+- **Beeper's on-device chats never reach Matrix.** The local bridge is "not
+  connected in any way to your Matrix homeserver"
+  (https://blog.beeper.com/2024/04/09/how-beeper-android-works/,
+  https://help.beeper.com/troubleshooting/beeper-on-device-vs-beeper-cloud-what-goes-to-beeper-servers):
+  messages stay in the app's own store and do not sync to the user's other
+  devices; only chat state (archived, pinned, reminders) does. So point 2
+  above ("written into the user's own encrypted rooms") and step 5 are not
+  Beeper's way; they would be our own extension.
+- **The split exists, the other half is private.** mautrix-go (MPL-2.0)
+  `bridgev2/matrixinterface.go` defines `MatrixConnector`; the only public
+  implementation is the appservice one (`bridgev2/matrix`). Hooks only an
+  on-device connector uses are there unimplemented (`DisplayNotification`,
+  deterministic room ids, `status/localbridgestate.go`): Beeper's local
+  connector and its Android glue (~40k lines of Go) are unpublished.
+  Third-party prior art for a connector with no homeserver: IAMichan/Nook
+  `apps/chatd/matrix.go` (MIT, seven bridges into a local store; not to be
+  copied into AGPL code carelessly) and tzarebczan/eggomi-meta-bridge
+  `sink/sink.go` (AGPL, mautrix-meta into a sink).
+- **Android builds look feasible.** meta, gmessages and whatsapp are pure Go
+  in their own code; cgo comes in only through mautrix-go's sqlite
+  (`mattn/go-sqlite3`, fine with the NDK) and libolm (`-tags goolm` makes it
+  pure Go). Signal needs a Rust cross-build of libsignal-ffi (Beeper's
+  `beeper/libsignal` CI has one for `aarch64-linux-android`). Untested.
+- **Licensing holds.** The bridges are AGPL-3.0; their `LICENSE.exceptions`
+  name only Beeper and Element, so not us; an AGPL companion APK that
+  publishes its source and go.mod pins is fine; the shared AIDL under a
+  permissive licence. The Binder split stays on the lawyer's list.
+
+The two designs that follow:
+
+- **(a) On the phone only, Beeper's way.** The companion app runs the
+  bridges in-process with a `MatrixConnector` of our own writing into a
+  local store, and Sasonica reads it over the bound service. Roughly 1–3k
+  lines of ours. The user's server (and its agents, timeline, contacts)
+  never sees bridged chats.
+- **(b) Also into the user's own Matrix rooms.** The same, plus the
+  connector is a device of the user's account copying chats into encrypted
+  rooms. Unpublished anywhere, and harder: one client account cannot send
+  as other people (the sender carried per message, e.g. MSC4144), no
+  `BatchSend` or deterministic ids on an ordinary homeserver, and our own
+  Olm device, cross-signing and key sharing.
+
+Either way the hard part is unchanged: staying connected in the
+background without Beeper's push relay.
