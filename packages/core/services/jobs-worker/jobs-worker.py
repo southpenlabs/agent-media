@@ -637,6 +637,72 @@ def transcript_chunk(session: str, offset: int) -> dict:
             "reset": reset}
 
 
+def _claude_projects() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
+
+
+def drop_copy(req: dict) -> dict:
+    """The server holds this chat's transcript now: delete this host's copy,
+    only when it is byte for byte the server's (`size` and `sha256`) and the
+    chat isn't running. The server keeps the record; a resume puts the copy
+    back first (`put_copy`). Answers the folder it was in, for that."""
+    import hashlib
+
+    sid = str(req.get("session") or "")
+    path = transcript_file(sid)
+    if path is None:
+        return {"ok": True, "dropped": False, "missing": True}
+    got = sessiond_call({"op": "get", "session": sid}, timeout=10.0)
+    if got.get("live"):
+        return {"ok": False, "code": "live", "error": "the chat is running; kept"}
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return {"ok": False, "code": "read", "error": str(e)}
+    if len(data) != int(req.get("size") or -1) \
+            or hashlib.sha256(data).hexdigest() != str(req.get("sha256") or ""):
+        return {"ok": False, "code": "mismatch", "error": "the server's copy differs; kept"}
+    try:
+        path.unlink()
+    except OSError as e:
+        return {"ok": False, "code": "unlink", "error": str(e)}
+    return {"ok": True, "dropped": True, "dir": path.parent.name}
+
+
+def put_copy(req: dict) -> dict:
+    """A piece of a chat's transcript back from the server before it resumes
+    here: `data` at byte `offset`, gathered in <projects>/<dir>/<session>.jsonl.part
+    and renamed into place with the `last` piece, so a put cut off halfway
+    is never taken for the transcript. A transcript already there is left
+    alone (`exists`): this host's copy wins."""
+    sid = str(req.get("session") or "")
+    d = str(req.get("dir") or "")
+    if not SESSION_ID_RE.fullmatch(sid) or not d or "/" in d or "\\" in d or d.startswith("."):
+        return {"ok": False, "code": "bad_request", "error": "a session and its folder, please"}
+    path = _claude_projects() / d / f"{sid}.jsonl"
+    part = path.with_name(path.name + ".part")
+    try:
+        offset = int(req.get("offset") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "code": "bad_request", "error": "offset"}
+    data = str(req.get("data") or "").encode("utf-8")
+    try:
+        if path.exists() or transcript_file(sid) is not None:
+            return {"ok": True, "exists": True}
+        have = part.stat().st_size if part.exists() else 0
+        if offset > 0 and have != offset:
+            return {"ok": False, "code": "gap", "error": "not where the last piece ended",
+                    "size": have}
+        part.parent.mkdir(parents=True, exist_ok=True)
+        with open(part, "wb" if offset == 0 else "ab") as fh:
+            fh.write(data)
+        if req.get("last"):
+            part.replace(path)
+        return {"ok": True, "size": offset + len(data), "done": bool(req.get("last"))}
+    except OSError as e:
+        return {"ok": False, "code": "write", "error": str(e)}
+
+
 def session_sync(req: dict) -> dict:
     """The server's poll: views, new events and transcript lines of the
     sessions it names (`{"sessions": {id: {"seq", "offset"}}}`)."""
@@ -726,6 +792,10 @@ def session_request(req) -> dict:
         return {"ok": True, "host": host_facts()}
     if op == "prepare":
         return session_prepare(req)
+    if op == "drop_copy":
+        return drop_copy(req)
+    if op == "put_copy":
+        return put_copy(req)
     req = {k: v for k, v in req.items() if k not in ("clone", "token")}
     timeout = 30.0
     if op == "start":

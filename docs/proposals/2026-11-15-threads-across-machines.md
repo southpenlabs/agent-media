@@ -206,10 +206,21 @@ is no longer a mirror of the real file but the record. In order:
 2. **Tag the owner.** The start carries the owning server's id. The
    worker's sessiond stores it, and the worker's own server leaves tagged
    chats out of its list, cards and index.
+   **Built 15 Nov 2026** (David: "okay, let's continue"): the tag is step
+   1's `owner_server`; `driver.headless.foreign` hides it from the
+   headless driver's `rows`/`all_rows` (the thread list, and so the cards)
+   and from `search._claude_files`. `media session list` on the machine
+   marks it, and a folder lookup skips it.
 3. **red2's copy is the record.** It goes into red2's backups like any
    transcript. Once a chat has ended and its last line has synced, the
    worker deletes its copy. A resume sends the file back to the worker
    before `--resume`.
+   **Built 15 Nov 2026**: `drop_copy` and `put_copy` on the worker
+   (jobs-worker.py), sent by `sessiond_remote` (`_maybe_drop` after an ended
+   chat's copy matches, idle 120 s; `_put_back` before `send`, `resume` and
+   `run_now`). The worker checks size and sha256 before deleting, and a put
+   lands in a `.part` file renamed at the end. Not yet: a subagent's own
+   files stay on the worker, since the sync doesn't carry them.
 4. **Push, not poll (later).** The worker sends new lines down the link it
    already holds open, in place of the 2 s `sync` poll and its 900 s
    cut-off. This is an efficiency change, not a change of model.

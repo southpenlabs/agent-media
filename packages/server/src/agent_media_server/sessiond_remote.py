@@ -88,6 +88,17 @@ FORWARD_OPS = frozenset({"send", "answer", "interrupt", "close", "park", "resume
 FRESH_S = 6.0
 #: A session is polled while live, and this long after its last event.
 RECENT_S = 900.0
+#: An ended chat whose copy here matches the worker's, idle this long, has
+#: the worker's copy dropped: this server's is the record (step 3 of
+#: docs/proposals/2026-11-15-threads-across-machines.md). Inside RECENT_S,
+#: since the poll is what notices. MEDIA_SESSIOND_REMOTE_DROP=0 keeps both.
+DROP_AFTER_S = 120.0
+#: Putting a transcript back, a piece of about this many bytes a request
+#: (whole lines).
+PUT_PIECE = 256 * 1024
+#: Ops that need the worker to have the transcript: a dropped one is put
+#: back first.
+NEEDS_COPY = frozenset({"send", "resume", "run_now"})
 #: Events kept here per remote session, for `events` without a wait.
 EVENTS_KEEP = 400
 #: A host's poll, at most this long.
@@ -218,6 +229,8 @@ class Remote:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.lock = threading.RLock()
+        #: One drop or put-back of a chat's transcript at a time (`_copy_lock`).
+        self._copy_locks: dict[str, threading.Lock] = {}
         #: Its record here, by session: what `records()` reads from disk.
         self.recs: dict[str, dict] = {}
         #: The last view its host gave, and when (monotonic).
@@ -239,6 +252,84 @@ class Remote:
         """A record with `host`, from disk at load."""
         with self.lock:
             self.recs[str(rec["session"])] = dict(rec)
+
+    def _copy_lock(self, sid: str) -> threading.Lock:
+        with self.lock:
+            return self._copy_locks.setdefault(sid, threading.Lock())
+
+    def _maybe_drop(self, host: str, sid: str, chunk: dict) -> None:
+        """The worker's copy of an ended chat, dropped once this server's
+        matches it byte for byte (the worker checks the size and sha256)."""
+        import hashlib
+
+        if os.environ.get("MEDIA_SESSIOND_REMOTE_DROP", "1") == "0":
+            return
+        if chunk.get("missing") or chunk.get("error"):
+            return
+        with self.lock:
+            rec = self.recs.get(sid)
+            v = self.views.get(sid) or {}
+            if rec is None or rec.get("copy") or v.get("live") or v.get("pending"):
+                return
+            if time.time() - float(v.get("last_event_at") or 0) < DROP_AFTER_S:
+                return
+        size = int(chunk.get("size") or 0)
+        if not size or size != self._mirror_size(sid):
+            return
+        try:
+            sha = hashlib.sha256(mirror_path(sid, self.root).read_bytes()).hexdigest()
+        except OSError:
+            return
+        with self._copy_lock(sid):
+            got = self.request(host, {"op": "drop_copy", "session": sid, "size": size,
+                                      "sha256": sha}, 20.0)
+            if got.get("ok") and got.get("dropped"):
+                with self.lock:
+                    rec = self.recs.get(sid)
+                    if rec is not None:
+                        rec["copy"] = {"dir": str(got.get("dir") or ""), "size": size,
+                                       "at": round(time.time())}
+                        self._save(rec)
+                log.info("sessiond: %s's copy on %s dropped; this server's is the record",
+                         sid[:8], host)
+
+    def _put_back(self, host: str, sid: str) -> dict:
+        """A dropped transcript back on its worker before the chat resumes
+        there, in whole-line pieces; `{"ok": True}` once it is (or the worker
+        had its own all along)."""
+        with self._copy_lock(sid):
+            with self.lock:
+                rec = self.recs.get(sid)
+                copy = dict((rec or {}).get("copy") or {})
+            if not copy:
+                return {"ok": True}
+            try:
+                data = mirror_path(sid, self.root).read_bytes()
+            except OSError as e:
+                return {"ok": False, "code": "copy",
+                        "error": f"this server's copy of the chat can't be read ({e})"}
+            off = 0
+            while True:
+                end = data.find(b"\n", off + PUT_PIECE)
+                end = len(data) if end < 0 else end + 1
+                last = end >= len(data)
+                got = self.request(host, {
+                    "op": "put_copy", "session": sid, "dir": copy.get("dir") or "",
+                    "offset": off, "data": data[off:end].decode("utf-8", "replace"),
+                    "last": last}, 20.0)
+                if not got.get("ok"):
+                    return {"ok": False, "code": "copy",
+                            "error": f"putting the chat's transcript back on {host} failed: "
+                                     f"{got.get('error') or got.get('code') or 'no answer'}"}
+                if got.get("exists") or last:
+                    break
+                off = end
+            with self.lock:
+                rec = self.recs.get(sid)
+                if rec is not None:
+                    rec.pop("copy", None)
+                    self._save(rec)
+            return {"ok": True}
 
     def owns(self, session: str) -> bool:
         with self.lock:
@@ -342,6 +433,10 @@ class Remote:
                     "error": f"this thread runs on {host}; moving it to another folder "
                              "is not supported there yet"}
         if op in FORWARD_OPS:
+            if op in NEEDS_COPY:
+                put = self._put_back(host, sid)
+                if not put.get("ok"):
+                    return put
             fwd = {k: v for k, v in req.items() if k != "token"}
             # Inside the canvas's own 30 s wait on this socket (driver/headless).
             got = self.request(host, fwd, 20.0)
@@ -550,6 +645,7 @@ class Remote:
         for sid, chunk in (got.get("transcripts") or {}).items():
             if isinstance(chunk, dict) and self.owns(sid):
                 self._mirror(sid, chunk)
+                self._maybe_drop(host, sid, chunk)
         for sid, evs in (got.get("events") or {}).items():
             if isinstance(evs, list) and self.owns(sid):
                 self._events(sid, evs)

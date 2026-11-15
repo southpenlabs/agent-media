@@ -104,7 +104,16 @@ def brief(view: dict) -> dict:
             "title": _title(view), "agent": str(view.get("agent") or "claude"),
             "card": bool(view.get("pending")) or view.get("state") == "approval",
             "tasks": int(view.get("tasks") or 0), "queued": len(view.get("queued") or []),
-            "last_event_at": view.get("last_event_at"), "host": str(view.get("host") or "")}
+            "last_event_at": view.get("last_event_at"), "host": str(view.get("host") or ""),
+            # Another server's chat run here as its worker: listed, marked,
+            # never a folder's live session (find).
+            "owner": str(view.get("owner_server") or "") if _foreign(view) else ""}
+
+
+def _foreign(view: dict) -> bool:
+    from .driver.headless import foreign
+
+    return foreign(view)
 
 
 def desk_rows(known: set[str]) -> list[dict]:
@@ -170,7 +179,8 @@ def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
         return None, "no session or folder named"
     if target.startswith(("/", "~")):
         want = _real(target)
-        here = [v for v in views if v.get("live") and _real(str(v.get("cwd") or "")) == want]
+        here = [v for v in views if v.get("live") and _real(str(v.get("cwd") or "")) == want
+                and not _foreign(v)]
         if not here:
             return None, f"no live headless session in {target}"
         return here[0], ""
@@ -492,7 +502,8 @@ def main(argv: list[str] | None = None) -> int:
                 [f"{b['tasks']} task(s)"] if b["tasks"] else [])
             print(f"{b['session']}  {'live' if b['live'] else 'parked'}  "
                   f"{', '.join(flags):<24}  {b['cwd']}"
-                  + (f" @{b['host']}" if b["host"] else "") + f"  {b['title']}")
+                  + (f" @{b['host']}" if b["host"] else "")
+                  + (f" (server {b['owner']}'s)" if b.get("owner") else "") + f"  {b['title']}")
         for b in desk:
             at = f"pane {b['pane']}" if b["where"] == "pane" else f"terminal pid {b['pid']}"
             print(f"{b['session']}  live  {at:<24}  {b['cwd']}  {b['title']}")

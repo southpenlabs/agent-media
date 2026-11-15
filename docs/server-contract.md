@@ -12447,7 +12447,26 @@ side), `phone_jobs.session` (the channel),
 - **Speech.** The start carries `owner_server`, this server's id, and the
   host runs a chat that has one with `MEDIA_HOOK_ENABLED=0`: it never speaks
   (a start with `server_permissions` and no owner, from an older server,
-  counts as another server's too). A `result` heard in the poll runs *this* host's Stop hook
+  counts as another server's too).
+- **One owner.** A thread belongs to the server that started it. A machine
+  that is another server's worker and has a server of its own leaves those
+  chats out of its own thread list, its cards and its search index
+  (`driver.headless.foreign`: an `owner_server` that isn't this server's id,
+  and no `host`). On the machine, `media session list` still shows them,
+  marked with their owner, and a folder lookup (`send <folder>`, `wake`)
+  passes them over; by id they are still reached.
+- **This server's copy is the record.** Once a chat there has ended, has
+  been idle `DROP_AFTER_S` (120 s) and the copy here matches the worker's,
+  the server asks the worker to `drop_copy` with the size and sha256; the
+  worker deletes its transcript only if both match and the chat isn't
+  running, and answers the Claude projects folder it was in. The record
+  here keeps `copy: {"dir", "size", "at"}`. A `send`, `resume` or `run_now`
+  to such a chat first puts it back (`put_copy`, whole-line pieces of about
+  256 KB, gathered in `<id>.jsonl.part` and renamed into place with the
+  last); a put that fails refuses the message (`code: "copy"`) and keeps the
+  mark. A transcript already on the worker wins over a put. A subagent's
+  own files (`<projects>/<dir>/<id>/`) aren't synced and stay on the worker.
+  `MEDIA_SESSIOND_REMOTE_DROP=0` keeps both copies. A `result` heard in the poll runs *this* host's Stop hook
   (media-hook-claude-code) with the reply, the mirror and the workspace, so
   the reply is spoken, filed and notified as a local headless session's is
   (`MEDIA_SESSIOND_REMOTE_SPEECH=0` turns that off). `media attach` and every

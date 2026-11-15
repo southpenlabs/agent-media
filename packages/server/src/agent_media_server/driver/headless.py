@@ -287,6 +287,30 @@ def _elicit_response(req: dict, appr: dict, labels: dict) -> dict | str:
     return {"action": "accept", "content": content}
 
 
+def foreign(view: dict) -> bool:
+    """A chat another server started here, this machine being its session
+    worker: that server lists it, speaks it, shows its cards and keeps its
+    transcript, so this one leaves it out (a thread belongs to exactly one
+    server, docs/proposals/2026-11-15-threads-across-machines.md, step 2).
+    Its record says so by `owner_server`, set at the start (sessiond.py);
+    a view carrying `host` is this server's own chat on another machine and
+    always its own."""
+    owner = str(view.get("owner_server") or "")
+    if not owner or view.get("host"):
+        return False
+    try:
+        from ..servers_report import server_id
+
+        return owner != server_id()
+    except Exception:  # noqa: BLE001 - an owner we can't check isn't us
+        return True
+
+
+def mine(views) -> list[dict]:
+    """`views` without the chats other servers own here (`foreign`)."""
+    return [v for v in views if not foreign(v)]
+
+
 def approval_of(entry: dict) -> dict:
     """A pending `can_use_tool` request as the thread's `approval`.
 
@@ -431,11 +455,11 @@ class HeadlessDriver:
 
         r = call("list", timeout=5.0, **({"live": True} if live else {}))
         if r.get("ok"):
-            got = list(r.get("sessions") or [])
+            got = mine(list(r.get("sessions") or []))
             return [v for v in got if v.get("live")] if live else got
         if live:
             return []
-        return [{**rec, "live": False} for rec in sessiond.records()]
+        return [{**rec, "live": False} for rec in mine(sessiond.records())]
 
     def all_rows(self) -> list[dict]:
         """Every session, as `rows()` gives them, with only the live ones
@@ -447,10 +471,10 @@ class HeadlessDriver:
         from .. import sessiond
 
         r = call("list", timeout=5.0, live=True)
-        recs = sessiond.records()
+        recs = mine(sessiond.records())
         if not r.get("ok"):
             return [{**rec, "live": False} for rec in recs]
-        live = [v for v in r.get("sessions") or [] if v.get("live")]
+        live = [v for v in mine(r.get("sessions") or []) if v.get("live")]
         ids = {v.get("session") for v in live}
         return live + [{**rec, "live": False} for rec in recs if rec.get("session") not in ids]
 

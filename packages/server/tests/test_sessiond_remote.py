@@ -574,3 +574,165 @@ def test_the_relay_sends_whole_lines_of_the_transcript(monkeypatch, tmp_path):
     got = mod.transcript_chunk(SID, 10_000)            # shorter than asked: from 0
     assert got["reset"] and got["data"].startswith('{"a":1}')
     assert mod.transcript_chunk("../../etc/passwd", 0)["missing"]
+
+
+# --- threads across machines, step 3: this server's copy is the record ------------
+
+
+class CopyHost(FakeHost):
+    """A worker that drops its copy when asked with the right size and
+    sha256, and takes pieces back."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.has_copy = True
+        self.put: list[dict] = []
+        self.put_fails = False
+
+    def __call__(self, body: dict, timeout: float):
+        import hashlib
+
+        req = (body or {}).get("request") or {}
+        if req.get("op") == "drop_copy":
+            self.seen.append(body)
+            data = "".join(self.lines).encode()
+            if req["size"] == len(data) and req["sha256"] == hashlib.sha256(data).hexdigest():
+                self.has_copy = False
+                return 200, {"ok": True, "dropped": True, "dir": "-home-other-work"}
+            return 200, {"ok": False, "code": "mismatch"}
+        if req.get("op") == "put_copy":
+            self.seen.append(body)
+            if self.put_fails:
+                return 200, {"ok": False, "code": "write", "error": "disk full"}
+            self.put.append(req)
+            if req.get("last"):
+                self.has_copy = True
+            return 200, {"ok": True, "size": req["offset"] + len(req["data"].encode())}
+        return super().__call__(body, timeout)
+
+
+@pytest.fixture
+def copy_server(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEDIA_SESSIOND_REMOTE_DROP", raising=False)
+    sup = sessiond.Supervisor(root=tmp_path / "sd")
+    fake = CopyHost()
+    sup.remote.call = fake
+    sup.remote.speak = lambda rec, text: None
+    work = tmp_path / "work"
+    work.mkdir()
+    assert _start(sup, work)["ok"]
+    return sup, fake
+
+
+def _ended(fake, ago: float = 600.0):
+    import time as _t
+
+    fake.view = {**fake.view, "live": False, "state": "parked",
+                 "last_event_at": _t.time() - ago}
+
+
+def test_an_ended_chat_matching_here_has_the_workers_copy_dropped(copy_server):
+    sup, fake = copy_server
+    sup.remote.sync_once()                         # live: mirrored, kept there
+    assert fake.has_copy
+    _ended(fake)
+    sup.remote.sync_once()
+    assert not fake.has_copy
+    rec = sessiond.read_record(SID, sup.root)
+    assert rec["copy"]["dir"] == "-home-other-work"
+    assert rec["copy"]["size"] == len("".join(fake.lines))
+    # Asked once: a dropped chat isn't asked again.
+    sup.remote.sync_once()
+    assert len([b for b in fake.seen if b["request"]["op"] == "drop_copy"]) == 1
+
+
+def test_not_dropped_while_recent_or_switched_off(copy_server, monkeypatch):
+    sup, fake = copy_server
+    _ended(fake, ago=5.0)
+    sup.remote.sync_once()
+    assert fake.has_copy
+    _ended(fake)
+    monkeypatch.setenv("MEDIA_SESSIOND_REMOTE_DROP", "0")
+    sup.remote.sync_once()
+    assert fake.has_copy and not [b for b in fake.seen if b["request"]["op"] == "drop_copy"]
+
+
+def test_a_message_puts_the_copy_back_before_it_goes(copy_server):
+    sup, fake = copy_server
+    _ended(fake)
+    sup.remote.sync_once()
+    assert not fake.has_copy
+    got = sup.handle({"op": "send", "session": SID, "text": "and again"})
+    assert got["ok"]
+    ops = [b["request"]["op"] for b in fake.seen]
+    assert ops[-2:] == ["put_copy", "send"]
+    assert "".join(p["data"] for p in fake.put) == "".join(fake.lines)
+    assert fake.put[-1]["last"] and fake.put[-1]["dir"] == "-home-other-work"
+    assert "copy" not in sessiond.read_record(SID, sup.root)
+
+
+def test_a_put_back_that_fails_sends_nothing_and_keeps_the_mark(copy_server):
+    sup, fake = copy_server
+    _ended(fake)
+    sup.remote.sync_once()
+    fake.put_fails = True
+    got = sup.handle({"op": "send", "session": SID, "text": "and again"})
+    assert not got["ok"] and got["code"] == "copy" and "disk full" in got["error"]
+    assert fake.seen[-1]["request"]["op"] == "put_copy"
+    assert sessiond.read_record(SID, sup.root)["copy"]
+
+
+def test_a_long_transcript_goes_back_in_whole_line_pieces(copy_server, monkeypatch):
+    sup, fake = copy_server
+    monkeypatch.setattr(sessiond_remote, "PUT_PIECE", 40)
+    fake.lines = [json.dumps({"type": "user", "n": i, "t": "é" * 10}) + "\n" for i in range(9)]
+    sup.remote.sync_once()
+    _ended(fake)
+    sup.remote.sync_once()
+    assert not fake.has_copy
+    sup.handle({"op": "resume", "session": SID})
+    assert len(fake.put) > 2 and all(p["data"].endswith("\n") for p in fake.put)
+    assert "".join(p["data"] for p in fake.put) == "".join(fake.lines)
+    offs = [p["offset"] for p in fake.put]
+    assert offs[0] == 0 and offs == sorted(offs)
+
+
+def test_the_worker_drops_only_a_matching_copy_of_an_ended_chat(tmp_path, monkeypatch):
+    import hashlib
+
+    worker = _load_worker()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    proj = tmp_path / "cc" / "projects" / "-home-w"
+    proj.mkdir(parents=True)
+    f = proj / f"{SID}.jsonl"
+    f.write_text('{"a":1}\n{"b":2}\n')
+    data = f.read_bytes()
+    live = {"live": True}
+    monkeypatch.setattr(worker, "sessiond_call", lambda req, timeout=30.0: {"ok": True, **live})
+    good = {"session": SID, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    assert worker.drop_copy(good)["code"] == "live" and f.exists()
+    live["live"] = False
+    assert worker.drop_copy({**good, "sha256": "0" * 64})["code"] == "mismatch" and f.exists()
+    assert worker.drop_copy({**good, "size": 3})["code"] == "mismatch"
+    got = worker.drop_copy(good)
+    assert got == {"ok": True, "dropped": True, "dir": "-home-w"} and not f.exists()
+    assert worker.drop_copy(good)["missing"]
+
+
+def test_the_worker_gathers_a_put_and_renames_it_into_place_at_the_end(tmp_path, monkeypatch):
+    worker = _load_worker()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    f = tmp_path / "cc" / "projects" / "-home-w" / f"{SID}.jsonl"
+    put = lambda **kw: worker.put_copy({"session": SID, "dir": "-home-w", **kw})  # noqa: E731
+    assert put(offset=0, data='{"a":1}\n')["ok"] and not f.exists()
+    assert put(offset=99, data="x\n")["code"] == "gap"
+    # A put cut off and begun again starts the part over.
+    assert put(offset=0, data='{"a":1}\n')["ok"]
+    got = put(offset=8, data='{"b":2}\n', last=True)
+    assert got["done"] and f.read_text() == '{"a":1}\n{"b":2}\n'
+    assert not f.with_name(f.name + ".part").exists()
+    # The worker's own copy wins over a put.
+    assert put(offset=0, data="other\n", last=True)["exists"]
+    assert f.read_text() == '{"a":1}\n{"b":2}\n'
+    for bad in ("", "../x", "a/b", ".hidden"):
+        assert worker.put_copy({"session": SID, "dir": bad, "data": "x"})["code"] == "bad_request"

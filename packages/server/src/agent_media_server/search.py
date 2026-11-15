@@ -356,9 +356,10 @@ def _claude_files() -> list[tuple[str, str]]:
 
     root = harnesses._claude_dir() / "projects"
     out = []
+    theirs = _owned_elsewhere()
     for f in glob.glob(str(root / "*" / "*.jsonl")):
         sid = os.path.basename(f)[:-6]
-        if transcript_session(sid):
+        if transcript_session(sid) and sid not in theirs:
             out.append((f, sid))
     # A chat this server runs on a session worker: its transcript is the copy
     # synced here (sessiond_remote.mirror_path), this server's record of it.
@@ -375,6 +376,18 @@ def _claude_files() -> list[tuple[str, str]]:
     except Exception:  # noqa: BLE001 - the index never fails on the mirror
         log.debug("search: the session workers' transcripts were not read", exc_info=True)
     return out
+
+
+def _owned_elsewhere() -> set[str]:
+    """Chats another server started on this machine (driver.headless.foreign):
+    that server indexes them from its own copy, so this one doesn't."""
+    try:
+        from . import sessiond
+        from .driver.headless import foreign
+
+        return {str(r.get("session")) for r in sessiond.records() if foreign(r)}
+    except Exception:  # noqa: BLE001
+        return set()
 
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
