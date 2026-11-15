@@ -177,3 +177,23 @@ Beeper's way, chats in the companion app's own store and shown by Sasonica;
 holds up on the phone. Next, step 2: mautrix-meta built for android/arm64
 with a `MatrixConnector` of our own (Go and the NDK installed on red2 for
 it), then a day on p8a against a test account, never David's.
+
+## Step 2a, the build (15 Nov 2026)
+
+All three bridges cross-build for Android arm64 unchanged, first try: Go
+1.27.4 (`~/.local/go` on red2) and NDK r30 (`~/android-sdk/ndk/30.0.16248370`),
+`GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-android29-clang
+-tags goolm`, tag v0.2610.0 on mautrix-go v0.32.0. Stripped: meta 37.4 MB
+(13.1 MB gzipped), gmessages 23.0 MB, whatsapp 30.6 MB; needed libraries
+only bionic's (libc, libdl, liblog, libm). Not run anywhere.
+
+Where our connector goes: `mxmain` cannot take another connector
+(`BridgeMain.Init`, `bridgev2/matrix/mxmain/main.go:246-258`, hardcodes
+`matrix.NewConnector`), so the companion app has its own entry point: open
+the database as `initDB` does, `bridgev2.NewBridge(..., ours,
+&connector.MetaConnector{}, ...)`, then `StartConnectors`, `StartLogins`,
+`PostStart` as `BridgeMain.Start()` does. Ours implements
+`bridgev2.MatrixConnector` (`bridgev2/matrixinterface.go:42`; intents return a
+`MatrixAPI`, line 199; `DisplayNotification` optional, line 141); what the
+user sends goes in through `Bridge.QueueMatrixEvent` (`bridgev2/queue.go:73`).
+The appservice one to copy from: `bridgev2/matrix/connector.go`, `intent.go`.
