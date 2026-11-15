@@ -170,3 +170,10 @@ The two designs that follow:
 
 Either way the hard part is unchanged: staying connected in the
 background without Beeper's push relay.
+
+**Decided** (David, 15 Nov 2026, "Phone only, then extend"): (a) first —
+Beeper's way, chats in the companion app's own store and shown by Sasonica;
+(b), copying into the user's own Matrix rooms, as a second stage once (a)
+holds up on the phone. Next, step 2: mautrix-meta built for android/arm64
+with a `MatrixConnector` of our own (Go and the NDK installed on red2 for
+it), then a day on p8a against a test account, never David's.
