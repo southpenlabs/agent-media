@@ -45,6 +45,11 @@ window and limits.
 
 ## Part B: tmux optional (#491 steps 2–5, 7, 9)
 
+Taken by its own thread (David, 15 Nov 2026, by card: the plan split):
+https://red2-ryer.sasonica.com/app/t/67233885-337d-4d29-ae82-1cfc0340d93f.
+This thread keeps Part A. Where the two meet in sessiond.py and send.py,
+the two threads agree by agent mail who edits what.
+
 In sam's order, each one breaking nothing:
 
 2. **Speech identity by thread.** Finish 84f6c688: mute, notification
@@ -69,9 +74,7 @@ In sam's order, each one breaking nothing:
 
 Small: `media-setup check` treats tmux as optional.
 
-## Order across both
+## Order
 
-Part A's Codex adapter first, because it carries most of #491 step 8 and
-the "other agents" ask at once. Then Part B's step 2, which is small and
-removes the bug class 84f6c688 hit. Then pi, then steps 3–5, then
-Gemini/Grok and steps 7 and 9.
+Part A here: Codex, then pi, then Gemini/Grok. Part B runs alongside it in
+its own thread.
