@@ -80,3 +80,21 @@ and search are split, and merged only in the app.
 
 Whatever is chosen, the double-speech gap gets fixed: W's sessiond should
 set `MEDIA_HOOK_ENABLED=0` on chats a server started there.
+
+## David's lean (15 Nov 2026, on the card; still under discussion)
+
+"I'm leaning towards option 2. but I'm thinking about removing the sync
+and the duplicate transcripts so that all the current transcripts are red2
+only ... don't implement it yet. I'd like to discuss it further".
+
+The open point: claude writes its JSONL on the machine where it runs, and
+needs it there to resume. So "red2 only" means one of:
+
+- **red2 holds the transcript, and the worker has a working copy only
+  while the chat is live.** Lines stream to red2 as now. The worker deletes
+  its copy when the chat ends, and red2 sends it back before a resume.
+- **No copy on red2 at all.** red2 reads the worker's file through the
+  worker link when it is needed. One copy, but history and search are gone
+  while the worker is off.
+- **claude runs on red2, and only its tools run on the other machine.**
+  Truly red2-only, but claude has no built-in way to do this.
