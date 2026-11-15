@@ -92,6 +92,12 @@ def agent_stop(session: str, agent_id: str, bearer: str) -> tuple[bool, dict]:
             return False, {"error": f"not stopped ({r.get('why') or 'no answer'})",
                            "status": 409, "agent": row}
         return True, {"session": session, "agent": row, "via": "stop_task"}
+    if str(row.get("id") or "").startswith("ses_"):
+        # opencode in a terminal: its subagent runs inside the main agent's
+        # turn (the task tool waits for it), so words to the main agent wait
+        # behind it, and its server is the TUI's own, out of reach.
+        return False, {"error": "this opencode chat runs in a terminal window: interrupt the "
+                                "turn to stop its subagent", "status": 409, "agent": row}
     ok, r = _relay(drv, session, stop_words(row))
     return ok, ({"session": session, "agent": row, **r} if ok else r)
 

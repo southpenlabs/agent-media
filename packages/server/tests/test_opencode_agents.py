@@ -174,3 +174,18 @@ def test_a_persona_reaches_opencode_as_a_system_prompt_only_headless():
     assert personas.via("opencode", headless=True) == "system_prompt"
     assert personas.via("opencode") == "prepend"          # a pane has no flag for it
     assert personas.via("claude") == "system_prompt"
+
+
+def test_stopping_a_subagent_of_an_opencode_in_a_terminal_says_to_interrupt(db, monkeypatch):
+    from agent_media_server import auth, driver
+
+    put(db, OC, 1, "assistant", [task(KID, "running")])
+    monkeypatch.setattr(auth, "gate", lambda b: ({"id": "u"}, {}))
+    monkeypatch.setattr(agents, "_live", lambda s: True)
+
+    class Pane:
+        kind = driver.PANE
+
+    monkeypatch.setattr(driver, "for_session", lambda s: Pane())
+    ok, d = agent_actions.agent_stop(OC, KID, "t")
+    assert not ok and d["status"] == 409 and "interrupt" in d["error"]

@@ -309,9 +309,10 @@ def _opencode_state(session: str, pane: str) -> dict:
     if chosen and chosen[1] > _opencode_at(session):
         model = chosen[0]
     herdr = bool(pane) and panes.is_herdr(pane)
+    agent = _opencode_agent(panes.capture(pane, lines=12, ansi=False)) if pane and not herdr else ""
     return {"agent": "opencode", "live": bool(pane), "model": model, "model_id": model,
-            "plan": False, "driver": driver.PANE,
-            "can": {"model": bool(pane) and not herdr, "plan": False}}
+            "plan": agent == "Plan", "driver": driver.PANE,
+            "can": {"model": bool(pane) and not herdr, "plan": bool(agent)}}
 
 
 def _opencode_at(session: str) -> float:
@@ -332,6 +333,35 @@ def _opencode_footer(screen: str) -> str:
         if m:
             return m.group(1).split("  ")[0] + " "
     return ""
+
+
+def _opencode_agent(screen: str) -> str:
+    """The agent the composer's footer names (`Build`, `Plan`, or one of the
+    user's own primary agents), or "" when no footer is on screen."""
+    for line in reversed(screen.splitlines()):
+        m = re.match(r"\s*┃\s+(\S+) · ", line)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _opencode_plan(pane: str, want: bool) -> tuple[bool, dict]:
+    """Plan mode in a running opencode: its Tab cycles the primary agents
+    (Build ⇄ Plan by default; measured on 1.19.5), checked on the footer."""
+    from . import panes
+
+    if panes.is_herdr(pane):
+        return False, {"error": "opencode's plan mode is not switchable in a herdr pane yet",
+                       "status": 400}
+    target = "Plan" if want else "Build"
+    for _ in range(_CYCLE):
+        if _opencode_agent(panes.capture(pane, lines=12, ansi=False)) == target:
+            return True, {"told": True}
+        panes._tmux(["send-keys", "-t", pane, "Tab"])
+        time.sleep(0.8)
+    if _opencode_agent(panes.capture(pane, lines=12, ansi=False)) == target:
+        return True, {"told": True}
+    return False, {"error": f"opencode did not switch to {target}", "status": 502}
 
 
 def _configure_opencode(session: str, pane: str, model: str) -> tuple[bool, dict]:
@@ -704,9 +734,13 @@ def configure_pane(session: str, *, model: str | None = None,
                 _CHOSEN[session] = (model, time.time())
         return ok, detail
     if agent == "opencode":
-        if mode:
-            return False, {"error": "opencode has no plan mode here", "status": 400}
-        return _configure_opencode(session, pane, model) if model else (True, {"told": True})
+        if model:
+            ok, detail = _configure_opencode(session, pane, model)
+            if not ok:
+                return ok, detail
+        if mode is not None:
+            return _opencode_plan(pane, mode == "plan")
+        return True, {"told": True}
     if agent == "pi":
         if mode:
             return False, {"error": "pi has no plan mode here", "status": 400}

@@ -233,7 +233,7 @@ def oc_pane(monkeypatch):
     ss._CHOSEN.clear()
     ns = type("Pane", (), {})()
     ns.typed, ns.keys, ns.on, ns.state, ns.picker = [], [], "Big Pickle", "waiting", False
-    ns.takes = True
+    ns.takes, ns.agent = True, "Build"
     monkeypatch.setattr(auth, "gate", lambda b: ({"id": "u"}, {}))
     monkeypatch.setattr(sessions, "live_sessions", lambda: {OC: "%9"})
     monkeypatch.setattr(sessions, "_agent_of_pane", lambda p: "opencode")
@@ -255,6 +255,8 @@ def oc_pane(monkeypatch):
         ns.keys.append(argv[-1])
         if argv[-1] == "Enter" and ns.picker and ns.takes:
             ns.on = ns.search
+        if argv[-1] == "Tab":       # opencode cycles its primary agents
+            ns.agent = "Plan" if ns.agent == "Build" else "Build"
         ns.picker = False
         return ""
     monkeypatch.setattr(panes, "send", send)
@@ -262,7 +264,7 @@ def oc_pane(monkeypatch):
     monkeypatch.setattr(panes, "_tmux", tmux)
     monkeypatch.setattr(panes, "capture", lambda p, lines=40, ansi=True: (
         "     ▣  Build · Big Pickle · 5.2s\n  ┃\n"
-        f"  ┃  Build · {ns.on} OpenCode Zen                          ~/work\n  ╹▀▀▀\n"))
+        f"  ┃  {ns.agent} · {ns.on} OpenCode Zen                          ~/work\n  ╹▀▀▀\n"))
     monkeypatch.setattr(ss.time, "sleep", lambda s: None)
     monkeypatch.setattr(om, "models", lambda: (om.sheet(LISTING), "opencode/big-pickle"))
     monkeypatch.setattr(om, "current", lambda s: "opencode/big-pickle")
@@ -273,7 +275,7 @@ def oc_pane(monkeypatch):
 def test_a_running_opencode_says_its_model_and_offers_the_free_ones(oc_pane):
     ok, d = ss.get(OC, "t")
     assert ok and d["agent"] == "opencode" and d["model"] == "opencode/big-pickle"
-    assert d["can"] == {"model": True, "plan": False}
+    assert d["can"] == {"model": True, "plan": True}
     assert [m["id"] for m in d["models"]] == ["opencode/big-pickle", "openrouter/qwen/qwen3.8-27b:free"]
 
 
@@ -306,7 +308,6 @@ def test_opencode_refuses_mid_turn_plan_and_strangers(oc_pane):
         "model": "opencode/big-pickle"}
     ss._PENDING.clear()
     oc_pane.state = "waiting"
-    assert ss.post(OC, {"plan": True}, "t")[1]["status"] == 400
     assert ss.post(OC, {"model": "--help"}, "t")[1]["status"] == 400
     ok, d = ss.post(OC, {"model": "opencode/not-on-the-sheet"}, "t")
     assert not ok and d["status"] == 400 and not oc_pane.typed
@@ -501,3 +502,14 @@ def test_pi_footer_is_read_past_an_extension_status_line():
         "venice/kimi-k3"
     assert ss._pi_footer("─\n/x\n(openrouter) qwen/qwen3.8-27b\n") == "openrouter/qwen/qwen3.8-27b"
     assert ss._pi_footer("nothing here\n") == ""
+
+
+def test_a_running_opencodes_plan_is_its_plan_agent_switched_by_tab(oc_pane):
+    st = ss.get(OC, "t")[1]
+    assert st["can"]["plan"] is True and st["plan"] is False
+    ok, d = ss.post(OC, {"plan": True}, "t")
+    assert ok and d["plan"] is True and oc_pane.keys == ["Tab"]
+    ok, d = ss.post(OC, {"plan": True}, "t")           # already on: no key
+    assert ok and oc_pane.keys == ["Tab"]
+    ok, d = ss.post(OC, {"plan": False}, "t")
+    assert ok and d["plan"] is False and oc_pane.agent == "Build"

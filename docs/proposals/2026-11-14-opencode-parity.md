@@ -91,12 +91,21 @@ let's get them working for opencode".
     sends the first message.
 11. **Running on another machine.** Not yet.
 12. **Moving a chat to another folder.** Not yet.
-13. **Personas in the system prompt.** Not yet.
+13. **Personas in the system prompt.** Done: a headless opencode chat sends
+    the persona's render as `system` with every prompt. In a pane, which
+    has no flag for it, the render still goes before the first message.
 14. **Resumed after a restart, cut-off subagents named.** Done: an opencode
     chat that a drained restart told to end its turn was never resumed
     (`_drain_cut` was Claude-only). Now it is, on its idle event. A chat cut
     off mid-turn counts its running `task` subagents as work
     (`_oc_running_agents`), and the resume names each one, to be continued
     with the task tool and its `task_id`.
-15. **Plan and Stop for opencode in a terminal pane.** Not yet.
-16. **A slash menu before the first chat in a folder.** Not yet.
+15. **Plan and Stop for opencode in a terminal pane.** Plan is done: Tab
+    cycles opencode's primary agents (Build ⇄ Plan, measured on 1.19.5),
+    and the footer confirms the switch. Stop can't work there: the subagent
+    runs inside the main agent's turn, and the TUI's server is its own. The
+    app is told to interrupt the turn instead (409).
+16. **A slash menu before the first chat in a folder.** Done: it is read
+    from opencode's files when no server has answered
+    (`disk_commands`), and a new chat's sheet asks with `agent=opencode`.
+    sasonica-app has been asked to send that parameter.
