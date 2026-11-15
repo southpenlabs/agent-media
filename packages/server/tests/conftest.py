@@ -384,3 +384,14 @@ def _default_agent_is_claude(monkeypatch):
     from agent_media_server import default_agent
 
     monkeypatch.setattr(default_agent, "_installed", lambda agent: agent == "claude")
+
+
+@pytest.fixture(autouse=True)
+def _no_live_sessiond(monkeypatch, tmp_path):
+    """No test may start a real headless chat: MEDIA_HEADLESS=1 from a host
+    that runs chats headless (red2) is dropped, and sessiond's socket is never
+    the live one (15 Nov 2026: core's window tests left eight real chats).
+    A test that wants either sets it itself, after this."""
+    monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
+    monkeypatch.setenv("MEDIA_SESSIOND_TRANSPORT", "unix")
+    monkeypatch.setenv("MEDIA_SESSIOND_SOCKET", str(tmp_path / "sessiond.sock"))

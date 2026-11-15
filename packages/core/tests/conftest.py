@@ -576,3 +576,18 @@ def _no_mail_note(monkeypatch):
     or mark its messages told. test_context_mail_note turns it back on
     against a fake."""
     monkeypatch.setenv("MEDIA_NOTE_MAIL", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_live_sessiond(monkeypatch, tmp_path):
+    """No test may start a real headless chat.
+
+    A host that runs chats headless (MEDIA_HEADLESS=1, red2) sends
+    conversation.start() to sessiond, so test_conversation's window tests put
+    their prompts ("why?", "what's this; rm -rf /") to the live session host
+    and left eight real Claude chats in the app (15 Nov 2026). Headless is off
+    unless a test turns it on, and sessiond's socket is never the real one.
+    """
+    monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
+    monkeypatch.setenv("MEDIA_SESSIOND_TRANSPORT", "unix")
+    monkeypatch.setenv("MEDIA_SESSIOND_SOCKET", str(tmp_path / "sessiond.sock"))
