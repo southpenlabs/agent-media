@@ -98,3 +98,27 @@ needs it there to resume. So "red2 only" means one of:
   while the worker is off.
 - **claude runs on red2, and only its tools run on the other machine.**
   Truly red2-only, but claude has no built-in way to do this.
+
+### David picks "no copy on red2" (15 Nov 2026), still for discussion
+
+"I was thinking more option two of those scenarios ... which seems to me
+like the default approach without any syncing. It would be handy for red 2
+to be able to access those other transcripts when required though."
+
+What that means in practice:
+
+- **Live, not kept.** While a chat runs, red2 still needs its events to
+  show cards, stream the reply and speak it. Those keep flowing over the
+  worker link but aren't written to disk on red2.
+  `<state>/sessiond/remote/` and the 2 s line sync go.
+- **Read on demand.** Opening an older thread, a recap or a search on red2
+  asks the machine for the file (a `read` op on the worker link, by byte
+  range). It can be cached in memory, never written to disk.
+- **Owner split.** red2 owns the thread: its list row, speech and cards.
+  The machine it ran on owns the file. red5's own server hides threads red2
+  started (its sessiond tags them with red2's server id) but can still
+  serve their file.
+- **Costs.** A thread's history can't be read while its machine is off.
+  Search across machines is a fan-out: the app already merges search across
+  servers, and red2's `media find` would ask each worker. The transcripts
+  go into the backups of the machine they ran on, not red2's.
