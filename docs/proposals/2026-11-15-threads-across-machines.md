@@ -210,3 +210,28 @@ is no longer a mirror of the real file but the record. In order:
 4. **Push, not poll (later).** The worker sends new lines down the link it
    already holds open, in place of the 2 s `sync` poll and its 900 s
    cut-off. This is an efficiency change, not a change of model.
+
+## Across harnesses
+
+David: "Will this work across all harnesses?"
+
+The rules (one owner, owner tag, hooks off, the worker's server hiding
+the chat) don't depend on the harness. The sync does. Today it reads a
+Claude JSONL by byte offset, and `start` refuses any other agent
+(`sessiond_remote.py:415`). Where each keeps its chat
+(`agent_media_core/harnesses.py`):
+
+| harness | store | runs headless under sessiond | sync | worker copy deleted / sent back |
+|---|---|---|---|---|
+| Claude Code | JSONL file | yes | byte offset, as now | yes |
+| antigravity | managed file (`antigravity.path`) | yes | byte offset, if append-only (to check) | yes |
+| opencode | SQLite db | yes | by message: its export, as `opencode_move.py` does | yes: export, then import on resume |
+| Codex | JSONL rollout | no (pane) | byte offset | yes |
+| pi | JSONL file | no (pane) | byte offset | yes |
+| Hermes | SQLite db | no | by message, from its rows | risky: no export/import seen; leave its copy |
+
+So the sync becomes a small per-harness adapter of two kinds: a file read
+by byte offset, or a database read message by message through the
+harness's own export. The owner keeps each in its native form, so a resume
+can hand it back. Today only Claude, antigravity and opencode run headless,
+so only they can be worker chats. opencode is parity item 11.
