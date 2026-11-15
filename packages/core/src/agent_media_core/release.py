@@ -1194,6 +1194,10 @@ def unit_runs(unit: str) -> dict:
     started = _started(pid)
     if since and started >= since:
         out.update(source="release", sha=release_at(started))
+    elif unit in native_units():
+        # Its own unit file starts it from `current`: always the release in
+        # use when it started (the speech sink's mpv, the tunnel's cloudflared).
+        out.update(source="release", sha=release_at(started))
     elif unit in read_manifest()["units"] or (co and plan_unit(unit, co).lines):
         out.update(source="checkout", path=str(co or ""))
     else:
@@ -1209,11 +1213,16 @@ def status() -> dict:
     units = {}
     co = default_checkout()
     names = set(man["units"])
+    # The units that start from the release by their own unit file count as
+    # in release mode (15 Nov 2026: they were left out, so a server still on
+    # the release before read as nothing to report).
+    native = set(native_units()) if cur else set()
+    names |= native
     if co:
         names |= set(units_naming(co))
     for u in sorted(names):
         r = unit_runs(u)
-        r["mode"] = "release" if u in man["units"] else "checkout"
+        r["mode"] = "release" if u in man["units"] or u in native else "checkout"
         units[u] = r
     return {"current": cur, "previous": prev, "running": info(), "units": units,
             "deployed": deployed_at(cur["sha"]) if cur else 0.0,

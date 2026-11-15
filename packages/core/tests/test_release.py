@@ -564,6 +564,39 @@ def test_media_version_names_the_units_that_differ(rel, monkeypatch, capsys):
     assert "switch" in capsys.readouterr().out
 
 
+def test_media_version_counts_the_units_that_start_from_the_release(rel, monkeypatch, capsys):
+    """A unit whose own file starts from `current` (agent-media-server) is
+    named when it still runs the release before, and counted when it runs
+    this one (15 Nov 2026: it was left out of `media version`)."""
+    _in_mode(rel, monkeypatch)
+    d = Path(release.current()["path"])
+    cur = rel.root / "current"
+    rel.unit("agent-media-own.service", f"[Service]\nExecStart={cur}/.venv/bin/media-feed --port 2\n")
+    rel.unit("agent-media-job.service", f"[Service]\nType=oneshot\nExecStart={cur}/.venv/bin/media-feed --once\n")
+    # Its process (pid 5555) runs a script under `current`, dated by when it
+    # started; the others (4242) run this release's own interpreter.
+    own = {"args": ["/usr/bin/python3", f"{cur}/.venv/bin/media-feed"]}
+    monkeypatch.setattr(release, "_unit_show", lambda u: {
+        "MainPID": "5555" if u == "agent-media-own.service" else "4242", "ActiveState": "active"})
+    monkeypatch.setattr(release, "_cmdline",
+                        lambda pid: own["args"] if pid == 5555 else [f"{d}/.venv/bin/python", "x"])
+    monkeypatch.setattr(release, "_started", lambda pid: 1.0)   # before any deploy: the release before
+    st = release.status()
+    assert st["units"]["agent-media-own.service"]["mode"] == "release"
+    assert "agent-media-job.service" not in st["units"]
+    assert "  agent-media-own: runs an earlier release (not restarted since the switch)" in release.status_lines(st)
+    own["args"] = [f"{d}/.venv/bin/python", f"{cur}/.venv/bin/media-feed"]
+    lines = release.status_lines()
+    assert not any("agent-media-own" in line for line in lines)
+    assert lines[-1].startswith("units: 3 run this release")
+    # A program that names neither (its run script ends in `exec mpv`) is
+    # dated: started after the switch, it runs this release.
+    own["args"] = ["mpv", "--idle=yes"]
+    monkeypatch.setattr(release, "_started", lambda pid: release.read_log()[-1]["t"] + 1)
+    assert release.unit_runs("agent-media-own.service")["sha"] == rel.first
+    assert not any("agent-media-own" in line for line in release.status_lines())
+
+
 def test_info_for_a_checkout_is_its_head():
     v = release.info()
     assert v["mode"] == "checkout" and len(v["sha"]) == 40 and v["deployed"] == 0.0
