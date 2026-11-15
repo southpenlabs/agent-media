@@ -269,3 +269,10 @@ thread when done. Step 4, Sasonica showing these chats, is the
 sasonica-app session's (agent-mail #634): the companion's bound service is
 at contract v2 (`IBridges.aidl` at sasonica-bridges ed6ea76: chats,
 messages, send, react, read, media, events; failures throw).
+
+**Step 4 works on p8a** (16 Nov 2026): Sasonica build 2368 (sasonica-app
+bd571e6e, PhoneBridgesPlugin) binds the companion's v2; the test account's
+chats show in Chats as "On this phone", open, and David sent and received
+through them (agent-mail #653). Chats asks for the permission once per
+install of the companion (9833405d). Not yet tried: reactions, read marks
+seen on the network, media.
