@@ -188,3 +188,25 @@ Read as rules for any install, not David's machines:
 For David's machines that gives red2 as central chats, red5 as a worker
 with a small server of its own (and its own chats if wanted), and red3/red4
 as workers or shells. That is decision 3 kept, with the owner rule.
+
+David, 15 Nov 2026: "yeah I like it. so what should we do with the sync?"
+
+## What happens to the sync
+
+It stays, with a new job. It's how the owning server's copy is kept, so it
+is no longer a mirror of the real file but the record. In order:
+
+1. **Fix the two gaps** (needed whatever else happens). The worker's
+   sessiond sets `MEDIA_HOOK_ENABLED=0` on chats a server started (today
+   it's only documented), and `search.db` indexes
+   `<state>/sessiond/remote/*.jsonl`, so `media find` sees worker chats.
+2. **Tag the owner.** The start carries the owning server's id. The
+   worker's sessiond stores it, and the worker's own server leaves tagged
+   chats out of its list, cards and index.
+3. **red2's copy is the record.** It goes into red2's backups like any
+   transcript. Once a chat has ended and its last line has synced, the
+   worker deletes its copy. A resume sends the file back to the worker
+   before `--resume`.
+4. **Push, not poll (later).** The worker sends new lines down the link it
+   already holds open, in place of the 2 s `sync` poll and its 900 s
+   cut-off. This is an efficiency change, not a change of model.
