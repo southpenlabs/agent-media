@@ -10,7 +10,8 @@
 # deploy/binary/build.sh; on Windows 11 for ARM64 the same file, run under
 # the x64 emulation, David 16 Oct 2026), checked against SHA256SUMS and put at
 # %USERPROFILE%\.local\bin\sasonica.exe; then `sasonica install` (shims for
-# every command, this machine's config, the agents' hooks, logon tasks
+# every command, this machine's config, opencode as the default agent when
+# there is none, the agents' hooks, logon tasks
 # under Task Scheduler → Sasonica, a quick tunnel among them) and a pairing
 # QR code for the app.
 # Running it again updates. docs/proposals/2026-09-29-single-binary.md.

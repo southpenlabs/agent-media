@@ -34,7 +34,7 @@ installed metadata, so a new console script needs nothing here:
 
     sasonica serve        the canvas + the app's API (media-visual-canvas)
     sasonica sessiond     the headless session holder (media sessiond)
-    sasonica install      shims, config, agents' hooks, services
+    sasonica install      shims, config, opencode, agents' hooks, services
     sasonica media say hi … any console script by name
 
 `sasonica install` writes a two-line shim per command into `~/.local/bin`
@@ -56,6 +56,21 @@ install` — shims, `media-setup init --roles origin` when there is no config,
 installed, `sasonica-canvas` and `sasonica-sessiond` as systemd --user units —
 and prints a pairing QR code. Running it again updates. Tested end to end on
 red5 with a scratch HOME and a `file://` release.
+
+Since 15 Nov 2026 it also installs opencode, without asking, when no
+opencode is on PATH: opencode is the default agent when none is set, and on
+its free models it needs no account, so a fresh install has an agent that
+works. It is fetched from opencode's GitHub release (v1.19.5, pinned, each
+asset checked against its sha256 as cloudflared is; linux x64 normal,
+baseline and musl, linux arm64 and arm64 musl, darwin arm64 and x64,
+windows x64 and arm64) to `~/.opencode/bin`, opencode's own place (the
+services' PATH has it; on Windows the shims' folder), with a link in
+`~/.local/bin`. The Agents step says what it did and the version.
+`--no-opencode` skips it for scripted installs; an opencode already there,
+any version, is left alone and its plugin wired as before; Claude Code stays
+optional, wired when present. On Android (the phone's installer chooses its
+own agents) or a platform with no build, it says so and, with no agent at
+all, how to add one by hand. `packages/sasonica/src/sasonica/opencode.py`.
 
 **The phone too** (29 Sep 2026): `deploy/android/install.sh` puts the
 binary for Debian's architecture into the proot's `~/.local/bin`, checked the

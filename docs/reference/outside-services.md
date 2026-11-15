@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 49 rows.
+Sorted with what blocks a public release first. 50 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -90,6 +90,7 @@ Sorted with what blocks a public release first. 49 rows.
 | 47 | Build-time fetches (jsDelivr, npm, PyPI) | vendoring MapLibre and the like | none | at build only | nothing | no |
 | 48 | kokoro-onnx GitHub release (model files) | the local Kokoro voice: `media-setup voices kokoro`, `sasonica install --local-voice` | none | fetched once on request, checked against pinned sha256s | nothing: the model is Apache-2.0 and kokoro-onnx MIT; keep the credit in NOTICE | **No, not gated** |
 | 49 | Hugging Face (rhasspy/piper-voices) | Piper voices: `media-setup voices piper:<voice>` | none | fetched on request by Piper's own downloader | **Needs work**: each voice has its own licence (its MODEL_CARD), some non-commercial; show it beside the voice (the picker's `licence`) and keep non-commercial ones out of a paid default | **No, not gated** |
+| 50 | opencode GitHub release (anomalyco/opencode, formerly sst/opencode) | opencode, the default agent: `sasonica install` fetches it when none is here (`--no-opencode` skips) | none | fetched once at install, pinned v1.19.5, checked against pinned sha256s | nothing: opencode is MIT. Its free models are opencode's own service, under row 10 | **No, not gated** |
 
 ## The services, one by one
 
@@ -617,6 +618,22 @@ hosted tier), every one of these becomes a reseller question.
   into the catalog (`licence`, proposal
   `docs/proposals/2026-11-14-voice-picker-providers.md`) and mark the
   non-commercial ones. Neither is gated by the personal-use switch.
+
+### 50. opencode's release
+
+- **Used for:** a fresh install's agent. `sasonica install`
+  (`packages/sasonica/src/sasonica/opencode.py`) fetches opencode from
+  https://github.com/anomalyco/opencode/releases (the sst/opencode address
+  redirects there) when no opencode is on PATH, pinned at v1.19.5 and checked
+  against the sha256s in `opencode.OPENCODE_ASSETS` (as cloudflared is), into
+  `~/.opencode/bin`. Not on Android, and not with `--no-opencode`.
+- **Terms:** opencode is MIT (https://github.com/anomalyco/opencode). The
+  binary runs as a separate program. Its free models, which make it work with
+  no account, are opencode's own hosted service: what they allow a product
+  is a question for row 10, **check current terms**.
+- **Production:** nothing for the download. Move the pin forward with a
+  release's digests (`gh release view v<version> -R anomalyco/opencode --json
+  assets`).
 
 ### Related repositories
 

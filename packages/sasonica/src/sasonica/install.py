@@ -11,8 +11,12 @@ has the binary instead of a checkout:
      before the server, loses its own command (sasonica-shell, or on Windows
      its sasonica.cmd): it is `sasonica shell` now (sasonica/shell.py);
   2. this host's config when it has none: role `origin`, headless sessions on;
-  3. the agents' hooks: Claude Code's settings, opencode's plugin, for those
-     installed;
+  3. the agents: opencode, the default agent (no account: its free models),
+     fetched from its GitHub release (pinned, sha256 checked, like
+     cloudflared) to ~/.opencode/bin when there is none, any version on PATH
+     left alone, not on Android, --no-opencode to skip (sasonica/opencode.py);
+     then the hooks: opencode's plugin, Claude Code's settings (optional),
+     for those installed. With neither, it says how to add one;
   4. a quick tunnel, so the phone reaches this computer from anywhere with no
      tailnet and no account (roadmap item 15): cloudflared, fetched to
      ~/.local/bin and checked against its pinned sha256, and the app-routes-
@@ -650,6 +654,39 @@ SLEEP_NOTE = {
 }
 
 
+def _agents_step(me: list[str], a) -> None:
+    """opencode fetched when there is none (the default agent, sasonica/
+    opencode.py), then each agent's hooks: opencode's plugin, Claude Code's
+    settings, for those here."""
+    from sasonica import opencode
+
+    print("== Agents")
+    if a.no_opencode:
+        oc = opencode.found(a.bin_dir)
+        print(f"  opencode: {oc + ' (already there)' if oc else 'skipped (--no-opencode)'}")
+    else:
+        try:
+            oc, what = opencode.fetch_opencode(a.bin_dir, dry_run=a.dry_run)
+        except OSError as e:
+            oc, what = "", f"download failed: {e}"
+        print(f"  opencode: {what}")
+    path = os.pathsep.join([str(a.bin_dir), os.environ.get("PATH", "")])
+    claude = shutil.which("claude", path=path)
+    if oc:
+        # The plugin's row looks for opencode on its own PATH (setup.
+        # _row_opencode): one just put in ~/.opencode/bin is not on it yet.
+        here = os.environ.get("PATH", "").split(os.pathsep)
+        if str(Path(oc).parent) not in here:
+            os.environ["PATH"] = os.pathsep.join([str(Path(oc).parent), *here])
+        _run([*me, "media-setup", "profile", "--only", "opencode"], dry_run=a.dry_run)
+    if claude:
+        _run([*me, "media-setup", "install-hooks"], dry_run=a.dry_run)
+    else:
+        print("  Claude Code: not installed (optional; wired when it is)")
+    if not oc and not claude:
+        print(opencode.ADD_AN_AGENT)
+
+
 def _run(argv: list[str], *, dry_run: bool) -> int:
     print("  $ " + " ".join(argv))
     if dry_run:
@@ -670,6 +707,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-tunnel", action="store_true",
                     help="no quick tunnel: the phone reaches this computer some other "
                          "way (a tailnet, your own tunnel or proxy)")
+    ap.add_argument("--no-opencode", action="store_true",
+                    help="do not fetch opencode, the default agent (for scripted installs); "
+                         "one already here is wired all the same")
     ap.add_argument("--force", action="store_true",
                     help="replace commands and services a checkout install put there")
     ap.add_argument("--local-speech", nargs="?", const="on", choices=("on", "off"),
@@ -732,16 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     if _tunnel_step(a, env_file):
         a.units.update(TUNNEL_UNIT)
 
-    print("== Agents")
-    path = os.pathsep.join([str(a.bin_dir), os.environ.get("PATH", "")])
-    if shutil.which("claude", path=path):
-        _run([*me, "media-setup", "install-hooks"], dry_run=a.dry_run)
-    else:
-        print("  Claude Code: not installed")
-    if shutil.which("opencode", path=path) or (Path.home() / ".opencode" / "bin" / "opencode").exists():
-        _run([*me, "media-setup", "profile", "--only", "opencode"], dry_run=a.dry_run)
-    else:
-        print("  opencode: not installed")
+    _agents_step(me, a)
 
     if a.local_speech:
         _local_speech(binary, a)
