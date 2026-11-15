@@ -89,8 +89,17 @@ let's get them working for opencode".
     it is that message. sessiond makes the fork, gives it the chat's
     permission rules (`PATCH`, since a fork takes none of its own), and
     sends the first message.
-11. **Running on another machine.** Not yet.
-12. **Moving a chat to another folder.** Not yet.
+11. **Running on another machine.** Waits for a machine. red2 is the
+    server now, and `media session hosts` lists no other worker. When there
+    is one, it needs a mirror of the opencode chat's messages beside the
+    Claude transcript mirror, since sessiond_remote syncs a Claude JSONL
+    and opencode keeps a database. It also needs the reply spoken here on
+    its idle event, and `start` let through for opencode.
+12. **Moving a chat to another folder.** Can't be done through opencode
+    (measured on 1.19.5): a prompt sent from another folder still runs in
+    the session's own folder, and so does a fork made from there. Only
+    editing opencode's database under a running server would move it, which
+    we won't do. The thread's folder override still moves it in the app.
 13. **Personas in the system prompt.** Done: a headless opencode chat sends
     the persona's render as `system` with every prompt. In a pane, which
     has no flag for it, the render still goes before the first message.
