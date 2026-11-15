@@ -267,11 +267,21 @@ def opencode_last_reply(session: str) -> tuple[str, str]:
     opencode's plugin hears "idle" but not the words; they are in the
     database by then, so the speech hook reads them here. The id is the
     last step's, which is what a repeat of the same idle is told apart by.
+    On opencode 2 they are read over its server.
     """
-    rows = opencode_rows(
-        "select m.id, json_extract(m.data, '$.role'), p.data, json_extract(m.data, '$.error') "
-        "from message m left join part p on p.message_id = m.id where m.session_id = ? "
-        "order by m.time_created, m.id, p.id", (session,))
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        rows = []
+        for r in opencode_api.records(session) or []:
+            err = json.dumps(r["error"]) if r.get("error") else None
+            for p in r["parts"] or [None]:
+                rows.append((r["id"], r["role"], json.dumps(p) if p else None, err))
+    else:
+        rows = opencode_rows(
+            "select m.id, json_extract(m.data, '$.role'), p.data, json_extract(m.data, '$.error') "
+            "from message m left join part p on p.message_id = m.id where m.session_id = ? "
+            "order by m.time_created, m.id, p.id", (session,))
     said: list[str] = []
     last = failed = ""
     for mid, role, pdata, error in rows:
@@ -301,6 +311,11 @@ def opencode_last_reply(session: str) -> tuple[str, str]:
 
 def _opencode_session(session: str) -> tuple:
     """`(directory, title)` of an opencode session, or () when it has none."""
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        info = opencode_api.session(session)
+        return (opencode_api.directory_of(info), str(info.get("title") or "")) if info else ()
     rows = opencode_rows("select directory, title from session where id = ?", (session,))
     return tuple(rows[0]) if rows else ()
 
@@ -741,6 +756,10 @@ def profile_of(session: str) -> str:
     """The harness profile a conversation belongs to, "" for the default —
     so resuming it runs with that profile's directory."""
     if is_opencode(session):
+        from . import opencode_api
+
+        if opencode_api.installed_v2():
+            return ""  # one server, the default profile's
         for profile, db in opencode_dbs():
             if _opencode_query(db, "select 1 from session where id = ?", (session,)):
                 return profile
@@ -822,6 +841,15 @@ def first_prompt(session: str) -> str:
     if is_opencode(session):
         # A user message's words are its text parts; `synthetic` ones are
         # opencode's own additions (a file it attached), not what was typed.
+        from . import opencode_api
+
+        if opencode_api.installed_v2():
+            for r in opencode_api.records(session) or []:
+                said = [p for p in r["parts"] if r["role"] == "user"
+                        and p.get("type") == "text" and not p.get("synthetic")]
+                if said:
+                    return " ".join(str(said[0].get("text") or "").split())
+            return ""
         rows = opencode_rows(
             "select p.data from part p join message m on m.id = p.message_id "
             "where p.session_id = ? and json_extract(m.data, '$.role') = 'user' "
@@ -1258,6 +1286,13 @@ def _opencode_live_session(pid: str, argv: list[str]) -> str:
     # The database this process writes to: its own XDG_DATA_HOME (a harness
     # profile's, when it was started in one).
     data = _env_of(pid, "XDG_DATA_HOME")
+    from . import opencode_api
+
+    if opencode_api.installed_v2() and not data:
+        since = (_started_at(pid) - 5.0) * 1000
+        got = [s for s in opencode_api.sessions(directory=cwd)
+               if int(((s.get("time") or {}).get("created")) or 0) >= since]
+        return str(min(got, key=lambda s: s["time"]["created"])["id"]) if got else ""
     rows = opencode_rows(
         "select id from session where directory = ? and parent_id is null "
         "and time_created >= ? order by time_created desc limit 1",
@@ -1361,7 +1396,13 @@ def _hermes_stored() -> list[Stored]:
 def _opencode_stored() -> list[Stored]:
     """Every opencode conversation, in every profile's database. A
     subagent's session (it has a parent) is part of its parent's, not one of
-    its own; an archived one was put away."""
+    its own; an archived one was put away. opencode 2: its server's list."""
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        return [Stored(str(s["id"]), OPENCODE,
+                       float(((s.get("time") or {}).get("updated")) or 0) / 1000.0)
+                for s in opencode_api.sessions() if is_opencode(str(s.get("id") or ""))]
     return [Stored(str(sid), OPENCODE, float(at or 0) / 1000.0, profile=profile)
             for profile, db in opencode_dbs()
             for sid, at in _opencode_query(db,

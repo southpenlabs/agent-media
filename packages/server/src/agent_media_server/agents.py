@@ -336,8 +336,10 @@ def opencode_agents(session: str, *, live: bool | None = None) -> list[dict] | N
     `pending` → running while the thread is live, else stopped (it died with
     the server). Steps are the child session's tool calls. None when the
     thread has no messages at all."""
-    from agent_media_core import harnesses
+    from agent_media_core import harnesses, opencode_api
 
+    if opencode_api.installed_v2():
+        return _opencode2_agents(session, live=live)
     if not harnesses.opencode_rows("select 1 from message where session_id = ? limit 1",
                                    (session,)):
         return None
@@ -388,6 +390,74 @@ def opencode_agents(session: str, *, live: bool | None = None) -> list[dict] | N
             "id": child,
             "description": str(inp.get("description") or st.get("title") or ""),
             "agent_type": str(inp.get("subagent_type") or ""),
+            "is_fork": False, "parent_id": None, "depth": 1,
+            "started_at": round(start, 3),
+            "ended_at": round(end or last, 3) if status != "running" else None,
+            "status": status,
+            "current_step": (steps[-1][0] or None) if steps and status == "running" else None,
+            "steps": len(steps),
+            "last_at": round(last, 3),
+        })
+    rows.sort(key=lambda r: (r["started_at"], r["id"]))
+    return rows
+
+
+def _opencode2_agents(session: str, *, live: bool | None = None) -> list[dict] | None:
+    """opencode 2's subagents, over its server (core opencode_api): each is
+    a child session, and runs in the background (its `subagent` tool call
+    is done at once), so the child's own outcome is its status: running
+    while the server has it active, done, failed, or stopped (interrupted,
+    or left behind by a server that is gone)."""
+    from agent_media_core import opencode_api
+
+    if not opencode_api.messages(session):
+        return None
+    kids = opencode_api.children(session)
+    if not kids:
+        return []
+    srv = opencode_api.service(start=False)
+    try:
+        active = set((srv.call("GET", "/api/session/active", timeout=5) or {}).keys()) if srv else set()
+    except opencode_api.ApiError:
+        active = set()
+    if live is None:
+        live = _live(session)
+    asked = {}
+    for r in opencode_api.records(session) or []:
+        for p in r["parts"]:
+            if p.get("type") == "tool" and p.get("tool") == "task":
+                meta = (p.get("state") or {}).get("metadata") or {}
+                asked[str(meta.get("sessionID") or "")] = (p.get("state") or {}).get("input") or {}
+    rows = []
+    for k in kids:
+        child = str(k.get("id") or "")
+        if not AGENT_ID.fullmatch(child):
+            continue
+        t = k.get("time") if isinstance(k.get("time"), dict) else {}
+        outcome = str(k.get("outcome") or "")
+        if child in active:
+            status = "running"
+        elif outcome == "succeeded":
+            status = "done"
+        elif outcome == "failed":
+            status = "failed"
+        elif outcome == "interrupted" or not live:
+            status = "stopped"
+        else:
+            status = "running"
+        steps = []
+        for r in opencode_api.records(child, start=False) or []:
+            for p in r["parts"]:
+                if p.get("type") == "tool":
+                    steps.append((str(p.get("tool") or ""), _ms(r.get("time"))))
+        inp = asked.get(child, {})
+        start = _ms(t.get("created")) or time.time()
+        end = _ms(t.get("idle")) if status != "running" else None
+        last = max([start, end or 0.0, _ms(t.get("updated")) or 0.0, *[a for _, a in steps if a]])
+        rows.append({
+            "id": child,
+            "description": str(inp.get("description") or k.get("title") or ""),
+            "agent_type": str(inp.get("agent") or k.get("agent") or ""),
             "is_fork": False, "parent_id": None, "depth": 1,
             "started_at": round(start, 3),
             "ended_at": round(end or last, 3) if status != "running" else None,

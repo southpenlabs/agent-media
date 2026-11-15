@@ -182,8 +182,14 @@ def current(session: str) -> str:
     assistant's `providerID`/`modelID`), so the latest says what the next
     turn runs unless it was changed since (session_settings keeps that).
     """
-    from . import harnesses
+    from . import harnesses, opencode_api
 
+    if opencode_api.installed_v2():
+        for r in reversed(opencode_api.records(session) or []):
+            m = r.get("model") or {}
+            if m.get("providerID") and m.get("id"):
+                return f"{m['providerID']}/{m['id']}"
+        return ""
     rows = harnesses.opencode_rows(
         "select data from message where session_id = ? order by time_created desc, id desc limit 8",
         (session,))

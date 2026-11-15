@@ -895,9 +895,13 @@ class OpencodeBuilder(_HarnessBuilder):
 
 def _opencode_rows(session: str) -> list[dict]:
     """A session's messages with their parts, oldest first, as
-    `OpencodeBuilder.feed` takes them."""
-    from agent_media_core import harnesses
+    `OpencodeBuilder.feed` takes them. opencode 2: over its server
+    (core opencode_api), never its tables."""
+    from agent_media_core import harnesses, opencode_api
 
+    if opencode_api.installed_v2():
+        return [{**r, "at": datetime.fromtimestamp(r["time"] / 1000.0, timezone.utc).isoformat()}
+                for r in opencode_api.records(session) or []]
     msgs: dict[str, dict] = {}
     for mid, at, mdata, pdata in harnesses.opencode_rows(
             "select m.id, m.time_created, m.data, p.data from message m "
@@ -1548,6 +1552,15 @@ def file_state(session: str) -> tuple[int, int, float] | None:
 
         if not harnesses.is_opencode(session):
             return None
+        from agent_media_core import opencode_api
+
+        if opencode_api.installed_v2():
+            # Its server's last change to the session, which every message
+            # and step moves.
+            info = opencode_api.session(session)
+            t = (info or {}).get("time") or {}
+            at = int(t.get("updated") or 0)
+            return (0, at, at / 1000.0) if at else None
         rows = harnesses.opencode_rows(
             "select count(*), max(time_updated) from part where session_id = ?", (session,))
         if not rows or not rows[0][0]:

@@ -119,13 +119,21 @@ def context_usage(session: str) -> tuple[int, int] | None:
     `context.window` guesses."""
     import json
 
-    from .. import harnesses
+    from .. import harnesses, opencode_api
     from . import context
 
-    rows = harnesses.opencode_rows(
-        "select data from message where session_id = ? "
-        "and json_extract(data, '$.role') = 'assistant' "
-        "order by time_created desc, id desc limit 4", (session,))
+    if opencode_api.installed_v2():
+        # v2's step carries `model: {id, providerID}`; as v1's for below.
+        rows = [(json.dumps({"tokens": r.get("tokens") or {},
+                             "modelID": (r.get("model") or {}).get("id", ""),
+                             "providerID": (r.get("model") or {}).get("providerID", "")}),)
+                for r in reversed(opencode_api.records(session) or [])
+                if r["role"] == "assistant"][:4]
+    else:
+        rows = harnesses.opencode_rows(
+            "select data from message where session_id = ? "
+            "and json_extract(data, '$.role') = 'assistant' "
+            "order by time_created desc, id desc limit 4", (session,))
     for (data,) in rows:
         try:
             m = json.loads(data)
@@ -158,10 +166,9 @@ def note(restart_only: bool = False) -> int:
 
         # A subagent's prompt is its parent's words, not the person's: it
         # gets the restart note only (as Claude's background agents do).
-        parent = harnesses.opencode_rows(
-            "select parent_id from session where id = ? and parent_id is not null", (session,))
+        parent = _parent(session)
         child = bool(parent)
-        _sessiond_session(str(parent[0][0]) if child else session)
+        _sessiond_session(parent or session)
         if child:
             hook["agent_id"] = session
         if restart_only or child:
@@ -195,15 +202,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # A subagent's session goes idle as well; its words are its parent's
     # tool result, not something said to the person.
-    if harnesses.opencode_rows(
-            "select 1 from session where id = ? and parent_id is not null", (session,)):
+    if _parent(session):
         return 0
     message, text = harnesses.opencode_last_reply(session)
     if not text or _already_spoken(session, message):
         return 0
     _headless_workspace(session)
-    folder = harnesses.opencode_rows("select directory from session where id = ?", (session,))
-    return speak(session, text, cwd=str(folder[0][0]) if folder else "")
+    return speak(session, text, cwd=_folder(session))
+
+
+def _parent(session: str) -> str:
+    """The session `session` is a subagent of, or ""."""
+    from .. import harnesses, opencode_api
+
+    if opencode_api.installed_v2():
+        return str((opencode_api.session(session) or {}).get("parentID") or "")
+    rows = harnesses.opencode_rows(
+        "select parent_id from session where id = ? and parent_id is not null", (session,))
+    return str(rows[0][0]) if rows else ""
+
+
+def _folder(session: str) -> str:
+    from .. import harnesses, opencode_api
+
+    if opencode_api.installed_v2():
+        return opencode_api.directory_of(opencode_api.session(session))
+    rows = harnesses.opencode_rows("select directory from session where id = ?", (session,))
+    return str(rows[0][0]) if rows else ""
 
 
 def speak(session: str, text: str, cwd: str = "") -> int:

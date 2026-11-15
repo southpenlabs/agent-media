@@ -37,6 +37,12 @@ starts (`GET /api/info` answers with a 2.x `version`): its routes live under
 ends in `session.execution.*`. `Host`'s session methods speak whichever it
 is, and `v2_events` turns a v2 event into the v1 payloads `Supervisor.
 _on_oc_event` reads, so the rest of sessiond does not know the difference.
+On 2, sessiond also uses opencode's own **background server** (the one its
+terminal app shares, `opencode service start`; core opencode_api.Service)
+rather than a private `serve`: one process for the desk's chats and the
+phone's. It is found through `service.json`, stood in for by `_Shared`
+(sessiond only lets go of it when no chat is attached: it is not ours to
+stop), and `MEDIA_SESSIOND_OPENCODE_SERVICE=0` keeps the private server.
 
 Config (env): MEDIA_SESSIOND_OPENCODE (the binary; default
 `harnesses.program("opencode")`), MEDIA_SESSIOND_OPENCODE_START (seconds to
@@ -362,6 +368,62 @@ def split_command(text: str, names) -> tuple[str, str] | None:
     return m.group(1), (m.group(2) or "").strip()
 
 
+_VERSIONS: dict[tuple, str] = {}
+
+
+def program_version(exe: str) -> str:
+    """`opencode --version` ("1.19.5", "2.3.0"), kept per binary and its
+    change time; "" when it does not say."""
+    import shutil
+
+    path = shutil.which(exe) or exe
+    try:
+        key = (path, os.stat(path).st_mtime)
+    except OSError:
+        key = (path, 0.0)
+    if key in _VERSIONS:
+        return _VERSIONS[key]
+    try:
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        out = ""
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+    _VERSIONS[key] = m.group(0) if m else ""
+    return _VERSIONS[key]
+
+
+class _Shared:
+    """opencode 2's background server, in the place of the `Popen` sessiond
+    holds for a private one: `pid`, `poll()` (None while it runs), `wait()`.
+    It is never ended from here (`terminate` does nothing): the desk's
+    terminal app uses it too."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = int(pid or 0)
+        self.returncode: int | None = None
+
+    def poll(self):
+        from agent_media_core import procinfo
+
+        if self.returncode is None and not procinfo.alive(self.pid):
+            self.returncode = 0
+        return self.returncode
+
+    def wait(self, timeout: float | None = None):
+        end = None if timeout is None else time.monotonic() + timeout
+        while self.poll() is None:
+            if end is not None and time.monotonic() >= end:
+                raise subprocess.TimeoutExpired("opencode service", timeout or 0)
+            time.sleep(1.0)
+        return self.returncode
+
+    def terminate(self) -> None:
+        pass
+
+    kill = terminate
+
+
 class Host:
     """The one `opencode serve` sessiond runs, started when a session needs it."""
 
@@ -369,7 +431,10 @@ class Host:
         self.sup = sup
         self.proc: subprocess.Popen | None = None
         self.port = 0
+        self.base = ""
         self.password = ""
+        #: On opencode's shared background server rather than one of ours.
+        self.shared = False
         self.lock = threading.Lock()
         self.stderr_tail: collections.deque = collections.deque(maxlen=40)
         self.stopping = False
@@ -402,6 +467,9 @@ class Host:
             if self.up:
                 return self.proc  # type: ignore[return-value]
             exe = self._program()
+            if os.environ.get("MEDIA_SESSIOND_OPENCODE_SERVICE") != "0" \
+                    and program_version(exe).split(".")[0] not in ("", "0", "1"):
+                return self._ensure_shared(exe)
             with socket.socket() as s:
                 s.bind(("127.0.0.1", 0))
                 self.port = s.getsockname()[1]
@@ -418,7 +486,8 @@ class Host:
                                         start_new_session=True)
             except OSError as e:
                 raise Refused(f"could not start opencode ({e})", "spawn_failed")
-            self.proc, self.stopping = proc, False
+            self.proc, self.stopping, self.shared = proc, False, False
+            self.base = f"http://127.0.0.1:{self.port}"
             threading.Thread(target=self._drain, args=(proc,), daemon=True,
                              name="sessiond-opencode-log").start()
             deadline = time.monotonic() + float(os.environ.get("MEDIA_SESSIOND_OPENCODE_START") or 60)
@@ -448,8 +517,60 @@ class Host:
                      self.version or "1.x", proc.pid, self.port)
             return proc
 
-    def _drain(self, proc: subprocess.Popen) -> None:
-        for line in proc.stdout or []:
+    def _ensure_shared(self, exe: str):
+        """Under the lock: opencode 2's background server, found or started
+        (core opencode_api.Service), stood in for by `_Shared`."""
+        from agent_media_core import opencode_api
+
+        from .sessiond import Refused
+
+        # Not marked headless: the desk's chats share this server, and which
+        # chat is the phone's is the plugin's to ask (it is per session).
+        env = self.sup._base_env(exe)
+        env.pop("MEDIA_SOURCE_KIND", None)
+        svc = opencode_api.Service(env=env, program=exe)
+        if os.environ.get("MEDIA_OPENCODE_SERVICE_START") == "0":
+            found = svc.find(start=False)
+        else:
+            # Asked for by a chat: started whatever the readers' switch says.
+            found = svc.find(start=False) or self._start_service(svc, exe)
+        if not found:
+            raise Refused("opencode's background server did not start", "spawn_failed")
+        rec = svc._read()
+        proc = _Shared(int(rec.get("pid") or 0))
+        self.base, self.password = svc.url.rstrip("/"), svc.password
+        self.port = int(urllib.parse.urlsplit(self.base).port or 0)
+        self.proc, self.stopping, self.shared = proc, False, True
+        self.v2, self.version = self._detect()
+        threading.Thread(target=self._drain, args=(proc,), daemon=True,
+                         name="sessiond-opencode-watch").start()
+        self.listening.clear()
+        threading.Thread(target=self._events, args=(proc,), daemon=True,
+                         name="sessiond-opencode-events").start()
+        if not self.listening.wait(10):
+            log.warning("sessiond: opencode's event stream is not connected yet")
+        log.info("sessiond: opencode %s's background server pid %d at %s",
+                 self.version or "2", proc.pid, self.base)
+        return proc
+
+    def _start_service(self, svc, exe: str) -> bool:
+        prev = os.environ.pop("MEDIA_OPENCODE_SERVICE_START", None)
+        try:
+            return svc.find(start=True)
+        finally:
+            if prev is not None:
+                os.environ["MEDIA_OPENCODE_SERVICE_START"] = prev
+
+    def _drain(self, proc) -> None:
+        if isinstance(proc, _Shared):
+            # Watched while it is the one in use; once let go, not ours to report.
+            while proc.poll() is None and self.proc is proc:
+                time.sleep(1.0)
+            if self.proc is not proc:
+                return
+            self.sup._oc_host_exited(proc, proc.returncode or 0)
+            return
+        for line in getattr(proc, "stdout", None) or []:
             self.stderr_tail.append(line.rstrip("\n")[:500])
         rc = proc.wait()
         self.sup._oc_host_exited(proc, rc)
@@ -468,6 +589,13 @@ class Host:
         with self.lock:
             proc, self.proc = self.proc, None
             self.stopping = True
+            shared = self.shared
+        if shared:
+            # Not ours to end: let go of it; its chats are parked as when ours stops.
+            if proc is not None:
+                log.info("sessiond: letting go of opencode's background server")
+                self.sup._oc_host_exited(proc, 0)
+            return
         if proc is not None and proc.poll() is None:
             log.info("sessiond: stopping opencode serve pid %d", proc.pid)
             self._terminate(proc)
@@ -481,7 +609,8 @@ class Host:
               timeout: float = 30.0):
         q = f"?{urllib.parse.urlencode({'directory': directory})}" if directory else ""
         data = None if body is None else json.dumps(body).encode()
-        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}{q}", data=data,
+        req = urllib.request.Request(f"{self.base or f'http://127.0.0.1:{self.port}'}{path}{q}",
+                                     data=data,
                                      method=method, headers={"Authorization": self._auth()})
         if data is not None:
             req.add_header("Content-Type", "application/json")
@@ -716,7 +845,7 @@ class Host:
         """Follow `/global/event` while this server runs; reconnect if it drops."""
         while proc.poll() is None and self.proc is proc:
             path = "/api/event" if self.v2 else "/global/event"
-            req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}",
+            req = urllib.request.Request(f"{self.base or f'http://127.0.0.1:{self.port}'}{path}",
                                          headers={"Authorization": self._auth(),
                                                   "Accept": "text/event-stream"})
             try:

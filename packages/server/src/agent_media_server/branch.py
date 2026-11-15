@@ -109,11 +109,14 @@ def opencode_cut(session: str, mid: str, mode: str) -> tuple[bool, str]:
     reply's first step; its later steps are kept), "" when the reply is the
     last thing said (keep all). "before": `mid` itself, one of the person's
     messages; "" when it is the first (nothing to keep)."""
-    from agent_media_core import harnesses
+    from agent_media_core import harnesses, opencode_api
 
-    rows = harnesses.opencode_rows(
-        "select id, json_extract(data, '$.role') from message where session_id = ? "
-        "order by time_created, id", (session,))
+    if opencode_api.installed_v2():
+        rows = [(r["id"], r["role"]) for r in opencode_api.records(session) or []]
+    else:
+        rows = harnesses.opencode_rows(
+            "select id, json_extract(data, '$.role') from message where session_id = ? "
+            "order by time_created, id", (session,))
     ids = [str(i) for i, _ in rows]
     if not mid or mid not in ids:
         return False, ""

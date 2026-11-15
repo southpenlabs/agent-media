@@ -68,6 +68,41 @@ below.
 - **Not tried yet:** approvals and forms (questions), fork, interrupt,
   credentials, plugins, permission rulesets.
 
+## Decided and built (branch `opencode-v2`, 16 Nov 2026)
+
+- **On v2, opencode is read over its API, never its tables** (David: "change
+  the files that read opencode's database directly to use the API"). Core
+  `opencode_api.py` finds v2's background server through
+  `$XDG_STATE_HOME/opencode/service.json` and starts it when it is down
+  (`opencode service start`, about 0.2 s; it then runs until stopped and has
+  no idle shutdown). The readers (transcript, last reply and speech hook,
+  first prompt, thread list, subagents, branch cut, reap, settings, model,
+  quota, file state) take a v2 branch through it; v1 keeps its SQL. A
+  database with v2's `session_v2` table is what selects v2.
+- **sessiond uses that same shared server on v2**, not a private `serve`.
+  It is told apart by `opencode --version`. sessiond lets go of the server
+  when no phone chat is attached, but never stops it, because the terminal
+  app uses it too. `MEDIA_SESSIOND_OPENCODE_SERVICE=0` keeps a private server.
+  The shared server is started without the headless marker, since desk chats
+  run on it.
+- Checked end to end on real 2.3.0 (scratch HOME, free model): chat,
+  transcript, approval, questions (a model may ask two forms at once, and
+  each is a card), interrupt, and letting go on close.
+
+## Still to do
+
+- **The plugin** (speech, the context note, the restart note): v1 plugins
+  do not run on v2. It must also tell a phone chat from a desk chat per
+  session, because both share one server and one environment (ask sessiond
+  by session id).
+- **Live text:** v2's API shows a reply only when its step ends (probed:
+  nothing for 23 s, then all 5,600 characters at once), and the session's
+  `time.updated` does not move while it streams. Word-by-word text in the
+  app would need sessiond to relay `session.text.delta` events.
+- Keys (`/api/credential`) and the model sheet (`/api/model`).
+- Rename: v2 takes no title from a client.
+- Back up `~/.local/share/opencode`, install v2 on red2, watch, remove v1.
+
 ## Risks
 
 - Both versions install as `opencode`, and package managers replace one

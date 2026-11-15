@@ -211,6 +211,10 @@ def last_message_at(session: str) -> float | None:
     if h.is_hermes(session):
         return _hermes_last(session)
     if h.is_opencode(session):
+        from agent_media_core import opencode_api
+
+        if opencode_api.installed_v2():
+            return opencode_api.last_at(session)
         rows = h.opencode_rows(
             "select max(time_created) from message where session_id = ?", (session,))
         return rows[0][0] / 1000.0 if rows and rows[0][0] is not None else None

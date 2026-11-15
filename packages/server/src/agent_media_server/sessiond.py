@@ -1065,13 +1065,18 @@ def oc_quota_agent(model: str = "", *, session: str = "") -> str:
     `opencode` when none is known."""
     provider = model.split("/", 1)[0] if "/" in (model or "") else ""
     if not provider and session:
-        from agent_media_core import harnesses
+        from agent_media_core import harnesses, opencode_api
 
-        rows = harnesses.opencode_rows(
-            "select json_extract(data, '$.providerID') from message where session_id = ? "
-            "and json_extract(data, '$.role') = 'assistant' "
-            "order by time_created desc limit 1", (session,))
-        provider = str(rows[0][0] or "") if rows else ""
+        if opencode_api.installed_v2():
+            said = [r for r in opencode_api.records(session, start=False) or []
+                    if r["role"] == "assistant" and r.get("model")]
+            provider = str(said[-1]["model"].get("providerID") or "") if said else ""
+        else:
+            rows = harnesses.opencode_rows(
+                "select json_extract(data, '$.providerID') from message where session_id = ? "
+                "and json_extract(data, '$.role') = 'assistant' "
+                "order by time_created desc limit 1", (session,))
+            provider = str(rows[0][0] or "") if rows else ""
     if not provider:
         # The user's configured default, read from its file: never by running
         # opencode, which can take a minute (this runs in the tick).
