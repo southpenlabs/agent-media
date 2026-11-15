@@ -56,7 +56,9 @@ import urllib.request
 
 log = logging.getLogger("agent-media.sessiond")
 
-#: The process marker `Supervisor._kill_orphans` looks for.
+#: The process marker `Supervisor._kill_orphans` looks for. Its value is
+#: the starting instance's state folder, so an instance ends only its own
+#: server: a test's supervisor (a tmp folder) once ended the live one.
 HOST_MARK = "MEDIA_SESSIOND_OPENCODE_HOST"
 
 #: Allowed without asking under the strict profile (permissions.py's
@@ -267,7 +269,7 @@ class Host:
                 self.port = s.getsockname()[1]
             self.password = secrets.token_urlsafe(24)
             env = self.sup._base_env(exe)
-            env[HOST_MARK] = "1"
+            env[HOST_MARK] = str(self.sup.root)
             env["OPENCODE_SERVER_PASSWORD"] = self.password
             try:
                 proc = subprocess.Popen([exe, "serve", "--hostname", "127.0.0.1",

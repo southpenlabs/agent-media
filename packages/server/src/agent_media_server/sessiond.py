@@ -1616,7 +1616,9 @@ class Supervisor:
         for pid, env in procinfo.environs().items():
             if pid == me:
                 continue
-            if env.get(HOST_MARK) == "1":
+            # Ours only (the value is the state folder); "1" was every
+            # instance's mark before that, so one left from then is ours too.
+            if env.get(HOST_MARK) in (str(self.root), "1"):
                 log.warning("sessiond: ending orphan opencode server %s", pid)
                 try:
                     os.kill(pid, signal.SIGTERM)

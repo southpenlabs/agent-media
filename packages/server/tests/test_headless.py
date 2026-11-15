@@ -1078,6 +1078,29 @@ def test_a_crashed_instance_leaves_pending_requests_lost_and_orphans_are_ended(h
             orphan.kill()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows ends orphans by pid")
+def test_an_instance_ends_only_its_own_opencode_server(host, tmp_path):
+    """A test's supervisor once ended the machine's live opencode server
+    (every server carried the same mark), cutting off an opencode chat
+    that was running the test suite."""
+    from agent_media_server.sessiond_opencode import HOST_MARK
+
+    root = sessiond.state_root()
+    root.mkdir(parents=True, exist_ok=True)
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    mine = subprocess.Popen(sleep, env={**os.environ, HOST_MARK: str(root)})
+    theirs = subprocess.Popen(sleep, env={**os.environ, HOST_MARK: str(tmp_path / "other")})
+    try:
+        sessiond.Supervisor().load()
+        assert mine.wait(5) == -signal.SIGTERM
+        time.sleep(0.2)
+        assert theirs.poll() is None
+    finally:
+        for p in (mine, theirs):
+            if p.poll() is None:
+                p.kill()
+
+
 def test_sessiond_down_is_503_and_never_a_pane(host):
     sid = start(host, "reply: a")
     wait_for(lambda: state(host, sid) == "waiting")
