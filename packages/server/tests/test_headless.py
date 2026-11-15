@@ -123,6 +123,27 @@ def start(h, text, **kw):
 
 # --- starting, sending, the process -------------------------------------------------
 
+def test_another_servers_chat_runs_with_its_hooks_off(host):
+    # A session worker's chat: the server that started it speaks it from the
+    # synced transcript, so this host's hook would say it twice (threads
+    # across machines, step 1). An older server sends no owner_server, but
+    # only another server sends server_permissions.
+    got = host.sup.handle({"op": "start", "cwd": str(host.work), "text": "reply: hi",
+                           "server_permissions": "normal", "owner_server": "srv-a"})
+    assert got["ok"], got
+    old = host.sup.handle({"op": "start", "cwd": str(host.work), "text": "reply: yo",
+                           "server_permissions": "normal"})
+    mine = start(host, "reply: here")
+    wait_for(lambda: len(starts(host)) == 3)
+    env = {r["env"]["MEDIA_SESSIOND_SESSION"]: r["env"] for r in starts(host)}
+    assert env[got["session"]]["MEDIA_HOOK_ENABLED"] == "0"
+    assert env[old["session"]]["MEDIA_HOOK_ENABLED"] == "0"
+    assert "MEDIA_HOOK_ENABLED" not in env[mine]
+    assert host.sup.sessions[got["session"]].record()["owner_server"] == "srv-a"
+    assert sessiond.Session.from_record(
+        host.sup.sessions[old["session"]].record()).owner_server == "remote"
+
+
 def test_start_spawns_claude_headless_with_the_spike_flags(host):
     sid = start(host, "reply: hello")
     wait_for(lambda: last_text(host, sid) == "hello")

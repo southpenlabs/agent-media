@@ -551,6 +551,11 @@ class Session:
         #: The default the server that sent this start resolved (a worker's
         #: fallback when it has no setting of its own; permissions.mode).
         self.server_permissions = ""
+        #: The server that started this chat here, when it is another one's
+        #: (a session worker's chat): that server keeps its transcript and
+        #: speaks it, so this host's own hooks stay off for it
+        #: (docs/proposals/2026-11-15-threads-across-machines.md).
+        self.owner_server = ""
         #: Chosen from the phone (session_settings.py): a model alias, and
         #: "plan" or "" — passed again at every resume, since a respawned
         #: process starts from its flags, not from what it was told.
@@ -731,6 +736,7 @@ class Session:
                 "workspace": self.workspace, "permissions": self.permissions,
                 "permissions_default": self.permissions_default,
                 "server_permissions": self.server_permissions,
+                "owner_server": self.owner_server,
                 "model": self.model, "mode": self.mode, "native_session": self.native_session,
                 "system_prompt_file": self.system_prompt_file,
                 "init_model": self.init_model, "init_mode": self.init_mode,
@@ -763,6 +769,7 @@ class Session:
         s.permissions_default = bool(rec.get("permissions_default",
                                              s.permissions in ("strict", "normal")))
         s.server_permissions = str(rec.get("server_permissions") or "")
+        s.owner_server = str(rec.get("owner_server") or "")
         s.native_session = str(rec.get("native_session") or "")
         s.system_prompt_file = str(rec.get("system_prompt_file") or "")
         s.init_model = str(rec.get("init_model") or "")
@@ -2329,6 +2336,10 @@ class Supervisor:
         env["MEDIA_SESSIOND_SESSION"] = s.id
         if s.workspace:
             env["MEDIA_SOURCE_WORKSPACE"] = s.workspace
+        if s.owner_server:
+            # Another server's chat: it runs the Stop hook itself from the
+            # synced transcript, so ours would speak the reply a second time.
+            env["MEDIA_HOOK_ENABLED"] = "0"
         return env
 
     def _argv(self, s: Session, exe: str, resume: bool) -> list[str]:
@@ -3093,7 +3104,8 @@ class Supervisor:
     def start(self, cwd: str, text: str, *, session: str = "", agent: str = "claude",
               workspace: str = "", permissions: str = "", model: str = "",
               mode: str = "", system_prompt_file: str = "", fork_from: str = "",
-              fork_at: str = "", slot: str = "", server_permissions: str = "") -> dict:
+              fork_at: str = "", slot: str = "", server_permissions: str = "",
+              owner_server: str = "") -> dict:
         """`fork_from`/`fork_at` (§6.34): start as a copy of that Claude
         session up to that record, not afresh. `slot: "high"` (Run now):
         with every slot busy, another session is parked for it
@@ -3154,6 +3166,7 @@ class Supervisor:
                         mode="plan" if mode == "plan" else "")
             s.permissions_default = not perms.named(permissions)
             s.server_permissions = server_permissions
+            s.owner_server = owner_server
             s.system_prompt_file = system_prompt_file
             s.first_text = " ".join(text.split())[:200]
             if fork_from and fork_at:
@@ -4149,7 +4162,12 @@ class Supervisor:
                     fork_from=str(req.get("fork_from") or ""),
                     fork_at=str(req.get("fork_at") or ""),
                     slot=str(req.get("slot") or ""),
-                    server_permissions=str(req.get("server_permissions") or ""))}
+                    server_permissions=str(req.get("server_permissions") or ""),
+                    # Only another server's sessiond (sessiond_remote) sends
+                    # server_permissions, so one older than owner_server is
+                    # still known for another server's start.
+                    owner_server=str(req.get("owner_server") or (
+                        "remote" if "server_permissions" in req else "")))}
             if op == "antigravity_hook":
                 from .antigravity_adapter import approval
                 return {"ok": True, "hook": approval(self, sid, req.get("payload") or {}, stage=str(req.get("stage") or "pre"))}

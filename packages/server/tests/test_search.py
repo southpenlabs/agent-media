@@ -1148,3 +1148,28 @@ def test_the_near_miss_a_model_writes_comes_back_as_a_complaint_it_can_act_on(
     assert search.compose("what did I say about the music bed in no-such-project") == {
         "q": "music bed in:no-such-project", "note": ""}
     assert len(asked) == 1, "asked once: an empty answer is an answer"
+
+
+def test_a_session_workers_chat_is_found_in_the_synced_copy(home, gate):
+    # A chat this server runs on another machine has no file under
+    # ~/.claude/projects here; its transcript is the copy sessiond_remote
+    # syncs, and search reads it (threads across machines, step 1).
+    from agent_media_server import sessiond_remote
+
+    s = Sess(sessiond_remote.mirror_path(SID3), SID3, cwd="/home/w/proj")
+    s.prompt("Is the kestrel nest still there?")
+    s.text("Yes, two chicks this morning.")
+    s.end_turn()
+    [hit] = ask("kestrel")["messages"]
+    assert hit["session"] == SID3
+
+
+def test_a_local_file_wins_over_a_synced_copy_of_the_same_chat(home, gate):
+    from agent_media_server import sessiond_remote
+
+    s = Sess(sessiond_remote.mirror_path(SID3), SID3)
+    s.prompt("old words from the worker")
+    s.end_turn()
+    claude(home, SID3).prompt("newer words here")
+    files = [f for f, sid in search._claude_files() if sid == SID3]
+    assert len(files) == 1 and "/claude/projects/" in files[0]

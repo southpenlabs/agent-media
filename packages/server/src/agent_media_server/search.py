@@ -17,7 +17,8 @@ uses (`transcript.Builder`), so a hit is a message the app can open, by the
 same id. What is indexed, per harness:
 
 - **Claude Code** — `~/.claude/projects/*/<session>.jsonl` (`CLAUDE_CONFIG_DIR`):
-  every message the log shows. Sidechains (a subagent's own turns) are not
+  every message the log shows. A chat run on a session worker is read from
+  the copy synced here (`<state>/sessiond/remote/<session>.jsonl`). Sidechains (a subagent's own turns) are not
   messages and are not indexed; the subagent's files under `<session>/` are
   not read.
 - **pi** — `~/.pi/agent/sessions/*/*.jsonl`: each `message` record.
@@ -359,6 +360,20 @@ def _claude_files() -> list[tuple[str, str]]:
         sid = os.path.basename(f)[:-6]
         if transcript_session(sid):
             out.append((f, sid))
+    # A chat this server runs on a session worker: its transcript is the copy
+    # synced here (sessiond_remote.mirror_path), this server's record of it.
+    # A local file of the same id wins (a chat moved back here).
+    seen = {sid for _, sid in out}
+    try:
+        from .sessiond import state_root
+        from .sessiond_remote import mirror_dir
+
+        for f in glob.glob(str(mirror_dir(state_root()) / "*.jsonl")):
+            sid = os.path.basename(f)[:-6]
+            if transcript_session(sid) and sid not in seen:
+                out.append((f, sid))
+    except Exception:  # noqa: BLE001 - the index never fails on the mirror
+        log.debug("search: the session workers' transcripts were not read", exc_info=True)
     return out
 
 

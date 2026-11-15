@@ -28,8 +28,10 @@ answers for it:
 * a turn's `result` heard in those events is spoken here: this host's own
   Stop hook (media-hook-claude-code) is run with the reply, so speech and
   the reply's notification go out from the server as a local session's do,
-  never from the worker to a device (the worker's sessiond runs its
-  sessions with `MEDIA_HOOK_ENABLED=0`).
+  never from the worker to a device. A start carries `owner_server` (this
+  server's id), and the worker's sessiond runs a chat that has one with
+  `MEDIA_HOOK_ENABLED=0`; a start with `server_permissions` and no owner
+  (an older server) counts as another server's too.
 
 **A host that is down** (red2 is on home power): a start or a message is
 answered at once, `code: "host_down"`, with a sentence that says so; the
@@ -131,6 +133,17 @@ def sync_s() -> float:
         return max(0.5, float(os.environ.get("MEDIA_SESSIOND_REMOTE_SYNC_S") or 2.0))
     except ValueError:
         return 2.0
+
+
+def _owner_id() -> str:
+    """This server's id, sent with a start so the worker knows whose chat it
+    runs; "remote" when the id can't be read (still another server's)."""
+    try:
+        from .servers_report import server_id
+
+        return server_id()
+    except Exception:  # noqa: BLE001 - never block a start on the id
+        return "remote"
 
 
 def mirror_dir(root: Path) -> Path:
@@ -427,6 +440,8 @@ class Remote:
                "permissions": str(req.get("permissions") or ""),
                # This server's own default, for a worker with none of its own.
                "server_permissions": _perms.mode(""),
+               # This server owns the chat: the worker keeps its hooks off.
+               "owner_server": _owner_id(),
                "model": str(req.get("model") or ""), "mode": str(req.get("mode") or ""),
                "slot": str(req.get("slot") or "")}
         if req.get("session"):

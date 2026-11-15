@@ -12397,9 +12397,13 @@ side), `phone_jobs.session` (the channel),
   whole lines (≤ 512 KiB a time). The transcript is mirrored at
   `<state>/sessiond/remote/<id>.jsonl`; `recaps.transcript_path` falls back
   to it, so the thread's messages, recaps and stream read it as they read a
-  local one.
-- **Speech.** The host runs its sessions with `MEDIA_HOOK_ENABLED=0`: it
-  never speaks. A `result` heard in the poll runs *this* host's Stop hook
+  local one. Search reads it too: `search.db` indexes the copy, so `media
+  find` and the app's search box find a worker's chat (a local file of the
+  same id wins).
+- **Speech.** The start carries `owner_server`, this server's id, and the
+  host runs a chat that has one with `MEDIA_HOOK_ENABLED=0`: it never speaks
+  (a start with `server_permissions` and no owner, from an older server,
+  counts as another server's too). A `result` heard in the poll runs *this* host's Stop hook
   (media-hook-claude-code) with the reply, the mirror and the workspace, so
   the reply is spoken, filed and notified as a local headless session's is
   (`MEDIA_SESSIOND_REMOTE_SPEECH=0` turns that off). `media attach` and every

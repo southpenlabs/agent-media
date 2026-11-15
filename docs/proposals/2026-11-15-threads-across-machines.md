@@ -196,7 +196,10 @@ David, 15 Nov 2026: "yeah I like it. so what should we do with the sync?"
 It stays, with a new job. It's how the owning server's copy is kept, so it
 is no longer a mirror of the real file but the record. In order:
 
-1. **Fix the two gaps** (needed whatever else happens). The worker's
+1. **Fix the two gaps** (needed whatever else happens). **Built 15 Nov
+   2026** (David: "Good, start step 1"): a start carries `owner_server`,
+   which the worker's sessiond keeps on the chat and which turns its hooks off;
+   `search._claude_files` reads the synced copies. The worker's
    sessiond sets `MEDIA_HOOK_ENABLED=0` on chats a server started (today
    it's only documented), and `search.db` indexes
    `<state>/sessiond/remote/*.jsonl`, so `media find` sees worker chats.
