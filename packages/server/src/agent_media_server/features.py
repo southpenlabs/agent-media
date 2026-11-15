@@ -185,6 +185,18 @@ def _personal(name: str):
     return check
 
 
+def _convert_targets() -> list[str]:
+    """The agents a chat can be copied into here (convert.py): [] without
+    txcript."""
+    try:
+        from . import convert
+
+        return convert.targets()
+    except Exception as e:  # noqa: BLE001 - never the reason /features fails
+        print(f"features: convert: {e}", file=sys.stderr)
+        return []
+
+
 def _play_gate() -> bool:
     from agent_media_core import play_gate
 
@@ -194,7 +206,7 @@ def _play_gate() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch}
@@ -219,7 +231,7 @@ def features(bearer: str) -> tuple[bool, dict]:
     from agent_media_core import personal_use
 
     return True, {**detect(), "personal_use": personal_use.report(),
-                  "version": version()}
+                  "convert_targets": _convert_targets(), "version": version()}
 
 
 def version() -> dict:

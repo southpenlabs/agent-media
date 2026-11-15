@@ -9542,7 +9542,8 @@ kinds each time, from the long press on a reply.
 
 ```json
 {"session": "<thread>", "id": "<message id>", "text": "<the first message>",
- "mode": "history" | "before" | "quote", "quote": "<the reply's words, for quote>"}
+ "mode": "history" | "before" | "quote", "quote": "<the reply's words, for quote>",
+ "agent": "<optional: another agent to branch into>"}
 ```
 
 → `{"ok", "session": "<the new chat>", "branched": true, ...}`. The thread
@@ -9566,6 +9567,14 @@ something to say.
   its first. Your first message has nothing before it: a fresh chat in the
   same folder, as `quote` with no quote. 404 for a message not in the
   transcript, 409 as `history` for a chat with none.
+
+- **`agent`** (15 Nov 2026), with `history` or `before`: when it names an
+  agent other than the thread's own, the history is copied into that agent
+  (§6.56) instead of forked, cut at the same place, and `text` is sent to
+  the copy. The answer is §6.56's with `branched: true`. 409 when this
+  server cannot make that agent's chat, or for `before` on your first
+  message (nothing to carry over). Omitted, or the thread's own agent: as
+  above.
 
 400 for a bad session id, an empty `text` or another `mode`. A Matrix room
 cannot be branched.
@@ -11616,6 +11625,47 @@ Claude. The app shows Settings' Default agent when `/features` has
 none, so this decides.
 
 ---
+
+### 6.56 A chat carried to another agent — gated (built 15 Nov 2026)
+
+Code: `agent_media_server/convert.py` (txcript, skillsynchq/txcript, run as
+a separate program). Pinned by `packages/server/tests/test_convert.py`.
+David, 15 Nov 2026: "We need a way of being able to convert a transcript
+from one agent to another". Proposal:
+`docs/proposals/2026-11-15-convert-between-agents.md`.
+
+#### `POST /session/convert`
+
+```json
+{"session": "<thread>", "agent": "claude" | "codex" | "opencode" | "pi",
+ "text": "<optional first message>", "refs": [...]}
+```
+
+→ `{"ok", "session": "<the copy>", "converted": true, "agent", "from":
+{"session", "agent", "id": ""}, "resume": "<the desk's command>", "loss":
+"<what is known to be lost, or ''>", "sent"?: bool, "send_error"?}`.
+
+The chat is copied into `agent`'s own store (a Claude Code JSONL file, a
+Codex rollout, a pi session, an `opencode import`), as a new thread that
+agent resumes as its own history; the thread it came from is left as it
+was. With `text`, it is then sent to the copy as any reply to an ended chat
+is (`POST /reply`'s path), which brings the copy back; `sent` says whether
+it went. Tool calls and reasoning cross where the target can hold them.
+`loss` names a direction known to drop something (txcript#104, #105), said,
+not refused. The copy is recorded in `<state>/converted.json` with where it
+came from.
+
+409 when this server cannot make that agent's chat (no txcript, or the
+agent is not installed); 400 for a bad session id; 502 with txcript's own
+words when it fails.
+
+`GET /features` has `convert: true` and `convert_targets: [<agent>…]` (the
+agents a copy can be made for here; `[]` without txcript): offer "Continue
+in…" with those, leaving out the thread's own agent.
+
+At the desk: `media session convert <id> --to <agent>` prints the new
+thread's link.
+
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

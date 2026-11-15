@@ -149,13 +149,30 @@ def _opencode_branch(session: str, mid: str, text: str, bearer: str,
 
 
 def session_branch(session: str, mid: str, text: str, bearer: str, *,
-                   mode: str = "history", quote: str = "") -> tuple[bool, dict]:
-    """`{"session", "id", "text", "mode", "quote"?}` → `{"session": <the new
-    chat>, "branched": true, ...}`; `quote` is the reply's words, for
-    `mode: "quote"`."""
+                   mode: str = "history", quote: str = "",
+                   agent: str = "") -> tuple[bool, dict]:
+    """`{"session", "id", "text", "mode", "quote"?, "agent"?}` → `{"session":
+    <the new chat>, "branched": true, ...}`; `quote` is the reply's words, for
+    `mode: "quote"`. `agent` other than the chat's own, with "history" or
+    "before": the history is copied into that agent instead of forked
+    (convert.py, txcript), cut at the same place, and the first message sent
+    to the copy."""
     from . import send
 
     session = (session or "").strip()
+    agent = (agent or "").strip().lower()
+    if (agent and mode in ("history", "before") and sessions._SESSION.fullmatch(session)
+            and agent != sessions.agent_of(session)):
+        if not (text or "").strip():
+            return False, {"error": "a branch needs a first message", "status": 400}
+        from . import convert
+
+        ok, detail = convert.session_convert(session, agent, bearer, text=text,
+                                             mid=(mid or "").strip(), mode=mode)
+        if ok:
+            detail["branched"] = True
+            detail["from"] = {**detail.get("from", {}), "id": (mid or "").strip()}
+        return ok, detail
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     if not (text or "").strip():

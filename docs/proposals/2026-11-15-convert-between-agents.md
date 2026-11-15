@@ -134,7 +134,15 @@ a copy must hold.
    is no build, a failure is said and the install goes on. Outside-services
    row 51. A checkout install (`media-setup`) does not fetch it: put txcript
    on PATH or set `MEDIA_TXCRIPT`.
-3. `POST /session/convert`, `/features convert`, Branch's `agent` (txcript's
-   `<id>#<range>` cut at the reply), the thread's `converted_from`, a
-   contract section.
+3. **Done (15 Nov 2026).** `POST /session/convert` and Branch's `agent`
+   (contract §6.56, §6.34), `/features` `convert` and `convert_targets`
+   (txcript here and the agent installed). A cut at a message is found by
+   time: txcript's export numbers its messages as its `#range` does, and a
+   record's timestamp places it on both sides (`convert.cut_count`); a cut
+   txcript refuses for splitting a tool call takes its nearest range. With
+   a first message, it goes to the copy by `/reply`'s path, which brings the
+   copy back in its own agent. Each copy is recorded in
+   `<state>/converted.json` (`convert.origin`); showing "continued from" on
+   a thread is left for step 4. Checked live: a two-turn Claude chat copied
+   into opencode cut after the first reply held that exchange only.
 4. The app's "Continue in…" and the Branch picker.

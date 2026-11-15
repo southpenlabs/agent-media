@@ -432,7 +432,7 @@ CORS_PATHS = frozenset({
     "/reply", "/ask", "/focus", "/session/resume", "/session/close", "/session/discard", "/draft", "/drafts/saved", "/drafts/saved/delete",
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
-    "/session/retract", "/session/react", "/session/branch", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
+    "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
@@ -4144,7 +4144,19 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = branch.session_branch(
             str(body.get("session") or ""), str(body.get("id") or ""),
             refs.expand(str(body.get("text") or ""), body.get("refs")), _bearer(h),
-            mode=str(body.get("mode") or "history"), quote=str(body.get("quote") or ""))
+            mode=str(body.get("mode") or "history"), quote=str(body.get("quote") or ""),
+            agent=str(body.get("agent") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/convert":
+        # "Continue in…" on a thread (server-contract.md §6.56): the chat
+        # copied into another agent, which resumes it as its own history.
+        # convert.py (txcript).
+        from . import convert
+
+        body = _read_json(h) or {}
+        ok, detail = convert.session_convert(
+            str(body.get("session") or ""), str(body.get("agent") or ""), _bearer(h),
+            text=refs.expand(str(body.get("text") or ""), body.get("refs")))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/react":
         # A long press on a message in the app, then an emoji

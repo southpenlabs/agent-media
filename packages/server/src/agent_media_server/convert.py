@@ -20,10 +20,12 @@ before the copy is made, not refused: txcript may have fixed them.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import time
 
 #: Our agent names (sessions.agent_of) → txcript's harness ids.
 TXCRIPT_IDS = {
@@ -87,7 +89,73 @@ def parse(out: str) -> dict:
     return {"session": resume.split()[-1], "resume": resume, "path": path}
 
 
-def convert(session: str, to: str, *, source: str = "", cwd: str = "") -> dict:
+def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
+    try:
+        r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                           timeout=TIMEOUT_S, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise ConvertError(f"txcript took longer than {int(TIMEOUT_S)} s") from None
+    except OSError as e:
+        raise ConvertError(f"txcript did not run: {e}") from None
+    return r.returncode, r.stdout or "", r.stderr or ""
+
+
+def _clean(out: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", out or "").strip()
+
+
+def _epoch(stamp: str) -> float | None:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def message_times(session: str, source: str, exe: str, cwd: str) -> list[float | None]:
+    """When each message of txcript's view of `session` was written, in its
+    order: message N here is txcript's `#N` (`txcript export`, the same
+    numbering as `view`'s; measured equal on a finished chat)."""
+    rc, out, err = _run([exe, "export", session, "--from", TXCRIPT_IDS[source]], cwd)
+    if rc != 0:
+        raise ConvertError(_clean(err or out) or f"txcript export failed ({rc})")
+    try:
+        msgs = json.loads(out).get("messages") or []
+    except (ValueError, AttributeError):
+        raise ConvertError("txcript's export was not JSON") from None
+    return [_epoch(m.get("timestamp")) if isinstance(m, dict) else None for m in msgs]
+
+
+def cut_count(session: str, mid: str, mode: str, times: list[float | None]) -> int | None:
+    """How many of txcript's messages a copy cut at our message `mid` keeps,
+    by time: "history" keeps everything before the person's next message
+    after the reply `mid` (all of it when the reply is the last thing said:
+    `len(times)`); "before" everything before `mid`, one of the person's
+    messages (0 when it is the first). None when `mid` is not in the chat.
+    Our messages and txcript's come from the same records, so a record's
+    time places it on both sides."""
+    from . import transcript
+
+    got = transcript.messages(session)
+    msgs = got[0] if got else []
+    idx = next((i for i, m in enumerate(msgs) if m.get("id") == mid), None)
+    if idx is None:
+        return None
+    if mode == "before":
+        if msgs[idx].get("role") != "user":
+            return None
+        cut = msgs[idx].get("at")
+    else:
+        cut = next((m.get("at") for m in msgs[idx + 1:] if m.get("role") == "user"), None)
+        if cut is None:
+            return len(times)
+    cut = float(cut) - 0.0005
+    return sum(1 for t in times if t is not None and t < cut)
+
+
+def convert(session: str, to: str, *, source: str = "", cwd: str = "",
+            upto: int | None = None) -> dict:
     """Write `session` as a new `to` chat; `{"session", "from", "to",
     "resume", "path", "loss"}`. `source` is the agent it ran in (looked up
     when not given); `cwd` is where txcript runs, which it uses when the
@@ -110,19 +178,117 @@ def convert(session: str, to: str, *, source: str = "", cwd: str = "") -> dict:
     cwd = cwd or sessions.transcript_cwd(session) or os.path.expanduser("~")
     if not os.path.isdir(cwd):
         cwd = os.path.expanduser("~")
-    argv = [exe, "continue", session, "--from", TXCRIPT_IDS[source],
+    which = session if upto is None else f"{session}#1-{upto}"
+    argv = [exe, "continue", which, "--from", TXCRIPT_IDS[source],
             "--with", TXCRIPT_IDS[to], "--no-resume"]
-    try:
-        r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT_S, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        raise ConvertError(f"txcript took longer than {int(TIMEOUT_S)} s") from None
-    except OSError as e:
-        raise ConvertError(f"txcript did not run: {e}") from None
-    out = (r.stdout or "") + (r.stderr or "")
-    if r.returncode != 0:
-        raise ConvertError(re.sub(r"\x1b\[[0-9;]*m", "", out).strip()[:500]
-                           or f"txcript failed ({r.returncode})")
-    got = parse(out)
+    rc, out, err = _run(argv, cwd)
+    if rc != 0 and upto is not None:
+        # A cut between a tool call and its result is refused with the
+        # nearest range that keeps them together; take it if it starts at 1.
+        near = re.search(r"nearest valid range is #1-(\d+)", _clean(out + err))
+        if near:
+            argv[2] = f"{session}#1-{near.group(1)}"
+            rc, out, err = _run(argv, cwd)
+    if rc != 0:
+        raise ConvertError(_clean(out + err)[:500] or f"txcript failed ({rc})")
+    got = parse(out + err)
     return {**got, "from": source, "to": to,
             "loss": KNOWN_LOSSES.get((source, to), "")}
+
+
+# --- the record of where a copy came from, and the server's call -------------------
+
+def _origins_path():
+    from agent_media_core._paths import state_dir
+
+    return state_dir() / "converted.json"
+
+
+def _origins() -> dict:
+    try:
+        d = json.loads(_origins_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def record_origin(new: str, old: str, source: str, to: str, mid: str = "") -> None:
+    """`<state>/converted.json`, `{"<new>": {"session", "agent", "to", "id", "at"}}`:
+    which chat a copy came from, for the thread's "continued from"."""
+    d = _origins()
+    d[new] = {"session": old, "agent": source, "to": to, "id": mid,
+              "at": round(time.time(), 3)}
+    p = _origins_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    tmp.replace(p)
+
+
+def origin(session: str) -> dict | None:
+    """Where the copy `session` came from, or None for a chat that is not one."""
+    got = _origins().get(session)
+    return got if isinstance(got, dict) else None
+
+
+def targets() -> list[str]:
+    """What this host can write a copy as: txcript here, and the agent too
+    (a copy nothing here can resume is no use)."""
+    if not binary():
+        return []
+    from . import default_agent
+
+    return [a for a in TARGETS if default_agent._installed(a)]
+
+
+def session_convert(session: str, to: str, bearer: str, *, text: str = "",
+                    mid: str = "", mode: str = "history") -> tuple[bool, dict]:
+    """`POST /session/convert` (server-contract.md §6.56), and Branch's
+    `agent` (§6.34): `session` copied into `to`; with `mid`, cut at that
+    message (`mode` "history": up to and including the reply; "before": up
+    to the reply before your message). With `text`, it is then sent to the
+    copy the way any reply to an ended chat is (send.reply), which brings
+    it back. `(ok, {"session", "converted", "agent", "from", "resume",
+    "loss", "sent"?})`."""
+    from . import auth, sessions
+
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    session = (session or "").strip()
+    if not sessions._SESSION.fullmatch(session):
+        return False, {"error": "not a session id", "status": 400}
+    to = (to or "").strip().lower()
+    if to not in targets():
+        return False, {"error": f"this server cannot make a {to or '(no agent)'} chat "
+                                f"(it can: {', '.join(targets()) or 'none'})", "status": 409}
+    source = sessions.agent_of(session)
+    mid = (mid or "").strip()
+    upto = None
+    try:
+        if mid:
+            exe = binary()
+            cwd = sessions.transcript_cwd(session) or os.path.expanduser("~")
+            cwd = cwd if os.path.isdir(cwd) else os.path.expanduser("~")
+            upto = cut_count(session, mid, mode,
+                             message_times(session, source, exe, cwd))
+            if upto is None:
+                return False, {"error": "that message is not in this chat", "status": 404}
+            if upto == 0:
+                return False, {"error": "nothing comes before your first message to carry "
+                                        "over: start a new chat instead", "status": 409}
+        got = convert(session, to, source=source, upto=upto)
+    except ConvertError as e:
+        return False, {"error": str(e), "status": 502}
+    record_origin(got["session"], session, source, to, mid)
+    out = {"session": got["session"], "converted": True, "agent": to,
+           "from": {"session": session, "agent": source, "id": mid},
+           "resume": got["resume"], "loss": got["loss"]}
+    if (text or "").strip():
+        from . import send
+
+        ok, detail = send.reply(text, bearer, session=got["session"])
+        out["sent"] = ok
+        if not ok:
+            out["send_error"] = detail.get("error") or "not sent"
+    return True, out

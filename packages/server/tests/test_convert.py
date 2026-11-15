@@ -127,3 +127,110 @@ def test_a_txcript_opencode_id_is_an_opencode_id():
         assert harnesses.is_opencode(sid)
         assert sessions._SESSION.fullmatch(sid)
     assert not harnesses.is_opencode("ses_" + "a" * 33)
+
+
+# --- a cut at a message, the origin, the server's call, Branch's agent -----------------
+
+def _times_fake(tmp_path, stamps: list[str], cont: str = CODEX_OUT) -> str:
+    """A txcript whose `export` lists messages at `stamps` and whose
+    `continue` prints `cont`; argv of the last call kept."""
+    log = tmp_path / "argv.json"
+    exe = tmp_path / "txcript"
+    export = json.dumps({"messages": [{"role": "user", "timestamp": t, "content": "x"}
+                                      for t in stamps]})
+    exe.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        f"json.dump({{'argv': sys.argv[1:], 'cwd': os.getcwd()}}, open({str(log)!r}, 'w'))\n"
+        f"sys.stdout.write({export!r} if sys.argv[1] == 'export' else {cont!r})\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return str(exe)
+
+
+# Our view of a chat: you, a reply in two of txcript's messages, you, a reply.
+OURS = [{"id": "u1", "role": "user", "at": 1000.0},
+        {"id": "a1", "role": "assistant", "at": 1001.0},
+        {"id": "u2", "role": "user", "at": 1010.0},
+        {"id": "a2", "role": "assistant", "at": 1011.0}]
+STAMPS = ["1970-01-01T00:16:40.000Z", "1970-01-01T00:16:41.000Z", "1970-01-01T00:16:42.000Z",
+          "1970-01-01T00:16:50.000Z", "1970-01-01T00:16:51.000Z"]
+
+
+@pytest.fixture
+def ours(monkeypatch):
+    from agent_media_server import transcript
+
+    monkeypatch.setattr(transcript, "messages", lambda s, **k: ([dict(m) for m in OURS], False))
+
+
+def test_cut_count(ours):
+    times = [convert._epoch(t) for t in STAMPS]
+    assert convert.cut_count(SID, "a1", "history", times) == 3    # up to the reply's end
+    assert convert.cut_count(SID, "a2", "history", times) == 5    # the last reply: all
+    assert convert.cut_count(SID, "u2", "before", times) == 3     # before your message
+    assert convert.cut_count(SID, "u1", "before", times) == 0     # your first: nothing
+    assert convert.cut_count(SID, "a1", "before", times) is None  # not one of yours
+    assert convert.cut_count(SID, "zz", "history", times) is None
+
+
+@pytest.fixture
+def gate(monkeypatch, tmp_path):
+    from agent_media_server import auth, default_agent
+
+    monkeypatch.setattr(auth, "gate", lambda b: ("someone", {}))
+    monkeypatch.setattr(default_agent, "_installed", lambda a: a in ("claude", "codex"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    sent = []
+    from agent_media_server import send
+    monkeypatch.setattr(send, "reply", lambda text, bearer, **kw: sent.append(
+        (text, kw.get("session"))) or (True, {}))
+    return sent
+
+
+def test_session_convert_cuts_records_and_sends(tmp_path, place, ours, gate, monkeypatch):
+    monkeypatch.setenv("MEDIA_TXCRIPT", _times_fake(tmp_path, STAMPS))
+    ok, out = convert.session_convert(SID, "codex", "tok", text="go on", mid="a1")
+    new = "01a1dd55-8715-7933-bffa-cfacf8115e8b"
+    assert ok and out["session"] == new and out["converted"] and out["agent"] == "codex"
+    assert out["from"] == {"session": SID, "agent": "claude", "id": "a1"} and out["sent"]
+    ran = json.loads((tmp_path / "argv.json").read_text())
+    assert ran["argv"][:2] == ["continue", f"{SID}#1-3"]
+    assert gate == [("go on", new)]
+    assert convert.origin(new)["session"] == SID and convert.origin(SID) is None
+
+
+def test_session_convert_refusals(tmp_path, place, ours, gate, monkeypatch):
+    monkeypatch.setenv("MEDIA_TXCRIPT", _times_fake(tmp_path, STAMPS))
+    assert convert.session_convert("nope", "codex", "tok")[1]["status"] == 400
+    assert convert.session_convert(SID, "pi", "tok")[1]["status"] == 409   # pi not here
+    assert convert.session_convert(SID, "codex", "tok", mid="zz")[1]["status"] == 404
+    assert convert.session_convert(SID, "codex", "tok", mid="u1",
+                                   mode="before")[1]["status"] == 409
+    monkeypatch.setenv("MEDIA_TXCRIPT", str(tmp_path / "gone"))
+    assert convert.session_convert(SID, "codex", "tok")[1]["status"] == 409  # no txcript
+
+
+def test_targets_need_txcript_and_the_agent(tmp_path, gate, monkeypatch):
+    monkeypatch.setenv("MEDIA_TXCRIPT", str(tmp_path / "gone"))
+    assert convert.targets() == []
+    monkeypatch.setenv("MEDIA_TXCRIPT", _fake(tmp_path, CODEX_OUT))
+    assert convert.targets() == ["claude", "codex"]
+
+
+def test_branch_into_another_agent_converts(tmp_path, place, ours, gate, monkeypatch):
+    from agent_media_server import branch
+
+    monkeypatch.setenv("MEDIA_TXCRIPT", _times_fake(tmp_path, STAMPS))
+    ok, out = branch.session_branch(SID, "u2", "try it this way", "tok", mode="before",
+                                    agent="codex")
+    assert ok and out["branched"] and out["converted"] and out["from"]["id"] == "u2"
+    assert json.loads((tmp_path / "argv.json").read_text())["argv"][1] == f"{SID}#1-3"
+
+
+def test_branch_with_its_own_agent_forks_as_before(place, ours, gate, monkeypatch):
+    from agent_media_server import branch, convert as cv
+
+    monkeypatch.setattr(cv, "session_convert", lambda *a, **k: pytest.fail("converted"))
+    monkeypatch.setattr(branch.transcript, "transcript_path", lambda s: "")
+    ok, out = branch.session_branch(SID, "a1", "hi", "tok", agent="claude")
+    assert not ok and out["status"] == 409  # the old path's own answer, no transcript here
