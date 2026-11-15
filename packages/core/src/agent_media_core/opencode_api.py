@@ -364,6 +364,7 @@ def as_v1(msgs: list[dict]) -> list[dict]:
                                             **({"error": st["error"]} if st.get("error") else {})}})
             out.append({"id": str(m.get("id") or ""), "time": at, "role": "assistant",
                         "parts": parts, "finish": str(m.get("finish") or ""),
+                        **({"live": True} if m.get("live") else {}),
                         "error": None,
                         "model": m.get("model") if isinstance(m.get("model"), dict) else None,
                         "tokens": m.get("tokens"), "cost": m.get("cost")})
@@ -389,7 +390,13 @@ def records(sid: str, *, start: bool = True) -> list[dict] | None:
     """A session's messages as v1 records (`as_v1`), oldest first; None when
     there is no server or no such session."""
     msgs = messages(sid, start=start)
-    return None if msgs is None else as_v1(msgs)
+    if msgs is None:
+        return None
+    # A step still in the live file has not ended: the API lists it with
+    # its words empty, so the live copy stands in its place.
+    live = {str(m.get("id") or ""): m for m in live_messages(sid)}
+    merged = [live.pop(str(m.get("id") or ""), m) for m in msgs]
+    return as_v1(merged + list(live.values()))
 
 
 def last_at(sid: str, *, start: bool = True) -> float | None:
@@ -398,3 +405,157 @@ def last_at(sid: str, *, start: bool = True) -> float | None:
     if not msgs:
         return None
     return max(int(((m.get("time") or {}).get("created")) or 0) for m in msgs) / 1000.0 or None
+
+
+# -- live steps ---------------------------------------------------------------
+#
+# opencode 2's API shows an assistant step only once it has ended (probed:
+# nothing for 23 s, then the whole reply), and the session's `time.updated`
+# does not move while it streams. Its event stream does carry the words as
+# they come (`session.text.delta`, …), so sessiond, which reads that stream,
+# keeps each step still in progress here, one small file per session; the
+# transcript adds those steps until the API has them (transcript.
+# _opencode_rows), and the watcher sees the file change (file_state).
+
+
+def live_path(sid: str) -> Path:
+    from ._paths import state_dir
+
+    return state_dir() / "opencode-live" / f"{sid}.json"
+
+
+class LiveSteps:
+    """The steps in progress per session, from v2's events (`feed`)."""
+
+    #: Written at most this often per session while words stream.
+    EVERY_S = 0.25
+
+    def __init__(self, clear: bool = False) -> None:
+        if clear:
+            # A new sessiond: what an earlier one left mid-step is not in progress.
+            from ._paths import state_dir
+
+            for f in (state_dir() / "opencode-live").glob("*.json"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+        self.steps: dict[str, dict[str, dict]] = {}
+        self.names: dict[str, str] = {}
+        self.written: dict[str, float] = {}
+        self.lock = threading.Lock()
+
+    def feed(self, obj: dict) -> None:
+        t = str(obj.get("type") or "")
+        if not t.startswith("session."):
+            return
+        d = obj.get("data") if isinstance(obj.get("data"), dict) else {}
+        sid = str(d.get("sessionID") or "")
+        if not sid:
+            return
+        mid = str(d.get("assistantMessageID") or "")
+        with self.lock:
+            if t.startswith("session.execution.") and t != "session.execution.started":
+                if self.steps.pop(sid, None) is not None:
+                    self._write(sid, force=True)
+                return
+            if not mid:
+                return
+            steps = self.steps.setdefault(sid, {})
+            if t == "session.step.ended":
+                if steps.pop(mid, None) is not None:
+                    self._write(sid, force=True)
+                return
+            step = steps.setdefault(mid, {"id": mid, "time": {"created": int(time.time() * 1000)},
+                                          "type": "assistant", "content": [], "live": True})
+            parts = step["content"]
+            if t == "session.step.started":
+                step["time"]["created"] = int(d.get("started") or step["time"]["created"])
+                return
+            if t in ("session.text.delta", "session.reasoning.delta"):
+                kind = "text" if t == "session.text.delta" else "reasoning"
+                key = (kind, int(d.get("ordinal") or 0))
+                part = next((p for p in parts if p.get("_key") == list(key)), None)
+                if part is None:
+                    part = {"type": kind, "text": "", "_key": list(key)}
+                    parts.append(part)
+                part["text"] += str(d.get("delta") or "")
+            elif t == "session.text.ended":
+                key = ["text", int(d.get("ordinal") or 0)]
+                part = next((p for p in parts if p.get("_key") == key), None)
+                if part is None:
+                    parts.append({"type": "text", "text": str(d.get("text") or ""), "_key": key})
+                else:
+                    part["text"] = str(d.get("text") or part["text"])
+            elif t == "session.tool.input.started":
+                self.names[str(d.get("id") or "")] = str(d.get("name") or "")
+                return
+            elif t == "session.tool.called":
+                tid = str(d.get("id") or "")
+                parts.append({"type": "tool", "id": tid, "name": self.names.get(tid, ""),
+                              "state": {"status": "running", "input": d.get("input") or {}},
+                              "_key": ["tool", tid]})
+            elif t in ("session.tool.success", "session.tool.failed"):
+                tid = str(d.get("id") or "")
+                part = next((p for p in parts if p.get("_key") == ["tool", tid]), None)
+                if part is not None:
+                    part["state"] = {"status": "completed" if t.endswith("success") else "error",
+                                     "input": part["state"].get("input") or {},
+                                     "content": d.get("content") or [],
+                                     "metadata": d.get("metadata") or {},
+                                     **({"error": str((d.get("error") or {}).get("message") or "")}
+                                        if t.endswith("failed") else {})}
+            else:
+                return
+            self._write(sid, force=t != "session.text.delta" and t != "session.reasoning.delta")
+
+    def _write(self, sid: str, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self.written.get(sid, -1e9) < self.EVERY_S:
+            return
+        self.written[sid] = now
+        path = live_path(sid)
+        steps = list((self.steps.get(sid) or {}).values())
+        try:
+            if not steps:
+                path.unlink(missing_ok=True)
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"steps": steps}))
+            os.replace(tmp, path)
+        except OSError:
+            pass
+
+    def flush(self) -> None:
+        """Every session's steps written now (a throttled delta held back)."""
+        with self.lock:
+            for sid in list(self.steps):
+                self._write(sid, force=True)
+
+
+#: A live file this long unchanged is not a step in progress (a sessiond
+#: that went mid-step left it).
+LIVE_STALE_S = 90.0
+
+
+def live_messages(sid: str) -> list[dict]:
+    """The steps sessiond has in progress for `sid` (v2 message shape)."""
+    try:
+        path = live_path(sid)
+        if time.time() - path.stat().st_mtime > LIVE_STALE_S:
+            return []
+        got = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    return [s for s in (got.get("steps") or []) if isinstance(s, dict)] \
+        if isinstance(got, dict) else []
+
+
+def live_state(sid: str) -> tuple[int, float]:
+    """`(size, mtime)` of the live file, (0, 0.0) when there is none."""
+    try:
+        st = live_path(sid).stat()
+    except OSError:
+        return 0, 0.0
+    return st.st_size, st.st_mtime

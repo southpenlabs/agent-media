@@ -114,16 +114,51 @@ below.
 - **Model sheet:** from `GET /api/model` (v2's `models --verbose` prints ids
   only), and the default from `/api/model/default`.
 
+## Live text and a desk chat's pane (built 16 Nov 2026)
+
+- **Live text:** sessiond feeds v2's streaming events into
+  `opencode_api.LiveSteps`, which keeps each step in progress in
+  `$XDG_STATE_HOME/agent-media/opencode-live/<session>.json` (written at most
+  every 0.25 s while words stream). `opencode_api.records` lets a live step
+  stand in for the API's copy, which lists the step with empty words until it
+  ends, and `transcript.file_state` counts the file so the watcher sees it
+  grow. The file goes when the step ends. A file unchanged for 90 s is
+  ignored, and a new sessiond clears old ones. Checked on real 2.3.0: the
+  transcript's text grew from 1,262 to 3,012 characters while the reply
+  streamed.
+- **A desk chat's pane:** `hook_opencode._v2_pane` finds the opencode 2
+  terminal app (an `opencode` process that is not the server) whose working
+  folder is the chat's, and reads `TMUX_PANE` from that process's
+  environment, when exactly one is open there. Checked with a real v2
+  terminal app in a tmux pane.
+
 ## Still to do
 
-- **Live text:** v2's API shows a reply only when its step ends (probed:
-  nothing for 23 s, then all 5,600 characters at once). Word-by-word text in
-  the app would need sessiond to relay `session.text.delta` events.
-- A desk chat's tmux pane, for its voice and filing.
 - Rename: v2 takes no title from a client.
-- Back up `~/.local/share/opencode`, install v2 on red2 (`npm i -g
-  @opencode/cli`, after removing `opencode-ai`), run media-setup, watch,
-  then remove v1.
+
+## Switching red2 (the plan)
+
+1. Merge `opencode-v2` to main and release it as usual. With v1 still
+   installed nothing changes: every v2 path is chosen by `opencode --version`
+   or by the database having `session_v2`.
+2. Wait until no opencode chat is working, then back up v1's data:
+   `tar czf ~/opencode-v1-backup-<date>.tgz -C ~/.local/share opencode`
+   (v2 migrates the same `opencode.db` in place).
+3. `npm uninstall -g opencode-ai && npm install -g @opencode/cli` (under
+   fnm's default node), then check `opencode --version` says 2.x.
+4. `media-setup`: links `~/.config/opencode/plugins/agent-media` and drops
+   v1's `agent-media.js` link.
+5. `media restart-services --only sessiond --after 10`.
+6. Start a phone opencode chat. Check: history migration finished
+   (`GET /api/experimental/migration/v1`), the Venice and OpenRouter keys
+   carried over (the Coding agents page shows them set), the model sheet,
+   live text, an approval, a question, the reply spoken. Then open
+   `opencode` in a narrow pane: no crash.
+
+Rollback: `npm uninstall -g @opencode/cli && npm install -g
+opencode-ai@1.19.5`, stop v2's background server first (`opencode service
+stop`), restore the tarball over `~/.local/share/opencode`, run `media-setup`,
+and restart sessiond.
 
 ## Risks
 

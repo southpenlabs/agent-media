@@ -88,9 +88,37 @@ def _v2_place(session: str) -> None:
         os.environ.pop(k, None)
     if (state_dir() / "sessiond" / f"{session}.json").exists():
         os.environ["MEDIA_SOURCE_KIND"] = "headless"
-    elif os.environ.get("MEDIA_SOURCE_KIND") == "headless":
+        return
+    if os.environ.get("MEDIA_SOURCE_KIND") == "headless":
         os.environ.pop("MEDIA_SOURCE_KIND", None)
         os.environ.pop("MEDIA_SOURCE_WORKSPACE", None)
+    pane = _v2_pane(opencode_api.directory_of(opencode_api.session(session, start=False)))
+    if pane:
+        os.environ["TMUX_PANE"] = pane
+
+
+def _v2_pane(folder: str) -> str:
+    """The tmux pane of the opencode 2 terminal app open in `folder`, when
+    exactly one is: its process (an `opencode` that is not the server) has
+    that working folder, and its environment names its pane. "" otherwise."""
+    import os
+
+    from .. import procinfo
+
+    if not folder:
+        return ""
+    want = os.path.realpath(folder)
+    panes = set()
+    for pid, argv in procinfo.processes():
+        if not argv or os.path.basename(argv[0]) not in ("opencode", "opencode.exe") \
+                or "serve" in argv[1:]:
+            continue
+        if procinfo.cwd(pid) != want:
+            continue
+        pane = procinfo.environ(pid).get("TMUX_PANE", "")
+        if pane:
+            panes.add(pane)
+    return panes.pop() if len(panes) == 1 else ""
 
 
 def _sessiond_session(session: str) -> None:

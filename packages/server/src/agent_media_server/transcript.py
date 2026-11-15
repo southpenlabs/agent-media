@@ -1560,7 +1560,12 @@ def file_state(session: str) -> tuple[int, int, float] | None:
             info = opencode_api.session(session)
             t = (info or {}).get("time") or {}
             at = int(t.get("updated") or 0)
-            return (0, at, at / 1000.0) if at else None
+            # And the steps sessiond has in progress (opencode_api.LiveSteps):
+            # the API shows a step only once it has ended.
+            size, mtime = opencode_api.live_state(session)
+            if not at and not size:
+                return None
+            return 0, at + size, max(at / 1000.0, mtime)
         rows = harnesses.opencode_rows(
             "select count(*), max(time_updated) from part where session_id = ?", (session,))
         if not rows or not rows[0][0]:

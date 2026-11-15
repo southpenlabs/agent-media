@@ -420,6 +420,11 @@ class Host:
         self.lock = threading.Lock()
         self.stderr_tail: collections.deque = collections.deque(maxlen=40)
         self.stopping = False
+        #: opencode 2's steps in progress, kept for the transcript (core
+        #: opencode_api.LiveSteps): its API shows a step once it has ended.
+        from agent_media_core import opencode_api
+
+        self.live = opencode_api.LiveSteps(clear=True)
         #: The running server is opencode 2 (`GET /api/info`, at start).
         self.v2 = False
         self.version = ""
@@ -859,6 +864,10 @@ class Host:
                         if not isinstance(obj, dict):
                             continue
                         if self.v2:
+                            try:
+                                self.live.feed(obj)
+                            except Exception:  # noqa: BLE001 — the live text is best-effort
+                                log.exception("sessiond: opencode live step")
                             payloads = v2_events(obj)
                         else:
                             payload = obj.get("payload")

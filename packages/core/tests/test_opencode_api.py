@@ -290,3 +290,61 @@ def test_v2_model_sheet_is_its_model_list(server):
     assert [m["id"] for m in offered] == ["opencode/big-pickle", "openrouter/google/gemma:free"]
     assert default == "opencode/big-pickle"
     opencode_models.forget()
+
+
+def _ev(t, **data):
+    return {"id": "evt_" + t, "type": t, "data": {"sessionID": SID, **data}}
+
+
+def test_live_steps_stand_in_until_the_step_ends(server):
+    """v2's API lists a step in progress with its words empty; sessiond's
+    live file (from the event stream) stands in for it until it ends."""
+    live = api.LiveSteps(clear=True)
+    live.EVERY_S = 0
+    live.feed(_ev("session.step.started", assistantMessageID="msg_3", started=2999))
+    live.feed(_ev("session.text.delta", assistantMessageID="msg_3", ordinal=0, delta="It pri"))
+    live.feed(_ev("session.tool.input.started", assistantMessageID="msg_3", id="c9", name="shell"))
+    live.feed(_ev("session.tool.called", assistantMessageID="msg_3", id="c9", input={"command": "ls"}))
+    # msg_3 is in the API (finished, in the fixture); while live, the live copy wins.
+    recs = api.records(SID)
+    step = next(r for r in recs if r["id"] == "msg_3")
+    assert step.get("live") and step["parts"][0] == {"type": "text", "text": "It pri"}
+    assert step["parts"][1]["tool"] == "bash" and step["parts"][1]["state"]["status"] == "running"
+    assert api.live_state(SID)[0] > 0
+    live.feed(_ev("session.step.ended", assistantMessageID="msg_3", finish="stop"))
+    assert not api.live_path(SID).exists()
+    step = next(r for r in api.records(SID) if r["id"] == "msg_3")
+    assert not step.get("live") and step["parts"][-1]["text"] == "It printed hi."
+
+
+def test_a_stale_live_file_is_ignored(server):
+    live = api.LiveSteps(clear=True)
+    live.EVERY_S = 0
+    live.feed(_ev("session.text.delta", assistantMessageID="msg_new", ordinal=0, delta="half"))
+    assert api.live_messages(SID)
+    old = __import__("time").time() - api.LIVE_STALE_S - 5
+    os.utime(api.live_path(SID), (old, old))
+    assert api.live_messages(SID) == []
+    api.LiveSteps(clear=True)
+    assert not api.live_path(SID).exists()
+
+
+def test_v2_pane_is_the_terminal_apps_in_that_folder(monkeypatch, tmp_path):
+    """A desk chat's pane: the opencode 2 terminal app (not the server) whose
+    working folder is the chat's, read from its own environment; none when
+    two panes have one open there."""
+    from agent_media_core import procinfo
+    from agent_media_core.intake import hook_opencode
+
+    work, other = str(tmp_path / "work"), str(tmp_path / "other")
+    procs = {10: (["/usr/bin/opencode"], work, {"TMUX_PANE": "%4"}),
+             11: (["/usr/bin/opencode.exe", "serve", "--service"], work, {"TMUX_PANE": "%1"}),
+             12: (["/usr/bin/opencode"], other, {"TMUX_PANE": "%7"}),
+             13: (["/usr/bin/vim"], work, {"TMUX_PANE": "%9"})}
+    monkeypatch.setattr(procinfo, "processes", lambda: [(p, v[0]) for p, v in procs.items()])
+    monkeypatch.setattr(procinfo, "cwd", lambda pid: procs[pid][1])
+    monkeypatch.setattr(procinfo, "environ", lambda pid: procs[pid][2])
+    assert hook_opencode._v2_pane(work) == "%4"
+    assert hook_opencode._v2_pane(str(tmp_path / "none")) == ""
+    procs[14] = (["/usr/bin/opencode"], work, {"TMUX_PANE": "%5"})
+    assert hook_opencode._v2_pane(work) == ""
