@@ -1410,6 +1410,14 @@ Built from `claude -p --output-format stream-json`'s init event and cached
 per directory until Claude Code's version changes (`slash_menu.menu`). The
 `item` form went with Audiobookshelf (11 Nov 2026).
 
+An opencode thread's menu is opencode's own, and so is a new chat's with
+`agent=opencode` beside its `cwd`. The answer carries `"agent": "opencode"`,
+and each row has a `group` ("Commands" or "Skills"). It comes from
+opencode's server while one runs (`GET /command`), and is kept per folder.
+Before any has run there, it is read from opencode's files
+(`sessiond_opencode.disk_commands`). A typed `/name args` for one of them
+runs as opencode's command (15 Nov 2026).
+
 Clients: S (`mixins/sasonicaSlash.js`).
 
 #### `GET /draft?session=` · `POST /draft` — gated
