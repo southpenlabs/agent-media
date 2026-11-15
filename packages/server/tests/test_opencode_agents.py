@@ -166,3 +166,11 @@ def test_the_slash_menu_before_any_server_answered_is_read_from_disk(tmp_path, m
     host.proc = None
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     assert {c["name"] for c in host.commands(str(proj))} == set(menu)
+
+
+def test_a_persona_reaches_opencode_as_a_system_prompt_only_headless():
+    from agent_media_server import personas
+
+    assert personas.via("opencode", headless=True) == "system_prompt"
+    assert personas.via("opencode") == "prepend"          # a pane has no flag for it
+    assert personas.via("claude") == "system_prompt"

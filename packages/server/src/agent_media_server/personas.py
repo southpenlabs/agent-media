@@ -196,9 +196,17 @@ def render(persona: str, role: str, agent: str, mode: str = "public") -> tuple[b
     return True, r.stdout.strip() + "\n"
 
 
-def via(agent: str) -> str:
+#: Agents whose headless chats take a system prompt though their pane has
+#: no flag for it: opencode's prompt call has a `system` field (sessiond
+#: sends the render with every prompt).
+HEADLESS_SYSTEM_PROMPT = ("opencode",)
+
+
+def via(agent: str, *, headless: bool = False) -> str:
     """How `agent` gets a render: "system_prompt" or "prepend"."""
-    return "system_prompt" if agent in SYSTEM_PROMPT_FLAG else "prepend"
+    if agent in SYSTEM_PROMPT_FLAG or (headless and agent in HEADLESS_SYSTEM_PROMPT):
+        return "system_prompt"
+    return "prepend"
 
 
 def prepend(render_text: str, text: str) -> str:

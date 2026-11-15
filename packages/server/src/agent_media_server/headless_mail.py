@@ -221,8 +221,9 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         if not made_it:
             return RC_FAILED, {"error": f"could not render the persona: {rendered}",
                                "code": "persona"}
-        if personas.via(agent) == "system_prompt" \
-                and _call("ping", timeout=3.0).get("system_prompt") is True:
+        if personas.via(agent, headless=True) == "system_prompt" \
+                and _call("ping", timeout=3.0).get(
+                    "opencode_system" if agent == "opencode" else "system_prompt") is True:
             prompt_file = personas.write(rendered)
         else:
             text = personas.prepend(rendered, text)

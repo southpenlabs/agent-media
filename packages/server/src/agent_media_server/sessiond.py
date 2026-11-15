@@ -1029,6 +1029,16 @@ def _write_squeeze(rec: "dict | None") -> None:
         pass
 
 
+def _read_text(path: str) -> str:
+    """A persona's render file, or "" (gone, or none)."""
+    if not path:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def oc_quota_agent(model: str = "", *, session: str = "") -> str:
     """`opencode:<provider>` for a model `provider/model`, else the provider
     the session's last step ran on, else opencode's default model's; plain
@@ -3086,7 +3096,8 @@ class Supervisor:
             return self._oc_start(cwd, text, workspace=workspace,
                                   permissions=perms.mode(permissions), model=model,
                                   mode="plan" if mode == "plan" else "",
-                                  fork_from=fork_from, fork_at=fork_at)
+                                  fork_from=fork_from, fork_at=fork_at,
+                                  system_prompt_file=system_prompt_file)
         # A restart pending (David, 11 Nov 2026, screenshot: a new chat
         # refused with "start the chat again once it has" — "this should
         # happen automatically"): the chat is made now and its first message
@@ -3703,7 +3714,8 @@ class Supervisor:
         log.info("sessiond: opencode serve exited %s", rc)
 
     def _oc_start(self, cwd: str, text: str, *, workspace: str, permissions: str,
-                  model: str, mode: str = "", fork_from: str = "", fork_at: str = "") -> dict:
+                  model: str, mode: str = "", fork_from: str = "", fork_at: str = "",
+                  system_prompt_file: str = "") -> dict:
         """A new opencode chat; with `fork_from`, a branch with its history:
         opencode's own fork of that session, keeping every message before
         `fork_at` (a message id), or all of them when it is empty
@@ -3732,6 +3744,8 @@ class Supervisor:
         with self.lock:
             s = Session(sid, cwd, agent="opencode", workspace=workspace,
                         permissions=permissions, model=model, mode=mode)
+            # A persona's render (personas.py), sent as `system` with every prompt.
+            s.system_prompt_file = system_prompt_file
             s.first_text = " ".join(text.split())[:200]
             self.sessions[sid] = s
             self._oc_attach(s, proc)
@@ -3777,6 +3791,9 @@ class Supervisor:
             # running commands); otherwise its default agent (`build`).
             if s.mode == "plan":
                 body["agent"] = "plan"
+            system = _read_text(s.system_prompt_file)
+            if system:
+                body["system"] = system
             self.oc.call("POST", f"/session/{s.id}/prompt_async", body, directory=s.cwd)
         with self.lock:
             s.turns += 1
@@ -4031,7 +4048,8 @@ class Supervisor:
                 with self.lock:
                     live = sum(1 for x in self.sessions.values() if x.live)
                 free = mem_available_mb()
-                return {"ok": True, "pid": os.getpid(), "system_prompt": True, "held": True,
+                return {"ok": True, "pid": os.getpid(), "system_prompt": True,
+                        "opencode_system": True, "held": True,
                         "quota": True, "run_now": True, "hosts": True,
                         "max_live": max_live(), "live": live,
                         "free_mb": round(free) if free is not None else None,

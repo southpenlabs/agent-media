@@ -196,7 +196,7 @@ class _FakeHeadless:
     def __init__(self, takes):
         self.takes, self.started = takes, []
 
-    def takes_system_prompt(self):
+    def takes_system_prompt(self, agent="claude"):
         return self.takes
 
     def start(self, **kw):

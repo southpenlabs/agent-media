@@ -461,10 +461,12 @@ class HeadlessDriver:
 
     # -- acting --
 
-    def takes_system_prompt(self) -> bool:
-        """Whether the running sessiond passes `system_prompt_file` on (one
-        older than this canvas drops it silently, so it is asked first)."""
-        return call("ping", timeout=3.0).get("system_prompt") is True
+    def takes_system_prompt(self, agent: str = "claude") -> bool:
+        """Whether the running sessiond passes `system_prompt_file` on for
+        `agent` (one older than this canvas drops it silently, so it is
+        asked first; opencode's took it later, `opencode_system`)."""
+        key = "opencode_system" if agent == "opencode" else "system_prompt"
+        return call("ping", timeout=3.0).get(key) is True
 
     def start(self, *, agent, cwd, text, host="", flags=(), quote="", model="", mode="",
               system_prompt_file="", fork_from="", fork_at=""):

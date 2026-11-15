@@ -310,6 +310,18 @@ def test_a_branch_is_opencodes_fork_given_the_chats_rules(host, monkeypatch):
     assert host.sup.get(whole)["agent"] == "opencode"
 
 
+def test_a_persona_is_opencodes_system_prompt_on_every_prompt(host, tmp_path):
+    render = tmp_path / "persona.md"
+    render.write_text("You are Ada, a careful reviewer.\n")
+    sid = start(host, "hi", system_prompt_file=str(render))
+    wait_for(lambda: state(host, sid) == "waiting")
+    driver.headless_driver().send(sid, "next", "next")
+    prompts = [r for r in requests(host) if r[1].startswith(f"/session/{sid}/prompt_async")]
+    assert len(prompts) == 2
+    assert all(p[2]["system"] == "You are Ada, a careful reviewer." for p in prompts)
+    assert driver.headless_driver().takes_system_prompt("opencode")
+
+
 def test_the_server_needs_its_password(host):
     import urllib.error
     import urllib.request

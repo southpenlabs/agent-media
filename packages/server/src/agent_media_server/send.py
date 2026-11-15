@@ -869,9 +869,9 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     if rendered:
         from . import personas
 
-        delivered = personas.via(agent)
+        delivered = personas.via(agent, headless=chosen.kind == driver.HEADLESS)
         if (delivered == "system_prompt" and chosen.kind == driver.HEADLESS
-                and not chosen.takes_system_prompt()):
+                and not chosen.takes_system_prompt(agent)):
             delivered = "prepend"       # a sessiond older than this canvas
         if delivered == "system_prompt":
             prompt_file = personas.write(rendered)
