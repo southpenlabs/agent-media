@@ -168,6 +168,23 @@ def test_targets_agent_workspaces(server, shelf, signed_in, tmp_path, monkeypatc
     assert obj["agent_workspaces"] == []
 
 
+def test_targets_a_copy_says_where_it_came_from(server, shelf, signed_in):
+    """`converted_from` (15 Nov 2026, sasonica-app mail #587): a chat copied
+    from another agent's (§6.56) carries {session, agent}, so the copy's
+    header can link back; other rows have no such key."""
+    from agent_media_server import convert
+
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    rows = obj["sessions"]
+    assert rows and not any("converted_from" in r for r in rows)
+    copy = rows[0]["session"]
+    convert.record_origin(copy, "3a9d22fb-7d49-470f-8c8e-437a92b41098", "codex", "claude")
+    _, obj = call(server, "GET", "/targets", headers=AUTH)
+    got = {r["session"]: r.get("converted_from") for r in obj["sessions"]}
+    assert got[copy] == {"session": "3a9d22fb-7d49-470f-8c8e-437a92b41098", "agent": "codex"}
+    assert all(v is None for k, v in got.items() if k != copy)
+
+
 def test_targets_shape(server, shelf, signed_in):
     res, obj = call(server, "GET", "/targets", headers=AUTH)
     assert res.status == 200

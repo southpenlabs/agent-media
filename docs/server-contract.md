@@ -11653,7 +11653,9 @@ is (`POST /reply`'s path), which brings the copy back; `sent` says whether
 it went. Tool calls and reasoning cross where the target can hold them.
 `loss` names a direction known to drop something (txcript#104, #105), said,
 not refused. The copy is recorded in `<state>/converted.json` with where it
-came from.
+came from, and its `/targets` row (§6.1) carries `converted_from: {"session",
+"agent"}`, the thread and agent it was copied from, so its header can link
+back (other rows have no such key).
 
 409 when this server cannot make that agent's chat (no txcript, or the
 agent is not installed); 400 for a bad session id; 502 with txcript's own

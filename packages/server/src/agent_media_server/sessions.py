@@ -916,6 +916,16 @@ def _targets(bearer: str, history: str = "") -> tuple[bool, dict]:
             whole = whole_title(str(r.get("session") or ""), title)
             if whole != title:
                 r["title_whole"] = whole
+    # A chat copied from another agent's (convert.py, contract §6.56) says
+    # which, so the copy's header can link back (sasonica-app, mail #587).
+    from . import convert
+
+    copies = convert._origins()
+    if copies:
+        for r in rows:
+            o = copies.get(str(r.get("session") or ""))
+            if isinstance(o, dict) and o.get("session"):
+                r["converted_from"] = {"session": o["session"], "agent": o.get("agent") or ""}
     out = {"sessions": rows, "places": where}
     mail = mailbox.by_project(
         [(r.get("project"), r.get("cwd")) for r in rows]
