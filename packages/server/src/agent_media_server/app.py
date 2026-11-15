@@ -432,7 +432,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -2542,6 +2542,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The app's language, every device's (language.py).
         ok, detail = pins.settings_language(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/agent":
+        # Settings' Default agent: what a new chat that names none gets.
+        from . import default_agent
+
+        ok, detail = default_agent.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you (personal.py, §6.42).
         from . import personal
@@ -4417,6 +4423,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = read_receipts.settings(_bearer(h), str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/agent":
+        # Settings' Default agent, or a folder's: "" clears it.
+        from . import default_agent
+
+        ok, detail = default_agent.settings(_bearer(h), _read_json(h) or {})
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you: some fields at once, null forgets one.

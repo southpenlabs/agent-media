@@ -64,6 +64,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -326,12 +328,50 @@ def note_for(hook: dict) -> str:
     d = state_dir()
     note = " ".join(n for n in (_restart_note(hook, d), _band_note(hook, d),
                                 _notes_note(hook, d), _link_note(hook, d),
-                                _related_note(hook, d)) if n)
+                                _related_note(hook, d), _mail_note(hook)) if n)
     event = hook.get("hook_event_name")
     if note and event:
         note = json.dumps({"hookSpecificOutput": {
             "hookEventName": event, "additionalContext": note}})
     return note
+
+
+def _is_claude(hook: dict) -> bool:
+    """Claude Code's own hook: its transcript is under Claude's folder."""
+    tp = str(hook.get("transcript_path") or "")
+    if not tp:
+        return False
+    try:
+        from .. import harnesses
+
+        if tp.startswith(str(harnesses._claude_dir()) + os.sep):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return ".claude" in Path(tp).parts
+
+
+def _mail_note(hook: dict) -> str:
+    """"You have mail" for this session's project, once per message, or "".
+
+    agent mail's own `agent-mail-inbox-hook --new` writes the line (it reads
+    the mailbox and remembers what each session was told). Claude Code runs
+    that hook itself; every other harness gets it here, at the next prompt or
+    step its hook or plugin asks for a note (agent-mail #520). Off with
+    MEDIA_NOTE_MAIL=0, and silent where agent mail isn't installed."""
+    if os.environ.get("MEDIA_NOTE_MAIL", "1") == "0" or _is_claude(hook):
+        return ""
+    exe = shutil.which("agent-mail-inbox-hook")
+    sid = str(hook.get("session_id") or "")
+    if not exe or not sid:
+        return ""
+    payload = {"session_id": sid, "cwd": str(hook.get("cwd") or os.getcwd())}
+    try:
+        r = subprocess.run([exe, "--new"], input=json.dumps(payload), capture_output=True,
+                           text=True, timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return " ".join(r.stdout.split()) if r.returncode == 0 else ""
 
 
 def _band_note(hook: dict, d: Path) -> str:

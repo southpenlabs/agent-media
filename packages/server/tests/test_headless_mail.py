@@ -351,3 +351,26 @@ def test_adopt_refuses_what_it_cannot_resume(host):
     with pytest.raises(sessiond.Refused) as e:
         host.sup.adopt("bbbbbbbb-0000-4000-8000-000000000003", str(host.work / "gone"))
     assert e.value.code == "bad_cwd"
+
+
+def test_desk_rows_name_every_harness_not_only_claude(monkeypatch):
+    # An opencode or Codex in a terminal is a person's session too: agent mail
+    # reads these rows before starting a second session beside one
+    # (agent-mail #520). sessiond's own are left out by their environment.
+    from agent_media_core import claude_sessions, harnesses, procinfo
+
+    monkeypatch.setattr(claude_sessions, "records", lambda: [])
+    monkeypatch.setattr(harnesses, "running", lambda: [
+        harnesses.Running(101, "ses_desk", "", "opencode"),
+        harnesses.Running(102, "rollout-x", "%4", "codex"),
+        harnesses.Running(103, "ses_held", "", "opencode"),
+        harnesses.Running(104, "", "", "pi")])
+    monkeypatch.setattr(procinfo, "environ", lambda pid: {"MEDIA_SESSIOND_SESSION": "x"}
+                        if pid == 103 else {"HOME": "/h"})
+    monkeypatch.setattr(procinfo, "cwd", lambda pid: f"/w/{pid}")
+    rows = hm.desk_rows({"rollout-x"})
+    assert [(r["session"], r["agent"], r["where"], r["cwd"]) for r in rows] == [
+        ("ses_desk", "opencode", "terminal", "/w/101")]
+    rows = hm.desk_rows(set())
+    assert {r["session"]: (r["agent"], r["pane"]) for r in rows} == {
+        "ses_desk": ("opencode", ""), "rollout-x": ("codex", "%4")}

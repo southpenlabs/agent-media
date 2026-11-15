@@ -567,3 +567,12 @@ def _no_hit_counting_into_the_real_state(monkeypatch):
     """
     monkeypatch.setenv("MEDIA_HITS", "0")
     monkeypatch.delenv("MEDIA_HITS_FLUSH_S", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_mail_note(monkeypatch):
+    """note_for asks agent mail's `agent-mail-inbox-hook` for a "you have
+    mail" line (context._mail_note): a test must never read the real mailbox
+    or mark its messages told. test_context_mail_note turns it back on
+    against a fake."""
+    monkeypatch.setenv("MEDIA_NOTE_MAIL", "0")

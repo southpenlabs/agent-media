@@ -108,9 +108,10 @@ def brief(view: dict) -> dict:
 
 
 def desk_rows(known: set[str]) -> list[dict]:
-    """The claudes sessiond does not hold: in a desk pane or a plain
-    terminal, from Claude Code's own records (claude_sessions), so a
-    session started with no tmux is listed too (#491 step 4). `known`:
+    """The sessions sessiond does not hold: in a desk pane or a plain
+    terminal. Claude's from its own records (claude_sessions), so a session
+    started with no tmux is listed too (#491 step 4); every other harness's
+    from its process (harnesses.running), each row naming its `agent`. `known`:
     sessiond's ids, left out. Never raises."""
     try:
         from agent_media_core import live_copy
@@ -134,6 +135,30 @@ def desk_rows(known: set[str]) -> list[dict]:
                     "title": _title({"session": sid}), "agent": "claude", "card": False,
                     "tasks": 0, "queued": 0, "last_event_at": None, "host": "",
                     "where": where, "pane": rec.get("pane") or "", "pid": rec.get("pid")})
+    # Every other harness at a desk: a codex, pi, hermes, opencode, gemini or
+    # grok in a pane or a terminal (harnesses.running), so agent mail sees a
+    # person's session whatever agent it is (agent-mail #520). sessiond's own
+    # are left out by their environment, as Claude's are.
+    try:
+        from agent_media_core import harnesses, procinfo
+        others = harnesses.running()
+    except Exception:  # noqa: BLE001
+        others = []
+    for r in others:
+        if not r.session or r.session in seen:
+            continue
+        try:
+            if procinfo.environ(r.pid).get("MEDIA_SESSIOND_SESSION"):
+                continue
+            cwd = procinfo.cwd(r.pid)
+        except Exception:  # noqa: BLE001
+            cwd = ""
+        seen.add(r.session)
+        where = "pane" if r.pane else "terminal"
+        out.append({"session": r.session, "live": True, "state": where, "cwd": cwd,
+                    "title": _title({"session": r.session}), "agent": r.harness,
+                    "card": False, "tasks": 0, "queued": 0, "last_event_at": None,
+                    "host": "", "where": where, "pane": r.pane or "", "pid": r.pid})
     return out
 
 
@@ -198,7 +223,7 @@ AGENTS = ("claude", "opencode", "antigravity")
 
 def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
           persona: str = "", role: str = "", permissions: str = "",
-          host: str = "", agent: str = "claude") -> tuple[int, dict]:
+          host: str = "", agent: str = "") -> tuple[int, dict]:
     """A fresh headless session in `cwd` with `text` as its first
     message; `(rc, answer)` with the session id and its thread link. Filed
     under the workspace a new chat from the app would get (send.ask), and
@@ -211,8 +236,10 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     public render: a session started from another, or from a timer, is never
     a private thread. `permissions` names its profile (permissions.py:
     strict, normal, folder); empty is the host's. `host` runs it on that
-    host (roadmap 56; no persona there yet). `agent` is Claude Code by
-    default, or opencode or Antigravity (`AGENTS`), with that agent's own
+    host (roadmap 56; no persona there yet). `agent` is Claude Code,
+    opencode or Antigravity (`AGENTS`); none named is the default agent
+    (default_agent.resolve, headless), and the answer says which and why
+    (`agent`, `agent_source`). Each takes its own
     model ids (session_settings.clean_new); only Claude goes to another
     host yet."""
     from agent_media_core import layout
@@ -223,7 +250,18 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
     cwd = _real(cwd)
     if not os.path.isdir(cwd):
         return RC_NONE, {"error": f"no folder {cwd}", "code": "none"}
-    agent = (agent or "claude").strip()
+    agent_source = ""
+    if not (agent or "").strip():
+        from . import default_agent
+
+        agent, agent_source = default_agent.resolve(cwd, headless=True)
+        from .sessiond_remote import is_local as _here
+
+        if (host or "").strip() and not _here(host.strip()) and agent != "claude":
+            # Only Claude runs on another host yet: a named host keeps the
+            # chat Claude rather than refusing a default nobody asked for.
+            agent, agent_source = "claude", "host"
+    agent = agent.strip()
     if agent not in AGENTS:
         return RC_USAGE, {"error": f"agent must be one of {', '.join(AGENTS)}", "code": "agent"}
     want = (model or "").strip()
@@ -267,7 +305,8 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         return RC_FAILED, {"error": r.get("error") or "refused", "code": r.get("code") or "refused"}
     sid = str(r.get("session") or "")
     out = {"session": sid, "cwd": cwd, "link": thread_link_base() + sid,
-           **({"agent": agent} if agent != "claude" else {})}
+           **({"agent": agent} if agent != "claude" else {}),
+           **({"agent_source": agent_source} if agent_source else {})}
     if r.get("host"):
         out["host"] = r["host"]
     if persona or role:
@@ -308,8 +347,10 @@ def _parser() -> argparse.ArgumentParser:
     st.add_argument("text", nargs="*", help="the first message; '-' or nothing reads stdin")
     st.add_argument("--from", dest="sender", default="",
                     help="who it is from: prefixed as '[From Name]' unless the text has one")
-    st.add_argument("--agent", default="claude", choices=AGENTS,
-                    help="which agent runs it (default: claude)")
+    st.add_argument("--agent", default="", choices=("",) + AGENTS,
+                    help="which agent runs it (default: the folder's or the server's "
+                         "default agent, else opencode or claude, whichever is here: "
+                         "`media session default-agent`)")
     st.add_argument("--model", default="", help="opus | sonnet | haiku | fable (default: "
                                                 "Claude's own); for opencode a provider/model "
                                                 "id it lists")
@@ -341,6 +382,13 @@ def _parser() -> argparse.ArgumentParser:
     wk.add_argument("--permissions", default="", choices=("", "strict", "normal", "folder"),
                     help="for a session it starts (see start)")
     wk.add_argument("--json", action="store_true")
+    da = sub.add_parser("default-agent", help="the agent a new chat gets when none is "
+                                              "named: show it, or set it")
+    da.add_argument("agent", nargs="?", default=None,
+                    help="claude, opencode, … (none: show it; '' or --clear: unset)")
+    da.add_argument("--folder", default="", help="set this folder's own default instead")
+    da.add_argument("--clear", action="store_true", help="unset it")
+    da.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
     ls.add_argument("--cwd", default="", help="only this folder's")
@@ -360,11 +408,40 @@ def _parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _default_agent_cmd(a) -> int:
+    from . import default_agent as da
+
+    if a.clear or a.agent is not None:
+        want = "" if a.clear else (a.agent or "").strip().lower()
+        known = da._known()
+        if want and want not in known:
+            print(f"media session default-agent: one of {', '.join(known)}", file=sys.stderr)
+            return RC_USAGE
+        if a.folder and not os.path.isdir(_real(a.folder)):
+            print(f"media session default-agent: no folder {a.folder}", file=sys.stderr)
+            return RC_USAGE
+        da.set_default(want, a.folder)
+    rep = da.report(a.folder)
+    if a.json:
+        print(json.dumps(rep))
+        return 0
+    print(f"server default: {rep['agent'] or '(none set)'}")
+    for folder, agent in sorted(rep["folders"].items()):
+        print(f"  {folder}: {agent}")
+    why = {"folder": "the folder's default", "server": "the server's default",
+           "env": "MEDIA_ASK_AGENT", "fallback": "none set: the first installed of "
+           + ", ".join(rep["fallback"]), "none": "nothing installed"}[rep["source"]]
+    print(f"a new chat{' there' if a.folder else ''} gets: {rep['effective']} ({why})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
         return RC_USAGE if e.code else 0
+    if a.cmd == "default-agent":
+        return _default_agent_cmd(a)
     views, up = rows()
     if a.cmd == "hosts":
         r = _call("hosts", timeout=60.0)

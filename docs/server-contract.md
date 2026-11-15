@@ -5772,6 +5772,7 @@ local look, never a network call:
 | `read_page` | `POST /read` takes `{"page"}`, a page the phone read signed in (§6.7a) — where personal use allows `signed-in-reading` |
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
+| `default_agent` | always: `GET`/`POST /settings/agent`, the agent a new chat that names none gets (§6.55, 15 Nov 2026) |
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
@@ -7804,7 +7805,7 @@ POST /presets Preset → {"ok": true, "preset": Preset}       // added, or repla
 POST /presets/remove {"name"} → {"ok": true} | 404
 
 Preset = {"name": "Web app",            // 1–40 characters, the key
-          "agent": "claude" | "",       // "" = the host's default agent
+          "agent": "claude" | "",       // "" = the default agent (§6.55)
           "profile": "", "model": "", "plan": false,
           "persona": "", "role": "",    // ids from personas/roles; "" = none
           "agents_md": "",              // "" = agents_md_default
@@ -11538,6 +11539,49 @@ tunnel terminates TLS; the canvas itself stays plain http on the tailnet.
 - The desk's name wins over the device's own `device` field.
 - Device callers' ABS item lookups used the host's ABS login until the ABS
   exit (11 Nov 2026), when the lookups and the `item` fields went.
+
+### 6.55 The default agent — reading gated, setting admins (built 15 Nov 2026)
+
+What a new chat gets when it names no agent (David, 15 Nov 2026: "We should
+also be able to set a default agent", and "let's use opencode as the default
+when none is set... so that it can work out of the box with free models").
+Every start that names none asks it: `/ask` (a new chat), `media session
+start` and `wake`, sessiond's own `start`, and so agent mail's wakes and
+handoffs. In order, the first that is installed and can run there (a
+headless start only takes `claude`, `opencode` or `antigravity`):
+
+1. the folder's own default, the nearest set at or above the chat's folder;
+2. the server's default (this setting);
+3. `MEDIA_ASK_AGENT` in the env file (the older, `/ask`-only setting);
+4. opencode, which runs on its own free models with no account or key;
+5. Claude Code;
+6. `claude` when nothing is installed (the start then says what's missing).
+
+A chat started on another host (`media session start --host`) stays Claude
+when the default is something else, since only Claude runs there yet.
+
+```
+GET  /settings/agent → {"ok": true, "agent": "<id>" | "", "folders": {"<path>": "<id>"},
+                        "effective": "<id>", "source": "folder" | "server" | "env" | "fallback" | "none",
+                        "fallback": ["opencode", "claude"],
+                        "choices": [{"id", "installed", "headless"}, …]}
+POST /settings/agent {"agent": "<id>" | "", "folder"?: "<path>"} → the same
+```
+
+`agent` is the server's setting ("" = none set); `effective` and `source`
+are what a new chat with no folder gets now and why. `POST` sets the
+server's default, or `folder`'s; "" clears it. `GET` is any paired device;
+`POST` is `auth.may_admin` (a member or guest is 403 `not_admin`). 400
+`code: "agent"` for an id that isn't one of `choices`, `code: "folder"` for
+a folder that doesn't exist. In `CORS_PATHS`. Stored in
+`<state>/default_agent.json`. On the command line: `media session
+default-agent [<id> | --clear] [--folder <path>]`.
+
+`media session start` answers `agent_source` beside `agent` when the agent
+was not named: the source above, or `"host"` when another host kept it
+Claude. The app shows Settings' Default agent when `/features` has
+`default_agent`, and a new-chat sheet that leaves the agent unpicked sends
+none, so this decides.
 
 ---
 

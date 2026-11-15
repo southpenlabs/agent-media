@@ -727,7 +727,9 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     `project` (a series name) opens it in that project's directory instead,
     and `cwd` (a directory, as `/targets` hands them out) says the same thing
     without the library's naming convention in the middle.
-    `agent` picks Claude Code (the default, or MEDIA_ASK_AGENT), Codex or pi.
+    `agent` picks Claude Code, Codex, pi, opencode…; none named is the
+    default agent (default_agent.resolve: the folder's, the server's,
+    MEDIA_ASK_AGENT, then opencode or Claude, whichever is installed).
     `model` (an alias from session_settings.MODELS) and `mode` ("plan")
     are Claude's, from the reply box's bottom row; opencode and pi take a
     `provider/model` id as their model (one from their sheet); other agents
@@ -754,7 +756,13 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     user, err = auth.gate(bearer)
     if not user:
         return False, err
-    agent = (agent or os.environ.get("MEDIA_ASK_AGENT") or "claude").strip().lower()
+    if not (agent or "").strip():
+        # None named: the folder's default, the server's, then opencode or
+        # Claude, whichever is here (default_agent.py).
+        from . import default_agent
+
+        agent = default_agent.resolve(cwd)[0]
+    agent = agent.strip().lower()
     if agent == "quick":
         # A quick chat (quick.py): a fast model, no agent, no folder.
         from . import quick

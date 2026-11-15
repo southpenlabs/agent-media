@@ -352,6 +352,18 @@ PENDING_KEPT = ("it has a question or permission waiting for an answer; "
 
 # --- where things are -------------------------------------------------------------
 
+def _default_agent(cwd: str) -> str:
+    """A start that names no agent: the default agent (default_agent.py),
+    Claude if that can't be read."""
+    try:
+        from .default_agent import resolve
+
+        return resolve(cwd, headless=True)[0]
+    except Exception:  # noqa: BLE001 - never block a start on the setting
+        log.warning("sessiond: the default agent was not read", exc_info=True)
+        return "claude"
+
+
 def state_root() -> Path:
     from agent_media_core._paths import state_dir
 
@@ -2601,7 +2613,12 @@ class Supervisor:
                     # (a form, or a URL to visit): a card like a question,
                     # answered `{action, content}` (driver/headless.py),
                     # declined if nobody answers in `elicit_timeout_s`.
-                    s.pending[rid] = {"request_id": rid, "request": req, "at": round(now, 3)}
+                    s.pending[rid] = {"request_id": rid, "request": req, "at": round(now, 3),
+                                      # Antigravity's card says so from the
+                                      # start: its adapter set it a line later,
+                                      # and a card read between was Claude's.
+                                      **({"antigravity": True}
+                                         if s.agent == "antigravity" else {})}
                     s.set_state("approval")
                     if req.get("subtype") == "elicitation":
                         log.info("sessiond: %s elicitation from %s (%s)", s.id[:8],
@@ -4154,7 +4171,7 @@ class Supervisor:
             if op == "start":
                 return {"ok": True, **self.start(
                     str(req.get("cwd") or ""), str(req.get("text") or ""), session=sid,
-                    agent=str(req.get("agent") or "claude"),
+                    agent=str(req.get("agent") or _default_agent(str(req.get("cwd") or ""))),
                     workspace=str(req.get("workspace") or ""),
                     permissions=str(req.get("permissions") or ""),
                     model=str(req.get("model") or ""), mode=str(req.get("mode") or ""),

@@ -372,3 +372,15 @@ def _a_hostname_no_real_machine_has(monkeypatch):
 
     monkeypatch.setattr(socket, "gethostname",
                         lambda: "a-host-under-test.invalid")
+
+
+@pytest.fixture(autouse=True)
+def _default_agent_is_claude(monkeypatch):
+    """A start that names no agent gets the default agent
+    (default_agent.resolve), which falls back to opencode when it is
+    installed. Whether it is depends on the machine, so every test sees only
+    Claude installed, as before that fallback; test_default_agent.py says
+    otherwise where it means to."""
+    from agent_media_server import default_agent
+
+    monkeypatch.setattr(default_agent, "_installed", lambda agent: agent == "claude")
