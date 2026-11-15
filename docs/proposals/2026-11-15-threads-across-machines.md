@@ -249,3 +249,17 @@ by byte offset, or a database read message by message through the
 harness's own export. The owner keeps each in its native form, so a resume
 can hand it back. Today only Claude, antigravity and opencode run headless,
 so only they can be worker chats. opencode is parity item 11.
+
+## The fleet history sync (15 Nov 2026, open)
+
+Found by thread 0685dc4e: agent-sessions' fleet sync (red5 the hub) copies
+red2's Claude transcripts into red5's `~/.claude/projects`, so red5's small
+server lists every red2 chat as an ended chat of its own, and the phone
+sometimes opens a red2 chat there (no Play keys, no autoplay). The app's
+three routing bugs went to sasonica-app (mail #608). David recalls a thread
+replacing the sync; not found yet (not 6ccbe9f4). Whoever replaces it:
+other machines' copies stay out of `~/.claude/projects`, and deletions
+propagate, or at least aren't undone. Thread 6ccbe9f4 found that a chat
+deleted on red2 came back from red5 within minutes, with its original
+mtimes, for Claude, Codex and pi alike. Meanwhile red5's small server could
+list no chats at all (not built).
