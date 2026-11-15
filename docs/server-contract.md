@@ -9119,6 +9119,16 @@ the owner's"`. With no bridges configured, `GET /bridges` is `{"ok": true,
   account's import writes nothing). `POST /contacts/import` answers
   `profile: {network: [field names]}`, never the values; the export links
   ask for Personal information → Profile information too.
+  `signed_in_with` (16 Nov 2026, David: "I need to know which emails I'm
+  logged in with"): what was typed in the sign-in's email, phone or
+  user-name field (the form step's field of type `email`, `phone_number`
+  or `username`, the first filled; never a password, code or token field),
+  kept for the login it made from the sign-in until it signs out
+  (`<state_dir>/bridges-signed-in-with.json`, 0600; a login the bridge
+  stops listing is forgotten ten minutes on). Absent for a sign-in by QR
+  or one made before this; the app shows it where the network's own
+  `email` does not already say the same. The phone companion reports the
+  same field for its own accounts.
 - `logins[].state` is the bridge state event as the bridge says it
   (`CONNECTED`, `CONNECTING`, `BACKFILLING`, `TRANSIENT_DISCONNECT`,
   `BAD_CREDENTIALS`, `UNKNOWN_ERROR`, `LOGGED_OUT`, …); `error` its error
