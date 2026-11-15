@@ -101,9 +101,15 @@ word and the code with no tools. Ten of the twelve passed:
 Both failures are Codex's code-mode tool calls (`custom_tool_call` whose
 input is a JS string such as `tools.exec_command({...})`). opencode's import
 wants an object for the input, and the Claude copy keeps the call but not
-its output. That is a bug upstream, kept with a repro, rather than a reason
+its output. That is a bug upstream (skillsynchq/txcript#104), not a reason
 to write our own. Smaller: txcript names Codex rollouts by UTC time where
-Codex uses local time. Not yet tried: a long real chat, Gemini and Grok
+Codex uses local time.
+
+**A long real chat** (this thread, 1.5 MB of Claude Code JSONL, many tool
+calls, a question card, a subagent): into opencode and Codex, the copy
+resumed and answered a question about its own late history correctly. Into
+pi it was refused by the API: a `/rename` in the chat became a tool result
+with no tool call before it (txcript#105). Not yet tried: Gemini and Grok
 sources.
 
 ## Steps
