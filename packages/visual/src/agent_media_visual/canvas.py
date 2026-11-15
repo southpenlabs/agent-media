@@ -848,6 +848,49 @@ def _pane_turns(pane: str, limit: int = 12) -> list[str]:
     return ["\n".join(lines)] if lines else []
 
 
+def _session_turns(session: str, limit: int = 12) -> list[str]:
+    """A conversation's assistant turns by its session id, pane or none
+    (#491 step 5: the completions shim reads a headless chat this way)."""
+    if not session or _private(session):
+        return []
+    try:
+        from agent_media_core import conversation
+        path = conversation.transcript(session)
+    except Exception:  # noqa: BLE001
+        path = None
+    if path is None:
+        return []
+    turns: list[str] = []
+    try:
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("type") != "assistant":
+                continue
+            c = (r.get("message") or {}).get("content")
+            if isinstance(c, list):
+                text = "\n".join(b.get("text", "") for b in c
+                                 if isinstance(b, dict) and b.get("type") == "text")
+            else:
+                text = c if isinstance(c, str) else ""
+            if text.strip():
+                turns.append(text.strip())
+    except OSError:
+        return []
+    return turns[-limit:]
+
+
+def _session_state(session: str) -> str:
+    """working | waiting | approval | ended, from the driver that owns it."""
+    try:
+        from agent_media_server import driver
+        return str(driver.for_session(session).state(session).get("state") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _child_env() -> dict:
     """Environment for shell-outs that RENDER speech in-process (`media say`,
     replay). `media say` submits and renders in the calling process, so the TTS
@@ -899,12 +942,60 @@ def _play_pane(pane: str) -> bool:
         return False
 
 
+def _seam_owns(session: str) -> bool:
+    try:
+        from agent_media_core import seam
+        return seam.owned_headless(session)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _last_speaking_session() -> str:
+    """The session id of the most recent speech that names one, pane or none
+    (a headless chat's replies carry no pane)."""
+    try:
+        import sqlite3
+
+        from agent_media_core.state.store import StateStore
+        st = StateStore()
+        ex = ((st.get_now_playing("speech") or {}).get("extras")) or {}
+        if ex.get("source_session"):
+            return str(ex["source_session"])
+        db = sqlite3.connect(str(st.path))
+        for (raw,) in db.execute(
+                "SELECT extras FROM history WHERE sink='speech' AND "
+                "extras IS NOT NULL ORDER BY rowid DESC LIMIT 10"):
+            try:
+                sid = (json.loads(raw) or {}).get("source_session")
+            except (TypeError, ValueError):
+                continue
+            if sid:
+                return str(sid)
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _send_by_session(session: str, text: str) -> tuple[bool, str]:
+    """Through the driver seam (agent_media_core.seam, #491 step 5): the
+    session host for a headless chat, its pane for a desk one."""
+    from agent_media_core import seam
+
+    ok, detail = seam.send(session, text)
+    return (True, f"session:{session}") if ok else (False, str(detail.get("error")
+                                                               or "not delivered"))
+
+
 def send_input(text: str, target: str) -> tuple[bool, str]:
-    """Deliver `text` to `target`: "speaker" or "amux:<name>". Returns
-    (ok, detail) where detail is the resolved destination or the error."""
+    """Deliver `text` to `target`: "speaker", "session:<id>", "tmux:<pane>"
+    or "amux:<name>". Returns (ok, detail) where detail is the resolved
+    destination or the error. "speaker" is whoever spoke last: typed into
+    its pane when a desk pane runs it, else sent by its session id."""
     text = (text or "").strip()
     if not text:
         return False, "empty text"
+    if target.startswith("session:"):
+        return _send_by_session(target[len("session:"):].strip(), text)
     if target.startswith("amux:"):
         name = target[len("amux:"):]
         if name not in {s["name"] for s in _amux_sessions()}:
@@ -923,8 +1014,12 @@ def send_input(text: str, target: str) -> tuple[bool, str]:
         err = _send_to_pane(pane, text)
         return (False, err) if err else (True, f"tmux:{pane}")
     speaker = _last_speaker()
-    if not speaker:
-        return False, "no speaker on record yet"
+    session = (speaker or {}).get("session") or ""
+    if not speaker or (session and _seam_owns(session)):
+        session = session or _last_speaking_session()
+        if not session:
+            return False, "no speaker on record yet"
+        return _send_by_session(session, text)
     err = _send_to_pane(speaker["pane"], text)
     if err:
         return False, err
@@ -1805,7 +1900,14 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
             # like /agents) — latest turn full, older ones collapsible snapshots.
             # parse_qs percent-decodes the client's encodeURIComponent exactly
             # once — downstream must treat the pane id as raw from here.
-            pane = (parse_qs(query).get("pane") or [""])[0]
+            q = parse_qs(query)
+            session = (q.get("session") or [""])[0]
+            if session:
+                # By session id, pane or none (#491 step 5).
+                self._json(200, {"session": session, "turns": _session_turns(session),
+                                 "state": _session_state(session)})
+                return
+            pane = (q.get("pane") or [""])[0]
             self._json(200, {"pane": pane, "turns": _pane_turns(pane)})
         elif path == "/pair":
             code = (parse_qs(query).get("c") or [""])[0]

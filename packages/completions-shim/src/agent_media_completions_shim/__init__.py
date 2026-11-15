@@ -22,7 +22,9 @@ Config (env):
   MEDIA_COMPLETIONS_PORT     listen port (default 8783 — shim 8782, canvas 8781)
   MEDIA_COMPLETIONS_BIND     bind address (default 127.0.0.1)
   MEDIA_COMPLETIONS_CANVAS   canvas base URL (default http://127.0.0.1:8781)
-  MEDIA_COMPLETIONS_TARGET   session to drive: "tmux:<pane>" | "amux:<name>" |
+  MEDIA_COMPLETIONS_TARGET   session to drive: "session:<id>" (any conversation,
+                             pane or none, through the driver seam) |
+                             "tmux:<pane>" | "amux:<name>" |
                              "<tmux-session-name>"  (REQUIRED)
   MEDIA_COMPLETIONS_TOKEN    amux token for /input (X-Auth-Token); blank if the
                              canvas runs MEDIA_VISUAL_TRUST_TAILNET=1
@@ -98,7 +100,10 @@ def _post(path: str, body: dict) -> tuple[int, dict]:
 
 def _resolve_pane(target: str) -> str | None:
     """The tmux pane id to read replies from. tmux:<pane> is direct; amux:/plain
-    names are matched against /agents by session/name."""
+    names are matched against /agents by session/name. "session:<id>" is
+    kept as it is: read by its id, no pane (#491 step 5)."""
+    if target.startswith("session:"):
+        return target
     if target.startswith("tmux:"):
         return target[len("tmux:"):]
     want = target[len("amux:"):] if target.startswith("amux:") else target
@@ -111,11 +116,17 @@ def _resolve_pane(target: str) -> str | None:
 
 
 def _peek_turns(pane: str) -> list[str]:
-    data = _get("/peek?pane=" + urllib.parse.quote(pane))
+    if pane.startswith("session:"):
+        data = _get("/peek?session=" + urllib.parse.quote(pane[len("session:"):]))
+    else:
+        data = _get("/peek?pane=" + urllib.parse.quote(pane))
     return (data.get("turns") if isinstance(data, dict) else None) or []
 
 
 def _state(pane: str) -> str:
+    if pane.startswith("session:"):
+        data = _get("/peek?session=" + urllib.parse.quote(pane[len("session:"):]))
+        return str((data or {}).get("state") or "") if isinstance(data, dict) else ""
     data = _get("/agents")
     for a in (data.get("agents") if isinstance(data, dict) else []) or []:
         if a.get("pane") == pane:
@@ -137,8 +148,12 @@ def _new_turns(before_last: str | None, after: list[str]) -> list[str]:
 def _ensure_muted(pane: str, _cache: set = set()) -> None:
     if _env("MEDIA_COMPLETIONS_MUTE", "1") != "1" or pane in _cache:
         return
+    # "session:<id>": the conversation itself is muted (its speech level
+    # goes to quiet), pane or none.
+    how = (["--thread", pane[len("session:"):]] if pane.startswith("session:")
+           else ["--pane", pane])
     try:
-        subprocess.run([_media_bin(), "mute-pane", "--pane", pane, "on"],
+        subprocess.run([_media_bin(), "mute-pane", *how, "on"],
                        timeout=8, capture_output=True)
         _cache.add(pane)
     except (OSError, subprocess.SubprocessError) as e:

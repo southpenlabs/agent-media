@@ -10173,6 +10173,32 @@ def cmd_restore(a) -> int:
     return mod.restore_main(a.args or [])
 
 
+def _session_deliver(argv: list[str]) -> int:
+    """`media session deliver <id> [--from NAME] [--json] <text…>`: words into
+    any conversation by its session id, through the driver seam (seam.py,
+    #491 step 5) — sessiond's, a desk pane's, or an ended one revived — as a
+    reply from the app goes. `-` or no text reads stdin. rc 0 sent, 1 not."""
+    import argparse
+
+    from . import seam
+
+    ap = argparse.ArgumentParser(prog="media session deliver")
+    ap.add_argument("session")
+    ap.add_argument("text", nargs="*")
+    ap.add_argument("--from", dest="sender", default="")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    text = " ".join(a.text).strip()
+    if not text or text == "-":
+        text = sys.stdin.read().strip()
+    ok, detail = seam.send(a.session, text, sender=a.sender)
+    if a.json:
+        print(json.dumps({"ok": ok, **detail}))
+    elif not ok:
+        print(f"media session deliver: {detail.get('error')}", file=sys.stderr)
+    return 0 if ok else 1
+
+
 def cmd_session(a) -> int:
     """`media session list|send`: headless sessions (sessiond) seen and
     messaged from another session (agent_media_server.headless_mail).
@@ -10180,6 +10206,8 @@ def cmd_session(a) -> int:
     if a.args and a.args[0] == "holder":
         from . import live_copy
         return live_copy.main(a.args[1:])
+    if a.args and a.args[0] == "deliver":
+        return _session_deliver(a.args[1:])
     mail = _server_module("headless_mail")
     if mail is None:
         return 1

@@ -74,6 +74,40 @@ In sam's order, each one breaking nothing:
 
 Small: `media-setup check` treats tmux as optional.
 
+### Part B as built (15 Nov 2026)
+
+- **Step 2, built.** Outside tmux, `media mute-pane` mutes the
+  conversation itself (its speech level goes to quiet; `--thread <id>` for
+  any), `--session` mutes a headless chat's workspace; a speech hold is
+  owned by the session id before the pane; a notification or question is
+  labelled with the thread's name when there is no pane (none while the
+  thread is on screen in the app), and the app's thread on screen counts as
+  attention as a focused pane does; a question kept for the phone carries
+  the thread's own voice before the hashed workspace voice, which is the
+  last resort everywhere now.
+- **The setup check, built.** `media-setup check` requires python, git and
+  the claude CLI; cloudflared, ffmpeg, mpv and tmux are reported optional.
+- **Step 4, built.** `media session list` lists claudes in desk panes and
+  plain terminals from Claude Code's own records (JSON: under `desk`);
+  `procinfo` reads Windows' process table (CIM) and `claude_sessions` no
+  longer needs /proc; `live_copy.py` answers who runs a session, sessiond
+  refuses a resume while a pane or terminal holds it (`live_elsewhere`), and
+  `media session holder <id>` (rc 0 free, 3 held) is the check for
+  agent-workspace's resume wrapper in place of its tmux registry guard.
+- **Step 3, built.** A reply (or Resume) to an ended desk-born Claude chat
+  comes back headless unless someone typed at a desk client in the last
+  five minutes (`send.revive_driver`; `MEDIA_REVIVE=pane|headless` pins
+  it; no tmux on the host means headless): sessiond `adopt`s it, parked,
+  and the send resumes it from its transcript. A sessiond chat picked up
+  at the desk in a pane takes replies in that pane.
+- **Step 5, built.** `agent_media_core/seam.py` sends by session id through
+  the server's `send.deliver`; `media ask` uses it for a headless chat and
+  starts a new one headless where the host runs headless or has no tmux;
+  the canvas `/input` takes `session:<id>` and reaches a pane-less speaker
+  by id; `/peek?session=` reads a chat by id; the completions shim takes
+  `session:<id>`; the voice bridge follows a thread ("follow the last
+  thread", or by itself with no tmux) through `media session deliver`.
+
 ## Order
 
 Part A here: Codex, then pi, then Gemini/Grok. Part B runs alongside it in

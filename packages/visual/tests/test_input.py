@@ -224,3 +224,29 @@ def test_send_input_no_speaker(monkeypatch):
     monkeypatch.setattr(canvas, "_last_speaker", lambda: None)
     ok, detail = canvas.send_input("hi", "speaker")
     assert ok is False and "no speaker" in detail
+
+
+# --- #491 step 5: by session id, through the seam ---------------------------
+
+def test_a_session_target_goes_through_the_seam(monkeypatch):
+    from agent_media_core import seam
+    sent = []
+    monkeypatch.setattr(seam, "send", lambda s, t, **k: sent.append((s, t)) or (True, {}))
+    ok, where = canvas.send_input("hi", "session:abc")
+    assert ok and where == "session:abc" and sent == [("abc", "hi")]
+
+
+def test_the_speaker_with_no_pane_is_reached_by_its_session(monkeypatch):
+    from agent_media_core import seam
+    sent = []
+    monkeypatch.setattr(seam, "send", lambda s, t, **k: sent.append((s, t)) or (True, {}))
+    monkeypatch.setattr(canvas, "_last_speaker", lambda: None)
+    monkeypatch.setattr(canvas, "_last_speaking_session", lambda: "head-1")
+    monkeypatch.setattr(canvas, "_send_to_pane", lambda *a: "should not type")
+    assert canvas.send_input("hello", "speaker") == (True, "session:head-1")
+    # A headless speaker that also has a live pane on record: still by id.
+    monkeypatch.setattr(canvas, "_last_speaker",
+                        lambda: {"pane": "%5", "session": "head-2", "tmux_session": "w"})
+    monkeypatch.setattr(canvas, "_seam_owns", lambda s: s == "head-2")
+    assert canvas.send_input("again", "speaker") == (True, "session:head-2")
+    assert sent == [("head-1", "hello"), ("head-2", "again")]

@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -77,6 +78,46 @@ def load_hosts() -> dict[str, str | None]:
     return dict(DEFAULT_HOSTS)
 
 
+def load_thread() -> str:
+    """The conversation the target file names by its session id (`thread
+    <id>`), or "". A thread is reached through agent-media's driver seam
+    (`media session deliver`), pane or none, so the bridge needs no tmux
+    for it (#491 step 5)."""
+    try:
+        parts = TARGET_FILE.read_text().split()
+    except FileNotFoundError:
+        return ""
+    return parts[1] if len(parts) == 2 and parts[0] == "thread" else ""
+
+
+def save_thread(session: str) -> None:
+    TARGET_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TARGET_FILE.write_text(f"thread {session}\n")
+
+
+def last_thread() -> str:
+    """The conversation that spoke last (`media ask --status --json`), or ""."""
+    try:
+        r = subprocess.run(["media", "ask", "--status", "--json"], capture_output=True,
+                           text=True, timeout=10)
+        return str((json.loads(r.stdout or "{}") or {}).get("session") or "")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ""
+
+
+def inject_thread(session: str, text: str) -> bool:
+    """Into the conversation `session` through agent-media's seam."""
+    try:
+        r = subprocess.run(["media", "session", "deliver", session, "--from", "voice", "--", text],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as err:
+        print(f"[shim] thread delivery failed: {err}", file=sys.stderr)
+        return False
+    if r.returncode != 0:
+        print(f"[shim] thread delivery failed: {r.stderr.strip()}", file=sys.stderr)
+    return r.returncode == 0
+
+
 def load_target() -> tuple[str | None, str]:
     try:
         raw = TARGET_FILE.read_text().strip()
@@ -106,6 +147,11 @@ SWITCH_RE = re.compile(
 )
 WHERE_RE = re.compile(
     r"^\s*(?:where\s+am\s+i|current\s+target|what\s+target|where\s+are\s+we)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+THREAD_RE = re.compile(
+    r"^\s*(?:follow|use|switch\s+to)\s+(?:the\s+)?(?:last\s+|latest\s+)?"
+    r"(?:thread|conversation|chat)\s*[.!?]?\s*$",
     re.IGNORECASE,
 )
 LIST_RE = re.compile(
@@ -256,7 +302,15 @@ def handle_command(text: str, hosts: dict[str, str | None]) -> str | None:
         # First word looked like a switch verb but the token isn't a known host
         # ("use my GTD inbox", "go to line 42"). Fall through to text injection
         # rather than yelling about an "unknown target".
+    if THREAD_RE.match(text):
+        sid = last_thread()
+        if not sid:
+            return "No conversation has spoken yet."
+        save_thread(sid)
+        return "Following the last conversation."
     if WHERE_RE.match(text):
+        if load_thread():
+            return "Current target is the conversation you followed."
         host, session = load_target()
         return f"Current target is {describe_target(host, session)}."
     if LIST_RE.match(text):
@@ -444,6 +498,13 @@ def do_inject(text: str) -> bool:
     """
     if offer_to_converse(text):
         return True
+    thread = load_thread()
+    if not thread and shutil.which("tmux") is None:
+        # No tmux on this host: the conversation that spoke last.
+        thread = last_thread()
+    if thread:
+        inject_thread(thread, text)
+        return False
     host, session = load_target()
     if host is None:
         inject_local(session, text)

@@ -318,6 +318,14 @@ def liveness(conv: Optional[Conversation], *, store=None,
     """
     if conv is None or not conv.session:
         return Liveness(False, "no conversation has spoken here yet")
+    if _headless(conv.session):
+        # Held by the session host, pane or none: reached by its id (seam.py,
+        # #491 step 5), and an ended one is woken by the same send.
+        window = LIVE_S if live_s is None else live_s
+        if conv.age(now) > window:
+            mins = int(conv.age(now) // 60)
+            return Liveness(False, f"{conv.label} has been quiet for {mins} minutes")
+        return Liveness(True, f"{conv.label} is listening")
     if not conv.pane:
         return Liveness(False, f"{conv.label} was not recorded against a pane")
     if not pane_alive(conv.pane):
@@ -339,6 +347,14 @@ def liveness(conv: Optional[Conversation], *, store=None,
         mins = int(conv.age(now) // 60)
         return Liveness(False, f"{conv.label} has been quiet for {mins} minutes")
     return Liveness(True, f"{conv.label} is listening")
+
+
+def _headless(session: str) -> bool:
+    try:
+        from . import seam
+        return seam.owned_headless(session)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def needle(text: str) -> str:
@@ -499,7 +515,18 @@ def deliver(conv: Conversation, line: str, *,
     know".
     """
     line = " ".join((line or "").split())
-    if not line or not conv.pane:
+    if not line:
+        return False
+    if conv.session and (not conv.pane or _headless(conv.session)):
+        # No pane, or the session host holds it: by its id, through the
+        # driver seam (seam.py, #491 step 5) — what a reply from the app does.
+        from . import seam
+
+        ok, detail = seam.send(conv.session, line)
+        if not ok:
+            log.info("ask: %s not delivered: %s", conv.session[:8], detail.get("error"))
+        return ok
+    if not conv.pane:
         return False
     try:
         typed = subprocess.run(["tmux", "send-keys", "-t", conv.pane, "-l", line],
@@ -594,6 +621,40 @@ def find_window(name: str, session: str = "") -> Optional[str]:
     return None
 
 
+def _start_headless_wanted() -> bool:
+    """A new conversation starts headless where the host runs headless chats
+    (MEDIA_HEADLESS) or has no tmux at all (#491 step 5)."""
+    import shutil
+
+    if not (os.environ.get("MEDIA_ASK_CMD") or "").strip() in ("", ASK_CMD):
+        return False                    # a launcher of its own: a window
+    try:
+        from agent_media_server import driver
+    except Exception:  # noqa: BLE001
+        return False
+    return driver.headless_enabled() or shutil.which("tmux") is None
+
+
+def _start_headless(prompt: str, name: str) -> Optional[str]:
+    """Start the answering session in the session host, named `name` (its
+    title, which a later ask finds it by as a window's name was)."""
+    try:
+        from agent_media_server import driver
+        ok, d = driver.headless_driver().start(
+            agent="claude", cwd=os.environ.get("MEDIA_ASK_DIR") or str(Path.home()),
+            text=prompt)
+    except Exception as e:  # noqa: BLE001
+        log.debug("could not start a headless conversation: %s", e)
+        return None
+    if not ok:
+        log.debug("headless start refused: %s", d.get("error"))
+        return None
+    session = str(d.get("session") or "")
+    if session:
+        set_session_name(session, name)   # its automatic name; never its transcript
+    return name
+
+
 def start(prompt: str, *, channel: str = "speech", title: str = "",
           session: str = "", cmd: str = "") -> Optional[str]:
     """Open a window named for the subject, running the answerer on `prompt`.
@@ -614,6 +675,8 @@ def start(prompt: str, *, channel: str = "speech", title: str = "",
     if not prompt:
         return None
     name = window_name(channel, title)
+    if _start_headless_wanted():
+        return _start_headless(prompt, name)
     existing = find_window(name, session)
     if existing is not None:
         # Already open and not yet spoken. Type into it rather than opening a
