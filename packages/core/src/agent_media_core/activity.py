@@ -36,7 +36,7 @@ MAX_STEPS = 80
 #: opencode's `ses_…`. All are safe as filenames, which is the other half of
 #: what this guards.
 _UUID = re.compile(r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                   r"|[0-9]{8}_[0-9]{6}_[0-9a-f]{4,}|ses_[0-9A-Za-z]{26})$")
+                   r"|[0-9]{8}_[0-9]{6}_[0-9a-f]{4,}|ses_[0-9A-Za-z]{26,32})$")
 #: Tools that are bookkeeping, not work anyone would want listed.
 _QUIET = {"TodoWrite", "ToolSearch", "TaskOutput", "BashOutput", "update_plan"}
 #: Codex's, pi's, opencode's, Gemini CLI's and Grok's names for the same tools.

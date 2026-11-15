@@ -24,7 +24,7 @@ import re
 log = logging.getLogger(__name__)
 
 _SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                      r"|[0-9]{8}_[0-9]{6}_[0-9a-f]{4,}|ses_[0-9A-Za-z]{26}")
+                      r"|[0-9]{8}_[0-9]{6}_[0-9a-f]{4,}|ses_[0-9A-Za-z]{26,32}")
 
 
 def available() -> bool:

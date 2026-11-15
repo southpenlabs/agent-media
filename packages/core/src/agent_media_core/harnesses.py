@@ -94,8 +94,9 @@ SETTINGS_HARNESSES = (CLAUDE, CODEX, PI, HERMES, OPENCODE, ANTIGRAVITY, GROK)
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 #: Hermes numbers its sessions by the clock instead: `20260921_102508_f74b02`.
 _HERMES_ID = r"[0-9]{8}_[0-9]{6}_[0-9a-f]{4,}"
-#: opencode's: `ses_` and 26 base62 characters, `ses_f2fa343dcffeKPfrR1z5h6u4NN`.
-_OPENCODE_ID = r"ses_[0-9A-Za-z]{26}"
+#: opencode's: `ses_` and 26 base62 characters, `ses_f2fa343dcffeKPfrR1z5h6u4NN`; a
+#: copy txcript imported has 32 hex ones (convert.py).
+_OPENCODE_ID = r"ses_[0-9A-Za-z]{26,32}"
 #: Any of the shapes, for anything that takes a session id from outside.
 SESSION_ID = re.compile(f"(?:{_UUID}|{_HERMES_ID}|{_OPENCODE_ID})")
 _ROLLOUT = re.compile(r"rollout-.*-(" + _UUID + r")\.jsonl$")

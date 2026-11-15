@@ -114,9 +114,21 @@ sources.
 
 ## Steps
 
-1. `agent_media_core/convert.py`: the fold to "what crosses" and the
-   Claude Code and opencode writers (the two default agents), with the CLI.
-2. The Codex and pi writers.
-3. `/session/convert`, Branch's `agent`, the thread's `converted_from`,
-   contract section and feature flag.
+The "Writers" and "What crosses" sections above were the plan before txcript
+was found; txcript now does that work, and they stay as the record of what
+a copy must hold.
+
+1. **Done (15 Nov 2026).** `media session convert <id> --to <agent>`
+   (agent_media_server/convert.py, headless_mail.py): runs txcript, prints
+   the new thread's link and the desk's resume command, and says a known
+   loss. txcript is found on PATH or through `MEDIA_TXCRIPT`. A copy
+   opencode imports from txcript has a 32-character id, which the id
+   patterns now take (harnesses, sessions, seam, activity), so it lists and
+   reads as an opencode thread. Checked end to end: a Claude chat copied
+   into opencode, read by the server, resumed, remembered its word.
+2. The installer fetches txcript pinned and checksummed, as it does
+   opencode (and an outside-services row for the download).
+3. `POST /session/convert`, `/features convert`, Branch's `agent` (txcript's
+   `<id>#<range>` cut at the reply), the thread's `converted_from`, a
+   contract section.
 4. The app's "Continue in…" and the Branch picker.

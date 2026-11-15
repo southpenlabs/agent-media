@@ -399,6 +399,12 @@ def _parser() -> argparse.ArgumentParser:
     da.add_argument("--folder", default="", help="set this folder's own default instead")
     da.add_argument("--clear", action="store_true", help="unset it")
     da.add_argument("--json", action="store_true")
+    cv = sub.add_parser("convert", help="copy a chat into another agent (claude, codex, "
+                                        "opencode, pi), which resumes it as its own "
+                                        "history; prints the new thread's link")
+    cv.add_argument("session", help="the chat's session id (any agent the app shows)")
+    cv.add_argument("--to", required=True, help="the agent the copy is for")
+    cv.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", help="the sessions sessiond holds, newest first")
     ls.add_argument("--all", action="store_true", help="parked ones too (default: live only)")
     ls.add_argument("--cwd", default="", help="only this folder's")
@@ -445,6 +451,31 @@ def _default_agent_cmd(a) -> int:
     return 0
 
 
+def _convert_cmd(a) -> int:
+    """`media session convert <id> --to <agent>` (convert.py)."""
+    from agent_media_core.intake.context import thread_link_base
+
+    from . import convert
+
+    try:
+        got = convert.convert(a.session.strip(), a.to)
+    except convert.ConvertError as e:
+        if a.json:
+            print(json.dumps({"ok": False, "error": str(e)}))
+        else:
+            print(f"media session convert: {e}", file=sys.stderr)
+        return RC_FAILED
+    got["link"] = thread_link_base() + got["session"]
+    if a.json:
+        print(json.dumps({"ok": True, **got}))
+        return 0
+    print(f"{got['from']} chat copied into {got['to']}: {got['link']}")
+    print(f"  at the desk: {got['resume']}")
+    if got["loss"]:
+        print(f"  known loss: {got['loss']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         a = _parser().parse_args(argv)
@@ -452,6 +483,8 @@ def main(argv: list[str] | None = None) -> int:
         return RC_USAGE if e.code else 0
     if a.cmd == "default-agent":
         return _default_agent_cmd(a)
+    if a.cmd == "convert":
+        return _convert_cmd(a)
     views, up = rows()
     if a.cmd == "hosts":
         r = _call("hosts", timeout=60.0)
