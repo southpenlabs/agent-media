@@ -5786,6 +5786,7 @@ local look, never a network call:
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Outros", formerly "Sung out") (8 Nov 2026) |
 | `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
 | `storage` | always: `GET`/`POST /storage` (§6.5, 14 Nov 2026) — how long rendered clips, the music log and play history are kept, and the scheduled jobs' last runs, for Settings → Storage |
+| `device_log` | always: `POST /device/log` takes a paired device's own log lines (the app's updater: `source: "update"`), the newest 200 per device, read by an admin with `GET /device/log` (§6.21i, 15 Nov 2026); the app sends its lines only then |
 | `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
@@ -7397,6 +7398,37 @@ up again after. Kept with the device record (`stage_auto`, `stage_by`,
 - `/devices` rows carry `stage` (the mode) and, once set, `stage_auto`,
   `stage_by`, `stage_at`; `GET /devices` adds `stage_live`.
 - In `/features`: `stage: true`.
+
+### 6.21i A device's own log lines, reported (built 15 Nov 2026)
+
+sasonica-app agent-mail #560, 15 Nov 2026: an app update kills the app's
+process, and what the updater did (downloaded, verified, handed to the
+installer, came back) was only on the phone. So the app sends its log lines
+here, outbound, each batch tagged with where it came from. Code:
+`device_log.py`; tests in `test_device_log.py`.
+
+- `POST /device/log {"source": "update", "lines": ["2026-11-15 16:22:40
+  update: ...", ...]}` — any paired device, a guest too (401 otherwise: the
+  host token is not a device). `source` a short name (letters, digits,
+  `.` `_` `-`, up to 40), else 400; `lines` a list of strings, else 400.
+  Only the last 200 of a post are looked at; a line that is not a string or
+  is blank is dropped, a newline in one becomes a space, and each is cut to
+  500 characters. The device's own time is whatever the line says; the
+  server adds when it arrived. → `{ok: true, kept}`.
+- The newest 200 lines per device are kept, each `{at, source, line}` (`at`
+  the arrival, epoch seconds), in `<state>/device-log.json` (0600), so a
+  restart keeps them.
+- `GET /device/log?device=<id>[&source=<name>]` — an admin (403 for a member
+  or guest; 401 for no device). `device` is a device's id, or its name when
+  only one device has it. → `{ok: true, device, name, lines: [{at, source,
+  line}]}`, oldest first, only `source`'s when given; 404 for a device that
+  is not paired and has no log. Without `device` → `{ok: true, devices:
+  [{id, name, count, last}]}`: the devices that have a log, the most recent
+  first.
+- At the desk: `media-visual-canvas devices --log <id|name> [--source
+  update]` prints them, `YYYY-MM-DD HH:MM:SS  [source] line` (the arrival
+  time first).
+- In `/features`: `device_log: true`.
 
 ### 6.21a Restarting the phone's services — down the connection it opens (built 18 Oct 2026)
 

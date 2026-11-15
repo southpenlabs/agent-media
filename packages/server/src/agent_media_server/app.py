@@ -375,6 +375,10 @@ except /pair, which is how a device gets its token):
                   embedded stories tray page came to when it failed (state,
                   host/path, title, structure only), appended to
                   <state>/stories-tray-log.jsonl (stories_tray_log.py, §6.21d)
+  POST /device/log {source, lines: [str]} → any paired device's own log
+                  lines (the app's updater: source "update"), the newest 200
+                  per device in <state>/device-log.json; GET /device/log
+                  ?device=&source= reads them (an admin) (device_log.py, §6.21i)
   POST /notes {id, title, text, priority?, ttl_s?, keep?} (host token) → a
                   notification in the phone's shade; POST /notes/clear {id}.
                   Phones on /sessions/events?notes=1 get a `notes` frame
@@ -447,7 +451,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -506,7 +510,9 @@ GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/spee
                          "/book/state",
                          # A screen taking Now playing off itself (stage.py, §6.21h):
                          # the living-room TV is often a guest.
-                         "/device/stage", "/device/app"}) | AUDIO_PATHS | MUSIC_PATHS
+                         "/device/stage", "/device/app",
+                         # A device's own log lines (device_log.py, §6.21i).
+                         "/device/log"}) | AUDIO_PATHS | MUSIC_PATHS
 
 # The Organiser: browsing and capturing in the Org tree (org.py). The same
 # arrangement.
@@ -2563,6 +2569,14 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, detail.pop("status", 400), {"ok": False, **detail})
             return True
         _send_file(h, detail["file"], detail["size"], detail["type"])
+    elif path == "/device/log":
+        # A device's kept log lines, for an admin (device_log.py, §6.21i).
+        from . import device_log
+
+        q = parse_qs(query)
+        ok, detail = device_log.get(_bearer(h), (q.get("device") or [""])[0],
+                                    (q.get("source") or [""])[0])
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/device/follow":
         # What this device follows, and the thread open on that phone now
         # (follow.py, §6.21g): asked when it has no stream open.
@@ -3901,6 +3915,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import listen_log
 
         ok, detail = listen_log.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/log":
+        # A paired device's own log lines, e.g. the app's updater (device_log.py, §6.21i).
+        from . import device_log
+
+        ok, detail = device_log.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/stories-tray-log":
         # What the stories row's embedded tray page came to (stories_tray_log.py, §6.21d).

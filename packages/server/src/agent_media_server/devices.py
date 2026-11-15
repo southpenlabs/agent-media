@@ -837,8 +837,9 @@ def links(code: str, host: str, port: int, server: str = "",
 
 def cli_devices(argv: list[str]) -> int:
     """`media-visual-canvas devices [--revoke ID | --enrol ID | --no-enrol ID |
-    --role ID ROLE | --rename ID NAME]` — list, forget one, give one the
-    enrol bit (or take it back), set its role, or rename it."""
+    --role ID ROLE | --rename ID NAME | --log ID [--source S]]` — list, forget
+    one, give one the enrol bit (or take it back), set its role, rename it,
+    or print the log lines it sent (device_log.py)."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="media-visual-canvas devices",
@@ -863,7 +864,16 @@ def cli_devices(argv: list[str]) -> int:
     act.add_argument("--no-sessions", metavar="ID", help="no longer run agent sessions")
     act.add_argument("--revoke-account", metavar="WHO",
                      help="forget every device an account enrolled (its sub, or its email)")
+    act.add_argument("--log", metavar="ID",
+                     help="print the lines this device sent to POST /device/log, oldest "
+                          "first (its id or name; device_log.py)")
+    ap.add_argument("--source", default="",
+                    help="with --log: only this source's lines (e.g. update)")
     args = ap.parse_args(argv)
+    if args.log:
+        from . import device_log
+
+        return device_log.cli_print(args.log, args.source)
     if args.role:
         device_id, role = args.role
         try:
