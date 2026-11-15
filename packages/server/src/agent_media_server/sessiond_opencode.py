@@ -368,29 +368,11 @@ def split_command(text: str, names) -> tuple[str, str] | None:
     return m.group(1), (m.group(2) or "").strip()
 
 
-_VERSIONS: dict[tuple, str] = {}
-
-
 def program_version(exe: str) -> str:
-    """`opencode --version` ("1.19.5", "2.3.0"), kept per binary and its
-    change time; "" when it does not say."""
-    import shutil
+    """`opencode --version` (core opencode_api.cli_version)."""
+    from agent_media_core import opencode_api
 
-    path = shutil.which(exe) or exe
-    try:
-        key = (path, os.stat(path).st_mtime)
-    except OSError:
-        key = (path, 0.0)
-    if key in _VERSIONS:
-        return _VERSIONS[key]
-    try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True,
-                             timeout=30, stdin=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        out = ""
-    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
-    _VERSIONS[key] = m.group(0) if m else ""
-    return _VERSIONS[key]
+    return opencode_api.cli_version(exe)
 
 
 class _Shared:
@@ -551,7 +533,21 @@ class Host:
             log.warning("sessiond: opencode's event stream is not connected yet")
         log.info("sessiond: opencode %s's background server pid %d at %s",
                  self.version or "2", proc.pid, self.base)
+        threading.Thread(target=self._carry_keys, daemon=True, name="sessiond-opencode-keys").start()
         return proc
+
+    @staticmethod
+    def _carry_keys() -> None:
+        """auth.json's keys into v2's credentials, once each (core
+        opencode_keys.carry_over): v2 does not read auth.json."""
+        try:
+            from agent_media_core import opencode_keys
+
+            got = opencode_keys.carry_over()
+            if got:
+                log.info("sessiond: opencode keys carried to its server: %s", ", ".join(got))
+        except Exception as e:  # noqa: BLE001 — the chat goes on without them
+            log.info("sessiond: opencode keys not carried: %s", e)
 
     def _start_service(self, svc, exe: str) -> bool:
         prev = os.environ.pop("MEDIA_OPENCODE_SERVICE_START", None)

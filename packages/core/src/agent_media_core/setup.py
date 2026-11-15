@@ -2410,6 +2410,16 @@ def opencode_plugin_dest() -> Path:
     return Path(base) / "opencode" / "plugins" / "agent-media.js"
 
 
+def opencode2_plugin_source() -> Path:
+    """opencode 2's plugin: a folder (v2 loads a folder's `index.js`; v1
+    plugins do not run on it)."""
+    return _data_dir("opencode") / "v2" / "agent-media"
+
+
+def opencode2_plugin_dest() -> Path:
+    return opencode_plugin_dest().parent / "agent-media"
+
+
 def _plugin_linked(dest: Path, src: Path) -> bool:
     """Whether ``dest`` already serves the plugin ``src``. A link to ``src``
     itself, or a working link to an identical copy (a checkout's beside a
@@ -2435,6 +2445,10 @@ def _row_opencode(args, *, check_only: bool):
     hook extras find their tools: on PATH, which is the installing shell's."""
     if shutil.which("opencode") is None:
         return "absent", "opencode is not installed here"
+    from . import opencode_api
+
+    if opencode_api.cli_is_v2("opencode"):
+        return _row_opencode2(args, check_only=check_only)
     src, dest = opencode_plugin_source(), opencode_plugin_dest()
     if not src.exists():
         return "absent", f"no plugin at {src} (not a source checkout)"
@@ -2445,6 +2459,35 @@ def _row_opencode(args, *, check_only: bool):
         return "ok", str(dest)
     ok = _symlink_into(src, dest, dry_run=args.dry_run)
     return ("installed" if ok else "failed"), str(dest)
+
+
+def _row_opencode2(args, *, check_only: bool):
+    """opencode 2: its plugin folder linked into the plugins directory, and
+    v1's file link taken away when it is ours (v2 tries to load it, fails,
+    and says so in its log on every start)."""
+    src, dest = opencode2_plugin_source(), opencode2_plugin_dest()
+    if not (src / "index.js").exists():
+        return "absent", f"no plugin at {src} (not a source checkout)"
+    old = opencode_plugin_dest()
+    stale = old.is_symlink() and old.resolve().name == "agent-media.js"
+    linked = dest.is_symlink() and dest.resolve() == src.resolve()
+    if check_only:
+        return ("ok" if linked and not stale else "missing"), str(dest)
+    if stale and not args.dry_run:
+        old.unlink()
+        print(f"media-setup: removed opencode 1's plugin link {old}")
+    if linked:
+        return "ok", str(dest)
+    if dest.exists() and not dest.is_symlink():
+        return "failed", f"{dest} is not a link of ours; left alone"
+    if args.dry_run:
+        print(f"# would link {dest} -> {src}")
+        return "installed", str(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink():
+        dest.unlink()
+    dest.symlink_to(src, target_is_directory=True)
+    return "installed", str(dest)
 
 
 def pi_extension_source() -> Path:

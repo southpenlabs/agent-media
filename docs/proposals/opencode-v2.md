@@ -89,19 +89,41 @@ below.
   transcript, approval, questions (a model may ask two forms at once, and
   each is a card), interrupt, and letting go on close.
 
+## Plugin, keys, models (built 16 Nov 2026)
+
+- **The plugin** is `packages/core/opencode/v2/agent-media/index.js`, a
+  folder linked to `~/.config/opencode/plugins/agent-media` (media-setup does
+  this on v2, and removes v1's `agent-media.js` link, which v2 tries to load
+  and fails on every start). It uses v2's hooks: `session.hook("prompt")`
+  for the "You:" turn and the note, `session.hook("context")` to add the
+  note (and a waiting restart's) to each model request's system prompt,
+  `tool.hook("execute.before")` for steps, and events for retries and the
+  turn's end (Stop and speaking). v2 loads a copy per folder it serves, and
+  every copy hears every event, so events are handled once per process by id.
+  Checked on real 2.3.0 with a recorder in place of the hook: each call once,
+  and the model obeyed the note.
+- **Which chat is the phone's** is decided per chat by the hook
+  (`hook_opencode._v2_place`): sessiond has a record of it. On v2 a tmux pane
+  inherited from the shared server is dropped, so a desk chat's reply is
+  not attributed to whichever pane started the server. (Finding a desk
+  chat's own pane is not done.)
+- **Keys:** v2 does not read `auth.json`. `opencode_keys` reads and writes
+  v2's credentials over the API, and `carry_over()` (run by sessiond when it
+  attaches) copies in any auth.json key v2 lacks. Checked: an OpenRouter key
+  carried over adds its free models to the sheet.
+- **Model sheet:** from `GET /api/model` (v2's `models --verbose` prints ids
+  only), and the default from `/api/model/default`.
+
 ## Still to do
 
-- **The plugin** (speech, the context note, the restart note): v1 plugins
-  do not run on v2. It must also tell a phone chat from a desk chat per
-  session, because both share one server and one environment (ask sessiond
-  by session id).
 - **Live text:** v2's API shows a reply only when its step ends (probed:
-  nothing for 23 s, then all 5,600 characters at once), and the session's
-  `time.updated` does not move while it streams. Word-by-word text in the
-  app would need sessiond to relay `session.text.delta` events.
-- Keys (`/api/credential`) and the model sheet (`/api/model`).
+  nothing for 23 s, then all 5,600 characters at once). Word-by-word text in
+  the app would need sessiond to relay `session.text.delta` events.
+- A desk chat's tmux pane, for its voice and filing.
 - Rename: v2 takes no title from a client.
-- Back up `~/.local/share/opencode`, install v2 on red2, watch, remove v1.
+- Back up `~/.local/share/opencode`, install v2 on red2 (`npm i -g
+  @opencode/cli`, after removing `opencode-ai`), run media-setup, watch,
+  then remove v1.
 
 ## Risks
 

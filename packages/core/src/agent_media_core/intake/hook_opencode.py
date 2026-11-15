@@ -71,6 +71,28 @@ def _headless_workspace(session: str) -> None:
         os.environ["MEDIA_SOURCE_WORKSPACE"] = workspace
 
 
+def _v2_place(session: str) -> None:
+    """opencode 2 runs one background server for the desk's chats and the
+    phone's, with the environment of whoever started it: its tmux pane (if
+    any) is not this chat's, and its `MEDIA_SOURCE_KIND` says nothing about
+    this chat. So on v2 a pane inherited from the server is dropped, and the
+    chat is the phone's (headless) when sessiond has a record of it."""
+    import os
+
+    from .. import opencode_api
+    from .._paths import state_dir
+
+    if not session or not opencode_api.installed_v2():
+        return
+    for k in ("TMUX_PANE", "TMUX"):
+        os.environ.pop(k, None)
+    if (state_dir() / "sessiond" / f"{session}.json").exists():
+        os.environ["MEDIA_SOURCE_KIND"] = "headless"
+    elif os.environ.get("MEDIA_SOURCE_KIND") == "headless":
+        os.environ.pop("MEDIA_SOURCE_KIND", None)
+        os.environ.pop("MEDIA_SOURCE_WORKSPACE", None)
+
+
 def _sessiond_session(session: str) -> None:
     """The restart note asks `MEDIA_SESSIOND_SESSION`, which a `claude -p`
     carries in its environment; the one shared `opencode serve` cannot, so
@@ -161,6 +183,7 @@ def note(restart_only: bool = False) -> int:
         session = str(hook.get("session_id") or "")
         if not session:
             return 0
+        _v2_place(session)
         from .. import harnesses
         from . import context
 
@@ -191,8 +214,18 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "note":
         return note("--restart" in args[1:])
     if args and args[0] == "event":
-        from .agent_events import main as events
-        return events("opencode")
+        import json
+        import os
+
+        from .agent_events import handle
+        if os.environ.get("MEDIA_HOOK_ENABLED", "1") == "0":
+            return 0
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            return 0
+        _v2_place(str(payload.get("session_id") or "") if isinstance(payload, dict) else "")
+        return handle(payload, "opencode")
     if len(args) < 2 or args[0] != "--session":
         return 0
     from .. import harnesses
@@ -200,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     session = args[1]
     if not harnesses.is_opencode(session):
         return 0
+    _v2_place(session)
     # A subagent's session goes idle as well; its words are its parent's
     # tool result, not something said to the person.
     if _parent(session):

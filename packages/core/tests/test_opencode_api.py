@@ -59,6 +59,19 @@ SESSIONS = {
 }
 
 
+CREDS: dict = {}
+MODELS = [
+    {"id": "big-pickle", "providerID": "opencode", "name": "Big Pickle",
+     "cost": [{"input": 0, "output": 0}], "capabilities": {"tools": True}},
+    {"id": "paid-one", "providerID": "opencode", "name": "Paid",
+     "cost": [{"input": 1, "output": 2}], "capabilities": {"tools": True}},
+    {"id": "google/gemma:free", "providerID": "openrouter", "name": "Gemma (free)",
+     "cost": [{"input": 0, "output": 0}], "capabilities": {"tools": True}},
+    {"id": "chatty:free", "providerID": "openrouter", "name": "No tools",
+     "cost": [{"input": 0, "output": 0}], "capabilities": {"tools": False}},
+]
+
+
 @pytest.fixture
 def server(tmp_path, monkeypatch):
     seen: list[str] = []
@@ -87,6 +100,12 @@ def server(tmp_path, monkeypatch):
                 return self._send(200, {"version": "2.3.0"})
             if parts == ["session", "active"]:
                 return self._send(200, {"data": {}})
+            if parts == ["credential"]:
+                return self._send(200, {"data": list(CREDS.values())})
+            if parts == ["model"]:
+                return self._send(200, {"data": MODELS})
+            if parts == ["model", "default"]:
+                return self._send(200, {"data": {"id": "big-pickle", "providerID": "opencode"}})
             if parts == ["session"]:
                 rows = list(SESSIONS.values())
                 if q.get("parentID") == "null":
@@ -113,6 +132,29 @@ def server(tmp_path, monkeypatch):
                                         "cursor": {"next": str(start + limit)}})
             return self._send(404, {"message": "no route"})
 
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n)) if n else None
+
+        def do_POST(self):
+            seen.append("POST " + self.path)
+            if self.path == "/api/credential":
+                b = self._body()
+                cid = f"crd_{len(CREDS) + 1}"
+                CREDS[cid] = {"id": cid, "integrationID": b["integrationID"], "label": b["label"],
+                              "active": bool(b.get("activate")), "value": b["value"]}
+                return self._send(200, {"data": CREDS[cid]})
+            return self._send(404, {"message": "no route"})
+
+        def do_DELETE(self):
+            seen.append("DELETE " + self.path)
+            cid = self.path.rsplit("/", 1)[-1]
+            if CREDS.pop(cid, None) is None:
+                return self._send(404, {"message": "no such credential"})
+            self.send_response(204)
+            self.end_headers()
+
+    CREDS.clear()
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     state = tmp_path / "xdg-state" / "opencode"
@@ -189,3 +231,62 @@ def test_models_current_and_context_usage(server):
     assert used == 1200 + 4096
     assert hook_opencode._parent(KID) == SID and hook_opencode._parent(SID) == ""
     assert hook_opencode._folder(SID) == "/work"
+
+
+def test_v2_place_is_per_chat_not_the_servers_environment(server, tmp_path, monkeypatch):
+    """One server for the desk's chats and the phone's: its tmux pane and
+    headless marker are whoever started it. A chat sessiond has a record of
+    is the phone's; any other is the desk's, with no inherited pane."""
+    from agent_media_core._paths import state_dir
+    from agent_media_core.intake import hook_opencode
+
+    rec = state_dir() / "sessiond" / f"{SID}.json"
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text("{}")
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1/default,1,0")
+    hook_opencode._v2_place(SID)
+    assert os.environ.get("MEDIA_SOURCE_KIND") == "headless"
+    assert "TMUX_PANE" not in os.environ and "TMUX" not in os.environ
+    monkeypatch.setenv("MEDIA_SOURCE_WORKSPACE", "p-x")
+    hook_opencode._v2_place(KID)
+    assert "MEDIA_SOURCE_KIND" not in os.environ and "MEDIA_SOURCE_WORKSPACE" not in os.environ
+
+
+def test_cli_version_reads_the_binary(tmp_path, monkeypatch):
+    exe = tmp_path / "opencode"
+    exe.write_text("#!/bin/sh\necho 'opencode v2.3.0'\n")
+    exe.chmod(0o755)
+    assert api.cli_version(str(exe)) == "2.3.0" and api.cli_is_v2(str(exe))
+    one = tmp_path / "oc1"
+    one.write_text("#!/bin/sh\necho 1.19.5\n")
+    one.chmod(0o755)
+    assert api.cli_version(str(one)) == "1.19.5" and not api.cli_is_v2(str(one))
+    assert api.cli_version(str(tmp_path / "missing")) == ""
+
+
+def test_v2_keys_are_its_credentials_and_auth_json_is_carried(server, tmp_path):
+    from agent_media_core import opencode_keys
+
+    auth = tmp_path / "xdg-data" / "opencode" / "auth.json"
+    auth.write_text(json.dumps({"openrouter": {"type": "api", "key": "sk-or-v1-" + "x" * 30},
+                                "bad": {"type": "oauth"}}))
+    assert opencode_keys.stored() == {}
+    assert opencode_keys.carry_over() == ["openrouter"]
+    assert opencode_keys.carry_over() == []          # once
+    assert opencode_keys.providers()[0]["set"] is True
+    opencode_keys.save("openrouter", "sk-or-v1-" + "y" * 30)
+    got = opencode_keys.stored()["openrouter"]
+    assert got["key"].endswith("y" * 30) and len(CREDS) == 1   # the old one removed
+    assert opencode_keys.remove("openrouter") and opencode_keys.stored() == {}
+    assert json.loads(auth.read_text())["openrouter"]["key"].endswith("x" * 30)  # untouched
+
+
+def test_v2_model_sheet_is_its_model_list(server):
+    from agent_media_core import opencode_models
+
+    opencode_models.forget()
+    offered, default = opencode_models.models()
+    assert [m["id"] for m in offered] == ["opencode/big-pickle", "openrouter/google/gemma:free"]
+    assert default == "opencode/big-pickle"
+    opencode_models.forget()

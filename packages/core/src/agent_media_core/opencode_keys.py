@@ -41,7 +41,29 @@ def auth_path() -> Path:
     return harnesses.opencode_db().parent / "auth.json"
 
 
+def _v2():
+    """opencode 2's server when it keeps the keys (its credentials, not
+    auth.json, which it does not read), else None."""
+    from . import opencode_api
+
+    return opencode_api.service() if opencode_api.installed_v2() else None
+
+
 def stored() -> dict:
+    """`{provider: {"type": "api", "key": …}}` as auth.json has it; on
+    opencode 2 its active credentials, in that shape."""
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        srv = _v2()
+        try:
+            rows = srv.call("GET", "/api/credential", timeout=10) if srv else []
+        except opencode_api.ApiError:
+            rows = []
+        return {str(c["integrationID"]): {"type": "api", "key": str(c["value"].get("key") or ""),
+                                         "id": str(c.get("id") or "")}
+                for c in rows or [] if isinstance(c, dict) and c.get("active")
+                and isinstance(c.get("value"), dict) and c["value"].get("type") == "key"}
     try:
         data = json.loads(auth_path().read_text())
     except (OSError, ValueError):
@@ -98,17 +120,76 @@ def _write(data: dict) -> None:
         raise
 
 
+def _v2_add(srv, provider: str, key: str) -> None:
+    srv.call("POST", "/api/credential", {"integrationID": provider, "label": provider,
+                                         "value": {"type": "key", "key": key},
+                                         "activate": True}, timeout=15)
+
+
 def save(provider: str, key: str) -> None:
-    """Keep `key` for `provider`, leaving every other provider's as it was."""
+    """Keep `key` for `provider`, leaving every other provider's as it was.
+    On opencode 2, as an active credential of its server (the old one of
+    that provider removed)."""
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        srv = _v2()
+        if srv is None:
+            raise OSError("opencode's server is not running")
+        old = stored().get(provider) or {}
+        _v2_add(srv, provider, key)
+        if old.get("id"):
+            try:
+                srv.call("DELETE", f"/api/credential/{old['id']}", timeout=15)
+            except opencode_api.ApiError:
+                pass
+        return
     data = stored()
     data[provider] = {"type": "api", "key": key}
     _write(data)
 
 
 def remove(provider: str) -> bool:
+    from . import opencode_api
+
     data = stored()
     if provider not in data:
         return False
+    if opencode_api.installed_v2():
+        srv = _v2()
+        if srv is None or not data[provider].get("id"):
+            return False
+        srv.call("DELETE", f"/api/credential/{data[provider]['id']}", timeout=15)
+        return True
     del data[provider]
     _write(data)
     return True
+
+
+def carry_over() -> list[str]:
+    """On opencode 2: the keys auth.json holds that its server has no
+    credential for, added to it (v2 does not read auth.json). The providers
+    carried, by name. auth.json is left as it is."""
+    from . import opencode_api
+
+    if not opencode_api.installed_v2():
+        return []
+    srv = _v2()
+    if srv is None:
+        return []
+    try:
+        old = json.loads(auth_path().read_text())
+    except (OSError, ValueError):
+        return []
+    have = stored()
+    done = []
+    for provider, entry in (old.items() if isinstance(old, dict) else []):
+        if provider in have or not isinstance(entry, dict) or entry.get("type") != "api" \
+                or not well_formed(str(entry.get("key") or "")):
+            continue
+        try:
+            _v2_add(srv, provider, str(entry["key"]))
+            done.append(provider)
+        except opencode_api.ApiError:
+            continue
+    return done

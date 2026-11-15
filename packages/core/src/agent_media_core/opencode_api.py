@@ -104,6 +104,37 @@ def _alive(pid) -> bool:
         return False
 
 
+_VERSIONS: dict[tuple, str] = {}
+
+
+def cli_version(exe: str = "") -> str:
+    """`opencode --version` ("1.19.5", "2.3.0"), kept per binary and its
+    change time; "" when it does not say or is not there."""
+    import re
+    import shutil
+
+    exe = exe or _program()
+    path = shutil.which(exe) or exe
+    try:
+        key = (path, os.stat(path).st_mtime)
+    except OSError:
+        return ""
+    if key in _VERSIONS:
+        return _VERSIONS[key]
+    try:
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        out = ""
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+    _VERSIONS[key] = m.group(0) if m else ""
+    return _VERSIONS[key]
+
+
+def cli_is_v2(exe: str = "") -> bool:
+    return cli_version(exe).split(".")[0] not in ("", "0", "1")
+
+
 class Service:
     """opencode 2's background server for one user (or one harness profile:
     `env` carries its XDG directories)."""
