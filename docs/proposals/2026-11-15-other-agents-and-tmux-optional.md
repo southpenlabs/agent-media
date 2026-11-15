@@ -78,3 +78,20 @@ Small: `media-setup check` treats tmux as optional.
 
 Part A here: Codex, then pi, then Gemini/Grok. Part B runs alongside it in
 its own thread.
+
+Part B, in its thread's order: step 2 (speech identity by thread), the
+small `media-setup check` fix, step 4 (discovery without panes and the
+one-live-copy lock, which agent-workspace waits on), step 3 (the §8
+revive, which leans on step 4's lock), step 5 (side doors), step 9 (Matrix
+as the front door, which agent-config waits on), then step 7 (the
+server-held terminal).
+
+Where they meet (agreed by agent mail, 15 Nov 2026): Part B owns send.py's
+pane path (`_deliver_pane`, `open_window`, the revive), `sessions.py`,
+`procinfo`, `conversation.py`, `room_delegate` and the side doors. Part A
+owns the driver routing for new harnesses, send.py's harness-profile
+branch, `session_settings` for pane-only harnesses and the new
+`sessiond_<agent>.py` modules. In `sessiond.py` each commits only its own
+hunks: Part A's adapters branch in start/send/configure/interrupt/close as
+opencode's do, and Part B's lock lives in its own module with one call
+site.
