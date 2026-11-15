@@ -197,3 +197,9 @@ the database as `initDB` does, `bridgev2.NewBridge(..., ours,
 `MatrixAPI`, line 199; `DisplayNotification` optional, line 141); what the
 user sends goes in through `Bridge.QueueMatrixEvent` (`bridgev2/queue.go:73`).
 The appservice one to copy from: `bridgev2/matrix/connector.go`, `intent.go`.
+
+**Companion app confirmed** (David, 15 Nov 2026, "Companion app it is"),
+after asking whether Beeper does one: it does not — its bridges run inside
+the Beeper app, which only Beeper may do (the bridges' `LICENSE.exceptions`).
+Code starts in `~/projects/sasonica-bridges` on red2, AGPL-3.0; private until
+the lawyer has answered who publishes it.
