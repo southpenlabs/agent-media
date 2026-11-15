@@ -226,3 +226,17 @@ signed-in messenger.com, or the app's username-and-password flow, which can
 meet two-factor and Meta's checkpoints); no app shell yet, so the first run
 is the binary started by hand on p8a; sending media, edits and deletes from
 the API still to add.
+
+## Step 2, first real run (15 Nov 2026, p8a)
+
+The android/arm64 binary started by hand in Termux (`~/sasonica-bridges`,
+tmux session `bridges`), a test account signed in with Messenger Android's
+password flow through `scripts/login.py` (two-factor passed). Its history
+backfilled into the local store; a message from David's own Messenger
+arrived live, and a reply sent through the API was delivered (status
+success) — both directions against the real network. Messenger's
+end-to-end encryption device registered. ~32 MB resident at idle. Found:
+Meta's account chooser can land a password sign-in on another account
+linked to the same email (it did, and was signed out at once) — the app
+must show the signed-in name before going further. A day's trial of memory,
+battery and reconnects is running (`scripts/watch.sh` → `stats.tsv`).
