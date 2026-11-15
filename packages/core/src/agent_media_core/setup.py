@@ -2410,6 +2410,25 @@ def opencode_plugin_dest() -> Path:
     return Path(base) / "opencode" / "plugins" / "agent-media.js"
 
 
+def _plugin_linked(dest: Path, src: Path) -> bool:
+    """Whether ``dest`` already serves the plugin ``src``. A link to ``src``
+    itself, or a working link to an identical copy (a checkout's beside a
+    release's), or any working link in a folder that is itself a link — a
+    dotfiles package owns that folder, and relinking wrote a release's
+    versioned path into the repo, which blocked its updates and broke once
+    the release was pruned (red2, 15 Nov 2026)."""
+    if not dest.is_symlink():
+        return False
+    target = dest.resolve()
+    if target == src.resolve():
+        return True
+    if not target.is_file():
+        return False
+    if target.read_bytes() == src.read_bytes():
+        return True
+    return dest.parent.resolve() != dest.parent.absolute()
+
+
 def _row_opencode(args, *, check_only: bool):
     """opencode's plugin: it has no hooks file, it loads every script in its
     plugins directory, so the plugin is linked in there. Found the way the
@@ -2419,7 +2438,7 @@ def _row_opencode(args, *, check_only: bool):
     src, dest = opencode_plugin_source(), opencode_plugin_dest()
     if not src.exists():
         return "absent", f"no plugin at {src} (not a source checkout)"
-    linked = dest.is_symlink() and dest.resolve() == src
+    linked = _plugin_linked(dest, src)
     if check_only:
         return ("ok" if linked else "missing"), str(dest)
     if linked:
@@ -2457,7 +2476,7 @@ def _row_pi(args, *, check_only: bool):
     src, dests = pi_extension_source(), pi_extension_dests()
     if not src.exists():
         return "absent", f"no extension at {src} (not a source checkout)"
-    unlinked = [d for d in dests if not (d.is_symlink() and d.resolve() == src)]
+    unlinked = [d for d in dests if not _plugin_linked(d, src)]
     detail = str(dests[0]) + (f" (+{len(dests) - 1} profile(s))" if len(dests) > 1 else "")
     if check_only or not unlinked:
         return ("ok" if not unlinked else "missing"), detail

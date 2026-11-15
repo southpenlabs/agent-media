@@ -912,6 +912,58 @@ def test_pi_row_is_absent_without_pi(tmp_path, monkeypatch):
     assert not (tmp_path / "pi").exists()
 
 
+def _opencode_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(setup.shutil, "which", lambda name: f"/usr/bin/{name}")
+    return setup.opencode_plugin_dest(), setup.opencode_plugin_source()
+
+
+def test_opencode_keeps_a_link_to_an_identical_copy(tmp_path, monkeypatch):
+    """A release's media-setup found the plugin linked to the checkout's
+    copy and relinked it to the release's: same file, a needless write."""
+    dest, src = _opencode_env(tmp_path, monkeypatch)
+    copy = tmp_path / "checkout" / "agent-media.js"
+    copy.parent.mkdir()
+    copy.write_bytes(src.read_bytes())
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(copy)
+    args = _profile_args(tmp_path)
+    assert setup._row_opencode(args, check_only=True) == ("ok", str(dest))
+    assert setup._row_opencode(args, check_only=False) == ("ok", str(dest))
+    assert dest.resolve() == copy
+
+
+def test_opencode_leaves_a_link_in_a_dotfiles_owned_folder(tmp_path, monkeypatch):
+    """The plugins folder a link into a dotfiles repo: relinking wrote a
+    release's versioned path into the repo and blocked its updates (red2,
+    15 Nov 2026). A working link there is the owner's, even to a newer copy."""
+    dest, src = _opencode_env(tmp_path, monkeypatch)
+    repo_plugins = tmp_path / "dotfiles" / "plugins"
+    repo_plugins.mkdir(parents=True)
+    newer = tmp_path / "checkout" / "agent-media.js"
+    newer.parent.mkdir()
+    newer.write_text("// a checkout ahead of the release\n")
+    dest.parent.parent.mkdir(parents=True)
+    dest.parent.symlink_to(repo_plugins)
+    (repo_plugins / dest.name).symlink_to(newer)
+    args = _profile_args(tmp_path)
+    assert setup._row_opencode(args, check_only=False) == ("ok", str(dest))
+    assert dest.resolve() == newer
+
+
+def test_opencode_relinks_a_differing_copy_in_its_own_folder(tmp_path, monkeypatch):
+    dest, src = _opencode_env(tmp_path, monkeypatch)
+    old = tmp_path / "old" / "agent-media.js"
+    old.parent.mkdir()
+    old.write_text("// an older plugin\n")
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(old)
+    args = _profile_args(tmp_path)
+    assert setup._row_opencode(args, check_only=True) == ("missing", str(dest))
+    assert setup._row_opencode(args, check_only=False) == ("installed", str(dest))
+    assert dest.resolve() == src.resolve()
+
+
 def test_a_managed_config_dir_is_written_to_instead(tmp_path, monkeypatch, capsys):
     """The Advanced option: Sasonica's own config directory, and the
     CLAUDE_CONFIG_DIR that points every session at it."""
