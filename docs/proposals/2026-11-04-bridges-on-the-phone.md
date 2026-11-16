@@ -315,3 +315,14 @@ bridges app used 1.5 mAh in 6 h** (5 h of it as its foreground service,
 hour unplugged, 75 % → 49 % from 01:00 to 06:30) was Termux at 235 mAh with
 2 h 17 m of wake locks: the trial's own logger, which reached the phone over
 ssh and adb every 5 minutes. The logger was stopped early on that finding.
+
+## Instagram (17 Nov 2026)
+
+The companion runs mautrix-meta's Instagram connector (`igconnector`) beside
+Messenger in one process, one bridge and database each, one local store and
+API (sasonica-bridges 5d1a294, build-103; existing Messenger data kept).
+New accounts' password sign-ins were refused by Instagram ("couldn't sign
+you in"); the cookie sign-in's blank page was the WebView (no height, its
+storage cleared while the page loaded; fixed in 29e441c, build-105, with a
+switch to debug the sign-in browser and remembered sign-in addresses). With
+build-105 David signed two Instagram accounts in on p8a.
