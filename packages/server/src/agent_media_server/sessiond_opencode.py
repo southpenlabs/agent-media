@@ -369,33 +369,11 @@ def split_command(text: str, names) -> tuple[str, str] | None:
 
 
 def config_env(env: dict) -> dict:
-    """`env` with the gateway key opencode's config asks for, when sessiond
-    lacks it. opencode reads `{env:NAME}` in its config from the server's
-    environment, and sessiond's (a systemd unit's) has no login shell's
-    secrets: on red2 every request to the gateway went without its key and
-    failed (16 Nov 2026, the gateway thread d0815027). Only
-    LITELLM_MASTER_KEY, and only when the config names it, found as the
-    summary's is (intake._summary: the environment, else litellm.env), so no
-    other secret reaches the agents."""
-    from pathlib import Path
+    """`env` with the gateway key opencode's config names (core
+    opencode_api.config_env)."""
+    from agent_media_core import opencode_api
 
-    if env.get("LITELLM_MASTER_KEY"):
-        return env
-    cfg = Path(env.get("XDG_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
-               or Path.home() / ".config") / "opencode"
-    names: set[str] = set()
-    for f in ("opencode.json", "opencode.jsonc", "config.json"):
-        try:
-            names |= set(re.findall(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}",
-                                    (cfg / f).read_text(encoding="utf-8")))
-        except OSError:
-            continue
-    if "LITELLM_MASTER_KEY" not in names:
-        return env
-    from agent_media_core.intake import _summary
-
-    key = _summary._litellm_master_key()
-    return {**env, "LITELLM_MASTER_KEY": key} if key else env
+    return opencode_api.config_env(env)
 
 
 def program_version(exe: str) -> str:

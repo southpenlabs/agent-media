@@ -348,3 +348,28 @@ def test_v2_pane_is_the_terminal_apps_in_that_folder(monkeypatch, tmp_path):
     assert hook_opencode._v2_pane(str(tmp_path / "none")) == ""
     procs[14] = (["/usr/bin/opencode"], work, {"TMUX_PANE": "%5"})
     assert hook_opencode._v2_pane(work) == ""
+
+
+def test_a_readers_start_gives_the_server_the_gateway_key(tmp_path, monkeypatch):
+    """Readers start opencode's server too (agent-media-server, whose
+    environment has no login shell's secrets): it came up keyless after
+    sessiond had the fix (red2, 16 Nov 2026)."""
+    cfg = tmp_path / "cfg" / "opencode"
+    cfg.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (cfg / "opencode.json").write_text('{"x": "{env:LITELLM_MASTER_KEY}"}')
+    keyfile = tmp_path / "litellm.env"
+    keyfile.write_text("LITELLM_MASTER_KEY=sk-master\nOPENAI_API_KEY=o\n")
+    monkeypatch.setenv("MEDIA_SUMMARY_KEY_FILE", str(keyfile))
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    monkeypatch.delenv("MEDIA_OPENCODE_SERVICE_START", raising=False)
+    seen = {}
+
+    def run(argv, env=None, **kw):
+        seen["env"] = env
+
+    monkeypatch.setattr(api.subprocess, "run", run)
+    monkeypatch.setattr(api.time, "monotonic", iter([0.0, 99.0, 99.0, 99.0]).__next__)
+    assert api.Service(program="/bin/true").find(start=True) is False
+    assert seen["env"]["LITELLM_MASTER_KEY"] == "sk-master"
+    assert seen["env"].get("OPENAI_API_KEY") != "o"
