@@ -8,7 +8,7 @@ from agent_media_server import mailbox, sessions
 def bare(monkeypatch):
     monkeypatch.setattr(sessions.auth, "may_control_speech", lambda b: (True, {}))
     monkeypatch.setattr(sessions, "sessions_index", lambda days=None: [])
-    monkeypatch.setattr(sessions, "places", lambda: [])
+    monkeypatch.setattr(sessions, "places", lambda limit=6: [])
     monkeypatch.setattr(mailbox, "with_mail", lambda w: w)
     monkeypatch.setattr(mailbox, "by_project", lambda pairs: None)
     monkeypatch.setattr(sessions, "project_groups", lambda: {})

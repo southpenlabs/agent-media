@@ -45,7 +45,7 @@ def test_targets_carries_the_whole_title_beside_a_cut_one(monkeypatch):
     rows = [{"session": SID, "title": short}, {"session": "other", "title": "Short one"}]
     monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
     monkeypatch.setattr(sessions, "sessions_index", lambda days: rows)
-    monkeypatch.setattr(sessions, "places", lambda: [])
+    monkeypatch.setattr(sessions, "places", lambda limit=6: [])
     monkeypatch.setattr(mailbox, "with_mail", lambda where: where)
     monkeypatch.setattr(mailbox, "by_project", lambda pairs: None)
     monkeypatch.setattr(sessions, "project_groups", lambda: {})

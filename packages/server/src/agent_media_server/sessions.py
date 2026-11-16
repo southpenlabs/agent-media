@@ -883,6 +883,8 @@ def places(limit: int = 6) -> list[dict]:
             for path, at in seen.items()]
 
 
+#: How many places `/targets` sends: the new-chat picker scrolls them.
+TARGETS_PLACES = 40
 #: How long a finished `/targets` build answers the requests after it (s).
 TARGETS_REUSE_S = 2.0
 #: history key → {"done": Event, "gen", "at", "out", "err"}: the build
@@ -994,7 +996,10 @@ def _build_targets(history: str = "") -> dict:
     Gated like `/conversations` (by `targets`, its caller).
     """
     days = -1.0 if history == "all" else STORE_DAYS
-    rows, where = sessions_index(days=days), mailbox.with_mail(places())
+    # The new-chat picker lists these, so more than the dashboard's few
+    # chips (David, 16 Nov 2026: agent-media missing from new chat once six
+    # other folders had been used since).
+    rows, where = sessions_index(days=days), mailbox.with_mail(places(TARGETS_PLACES))
     # A title cut to the list's length carries its whole beside it, for the
     # rename box and the list's Full titles (David, 14 Nov 2026: "This chat
     # title is truncated in the rename field").
