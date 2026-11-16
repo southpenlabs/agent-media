@@ -460,7 +460,11 @@ Everything a message can be pointed at.
   `/conversations` rows, `/dashboard`'s `recent`, `working` and
   `needs_you` rows, and the thread stream's snapshot (§11).
 - `places`: up to 40 directories sessions have run in, newest first (6 until
-  16 Nov 2026; `/dashboard`'s `places` stay 6)
+  16 Nov 2026; `/dashboard`'s `places` stay 6). A folder reached through a
+  symlink is one place, under its real path; `name` is the basename unless
+  another place shares it, then the project name or enough parent folders
+  to tell them apart (`projects/sasonica-app`, `sasonica/sasonica-app`;
+  17 Nov 2026)
   (running sessions count as "now"). These are the only directories a new
   chat may be opened in — `/ask` checks against this list (with no limit).
   `mail` (16 Oct 2026): how many agent-mail messages are **pending** in

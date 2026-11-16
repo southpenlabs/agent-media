@@ -857,8 +857,12 @@ def places(limit: int = 6) -> list[dict]:
             return False
         cwd = transcript_cwd(sid)
         hidden = any(part.startswith(".") for part in Path(cwd).parts[1:]) if cwd else False
-        if cwd and cwd not in seen and os.path.isdir(cwd) and (live or not hidden):
-            seen[cwd] = at
+        # A folder reached through a link is one place, under its real path
+        # (`~/projects/websites` → `~/spl/projects/spl/websites`; David,
+        # 17 Nov 2026: the picker listed websites twice).
+        real = os.path.realpath(cwd) if cwd else ""
+        if real and real not in seen and os.path.isdir(real) and (live or not hidden):
+            seen[real] = at
         return True
 
     # Somewhere a session is running is the most current answer there is, and
@@ -879,8 +883,39 @@ def places(limit: int = 6) -> list[dict]:
     for at, sid in sorted(rows, key=lambda r: -r[0]):
         if sid and not take(sid, at):
             break
-    return [{"name": os.path.basename(path) or path, "path": path, "at": round(at, 3)}
+    names = _place_names(list(seen))
+    return [{"name": names[path], "path": path, "at": round(at, 3)}
             for path, at in seen.items()]
+
+
+def _place_names(paths: list[str]) -> dict[str, str]:
+    """`{path: name}`: each place's basename, unless another place shares it
+    — two clones of one repo (`~/projects/sasonica-app` and
+    `~/spl/projects/sasonica/sasonica-app`) — when each is named as its
+    project (`sasonica-app`, `sasonica/sasonica-app`), the name its threads
+    are filed under, else by as many parent folders as tell them apart."""
+    from agent_media_core import layout
+
+    base = {p: os.path.basename(p.rstrip("/")) or p for p in paths}
+    clash: dict[str, list[str]] = {}
+    for p, b in base.items():
+        clash.setdefault(b, []).append(p)
+    out = dict(base)
+    for group in clash.values():
+        if len(group) < 2:
+            continue
+        named = {p: (layout.project_name(p) if layout.projects() else "") or "" for p in group}
+        if all(named.values()) and len(set(named.values())) == len(group):
+            out.update(named)
+            continue
+        depth = 2
+        while True:
+            tails = {p: "/".join(Path(p).parts[-depth:]) for p in group}
+            if len(set(tails.values())) == len(group) or depth > 8:
+                out.update(tails)
+                break
+            depth += 1
+    return out
 
 
 #: How many places `/targets` sends: the new-chat picker scrolls them.
