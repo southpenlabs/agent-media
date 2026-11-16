@@ -11866,6 +11866,58 @@ in…" with those, leaving out the thread's own agent.
 At the desk: `media session convert <id> --to <agent>` prints the new
 thread's link.
 
+---
+
+### 6.57 Sasonica's prompts, read-only — gated; personas not for guests (built 16 Nov 2026)
+
+Settings → Prompts (David, 16 Nov 2026: "Maybe they should be viewable and
+configurable from the settings page somewhere";
+docs/proposals/2026-11-16-prompts-in-settings.md, step 1). Every prompt
+Sasonica adds to a model's input, in full, with where and when it is used.
+Code: `agent_media_server/prompt_settings.py`.
+
+```
+GET /settings/prompts → {"ok": true,
+  "prompts": [{"key": "writing" | "quick" | "tidy" | "summary",
+               "title", "what", "when", "used_by": [<harness or feature>…],
+               "source", "overridden": "<env var>" | null, "enabled": bool,
+               "text": "<the prompt as sent>",
+               "parts": [{"key", "label", "when", "text", "parsed": […], "overridden"?}…],
+               "also"?: [{"label", "text", "when"}…],
+               "parsed": ["<what the app or server reads in the answer>"…]}…],
+  "personas": [{"id", "kind": "persona" | "role", "private": bool}…],
+  "persona_agents": ["claude", "pi", "codex", "opencode", "hermes"]}
+GET /settings/prompts?persona=<id>[&agent=<agent>]
+  → {"ok": true, "persona", "kind", "agent", "mode": "public",
+     "via": "system_prompt" | "prepend", "text"}
+```
+
+- `writing`: the writing guide (core `agent_notes.md`, or the site's
+  `MEDIA_AGENT_NOTES_FILE`). `text` is the note as told; `parts` one per
+  rule, `label` its tag (`all`, `claude`, `canvas`, `tune`), `parsed` the
+  markers in it (`[[replies:`, `[[actions:`, `[[map:`, `[[route:`,
+  `[[sound:`, `[[visual:`, `[[reveal:`, `[[tune:`, `Shared file:`); `also`
+  the thread-link note and the context-fullness notes. `enabled` is false
+  under `MEDIA_AGENT_NOTES=0`.
+- `quick`: quick answers' system prompt.
+- `tidy`: one part per chip (`key` as in `GET /voice/tidy/intents`); `text`
+  is the default chip's. The answer is JSON (`parsed`).
+- `summary`: parts `summary`, `code`, `table`, each the env override where
+  one is set (`overridden` names it).
+- A prompt that fails to build comes back as `{"key", "error"}`; the rest
+  still come.
+
+Personas are listed by id; `?persona=` renders one in public mode for
+`agent` (default `claude`), as a fresh chat would get it, and `via` says
+how that agent takes it. 400 `code: "agent"` for an agent not in
+`persona_agents`, 404 `code: "persona"` for an unknown id, 502 `code:
+"render"` when the renderer fails.
+
+Any paired device may read (401 `not_paired` otherwise). A guest gets the
+prompts with `personas: []`, and `?persona=` is 403 `code: "guest"`.
+Read-only for now; additions with a reset are step 2. In `CORS_PATHS`.
+`/features` has `prompts_view: true`.
+
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

@@ -438,7 +438,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -2569,6 +2569,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import default_agent
 
         ok, detail = default_agent.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/prompts":
+        # Settings → Prompts: every prompt Sasonica adds, read-only (§6.57).
+        from . import prompt_settings
+
+        q = {k: v[0] for k, v in parse_qs(h.path.partition("?")[2]).items()}
+        ok, detail = prompt_settings.settings(_bearer(h), q)
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you (personal.py, §6.42).
