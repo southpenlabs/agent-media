@@ -86,7 +86,7 @@ def test_kokoro_installs_downloads_and_starts(env):
     unit = env.unit.read_text()
     for line in (f"ExecStart={venv}/bin/kokoro-tts-server", "Environment=KOKORO_BIND=127.0.0.1",
                  "Environment=KOKORO_PORT=8880", "Environment=KOKORO_VOICE=bf_emma",
-                 f"Environment=KOKORO_MODEL_DIR={models}", "Nice=5", "Restart=on-failure"):
+                 f"Environment=KOKORO_MODEL_DIR={models}", "CPUWeight=1000", "Restart=on-failure"):
         assert line in unit.splitlines()
     assert ["systemctl", "--user", "enable", "--now", "agent-media-kokoro-tts.service"] in env.calls
     assert not env.envfile.exists()          # no --fallback: the env is left alone

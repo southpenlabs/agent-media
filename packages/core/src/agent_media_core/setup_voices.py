@@ -339,8 +339,14 @@ Environment=KOKORO_BIND=127.0.0.1
 Environment=KOKORO_PORT={KOKORO_PORT}
 Restart=on-failure
 RestartSec=3
-# onnxruntime takes every core per call; keep it from crowding the rest.
-Nice=5
+# A reply waits on this: it is voiced, then filed with its Play. Nice=5 was to
+# keep onnxruntime (every core, per call) from crowding the rest, but nice
+# orders only the processes of this unit's own cgroup; against its siblings
+# (the session host, whose chats run test suites and builds) what counts is
+# the cgroup's weight, and at the default it timed out on whole replies under
+# load and their Play came late or never (David, 16 Nov 2026: "voice first").
+# Its calls are short bursts; the builds slice gives way already.
+CPUWeight=1000
 
 [Install]
 WantedBy=default.target
@@ -358,7 +364,8 @@ WorkingDirectory={voices_dir}
 ExecStart={python} -m piper.http_server -m {voice} --data-dir {voices_dir} --download-dir {voices_dir} --host 127.0.0.1 --port {PIPER_PORT}
 Restart=on-failure
 RestartSec=3
-Nice=5
+# As Kokoro's: a reply waits on it (CPUWeight, not Nice: see kokoro_unit).
+CPUWeight=1000
 
 [Install]
 WantedBy=default.target
