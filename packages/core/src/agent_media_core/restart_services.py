@@ -834,11 +834,51 @@ def drain(only: "list[str]", *, after: float = 10.0,
     if res["rc"] != OK:
         return res
     if (res.get("scheduled") or {}).get("how") == "joined":
-        res["rc"] = BUSY
-        return res
+        rec = res.get("drain") or {}
+        if not rec.get("handoff"):
+            res["rc"] = BUSY
+            return res
+        # A hold `hold_for` began for this very run: take it over and run it.
+        rid = rec.get("id")
+        _update_pending(lambda r: {**{k: v for k, v in r.items() if k != "handoff"},
+                                   "unit": f"pid {os.getpid()}"}
+                        if r and r.get("id") == rid else r)
+        res["scheduled"] = {"how": "took over", "unit": f"pid {os.getpid()}", "log": ""}
     if after > 0:
         _sleep(after)
     return _fire_drain(emit, res)
+
+
+def hold_for(only: "list[str]", hold_s: float = 900.0) -> "Optional[dict]":
+    """Begin a drained restart's hold now, for a run in another process that
+    will restart `only` later through `drain` (media update's detached
+    finish, which restarts the other services first and drains the session
+    holder last). Written before the caller's turn ends, so a chat that
+    started it is told by the context hook to end its turn, cut off for it,
+    and resumed after, as with `restart-services --after` (David, 16 Nov
+    2026: "It didn't resume. why not? this seems to be an ongoing problem":
+    the update's own drain began half a minute after the chat had ended its
+    turn, so it was never cut off and never resumed). Marked `handoff`, so
+    that run's `drain` takes it over rather than joining and leaving it;
+    kept alive `hold_s` until then. Joins a restart already pending (that
+    one's run restarts). The record, or None when `only` names no session
+    holder."""
+    selected, _unknown = resolve(only, services())
+    selected = [s for s in selected if is_sessiond(s)]
+    if not selected:
+        return None
+    waits = waiting_on(selected, "", now=False, drain=True)
+    res: dict = {"rc": OK}
+    res = _start_drain(selected, 0.0, waits, "", lambda _line: None, res, inline=True)
+    rec = res.get("drain")
+    if res.get("rc") != OK or not rec:
+        return None
+    if (res.get("scheduled") or {}).get("how") == "joined":
+        return rec
+    rid, until = rec["id"], round(time.time() + hold_s, 3)
+    return _update_pending(lambda r: {**r, "handoff": True,
+                                      "alive_until": max(float(r.get("alive_until") or 0), until)}
+                           if r and r.get("id") == rid else r)
 
 
 # --- restarting, checking, alerting ------------------------------------------------

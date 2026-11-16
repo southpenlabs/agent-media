@@ -389,6 +389,16 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
   continued with SendMessage to its id (it resumes from its own transcript;
   their folder is named), and each background command to re-run if still
   needed. Idle sessions are not woken. Held messages are delivered after.
+- **`media update` from inside a chat** (16 Nov 2026; David: "It didn't
+  resume. why not? this seems to be an ongoing problem"). The update hands
+  its restarts to a transient unit, which restarts the other services
+  first and drains sessiond last, half a minute or more later; by then the
+  chat that ran it had ended its turn, was never cut off for the drain and
+  was never resumed. Now the update begins the hold itself before it
+  returns (restart_services `hold_for`, marked `handoff`, kept alive 15 min),
+  so the chat is told to end its turn and resumed after as with
+  `restart-services --after`; the unit's `drain` takes that hold over
+  instead of joining it and leaving the restart to nobody.
 - **Estimates and the window** (14 Nov 2026; David: "sessions working
   through a restart notice might be requested to give an ETA of critical
   task completion ... that way other sessions can keep working on quicker

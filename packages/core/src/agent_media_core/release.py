@@ -1441,9 +1441,14 @@ def _go(units: "list[str]", new: str, old: str, emit: Emit, *, rollback: bool = 
                 "--from", old or "-", "--units", *units]
         if not rollback:
             argv.append("--no-rollback")
+        # The hold begins now, not when the detached run reaches the session
+        # holder: this chat is then told to end its turn and resumed after.
+        held = rs.hold_for([n for n in stems if rs.short_name(n) == rs.SESSIOND])
         try:
             sch = _detach(argv)
         except ReleaseError as e:
+            if held and held.get("handoff"):
+                rs.clear_pending(str(held["id"]))
             emit(f"could not hand the restarts over: {e}")
             return 1
         emit(f"the restarts run outside this chat ({sch['how']} {sch['unit']}; log: "

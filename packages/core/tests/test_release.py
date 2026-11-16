@@ -482,11 +482,28 @@ def test_inside_a_chat_the_session_hosts_restart_is_handed_over(rel, monkeypatch
     run = next(c for c in rel.host.calls() if c.startswith("systemd-run"))
     assert f"agent_media_core.release --finish {second} --from {rel.first}" in run
     assert "agent-media-sessiond.service" in run and "end your turn" in out[-1]
-    # …and that unit's half does the restarts.
+    # The hold began before the chat's turn ends, so the context hook tells it
+    # to end its turn and it is resumed after (David, 16 Nov 2026: "It didn't
+    # resume. why not?"); handed to the unit's run, not left to a run of its own.
+    held = rs.pending()
+    assert held and held.get("handoff") is True
+    # …and that unit's half does the restarts, taking the hold over.
     monkeypatch.delenv("MEDIA_SESSIOND_SESSION")
     assert release.main(["--finish", second, "--from", rel.first, "--units",
                          "agent-media-feed.service", "agent-media-sessiond.service"]) == 0
     assert rel.host.restarts() == ["agent-media-feed.service", "agent-media-sessiond.service"]
+    assert rs.read_pending() is None
+
+
+def test_a_hold_not_handed_over_is_still_joined_and_left(rel, monkeypatch):
+    """A restart already waiting with a run of its own: `drain` joins it and
+    leaves the restart to that run, as before."""
+    _in_mode(rel, monkeypatch)
+    rs._update_pending(lambda r: {"id": "other", "since": 1.0, "deadline": 9e12,
+                                  "alive_until": 9e12, "only": ["agent-media-sessiond"],
+                                  "state": "waiting", "waiting_on": []})
+    assert rs.drain(["agent-media-sessiond"], after=0)["rc"] == rs.BUSY
+    assert rel.host.restarts() == [] and rs.read_pending()["id"] == "other"
 
 
 def test_no_restart_and_only(rel, monkeypatch):
