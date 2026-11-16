@@ -592,7 +592,9 @@ def _update_release(spec: dict, rel: Path, root: "Path | None", budget: float,
                      "outcome: `media version --log`)")
         rc = 0
     res["moved"] = any(x.startswith("current is ") for x in out)
-    if worker_changed and rc == 0:
+    # Whether or not the update worked: a fix to the worker is often what a
+    # failed update needs (16 Nov 2026, red5's first release-mode update).
+    if worker_changed:
         argv2, _ = restart_argv({"only": [WORKER_UNIT], "after": UPDATE_AFTER_S})
         rc2, err, result = _run_restart(argv2, max(5.0, budget - (time.monotonic() - t0)))
         res["restart"] = result
