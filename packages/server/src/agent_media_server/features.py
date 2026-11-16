@@ -114,6 +114,11 @@ never a network call, so the app can ask on every start.
             it is sent (photo_edit.py, §6.58, 16 Nov 2026): GET
             /photo/edit/presets, POST /photo/edit; the default route also needs
             personal use ("google-image-signin")
+  device_kinds  what kind each device is and what its kind brings (device_kinds.py,
+            §6.59, 16 Nov 2026): GET /device/rules, `kind`/`rules` on GET
+            /devices, POST /devices/kind and /devices/rules, `kind` on POST
+            /device/app and /pair/request; private threads withheld where
+            the rules say so
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -247,7 +252,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
-          "photo_edit": _photo_edit, "agents": _agents}
+          "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True}
 
 
 def detect() -> dict[str, bool]:

@@ -435,7 +435,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     phone.listening(phone_kinds, True)
     if want_notes:
         notes.listening(True)
-    from . import speech_frames
+    from . import device_kinds, speech_frames
     # Per player channel: (token, cursor). Frames after the cursor are sent;
     # a fresh stream starts at now, one that reconnects (`*_after`) gets what
     # it missed, if still young.
@@ -505,7 +505,9 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                 seen = version
                 if first or rows != seen_rows:
                     seen_rows = rows
-                    send("sessions", {"sessions": rows, "at": round(time.time(), 3)})
+                    # No private threads to a device whose rules say so (§6.59).
+                    send("sessions", {"sessions": device_kinds.filter_for(bearer, rows),
+                                      "at": round(time.time(), 3)})
                     last_sent = time.monotonic()
                 if cursor is not None and (first or head != cursor):
                     got = alerts.notices(None if cursor == FIRST else cursor)

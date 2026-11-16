@@ -470,7 +470,8 @@ CORS_PATHS = frozenset({
 
 # Device management spends the caller's bearer, like the other app routes.
 # Both successful answers and refusals must be readable by Capacitor's webview.
-DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role", "/devices/rename"})
+DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role", "/devices/rename",
+                          "/devices/kind", "/devices/rules", "/device/rules"})
 CORS_PATHS = CORS_PATHS | DEVICE_PATHS
 
 # Where the audio goes (audio.py). Its own set, joined here, so the block
@@ -2253,6 +2254,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # list instead of working one out from the library.
         ok, detail = sessions.targets(
             _bearer(h), (parse_qs(query).get("history") or [""])[0])
+        if ok:
+            from . import device_kinds
+
+            # No private threads to a device whose rules say so (§6.59).
+            detail = {**detail, "sessions": device_kinds.filter_for(_bearer(h), detail.get("sessions"))}
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/dashboard":
         # The home screen: one cheap aggregate of the sweeps the other
@@ -2405,7 +2411,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not user:
             _json(h, err.get("status", 401), {"ok": False, "error": "not allowed"})
         else:
-            _json(h, 200, {"ok": True, "sessions": sessions.sessions_index()})
+            from . import device_kinds
+
+            # A device whose rules say no private threads is not sent them (§6.59).
+            _json(h, 200, {"ok": True, "sessions": device_kinds.filter_for(
+                _bearer(h), sessions.sessions_index())})
     elif path == "/devices":
         # Which devices are paired (§9). Gated on the enrol bit, not merely
         # on being a device: what else is paired is the owner's business, and
@@ -2422,6 +2432,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
                            "self": user.get("device")})
     elif path == "/sessions/state":
         ok, detail = sessions.session_states(_bearer(h))
+        if ok:
+            from . import device_kinds
+
+            # No private threads to a device whose rules say so (§6.59).
+            detail["sessions"] = device_kinds.filter_for(_bearer(h), detail.get("sessions"))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/sessions/slots":
         # Who holds the session slots and why, and who waits (§6.3 "Run now").
@@ -2620,6 +2635,19 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = device_log.get(_bearer(h), (q.get("device") or [""])[0],
                                     (q.get("source") or [""])[0])
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/device/rules":
+        # What this device is and what its kind brings, each rule with its
+        # source (device_kinds.py, §6.59). Any paired device, guests too.
+        from . import device_kinds
+
+        dev = device_kinds.device_for(_bearer(h))
+        if not dev:
+            _json(h, 401, {"ok": False, "error": "a paired device only"})
+        else:
+            _json(h, 200, {"ok": True, "id": dev.get("id"), "kind": device_kinds.kind_of(dev),
+                           "kind_set_by": dev.get("kind_set_by") or None,
+                           "rules": device_kinds.rules_for(dev), "kinds": list(device_kinds.KINDS),
+                           "table": device_kinds.table()})
     elif path == "/device/follow":
         # What this device follows, and the thread open on that phone now
         # (follow.py, §6.21g): asked when it has no stream open.
@@ -3225,7 +3253,7 @@ def _pair_off(h: BaseHTTPRequestHandler) -> bool:
 
 
 def _pair_request(h: BaseHTTPRequestHandler) -> None:
-    """`POST /pair/request {"name", "platform"?}` — a device with no token (a
+    """`POST /pair/request {"name", "platform"?, "kind"?}` — a device with no token (a
     TV) asking to be let in from a phone (§9 "Pairing from the new device";
     pair_requests.py). Open, like /pair, and refused while the address is
     rate-limited. The answer carries `approve`, the link for the device to
@@ -3244,7 +3272,7 @@ def _pair_request(h: BaseHTTPRequestHandler) -> None:
         return
     body = _read_json(h) or {}
     ok, got = pair_requests.ask(str(body.get("name") or body.get("device") or ""),
-                                str(body.get("platform") or ""), ip)
+                                str(body.get("platform") or ""), ip, str(body.get("kind") or ""))
     if not ok:
         _json(h, 429, {"ok": False, **got})
         return
@@ -3348,10 +3376,11 @@ def _pair_decide(h: BaseHTTPRequestHandler, allow: bool) -> None:
                      "lapsed": (410, "that request went unanswered too long")}[status]
         _json(h, code, {"ok": False, "code": status, "error": msg})
         return
+    # No role sent: the kind's suggestion (guest for a TV), else member (§6.59).
+    role = role or got.get("suggested_role") or pair_requests.DEFAULT_ROLE
     print(f"pair: {user.get('device')} {'allowed' if allow else 'denied'} {got['id']} "
-          f"({got['name']!r}{', ' + str(role or pair_requests.DEFAULT_ROLE) if allow else ''})", file=sys.stderr)
-    _json(h, 200, {"ok": True, "request": got,
-                   **({"role": role or pair_requests.DEFAULT_ROLE} if allow else {})})
+          f"({got['name']!r}{', ' + role if allow else ''})", file=sys.stderr)
+    _json(h, 200, {"ok": True, "request": got, **({"role": role} if allow else {})})
 
 
 def _enrol_wait(h: BaseHTTPRequestHandler) -> None:
@@ -3603,6 +3632,64 @@ def _devices_follow(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
+def _devices_kind(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/kind {"id", "kind": "phone"|"tablet"|"tv"|"computer"|null}`
+    — the owner says what kind a device is (device_kinds.py, §6.59); a later
+    report from the device never overwrites it. null goes back to what the
+    device reported. Asked of a device that may manage devices, like a role."""
+    from . import device_kinds
+
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    if "kind" not in body:
+        _json(h, 400, {"ok": False, "code": "bad_kind",
+                       "error": f"expected {{\"id\", \"kind\": {' | '.join(device_kinds.KINDS)} | null}}"})
+        return
+    try:
+        found = devices.set_kind(device_id, body.get("kind"))
+    except ValueError as e:
+        _json(h, 400, {"ok": False, "code": "bad_kind", "error": str(e)})
+        return
+    if not found:
+        _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
+        return
+    print(f"devices: {user.get('device')} set {device_id}'s kind to {body.get('kind')}", file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
+def _devices_rules(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/rules {"id", "rules": {rule: value | null}}` — the
+    owner changes a device's rules (device_kinds.py, §6.59); null goes back
+    to its kind's default. Asked of a device that may manage devices."""
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    changes = body.get("rules")
+    if not isinstance(changes, dict) or not changes:
+        _json(h, 400, {"ok": False, "code": "bad_rules",
+                       "error": 'expected {"id", "rules": {rule: value or null}}'})
+        return
+    try:
+        found = devices.set_rules(device_id, changes)
+    except ValueError as e:
+        _json(h, 400, {"ok": False, "code": "bad_rules", "error": str(e)})
+        return
+    if not found:
+        _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
+        return
+    print(f"devices: {user.get('device')} changed {device_id}'s rules {sorted(changes)}", file=sys.stderr)
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
@@ -3628,6 +3715,10 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_pause(h)
     elif path == "/devices/follow":
         _devices_follow(h)
+    elif path == "/devices/kind":
+        _devices_kind(h)
+    elif path == "/devices/rules":
+        _devices_rules(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
     elif path == "/contacts/import":
@@ -4171,14 +4262,18 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 401, {"ok": False, "error": "a paired device only"})
             return True
         before = next((d.get("app") for d in devices.list_devices() if d.get("id") == dev), None)
-        got = devices.set_app(dev, _read_json(h) or {})
+        body = _read_json(h) or {}
+        got = devices.set_app(dev, body)
+        # `kind`: what kind of device it is (§6.59); an owner's choice wins.
+        kind = devices.report_kind(dev, body.get("kind")) if got is not None else None
         if got is not None and got != before:
             # A new build: the account's list at sasonica.com hears of it
             # (servers_report.py), so it can stop offering the update.
             from . import servers_report
 
             servers_report.report_soon(dev)
-        _json(h, 200 if got is not None else 404, {"ok": got is not None, "app": got or {}})
+        _json(h, 200 if got is not None else 404, {"ok": got is not None, "app": got or {},
+                                                   **({"kind": kind} if got is not None else {})})
     elif path == "/device/view":
         # What this device shows now, the chat list or a thread: a device
         # mirroring it shows the same (follow.py, §6.21g).

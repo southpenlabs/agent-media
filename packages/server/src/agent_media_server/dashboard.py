@@ -623,4 +623,12 @@ def dashboard(bearer: str) -> tuple[bool, dict]:
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
-    return True, build(bearer)
+    out = build(bearer)
+    from . import device_kinds
+
+    # No private threads to a device whose rules say so (§6.59).
+    dev = device_kinds.device_for(bearer)
+    if not device_kinds.shows_private(dev):
+        out = {**out, **{k: device_kinds.filter_rows(out.get(k), dev)
+                         for k in ("needs_you", "working", "recent", "replies") if k in out}}
+    return True, out

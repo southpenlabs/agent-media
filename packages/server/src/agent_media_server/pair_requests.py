@@ -8,7 +8,7 @@ device types it in (`POST /devices/code`, then `POST /pair`), is hard on a
 TV: no camera and a remote to type with. This is the reverse:
 
 - the new device asks, with no credential (`POST /pair/request {"name",
-  "platform"?}`), and gets an id, a secret, a short code to read out and the
+  "platform"?, "kind"?}`), and gets an id, a secret, a short code to read out and the
   link to put in a QR;
 - a device that may enrol (the same gate as minting a code) looks the
   request up by id (the QR) or code (typed), sees who is asking, and allows
@@ -106,21 +106,32 @@ def _prune(reqs: list, now: float) -> list:
 
 
 def public(r: dict) -> dict:
-    """What the approving phone is shown of a request."""
+    """What the approving phone is shown of a request: with the asking
+    device's `kind` (phone, tablet, tv, computer, or None) and the
+    `suggested_role` the card starts on (guest for a TV, else None: the
+    usual default), device_kinds.py §6.59."""
+    from . import device_kinds
+
     code = str(r.get("code") or "")
+    kind = device_kinds.clean_kind(r.get("kind"))
     return {"id": r.get("id"), "name": r.get("name") or "", "platform": r.get("platform") or None,
+            "kind": kind, "suggested_role": device_kinds.suggested_role(kind),
             "code": f"{code[:3]}-{code[3:]}" if code else "", "asked_at": r.get("at"),
             "expires": round(float(r.get("at") or 0) + TTL_S, 3), "from_ip": r.get("ip") or "",
             "status": r.get("status")}
 
 
-def ask(name: str, platform: str, ip: str) -> tuple[bool, dict]:
-    """File a request. `(True, {"id", "secret", "code", "expires_in"})` — the
+def ask(name: str, platform: str, ip: str, kind: str = "") -> tuple[bool, dict]:
+    """File a request (`kind`: what the device says it is; an unknown value
+    is dropped). `(True, {"id", "secret", "code", "expires_in"})` — the
     secret is only ever in this answer — or `(False, {"code", "error"})`
     when too many wait."""
     now = time.time()
     name = " ".join((name or "").split())[:80] or "A device"
     platform = " ".join((platform or "").split())[:40]
+    from . import device_kinds
+
+    kind = device_kinds.clean_kind(kind)
     with _txn():
         reqs = _prune(_load(), now)
         open_ = [r for r in reqs if r.get("status") == "pending"]
@@ -131,7 +142,8 @@ def ask(name: str, platform: str, ip: str) -> tuple[bool, dict]:
         secret = secrets.token_urlsafe(24)
         code = _new_code({str(r.get("code") or "") for r in open_})
         req = {"id": secrets.token_hex(6), "secret": _hash(secret), "code": code, "name": name,
-               "platform": platform, "ip": ip or "", "at": round(now, 3), "status": "pending"}
+               "platform": platform, "ip": ip or "", "at": round(now, 3), "status": "pending",
+               **({"kind": kind} if kind else {})}
         reqs.append(req)
         _save(reqs)
     return True, {"id": req["id"], "secret": secret, "code": f"{code[:3]}-{code[3:]}",
@@ -161,7 +173,8 @@ def pending() -> list[dict]:
 
 def decide(rid: str, *, allow: bool, role: str = "", name: str = "", by: str = "") -> tuple[str, dict]:
     """The phone's answer. `("ok", request)`, or `("unknown"|"answered"|"lapsed",
-    {})`. `role` is admin, member or guest (default member); `name` is what
+    {})`. `role` is admin, member or guest (default the kind's
+    `suggested_role`, else member); `name` is what
     the device will be called (default the name it asked with)."""
     rid = (rid or "").strip()
     now = time.time()
@@ -178,7 +191,10 @@ def decide(rid: str, *, allow: bool, role: str = "", name: str = "", by: str = "
         req["decided_at"] = round(now, 3)
         req["by"] = by or ""
         if allow:
-            req["role"] = role or DEFAULT_ROLE
+            # No role sent: the kind's suggestion (guest for a TV), else member.
+            from . import device_kinds
+
+            req["role"] = role or device_kinds.suggested_role(req.get("kind")) or DEFAULT_ROLE
             given = " ".join((name or "").split())[:80]
             if given:
                 req["name"] = given
@@ -213,4 +229,7 @@ def wait(rid: str, secret: str, ip: str = "") -> tuple[str, dict]:
     got = devices.redeem(code, req.get("name") or "device", ip)
     if not got:
         return "unknown", {}
+    if req.get("kind") and got.get("device_id"):
+        # The kind it asked with, as if reported by POST /device/app.
+        devices.report_kind(got["device_id"], req["kind"])
     return "approved", got

@@ -300,10 +300,15 @@ def list_devices() -> list[dict]:
     """Every paired device, without its hash, with its role and its enrol bit
     as they take effect (a member's stored bit is no bit; the role lowered to
     its account's `ceiling`, shown when there is one), and its Now
-    playing `stage` mode (stage.py, §6.21h)."""
+    playing `stage` mode (stage.py, §6.21h), and its `kind`, `kind_set_by`
+    and effective `rules` (device_kinds.py, §6.59)."""
+    from . import device_kinds
+
     with _LOCK:
-        return [{**{k: v for k, v in d.items() if k not in _PRIVATE},
+        return [{**{k: v for k, v in d.items() if k not in _PRIVATE and k != "rule_overrides"},
                  "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d),
+                 "kind": device_kinds.kind_of(d), "kind_set_by": d.get("kind_set_by") or None,
+                 "rules": device_kinds.rules_for(d),
                  **({"ceiling": ceiling_of(d)} if ceiling_of(d) else {})}
                 for d in _load()]
 
@@ -473,6 +478,82 @@ def set_app(device_id: str, info: dict) -> dict | None:
         if hit.get("app") != clean or now - float(hit.get("app_at") or 0) >= 3600:
             _save([{**d, "app": clean, "app_at": now} if d is hit else d for d in rows])
         return clean
+
+
+def report_kind(device_id: str, kind) -> str | None:
+    """What kind the device says it is (device_kinds.py, §6.59): kept as
+    `kind_reported`, and as `kind` (`kind_set_by: "device"`) unless the
+    owner has chosen one, which a report never overwrites. An unknown
+    value is ignored. The device's kind now, or None (unknown id, or no
+    kind known)."""
+    from . import device_kinds
+
+    k = device_kinds.clean_kind(kind)
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return None
+        if k is None:
+            return device_kinds.kind_of(hit)
+        new = {**hit, "kind_reported": k}
+        if hit.get("kind_set_by") != "owner":
+            new.update(kind=k, kind_set_by="device")
+        if new != hit:
+            _save([new if d is hit else d for d in rows])
+        return device_kinds.kind_of(new)
+
+
+def set_kind(device_id: str, kind) -> bool:
+    """The owner's choice of a device's kind (`POST /devices/kind`), kept as
+    `kind_set_by: "owner"`; None clears it, back to what the device last
+    reported. False for an unknown id; ValueError for a kind that is not one."""
+    from . import device_kinds
+
+    k = None if kind is None else device_kinds.clean_kind(kind)
+    if kind is not None and k is None:
+        raise ValueError(f"kind must be one of {', '.join(device_kinds.KINDS)}")
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        new = dict(hit)
+        if k is not None:
+            new.update(kind=k, kind_set_by="owner")
+        else:
+            back = device_kinds.clean_kind(hit.get("kind_reported"))
+            new.update(kind=back, kind_set_by="device" if back else None)
+        if new != hit:
+            _save([new if d is hit else d for d in rows])
+        return True
+
+
+def set_rules(device_id: str, changes: dict) -> bool:
+    """The owner's changes to a device's rules (`POST /devices/rules`):
+    `{rule: value}`, a None value back to the kind's default. Kept as
+    `rule_overrides`. False for an unknown id; ValueError naming the first
+    rule or value that is not one (nothing is changed then)."""
+    from . import device_kinds
+
+    for rule, value in changes.items():
+        why = device_kinds.check_override(str(rule), value)
+        if why:
+            raise ValueError(why)
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        over = dict(hit.get("rule_overrides") or {})
+        for rule, value in changes.items():
+            if value is None:
+                over.pop(rule, None)
+            else:
+                over[rule] = value
+        if over != (hit.get("rule_overrides") or {}):
+            _save([{**d, "rule_overrides": over} if d is hit else d for d in rows])
+        return True
 
 
 def app_words(d: dict) -> str:

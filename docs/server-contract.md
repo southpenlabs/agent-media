@@ -5845,6 +5845,7 @@ local look, never a network call:
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
 | `photo_edit` | an image model can be reached for AI edits to a picture before it is sent (§6.58, 16 Nov 2026): one of `MEDIA_IMAGE_EDIT_MODELS` has a route here (the default, Gemini through cli-proxy-api, needs its key and personal use, `google-image-signin`). The attachment preview offers Edit only then |
 | `agents` | this server runs agent chats: its session host is here (the socket, or TCP); `MEDIA_AGENTS=0/1` says so outright (16 Nov 2026). False on a server for people's chats only (Matrix and bridges); the app draws its strip pill as a chat server then, not an agent one |
+| `device_kinds` | always true (§6.59, 16 Nov 2026): devices report their kind (`POST /device/app {"kind"}`), `GET /device/rules` and `GET /devices` rows carry `kind` and `rules`, the owner sets them with `POST /devices/kind` and `POST /devices/rules`, and private threads are withheld from a device whose rules say so |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -7345,8 +7346,11 @@ screen). Not screen mirroring. Code: `follow.py`; tests in `test_follow.py`.
   it opened last (`session`, still set on `"list"`), when its screen last
   changed (`at`, epoch seconds) and that thread's title. Every field null
   and `phones` `[]` while it mirrors nobody.
-- `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?}` — any
-  paired device, a guest too (401 otherwise) → `{ok, app}`: the app build it
+- `POST /device/app {"build"?, "sha"?, "platform"?, "shell"?, "web"?, "kind"?}` — any
+  paired device, a guest too (401 otherwise) → `{ok, app, kind}`: `kind` is
+  what kind of device it is (`phone` | `tablet` | `tv` | `computer`, §6.59;
+  an unknown value is ignored, and an owner's choice is never overwritten),
+  answered with the kind now in effect (null when none is known). The app build it
   runs (the CI build number, the commit, `android`/`web`, the Android shell's
   own version), said at start and on each return to the front (7 Nov 2026).
   Kept on its `/devices` row as `app` (only those keys, each cut to 64
@@ -11743,7 +11747,7 @@ code to scan from the phone or something?"). No account is involved. Code:
 `agent_media_server/pair_requests.py`; pinned by `test_pair_requests.py`.
 
 ```
-POST /pair/request {"name": "TCL Smart TV", "platform"?}     no credential, like /pair
+POST /pair/request {"name": "TCL Smart TV", "platform"?, "kind"?}   no credential, like /pair
   → {"ok", "id", "secret", "code": "K7Q-2MX", "expires_in": 600,
      "approve": "<base>/app/approve?pair=<id>", "server": {"name", "base"}, "server_id"}
   → 429 {"code": "rate_limited" | "too_many_requests"}
@@ -11754,8 +11758,8 @@ POST /pair/wait {"id", "secret"}                              no credential; pol
          "role", "server", "server_id"}             POST /pair's answer, once
   → 403 {"code": "denied"}   410 {"code": "lapsed"}   404 {"code": "unknown"}   429 rate_limited
 GET  /pair/pending[?id=<id> | ?code=<code>]                   auth.may_enrol
-  → {"ok", "request": {"id", "name", "platform", "code", "asked_at", "expires",
-                        "from_ip", "status"}}     404 unknown
+  → {"ok", "request": {"id", "name", "platform", "kind", "suggested_role", "code",
+                        "asked_at", "expires", "from_ip", "status"}}     404 unknown
   → {"ok", "requests": [every pending one, oldest first]}       with neither
 POST /pair/approve {"id", "role"?, "name"?}                   auth.may_enrol
   → {"ok", "request", "role"}     404 unknown, 409 answered, 410 lapsed, 400 bad_role
@@ -11777,7 +11781,15 @@ POST /pair/deny {"id"}                                        auth.may_enrol
 - Approving and looking up are gated like `POST /devices/code`: a device
   with the enrol bit (an admin), the same right that mints a code. A member,
   a guest or an admin without the bit is 403, no bearer 401.
-- `role` is admin, member or guest, **member** when absent; the enrol bit is
+- `kind` is what the asking device says it is (§6.59: `phone` | `tablet` |
+  `tv` | `computer`, null when it did not say or said something else);
+  `suggested_role` is the role the approval card starts on for that kind —
+  `"guest"` for a TV (anyone in the room can use it), null otherwise (the
+  card's usual default). Suggested, not forced: the approver may pick any
+  role. The device row is made with the kind it asked with (`kind_set_by:
+  "device"`).
+- `role` is admin, member or guest; when absent, the request's
+  `suggested_role`, else **member**; the enrol bit is
   never given this way (managing devices is still granted at the desk or by
   a code minted with `enrol`). `name` is what the device will be called,
   the name it asked with when absent — the approver names it, as the desk
@@ -12035,6 +12047,80 @@ Any paired device may read the presets (401 `not_paired` otherwise). A guest
 may not edit: 403 `code: "guest"` (the server's guest rule). Both in
 `CORS_PATHS`. `/features` has `photo_edit` where an image model can be
 reached.
+
+### 6.59 What kind of device it is — reported, set by the owner, each kind's defaults (built 16 Nov 2026)
+
+A phone, a tablet, a TV and a computer have different purposes, so each kind
+brings defaults: what it shows, what it does on its own, what it may do
+(David, 16 Nov 2026: "they could have different rules. they also have
+different purposes"; docs/proposals/2026-11-16-device-kinds.md, step 1).
+Defaults, not locks: each can be changed per device, and that change wins.
+The app renders what these routes answer and holds no table of kinds itself.
+Code: `agent_media_server/device_kinds.py` (the table, one list) and
+`devices.py`; pinned by `test_device_kinds.py`.
+
+```
+POST /device/app {…, "kind": "phone" | "tablet" | "tv" | "computer"}     the device reports it (§6.21)
+POST /pair/request {…, "kind"}                                          before it has a token (§9)
+GET  /device/rules                                       any paired device, a guest too; 401 otherwise
+  → {"ok", "id", "kind": <kind> | null, "kind_set_by": "device" | "owner" | null,
+     "rules": {<rule>: {"value", "source": "kind" | "owner" | "default"}},
+     "kinds": ["phone", "tablet", "tv", "computer"],
+     "table": [{"id", "label", "choices": [...], "kinds": {<kind>: value}, "pairing"?: true}]}
+GET  /devices                         each row gains "kind", "kind_set_by" and "rules" (as above)
+POST /devices/kind {"id", "kind": <kind> | null}                       auth.may_enrol
+  → {"ok", "id", "devices"}     400 bad_kind, 404 no_such_device
+POST /devices/rules {"id", "rules": {<rule>: value | null}}            auth.may_enrol
+  → {"ok", "id", "devices"}     400 bad_rules (nothing changed), 404 no_such_device
+```
+
+- **The kind.** The device reports it (how it tells: the proposal's "Kinds"
+  table — Android's TV mode and smallest width, the browser's pointer and
+  width); an unknown value is ignored. The row keeps `kind`, `kind_set_by`
+  and the last report. The owner's choice (`POST /devices/kind`, like the
+  role and the pause and follow switches: a device with the enrol bit)
+  is `kind_set_by: "owner"` and is never overwritten by a later report;
+  `"kind": null` clears it, back to what the device last reported.
+- **The rules and their defaults** (`value` per kind; null is "does not
+  apply"):
+
+  | rule | phone | tablet | tv | computer | choices |
+  |---|---|---|---|---|---|
+  | `suggested_role` (pairing only) | null | null | `"guest"` | null | — |
+  | `notifications` | `on` | `on` | `off` | `quiet` | on, quiet, off |
+  | `speaks` | `on` | `on` | `room` | `when_asked` | on, room, when_asked, off |
+  | `mic` | `on` | `on` | `ask_phone` | `on` | on, ask_phone, off |
+  | `follow_phone` | null | false | **true** | false | true, false |
+  | `home` | `chats` | `thread_canvas` | `stage` | `threads_agents_first` | those four |
+  | `local_bridges` | true | true | false | false | true, false |
+  | `starts_agent_chats` | true | true | false | true | true, false |
+  | `private_threads` | true | true | **false** | true | true, false |
+
+  `source` is `kind` (its kind's default), `owner` (changed with `POST
+  /devices/rules`) or `default` (no kind known yet: a phone's values, which
+  is what every device had before kinds). A `null` value in `POST
+  /devices/rules` goes back to the default. `suggested_role` is read once,
+  at pairing, and cannot be changed (400). A value of the wrong type
+  (`"yes"` for a boolean) or outside `choices` is 400 `bad_rules` and
+  nothing is changed.
+- **Enforced on the server: `private_threads`.** A device whose rules say
+  false is not sent private or sealed threads (agent_media_core.private
+  `hidden`, or a row marked `sealed`) in the thread lists: `GET
+  /conversations`, `GET /targets` `sessions`, `GET /sessions/state`, the
+  `sessions` frames of `/sessions/events`, and `/dashboard`'s `needs_you`,
+  `working`, `recent` and `replies`. A login that is not a device (the
+  desk) sees them all. So a TV shows no private threads until the owner
+  turns `private_threads` on for it.
+- The other rules are read by the app (step 2): the home screen,
+  notifications, the mic key, Follow my phone. Today's hand-set TV
+  behaviour moves onto the TV defaults in step 3.
+- **Pairing.** The approval card (`GET /pair/pending`) carries the asking
+  device's `kind` and `suggested_role` (guest for a TV), and `POST
+  /pair/approve` with no `role` takes the suggestion: "Let *Living room TV*
+  (a TV) in?" defaults to guest, and the approver may choose otherwise.
+- `/features` has `device_kinds: true`. `/devices/kind`, `/devices/rules`
+  and `/device/rules` are in `CORS_PATHS`. An older server answers 404 to
+  the new routes and ignores `kind`.
 
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
