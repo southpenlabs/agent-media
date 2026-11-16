@@ -241,3 +241,14 @@ def test_features_say_photo_edit(server, signed_in, model):
     assert obj["photo_edit"] is True
     assert "/photo/edit" in __import__("agent_media_server.app", fromlist=["CORS_PATHS"]).CORS_PATHS
     assert os.environ.get("MEDIA_IMAGE_EDIT_BASE_URL")
+
+
+def test_a_chat_with_people_is_not_private_for_an_edit(monkeypatch):
+    """Edit is for a picture about to be sent to someone: a Matrix room (a
+    person's chat) is not refused as private; only private or sealed are."""
+    from agent_media_server import photo_edit
+    import agent_media_core.private as private
+    monkeypatch.setattr(private, "hidden", lambda s: s == "sealed-thread")
+    assert photo_edit._private("!room:example.org") is False
+    assert photo_edit._private("sealed-thread") is True
+    assert photo_edit._private("") is False

@@ -20,6 +20,8 @@ def _bare(monkeypatch, tmp_path):
     # astrotunes may be installed on the machine running the tests.
     monkeypatch.setenv("MEDIA_RADIO_ASTROTUNES", str(tmp_path / "no-astrotunes"))
     monkeypatch.setenv("MEDIA_TXCRIPT", str(tmp_path / "no-txcript"))
+    # The machine running the tests may have a session host of its own.
+    monkeypatch.setenv("MEDIA_AGENTS", "0")
 
 
 #: The personal settings' parts (personal_prefs.features), all off on a bare server.
@@ -41,7 +43,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     assert version["short"] == version["sha"][:8] and version["deployed"] == 0.0
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": False, "signed_in": False, "stories": False, "personal": True, "default_agent": True, "prompts_view": True, "convert": False, "convert_targets": [], "app_update": True, "app_update_bridges": True, "tidy_draft": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "mark_heard_ids": True, "quote_part": True, "music_sung": True, "speech_music_log": True, "storage": True, "device_log": True, "music_voted": True, "music_chapters": True, "music_search": True, "music_channel": True, "mix_songs": True, "room_delegate": False, "map": True,
-                   "play_gate": False, "trakt": True, "watch": False, "pair_request": True, "photo_edit": False,
+                   "play_gate": False, "trakt": True, "watch": False, "pair_request": True, "photo_edit": False, "agents": False,
                    "personal_use": {"on": False, "methods": {m: False for m in personal_use.METHODS},
                                     "addons": ["facebook-previews", "youtube-radio", "youtube-search", "youtube-streaming"]}}
     assert "/features" in app.CORS_PATHS
@@ -78,6 +80,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     monkeypatch.delenv("MEDIA_PRACTICE_PROFILES", raising=False)
     # An image model for photo edits: cli-proxy-api's key (photo_edit.py).
     monkeypatch.setenv("CLIPROXY_API_KEY", "k")
+    monkeypatch.setenv("MEDIA_AGENTS", "1")
     monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "phs-treatment-guard now")
     txcript = tmp_path / "txcript"
     txcript.write_text("#!/bin/sh\n")
@@ -93,7 +96,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     assert obj.pop("version")["mode"] == "checkout"
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": True, "signed_in": True, "stories": True, "personal": True, "default_agent": True, "prompts_view": True, "convert": True, "convert_targets": ["claude"], "app_update": True, "app_update_bridges": True, "tidy_draft": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "mark_heard_ids": True, "quote_part": True, "music_sung": True, "speech_music_log": True, "storage": True, "device_log": True, "music_voted": True, "music_chapters": True, "music_search": True, "music_channel": True, "mix_songs": True, "room_delegate": False, "map": True,
-                   "play_gate": True, "trakt": True, "watch": False, "pair_request": True, "photo_edit": True,
+                   "play_gate": True, "trakt": True, "watch": False, "pair_request": True, "photo_edit": True, "agents": True,
                    "personal_use": {"on": True, "methods": {m: True for m in personal_use.METHODS},
                                     "addons": sorted(personal_use.ADDON_METHODS)}}
 
@@ -128,3 +131,21 @@ def test_the_stories_row_is_the_servers_to_turn_off(monkeypatch, tmp_path):
 
 
 # The refusals are test_contract's GATED_GETS, which lists /features.
+
+
+def test_agents_says_whether_a_session_host_is_here(monkeypatch, tmp_path):
+    """`agents`: true where the session host is (its socket or TCP), false on a
+    server for people's chats only; MEDIA_AGENTS says so outright."""
+    from agent_media_server import features, sessiond
+    monkeypatch.delenv("MEDIA_AGENTS", raising=False)
+    monkeypatch.setattr(sessiond, "use_tcp", lambda: False)
+    sock = tmp_path / "sessiond.sock"
+    monkeypatch.setattr(sessiond, "socket_path", lambda: sock)
+    assert features._agents() is False
+    sock.touch()
+    assert features._agents() is True
+    monkeypatch.setenv("MEDIA_AGENTS", "0")
+    assert features._agents() is False
+    monkeypatch.setenv("MEDIA_AGENTS", "1")
+    sock.unlink()
+    assert features._agents() is True

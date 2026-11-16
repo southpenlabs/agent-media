@@ -121,6 +121,7 @@ server without it would show.
 
 from __future__ import annotations
 
+import os
 import sys
 
 from . import auth
@@ -226,6 +227,19 @@ def _pair_request() -> bool:
     return pair_requests.enabled()
 
 
+def _agents() -> bool:
+    """Whether this server runs agent chats: its session host is there (the
+    socket, or TCP). MEDIA_AGENTS=0/1 says so outright. A server for people's
+    chats only (Matrix and bridges, no session host) answers false, and the
+    app draws its strip pill as a chat server, not an agent one (David, 16
+    Nov 2026: "display them slightly differently based on what they are")."""
+    v = os.environ.get("MEDIA_AGENTS", "").strip()
+    if v:
+        return v not in ("0", "false", "no", "off")
+    from . import sessiond
+    return sessiond.use_tcp() or sessiond.socket_path().exists()
+
+
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
@@ -233,7 +247,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
-          "photo_edit": _photo_edit}
+          "photo_edit": _photo_edit, "agents": _agents}
 
 
 def detect() -> dict[str, bool]:

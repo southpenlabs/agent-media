@@ -35,7 +35,7 @@ one comes back in `choices[0].message.images` as a data: URL. Where it is:
                               in to Google with a borrowed CLI login, so it is
                               a personal-use method (personal_use
                               "google-image-signin").
-  MEDIA_PRIVATE_IMAGE_MODELS  the only models a private, sealed or people's
+  MEDIA_PRIVATE_IMAGE_MODELS  the only models a private or sealed
                               thread's picture may go to; none (the default)
                               and such a thread gets `why: no_model`.
   MEDIA_PHOTO_EDIT_DAILY      edits a device may ask for in a day (default 100)
@@ -375,10 +375,8 @@ def _private(session: str) -> bool:
         return False
     from agent_media_core.private import hidden
 
-    from . import matrix
-
     try:
-        return hidden(session) or matrix.room(session) is not None
+        return hidden(session)
     except Exception:  # noqa: BLE001 — unsure is private
         return True
 

@@ -5844,6 +5844,7 @@ local look, never a network call:
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
 | `photo_edit` | an image model can be reached for AI edits to a picture before it is sent (§6.58, 16 Nov 2026): one of `MEDIA_IMAGE_EDIT_MODELS` has a route here (the default, Gemini through cli-proxy-api, needs its key and personal use, `google-image-signin`). The attachment preview offers Edit only then |
+| `agents` | this server runs agent chats: its session host is here (the socket, or TCP); `MEDIA_AGENTS=0/1` says so outright (16 Nov 2026). False on a server for people's chats only (Matrix and bridges); the app draws its strip pill as a chat server then, not an agent one |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -12020,8 +12021,9 @@ POST /photo/edit?describe=<words>[&session=<thread>]
   picture: `error` is its reason as it said it, not a broken picture.
   `failed` (502) when no model answered with a picture (`error` the last
   one's reason). `no_model` (503) when no model can be reached here, or the
-  thread is private, sealed or a chat with people and no
-  `MEDIA_PRIVATE_IMAGE_MODELS` is set (none today). `busy` (429): one edit
+  thread is private or sealed and no `MEDIA_PRIVATE_IMAGE_MODELS` is set
+  (none today). A chat with people is not private for this: Edit is a
+  step he chooses for a picture he is about to send them. `busy` (429): one edit
   at a time per device. `limit` (429): the device's day's edits are used up
   (`MEDIA_PHOTO_EDIT_DAILY`, default 100, counted in memory). `bad_request`
   (400): no preset or an unknown one, and no description.
