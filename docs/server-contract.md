@@ -5797,6 +5797,7 @@ local look, never a network call:
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
+| `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -11646,6 +11647,67 @@ The gate was "a known device token, **or** an ABS bearer that passed the old
 §4.1". The ABS branch (the fallback lines in `auth.py`, and `auth_abs.py`)
 was deleted at the ABS exit, 11 Nov 2026 (David: "I'd like to move away
 from audiobookshelf"); the gate is now a known device token only.
+
+### Pairing from the new device — BUILT 16 Nov 2026
+
+The reverse of minting a code: the new device asks and a phone says yes, for
+a device that is hard to type a code into — a TV with a remote and no camera
+(David, 16 Nov 2026: "Can we make it easier from the TV?.. maybe with a QR
+code to scan from the phone or something?"). No account is involved. Code:
+`agent_media_server/pair_requests.py`; pinned by `test_pair_requests.py`.
+
+```
+POST /pair/request {"name": "TCL Smart TV", "platform"?}     no credential, like /pair
+  → {"ok", "id", "secret", "code": "K7Q-2MX", "expires_in": 600,
+     "approve": "<base>/app/approve?pair=<id>", "server": {"name", "base"}, "server_id"}
+  → 429 {"code": "rate_limited" | "too_many_requests"}
+  → 404 {"code": "no_pair_requests"}           turned off here (or an older server)
+POST /pair/wait {"id", "secret"}                              no credential; poll every 3–5 s
+  → 200 {"ok": true, "status": "pending"}
+  → 200 {"ok": true, "status": "approved", "token", "device_id", "name", "enrol": false,
+         "role", "server", "server_id"}             POST /pair's answer, once
+  → 403 {"code": "denied"}   410 {"code": "lapsed"}   404 {"code": "unknown"}   429 rate_limited
+GET  /pair/pending[?id=<id> | ?code=<code>]                   auth.may_enrol
+  → {"ok", "request": {"id", "name", "platform", "code", "asked_at", "expires",
+                        "from_ip", "status"}}     404 unknown
+  → {"ok", "requests": [every pending one, oldest first]}       with neither
+POST /pair/approve {"id", "role"?, "name"?}                   auth.may_enrol
+  → {"ok", "request", "role"}     404 unknown, 409 answered, 410 lapsed, 400 bad_role
+POST /pair/deny {"id"}                                        auth.may_enrol
+  → {"ok", "request"}             404, 409, 410 as above
+```
+
+- The device shows `approve` as a QR and the code beside it, with a
+  countdown from `expires_in`. `approve` is on the address the device asked
+  on, under the web app (`/app/approve?pair=<id>`): the app's link handling
+  or the phone's browser opens the approve screen, which reads `GET
+  /pair/pending?id=` and offers Allow / Allow as guest / Deny. A phone
+  already signed in can type the code instead (case, spaces and the dash do
+  not matter; by code, only a pending request is found).
+- Approving and looking up are gated like `POST /devices/code`: a device
+  with the enrol bit (an admin), the same right that mints a code. A member,
+  a guest or an admin without the bit is 403, no bearer 401.
+- `role` is admin, member or guest, **member** when absent; the enrol bit is
+  never given this way (managing devices is still granted at the desk or by
+  a code minted with `enrol`). `name` is what the device will be called,
+  the name it asked with when absent — the approver names it, as the desk
+  does.
+- No device row and no token exist until the device's next `/pair/wait`
+  after the approval: that poll makes the device exactly as `POST /pair`
+  would and spends the request, so the token is handed out once and a
+  second poll is `404 unknown`. Allowed but never collected leaves nothing.
+- A request lapses unanswered after 10 minutes (`410 lapsed`: ask again for
+  a new code). Answered and lapsed requests are remembered an hour, so a
+  late poll still hears which. The secret is only in `/pair/request`'s
+  answer and is kept hashed.
+- Limits: at most 20 requests wait at once and 3 from one address; a wrong
+  secret counts against the address like a wrong pairing code, and a
+  rate-limited address is refused `/pair/request` too. Nothing is alerted
+  on — anyone can ask, so a request is seen only by scanning or typing it.
+- Knowing it is there: an unpaired device reads `GET /enrol`'s
+  `"pair_request": true` (it cannot read `/features` yet); a paired phone
+  reads `/features`' `pair_request`. `MEDIA_PAIR_REQUESTS=0` turns both off
+  and the routes answer 404 `no_pair_requests`.
 
 Over the Cloudflare link, device tokens must travel over https only. The
 tunnel terminates TLS; the canvas itself stays plain http on the tailnet.

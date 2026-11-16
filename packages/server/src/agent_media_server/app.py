@@ -443,7 +443,7 @@ CORS_PATHS = frozenset({
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
-    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/enrol/wait", "/me", "/me/signout", "/me/account", "/me/servers",
+    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/enrol/wait", "/pair/request", "/pair/wait", "/pair/pending", "/pair/approve", "/pair/deny", "/me", "/me/signout", "/me/account", "/me/servers",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
     "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
@@ -504,7 +504,7 @@ CORS_PATHS = CORS_PATHS | ROOM_DELEGATE_PATHS
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
-GUEST_POSTS = frozenset({"/pair", "/enrol", "/enrol/wait", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/heard", "/speech/balance",
+GUEST_POSTS = frozenset({"/pair", "/enrol", "/enrol/wait", "/pair/request", "/pair/wait", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/heard", "/speech/balance",
                          "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
                          "/book/state",
@@ -549,7 +549,7 @@ CORS_PATHS = CORS_PATHS | FREE_PATHS
 # read the amux token out of it, so the GET must stay same-origin — which is
 # why this is a separate set, keyed on the method, and NOT in `CORS_PATHS`
 # (the canvas's own `_cors` reads that set for every answer it sends).
-CORS_POST_PATHS = frozenset({"/pair", "/enrol", "/enrol/wait"})
+CORS_POST_PATHS = frozenset({"/pair", "/enrol", "/enrol/wait", "/pair/request", "/pair/wait"})
 
 # The per-thread event stream (§11), `/threads/<session>/events`: an app route
 # like the ones above, but a path with the thread in it, so it is matched
@@ -2316,7 +2316,15 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # Where the app signs in with an account (oidc.py): open, like /pair.
         from . import oidc
 
-        _json(h, 200, {"ok": True, "accounts": oidc.public_info() if oidc.configured() else []})
+        from . import pair_requests
+
+        # `pair_request`: this server takes POST /pair/request, for an
+        # unpaired device (a TV) to offer "Pair from your phone" — it cannot
+        # read /features yet.
+        _json(h, 200, {"ok": True, "accounts": oidc.public_info() if oidc.configured() else [],
+                       "pair_request": pair_requests.enabled()})
+    elif path == "/pair/pending":
+        _pair_pending(h)
     elif path == "/shell":
         # This machine's shell connector URL, for "Connect an assistant".
         from . import shell_signin
@@ -3161,6 +3169,146 @@ def _enrolled(h: BaseHTTPRequestHandler, claims: dict, device: str, ip: str,
                    "server_id": _server_id()})
 
 
+def _pair_off(h: BaseHTTPRequestHandler) -> bool:
+    from . import pair_requests
+
+    if pair_requests.enabled():
+        return False
+    _json(h, 404, {"ok": False, "code": "no_pair_requests",
+                   "error": "this server does not take pairing requests"})
+    return True
+
+
+def _pair_request(h: BaseHTTPRequestHandler) -> None:
+    """`POST /pair/request {"name", "platform"?}` — a device with no token (a
+    TV) asking to be let in from a phone (§9 "Pairing from the new device";
+    pair_requests.py). Open, like /pair, and refused while the address is
+    rate-limited. The answer carries `approve`, the link for the device to
+    show as a QR: the web app's approve page, which a phone signed in here
+    opens to say yes."""
+    from urllib.parse import quote
+
+    from . import pair_requests
+
+    if _pair_off(h):
+        return
+    ip = h.client_address[0] if h.client_address else ""
+    if devices.rate_limited(ip):
+        _json(h, 429, {"ok": False, "code": "rate_limited",
+                       "error": "too many pairing attempts; try again in a few minutes"})
+        return
+    body = _read_json(h) or {}
+    ok, got = pair_requests.ask(str(body.get("name") or body.get("device") or ""),
+                                str(body.get("platform") or ""), ip)
+    if not ok:
+        _json(h, 429, {"ok": False, **got})
+        return
+    base = _base_url(h)
+    print(f"pair: {ip} asks to pair {str(body.get('name') or '')[:80]!r} ({got['id']})", file=sys.stderr)
+    _json(h, 200, {"ok": True, **got,
+                   "approve": f"{base}{web_app.PREFIX}/approve?pair={quote(got['id'])}",
+                   "server": {"name": _server_name(), "base": base}, "server_id": _server_id()})
+
+
+def _pair_wait(h: BaseHTTPRequestHandler) -> None:
+    """`POST /pair/wait {"id", "secret"}` — the asking device's poll. Pending
+    is 200 `{"ok": true, "status": "pending"}`; approved is `POST /pair`'s
+    answer, once; 403 `denied`; 410 `lapsed`; 404 `unknown` (a wrong or spent
+    secret counts against the address like a wrong code)."""
+    from . import pair_requests
+
+    if _pair_off(h):
+        return
+    ip = h.client_address[0] if h.client_address else ""
+    if devices.rate_limited(ip):
+        _json(h, 429, {"ok": False, "code": "rate_limited",
+                       "error": "too many pairing attempts; try again in a few minutes"})
+        return
+    body = _read_json(h) or {}
+    status, got = pair_requests.wait(str(body.get("id") or ""), str(body.get("secret") or ""), ip)
+    if status == "pending":
+        _json(h, 200, {"ok": True, "status": "pending"})
+    elif status == "approved":
+        print(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip} by request", file=sys.stderr)
+        server = {"name": _server_name(), "base": _base_url(h)}
+        lookup = _lookup_for(server["base"])
+        if lookup:
+            server["lookup"] = lookup
+        _json(h, 200, {"ok": True, "status": "approved", "token": got["token"],
+                       "device_id": got["device_id"], "name": got["name"],
+                       "enrol": bool(got.get("enrol")), "role": got["role"],
+                       "server": server, "server_id": _server_id()})
+    elif status == "denied":
+        _json(h, 403, {"ok": False, "code": "denied", "error": "the request to pair was turned down"})
+    elif status == "lapsed":
+        _json(h, 410, {"ok": False, "code": "lapsed",
+                       "error": "nobody answered in time; ask again for a new code"})
+    else:
+        devices._note_failure(ip)
+        _json(h, 404, {"ok": False, "code": "unknown", "error": "no such request"})
+
+
+def _pair_pending(h: BaseHTTPRequestHandler) -> None:
+    """`GET /pair/pending[?id=|?code=]` — who is asking, for the phone to show
+    before it says yes. Gated like minting a code (`auth.may_enrol`). With
+    `id` or `code`, `{"request": …}` (404 `unknown`; by code, only a pending
+    one); with neither, `{"requests": [every pending one]}`."""
+    from . import pair_requests
+
+    if _pair_off(h):
+        return
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    q = parse_qs(h.path.partition("?")[2])
+    rid, code = (q.get("id") or [""])[0], (q.get("code") or [""])[0]
+    if not (rid or code):
+        _json(h, 200, {"ok": True, "requests": pair_requests.pending()})
+        return
+    got = pair_requests.find(rid, code)
+    if got is None:
+        _json(h, 404, {"ok": False, "code": "unknown", "error": "no such request (or it has lapsed)"})
+        return
+    _json(h, 200, {"ok": True, "request": got})
+
+
+def _pair_decide(h: BaseHTTPRequestHandler, allow: bool) -> None:
+    """`POST /pair/approve {"id", "role"?, "name"?}` and `POST /pair/deny
+    {"id"}`, gated like minting a code. `role` admin, member or guest
+    (default member; never the enrol bit); `name` what the device will be
+    called (default the name it asked with). 404 unknown, 409 answered, 410
+    lapsed."""
+    from . import pair_requests
+
+    if _pair_off(h):
+        return
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    role = str(body.get("role") or "") if allow else ""
+    if role and role not in devices.ROLES:
+        _json(h, 400, {"ok": False, "code": "bad_role", "error": "role must be admin, member or guest"})
+        return
+    status, got = pair_requests.decide(str(body.get("id") or ""), allow=allow, role=role,
+                                       name=str(body.get("name") or "") if allow else "",
+                                       by=str(user.get("device") or ""))
+    if status != "ok":
+        code, msg = {"unknown": (404, "no such request"),
+                     "answered": (409, "that request has already been answered"),
+                     "lapsed": (410, "that request went unanswered too long")}[status]
+        _json(h, code, {"ok": False, "code": status, "error": msg})
+        return
+    print(f"pair: {user.get('device')} {'allowed' if allow else 'denied'} {got['id']} "
+          f"({got['name']!r}{', ' + str(role or pair_requests.DEFAULT_ROLE) if allow else ''})", file=sys.stderr)
+    _json(h, 200, {"ok": True, "request": got,
+                   **({"role": role or pair_requests.DEFAULT_ROLE} if allow else {})})
+
+
 def _enrol_wait(h: BaseHTTPRequestHandler) -> None:
     """`POST /enrol/wait {"request", "secret"}` — the app that asked to join
     (`POST /enrol`'s `request`) checking whether the owner has answered.
@@ -3416,6 +3564,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _enrol(h)
     elif path == "/enrol/wait":
         _enrol_wait(h)
+    elif path == "/pair/request":
+        _pair_request(h)
+    elif path == "/pair/wait":
+        _pair_wait(h)
+    elif path in ("/pair/approve", "/pair/deny"):
+        _pair_decide(h, path == "/pair/approve")
     elif path == "/devices/code":
         _devices_code(h)
     elif path == "/devices/revoke":
