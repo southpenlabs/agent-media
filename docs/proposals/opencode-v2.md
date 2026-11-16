@@ -68,6 +68,104 @@ below.
 - **Not tried yet:** approvals and forms (questions), fork, interrupt,
   credentials, plugins, permission rulesets.
 
+## Decided and built (branch `opencode-v2`, 16 Nov 2026)
+
+- **On v2, opencode is read over its API, never its tables** (David: "change
+  the files that read opencode's database directly to use the API"). Core
+  `opencode_api.py` finds v2's background server through
+  `$XDG_STATE_HOME/opencode/service.json` and starts it when it is down
+  (`opencode service start`, about 0.2 s; it then runs until stopped and has
+  no idle shutdown). The readers (transcript, last reply and speech hook,
+  first prompt, thread list, subagents, branch cut, reap, settings, model,
+  quota, file state) take a v2 branch through it; v1 keeps its SQL. A
+  database with v2's `session_v2` table is what selects v2.
+- **sessiond uses that same shared server on v2**, not a private `serve`.
+  It is told apart by `opencode --version`. sessiond lets go of the server
+  when no phone chat is attached, but never stops it, because the terminal
+  app uses it too. `MEDIA_SESSIOND_OPENCODE_SERVICE=0` keeps a private server.
+  The shared server is started without the headless marker, since desk chats
+  run on it.
+- Checked end to end on real 2.3.0 (scratch HOME, free model): chat,
+  transcript, approval, questions (a model may ask two forms at once, and
+  each is a card), interrupt, and letting go on close.
+
+## Plugin, keys, models (built 16 Nov 2026)
+
+- **The plugin** is `packages/core/opencode/v2/agent-media/index.js`, a
+  folder linked to `~/.config/opencode/plugins/agent-media` (media-setup does
+  this on v2, and removes v1's `agent-media.js` link, which v2 tries to load
+  and fails on every start). It uses v2's hooks: `session.hook("prompt")`
+  for the "You:" turn and the note, `session.hook("context")` to add the
+  note (and a waiting restart's) to each model request's system prompt,
+  `tool.hook("execute.before")` for steps, and events for retries and the
+  turn's end (Stop and speaking). v2 loads a copy per folder it serves, and
+  every copy hears every event, so events are handled once per process by id.
+  Checked on real 2.3.0 with a recorder in place of the hook: each call once,
+  and the model obeyed the note.
+- **Which chat is the phone's** is decided per chat by the hook
+  (`hook_opencode._v2_place`): sessiond has a record of it. On v2 a tmux pane
+  inherited from the shared server is dropped, so a desk chat's reply is
+  not attributed to whichever pane started the server. (Finding a desk
+  chat's own pane is not done.)
+- **Keys:** v2 does not read `auth.json`. `opencode_keys` reads and writes
+  v2's credentials over the API, and `carry_over()` (run by sessiond when it
+  attaches) copies in any auth.json key v2 lacks. Checked: an OpenRouter key
+  carried over adds its free models to the sheet.
+- **Model sheet:** from `GET /api/model` (v2's `models --verbose` prints ids
+  only), and the default from `/api/model/default`.
+
+## Live text and a desk chat's pane (built 16 Nov 2026)
+
+- **Live text:** sessiond feeds v2's streaming events into
+  `opencode_api.LiveSteps`, which keeps each step in progress in
+  `$XDG_STATE_HOME/agent-media/opencode-live/<session>.json` (written at most
+  every 0.25 s while words stream). `opencode_api.records` lets a live step
+  stand in for the API's copy, which lists the step with empty words until it
+  ends, and `transcript.file_state` counts the file so the watcher sees it
+  grow. The file goes when the step ends. A file unchanged for 90 s is
+  ignored, and a new sessiond clears old ones. Checked on real 2.3.0: the
+  transcript's text grew from 1,262 to 3,012 characters while the reply
+  streamed.
+- **A desk chat's pane:** `hook_opencode._v2_pane` finds the opencode 2
+  terminal app (an `opencode` process that is not the server) whose working
+  folder is the chat's, and reads `TMUX_PANE` from that process's
+  environment, when exactly one is open there. Checked with a real v2
+  terminal app in a tmux pane.
+
+## Rename and move (16 Nov 2026)
+
+- **Rename:** v2's `PATCH /api/session/{id}` takes `title` (checked on
+  2.3.0), so a rename from the app reaches opencode's own list too. The app
+  keeps its name itself regardless (`book_tracks.rename`).
+- **Move to another folder:** `POST /api/session/{id}/move {directory}`
+  keeps the history, and the next command runs in the new folder (checked:
+  `pwd` answered the new folder). sessiond uses it whether or not one of its
+  chats has the server open.
+
+## Switching red2 (the plan)
+
+1. Merge `opencode-v2` to main and release it as usual. With v1 still
+   installed nothing changes: every v2 path is chosen by `opencode --version`
+   or by the database having `session_v2`.
+2. Wait until no opencode chat is working, then back up v1's data:
+   `tar czf ~/opencode-v1-backup-<date>.tgz -C ~/.local/share opencode`
+   (v2 migrates the same `opencode.db` in place).
+3. `npm uninstall -g opencode-ai && npm install -g @opencode/cli` (under
+   fnm's default node), then check `opencode --version` says 2.x.
+4. `media-setup`: links `~/.config/opencode/plugins/agent-media` and drops
+   v1's `agent-media.js` link.
+5. `media restart-services --only sessiond --after 10`.
+6. Start a phone opencode chat. Check: history migration finished
+   (`GET /api/experimental/migration/v1`), the Venice and OpenRouter keys
+   carried over (the Coding agents page shows them set), the model sheet,
+   live text, an approval, a question, the reply spoken. Then open
+   `opencode` in a narrow pane: no crash.
+
+Rollback: `npm uninstall -g @opencode/cli && npm install -g
+opencode-ai@1.19.5`, stop v2's background server first (`opencode service
+stop`), restore the tarball over `~/.local/share/opencode`, run `media-setup`,
+and restart sessiond.
+
 ## Risks
 
 - Both versions install as `opencode`, and package managers replace one

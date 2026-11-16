@@ -71,6 +71,56 @@ def _headless_workspace(session: str) -> None:
         os.environ["MEDIA_SOURCE_WORKSPACE"] = workspace
 
 
+def _v2_place(session: str) -> None:
+    """opencode 2 runs one background server for the desk's chats and the
+    phone's, with the environment of whoever started it: its tmux pane (if
+    any) is not this chat's, and its `MEDIA_SOURCE_KIND` says nothing about
+    this chat. So on v2 a pane inherited from the server is dropped, and the
+    chat is the phone's (headless) when sessiond has a record of it."""
+    import os
+
+    from .. import opencode_api
+    from .._paths import state_dir
+
+    if not session or not opencode_api.installed_v2():
+        return
+    for k in ("TMUX_PANE", "TMUX"):
+        os.environ.pop(k, None)
+    if (state_dir() / "sessiond" / f"{session}.json").exists():
+        os.environ["MEDIA_SOURCE_KIND"] = "headless"
+        return
+    if os.environ.get("MEDIA_SOURCE_KIND") == "headless":
+        os.environ.pop("MEDIA_SOURCE_KIND", None)
+        os.environ.pop("MEDIA_SOURCE_WORKSPACE", None)
+    pane = _v2_pane(opencode_api.directory_of(opencode_api.session(session, start=False)))
+    if pane:
+        os.environ["TMUX_PANE"] = pane
+
+
+def _v2_pane(folder: str) -> str:
+    """The tmux pane of the opencode 2 terminal app open in `folder`, when
+    exactly one is: its process (an `opencode` that is not the server) has
+    that working folder, and its environment names its pane. "" otherwise."""
+    import os
+
+    from .. import procinfo
+
+    if not folder:
+        return ""
+    want = os.path.realpath(folder)
+    panes = set()
+    for pid, argv in procinfo.processes():
+        if not argv or os.path.basename(argv[0]) not in ("opencode", "opencode.exe") \
+                or "serve" in argv[1:]:
+            continue
+        if procinfo.cwd(pid) != want:
+            continue
+        pane = procinfo.environ(pid).get("TMUX_PANE", "")
+        if pane:
+            panes.add(pane)
+    return panes.pop() if len(panes) == 1 else ""
+
+
 def _sessiond_session(session: str) -> None:
     """The restart note asks `MEDIA_SESSIOND_SESSION`, which a `claude -p`
     carries in its environment; the one shared `opencode serve` cannot, so
@@ -119,13 +169,21 @@ def context_usage(session: str) -> tuple[int, int] | None:
     `context.window` guesses."""
     import json
 
-    from .. import harnesses
+    from .. import harnesses, opencode_api
     from . import context
 
-    rows = harnesses.opencode_rows(
-        "select data from message where session_id = ? "
-        "and json_extract(data, '$.role') = 'assistant' "
-        "order by time_created desc, id desc limit 4", (session,))
+    if opencode_api.installed_v2():
+        # v2's step carries `model: {id, providerID}`; as v1's for below.
+        rows = [(json.dumps({"tokens": r.get("tokens") or {},
+                             "modelID": (r.get("model") or {}).get("id", ""),
+                             "providerID": (r.get("model") or {}).get("providerID", "")}),)
+                for r in reversed(opencode_api.records(session) or [])
+                if r["role"] == "assistant"][:4]
+    else:
+        rows = harnesses.opencode_rows(
+            "select data from message where session_id = ? "
+            "and json_extract(data, '$.role') = 'assistant' "
+            "order by time_created desc, id desc limit 4", (session,))
     for (data,) in rows:
         try:
             m = json.loads(data)
@@ -153,15 +211,15 @@ def note(restart_only: bool = False) -> int:
         session = str(hook.get("session_id") or "")
         if not session:
             return 0
+        _v2_place(session)
         from .. import harnesses
         from . import context
 
         # A subagent's prompt is its parent's words, not the person's: it
         # gets the restart note only (as Claude's background agents do).
-        parent = harnesses.opencode_rows(
-            "select parent_id from session where id = ? and parent_id is not null", (session,))
+        parent = _parent(session)
         child = bool(parent)
-        _sessiond_session(str(parent[0][0]) if child else session)
+        _sessiond_session(parent or session)
         if child:
             hook["agent_id"] = session
         if restart_only or child:
@@ -184,8 +242,18 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "note":
         return note("--restart" in args[1:])
     if args and args[0] == "event":
-        from .agent_events import main as events
-        return events("opencode")
+        import json
+        import os
+
+        from .agent_events import handle
+        if os.environ.get("MEDIA_HOOK_ENABLED", "1") == "0":
+            return 0
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            return 0
+        _v2_place(str(payload.get("session_id") or "") if isinstance(payload, dict) else "")
+        return handle(payload, "opencode")
     if len(args) < 2 or args[0] != "--session":
         return 0
     from .. import harnesses
@@ -193,17 +261,36 @@ def main(argv: list[str] | None = None) -> int:
     session = args[1]
     if not harnesses.is_opencode(session):
         return 0
+    _v2_place(session)
     # A subagent's session goes idle as well; its words are its parent's
     # tool result, not something said to the person.
-    if harnesses.opencode_rows(
-            "select 1 from session where id = ? and parent_id is not null", (session,)):
+    if _parent(session):
         return 0
     message, text = harnesses.opencode_last_reply(session)
     if not text or _already_spoken(session, message):
         return 0
     _headless_workspace(session)
-    folder = harnesses.opencode_rows("select directory from session where id = ?", (session,))
-    return speak(session, text, cwd=str(folder[0][0]) if folder else "")
+    return speak(session, text, cwd=_folder(session))
+
+
+def _parent(session: str) -> str:
+    """The session `session` is a subagent of, or ""."""
+    from .. import harnesses, opencode_api
+
+    if opencode_api.installed_v2():
+        return str((opencode_api.session(session) or {}).get("parentID") or "")
+    rows = harnesses.opencode_rows(
+        "select parent_id from session where id = ? and parent_id is not null", (session,))
+    return str(rows[0][0]) if rows else ""
+
+
+def _folder(session: str) -> str:
+    from .. import harnesses, opencode_api
+
+    if opencode_api.installed_v2():
+        return opencode_api.directory_of(opencode_api.session(session))
+    rows = harnesses.opencode_rows("select directory from session where id = ?", (session,))
+    return str(rows[0][0]) if rows else ""
 
 
 def speak(session: str, text: str, cwd: str = "") -> int:

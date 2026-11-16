@@ -92,6 +92,26 @@ def parse(listing: str) -> list[dict]:
     return out
 
 
+def parse_v2(rows) -> list[dict]:
+    """opencode 2's `GET /api/model` as `parse`'s rows: `cost` is a list of
+    tiers there (the first is the base price), `capabilities.tools` says it
+    calls tools, and a retired model is not listed at all."""
+    out: list[dict] = []
+    for m in rows if isinstance(rows, list) else []:
+        if not isinstance(m, dict) or not m.get("providerID") or not m.get("id"):
+            continue
+        mid = f"{m['providerID']}/{m['id']}"
+        if not MODEL_ID.fullmatch(mid):
+            continue
+        tiers = m.get("cost") if isinstance(m.get("cost"), list) else [m.get("cost") or {}]
+        base = tiers[0] if tiers and isinstance(tiers[0], dict) else {}
+        out.append({"id": mid, "name": str(m.get("name") or m["id"]),
+                    "cost": (float(base.get("input") or 0), float(base.get("output") or 0)),
+                    "toolcall": bool((m.get("capabilities") or {}).get("tools")),
+                    "status": str(m.get("status") or "")})
+    return out
+
+
 def is_free(m: dict) -> bool:
     provider = m["id"].split("/", 1)[0]
     if provider == "openrouter":
@@ -99,16 +119,18 @@ def is_free(m: dict) -> bool:
     return provider == "opencode" and m["cost"] == (0.0, 0.0)
 
 
-def sheet(listing: str) -> list[dict]:
-    """The chip's sheet from a listing: free, tool-using, not deprecated;
-    opencode's own first (no key needed), then by name."""
-    free = [m for m in parse(listing)
+def sheet(listing: str, rows: list[dict] | None = None) -> list[dict]:
+    """The chip's sheet from a listing (or `parse_v2`'s rows): free,
+    tool-using, not deprecated; opencode's own first (no key needed), then
+    by name."""
+    free = [m for m in (parse(listing) if rows is None else rows)
             if is_free(m) and m["toolcall"] and m["status"] != "deprecated"]
     free.sort(key=lambda m: (not m["id"].startswith("opencode/"), m["name"].lower()))
     return [{"id": m["id"], "label": m["name"], "note": "Free"} for m in free]
 
 
-def extras(listing: str, setting: str | None = None) -> list[dict]:
+def extras(listing: str, setting: str | None = None,
+           rows: list[dict] | None = None) -> list[dict]:
     """The models `MEDIA_OPENCODE_MODELS` adds to the sheet, in its order.
 
     Comma-separated `provider/model`, each optionally `=Label`; a leading `!`
@@ -118,7 +140,8 @@ def extras(listing: str, setting: str | None = None) -> list[dict]:
     listing); a malformed id is dropped.
     """
     raw = os.environ.get("MEDIA_OPENCODE_MODELS", "") if setting is None else setting
-    names = {m["id"]: m["name"] for m in parse(listing)} if listing else {}
+    names = {m["id"]: m["name"] for m in (parse(listing) if rows is None else rows)} \
+        if (listing or rows) else {}
     out: list[dict] = []
     for item in raw.split(","):
         item = item.strip()
@@ -134,6 +157,17 @@ def extras(listing: str, setting: str | None = None) -> list[dict]:
 
 def configured() -> str:
     """The model opencode's own config starts on, or "" (then big-pickle)."""
+    from . import opencode_api
+
+    if opencode_api.installed_v2():
+        srv = opencode_api.service()
+        try:
+            got = srv.call("GET", "/api/model/default", timeout=10) if srv else None
+        except opencode_api.ApiError:
+            got = None
+        got = got if isinstance(got, dict) else {}
+        ref = got.get("model") if isinstance(got.get("model"), dict) else got
+        return f"{ref['providerID']}/{ref['id']}" if ref.get("providerID") and ref.get("id") else ""
     try:
         return str(json.loads(_run(["debug", "config"], 30.0) or "{}").get("model") or "")
     except ValueError:
@@ -148,9 +182,21 @@ def models() -> tuple[list[dict], str]:
         at, memo, default = _memo
         if memo and time.time() - at < CACHE_TTL_S:
             return memo, default
-    listing = _run(["models", "--verbose"], 60.0)
-    free = sheet(listing)
-    offered = free + [m for m in extras(listing) if not any(f["id"] == m["id"] for f in free)]
+    from . import opencode_api
+
+    rows = None
+    listing = ""
+    if opencode_api.installed_v2():
+        srv = opencode_api.service()
+        try:
+            rows = parse_v2(srv.call("GET", "/api/model", timeout=30) if srv else [])
+        except opencode_api.ApiError:
+            rows = []
+    else:
+        listing = _run(["models", "--verbose"], 60.0)
+    free = sheet(listing, rows)
+    offered = free + [m for m in extras(listing, rows=rows)
+                      if not any(f["id"] == m["id"] for f in free)]
     default = configured() or FREE_DEFAULT
     if free:
         with _LOCK:
@@ -182,8 +228,14 @@ def current(session: str) -> str:
     assistant's `providerID`/`modelID`), so the latest says what the next
     turn runs unless it was changed since (session_settings keeps that).
     """
-    from . import harnesses
+    from . import harnesses, opencode_api
 
+    if opencode_api.installed_v2():
+        for r in reversed(opencode_api.records(session) or []):
+            m = r.get("model") or {}
+            if m.get("providerID") and m.get("id"):
+                return f"{m['providerID']}/{m['id']}"
+        return ""
     rows = harnesses.opencode_rows(
         "select data from message where session_id = ? order by time_created desc, id desc limit 8",
         (session,))

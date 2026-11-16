@@ -913,8 +913,12 @@ def test_pi_row_is_absent_without_pi(tmp_path, monkeypatch):
 
 
 def _opencode_env(tmp_path, monkeypatch):
+    from agent_media_core import opencode_api
+
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(setup.shutil, "which", lambda name: f"/usr/bin/{name}")
+    # opencode 1 unless a test says 2: never this machine's `opencode --version`.
+    monkeypatch.setattr(opencode_api, "cli_is_v2", lambda exe="": False)
     return setup.opencode_plugin_dest(), setup.opencode_plugin_source()
 
 
@@ -1476,3 +1480,33 @@ def test_check_treats_tmux_and_the_feature_tools_as_optional(tmp_path, monkeypat
     assert "optional tmux" in out
     _which_without(monkeypatch, "claude")
     assert setup.cmd_check(argparse.Namespace(rooms=False)) == 1
+
+
+def test_opencode2_links_its_folder_and_drops_v1s_file_link(tmp_path, monkeypatch):
+    """opencode 2 loads a plugin folder; v1's file it fails to load (a
+    warning on every start), so ours goes when the folder comes."""
+    from agent_media_core import opencode_api
+
+    dest, src = _opencode_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(opencode_api, "cli_is_v2", lambda exe="": True)
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(src)                      # v1's file link, ours
+    args = _profile_args(tmp_path)
+    folder = setup.opencode2_plugin_dest()
+    assert setup._row_opencode(args, check_only=True) == ("missing", str(folder))
+    assert setup._row_opencode(args, check_only=False) == ("installed", str(folder))
+    assert folder.resolve() == setup.opencode2_plugin_source().resolve()
+    assert (folder / "index.js").is_file()
+    assert not dest.is_symlink() and not dest.exists()
+    assert setup._row_opencode(args, check_only=True) == ("ok", str(folder))
+
+
+def test_opencode2_leaves_a_real_folder_alone(tmp_path, monkeypatch):
+    from agent_media_core import opencode_api
+
+    _opencode_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(opencode_api, "cli_is_v2", lambda exe="": True)
+    folder = setup.opencode2_plugin_dest()
+    folder.mkdir(parents=True)
+    state, why = setup._row_opencode(_profile_args(tmp_path), check_only=False)
+    assert state == "failed" and "not a link of ours" in why

@@ -235,6 +235,10 @@ def _no_live_speech_token(monkeypatch, tmp_path):
     # unset, a test that lists every harness's sessions would read this
     # machine's real ones.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    # opencode 2 is read over its background server (opencode_api): a test
+    # never starts one, and finds none (its service.json is under the
+    # throwaway XDG_STATE_HOME).
+    monkeypatch.setenv("MEDIA_OPENCODE_SERVICE_START", "0")
     # Gemini CLI's under GEMINI_CLI_HOME's `.gemini` (harnesses.gemini_dir),
     # and its sign-in is read from there: never this machine's.
     monkeypatch.setenv("GEMINI_CLI_HOME", str(tmp_path / "gemini-home"))

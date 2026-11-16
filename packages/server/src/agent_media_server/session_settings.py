@@ -317,8 +317,10 @@ def _opencode_state(session: str, pane: str) -> dict:
 
 def _opencode_at(session: str) -> float:
     """When the session's last message was written, in seconds."""
-    from agent_media_core import harnesses
+    from agent_media_core import harnesses, opencode_api
 
+    if opencode_api.installed_v2():
+        return opencode_api.last_at(session) or 0.0
     rows = harnesses.opencode_rows("select max(time_created) from message where session_id = ?",
                                    (session,))
     return (rows[0][0] or 0) / 1000.0 if rows else 0.0

@@ -232,6 +232,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    # opencode 2 is read over its background server (opencode_api): a test
+    # never starts one, and finds none (its service.json is under the
+    # throwaway XDG_STATE_HOME).
+    monkeypatch.setenv("MEDIA_OPENCODE_SERVICE_START", "0")
     # And Gemini CLI's, under GEMINI_CLI_HOME's `.gemini`.
     monkeypatch.setenv("GEMINI_CLI_HOME", str(tmp_path / "gemini-home"))
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
