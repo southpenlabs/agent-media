@@ -67,6 +67,12 @@ their messaging socket. To open a new chat (a "new thread" David asks
 for), `media session start <folder> --from <you> <first message>`
 (`--model`, `--plan`) prints its thread link.
 
+When agent mail is about one thread, name it: `agent-mail send|reply
+--thread <id or /app/t/<id> link>` (a commit's `Thread:` line, or the
+thread a request came from), and it is delivered to that chat, not to
+whichever chat is live in the folder. A reply goes back to the chat that
+sent the message by itself.
+
 Talk to another agent's session only through agent mail
 (`agent-mail-deliver`, `media session send`), never by typing or pasting
 into its pane (`tmux send-keys`, a paste). Those tools sign the words
