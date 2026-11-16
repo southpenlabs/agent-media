@@ -66,10 +66,10 @@ def test_settings_default_and_refuse_odd_values():
         speech_speed.save_settings(start=1.1)
     with pytest.raises(ValueError):
         speech_speed.save_settings(break_min=7)
-    assert speech_speed.save_settings(start=1.25, break_min=15)["start"] == 1.25
+    assert speech_speed.save_settings(start=1.2, break_min=15)["start"] == 1.2
     # The old switch keeps the others.
     speech_speed.set_reset_after_reply(True)
-    assert speech_speed.settings() == {"reset": True, "start": 1.25, "per_thread": False, "break_min": 15, "step": 0}
+    assert speech_speed.settings() == {"reset": True, "start": 1.2, "per_thread": False, "break_min": 15, "step": 0}
 
 
 def test_speed_steps_ladder_or_even(monkeypatch):
@@ -77,7 +77,9 @@ def test_speed_steps_ladder_or_even(monkeypatch):
     set the speed increments"): the ladder by default, even steps when set."""
     nx = speech_speed.next_speed
     # The ladder, as before.
-    assert [nx(1.0, 1), nx(1.25, 1), nx(1.5, 1), nx(2.0, 1), nx(3.0, 1)] == [1.25, 1.5, 2.0, 3.0, 3.0]
+    assert [nx(1.0, 1), nx(1.2, 1), nx(1.5, 1), nx(2.0, 1), nx(3.0, 1)] == [1.2, 1.5, 2.0, 3.0, 3.0]
+    # 1.2, not 1.25, since 16 Nov 2026; a 1.25 set by number goes on to 1.5 and back to 1.2.
+    assert [nx(1.25, 1), nx(1.25, -1)] == [1.5, 1.2]
     assert [nx(1.0, -1), nx(0.5, -1), nx(0.3, -1), nx(1.75, -1), nx(0.9, 1)] == [0.9, 0.4, 0.3, 1.5, 1.0]
     # Even steps, set.
     with pytest.raises(ValueError):
@@ -94,7 +96,15 @@ def test_speed_steps_ladder_or_even(monkeypatch):
     from agent_media_core import cli
     assert cli._speed_next(1.0, 1) == 1.05
     speech_speed.save_settings(step=0)
-    assert cli._speed_next(1.0, 1) == 1.25
+    assert cli._speed_next(1.0, 1) == 1.2
+
+
+def test_a_saved_125_start_reads_as_12():
+    """The ladder's 1.25 became 1.2 (David, 16 Nov 2026): a start saved as 1.25 is 1.2, not lost to 1×."""
+    import json
+    speech_speed._path().parent.mkdir(parents=True, exist_ok=True)
+    speech_speed._path().write_text(json.dumps({"start": 1.25}))
+    assert speech_speed.settings()["start"] == 1.2
 
 
 def test_reset_goes_back_to_the_start_speed(sent):
@@ -106,7 +116,7 @@ def test_reset_goes_back_to_the_start_speed(sent):
 
 
 def test_carrying_speed_leaves_the_start_alone(sent):
-    speech_speed.save_settings(start=1.25)
+    speech_speed.save_settings(start=1.2)
     StateStore().set_speech_speed(2.0)
     assert speech_speed.at_reply_start("sock", "s1") is False
     assert speech_speed.at_reply_end("sock", "s1") is False
@@ -114,13 +124,13 @@ def test_carrying_speed_leaves_the_start_alone(sent):
 
 
 def test_back_to_the_start_speed_after_a_break(sent):
-    speech_speed.save_settings(start=1.25, break_min=15)
+    speech_speed.save_settings(start=1.2, break_min=15)
     StateStore().set_speech_speed(2.0)
     speech_speed.at_reply_end("sock", "s1", now=1000.0)
     assert speech_speed.at_reply_start("sock", "s1", now=1000.0 + 14 * 60) is False
     assert StateStore().get_speech_speed() == 2.0
     assert speech_speed.at_reply_start("sock", "s1", now=1000.0 + 15 * 60) is True
-    assert StateStore().get_speech_speed() == 1.25
+    assert StateStore().get_speech_speed() == 1.2
 
 
 def test_each_thread_keeps_its_own_speed(sent):

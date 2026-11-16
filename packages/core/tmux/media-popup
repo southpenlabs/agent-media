@@ -95,7 +95,7 @@ bspeed=1.0              # book channel speed (tracked separately from speech)
 # Speed [ / ] ladder: at/above 1.0x, presses hop the rungs (1.0 1.25 1.5 2.0
 # 3.0 — widening gaps, so a held key accelerates); below 1.0x, fine flat 0.1
 # steps. Keep in sync with _SPEED_RUNGS in cli.py (speech/music CLI ladder).
-SPEED_RUNGS="1.0 1.25 1.5 2.0 3.0"
+SPEED_RUNGS="1.0 1.2 1.5 2.0 3.0"
 hist_idx=1
 # Fused speech keys: instead of running `$MEDIA <verb>` and then a separate
 # `popup-status` redraw (two Python spawns per press), a fusable speech key

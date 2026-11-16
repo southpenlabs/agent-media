@@ -17,7 +17,7 @@ next. That stays the default. The listener can choose (David, 31 Oct and
 - `break_min`: with the speed carrying between replies, it goes back to the
   start speed when nothing has been spoken for this many minutes (0: never).
 - `step`: how far a faster or slower press moves (David, 10 Nov 2026: "a
-  setting somewhere to set the speed increments"): 0, the ladder (1, 1.25,
+  setting somewhere to set the speed increments"): 0, the ladder (1, 1.2,
   1.5, 2, 3, and 0.1 steps under 1×), or one of STEPS, even steps all the
   way (`next_speed`, which cli.py `media speed up|down` uses).
 
@@ -49,13 +49,15 @@ log = logging.getLogger(__name__)
 NAME = "speech-speed-reset.json"
 HEARD = "speech-speed-heard.json"
 #: The rates a start speed may be (cli.py _SPEED_RUNGS, with 1.75×).
-STARTS = (1.0, 1.25, 1.5, 1.75, 2.0)
+STARTS = (1.0, 1.2, 1.5, 1.75, 2.0)
+#: A start saved before the ladder's 1.25 became 1.2 (David, 16 Nov 2026: "Can we change the 1.25 speed to 1.2").
+_OLD_STARTS = {1.25: 1.2}
 #: The break lengths offered, in minutes (0: never).
 BREAKS = (0, 5, 15, 30, 60)
 #: The even steps a press may move by (0, not one of them, is the ladder).
 STEPS = (0.05, 0.1, 0.25)
 #: The ladder at and above 1×, flat steps under it, and the ends (cli.py's).
-RUNGS = (1.0, 1.25, 1.5, 2.0, 3.0)
+RUNGS = (1.0, 1.2, 1.5, 2.0, 3.0)
 FLAT, MIN, MAX = 0.1, 0.3, 3.0
 #: Threads remembered, newest kept.
 MAX_THREADS = 200
@@ -85,6 +87,8 @@ def settings() -> dict:
     except (OSError, ValueError, TypeError):
         raw = {}
     start = raw.get("start")
+    if isinstance(start, (int, float)) and not isinstance(start, bool):
+        start = _OLD_STARTS.get(float(start), start)
     brk = raw.get("break_min")
     step = raw.get("step")
     return {

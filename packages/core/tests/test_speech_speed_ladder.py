@@ -45,14 +45,14 @@ def test_consecutive_presses_climb_the_ladder(phone):
     """The regression: the second press used to repeat the first one's rung."""
     for _ in range(3):
         cli.cmd_speed(_Args("up"))
-    assert phone == [("speed", 1.25), ("speed", 1.5), ("speed", 2.0)]
+    assert phone == [("speed", 1.2), ("speed", 1.5), ("speed", 2.0)]
 
 
 def test_a_press_does_not_read_the_player(phone):
     """The fixture fails the test if it does — that read is both the race and
     the delay a listener hears as "it changes at the end of the sentence"."""
     cli.cmd_speed(_Args("up"))
-    assert phone == [("speed", 1.25)]
+    assert phone == [("speed", 1.2)]
 
 
 def test_down_comes_back_the_same_way(phone):
@@ -66,7 +66,7 @@ def test_reset_is_remembered_too(phone):
     cli.cmd_speed(_Args("2"))
     cli.cmd_speed(_Args("reset"))
     cli.cmd_speed(_Args("up"))
-    assert phone[-1] == ("speed", 1.25)
+    assert phone[-1] == ("speed", 1.2)
 
 
 def test_what_is_sent_is_absolute(phone, monkeypatch):

@@ -2603,7 +2603,7 @@ shows it under the full player's speed keys and in Settings › Speech (David,
 Since 2 Nov 2026 it also carries where a reply starts (David: "a start
 speed", "per-thread speed", "reset after a break"): `GET` → `{"ok", "reset",
 "start", "per_thread", "break_min", "starts", "breaks"}`, and `POST` takes
-any of `reset`, `start` (one of `starts`: 1, 1.25, 1.5, 1.75, 2),
+any of `reset`, `start` (one of `starts`: 1, 1.2, 1.5, 1.75, 2; 1.25 until 16 Nov 2026, a saved 1.25 read as 1.2),
 `per_thread` (bool) and `break_min` (one of `breaks`: 0, 5, 15, 30, 60; 0 is
 never), 400 for anything else. `reset` goes back to `start`, not 1×.
 `per_thread`: each thread starts at the rate it was last heard at, a new one
@@ -2615,7 +2615,7 @@ ends (`at_reply_start` / `at_reply_end`); what was heard is kept in
 
 Since 10 Nov 2026 it also carries the steps a faster or slower press moves
 by (David: "a setting somewhere to set the speed increments"): `step`, 0
-for the ladder (1, 1.25, 1.5, 2, 3, and 0.1 under 1×; the default) or one
+for the ladder (1, 1.2, 1.5, 2, 3 — 1.2 was 1.25 until 16 Nov 2026 — and 0.1 under 1×; the default) or one
 of `steps` (0.05, 0.1, 0.25), even steps from 0.3 to 3 that land on the
 step's multiples; `GET` adds `"step"` and `"steps"`, `POST` takes `step`,
 400 for anything else. `speed+` / `speed-` (`/speech/ctl`) and

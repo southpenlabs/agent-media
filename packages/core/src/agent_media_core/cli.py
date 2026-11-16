@@ -1151,7 +1151,7 @@ def cmd_popup_status(a) -> int:
     # mid-clip). Empty at 1.0× — there's nothing worth a column then.
     sp = _sticky_speech_speed(speed)
     # %g on the rounded value, not %.2g: two *significant* digits turns the
-    # ladder's 1.25 rung into a wrong "1.2".
+    # 1.25 (a speed set by number) into a wrong "1.2".
     print(f"{round(sp, 2):g}" if sp is not None and abs(sp - 1.0) > 0.05 else "")
     return 0
 
@@ -2868,13 +2868,13 @@ def cmd_pane_muted(a) -> int:
 
 
 # Speed [ / ] ladder. At/above 1.0x, presses hop these rungs — the gaps widen
-# (1.0→1.25→1.5→2.0→3.0) so a held key accelerates. Below 1.0x, fine
+# (1.0→1.2→1.5→2.0→3.0; 1.25 until 16 Nov 2026) so a held key accelerates. Below 1.0x, fine
 # flat 0.1 steps for precise control (no ladder). Symmetric for up/down. As a
 # position ladder (snap off the live speed) it needs no cross-press accel state —
 # each listening-mode [ / ] press is a separate `media speed` process.
 # Keep in sync with SPEED_RUNGS in tmux/media-popup (book channel's shell copy).
 _SPEED_MIN, _SPEED_MAX, _SPEED_FLAT = 0.3, 3.0, 0.1
-_SPEED_RUNGS = (1.0, 1.25, 1.5, 2.0, 3.0)
+_SPEED_RUNGS = (1.0, 1.2, 1.5, 2.0, 3.0)
 
 
 def _speed_next(cur: float, direction: int) -> float:
