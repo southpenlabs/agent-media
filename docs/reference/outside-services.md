@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 53 rows.
+Sorted with what blocks a public release first. 55 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -65,7 +65,7 @@ Sorted with what blocks a public release first. 53 rows.
 | 22 | OpenAI | optional voices, realtime voice, speech-to-text, spoken summaries, pictures | the user's own key | off unless set | Tell listeners the voice is AI-generated (OpenAI's rule); check current terms on user-supplied keys | no |
 | 23 | Groq, OpenRouter, Google Gemini API | speech-to-text; free coding models | the user's own key | off unless set | nothing; each user's own account | no |
 | 24 | Alibaba DashScope (Qwen voices) | optional voice engine | the user's own key | off unless set | nothing | no |
-| 25 | Venice | canvas pictures | the user's own key | off unless set | nothing | no |
+| 25 | Venice | canvas pictures; private threads' end-to-end encrypted models (`MEDIA_PRIVATE_MODELS`, `e2ee-*`, through the owner's gateway) | the user's own key | off unless set | nothing | no |
 | 26 | TypeSafe (Jev) | "is this a good moment to speak" | the user's own key | shadow mode, off without a key | nothing | no |
 | 27 | sasonica.com workers (lookup, facts, feedback) on Cloudflare | finding an install; shared lengths; feedback | per-install Ed25519 key | the project's own, on Cloudflare Workers, D1 and KV | a privacy policy line for each; watch Workers plan limits | no |
 | 28 | cms.sasonica.com (Drupal) with Google sign-in | accounts (sign-up via `MEDIA_OIDC_SIGNUP`), enrolling a device | the project's Google OAuth client | published 8 Oct 2026, sign-in scopes only | terms link still to add; GitHub and Facebook sign-in need their own apps | no |
@@ -94,6 +94,8 @@ Sorted with what blocks a public release first. 53 rows.
 | 51 | txcript GitHub release (skillsynchq/txcript) | copying a chat into another agent (`media session convert`): `sasonica install` fetches it when none is here (`--no-txcript` skips) | none | fetched once at install, pinned v0.14.4, checked against pinned sha256s; runs locally, reading and writing the agents' own stores, nothing sent anywhere | nothing: txcript is Apache-2.0, run as a separate program | **No, not gated** |
 | 52 | Stremio add-ons, by address (Torrentio, and the legitimate ones offered as examples: Cinemeta, YouTube, WatchHub, Public Domain Movies, OpenSubtitles, Anime Kitsu, OmniCatalogs, Trakt, MDBList, and the Plex/Jellyfin/Emby bridges) | streams, catalogues, subtitles and where-to-watch at a title, inside Stremio (§6.54 "Stremio add-ons") | none | an address is named and its manifest read once when added (`watch_addons.py`); Stremio is sent to it by its own install link. Any address works, not a fixed table | nothing for the link; a torrent add-on's streams go peer-to-peer in the user's own Stremio. The example addresses are read from stremio-official-addons and a community list, and may move | no |
 | 53 | Google's image model (gemini-3.1-flash-image) through cli-proxy-api | Edit on a picture before it is sent: presets and a description (§6.58, `photo_edit.py`) | the Google sign-in the owner's AI gateway holds (a login borrowed from Google's own CLI) | personal install only; the picture goes to Google for each edit, only when Edit is used | **Needs work**: a public install names its own OpenAI-compatible image endpoint and key (`MEDIA_IMAGE_EDIT_BASE_URL`, `MEDIA_IMAGE_EDIT_API_KEY`); say in the privacy policy that an edited picture goes to that provider | **yes** (`google-image-signin`); an owner's own endpoint is not gated |
+| 54 | Anthropic API (Claude models with the owner's key) | a suggestion in Settings → Models (`model_roles.py`, §6.60) for follow-ups, describing and the canvas, named on the owner's gateway | the user's own key | off unless the owner's gateway routes a `claude-*` model to it | nothing; each owner's own account | no |
+| 55 | Google's Gemini text models through cli-proxy-api, on the owner's gateway | the fast models (`MEDIA_FAST_MODELS` and the like, e.g. `gemini-3-flash`), suggested in Settings → Models (§6.60) | the Google sign-in the owner's AI gateway holds (a login borrowed from Google's own CLI) | the owner's gateway config; agent-media only names the model | **Needs work**: a public install names a model with a key it holds (Gemini API, row 23); Settings → Models marks this suggestion personal | not gated in code (the route is the gateway's); Settings → Models flags it `personal` |
 
 ## The services, one by one
 
@@ -683,6 +685,32 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** a public build ships with no image model; the owner names
   one. The privacy policy says a picture sent to Edit goes to that provider.
 
+### 54. Anthropic API
+
+- **Used for:** nothing by default. Settings → Models (`model_roles.py`,
+  server-contract §6.60) suggests `claude-haiku-4-5` and `claude-sonnet-4-5`
+  for follow-ups, describing code and the canvas; the owner names the model
+  on their own gateway (`MEDIA_SUMMARY_BASE_URL`), which calls Anthropic.
+- **Credential:** the owner's own API key, held by their gateway.
+- **Terms:** https://www.anthropic.com/legal/commercial-terms and
+  https://www.anthropic.com/legal/aup. **Check current terms.**
+- **Production:** nothing; each owner's own account. Not a subscription
+  login (that is row 10).
+
+### 55. Google's Gemini text models through cli-proxy-api
+
+- **Used for:** the fast models on an install whose gateway routes
+  `gemini-*` to cli-proxy-api (`MEDIA_FAST_MODELS` and the purposes before
+  it: quick answers, tidy, the voice check, titles and tags). Settings →
+  Models suggests `gemini-3-flash` this way, marked `personal`.
+- **Credential:** the login Google's own CLI made, borrowed by
+  cli-proxy-api, as in row 53.
+- **Terms:** a CLI's sign-in driven by another program is a personal method
+  (**check current terms**). agent-media does not gate it: it only names a
+  model, and the route is the owner's gateway config.
+- **Public alternative:** the Gemini API with the owner's key (row 23), or
+  any other fast model Settings → Models suggests.
+
 ### Related repositories
 
 - **sasonica-shell:** sasonica.com, cms.sasonica.com, relay.sasonica.com
@@ -736,6 +764,10 @@ Ordered by effort, least first.
     the bridges question.
 
 ## Keeping this current
+
+A provider named in Settings → Models (`model_roles.py` `PROVIDERS`) names
+its row here; `packages/server/tests/test_model_roles.py` fails when that
+row is missing.
 
 Add a row here in the same change that adds a setting naming a service, a
 key, a client ID, a token or an outside address (a new `MEDIA_*` in

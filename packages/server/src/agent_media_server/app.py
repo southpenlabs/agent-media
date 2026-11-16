@@ -446,7 +446,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -2611,6 +2611,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         q = {k: v[0] for k, v in parse_qs(h.path.partition("?")[2]).items()}
         ok, detail = prompt_settings.settings(_bearer(h), q)
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/models":
+        # Settings → Models: which model each feature uses, read-only (§6.60).
+        from . import model_roles
+
+        ok, detail = model_roles.settings(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you (personal.py, §6.42).

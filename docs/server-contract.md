@@ -12134,6 +12134,62 @@ POST /devices/rules {"id", "rules": {<rule>: value | null}}            auth.may_
   the new routes and ignores `kind`.
 
 
+### 6.60 Which model each feature uses, read-only — gated; not for guests (built 17 Nov 2026)
+
+Settings → Models (David, 16 Nov 2026: "do we need a list of model and
+provider suggestions based on features?";
+docs/proposals/2026-11-17-models-per-feature.md, step 1). One row per
+feature that thinks: what it needs, the model in effect and where it runs,
+and suggestions. Code: `agent_media_server/model_roles.py` (`ROLES`, the one
+table; a new feature adds its row there).
+
+```
+GET /settings/models → {"ok": true,
+  "roles": [{"key", "label", "needs",
+             "settings": ["<setting>"…],        // in the order the code reads them
+             "model": "<name>" | null,          // the first tried; null: none set
+             "then"?: ["<name>"…],              // tried next, in order (chat roles, photo)
+             "source": "<setting>" | null,      // where `model` came from; null: the default
+             "default": "<name>" | null,
+             "where": {"route": "server" | "gateway" | "provider" | "none",
+                       "host": "<host[:port]>" | null, "provider": "<provider key>" | null,
+                       "label": "<for a person>"},
+             "personal": bool, "personal_method": "<personal_use name>" | null,
+             "blocked"?: "<why it cannot run here>",
+             "on"?: bool,                        // the feature's own switch, where it has one
+             "last"?: {"ok": bool, "at": <unix s>},
+             "fallback"?: "<engine>", "extras"?: ["<opencode model>"…], "service"?: "<stt service>",
+             "note"?: "<text>",
+             "suggestions": [{"model", "provider", "provider_name",
+                              "cost": "free" | "cheap" | "costly", "personal": bool}…]}…],
+  "left_out": [{"key": "memory", "why"}]}
+```
+
+- `key`, in this order: `agents`, `quick`, `tidy` (tidy-up, Draft, suggested
+  replies), `voice_check`, `summary`, `followups`, `describe`, `canvas`,
+  `private`, `photo`, `stt`, `voices`. Memory's reranking and dreams are
+  `left_out`: their models are agent-memory's own settings, which this
+  server cannot see.
+- `where.route`: `server` runs here (Ollama, Whisper, Kokoro, Piper,
+  cli-proxy-api), `gateway` is the summary gateway (`MEDIA_SUMMARY_BASE_URL`)
+  with `provider` what the model's name points to behind it, `provider` a
+  named service called directly, `none` when nothing is set. `host` never
+  carries a user or password.
+- `personal` is true only for a personal-use method (`personal_use`):
+  today photo edits through cli-proxy-api (`google-image-signin`); `blocked`
+  says when personal use is off here. A suggestion's `personal` marks a
+  borrowed sign-in (cli-proxy-api); every `provider` has a row in
+  docs/reference/outside-services.md.
+- `last` only where the feature already keeps its last call: the describers'
+  log (`MEDIA_DESCRIBE_LOG`). No call is made to check.
+- No key or token is ever in the answer. A role that fails to build comes back
+  as `{"key", "label", "needs", "error"}`; the rest still come.
+
+Any paired device may read (401 `not_paired` otherwise); a guest is 403
+`code: "guest"`. Read-only: choosing (`POST /settings/models`, saved in
+`<state>/models.json`) is step 3. In `CORS_PATHS`. `/features` has
+`models_view: true`.
+
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 
 Every route that took `item` had a `session` form, and the session form

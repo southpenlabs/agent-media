@@ -114,6 +114,8 @@ never a network call, so the app can ask on every start.
             it is sent (photo_edit.py, §6.58, 16 Nov 2026): GET
             /photo/edit/presets, POST /photo/edit; the default route also needs
             personal use ("google-image-signin")
+  models_view  GET /settings/models: which model each feature uses, where it
+            runs and suggestions, read-only (model_roles.py, §6.60, 17 Nov 2026)
   device_kinds  what kind each device is and what its kind brings (device_kinds.py,
             §6.59, 16 Nov 2026): GET /device/rules, `kind`/`rules` on GET
             /devices, POST /devices/kind and /devices/rules, `kind` on POST
@@ -248,7 +250,7 @@ def _agents() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
