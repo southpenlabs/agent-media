@@ -560,24 +560,32 @@ def _update_release(spec: dict, rel: Path, root: "Path | None", budget: float,
         argv.append("--dry-run")
     log = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") \
         / "agent-media" / "jobs-update.log"
-    rc = 0
-    try:
+
+    def run(argv: list) -> "tuple[int | None, list]":
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("w") as fh:
             p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=fh,
                                  stderr=subprocess.STDOUT, cwd=str(Path.home()),
                                  start_new_session=True)
             try:
-                rc = p.wait(timeout=max(5.0, budget - (time.monotonic() - t0) - 5))
+                got = p.wait(timeout=max(5.0, budget - (time.monotonic() - t0) - 5))
             except subprocess.TimeoutExpired:
-                rc = None
+                got = None
+        try:
+            return got, log.read_text(errors="replace").splitlines()
+        except OSError:
+            return got, []
+
+    try:
+        rc, out = run(argv)
+        if rc == 2 and any("unrecognized arguments: --detach" in x for x in out):
+            # A release from before --detach (16 Nov 2026): its update restarts
+            # inline; a long wait goes on in the background as a long build does.
+            lines.append("release: this release predates --detach; updating without it")
+            rc, out = run([a for a in argv if a != "--detach"])
     except OSError as e:
         lines.append(f"media update could not run: {e}")
         return 127, res, ""
-    try:
-        out = log.read_text(errors="replace").splitlines()
-    except OSError:
-        out = []
     lines += [f"release: {x}" for x in out[-20:] if x.strip()]
     if rc is None:
         lines.append(f"release: still building; it goes on in the background (log: {log}, "

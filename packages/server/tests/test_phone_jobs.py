@@ -914,3 +914,18 @@ def test_a_release_host_dry_run_pulls_nothing(worker, host, fake_py, repos, rele
     assert res["rc"] == 0, res
     assert release_host() == ["-m agent_media_core.cli update --detach --dry-run"]
     assert _git(dev, "rev-parse", "--short", "HEAD") == before
+
+
+def test_a_release_from_before_detach_is_updated_without_it(worker, host, fake_py, repos,
+                                                            release_host, tmp_path):
+    py = tmp_path / "data" / "agent-media" / "current" / ".venv" / "bin" / "python"
+    log = tmp_path / "release-argv.log"
+    py.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\ncase "$*" in *--detach*) '
+                  'echo "media: error: unrecognized arguments: --detach"; exit 2;; esac\n'
+                  'echo "current is 53be99ff95aa (was d789bc770c8e)"\n')
+    res = rs.update_device("p8a")
+    assert res["rc"] == 0, res
+    assert release_host() == ["-m agent_media_core.cli update --detach",
+                              "-m agent_media_core.cli update"]
+    assert "release: this release predates --detach; updating without it" in res["lines"]
+    assert res["moved"] is True
