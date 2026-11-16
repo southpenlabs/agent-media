@@ -282,3 +282,24 @@ phone that bridges them (sasonica-app cdd2a7d5; was "On this phone"). Seen
 anywhere else — once the second stage copies them into the user's Matrix
 rooms — they carry the phone's name instead ("from p8a"), which says where
 they came from ("yep, that makes sense").
+
+## Notifications, accounts, updates (16 Nov 2026)
+
+- **Message notifications** in the companion (sasonica-bridges a5558e9): one
+  per chat (MessagingStyle, a conversation shortcut), Reply and Mark as read
+  from the notification, a tap opens the chat in Sasonica
+  (`sasonica://t/phone.<base64url room>`).
+- **Which account**: the address typed at sign-in is kept through every step
+  (09727f5) and, for a cookie sign-in, read from the page's own email box
+  only, never a password field (d1de8ed); shown in the companion and
+  Settings → Bridges (sasonica-app 23b31d89) — "emails visible". Sign-in
+  fields are marked for the user's password manager (9bbf1de); the app keeps
+  no password.
+- **Updates through Sasonica's updater** (David: "yep sounds good"): CI
+  releases `build-<N>` with `sasonica-bridges-<N>-<sha7>.apk`, a release key
+  (red2 `~/.local/share/sasonica-bridges-signing`, backed up in
+  dotfiles-secrets 63df18b, mirrored in the repo's secrets); the server's
+  `/app/update?app=bridges` for paired devices only (agent-media fb3a22d4,
+  §6.52); Sasonica installs it beside itself (sasonica-app 42051575). p8a
+  moved off the debug key to build-101 by one reinstall.
+- **"Local"** pill in Chats' people view (bfce170a).
