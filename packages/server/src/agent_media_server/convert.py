@@ -89,10 +89,10 @@ def parse(out: str) -> dict:
     return {"session": resume.split()[-1], "resume": resume, "path": path}
 
 
-def _run(argv: list[str], cwd: str) -> tuple[int, str, str]:
+def _run(argv: list[str], cwd: str, env: dict | None = None) -> tuple[int, str, str]:
     try:
         r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT_S, stdin=subprocess.DEVNULL)
+                           timeout=TIMEOUT_S, stdin=subprocess.DEVNULL, env=env)
     except subprocess.TimeoutExpired:
         raise ConvertError(f"txcript took longer than {int(TIMEOUT_S)} s") from None
     except OSError as e:
@@ -181,17 +181,57 @@ def convert(session: str, to: str, *, source: str = "", cwd: str = "",
     which = session if upto is None else f"{session}#1-{upto}"
     argv = [exe, "continue", which, "--from", TXCRIPT_IDS[source],
             "--with", TXCRIPT_IDS[to], "--no-resume"]
-    rc, out, err = _run(argv, cwd)
+    env, imported = _opencode2_env(to)
+    try:
+        return _convert(argv, cwd, env, imported, session, upto, source, to)
+    finally:
+        if env is not None:
+            import shutil as _sh
+
+            _sh.rmtree(os.path.dirname(imported), ignore_errors=True)
+            _sh.rmtree(env["PATH"].split(os.pathsep, 1)[0], ignore_errors=True)
+
+
+def _opencode2_env(to: str) -> tuple[dict | None, str]:
+    """For a copy into opencode 2, which has no `opencode import`: txcript's
+    environment with a stand-in `opencode` first on its PATH (core
+    opencode_import), and the file it writes the new id to. (None, "")
+    otherwise."""
+    if to != "opencode":
+        return None, ""
+    from agent_media_core import opencode_api, opencode_import
+
+    if not opencode_api.cli_is_v2():
+        return None, ""
+    import tempfile
+
+    note = os.path.join(tempfile.mkdtemp(prefix="am-opencode-import-"), "id")
+    env = {**os.environ, "PATH": opencode_import.shim_dir() + os.pathsep + os.environ.get("PATH", ""),
+           "MEDIA_OPENCODE_IMPORTED": note}
+    return env, note
+
+
+def _convert(argv, cwd, env, imported, session, upto, source, to) -> dict:
+    rc, out, err = _run(argv, cwd, env)
     if rc != 0 and upto is not None:
         # A cut between a tool call and its result is refused with the
         # nearest range that keeps them together; take it if it starts at 1.
         near = re.search(r"nearest valid range is #1-(\d+)", _clean(out + err))
         if near:
             argv[2] = f"{session}#1-{near.group(1)}"
-            rc, out, err = _run(argv, cwd)
+            rc, out, err = _run(argv, cwd, env)
     if rc != 0:
         raise ConvertError(_clean(out + err)[:500] or f"txcript failed ({rc})")
     got = parse(out + err)
+    if imported:
+        # opencode 2 named the copy itself: that is the session that exists.
+        try:
+            real = open(imported, encoding="utf-8").read().strip()
+        except OSError:
+            real = ""
+        if real and real != got["session"]:
+            got = {**got, "session": real,
+                   "resume": got["resume"].replace(got["session"], real)}
     return {**got, "from": source, "to": to,
             "loss": KNOWN_LOSSES.get((source, to), "")}
 
