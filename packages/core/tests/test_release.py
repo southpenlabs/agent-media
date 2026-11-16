@@ -640,3 +640,25 @@ def test_drain_restarts_in_process_and_reports_health(rel, monkeypatch):
     monkeypatch.setenv("FAKE_DOWN", "agent-media-sessiond")
     assert rs.drain(["sessiond"], after=0)["rc"] == rs.FAILED
     assert rs.drain(["nope"], after=0)["rc"] == rs.UNKNOWN
+
+
+def test_detach_hands_the_restarts_over_and_holds_only_for_the_session_host(monkeypatch):
+    """`media update --detach` (the jobs worker's update on a host in release
+    mode, 16 Nov 2026): the restarts go to their own unit whatever runs it,
+    and the session host's hold is taken only when it is among them."""
+    from agent_media_core import release
+    from agent_media_core import restart_services as rs
+
+    monkeypatch.delenv("MEDIA_SESSIOND_SESSION", raising=False)
+    handed, held = [], []
+    monkeypatch.setattr(release, "_detach", lambda argv: handed.append(argv) or
+                        {"how": "systemd-run", "unit": "u", "log": "l"})
+    monkeypatch.setattr(release, "finish", lambda *a, **k: pytest.fail("ran here"))
+    monkeypatch.setattr(rs, "hold_for", lambda names: held.append(names) or {"id": "h"})
+    said = []
+    assert release._go(["agent-media-server.service"], "new", "old", said.append, detach=True) == 0
+    assert handed[-1][-6:] == ["--finish", "new", "--from", "old", "--units",
+                               "agent-media-server.service"] and held == []
+    assert "end your turn" not in said[-1]
+    assert release._go(["agent-media-sessiond.service"], "new", "old", said.append, detach=True) == 0
+    assert held == [["agent-media-sessiond"]]

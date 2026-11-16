@@ -853,3 +853,64 @@ def test_a_download_in_line_is_not_given_up_after_pickup(worker, host, tmp_path,
     gate.touch()
     th.join(timeout=10)
     assert second == {"rc": 0, "out": "second\n", "err": ""}
+
+
+# --- an update on a host in release mode (16 Nov 2026) -----------------------------
+#
+# Its services run from ~/.local/share/agent-media/current, so a pull changes
+# nothing that runs: the worker runs the host's own `media update --detach`
+# with the release's python (faked here: it records its argv and says it
+# switched), and a checkout that will not fast-forward no longer stops it.
+
+@pytest.fixture()
+def release_host(tmp_path, monkeypatch):
+    root = tmp_path / "data" / "agent-media"
+    py = root / "current" / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    log = tmp_path / "release-argv.log"
+    py.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\necho "current is 53be99ff95aa (was d789bc770c8e)"\n'
+                  'echo "the restarts run outside this chat (systemd-run media-update-x)"\n')
+    py.chmod(0o755)
+    (root / "release-mode.json").write_text("{}")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    return lambda: log.read_text().splitlines() if log.exists() else []
+
+
+def test_a_release_host_updates_its_release_even_when_the_checkout_diverged(
+        worker, host, fake_py, repos, release_host):
+    dev, work = repos
+    _upstream_commit(work)
+    (dev / "b").write_text("a digest nobody pushed\n")
+    _git(dev, "add", "b")
+    _git(dev, "commit", "-q", "-m", "local")
+    res = rs.update_device("p8a", ["canvas"])
+    assert res["rc"] == 0, res
+    assert release_host() == ["-m agent_media_core.cli update --detach --only canvas"]
+    assert any(ln.startswith("checkout not pulled (the release is still updated): FAILED")
+               for ln in res["lines"])
+    assert "release: current is 53be99ff95aa (was d789bc770c8e)" in res["lines"]
+    assert res["moved"] is True
+    # The checkout's own restart path is not taken: the release update restarts.
+    assert not any(line.startswith("argv") for line in fake_py())
+
+
+def test_a_release_host_pulls_its_checkout_too(worker, host, fake_py, repos, release_host):
+    dev, work = repos
+    before = _git(dev, "rev-parse", "--short", "HEAD")
+    after = _upstream_commit(work)
+    res = rs.update_device("p8a")
+    assert res["rc"] == 0, res
+    assert res["pulled"] == {"from": before, "to": after}
+    assert f"checkout pulled {before} -> {after}" in res["lines"]
+    assert release_host() == ["-m agent_media_core.cli update --detach"]
+
+
+def test_a_release_host_dry_run_pulls_nothing(worker, host, fake_py, repos, release_host):
+    dev, work = repos
+    before = _git(dev, "rev-parse", "--short", "HEAD")
+    _upstream_commit(work)
+    res = rs.update_device("p8a", dry_run=True)
+    assert res["rc"] == 0, res
+    assert release_host() == ["-m agent_media_core.cli update --detach --dry-run"]
+    assert _git(dev, "rev-parse", "--short", "HEAD") == before

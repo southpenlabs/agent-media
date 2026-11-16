@@ -7545,6 +7545,19 @@ then restart.
   as above, detached, `after` 10 s when 0 or absent. A dry run fetches and
   says what a pull would bring (`would pull a -> b (n commit(s))`), and its
   restart is a dry run. Nothing else: no ref, no branch, no command.
+- On a host in release mode (16 Nov 2026; docs/reference/releases.md: a
+  `current` release and `release-mode.json`), a pull changes nothing that
+  runs, so the worker pulls its checkout as before but a refused or failed
+  pull is a line in `lines` ("checkout not pulled (the release is still
+  updated): …"), not the end, and it then runs the host's own `media update
+  --detach [--only …] [--dry-run]` with the release's python: build, switch,
+  and the changed units restarted in a unit of their own, the session host
+  drained. Its output is in `lines` as `release: …`; `moved` is whether it
+  switched; `after` and `force` are not used. A build that outlasts the job
+  goes on in the background (`media version --log` has the outcome). When
+  the pull changed the worker's own files, it restarts itself 10 s out
+  (`restart`). red5 sat a day on an old release while a digest nobody had
+  pushed kept its checkout from fast-forwarding.
 - CLI: `media update --host NAME [--only …] [--after S] [--force]
   [--dry-run]` (`restart_services.update_device`). `media doctor --fix`
   deploys a host that is one of this server's jobs devices this way instead

@@ -59,6 +59,15 @@ for the services the checkout owns (or `only`), 10 s out and detached, with
 the busy checks. Answered as `result: {pulled: {from, to}, moved, lines,
 restart}`. A dry run fetches and says what a pull would bring.
 
+On a host in release mode (`media-setup release-mode`: its services run from
+`~/.local/share/agent-media/current`, not the checkout), a pull changes
+nothing that runs, so an update is that host's own `media update --detach`:
+build the newest release, switch to it, and restart what changed in a unit of
+its own (the session host drained). The checkout is still pulled first, as
+this worker runs from it, but a pull that fails (a diverged or dirty
+checkout) no longer stops the update: red5 sat a day on an old release that
+way (16 Nov 2026). A build that outlasts the job goes on in the background.
+
 **Agent sessions** (roadmap 56, David, 11 Nov 2026: "let's get our claude
 sessions running on red2 next ... I'm sick of only being able to run three
 at once"). With `MEDIA_JOBS_SESSIONS=1` here, and a device the server let
@@ -436,6 +445,9 @@ def update(spec, budget: float = 175.0, python: str = "") -> "tuple[int, dict | 
     lines: list = []
     res = {"pulled": None, "moved": False, "lines": lines, "restart": None}
     root = checkout()
+    rel = release_python()
+    if rel is not None:
+        return _update_release(spec, rel, root, max(5.0, budget - (time.monotonic() - t0)), res)
     if root is None:
         lines.append("no agent-media checkout here (MEDIA_JOBS_CHECKOUT): nothing to pull")
         return 1, res, ""
@@ -482,6 +494,104 @@ def update(spec, budget: float = 175.0, python: str = "") -> "tuple[int, dict | 
         lines.append(f"restart_services could not run (rc {rc}): "
                      f"{' '.join(err.strip().splitlines()[-3:])}")
     return rc, res, err
+
+
+def release_root() -> Path:
+    """Where releases live (agent_media_core.release.root)."""
+    explicit = (os.environ.get("MEDIA_RELEASE_ROOT") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    base = (os.environ.get("XDG_DATA_HOME") or "").strip()
+    return (Path(base) if base else Path.home() / ".local" / "share") / "agent-media"
+
+
+def release_python() -> "Path | None":
+    """The python of the release in use, when this host is in release mode
+    (a `current` release and the manifest `media-setup release-mode` keeps);
+    else None, and an update is a pull of the checkout."""
+    r = release_root()
+    if not ((r / "current").exists() and (r / "release-mode.json").is_file()):
+        return None
+    for py in (r / "current" / ".venv" / "bin" / "python",
+               r / "current" / ".venv" / "Scripts" / "python.exe"):
+        if py.exists():
+            return py
+    return None
+
+
+#: The jobs worker's own unit, restarted when a pull changed its files.
+WORKER_UNIT = "agent-media-jobs-worker"
+
+
+def _update_release(spec: dict, rel: Path, root: "Path | None", budget: float,
+                    res: dict) -> "tuple[int, dict, str]":
+    """An update on a host in release mode: pull the checkout (this worker's
+    own code; a failure is noted, not fatal), then `media update --detach`
+    with the release's python. Its output becomes `lines`; `moved` is whether
+    it switched release. A build still going when the budget runs out is
+    left to finish in its own session (the deploy log has the outcome)."""
+    t0 = time.monotonic()
+    lines = res["lines"]
+    dry = spec.get("dry_run") is True
+    worker_changed = False
+    if root is not None and not dry:
+        rc, out = _git(root, "status", "--porcelain", "--untracked-files=no")
+        if rc != 0 or out:
+            lines.append(f"{root}: uncommitted changes, checkout not pulled (the release is "
+                         "still updated)")
+        else:
+            _, before = _git(root, "rev-parse", "--short", "HEAD")
+            rc, out = _git(root, "pull", "--ff-only", "--quiet", timeout=GIT_TIMEOUT_S)
+            if rc != 0:
+                lines.append("checkout not pulled (the release is still updated): "
+                             + _pull_failed(rc, out, before))
+            else:
+                _, after = _git(root, "rev-parse", "--short", "HEAD")
+                res["pulled"] = {"from": before, "to": after}
+                if before != after:
+                    lines.append(f"checkout pulled {before} -> {after}")
+                    _, changed = _git(root, "diff", "--name-only", before, after, "--",
+                                      "packages/core/services/jobs-worker")
+                    worker_changed = bool(changed.strip())
+    argv = [str(rel), "-m", "agent_media_core.cli", "update", "--detach"]
+    if spec.get("only"):
+        argv += ["--only", *spec["only"]]
+    if dry:
+        argv.append("--dry-run")
+    log = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") \
+        / "agent-media" / "jobs-update.log"
+    rc = 0
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("w") as fh:
+            p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=fh,
+                                 stderr=subprocess.STDOUT, cwd=str(Path.home()),
+                                 start_new_session=True)
+            try:
+                rc = p.wait(timeout=max(5.0, budget - (time.monotonic() - t0) - 5))
+            except subprocess.TimeoutExpired:
+                rc = None
+    except OSError as e:
+        lines.append(f"media update could not run: {e}")
+        return 127, res, ""
+    try:
+        out = log.read_text(errors="replace").splitlines()
+    except OSError:
+        out = []
+    lines += [f"release: {x}" for x in out[-20:] if x.strip()]
+    if rc is None:
+        lines.append(f"release: still building; it goes on in the background (log: {log}, "
+                     "outcome: `media version --log`)")
+        rc = 0
+    res["moved"] = any(x.startswith("current is ") for x in out)
+    if worker_changed and rc == 0:
+        argv2, _ = restart_argv({"only": [WORKER_UNIT], "after": UPDATE_AFTER_S})
+        rc2, err, result = _run_restart(argv2, max(5.0, budget - (time.monotonic() - t0)))
+        res["restart"] = result
+        if result is None:
+            lines.append(f"this worker's restart could not be scheduled (rc {rc2}): "
+                         f"{' '.join(err.strip().splitlines()[-3:])}")
+    return int(rc), res, ""
 
 
 def _pull_failed(rc: int, out: str, at: str) -> str:

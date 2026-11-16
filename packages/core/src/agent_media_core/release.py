@@ -1430,20 +1430,24 @@ def finish(units: "list[str]", new: str, old: str, *, emit: Emit = print,
     return 1
 
 
-def _go(units: "list[str]", new: str, old: str, emit: Emit, *, rollback: bool = True) -> int:
+def _go(units: "list[str]", new: str, old: str, emit: Emit, *, rollback: bool = True,
+        detach: bool = False) -> int:
     """`finish`, here or, when this runs inside a chat of the session holder
-    it is about to restart, detached so the chat can end its turn."""
+    it is about to restart, detached so the chat can end its turn. `detach`
+    always hands it over (`media update --detach`: the jobs worker's update,
+    which answers before the services it is one of are restarted)."""
     from . import restart_services as rs
 
     stems = [u.removesuffix(".service") for u in units]
-    if _inside_session_holder() and any(rs.short_name(n) == rs.SESSIOND for n in stems):
+    holds = any(rs.short_name(n) == rs.SESSIOND for n in stems)
+    if detach or (_inside_session_holder() and holds):
         argv = [sys.executable, "-m", "agent_media_core.release", "--finish", new,
                 "--from", old or "-", "--units", *units]
         if not rollback:
             argv.append("--no-rollback")
         # The hold begins now, not when the detached run reaches the session
         # holder: this chat is then told to end its turn and resumed after.
-        held = rs.hold_for([n for n in stems if rs.short_name(n) == rs.SESSIOND])
+        held = rs.hold_for([n for n in stems if rs.short_name(n) == rs.SESSIOND]) if holds else None
         try:
             sch = _detach(argv)
         except ReleaseError as e:
@@ -1452,15 +1456,17 @@ def _go(units: "list[str]", new: str, old: str, emit: Emit, *, rollback: bool = 
             emit(f"could not hand the restarts over: {e}")
             return 1
         emit(f"the restarts run outside this chat ({sch['how']} {sch['unit']}; log: "
-             f"{sch['log']}): {' '.join(stems)}. The session host is drained, so end "
-             "your turn; the result is in the deploy log (`media version --log`)")
+             f"{sch['log']}): {' '.join(stems)}. "
+             + ("The session host is drained, so end your turn; " if holds and _inside_session_holder()
+                else "")
+             + "the result is in the deploy log (`media version --log`)")
         return 0
     return finish(units, new, old, emit=emit, rollback=rollback)
 
 
 def update(to: str = "", *, remote: str = "", only: "Optional[list[str]]" = None,
            restart: bool = True, every: bool = False, dry_run: bool = False,
-           emit: Emit = print) -> int:
+           detach: bool = False, emit: Emit = print) -> int:
     """`media update`: fetch, build the release for `to` (default the
     configured branch) beside the one in use, switch `current` to it, and
     restart the units in release mode whose code changed (`every`: all of
@@ -1517,7 +1523,7 @@ def update(to: str = "", *, remote: str = "", only: "Optional[list[str]]" = None
     if not restart or not units:
         emit("nothing restarted" + ("" if units else ": no running unit loads what changed"))
         return 0
-    return _go(units, sha, old, emit)
+    return _go(units, sha, old, emit, detach=detach)
 
 
 def rollback(*, restart: bool = True, dry_run: bool = False, emit: Emit = print) -> int:

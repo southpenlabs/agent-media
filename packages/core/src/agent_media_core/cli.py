@@ -9622,7 +9622,7 @@ def cmd_update(a) -> int:
             return release.rollback(restart=not a.no_restart, dry_run=a.dry_run, emit=emit)
         return release.update(a.to or "", remote=a.remote or "", only=a.only or None,
                               restart=not a.no_restart, every=a.all,
-                              dry_run=a.dry_run, emit=emit)
+                              dry_run=a.dry_run, detach=a.detach, emit=emit)
 
     res = restart_services.update_device(a.host, a.only or None,
                                          after=float(a.after or 0), force=a.force,
@@ -11658,6 +11658,10 @@ def _build_parser() -> argparse.ArgumentParser:
     up.add_argument("--dry-run", action="store_true",
                     help="fetch and say what a pull would bring and what would "
                          "restart; pull and restart nothing")
+    up.add_argument("--detach", action="store_true",
+                    help="build and switch here, then run the restarts in their own "
+                         "unit and return (the jobs worker's update on a host in "
+                         "release mode)")
     up.set_defaults(func=cmd_update)
 
     jb = sub.add_parser(

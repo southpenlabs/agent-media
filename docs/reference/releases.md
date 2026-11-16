@@ -84,6 +84,10 @@ A host that stayed busy is not a failed release: it is left switched, exit
 Run from inside a chat whose session host is among the units, steps 4 and 5
 are handed to a transient systemd unit so the chat can end its turn; the
 outcome is in the deploy log.
+`media update --detach` hands them over that way always: it is what
+`media update --host NAME` runs on a host in release mode, through the jobs
+worker there (contract §6.21a), so the job is answered before the services
+it is one of restart.
 
 **Which units a change touches.** For each unit, what it starts is read
 from its command (a console script, `python -m`, a file in the tree, and
