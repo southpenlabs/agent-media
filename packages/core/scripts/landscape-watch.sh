@@ -51,6 +51,20 @@ claude -p "$prompt" \
 git add -- "$OUT"
 git commit -q -m "docs: landscape watch $TODAY" -- "$OUT" || true
 
+# Push it. Unpushed, the commit leaves this checkout diverged from main, and
+# `media update --host` (a fast-forward pull) then fails here every time: red5
+# sat on a 15 Nov release for a day that way (16 Nov 2026), once no chat ran
+# on this host to push the digest along. Behind main, the digest is replayed
+# onto it, but only in a clean tree: never a stash over someone's work.
+if ! git push -q origin HEAD:main 2>/dev/null; then
+  if [ -z "$(git status --porcelain --untracked-files=no)" ] \
+      && git pull -q --rebase origin main && git push -q origin HEAD:main; then
+    :
+  else
+    echo "landscape-watch: committed $OUT but could not push it; push by hand" >&2
+  fi
+fi
+
 # Top item of "Worth stealing" makes the TODO title informative on the agenda.
 lead="$(awk '/^## Worth stealing/{f=1;next} /^## /{f=0} f && /^[-*] /{sub(/^[-*] +/,"");print;exit}' "$OUT" | sed -E 's/\*\*//g; s/\. .*/./' | cut -c1-90)"
 {
