@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 50 rows.
+Sorted with what blocks a public release first. 52 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -92,6 +92,7 @@ Sorted with what blocks a public release first. 50 rows.
 | 49 | Hugging Face (rhasspy/piper-voices) | Piper voices: `media-setup voices piper:<voice>` | none | fetched on request by Piper's own downloader | **Needs work**: each voice has its own licence (its MODEL_CARD), some non-commercial; show it beside the voice (the picker's `licence`) and keep non-commercial ones out of a paid default | **No, not gated** |
 | 50 | opencode GitHub release (anomalyco/opencode, formerly sst/opencode) | opencode, the default agent: `sasonica install` fetches it when none is here (`--no-opencode` skips) | none | fetched once at install, pinned v1.19.5, checked against pinned sha256s | nothing: opencode is MIT. Its free models are opencode's own service, under row 10 | **No, not gated** |
 | 51 | txcript GitHub release (skillsynchq/txcript) | copying a chat into another agent (`media session convert`): `sasonica install` fetches it when none is here (`--no-txcript` skips) | none | fetched once at install, pinned v0.14.4, checked against pinned sha256s; runs locally, reading and writing the agents' own stores, nothing sent anywhere | nothing: txcript is Apache-2.0, run as a separate program | **No, not gated** |
+| 52 | Stremio add-ons, by address (Torrentio, and the legitimate ones offered as examples: Cinemeta, YouTube, WatchHub, Public Domain Movies, OpenSubtitles, Anime Kitsu, OmniCatalogs, Trakt, MDBList, and the Plex/Jellyfin/Emby bridges) | streams, catalogues, subtitles and where-to-watch at a title, inside Stremio (§6.54 "Stremio add-ons") | none | an address is named and its manifest read once when added (`watch_addons.py`); Stremio is sent to it by its own install link. Any address works, not a fixed table | nothing for the link; a torrent add-on's streams go peer-to-peer in the user's own Stremio. The example addresses are read from stremio-official-addons and a community list, and may move | no |
 
 ## The services, one by one
 

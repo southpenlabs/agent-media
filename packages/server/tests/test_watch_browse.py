@@ -471,3 +471,81 @@ def test_open_in_settings_are_gated(server, fake, creds):
     assert res.status == 401
     res, _ = call(server, "POST", "/watch/settings", {"open_in": {"stremio": True}})
     assert res.status in (401, 403)
+
+
+TST = "https://torrentio.strem.fun/manifest.json"
+MANIFEST = {"id": "com.stremio.torrentio.addon", "name": "Torrentio", "version": "0.0.15",
+            "logo": "https://torrentio.strem.fun/images/logo_v1.png",
+            "resources": [{"name": "stream", "types": ["movie", "series"]}], "types": ["movie", "series"]}
+
+
+def _stremio(monkeypatch):
+    """Stub watch_addons._get; only the one address answers with a manifest."""
+    from agent_media_core import watch_addons
+
+    seen: list = []
+
+    def get(url, timeout=15.0):
+        seen.append(url)
+        if url != TST:
+            if url.endswith("/answers-not.json"):
+                return {"hello": "world"}
+            raise OSError("connection refused")
+        return dict(MANIFEST)
+    monkeypatch.setattr(watch_addons, "_get", get)
+    return seen
+
+
+def test_stremio_addons_are_any_address_the_owner_adds(server, signed_in, fake, creds, monkeypatch):
+    """Any add-on address, kept by the server; each row carries Stremio's own
+    install link (`stremio://<host><path>`) and its web app's add-ons page."""
+    seen = _stremio(monkeypatch)
+    _, obj = call(server, "GET", "/watch/settings", headers=AUTH)
+    assert obj["addons"] == []
+    # The examples to offer: Stremio's own first, each with its install link.
+    assert [s["name"] for s in obj["suggested"]][:2] == ["Cinemeta", "YouTube"]
+    assert obj["suggested"][0]["install"] == "stremio://v3-cinemeta.strem.io/manifest.json"
+    res, obj = call(server, "POST", "/watch/settings", {"addons": {"add": TST}}, AUTH)
+    assert res.status == 200 and obj["addons"] == [{
+        "id": "com.stremio.torrentio.addon", "name": "Torrentio", "address": TST,
+        "install": "stremio://torrentio.strem.fun/manifest.json", "web": "https://web.stremio.com/#/addons",
+        "logo": "https://torrentio.strem.fun/images/logo_v1.png"}], obj.get("addons")
+    assert seen == [TST]
+    # A bare host, a base path and a `stremio://` link all read as the manifest; re-adding does not duplicate.
+    for addr in ("torrentio.strem.fun", "https://torrentio.strem.fun", "stremio://torrentio.strem.fun/manifest.json"):
+        res, obj = call(server, "POST", "/watch/settings", {"addons": {"add": addr}}, AUTH)
+        assert res.status == 200 and len(obj["addons"]) == 1, addr
+    # Removed by its manifest id, or its address.
+    res, obj = call(server, "POST", "/watch/settings", {"addons": {"remove": "com.stremio.torrentio.addon"}}, AUTH)
+    assert res.status == 200 and obj["addons"] == []
+    call(server, "POST", "/watch/settings", {"addons": {"add": TST}}, AUTH)
+    _, obj = call(server, "POST", "/watch/settings", {"addons": {"remove": TST}}, AUTH)
+    assert obj["addons"] == []
+    # It rides the settings GET too, alongside the open-in keys.
+    _, obj = call(server, "POST", "/watch/settings", {"addons": {"add": TST}}, AUTH)
+    _, got = call(server, "GET", "/watch/settings", headers=AUTH)
+    assert [a["name"] for a in got["addons"]] == ["Torrentio"]
+
+
+def test_stremio_addons_refuse_a_bad_address(server, signed_in, fake, creds, monkeypatch):
+    _stremio(monkeypatch)
+    for bad in ({"addons": {}}, {"addons": {"add": ""}}, {"addons": {"add": "ftp://x/y"}},
+                {"addons": {"add": "https://nothing.strem.fun/manifest.json"}},
+                {"addons": {"add": "https://nothing.strem.fun/answers-not.json"}},
+                {"addons": {"remove": "com.stremio.nope"}}, {"addons": {"edit": TST}},
+                {"addons": "x"}):
+        res, obj = call(server, "POST", "/watch/settings", bad, AUTH)
+        assert res.status in (400, 502), bad
+        assert isinstance(obj["error"], str), bad
+    # An address that does not answer is 502; the add-on is the address's business.
+    res, _ = call(server, "POST", "/watch/settings", {"addons": {"add": "https://down.strem.fun/manifest.json"}}, AUTH)
+    assert res.status == 502
+
+
+def test_stremio_addons_are_an_admins(server, fake, creds, monkeypatch):
+    from agent_media_server import auth
+    _stremio(monkeypatch)
+    monkeypatch.setattr(auth, "may_admin", lambda b: (None, {"status": 403, "code": "not_admin",
+                                                             "error": "only an admin may change how this server is set up"}))
+    res, obj = call(server, "POST", "/watch/settings", {"addons": {"add": TST}}, AUTH)
+    assert res.status == 403 and obj["code"] == "not_admin"

@@ -24,8 +24,11 @@ agent_media_core.tmdb; David, 9 Nov 2026).
                                             films from the fixed table of sources (watch_free.py), each with `free`
   GET  /watch/free/file?id=<item> | title=&year=   gated → {"ok", "source", "id", "url", "duration", "subtitles", …}
   GET  /watch/free/subtitles?id=&name=      gated → {"ok", "vtt", "lang", "label"}
-  GET  /watch/settings                      gated → {"ok", "open_in": [{"id", "label", "on", "mode", "modes"}]}
-  POST /watch/settings {"open_in"?: {id: bool}, "open_in_mode"?: {id: "app"|"page"}}   admins → the same
+  GET  /watch/settings   gated → {"ok", "open_in": [{"id", "label", "on", "mode", "modes"}],
+                                  "addons": [{"id", "name", "address", "install", "web"}],  (watch_addons.py)
+                                  "suggested": [{"name", "address", "install", "web", "note"}]}
+  POST /watch/settings {"open_in"?: {id: bool}, "open_in_mode"?: {id: "app"|"page"},
+                        "addons"?: {"add"|"remove": "<address>"}}   admins → the same
   GET  /watch/season?id=<show>&season=<n>   gated → {"ok", "season", "episodes"}
   GET  /watch/person?id=                    gated → {"ok", "person", "movies": {cast, crew}, "shows": {cast, crew}}
   GET  /watch/lists?which=trending|popular|mine&page=    gated → {"ok", "lists", …}
@@ -96,21 +99,24 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         send_json(h, 200, {"ok": True, **got})
         return True
     if path == "/watch/settings":
-        # Which "open in <app>" keys a title's page carries (watch_open.py): the owner's choice, off by default.
-        from agent_media_core import watch_open
+        # Which "open in <app>" keys a title's page carries (watch_open.py), and
+        # the Stremio add-ons the owner added (watch_addons.py). The owner's
+        # choice, off and empty by default; a write is an admin's.
+        from agent_media_core import watch_addons, watch_open
         user, err = auth.gate(bearer) if method == "GET" else auth.may_admin(bearer)
         if not user:
             send_json(h, err.pop("status", 401 if method == "GET" else 403), {"ok": False, **err})
             return True
         if method == "POST":
             body = _body(h)
-            want, how = body.get("open_in"), body.get("open_in_mode")
+            want, how, change = body.get("open_in"), body.get("open_in_mode"), body.get("addons")
             try:
-                if not (isinstance(want, dict) and want) and not (isinstance(how, dict) and how):
-                    raise ValueError('send {"open_in": {"<app>": true|false}} or {"open_in_mode": {"<app>": "app"|"page"}}')
-                if not isinstance(want or {}, dict) or not isinstance(how or {}, dict):
-                    raise ValueError("open_in and open_in_mode are objects")
-                want, how = want or {}, how or {}
+                if not any(isinstance(x, dict) and x for x in (want, how, change)):
+                    raise ValueError('send {"open_in": {"<app>": true|false}}, {"open_in_mode": {"<app>": "app"|"page"}} '
+                                     'or {"addons": {"add"|"remove": "<address>"}}')
+                if not all(isinstance(x or {}, dict) for x in (want, how, change)):
+                    raise ValueError("open_in, open_in_mode and addons are objects")
+                want, how, change = want or {}, how or {}, change or {}
                 for app, on in want.items():
                     if app not in watch_open.APPS or not isinstance(on, bool):
                         raise ValueError(f"open_in: {app!r} is not one of {', '.join(watch_open.APPS)}, or not true|false")
@@ -118,14 +124,25 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
                     if app not in watch_open.APPS or m not in watch_open.modes(app):
                         raise ValueError(f"open_in_mode: {app!r} is not one of {', '.join(watch_open.APPS)}, "
                                          f"or {m!r} is not a way it opens here")
+                if change and not set(change) <= {"add", "remove"}:
+                    raise ValueError('addons takes "add" or "remove"')
                 for app, on in want.items():
                     watch_open.set_app(app, on)
                 for app, m in how.items():
                     watch_open.set_mode(app, m)
+                if "add" in change:
+                    watch_addons.add(str(change.get("add") or ""))
+                if "remove" in change:
+                    watch_addons.remove(str(change.get("remove") or ""))
             except ValueError as e:
                 send_json(h, 400, {"ok": False, "error": str(e)})
                 return True
-        send_json(h, 200, {"ok": True, "open_in": watch_open.apps()})
+            except Exception as e:  # noqa: BLE001
+                print(f"watch: addons: {e}", file=sys.stderr)
+                send_json(h, 502, {"ok": False, "error": f"that add-on address didn't answer: {e}"})
+                return True
+        send_json(h, 200, {"ok": True, "open_in": watch_open.apps(), "addons": watch_addons.addons(),
+                           "suggested": watch_addons.suggested()})
         return True
     if path in FREE:
         # Films from a fixed table of sources (watch_free.py): no address is ever taken from the request.
