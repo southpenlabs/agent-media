@@ -36,10 +36,19 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // opencode's PATH need not include the venv agent-media is installed in.
+// The installed release's hook first: its venv has the voice engines (Kokoro
+// is an add-on there, not in a source checkout's .venv, where every reply
+// failed to render and so was never filed: no Play buttons, 17 Nov 2026).
 function hookBin() {
   if (process.env.MEDIA_HOOK_BIN_OPENCODE) return process.env.MEDIA_HOOK_BIN_OPENCODE;
-  const venv = join(homedir(), "projects", "agent-media", ".venv", "bin", "media-hook-opencode");
-  return existsSync(venv) ? venv : "media-hook-opencode";
+  const data = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+  for (const venv of [
+    join(data, "agent-media", "current", ".venv", "bin", "media-hook-opencode"),
+    join(homedir(), "projects", "agent-media", ".venv", "bin", "media-hook-opencode"),
+  ]) {
+    if (existsSync(venv)) return venv;
+  }
+  return "media-hook-opencode";
 }
 
 function run(args, input = "") {
