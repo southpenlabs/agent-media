@@ -11691,8 +11691,12 @@ POST /pair/deny {"id"}                                        auth.may_enrol
 ```
 
 - The device shows `approve` as a QR and the code beside it, with a
-  countdown from `expires_in`. `approve` is on the address the device asked
-  on, under the web app (`/app/approve?pair=<id>`): the app's link handling
+  countdown from `expires_in`. `approve` and `server.base` (here and in
+  `/pair/wait`'s answer) are on this server's public https address
+  (`MEDIA_PUBLIC_URL`), whatever address the device asked on — a TV set up on
+  a tailnet address put a tailnet link in its QR (16 Nov 2026); only a server
+  with no public address answers with the address asked on. The same goes
+  for `POST /devices/code`'s `links` and `server.base`. `approve` is under the web app (`/app/approve?pair=<id>`): the app's link handling
   or the phone's browser opens the approve screen, which reads `GET
   /pair/pending?id=` and offers Allow / Allow as guest / Deny. A phone
   already signed in can type the code instead (case, spaces and the dash do

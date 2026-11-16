@@ -163,3 +163,20 @@ def test_an_unpaired_device_can_tell_the_server_takes_requests(server, phone, mo
     assert obj["pair_request"] is False
     res, obj = call(server, "POST", "/pair/request", {"name": "TV"})
     assert res.status == 404 and obj["code"] == "no_pair_requests"
+
+
+def test_links_for_another_device_use_the_public_address(server, phone, monkeypatch):
+    """A TV that reached the server on a tailnet address still puts the public
+    https address in its QR (David, 16 Nov 2026: "that's a tailscale address.
+    shouldn't it use a sasonica.com address?"), and so does a minted code."""
+    monkeypatch.setenv("MEDIA_PUBLIC_URL", "https://red2-ryer.sasonica.com")
+    req = _ask(server)
+    assert req["approve"] == f"https://red2-ryer.sasonica.com/app/approve?pair={req['id']}"
+    assert req["server"]["base"] == "https://red2-ryer.sasonica.com"
+    call(server, "POST", "/pair/approve", {"id": req["id"]}, _auth(phone))
+    _, got = _wait(server, req)
+    assert got["server"]["base"] == "https://red2-ryer.sasonica.com"
+    res, minted = call(server, "POST", "/devices/code", {"device": "Tablet"}, _auth(phone))
+    assert res.status == 200, minted
+    assert minted["server"]["base"] == "https://red2-ryer.sasonica.com"
+    assert "red2-ryer.sasonica.com" in minted["links"]["app"]

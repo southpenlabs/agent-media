@@ -2920,6 +2920,22 @@ def _services_restart(h: BaseHTTPRequestHandler) -> None:
     _json(h, status, {"ok": rc == rs.OK, "host": rs.host(), **res})
 
 
+def _public_base(h: BaseHTTPRequestHandler) -> str:
+    """The address to hand to ANOTHER device (a QR, a link to open on a
+    phone): this server's public https origin (MEDIA_PUBLIC_URL, or the last
+    rename's; server_address.current), else the address this request came in
+    on. Never the Host a device happened to use: a TV set up on a tailnet
+    address put a tailnet link in its pairing QR (David, 16 Nov 2026: "that's
+    a tailscale address. shouldn't it use a sasonica.com address?"; design
+    rule: nothing new relies on the tailnet)."""
+    from . import server_address
+
+    try:
+        return server_address.current() or _base_url(h)
+    except Exception:  # noqa: BLE001 — a link still goes out
+        return _base_url(h)
+
+
 def _lookup_for(base: str) -> str:
     """The sasonica.com lookup for this server, when `base` is the quick
     tunnel it publishes (tunnel.py): the app keeps it, and asks it for the
@@ -3203,7 +3219,7 @@ def _pair_request(h: BaseHTTPRequestHandler) -> None:
     if not ok:
         _json(h, 429, {"ok": False, **got})
         return
-    base = _base_url(h)
+    base = _public_base(h)
     print(f"pair: {ip} asks to pair {str(body.get('name') or '')[:80]!r} ({got['id']})", file=sys.stderr)
     _json(h, 200, {"ok": True, **got,
                    "approve": f"{base}{web_app.PREFIX}/approve?pair={quote(got['id'])}",
@@ -3230,7 +3246,7 @@ def _pair_wait(h: BaseHTTPRequestHandler) -> None:
         _json(h, 200, {"ok": True, "status": "pending"})
     elif status == "approved":
         print(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip} by request", file=sys.stderr)
-        server = {"name": _server_name(), "base": _base_url(h)}
+        server = {"name": _server_name(), "base": _public_base(h)}
         lookup = _lookup_for(server["base"])
         if lookup:
             server["lookup"] = lookup
@@ -3398,7 +3414,8 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
                        "error": "role must be admin, member or guest"})
         return
     code, expires = devices.mint_code(name, enrol=bool(body.get("enrol")), role=role)
-    base = _base_url(h)
+    # The links go to the device being paired, so the public address.
+    base = _public_base(h)
     host, _, port = base.partition("://")[2].partition(":")
     # Over https (a tunnel), the whole base: http://host:8781 would be wrong.
     app_link, browser_link = devices.links(
