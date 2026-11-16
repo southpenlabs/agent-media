@@ -161,7 +161,8 @@ def test_get_enrol_says_where_to_sign_in(server, monkeypatch):
     res, obj = call(server, "GET", "/enrol")
     assert res.status == 200
     assert obj["accounts"] == [{"issuer": ISS, "authorization_endpoint": f"{ISS}/oauth/authorize",
-                                "client_id": "sasonica-app", "scopes": "openid email profile"}]
+                                "client_id": "sasonica-app", "scopes": "openid email profile",
+                               "signup": None}]
 
 
 def test_enrol_with_a_code_swaps_it_at_the_issuer(server, monkeypatch):
@@ -318,3 +319,96 @@ def test_an_accounts_role(server, monkeypatch):
     assert obj["role"] == "member" and obj["enrol"] is False
     res, me = call(server, "GET", "/me", headers={"Authorization": f"Bearer {obj['token']}"})
     assert me["role"] == "member" and me["enrol"] is False
+
+
+# --- asking to join (join_requests.py; David, 16 Nov 2026) ----------------------
+
+def _alert(rid):
+    from agent_media_server import alerts
+    return next(a for a in alerts.listing()["alerts"] if a["id"] == f"join.{rid}")
+
+
+def test_a_stranger_asks_and_the_owner_allows(server):
+    from agent_media_server import alerts
+
+    stranger = token(sub="7", email="sam@example.com", name="Sam")
+    res, obj = call(server, "POST", "/enrol", {"id_token": stranger, "device": "Sam's phone"})
+    assert res.status == 403 and obj["code"] == "not_enrolled"
+    req = obj["request"]
+    assert req["status"] == "pending" and req["secret"]
+    a = _alert(req["id"])
+    assert a["open"] and a["level"] == "needs" and "Sam asks to join" in a["title"]
+    assert [x["id"] for x in a["actions"]] == ["allow", "guest", "deny"]
+
+    # Asking again refreshes the same request; the old secret stops working.
+    res, again = call(server, "POST", "/enrol", {"id_token": stranger, "device": "Sam's phone"})
+    assert again["request"]["id"] == req["id"]
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert res.status == 404
+    req = again["request"]
+
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert res.status == 200 and w == {"ok": True, "status": "pending"}
+
+    ok, out = alerts.act(f"join.{req['id']}", "allow")
+    assert ok and out["role"] == "member"
+    assert not _alert(req["id"])["open"]
+
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert res.status == 200 and w["ok"] and w["role"] == "member" and w["enrol"] is False
+    assert w["account"] == "sam@example.com" and w["name"] == "Sam's phone"
+    res, _ = call(server, "GET", "/targets", headers={"Authorization": f"Bearer {w['token']}"})
+    assert res.status == 200
+    # Spent: the same secret gets nothing more.
+    res, _ = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert res.status == 404
+
+    # The account is remembered: its next device signs straight in.
+    res, obj = call(server, "POST", "/enrol", {"id_token": stranger, "device": "Sam's tablet"})
+    assert res.status == 200 and obj["role"] == "member"
+
+    # Revoking the account forgets that too.
+    devices.revoke_account("sam@example.com")
+    res, obj = call(server, "POST", "/enrol", {"id_token": stranger})
+    assert res.status == 403 and obj["request"]["status"] == "pending"
+
+
+def test_allowed_as_guest_reads_only(server):
+    from agent_media_server import alerts
+
+    res, obj = call(server, "POST", "/enrol", {"id_token": token(sub="8", email="g@example.com")})
+    req = obj["request"]
+    alerts.act(f"join.{req['id']}", "guest")
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert w["role"] == "guest"
+
+
+def test_denied_stays_denied(server):
+    from agent_media_server import alerts
+
+    stranger = token(sub="9", email="x@example.com")
+    res, obj = call(server, "POST", "/enrol", {"id_token": stranger})
+    req = obj["request"]
+    ok, _ = alerts.act(f"join.{req['id']}", "deny")
+    assert ok
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert res.status == 403 and w["code"] == "denied"
+    # Asking again neither alerts nor files a request.
+    res, obj = call(server, "POST", "/enrol", {"id_token": stranger})
+    assert res.status == 403 and obj["code"] == "denied" and "request" not in obj
+    # An answered alert's buttons are gone.
+    ok, out = alerts.act(f"join.{req['id']}", "allow")
+    assert not ok and out["status"] == 409
+
+
+def test_asking_can_be_turned_off(server, monkeypatch):
+    monkeypatch.setenv("MEDIA_OIDC_REQUESTS", "0")
+    res, obj = call(server, "POST", "/enrol", {"id_token": token(sub="10", email="y@example.com")})
+    assert res.status == 403 and obj["code"] == "not_enrolled" and "request" not in obj
+
+
+def test_get_enrol_names_where_to_sign_up(server, monkeypatch):
+    monkeypatch.setenv("MEDIA_OIDC_SIGNUP", f"{ISS}|https://cms.sasonica.test/user/register")
+    assert oidc.signup_url(ISS) == "https://cms.sasonica.test/user/register"
+    monkeypatch.setenv("MEDIA_OIDC_SIGNUP", f"{ISS}|http://insecure.test/r")
+    assert oidc.signup_url(ISS) is None

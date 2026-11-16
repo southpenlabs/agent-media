@@ -797,7 +797,11 @@ def revoke_account(who: str) -> int:
                                         (d.get("account") and d.get("account", "").lower() == who.lower()))]
         if len(keep) != len(rows):
             _save(keep)
-        return len(rows) - len(keep)
+        gone = len(rows) - len(keep)
+    # An account let in by answering its request is let in no longer.
+    from . import join_requests
+    join_requests.forget(who)
+    return gone
 
 
 def _reset_for_tests() -> None:

@@ -100,7 +100,10 @@ ACTION_LABEL_MAX = 40
 #: outside this repo names a command instead, in config `[alerts.actions]`:
 #: `"<prefix>" = ["argv", …]`, run as `argv… <alert_id> <action>`, which
 #: prints `{"ok": true|false, …}` as its last stdout line.
-ACTION_HANDLERS: dict[str, str] = {}
+ACTION_HANDLERS: dict[str, str] = {
+    # A Sasonica account asking to join this server (join_requests.py).
+    "join.": "agent_media_server.join_requests:act",
+}
 ACTION_TIMEOUT_S = 150
 
 

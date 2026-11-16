@@ -443,7 +443,7 @@ CORS_PATHS = frozenset({
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
-    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/me", "/me/signout", "/me/account", "/me/servers",
+    "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/enrol/wait", "/me", "/me/signout", "/me/account", "/me/servers",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
     "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
@@ -504,7 +504,7 @@ CORS_PATHS = CORS_PATHS | ROOM_DELEGATE_PATHS
 # The POSTs a guest device may make (docs/proposals/2026-10-18-roles.md: a
 # guest reads and listens): pairing and signing out, the speech bar and
 # music controls, where to listen, and the phone's own playback reports.
-GUEST_POSTS = frozenset({"/pair", "/enrol", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/heard", "/speech/balance",
+GUEST_POSTS = frozenset({"/pair", "/enrol", "/enrol/wait", "/me/signout", "/speech/ctl", "/speech/up-next", "/speech/heard", "/speech/balance",
                          "/speech/speed-reset",
                          "/follow/trace", "/speech/state", "/music/state", "/handoff/state",
                          "/book/state",
@@ -549,7 +549,7 @@ CORS_PATHS = CORS_PATHS | FREE_PATHS
 # read the amux token out of it, so the GET must stay same-origin — which is
 # why this is a separate set, keyed on the method, and NOT in `CORS_PATHS`
 # (the canvas's own `_cors` reads that set for every answer it sends).
-CORS_POST_PATHS = frozenset({"/pair", "/enrol"})
+CORS_POST_PATHS = frozenset({"/pair", "/enrol", "/enrol/wait"})
 
 # The per-thread event stream (§11), `/threads/<session>/events`: an app route
 # like the ones above, but a path with the thread in it, so it is matched
@@ -3103,15 +3103,44 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
         print(f"enrol: refused from {ip}: {e}", file=sys.stderr)
         _json(h, 403, {"ok": False, "code": e.code, "error": "that sign-in was not accepted"})
         return
-    if not oidc.allowed(claims):
-        print(f"enrol: {claims.get('email') or claims.get('sub')} is not allowed here", file=sys.stderr)
-        _json(h, 403, {"ok": False, "code": "not_enrolled",
-                       "error": "that account has no access to this server"})
+    from . import join_requests
+
+    if oidc.allowed(claims):
+        role = oidc.role_of(claims)
+    else:
+        # Allowed by answering its request (join_requests.py), with the role
+        # it was given then; else it asks now.
+        role = join_requests.allowed_role(claims)
+    if not role:
+        who = claims.get('email') or claims.get('sub')
+        out = {"ok": False, "code": "not_enrolled", "error": "that account has no access to this server"}
+        if join_requests.enabled():
+            ok, req = join_requests.ask(claims, str(body.get("device") or ""), ip,
+                                        refresh_token=refresh_token, username=oidc.username_of(claims),
+                                        picture=oidc.picture_of(claims), server=_server_name())
+            if ok:
+                out["request"] = req
+                out["error"] = "that account has asked this server's owner for access"
+            else:
+                out.update(req)
+        print(f"enrol: {who} is not allowed here ({out.get('request', {}).get('status') or out['code']})",
+              file=sys.stderr)
+        _json(h, 403, out)
         return
-    got = devices.enrol_account(claims, str(body.get("device") or ""), ip,
-                                enrol=oidc.may_enrol(claims), refresh_token=refresh_token,
-                                username=oidc.username_of(claims), picture=oidc.picture_of(claims),
-                                role=oidc.role_of(claims))
+    _enrolled(h, claims, str(body.get("device") or ""), ip, refresh_token,
+              enrol=oidc.may_enrol(claims), role=role)
+
+
+def _enrolled(h: BaseHTTPRequestHandler, claims: dict, device: str, ip: str,
+              refresh_token: str, *, enrol: bool, role: str,
+              username: str = "", picture: str = "") -> None:
+    """A device token for an account let in here: `POST /enrol`'s answer, and
+    `POST /enrol/wait`'s once the owner has allowed it."""
+    from . import oidc
+
+    got = devices.enrol_account(claims, device, ip, enrol=enrol, refresh_token=refresh_token,
+                                username=username or oidc.username_of(claims),
+                                picture=picture or oidc.picture_of(claims), role=role)
     print(f"enrol: {got['device_id']} ({got['name']!r}) for "
           f"{claims.get('email') or claims.get('sub')} from {ip}", file=sys.stderr)
     if refresh_token:
@@ -3121,9 +3150,42 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "token": got["token"], "device_id": got["device_id"],
                    "name": got["name"], "enrol": got["enrol"], "role": got["role"],
                    "account": str(claims.get("email") or ""), "username": got["username"],
-                   "picture": oidc.picture_of(claims) or None,
+                   "picture": picture or oidc.picture_of(claims) or None,
                    "server": {"name": _server_name(), "base": _base_url(h)},
                    "server_id": _server_id()})
+
+
+def _enrol_wait(h: BaseHTTPRequestHandler) -> None:
+    """`POST /enrol/wait {"request", "secret"}` — the app that asked to join
+    (`POST /enrol`'s `request`) checking whether the owner has answered.
+    Open, like /enrol; a wrong secret counts against the address. Pending is
+    200 `{"ok": true, "status": "pending"}`; allowed is `POST /enrol`'s
+    answer, once."""
+    from . import join_requests
+
+    ip = h.client_address[0] if h.client_address else ""
+    if devices.rate_limited(ip):
+        _json(h, 429, {"ok": False, "code": "rate_limited",
+                       "error": "too many attempts; try again in a few minutes"})
+        return
+    body = _read_json(h) or {}
+    status, got = join_requests.wait(str(body.get("request") or ""), str(body.get("secret") or ""))
+    if status == "pending":
+        _json(h, 200, {"ok": True, "status": "pending"})
+    elif status == "allowed":
+        print(f"enrol: request allowed for {got['claims'].get('email') or got['claims'].get('sub')}",
+              file=sys.stderr)
+        _enrolled(h, got["claims"], got["device"], ip, got["rt"], enrol=False, role=got["role"],
+                  username=got["username"], picture=got["picture"])
+    elif status == "denied":
+        _json(h, 403, {"ok": False, "code": "denied",
+                       "error": "this server's owner turned that account away"})
+    elif status == "lapsed":
+        _json(h, 410, {"ok": False, "code": "lapsed",
+                       "error": "that request went unanswered; sign in again to ask again"})
+    else:
+        devices._note_failure(ip)
+        _json(h, 404, {"ok": False, "code": "unknown", "error": "no such request"})
 
 
 def _server_name() -> str:
@@ -3346,6 +3408,8 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         _pair(h)
     elif path == "/enrol":
         _enrol(h)
+    elif path == "/enrol/wait":
+        _enrol_wait(h)
     elif path == "/devices/code":
         _devices_code(h)
     elif path == "/devices/revoke":

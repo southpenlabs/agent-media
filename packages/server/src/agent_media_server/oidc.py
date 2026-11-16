@@ -16,9 +16,12 @@ the issuer):
     MEDIA_OIDC_ROLES      the same form with =admin|member|guest after each:
                           an account's role (else admin with the enrol bit,
                           member without)
+    MEDIA_OIDC_SIGNUP     <iss>|<https url>, …   where an account is made (GET /enrol's signup)
+    MEDIA_OIDC_REQUESTS   0 turns off asking to join (join_requests.py; on by default)
 
 An issuer is trusted to say who someone is; MEDIA_OIDC_ALLOW says whether that
-someone may have a device on *this* server. Nothing is allowed by default.
+someone may have a device on *this* server. Nothing is allowed by default:
+an account it does not name asks the owner instead (join_requests.py).
 
 RS256 only, checked with the standard library: a signature is `s^e mod n`,
 compared with the PKCS#1 v1.5 encoding of the SHA-256 digest. The discovery
@@ -183,8 +186,20 @@ def public_info() -> list[dict]:
             continue
         out.append({"issuer": iss, "authorization_endpoint": disc.get("authorization_endpoint"),
                     "client_id": clients[0] if clients else "",
-                    "scopes": "openid email profile"})
+                    "scopes": "openid email profile", "signup": signup_url(iss)})
     return out
+
+
+def signup_url(iss: str) -> str | None:
+    """Where a new account is made at this issuer (MEDIA_OIDC_SIGNUP,
+    `<iss>|<https url>, …`), for the app's "Create an account"; None when
+    unset. OIDC has no standard word for it that Drupal speaks."""
+    for rule in _list("MEDIA_OIDC_SIGNUP"):
+        r_iss, _, url = rule.partition("|")
+        url = url.strip()
+        if r_iss.strip().rstrip("/") == iss and url.startswith("https://"):
+            return url
+    return None
 
 
 def _token_request(iss: str, params: dict) -> dict:

@@ -11537,13 +11537,51 @@ authenticate requests. Code: `agent_media_server/oidc.py`,
 POST /enrol {"id_token": "<jwt>", "device": "Pixel 8a"}     no credential, like /pair
   → {"ok", "token", "device_id", "name", "enrol", "account", "server": {"name", "base"}, "server_id"}
   → 403 {"code": "bad_id_token"}   untrusted issuer, wrong audience, expired, bad signature
-  → 403 {"code": "not_enrolled"}   a valid sign-in for an account not allowed here
+  → 403 {"code": "not_enrolled", "request"?}   a valid sign-in for an account not allowed here
+  → 403 {"code": "denied"}         its request was turned away (below)
+  → 403 {"code": "too_many_requests"}   too many requests waiting here
   → 404 {"code": "no_accounts"}    this server takes no account sign-ins
   → 429 {"code": "rate_limited"}   as /pair (failures count the same way)
 ```
 
+#### Asking to join — BUILT 16 Nov 2026
+
+Anyone can make a Sasonica account (cms.sasonica.com takes sign-ups), and an
+account this server's config does not name now asks its owner instead of
+being turned away unseen (David, 16 Nov 2026: a new account asks, the owner
+approves). Code: `agent_media_server/join_requests.py`; pinned by
+`test_oidc.py`.
+
+- `POST /enrol` for such an account answers 403 `not_enrolled` with
+  `"request": {"id", "secret", "status": "pending"}` (an app that does not
+  know `request` shows "Its owner can allow it", which is still true). The
+  secret is only in that answer. Signing in again refreshes the same request
+  (a new secret; the old one stops working) and does not alert twice.
+- The owner gets the alert `join.<id>` at `needs` (§6.17: on Home and the
+  `alerts` frame), "<name> asks to join <server> (<email>)", with the actions
+  `allow` (Allow: role member), `guest` (Allow as guest: read and listen
+  only) and `deny` (Deny), answered through `POST /alerts/action`.
+- The app polls `POST /enrol/wait {"request", "secret"}` (no credential, CORS
+  like /enrol; every few seconds while its waiting screen is up):
+  `200 {"ok": true, "status": "pending"}`; once allowed, `POST /enrol`'s
+  answer (a device token, `role` member or guest, `enrol` false), once —
+  the request is spent by it; `403 denied`; `410 lapsed` (unanswered for 7
+  days: sign in again to ask again); `404 unknown` (no such request, a wrong
+  or spent secret; counts against the address like a wrong code).
+- An allowed account is remembered with its role, so its next device signs
+  straight in. `devices --revoke-account <sub|email>` forgets it as well as
+  its devices. A denied account is not alerted on again for 30 days.
+- At most 20 requests wait at once; one per account. `MEDIA_OIDC_REQUESTS=0`
+  turns asking off.
+
+`GET /enrol`'s accounts carry `signup` (16 Nov 2026): where a new account is
+made at that issuer (`MEDIA_OIDC_SIGNUP`, `<iss>|<https url>`; null when
+unset), for the app's "Create a Sasonica account" beside "Sign in". The
+issuer's sign-up may email a link to set a password, so the app opens it in
+the browser and then offers Sign in again.
+
 The app's flow: `GET /enrol` (open) → `{"accounts": [{"issuer",
-"authorization_endpoint", "client_id", "scopes"}]}` says where to sign in
+"authorization_endpoint", "client_id", "scopes", "signup"}]}` says where to sign in
 (`[]` when off); the app signs in there with PKCE, and sends `POST /enrol
 {"code", "code_verifier", "redirect_uri", "device"}` — the server swaps the
 code for the ID token at the issuer's token endpoint (a public client, no

@@ -68,7 +68,7 @@ Sorted with what blocks a public release first. 52 rows.
 | 25 | Venice | canvas pictures | the user's own key | off unless set | nothing | no |
 | 26 | TypeSafe (Jev) | "is this a good moment to speak" | the user's own key | shadow mode, off without a key | nothing | no |
 | 27 | sasonica.com workers (lookup, facts, feedback) on Cloudflare | finding an install; shared lengths; feedback | per-install Ed25519 key | the project's own, on Cloudflare Workers, D1 and KV | a privacy policy line for each; watch Workers plan limits | no |
-| 28 | cms.sasonica.com (Drupal) with Google sign-in | accounts, enrolling a device | the project's Google OAuth client | published 8 Oct 2026, sign-in scopes only | terms link still to add; GitHub and Facebook sign-in need their own apps | no |
+| 28 | cms.sasonica.com (Drupal) with Google sign-in | accounts (sign-up via `MEDIA_OIDC_SIGNUP`), enrolling a device | the project's Google OAuth client | published 8 Oct 2026, sign-in scopes only | terms link still to add; GitHub and Facebook sign-in need their own apps | no |
 | 29 | sasonica.com shop and licence keys | what an install has paid for | the project's signing key | built; checked offline | a payment provider's terms when it sells (not in this repo) | no |
 | 30 | OpenFreeMap | map tiles | none | public instance, free, commercial allowed | nothing; credit is shown; no uptime promise | no |
 | 31 | OpenStreetMap data (Geofabrik extracts) | cameras, speed limits | none | weekly download, kept locally | credit shown; ODbL notice with any database we hand on | no |
