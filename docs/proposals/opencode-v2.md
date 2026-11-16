@@ -142,6 +142,22 @@ below.
   `pwd` answered the new folder). sessiond uses it whether or not one of its
   chats has the server open.
 
+## Switched red2 (16 Nov 2026, 17:45-17:59)
+
+Done as planned below: release cd514caa (with the plugin linked through
+`current`), v1's data backed up to `~/opencode-v1-backup-2026-11-16.tgz`,
+`@opencode/cli` 2.3.0 in place of `opencode-ai` 1.19.5, `media-setup profile
+--only opencode`, one drained restart. Checked: sessiond on v2's background
+server; both auth.json keys (OpenRouter, Venice) carried into its
+credentials; a phone chat on a free model answered, its transcript read over
+the API, and its reply went to speech (claimed and toasted by the v2 plugin
+and hook); the model sheet (27); the terminal app opens at 28 columns. The
+first check chat failed on the configured default, `gateway/claude-liberated`,
+because the local gateway (red2:4000) answers 500 to any request, which has
+nothing to do with opencode. Two one-off units
+(`agent-media-backup`, `agent-media-map-cameras`) overran restart-services'
+60 s while running their jobs, and both succeeded.
+
 ## Switching red2 (the plan)
 
 1. Merge `opencode-v2` to main and release it as usual. With v1 still
