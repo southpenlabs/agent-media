@@ -987,7 +987,13 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
             return _signed_track(h, path.removeprefix("/music/files/"))
         return _get(h, path)
     if method == "POST":
-        return _post(h, path)
+        # Any write may change what a /targets row shows: a build begun
+        # before it is not shared after it (sessions._shared_build).
+        sessions.targets_changed()
+        try:
+            return _post(h, path)
+        finally:
+            sessions.targets_changed()
     if method == "OPTIONS":
         return _options(h, path)
     return False

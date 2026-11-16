@@ -77,12 +77,39 @@ def _calendar_events() -> list[dict]:
     return events
 
 
+_SHIFTS_REFRESHING = threading.Event()
+
+
 def _shift_index() -> tuple[dict, dict]:
+    """The shifts by source and their labels, re-read every SHIFT_TTL_S.
+
+    Past its minute an index already built is answered as it is and rebuilt
+    on a thread: the spans are clock times, so a minute-old index still says
+    when each shift starts and ends, and a cold read of the calendar (3,785
+    files on red2, 12 s) inside `/targets` held the new chat screen's list
+    past the phone's patience (16 Nov 2026). Only the first, with nothing
+    built yet, waits for the read."""
+    at, spans, labels = _SHIFTS
+    if at is not None:
+        if time.monotonic() - at >= SHIFT_TTL_S and not _SHIFTS_REFRESHING.is_set():
+            _SHIFTS_REFRESHING.set()
+
+            def refresh() -> None:
+                try:
+                    _build_shift_index(force=True)
+                finally:
+                    _SHIFTS_REFRESHING.clear()
+            threading.Thread(target=refresh, name="quiet-shifts", daemon=True).start()
+        return spans, labels
+    return _build_shift_index()
+
+
+def _build_shift_index(force: bool = False) -> tuple[dict, dict]:
     global _SHIFTS
     with _SHIFTS_LOCK:
         at, spans, labels = _SHIFTS
-        if at is not None and time.monotonic() - at < SHIFT_TTL_S:
-            return spans, labels
+        if not force and at is not None:
+            return spans, labels  # built while this one waited for the lock
         spans, labels = {}, {}
         try:
             events = _calendar_events()

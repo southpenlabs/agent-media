@@ -883,15 +883,106 @@ def places(limit: int = 6) -> list[dict]:
             for path, at in seen.items()]
 
 
+#: How long a finished `/targets` build answers the requests after it (s).
+TARGETS_REUSE_S = 2.0
+#: history key → {"done": Event, "gen", "at", "out", "err"}: the build
+#: under way or the last one, for `_shared_build`.
+_BUILDS: dict[str, dict] = {}
+_BUILDS_LOCK = threading.Lock()
+_GEN = 0
+
+
+def targets_changed() -> None:
+    """Something a `/targets` row shows may have changed (any POST to the
+    server: a rename, an archive, a new chat): no build begun before this is
+    shared with a request after it."""
+    global _GEN
+    with _BUILDS_LOCK:
+        _GEN += 1
+
+
+def _reset_builds_for_tests() -> None:
+    with _BUILDS_LOCK:
+        _BUILDS.clear()
+
+
+def _shared_build(key: str, build):
+    """`build()`, once for every request that asks while it runs or within
+    TARGETS_REUSE_S of its end, unless a `targets_changed` came between.
+
+    A build takes 1.5–2.5 s warm and far longer on a loaded host; the app
+    asks `/targets` from several screens at once and again when a request
+    outlasts its patience, so each ask building its own piled them up — 13
+    answered together on red2 at 11:27 on 16 Nov 2026, all after the phone
+    had given up, while a new chat waited behind them."""
+    with _BUILDS_LOCK:
+        b = _BUILDS.get(key)
+        mine = not (b and b["gen"] == _GEN and b["err"] is None and (
+            not b["done"].is_set() or time.monotonic() - b["at"] < TARGETS_REUSE_S))
+        if mine:
+            b = {"done": threading.Event(), "gen": _GEN, "at": 0.0, "out": None, "err": None}
+            _BUILDS[key] = b
+    if not mine:
+        b["done"].wait()
+        if b["err"] is None and b["out"] is not None:
+            return b["out"]
+        return build()  # the one joined failed: a try of this request's own
+    try:
+        b["out"] = build()
+        return b["out"]
+    except BaseException as e:
+        b["err"] = e
+        raise
+    finally:
+        b["at"] = time.monotonic()
+        b["done"].set()
+
+
+def warm() -> None:
+    """Fill the caches `/targets` reads (the calendar's shifts, the harness
+    stores, the transcripts), on a thread at server start, so the first new
+    chat screen after a restart is not the one that pays for them (12–20 s
+    cold on red2, 16 Nov 2026). At a low thread priority, as search's indexer."""
+    def run() -> None:
+        try:
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)
+        except (AttributeError, OSError):
+            pass
+        try:
+            from agent_media_core import _pass
+
+            with _pass.held():
+                _shared_build("", lambda: _build_targets(""))
+        except Exception:  # noqa: BLE001 — a warm-up that fails leaves the first ask to build
+            pass
+    threading.Thread(target=run, name="targets-warm", daemon=True).start()
+
+
 def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
-    """See `_targets`; one pass (`agent_media_core._pass`), as `sessions_index`."""
+    """See `_targets`; one pass (`agent_media_core._pass`), as `sessions_index`.
+    Requests that ask together share one build (`_shared_build`)."""
+    ok, detail = auth.may_control_speech(bearer)
+    if not ok:
+        return False, detail
     from agent_media_core import _pass
 
-    with _pass.held():
-        return _targets(bearer, history)
+    key = "all" if history == "all" else ""
+
+    def build() -> dict:
+        with _pass.held():
+            return _build_targets(key)
+    return True, _with_now(_shared_build(key, build))
 
 
 def _targets(bearer: str, history: str = "") -> tuple[bool, dict]:
+    """One build of `/targets`, unshared (see `targets`)."""
+    ok, detail = auth.may_control_speech(bearer)
+    if not ok:
+        return False, detail
+    return True, _with_now(_build_targets(history))
+
+
+def _build_targets(history: str = "") -> dict:
     """`/targets`: everything a message can be pointed at, in one answer.
 
     `sessions` are the conversations this host holds — running, lately
@@ -900,11 +991,8 @@ def _targets(bearer: str, history: str = "") -> tuple[bool, dict]:
     `project_groups` says which projects sit in a group (`project_groups`);
     `agent_workspaces` the business agents' folders (agent_workspaces.py).
     `history="all"` lifts the window, for the app's "Everything" filter.
-    Gated like `/conversations`.
+    Gated like `/conversations` (by `targets`, its caller).
     """
-    ok, detail = auth.may_control_speech(bearer)
-    if not ok:
-        return False, detail
     days = -1.0 if history == "all" else STORE_DAYS
     rows, where = sessions_index(days=days), mailbox.with_mail(places())
     # A title cut to the list's length carries its whole beside it, for the
@@ -954,15 +1042,22 @@ def _targets(bearer: str, history: str = "") -> tuple[bool, dict]:
         out["spaces"] = spaces.catalogue(rows)
     except Exception:  # noqa: BLE001 — a list without its strip, not no list
         pass
+    return out
+
+
+def _with_now(out: dict) -> dict:
+    """A copy of a built `/targets` with what a restart or the quota says
+    now, not as of the build it may share."""
     from . import sessiond
 
+    out = dict(out)
     restart = sessiond.restart_view()
     if restart:
         out["restart_pending"] = restart
     limit = sessiond.quota_view()
     if limit:
         out["quota"] = limit
-    return True, out
+    return out
 
 
 def project_groups() -> dict[str, dict]:

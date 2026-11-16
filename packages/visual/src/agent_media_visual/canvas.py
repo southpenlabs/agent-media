@@ -2433,6 +2433,10 @@ def main() -> None:
     # priority, then kept up; MEDIA_SEARCH_INDEX=0 leaves it to the queries.
     from agent_media_server import search as _search
     _search.start()
+    # The new chat screen's list (/targets): its caches filled now, at a low
+    # priority, so the first ask after a restart is not the slow one.
+    from agent_media_server import sessions as _sessions
+    _sessions.warm()
     # Optional thinking read-outs keep working with no app stream open.
     from agent_media_server import thinking_speech as _thinking_speech
     _thinking_speech.start()

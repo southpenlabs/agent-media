@@ -395,3 +395,16 @@ def _no_live_sessiond(monkeypatch, tmp_path):
     monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
     monkeypatch.setenv("MEDIA_SESSIOND_TRANSPORT", "unix")
     monkeypatch.setenv("MEDIA_SESSIOND_SOCKET", str(tmp_path / "sessiond.sock"))
+
+
+@pytest.fixture(autouse=True)
+def _targets_unshared(monkeypatch):
+    """Each `/targets` a test asks for is built afresh: a finished build is
+    not reused (sessions._shared_build), nor one left by the test before.
+    test_targets_shared turns sharing back on."""
+    from agent_media_server import sessions
+
+    monkeypatch.setattr(sessions, "TARGETS_REUSE_S", 0.0)
+    sessions._reset_builds_for_tests()
+    yield
+    sessions._reset_builds_for_tests()
