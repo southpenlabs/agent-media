@@ -45,7 +45,7 @@ release it started from, imports included, until it is restarted. Moving
 | `MEDIA_RELEASE_REMOTE` | the git URL (or path) releases are fetched from. Needed once; `media update --remote URL` sets it too |
 | `MEDIA_RELEASE_BRANCH` | the branch `media update` follows (default `main`) |
 | `MEDIA_RELEASE_PACKAGES` | package folders to install, e.g. `core server visual`; an extra as `server[covers]`. Unset: the packages of this repo the install running the update has, else `core` |
-| `MEDIA_RELEASE_REQUIREMENTS` | a pip requirements file installed into every release beside them: what this host needs that no package declares (pins, an add-on) |
+| `MEDIA_RELEASE_REQUIREMENTS` | a pip requirements file installed into every release beside them: what this host needs that no package declares (pins, an add-on). An add-on named by its checkout's folder is built by uv, which reuses its last build until `pyproject.toml` changes unless the add-on lists its sources in `[tool.uv] cache-keys` (16 Nov 2026: a release carried the personal-use add-on from before its last commit) |
 | `MEDIA_RELEASE_CONSTRAINTS` | a pip constraints file for the install |
 | `MEDIA_RELEASE_CHECKOUT` | the dev checkout this host's units name (default: the checkout the command runs from, else `~/projects/agent-media`) |
 | `MEDIA_RELEASE_KEEP` | releases kept on disk (default 3; never fewer than `current` and `previous`) |
