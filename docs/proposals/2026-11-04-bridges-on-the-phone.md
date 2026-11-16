@@ -303,3 +303,15 @@ they came from ("yep, that makes sense").
   §6.52); Sasonica installs it beside itself (sasonica-app 42051575). p8a
   moved off the debug key to build-101 by one reinstall.
 - **"Local"** pill in Chats' people view (bfce170a).
+
+## The day's trial (16–17 Nov 2026)
+
+The app on p8a, logged every 5 min from red2 over adb for 22 h: the core
+never dropped out on its own (its only gaps were today's reinstalls: 10:46,
+and 20:00–21:21 for the move to the release key); app ~75–90 MB, core
+~20–24 MB. Battery, Android's own accounting since the last charge: **the
+bridges app used 1.5 mAh in 6 h** (5 h of it as its foreground service,
+3 s of wake locks) — next to nothing. The night's real drain (about 4.7 % an
+hour unplugged, 75 % → 49 % from 01:00 to 06:30) was Termux at 235 mAh with
+2 h 17 m of wake locks: the trial's own logger, which reached the phone over
+ssh and adb every 5 minutes. The logger was stopped early on that finding.
