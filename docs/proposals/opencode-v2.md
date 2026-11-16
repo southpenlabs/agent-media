@@ -132,9 +132,15 @@ below.
   environment, when exactly one is open there. Checked with a real v2
   terminal app in a tmux pane.
 
-## Still to do
+## Rename and move (16 Nov 2026)
 
-- Rename: v2 takes no title from a client.
+- **Rename:** v2's `PATCH /api/session/{id}` takes `title` (checked on
+  2.3.0), so a rename from the app reaches opencode's own list too. The app
+  keeps its name itself regardless (`book_tracks.rename`).
+- **Move to another folder:** `POST /api/session/{id}/move {directory}`
+  keeps the history, and the next command runs in the new folder (checked:
+  `pwd` answered the new folder). sessiond uses it whether or not one of its
+  chats has the server open.
 
 ## Switching red2 (the plan)
 

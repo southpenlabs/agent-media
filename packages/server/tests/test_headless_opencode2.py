@@ -214,11 +214,11 @@ def test_v2_commands_menu_and_a_typed_command(host):
     wait_for(lambda: state(host, sid) == "waiting")
 
 
-def test_v2_rename_is_kept_here_and_close_stops_the_server(host):
+def test_v2_rename_sets_opencodes_title_and_close_stops_the_server(host):
     sid = start(host, "hi")
     wait_for(lambda: state(host, sid) == "waiting")
-    driver.headless_driver().rename(sid, "My chat")
-    assert not any(r[0] == "PATCH" for r in requests(host))
+    assert driver.headless_driver().rename(sid, "My chat") == ""
+    assert ("PATCH", f"/api/session/{sid}", {"title": "My chat"}) in requests(host)
     ok, d = driver.headless_driver().close(sid)
     assert ok and d["closed"]
     wait_for(lambda: not host.sup.oc.up)
@@ -269,3 +269,28 @@ def test_v2_rules_and_answers():
     assert oc.v2_form_answer(fields, qs, {"drink?": "Tea", "which?": "X, Y",
                                           "why?": "because"}) == {
         "a": "t", "b": ["x", "y"], "c": "because"}
+
+
+def test_v2_relocate_without_the_server_open_asks_opencodes_own(host, tmp_path, monkeypatch):
+    """No chat of ours attached: the move goes to opencode 2's background
+    server through core opencode_api, not v1's export and import."""
+    from agent_media_core import opencode_api, opencode_move
+
+    sid = start(host, "hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    host.sup.close(sid)
+    wait_for(lambda: not host.sup.oc.up)
+    calls = []
+
+    class Srv:
+        def call(self, method, path, body=None, timeout=15.0):
+            calls.append((method, path, body))
+
+    monkeypatch.setattr(opencode_api, "installed_v2", lambda env=None: True)
+    monkeypatch.setattr(opencode_api, "service", lambda start=True: Srv())
+    monkeypatch.setattr(opencode_move, "move", lambda *a, **k: pytest.fail("v1's move on v2"))
+    other = tmp_path / "moved"
+    other.mkdir()
+    out = host.sup._oc_relocate(sid, str(other))
+    assert out["relocated"] and out["cwd"] == str(other)
+    assert calls == [("POST", f"/api/session/{sid}/move", {"directory": str(other)})]

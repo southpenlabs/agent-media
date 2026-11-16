@@ -773,10 +773,10 @@ class Host:
         return self.call("POST", f"/session/{sid}/abort", directory=cwd)
 
     def rename(self, sid: str, cwd: str, title: str) -> bool:
-        """Whether opencode took the title: v2's sessions take none from a
-        client (its own title stands)."""
+        """Give opencode the session's title, so its own list says it too."""
         if self.v2:
-            return False
+            self.call("PATCH", f"/api/session/{sid}", {"title": title})
+            return True
         self.call("PATCH", f"/session/{sid}", {"title": title}, directory=cwd)
         return True
 

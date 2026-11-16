@@ -3973,8 +3973,21 @@ class Supervisor:
                 raise Refused(f"session {session[:8]} is working", "busy")
             if s.cwd == cwd:
                 return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
+        from agent_media_core import opencode_api
+
         if self.oc.v2 and self.oc.up:
             self.oc.move(session, cwd)
+        elif opencode_api.installed_v2():
+            # opencode 2 moves a session itself (its history kept; its next
+            # command runs in the new folder, checked on 2.3.0), whether or
+            # not a chat of ours has its server open.
+            srv = opencode_api.service()
+            if srv is None:
+                raise Refused("could not move it: opencode's server is not running", "refused")
+            try:
+                srv.call("POST", f"/api/session/{session}/move", {"directory": cwd})
+            except opencode_api.ApiError as e:
+                raise Refused(f"could not move it: {e}", "refused")
         else:
             exe = self.oc._program()
             why = opencode_move.move(session, cwd, program=exe, env=self._base_env(exe))
@@ -3996,9 +4009,7 @@ class Supervisor:
         if not live:
             return {"session": session, "renamed": False,
                     "why": "the name is kept here; opencode is told when the chat is next open"}
-        if not self.oc.rename(s.id, s.cwd, title):
-            return {"session": session, "renamed": False,
-                    "why": "the name is kept here; opencode 2 keeps its own title"}
+        self.oc.rename(s.id, s.cwd, title)
         return {"session": session, "renamed": True, "queued": False, "uuid": ""}
 
     def _oc_interrupt(self, session: str) -> dict:
