@@ -175,7 +175,8 @@ def intents(bearer: str, session: str = "") -> tuple[bool, dict]:
     from . import tidy_prefs
 
     listing, last = tidy_prefs.rank(session)
-    return True, {"intents": listing, "default": tidy_intents.DEFAULT, "last": last}
+    # `draft`: POST /voice/tidy/draft is answered here (tidy_draft.py), a separate action.
+    return True, {"intents": listing, "default": tidy_intents.DEFAULT, "last": last, "draft": True}
 
 
 def sent(body: dict, bearer: str) -> tuple[bool, dict]:

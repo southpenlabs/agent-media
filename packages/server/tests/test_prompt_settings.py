@@ -50,8 +50,9 @@ def test_every_prompt_is_listed_in_full(who):
     assert any(a["label"] == "Thread link" for a in w["also"])
     # Tidy: one prompt per chip, each with the RULES and the JSON answer.
     t = p["tidy"]
-    assert [x["key"] for x in t["parts"]] == [i.key for i in tidy_intents.INTENTS]
-    assert all('"messy"' in x["text"] for x in t["parts"])
+    assert [x["key"] for x in t["parts"]] == [i.key for i in tidy_intents.INTENTS] + ["draft"]
+    assert all('"messy"' in x["text"] for x in t["parts"] if x["key"] != "draft")
+    assert '"draft"' in t["parts"][-1]["text"]
     # Summary and the describers, none overridden.
     assert [x["key"] for x in p["summary"]["parts"]] == ["summary", "code", "table"]
     assert p["summary"]["overridden"] is None

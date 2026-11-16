@@ -226,6 +226,10 @@ except /pair, which is how a device gets its token):
                   an offer to clean up a dictated message to a person: `messy`,
                   `tidy`; only when the words look messy, never for an agent
                   (voice_tidy.py)
+  POST /voice/tidy/draft {"context": [{"from", "text"}...], "session"?, "recipient"?, "hint"?,
+                  "intent"?, "suggest"?} → the next message to that person written
+                  in their voice from the chat: `draft`, with `suggest` also
+                  `replies` (tidy_draft.py)
   POST /session/move/cancel {"session"} → drop the move waiting on that
                   session, and any failure it left (§6.15)
   POST /session/answer {"session", "choice", "key"} → answer the dialog that
@@ -436,7 +440,7 @@ CORS_PATHS = frozenset({
     "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
-    "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent",
+    "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
@@ -4475,6 +4479,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import voice_tidy
 
         ok, detail = voice_tidy.sent(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/voice/tidy/draft":
+        # The next message to a person written from the chat and a hint (tidy_draft.py).
+        from . import tidy_draft
+
+        ok, detail = tidy_draft.post(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/voice/tidy":
         # An offer to tidy a dictated message to a person (voice_tidy.py).

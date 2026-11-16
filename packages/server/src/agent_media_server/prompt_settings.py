@@ -104,6 +104,14 @@ def _tidy() -> dict:
             continue
         parts.append({"key": intent.key, "label": intent.label,
                       "when": f"the {intent.label} chip", "text": text, "parsed": ["JSON answer"]})
+    from . import tidy_draft
+
+    try:
+        parts.append({"key": "draft", "label": "Draft", "when": "the Draft action (plain register; "
+                      "an intent's pattern replaces the guidance)",
+                      "text": tidy_draft.system_prompt(tidy_intents.get(None)), "parsed": ["JSON answer"]})
+    except OSError:
+        pass
     default = tidy_intents.get(None)
     return {
         "key": "tidy", "title": "Voice tidy-up",

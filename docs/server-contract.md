@@ -1901,7 +1901,7 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   with none set it gets no model (`why: "no_answer"`).
 - `intent` (25 Oct 2026): a key from the server's list, to rewrite in a chosen
   register rather than only clean up. `GET /voice/tidy/intents` (gated) →
-  `{"ok": true, "default": "plain", "last": "", "intents": [{"key", "label"}, …]}`, in the
+  `{"ok": true, "default": "plain", "last": "", "draft": true, "intents": [{"key", "label"}, …]}`, in the
   order the app shows them; the app renders its chips from it and knows only
   the default by name. With `?session=<thread>` the list is ranked for that
   person (25 Oct 2026): the register last *sent* with (Send tidy on a card in
@@ -1957,6 +1957,49 @@ the words. Request: `{"text", "session"?, "recipient"?: "<their name>",
   history, for the flow where nobody is looking. Nothing is sent to the
   session. 400 without `text`, or for a `session` that is not a session id.
   `voice_tidy.py`.
+- **Draft** (16 Nov 2026; David: "an option to tidy... draft, that starts
+  from scratch based on previous messages"): `POST /voice/tidy/draft`
+  (gated like `/voice/tidy`) writes the next message to the person rather
+  than rewriting one. Request: `{"context": [{"from": "me"|"them"|"<name>",
+  "text": "…", "ts"?: <ms>}, …], "session"?, "recipient"?: "<their name>",
+  "hint"?: "<what I want to say; may be empty or a messy dictation>",
+  "intent"?: "<a tidy intent key, default plain>", "suggest"?: 0–4}` →
+  `{"ok": true, "draft": "…", "replies"?: ["…"], "why"?: "no_answer" |
+  "off"}`. `context` is the chat's last messages, oldest first; the last 30
+  are used, each cut at 1000 characters (`ts` is accepted and not sent to the
+  model). It is in the request because some chats (the phone's Local bridged
+  chats) live only on the phone; when it is left out and `session` is a
+  Matrix room here, the room's last 30 messages are read instead (the
+  owner's as `me`). Otherwise it is required: 400 when absent, empty or not
+  a list of `{from, text}`. The model writes in the user's own voice, learnt
+  from his messages in the chat (no greeting or sign-off unless his own
+  messages use them), in the chat's language and the register the intent's
+  pattern describes, short like a chat message, saying what the hint says;
+  with no hint, a reply to what most obviously needs one, else a brief
+  natural reply. It never invents facts, names, dates, numbers, places,
+  promises or plans that are not in the chat or the hint. Its answer is JSON
+  `{"draft"[, "replies"]}` (a plain-text answer is taken as the draft),
+  stripped of a code fence, a preamble line, wrapping quotes and a label
+  (`Draft:`, `Me:`), whitespace collapsed. `suggest` (David: "Maybe that
+  could be a part of the quick reply edits") asks the same single call for
+  up to that many one-tap replies for the suggested-replies row: a few
+  words each, distinct in meaning (a yes, a not yet, a question back), under
+  the same rules; each is cleaned the same way, and empty ones, repeats
+  (case and a trailing `.`/`!` aside) and ones over 80 characters are
+  dropped. `replies` is present whenever `suggest` > 0 (maybe empty). An
+  empty draft answers `draft: ""`, `why: "no_answer"` — except with
+  `suggest` > 0, no hint and at least one reply, when `draft` is left out.
+  Model choice and the private rule are the tidy's (`MEDIA_TIDY_MODEL`, then
+  `MEDIA_FAST_MODELS`, then `MEDIA_FOLLOWUP_MODEL`; a private or sealed
+  `session` only to `MEDIA_PRIVATE_MODELS`, none set → no model and
+  `no_answer`); deadline `MEDIA_TIDY_DRAFT_TIMEOUT` (8 s);
+  `MEDIA_VOICE_TIDY=0` answers `why: "off"`. Nothing of the chat, the hint or
+  the draft is kept. Draft is its own action, not an intent: it is not in
+  the intents list, but `GET /voice/tidy/intents` carries `"draft": true`
+  and `/features` `tidy_draft: true` where this route is answered. 400 for an
+  unknown intent, a `suggest` outside 0–4 or not an integer, a non-text
+  `hint`, or a `session` that is not a session id. `tidy_draft.py`; its
+  prompt is listed in `GET /settings/prompts` under `tidy` (part `draft`).
 
 Clients: W (`hooks/useDictation.ts`, `hooks/useHandsFree.ts`; a Matrix room's
 thread only).
@@ -5796,6 +5839,7 @@ local look, never a network call:
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), open to anyone, paired or not (16 Nov 2026); the app offers updating itself only then |
 | `app_update_bridges` | always: those routes also offer the Sasonica Bridges app with `app=bridges`, to paired admin and member devices only (§6.52, 16 Nov 2026); the app offers updating Bridges only then. Not a check that this server can read the private bridges repo |
+| `tidy_draft` | always: this server answers `POST /voice/tidy/draft` (§6.3 "POST /voice/tidy", Draft, 16 Nov 2026); the app offers Draft only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
