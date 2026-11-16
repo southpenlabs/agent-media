@@ -518,7 +518,8 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
             f"sftp:{host}:/path and keep {('MEDIA_BACKUP_DEST')} local instead")
 
     free = shutil.disk_usage(store).free
-    if free < FLOOR_BYTES:
+    low_floor = free < FLOOR_BYTES
+    if low_floor:
         out["warnings"].append(
             f"only {free / 1024 ** 3:.1f}G free on {store}: under the {FLOOR_BYTES / 1024 ** 3:.0f}G floor")
         _alert("space", f"backup destination has {free / 1024 ** 3:.1f}G free", level="warn")
@@ -589,7 +590,7 @@ def backup(*, tier: str = DEFAULT_TIER, to: str | None = None, dry_run: bool = F
     if out["ok"]:
         _mark_good(store, man)
     if prune:
-        out["pruned"] = _prune(store, max_bytes())
+        out["pruned"] = _prune(store, max_bytes(), low_floor=low_floor)
     if host:
         # `quick_push` (the cutover's second pass): only this snapshot goes,
         # hardlinked there against the one before it, when the far side has
@@ -922,7 +923,7 @@ def _rsync_has_mkpath() -> bool:
 _MKPATH: bool | None = None
 
 
-def _prune(store: Path, cap: int) -> list[str]:
+def _prune(store: Path, cap: int, *, low_floor: bool = False) -> list[str]:
     """Drop the oldest snapshots to bring the store under its cap.
 
     History is given up for the cap, but **the last snapshot is never deleted
@@ -945,6 +946,13 @@ def _prune(store: Path, cap: int) -> list[str]:
     elif used > cap * 0.7:
         _alert("space", f"backup store at {used / 1024 ** 3:.1f}G of its "
                         f"{cap / 1024 ** 3:.1f}G cap", level="warn")
+    elif not low_floor:
+        # The all-clear. Without it a warning raised once stays up for good:
+        # backup.red5.space sat at "7.7G of its 10.0G cap" for three days after
+        # pruning had brought red5's store to 1.5G (16 Nov 2026). The floor
+        # alert shares this id, so a run that tripped the floor leaves it up.
+        _alert("space", f"backup store at {used / 1024 ** 3:.1f}G of its "
+                        f"{cap / 1024 ** 3:.1f}G cap", level="ok")
     return gone
 
 

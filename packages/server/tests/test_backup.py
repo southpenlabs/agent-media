@@ -767,3 +767,20 @@ def test_a_restore_does_not_delete_what_a_backup_leaves_out(install, tmp_path):
     assert (cfg / "config.toml").exists()
     assert not (cfg / "stale-leftover.toml").exists(), \
         "anything else still matches the snapshot"
+
+
+def test_a_store_back_under_the_line_clears_the_space_alert(install, monkeypatch):
+    """A space warning is cleared by the run that finds room again, and not by
+    one that tripped the disk floor (the two share the `space` id)."""
+    import shutil as _shutil
+
+    raised: list[tuple] = []
+    monkeypatch.setattr(bk, "_alert",
+                        lambda suffix, title, level="warn": raised.append((suffix, level)))
+    bk.backup(tier="jewels")
+    assert ("space", "ok") in raised
+    raised.clear()
+    tight = _shutil.disk_usage("/")._replace(free=1 * 1024 ** 3)
+    monkeypatch.setattr(bk.shutil, "disk_usage", lambda p: tight)
+    bk.backup(tier="jewels")
+    assert ("space", "warn") in raised and ("space", "ok") not in raised
