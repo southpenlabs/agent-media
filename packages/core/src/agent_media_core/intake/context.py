@@ -540,6 +540,16 @@ WINDOW_NOTE = ("A restart of the session host is due in about {min} min (around 
                "safe point, say what's left, and end your turn: you'll be resumed after "
                "the restart.")
 
+#: What a session let through a waiting restart (the app's Send now on a
+#: held message) is told: the restart now waits on it.
+THROUGH_NOTE = ("A restart of the session host is waiting, and David let his message "
+                "through to you, so the restart now waits on this chat. Answer it, then "
+                "finish the step you're on and end your turn; don't start background "
+                "agents or background commands, and stop any you have running unless they "
+                "are about to finish. If something critical needs longer, run "
+                "`media restart-services --eta <minutes> --why \"<what>\"`. You'll be "
+                "resumed after the restart with anything left.")
+
 #: What a session is told once the estimate it gave has passed and the
 #: restart still waits on it.
 LATE_NOTE = ("The time you estimated for the waiting restart has passed and it still "
@@ -571,11 +581,16 @@ def _restart_note(hook: dict, d: Path) -> str:
         rec = rs.pending()
     except Exception:  # noqa: BLE001 — a note is never worth failing a hook
         return ""
-    # Let through (the app's Send now on a held message): it is not asked to stop.
-    if not rec or rs.lets_through(rec, sid):
+    if not rec:
         return ""
     now = time.time()
     rid = str(rec["id"])
+    # Let through (the app's Send now on a held message): not asked to stop
+    # at once, but told the restart now waits on it, once (David, 16 Nov
+    # 2026: "Sessions don't seem to realise that they're holding up a
+    # restart" — one let through started more background work for 20 min).
+    if rs.lets_through(rec, sid):
+        return "" if agent else _once(d, sid, agent, "through", rid, THROUGH_NOTE)
     # A window is open (another session's estimate): carry on with what fits.
     # Its own marker, so `told_to_end` stays false and the note to end the
     # turn still comes once the window closes.

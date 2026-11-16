@@ -421,3 +421,25 @@ def test_release_route_needs_a_session_id_and_the_key():
     assert not ok and d["status"] == 400
     ok, d = stop.session_release("11111111-2222-3333-4444-555555555555", "")
     assert not ok and d.get("status") in (401, 403)
+
+
+def test_send_now_mid_drain_keeps_the_cut_off_for_after_the_restart(host):
+    # David, 16 Nov 2026: "Sessions don't seem to realise that they're holding up a
+    # restart" — Send now resumed a chat cut off for the drain with "it is over".
+    sid = start(host, "reply: a")
+    wait_for(lambda: _said(host.sup, sid) == "a")
+    _pend()
+    _fresh(host.sup)
+    cut = {"why": "drain", "due": True, "turn": True, "last_text": "go", "restart": "r1"}
+    with host.sup.lock:
+        host.sup.sessions[sid].cut_off = dict(cut)
+    assert host.sup.send(sid, "reply: let me in")["held"] is True
+    r = driver.headless.call("release", session=sid, timeout=15.0)
+    assert r["ok"] and r["released"] == 1
+    wait_for(lambda: _said(host.sup, sid) == "let me in")
+    assert host.sup.sessions[sid].cut_off["why"] == "drain"      # kept
+    # The restart over, it is resumed with it.
+    rs.clear_pending()
+    _fresh(host.sup)
+    assert sid in host.sup.deliver_due()
+    assert host.sup.sessions[sid].cut_off is None

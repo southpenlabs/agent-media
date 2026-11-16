@@ -37,13 +37,18 @@ def test_no_restart_pending_lets_nothing_through(host):
     assert not rs.lets_through(None, "33333333-cccc")
 
 
-def test_a_session_let_through_is_not_told_to_end_its_turn(host, monkeypatch):
+def test_a_session_let_through_is_told_the_restart_waits_on_it_once(host, monkeypatch):
+    # David, 16 Nov 2026: "Sessions don't seem to realise that they're holding up a restart".
     host.session("11111111-aaaa", state="working")
     _run("--only", "sessiond", "--after", "10")
     monkeypatch.setenv("MEDIA_SESSIOND_SESSION", "11111111-aaaa")
     rs.let_through("11111111-aaaa")
-    assert context.restart_note_for(_hook()) == ""
+    note = json.loads(context.restart_note_for(_hook()))["hookSpecificOutput"]["additionalContext"]
+    assert "the restart now waits on this chat" in note and "--eta" in note
+    assert context.restart_note_for(_hook()) == ""               # once
     assert not context.told_to_end("11111111-aaaa", rs.pending()["id"])
+    # Its background agents are not told it again.
+    assert context.restart_note_for({**_hook(), "agent_id": "a1"}) == ""
 
 
 def test_one_not_let_through_still_is(host, monkeypatch):

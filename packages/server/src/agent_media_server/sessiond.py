@@ -2072,6 +2072,12 @@ class Supervisor:
             if s is None:
                 return True
             cut = s.cut_off if (s.cut_off or {}).get("due") else None
+            if cut and cut.get("why") == "drain" and self.draining():
+                # Let through a restart still waiting (Send now): what was
+                # cut off waits for after it, and its note would say the
+                # restart is over (David, 16 Nov 2026: "Sessions don't seem
+                # to realise that they're holding up a restart").
+                cut = None
             text = ""
             if cut and s.agent in ("claude", "antigravity", "opencode"):
                 if cut.get("why") == "quota":
