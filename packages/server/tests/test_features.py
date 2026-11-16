@@ -41,7 +41,7 @@ def test_a_bare_server_has_none_of_them(server, signed_in, monkeypatch, tmp_path
     assert version["short"] == version["sha"][:8] and version["deployed"] == 0.0
     assert obj == {"ok": True, **{p: False for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": False, "signed_in": False, "stories": False, "personal": True, "default_agent": True, "prompts_view": True, "convert": False, "convert_targets": [], "app_update": True, "app_update_bridges": True, "tidy_draft": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "mark_heard_ids": True, "quote_part": True, "music_sung": True, "speech_music_log": True, "storage": True, "device_log": True, "music_voted": True, "music_chapters": True, "music_search": True, "music_channel": True, "mix_songs": True, "room_delegate": False, "map": True,
-                   "play_gate": False, "trakt": True, "watch": False, "pair_request": True,
+                   "play_gate": False, "trakt": True, "watch": False, "pair_request": True, "photo_edit": False,
                    "personal_use": {"on": False, "methods": {m: False for m in personal_use.METHODS},
                                     "addons": ["facebook-previews", "youtube-radio", "youtube-search", "youtube-streaming"]}}
     assert "/features" in app.CORS_PATHS
@@ -76,6 +76,8 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     monkeypatch.setenv("MEDIA_PHONE_JOBS", "1")
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")
     monkeypatch.delenv("MEDIA_PRACTICE_PROFILES", raising=False)
+    # An image model for photo edits: cli-proxy-api's key (photo_edit.py).
+    monkeypatch.setenv("CLIPROXY_API_KEY", "k")
     monkeypatch.setenv("MEDIA_PLAY_GATE_CMD", "phs-treatment-guard now")
     txcript = tmp_path / "txcript"
     txcript.write_text("#!/bin/sh\n")
@@ -91,7 +93,7 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     assert obj.pop("version")["mode"] == "checkout"
     assert obj == {"ok": True, **{p: True for p in PARTS | PERSONAL}, "quick": True, "read": True,
                    "read_page": True, "signed_in": True, "stories": True, "personal": True, "default_agent": True, "prompts_view": True, "convert": True, "convert_targets": ["claude"], "app_update": True, "app_update_bridges": True, "tidy_draft": True, "stt": True, "follow": True, "stage": True, "speech_recent": True, "up_next": True, "mark_heard": True, "mark_heard_now": True, "mark_heard_ids": True, "quote_part": True, "music_sung": True, "speech_music_log": True, "storage": True, "device_log": True, "music_voted": True, "music_chapters": True, "music_search": True, "music_channel": True, "mix_songs": True, "room_delegate": False, "map": True,
-                   "play_gate": True, "trakt": True, "watch": False, "pair_request": True,
+                   "play_gate": True, "trakt": True, "watch": False, "pair_request": True, "photo_edit": True,
                    "personal_use": {"on": True, "methods": {m: True for m in personal_use.METHODS},
                                     "addons": sorted(personal_use.ADDON_METHODS)}}
 

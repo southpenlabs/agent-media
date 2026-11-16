@@ -150,6 +150,12 @@ def _summary() -> dict:
     }
 
 
+def _photo() -> dict:
+    from . import photo_edit
+
+    return photo_edit.prompt_report()
+
+
 def _personas() -> list[dict]:
     from . import personas
 
@@ -159,7 +165,7 @@ def _personas() -> list[dict]:
 
 def report(guest: bool = False) -> dict:
     prompts = []
-    for build in (_writing, _quick, _tidy, _summary):
+    for build in (_writing, _quick, _tidy, _summary, _photo):
         try:
             prompts.append(build())
         except Exception as e:  # noqa: BLE001 — one prompt never hides the rest

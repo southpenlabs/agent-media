@@ -110,6 +110,10 @@ never a network call, so the app can ask on every start.
   personal_use  {"on", "methods": {name: allowed}} (personal_use.py, 2 Nov
             2026): what this install allows that a public product could
             not; bridges also needs "messaging-bridges"
+  photo_edit  an image model can be reached for AI edits to a picture before
+            it is sent (photo_edit.py, §6.58, 16 Nov 2026): GET
+            /photo/edit/presets, POST /photo/edit; the default route also needs
+            personal use ("google-image-signin")
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -136,6 +140,12 @@ def _music() -> bool:
     if music_rooms.stream():
         return True
     return bool(StateStore().recent_history(sink="music", limit=1))
+
+
+def _photo_edit() -> bool:
+    from . import photo_edit
+
+    return photo_edit.configured()
 
 
 def _contacts() -> bool:
@@ -222,7 +232,8 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
-          "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request}
+          "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
+          "photo_edit": _photo_edit}
 
 
 def detect() -> dict[str, bool]:

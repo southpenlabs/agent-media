@@ -255,6 +255,10 @@ except /pair, which is how a device gets its token):
                   "size"} (uploads.py)
   GET  /upload?path=<its path>  → that file back, as itself (a thumbnail in
                   the reply box and the thread); only under the upload root
+  GET  /photo/edit/presets[?session=] → the photo edit presets {key, label,
+                  group}, `describe`, `provider`, `available` (photo_edit.py)
+  POST /photo/edit?preset=<key>|describe=<text>[&session=]  (the picture as
+                  the raw body) → the edited picture, or {"ok": false, "why"}
   GET  /speech/now   → what is being said, named for the speech bar
   POST /speech/ctl   {"action", "arg"?, "sentence"?, "session"?} → a
                   listener's speech verb (goto-sentence / replay-id from a
@@ -451,6 +455,7 @@ CORS_PATHS = frozenset({
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/enrol/wait", "/pair/request", "/pair/wait", "/pair/pending", "/pair/approve", "/pair/deny", "/me", "/me/signout", "/me/account", "/me/servers",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
+    "/photo/edit/presets", "/photo/edit",
     "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
@@ -635,6 +640,10 @@ def body_limit(path: str) -> int:
     (/upload), which is streamed to disk after the bearer is checked."""
     if path == "/upload":
         return uploads.max_bytes()
+    if path == "/photo/edit":
+        # Past the guard: the route refuses a body over photo_edit.MAX_BYTES
+        # itself, unread, as JSON `why: too_big` the app can show.
+        return 1 << 40
     if path == "/read":
         from . import read_it
 
@@ -2574,6 +2583,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = default_agent.settings(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/photo/edit/presets":
+        # The photo edit presets for the attachment preview (photo_edit.py, §6.58).
+        from . import photo_edit
+
+        session = (parse_qs(h.path.partition("?")[2]).get("session") or [""])[0]
+        ok, detail = photo_edit.presets(_bearer(h), session)
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/prompts":
         # Settings → Prompts: every prompt Sasonica adds, read-only (§6.57).
         from . import prompt_settings
@@ -3734,6 +3750,37 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = uploads.link(str(body.get("path") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    elif path == "/photo/edit":
+        # An AI edit to a picture before it is sent (photo_edit.py, §6.58):
+        # the picture back, or why not. Nothing of it is kept.
+        from . import photo_edit
+
+        try:
+            length = int(h.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        q = {k: v[0] for k, v in parse_qs(h.path.partition("?")[2]).items()}
+        was_read = []
+
+        def read(n: int) -> bytes:
+            was_read.append(n)
+            chunks, left = [], n
+            while left > 0:
+                got = h.rfile.read(min(left, 1 << 20))
+                if not got:
+                    break
+                chunks.append(got)
+                left -= len(got)
+            return b"".join(chunks)
+
+        status, picture, ctype, detail = photo_edit.edit(
+            _bearer(h), length, read, h.headers.get("Content-Type") or "", q)
+        if not was_read:
+            h.close_connection = True      # refused first: the body is left unread
+        if picture is not None:
+            _send(h, status, picture, ctype)
+        else:
+            _json(h, status, detail)
     elif path == "/upload":
         try:
             length = int(h.headers.get("Content-Length", "0"))

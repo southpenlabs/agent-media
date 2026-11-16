@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 52 rows.
+Sorted with what blocks a public release first. 53 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -93,6 +93,7 @@ Sorted with what blocks a public release first. 52 rows.
 | 50 | opencode GitHub release (anomalyco/opencode, formerly sst/opencode) | opencode, the default agent: `sasonica install` fetches it when none is here (`--no-opencode` skips) | none | fetched once at install, pinned v1.19.5, checked against pinned sha256s | nothing: opencode is MIT. Its free models are opencode's own service, under row 10 | **No, not gated** |
 | 51 | txcript GitHub release (skillsynchq/txcript) | copying a chat into another agent (`media session convert`): `sasonica install` fetches it when none is here (`--no-txcript` skips) | none | fetched once at install, pinned v0.14.4, checked against pinned sha256s; runs locally, reading and writing the agents' own stores, nothing sent anywhere | nothing: txcript is Apache-2.0, run as a separate program | **No, not gated** |
 | 52 | Stremio add-ons, by address (Torrentio, and the legitimate ones offered as examples: Cinemeta, YouTube, WatchHub, Public Domain Movies, OpenSubtitles, Anime Kitsu, OmniCatalogs, Trakt, MDBList, and the Plex/Jellyfin/Emby bridges) | streams, catalogues, subtitles and where-to-watch at a title, inside Stremio (§6.54 "Stremio add-ons") | none | an address is named and its manifest read once when added (`watch_addons.py`); Stremio is sent to it by its own install link. Any address works, not a fixed table | nothing for the link; a torrent add-on's streams go peer-to-peer in the user's own Stremio. The example addresses are read from stremio-official-addons and a community list, and may move | no |
+| 53 | Google's image model (gemini-3.1-flash-image) through cli-proxy-api | Edit on a picture before it is sent: presets and a description (§6.58, `photo_edit.py`) | the Google sign-in the owner's AI gateway holds (a login borrowed from Google's own CLI) | personal install only; the picture goes to Google for each edit, only when Edit is used | **Needs work**: a public install names its own OpenAI-compatible image endpoint and key (`MEDIA_IMAGE_EDIT_BASE_URL`, `MEDIA_IMAGE_EDIT_API_KEY`); say in the privacy policy that an edited picture goes to that provider | **yes** (`google-image-signin`); an owner's own endpoint is not gated |
 
 ## The services, one by one
 
@@ -652,6 +653,35 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** nothing. Move the pin forward with a release's digests
   (`gh release view v<version> -R skillsynchq/txcript --json assets`), after
   re-running the trial in `docs/proposals/2026-11-15-convert-between-agents.md`.
+
+### 53. Google's image model, for photo edits
+
+- **Used for:** Edit on a picture between choosing it and sending it
+  (server-contract §6.58, `agent_media_server/photo_edit.py`, 16 Nov 2026):
+  a preset (Fix the light, Sketch, Sunset and the rest) or a description.
+  Never automatic; a private, sealed or people's thread gets no Edit unless
+  `MEDIA_PRIVATE_IMAGE_MODELS` names a model.
+- **How:** an OpenAI-style `POST /v1/chat/completions` to cli-proxy-api
+  (`CLIPROXY_BASE_URL`, default `http://127.0.0.1:8317/v1`, with
+  `CLIPROXY_API_KEY` from the environment or the AI gateway's
+  `litellm.env`), model `gemini-3.1-flash-image`; the picture goes as a
+  data: URL and comes back in `message.images`. cli-proxy-api signs in to
+  Google with the login Google's own CLI made. Nothing of the picture is kept
+  on the server.
+- **Credential:** the owner's Google account, through that borrowed sign-in.
+  No per-picture charge; the account's quota.
+- **Terms:** a CLI's sign-in driven by another program is a personal method,
+  not something Google offers a product: **check current terms**. Gated:
+  `personal_use.allowed("google-image-signin")` (`MEDIA_PHOTO_EDIT_GOOGLE`
+  its own switch), so a public install does not use it.
+- **Public alternative:** any OpenAI-compatible image endpoint the owner
+  configures, with their own key (`MEDIA_IMAGE_EDIT_BASE_URL`,
+  `MEDIA_IMAGE_EDIT_API_KEY`), or a model on their gateway named
+  `gateway:<model>` in `MEDIA_IMAGE_EDIT_MODELS` (OpenAI's or Venice's image
+  models are per picture, so none is set by default). Not gated: it is the
+  owner's own account.
+- **Production:** a public build ships with no image model; the owner names
+  one. The privacy policy says a picture sent to Edit goes to that provider.
 
 ### Related repositories
 

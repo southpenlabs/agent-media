@@ -180,6 +180,19 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setenv("MEDIA_PEOPLE", "0")
     # … and a video's channel, a channel's page and uploads (music_channel).
     monkeypatch.setenv("MEDIA_MUSIC_CHANNEL", "0")
+    # A picture is never sent to a real image model (photo_edit.py): no
+    # cli-proxy-api key from the machine's environment or key file, and the
+    # call itself refuses. A test that wants an edit patches photo_edit._post.
+    for k in ("CLIPROXY_API_KEY", "CLIPROXY_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MEDIA_PHOTO_EDIT_KEY_FILE", str(tmp_path / "no-litellm.env"))
+    from agent_media_server import photo_edit
+
+    def _no_image_model(*a, **k):
+        raise RuntimeError("a test reached a real image model")
+
+    monkeypatch.setattr(photo_edit, "_post", _no_image_model)
+    photo_edit._reset_for_tests()
     # The tests exercise the personal-use methods (personal_use.py) as a
     # personal install has them; test_personal_use.py checks a public one.
     monkeypatch.setenv("MEDIA_PERSONAL_USE", "1")

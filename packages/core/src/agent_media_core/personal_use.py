@@ -64,6 +64,9 @@ METHODS = {
                           "pages read, and friends-only videos played, with the app's stored sign-ins"),
     "stremio-page": ("MEDIA_WATCH_STREMIO_PAGE",
                      "Stremio's own web app shown inside the app, the video on its page driven by the app's controls"),
+    "google-image-signin": ("MEDIA_PHOTO_EDIT_GOOGLE",
+                            "pictures edited by Google's image model through a sign-in borrowed from "
+                            "Google's own CLI (cli-proxy-api), for Edit on a picture before it is sent"),
     "camera-reports": ("MEDIA_CAMERA_REPORTS",
                        "people's reports of where phone and seatbelt cameras stand, read from a "
                        "community site through the phone, for the Map and the camera alerts"),

@@ -5843,6 +5843,7 @@ local look, never a network call:
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
+| `photo_edit` | an image model can be reached for AI edits to a picture before it is sent (§6.58, 16 Nov 2026): one of `MEDIA_IMAGE_EDIT_MODELS` has a route here (the default, Gemini through cli-proxy-api, needs its key and personal use, `google-image-signin`). The attachment preview offers Edit only then |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -11922,7 +11923,7 @@ Code: `agent_media_server/prompt_settings.py`.
 
 ```
 GET /settings/prompts → {"ok": true,
-  "prompts": [{"key": "writing" | "quick" | "tidy" | "summary",
+  "prompts": [{"key": "writing" | "quick" | "tidy" | "summary" | "photo",
                "title", "what", "when", "used_by": [<harness or feature>…],
                "source", "overridden": "<env var>" | null, "enabled": bool,
                "text": "<the prompt as sent>",
@@ -11948,6 +11949,10 @@ GET /settings/prompts?persona=<id>[&agent=<agent>]
   is the default chip's. The answer is JSON (`parsed`).
 - `summary`: parts `summary`, `code`, `table`, each the env override where
   one is set (`overridden` names it).
+- `photo`: photo edits (§6.58): `text` the frame every edit starts with,
+  one part per preset (`key` as in `GET /photo/edit/presets`) and
+  `describe`; `enabled` is `/features`' `photo_edit`, `model` the first
+  image model tried. The answer is a picture (`parsed`).
 - A prompt that fails to build comes back as `{"key", "error"}`; the rest
   still come.
 
@@ -11961,6 +11966,73 @@ Any paired device may read (401 `not_paired` otherwise). A guest gets the
 prompts with `personas: []`, and `?persona=` is 403 `code: "guest"`.
 Read-only for now; additions with a reset are step 2. In `CORS_PATHS`.
 `/features` has `prompts_view: true`.
+
+### 6.58 AI edits to a photo before it is sent — gated; not for guests (built 16 Nov 2026)
+
+Between choosing or taking a picture and sending it, the attachment preview's
+Edit (David, 16 Nov 2026: "Maybe even with some ai filters and mods?";
+docs/proposals/2026-11-16-photo-edits.md, step 1). The edit is made on the
+server by an image model, never automatically, and nothing of it is kept.
+Code: `agent_media_server/photo_edit.py`; pinned by `test_photo_edit.py`.
+
+```
+GET  /photo/edit/presets[?session=<thread>]
+  → {"ok": true, "presets": [{"key", "label", "group": "fix" | "style" | "fun"}…],
+     "describe": true, "provider": "Google", "available": bool}
+POST /photo/edit?preset=<key>[&session=<thread>]      (the picture as the raw body)
+POST /photo/edit?describe=<words>[&session=<thread>]
+  → 200 the edited picture, Content-Type image/png | image/jpeg | image/webp
+  → {"ok": false, "why": "refused" | "no_model" | "too_big" | "failed" | …, "error"}
+```
+
+- **Presets**, in the order the app shows them: `light` Fix the light,
+  `blur` Blur the background, `cutout` Remove the background (fix);
+  `painting` Painting, `sketch` Sketch (style); `cartoon` Cartoon, `vintage`
+  Vintage film, `sunset` Sunset (fun). The prompt behind each stays on the
+  server and is shown in `GET /settings/prompts` (§6.57, key `photo`); every
+  edit starts with a frame that keeps the people, faces, poses and scene
+  recognisable and adds no text. `describe` is the person's own words (up to
+  500 characters, whitespace collapsed) after the same frame. `preset` wins
+  when both are sent. `provider` names who makes the edit (for the sheet's
+  one-time "Edits are made by Google's image model"); `available` is false
+  where there is no model for that thread (a private one, below).
+- **The picture**: `image/jpeg`, `image/png` or `image/webp`, read from its
+  bytes (the Content-Type is not trusted), up to 15 MB. Over that, 413
+  `too_big`, refused before a byte is read. Downscaled to 2048 px on the
+  long side before it is sent, where Pillow is installed (it is optional;
+  without it the picture goes as it came). Not a picture: 415 `bad_type`.
+- **The model**: an OpenAI-style `POST <base>/chat/completions` with the
+  instruction and the picture as an `image_url` data: URL; the edit comes
+  back in `choices[0].message.images` (a data: URL, wrapped however the
+  gateway wraps it). `MEDIA_IMAGE_EDIT_MODELS` is the ordered list (default
+  `gemini-3.1-flash-image`, `-` none); a failing model is followed by the
+  next inside one 60 s deadline. A plain name goes to
+  `MEDIA_IMAGE_EDIT_BASE_URL` with `MEDIA_IMAGE_EDIT_API_KEY` when set, else
+  to cli-proxy-api (`CLIPROXY_BASE_URL`, default `http://127.0.0.1:8317/v1`)
+  with `CLIPROXY_API_KEY` from the environment or the gateway's key file
+  (`MEDIA_PHOTO_EDIT_KEY_FILE`, else `MEDIA_SUMMARY_KEY_FILE`, else
+  `~/.config/litellm/litellm.env`); that route is the Google sign-in the
+  gateway holds, so it runs only where personal use allows
+  `google-image-signin` (`MEDIA_PHOTO_EDIT_GOOGLE` its own switch). A name
+  prefixed `gateway:` goes to the summary gateway (`MEDIA_SUMMARY_BASE_URL`
+  and its key), where a paid fallback is named; none is set by default.
+- **Why not**: `refused` (422) when the model answered in words and no
+  picture: `error` is its reason as it said it, not a broken picture.
+  `failed` (502) when no model answered with a picture (`error` the last
+  one's reason). `no_model` (503) when no model can be reached here, or the
+  thread is private, sealed or a chat with people and no
+  `MEDIA_PRIVATE_IMAGE_MODELS` is set (none today). `busy` (429): one edit
+  at a time per device. `limit` (429): the device's day's edits are used up
+  (`MEDIA_PHOTO_EDIT_DAILY`, default 100, counted in memory). `bad_request`
+  (400): no preset or an unknown one, and no description.
+- **Nothing kept**: no copy of the picture, the result or the description
+  is written; one journal line per edit (the preset key or `describe`, the
+  sizes, the model, the time taken, how it ended).
+
+Any paired device may read the presets (401 `not_paired` otherwise). A guest
+may not edit: 403 `code: "guest"` (the server's guest rule). Both in
+`CORS_PATHS`. `/features` has `photo_edit` where an image model can be
+reached.
 
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
