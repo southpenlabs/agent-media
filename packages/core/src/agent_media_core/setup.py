@@ -2412,8 +2412,9 @@ def opencode_plugin_dest() -> Path:
 
 def opencode2_plugin_source() -> Path:
     """opencode 2's plugin: a folder (v2 loads a folder's `index.js`; v1
-    plugins do not run on it)."""
-    return _data_dir("opencode") / "v2" / "agent-media"
+    plugins do not run on it). Named through the release's `current` link
+    when it is in one, so pruning that release does not break the link."""
+    return Path(_through_current(str(_data_dir("opencode") / "v2" / "agent-media")))
 
 
 def opencode2_plugin_dest() -> Path:

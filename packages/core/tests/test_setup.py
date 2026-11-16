@@ -1510,3 +1510,20 @@ def test_opencode2_leaves_a_real_folder_alone(tmp_path, monkeypatch):
     folder.mkdir(parents=True)
     state, why = setup._row_opencode(_profile_args(tmp_path), check_only=False)
     assert state == "failed" and "not a link of ours" in why
+
+
+def test_opencode2_plugin_is_linked_through_current(tmp_path, monkeypatch):
+    """Run from a release, the plugin folder is that release's by its real
+    path; the link goes through `current`, or the next pruned release breaks
+    it (red2, 16 Nov 2026: linked to releases/ddf6bc0b1116/…)."""
+    from agent_media_core import release
+
+    root = tmp_path / "am"
+    rel = root / "releases" / "abc123"
+    plugin = rel / "pkg" / "opencode" / "v2" / "agent-media"
+    plugin.mkdir(parents=True)
+    (root / "current").symlink_to(rel)
+    monkeypatch.setattr(release, "releases_dir", lambda: root / "releases")
+    monkeypatch.setattr(release, "current_link", lambda: root / "current")
+    monkeypatch.setattr(setup, "_data_dir", lambda name: rel / "pkg" / name)
+    assert setup.opencode2_plugin_source() == root / "current" / "pkg" / "opencode" / "v2" / "agent-media"
