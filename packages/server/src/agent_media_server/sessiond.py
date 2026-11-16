@@ -112,7 +112,10 @@ record saying it), and the next start resumes each session cut off — mid-
 turn, a card up, background work — once, with `resume_note`. Idle ones are
 not woken, except one that ended its turn because the drain told it to
 (23 Oct 2026, `_drain_cut`: the context hook's marker names the restart):
-its work was cut short, so it is resumed too, told to carry on. A session
+its work was cut short, so it is resumed too, told to carry on. One that
+had already ended its turn but holds the restart with background work is
+told by a message (`_nudge_for_restart`, 16 Nov 2026: no turn, no hook), and
+is resumed the same way, with what it stopped named. A session
 let through (`release`, 3 Nov 2026: the app's Send now on a held message)
 has its held messages sent at once and is held no more; it is not asked to
 end its turn, and the restart waits for it like any busy session.
@@ -686,6 +689,10 @@ class Session:
         #: take `perTaskStopAffordance`): told on the next message
         #: (`interrupt_killed_note`), then forgotten.
         self.interrupt_killed: list[dict] = []
+        #: Told by `_nudge_for_restart` to end for a drained restart while
+        #: idle with background work: `{"restart": id, "tasks": [...]}`,
+        #: so `_drain_cut` can name what it stops when it is resumed.
+        self.drain_nudged: dict | None = None
         self.background_timer: threading.Timer | None = None
         self.acked: set[str] = set()
         self.responses: dict[str, dict] = {}
@@ -1711,8 +1718,15 @@ class Supervisor:
             told = False
         if not told:
             return
+        tasks = s.task_list(now) if s.agent != "opencode" else []
+        nudged = s.drain_nudged or {}
+        if nudged.get("restart") == str(rec.get("id") or ""):
+            # Told while idle with background work: what it stopped since is
+            # named in the resume too, to be re-run or continued.
+            ids = {t.get("id") for t in tasks}
+            tasks += [t for t in nudged.get("tasks") or [] if t.get("id") not in ids]
         s.cut_off = {"state": s.state, "turn": True, "question": False,
-                     "tasks": s.task_list(now) if s.agent != "opencode" else [],
+                     "tasks": tasks,
                      "queued": len(s.queued),
                      "last_text": s.last_text, "at": round(now, 3), "why": "drain",
                      "restart": str(rec.get("id") or ""), "due": True}
@@ -1802,6 +1816,10 @@ class Supervisor:
         it stopped is left to `quota_tick`, which runs last. The sessions
         acted on."""
         if self.draining():
+            try:
+                self._nudge_for_restart()
+            except Exception:  # noqa: BLE001 — a notice must not stop delivery
+                log.exception("sessiond: telling idle sessions of the restart")
             return self._deliver_in_window()
         q = _quota()
         if q.warnings_path().exists():
@@ -1847,6 +1865,62 @@ class Supervisor:
             except Exception:  # noqa: BLE001
                 log.exception("sessiond: resuming after the usage limit")
         return done
+
+    def _nudge_for_restart(self) -> list[str]:
+        """While a drained restart waits on a Claude session that has ended
+        its turn but has background work running (`waiting_on` kind
+        "agents"), send it the notice (core intake/context.py
+        `IDLE_RESTART_NOTE`) as a turn, once per restart: the context hook
+        tells a session only from inside a turn, so one idle on a background
+        command never heard and held the restart until it gave up (16 Nov
+        2026). The hook's marker is written first, so the hook does not say
+        it again and the turn's end is a drain cut (`_drain_cut`): it is
+        resumed after the restart, told what was stopped. Not for a session
+        let through, one that gave an estimate, or while a window lets it
+        work. The sessions told."""
+        rec = self.draining()
+        if not rec:
+            return []
+        from agent_media_core import restart_services as rs
+        from agent_media_core.intake import context
+
+        rid = str(rec.get("id") or "")
+        waits = {str(w.get("session") or "") for w in rec.get("waiting_on") or []
+                 if isinstance(w, dict) and w.get("kind") == "agents"}
+        now = time.time()
+        todo: list[tuple[str, str]] = []
+        with self.lock:
+            for s in self.sessions.values():
+                if (s.id not in waits or s.agent != "claude" or not s.live
+                        or s.state != "waiting" or s.pending or s.queued
+                        or not rs.holds(rec, s.id, now) or rs.has_eta(rec, s.id)
+                        or context.told_to_end(s.id, rid)):
+                    continue
+                tasks = s.task_list(now)
+                if not tasks:
+                    continue
+                agents_n = sum(1 for t in tasks if t.get("type") == "local_agent")
+                work = "; ".join(
+                    ("background agent " if t.get("type") == "local_agent"
+                     else "background command ")
+                    + f"\u201c{' '.join(str(t.get('description') or t.get('id') or '?').split())[:120]}\u201d"
+                    for t in tasks)
+                if agents_n == len(tasks):
+                    work += " (it hands back by itself; end your turn now)"
+                s.drain_nudged = {"restart": rid, "tasks": tasks}
+                todo.append((s.id, context.IDLE_RESTART_NOTE.format(work=work)))
+        told = []
+        for sid, text in todo:
+            context.mark_told(sid, rid)
+            try:
+                self.send(sid, text, _internal=True, _no_bump=True)
+                told.append(sid)
+                log.info("sessiond: %s told of the pending restart while idle with "
+                         "background work", sid[:8])
+            except Refused as e:
+                log.warning("sessiond: %s not told of the pending restart: %s",
+                            sid[:8], e.error)
+        return told
 
     def _deliver_in_window(self) -> list[str]:
         """While a restart is pending with a window open (core

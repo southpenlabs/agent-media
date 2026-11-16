@@ -846,6 +846,30 @@ def told_to_end(sid: str, restart_id: str) -> bool:
         return False
 
 
+def mark_told(sid: str, restart_id: str) -> None:
+    """Note that sessiond session `sid` has been told to end its turn for
+    the pending restart `restart_id`, as `_restart_note` does: sessiond's
+    `_nudge_for_restart` writes it when it sends the notice itself, so the
+    hook does not say it again and `_drain_cut` resumes the session after."""
+    if sid and restart_id:
+        (state_dir() / f"{sid}.restart").write_text(restart_id)
+
+
+#: What sessiond sends a session that has ended its turn but holds a drained
+#: restart up with background work (`Supervisor._nudge_for_restart`): no turn
+#: is running, so no hook can carry `RESTART_NOTE` to it (David, 16 Nov 2026:
+#: "The notification should come to the working threads and they should
+#: resume after the restart"). `{work}` names what is running.
+IDLE_RESTART_NOTE = (
+    "[From the session host] A restart of the session host is waiting, and it waits "
+    "on your background work: {work}. Background agents are told as well and will "
+    "hand back; don't relaunch them before the restart. Stop any background command "
+    "that can simply be re-run afterwards (TaskStop), then end your turn: you'll be "
+    "resumed automatically after the restart, told what was stopped. If that work is "
+    "critical and can't safely stop, run `media restart-services --eta <minutes> "
+    "--why \"<what>\"` with an honest estimate instead, and end your turn.")
+
+
 def restart_note_for(hook: dict) -> str:
     """`media-hook-context --restart` (Claude Code's PostToolUse): the
     restart note alone, as the hook JSON."""

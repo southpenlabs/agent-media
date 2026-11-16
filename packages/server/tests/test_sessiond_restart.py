@@ -335,6 +335,47 @@ def test_a_drained_session_busy_again_at_the_stop_is_cut_off_mid_turn(host):
     assert cut["why"] == "restart" and cut["drained"] and cut["turn"]
 
 
+def test_an_idle_session_holding_the_restart_with_background_work_is_told_then_resumed(host):
+    # It ended its turn with a background command still running: no turn,
+    # so no hook carries the notice (16 Nov 2026). sessiond sends it, once,
+    # and the turn that ends is a drain cut, resumed after naming the command.
+    sid = start(host, "reply: a")
+    wait_for(lambda: _said(host.sup, sid) == "a")
+    _task(host, sid, "task_started", description="full server suite",
+          task_type="local_bash", is_backgrounded=True)
+    _pend(waiting_on=[{"session": sid, "kind": "agents", "label": "s",
+                       "why": "has 1 task(s) in flight"}])
+    _fresh(host.sup)
+    assert host.sup._nudge_for_restart() == [sid]
+    wait_for(lambda: "waits on your background work" in _said(host.sup, sid))
+    assert "\u201cfull server suite\u201d" in _said(host.sup, sid)
+    assert host.sup._nudge_for_restart() == []          # once per restart
+    _task(host, sid, "task_notification", status="stopped")   # it stopped the run
+    wait_for(lambda: (sessiond.read_record(sid)["cut_off"] or {}).get("why") == "drain")
+    cut = sessiond.read_record(sid)["cut_off"]
+    assert [t["description"] for t in cut["tasks"]] == ["full server suite"]
+    rs.clear_pending()
+    _fresh(host.sup)
+    assert host.sup.deliver_due() == [sid]
+    wait_for(lambda: "Carry on" in _said(host.sup, sid))
+    assert "full server suite" in _said(host.sup, sid)
+
+
+def test_an_idle_session_that_gave_an_estimate_or_was_let_through_is_not_told(host):
+    sid = start(host, "reply: a")
+    wait_for(lambda: _said(host.sup, sid) == "a")
+    _task(host, sid, "task_started", description="long job",
+          task_type="local_bash", is_backgrounded=True)
+    _pend(waiting_on=[{"session": sid, "kind": "agents", "label": "s", "why": "w"}],
+          through=[sid])
+    _fresh(host.sup)
+    assert host.sup._nudge_for_restart() == []
+    _pend(waiting_on=[{"session": sid, "kind": "agents", "label": "s", "why": "w"}],
+          etas={sid: {"until": time.time() + 60, "at": time.time(), "what": "x"}})
+    _fresh(host.sup)
+    assert host.sup._nudge_for_restart() == []
+
+
 # --- Send now on a held message: the restart lets the session through ------------
 
 def test_release_sends_what_is_held_and_holds_no_more(host):
