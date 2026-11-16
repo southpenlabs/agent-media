@@ -3234,8 +3234,11 @@ def _enrolled(h: BaseHTTPRequestHandler, claims: dict, device: str, ip: str,
         # This server, on the account's list at sasonica.com (roadmap item 20).
         from . import servers_report
         servers_report.report_soon(got["device_id"], _base_url(h))
+    from . import join_requests
+
     _json(h, 200, {"ok": True, "token": got["token"], "device_id": got["device_id"],
                    "name": got["name"], "enrol": got["enrol"], "role": got["role"],
+                   "welcome": join_requests.take_welcome(claims, got["role"], _server_name()),
                    "account": str(claims.get("email") or ""), "username": got["username"],
                    "picture": picture or oidc.picture_of(claims) or None,
                    "server": {"name": _server_name(), "base": _base_url(h)},

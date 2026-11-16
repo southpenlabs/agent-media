@@ -11671,6 +11671,12 @@ approves). Code: `agent_media_server/join_requests.py`; pinned by
   the request is spent by it; `403 denied`; `410 lapsed` (unanswered for 7
   days: sign in again to ask again); `404 unknown` (no such request, a wrong
   or spent secret; counts against the address like a wrong code).
+- The first device token after acceptance (from `/enrol/wait`, or `/enrol`
+  if the app stopped waiting) carries `welcome: {"title", "text"}` (17 Nov
+  2026; David: "acceptance should come with an onboarding message"): "Welcome
+  to <server>" and what the role may do here; the app shows it once, after
+  signing in. Every other answer has `welcome: null`. `MEDIA_JOIN_WELCOME`
+  replaces the text (`{server}` and `{role}` filled in).
 - An allowed account is remembered with its role, so its next device signs
   straight in. `devices --revoke-account <sub|email>` forgets it as well as
   its devices. A denied account is not alerted on again for 30 days.

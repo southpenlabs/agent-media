@@ -23,7 +23,9 @@ and the allowed accounts, `{"<iss>|<sub>": {"role", "email", "at"}}`.
 Limits: one open request per account (asking again refreshes it and does not
 alert twice), at most `MAX_OPEN` open at once (more is `too_many_requests`), a
 request lapses after `TTL_S`, and a denied account is not alerted on again for
-`DENY_QUIET_S`. `MEDIA_OIDC_REQUESTS=0` turns asking off (a stranger is
+`DENY_QUIET_S`. The first device signed in after acceptance carries a welcome
+(`take_welcome`; MEDIA_JOIN_WELCOME replaces its text).
+`MEDIA_OIDC_REQUESTS=0` turns asking off (a stranger is
 `not_enrolled` with no request, as before).
 """
 
@@ -99,6 +101,42 @@ def allowed_role(claims: dict) -> str:
     got = _load()["allowed"].get(_key(claims))
     role = str((got or {}).get("role") or "")
     return role if role in devices.ROLES else ""
+
+
+#: The welcome an account gets with its first device after it is let in
+#: (David, 17 Nov 2026: "acceptance should come with an onboarding
+#: message"). MEDIA_JOIN_WELCOME replaces the text; {server} and {role} are
+#: filled in.
+WELCOME = {
+    "member": ("An administrator of {server} has approved your registration. You can read "
+               "and listen to the chats here, start your own from the menu, and talk to the "
+               "agents by typing or with the mic. Settings has your voice, your devices and "
+               "your account."),
+    "guest": ("An administrator of {server} has approved your registration as a guest. You "
+              "can read the chats here and listen to them, but not type into them. Ask an "
+              "administrator if you need more."),
+}
+
+
+def take_welcome(claims: dict, role: str, server: str) -> dict | None:
+    """`{"title", "text"}` for an account let in by answering its request, the
+    first time one of its devices signs in after; None after that, and for an
+    account let in by the server's config."""
+    key = _key(claims)
+    with _txn():
+        data = _load()
+        got = data["allowed"].get(key)
+        if not got or not got.get("welcome"):
+            return None
+        got["welcome"] = False
+        devices._write(path(), data)
+    custom = (os.environ.get("MEDIA_JOIN_WELCOME") or "").strip()
+    text = custom or WELCOME.get(role) or WELCOME["member"]
+    try:
+        text = text.format(server=server, role=role)
+    except (KeyError, IndexError, ValueError):
+        pass
+    return {"title": f"Welcome to {server}", "text": text}
 
 
 def forget(who: str) -> int:
@@ -188,7 +226,7 @@ def act(alert_id: str, action: str) -> tuple[bool, dict]:
         if role:
             req["role"] = role
             data["allowed"][req["key"]] = {"role": role, "email": req.get("email") or "",
-                                           "at": round(now, 3)}
+                                           "at": round(now, 3), "welcome": True}
         else:
             req.pop("rt", None)
         devices._write(path(), data)

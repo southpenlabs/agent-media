@@ -363,9 +363,13 @@ def test_a_stranger_asks_and_the_owner_allows(server):
     res, _ = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
     assert res.status == 404
 
+    # Acceptance comes with a welcome, once.
+    assert w["welcome"]["title"].startswith("Welcome to ")
+    assert "approved your registration" in w["welcome"]["text"]
+
     # The account is remembered: its next device signs straight in.
     res, obj = call(server, "POST", "/enrol", {"id_token": stranger, "device": "Sam's tablet"})
-    assert res.status == 200 and obj["role"] == "member"
+    assert res.status == 200 and obj["role"] == "member" and obj["welcome"] is None
 
     # Revoking the account forgets that too.
     devices.revoke_account("sam@example.com")
@@ -380,7 +384,23 @@ def test_allowed_as_guest_reads_only(server):
     req = obj["request"]
     alerts.act(f"join.{req['id']}", "guest")
     res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
-    assert w["role"] == "guest"
+    assert w["role"] == "guest" and "as a guest" in w["welcome"]["text"]
+
+
+def test_the_welcome_can_be_the_owners_own(server, monkeypatch):
+    from agent_media_server import alerts
+
+    monkeypatch.setenv("MEDIA_JOIN_WELCOME", "Hi from {server}, you are a {role}.")
+    res, obj = call(server, "POST", "/enrol", {"id_token": token(sub="11", email="w@example.com")})
+    req = obj["request"]
+    alerts.act(f"join.{req['id']}", "allow")
+    res, w = call(server, "POST", "/enrol/wait", {"request": req["id"], "secret": req["secret"]})
+    assert w["welcome"]["text"].startswith("Hi from ") and w["welcome"]["text"].endswith("a member.")
+
+
+def test_an_account_named_in_config_gets_no_welcome(server):
+    res, obj = call(server, "POST", "/enrol", {"id_token": token()})
+    assert res.status == 200 and obj["welcome"] is None
 
 
 def test_denied_stays_denied(server):
