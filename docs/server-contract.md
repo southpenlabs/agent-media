@@ -262,7 +262,9 @@ Everything a message can be pointed at.
   did. `window` is true while at least 3 min of that is left: messages to
   other threads and new chats then go through rather than being held, and
   only the thread that gave the estimate is held, so "held until the server
-  restarts" can add "in about N min". Each headless row, and a headless thread's
+  restarts" can add "in about N min". A row's `label` is the chat's
+  title as the list gives it (a rename included; 16 Nov 2026), its first
+  words only when it has none. Each headless row, and a headless thread's
   snapshot (§11), carries the same object plus `"held": <how many of this
   thread's messages wait for it>`, so a held reply (§6.2.2 `held`) can say
   "held until the server restarts". It goes when the restart is done or
@@ -11040,6 +11042,38 @@ person's `photo`.
     docs/decisions/2026-11-02-personal-use.md). A kept `"page"` reads as
     `"app"` wherever it is no longer offered. An entry without `mode`
     (an older server) is `"app"`.
+  - **Stremio add-ons** (`watch_addons.py`; David, 15 Nov 2026: "an add-on
+    for torrentio" → "make it for any add-on address but only in advanced
+    mode, and only a user with administrative privileges"). `addons` on
+    `GET /watch/settings` is the extra Stremio add-ons the owner added, in
+    the order added: `[{"id", "name", "address", "install", "web",
+    "logo"?}]`. `address` is the add-on's manifest address; `install` is
+    Stremio's own install link — the address with its scheme taken off,
+    `https://torrentio.strem.fun/manifest.json` →
+    `stremio://torrentio.strem.fun/manifest.json` (stremio-addon-sdk
+    docs/deep-links.md, "To addons"); `web` is Stremio's web app's add-ons
+    page (`https://web.stremio.com/#/addons`) for a browser or a shell with
+    no Stremio app to take the link. The app opens `install`, and `web`
+    where nothing takes it. Any address whose page serves a Stremio add-on
+    manifest may be added — not a fixed table; the manifest is read once, on
+    adding, for the add-on's own name and id, so this is the one watch
+    source that trusts an address from outside. Added and removed with
+    `POST /watch/settings {"addons": {"add": "<address>"}}` and
+    `{"addons": {"remove": "<address or manifest id>"}}` — admins, as the
+    route's writes are (the app shows the section only in Advanced). A
+    pasted address may omit the scheme (`https://` is assumed) or the
+    `/manifest.json`, or be a `stremio://` link; anything else is 400, as is
+    a reachable page that is not an add-on, and an address that does not
+    answer is 502. At most 25 are kept, in `<state_dir>/watch-addons.json`.
+    `suggested` is `EXAMPLES`: a few legitimate add-ons to offer, Stremio's
+    own first (Cinemeta, YouTube, WatchHub, Public Domain Movies,
+    OpenSubtitles v3), then a few open ones (Anime Kitsu, OmniCatalogs,
+    Trakt Tv, MDBList) and the library bridges (Plex, Jellyfin, Emby — your
+    own server), each `{"name", "address", "install", "web", "note"}` —
+    examples only, Torrentio not among them (David, 15 Nov 2026: "list of
+    all legitimate ones", "also add Plex/Jellyfin/Emby"), and any address
+    may still be added. The examples' addresses are read by hand from
+    stremio-official-addons and a community list and may move.
   - Then the where-to-watch services, when TMDb is set up: each known
     service once, `kind` the first way it offers the title (`stream`,
     `free`, `ads`, `rent`, `buy`), `url` that service's own search for the

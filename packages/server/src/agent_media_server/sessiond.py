@@ -522,8 +522,32 @@ def restart_view() -> dict | None:
             "eta": round(eta, 3) if eta is not None else None,
             "window": rs.window(rec) is not None,
             "waiting_on": [{"session": w.get("session") or "", "kind": w.get("kind") or "",
-                            "label": w.get("label") or ""}
+                            "label": _restart_label(w)}
                            for w in rec.get("waiting_on") or [] if isinstance(w, dict)]}
+
+
+def _restart_label(w: dict) -> str:
+    """A waited-on session's name as the app's list gives it (a /rename
+    included), not the record's "session 0685dc4e (its first words)" — the
+    card named the chat David was in by words he did not know it by (David,
+    16 Nov 2026: "It was the chat I was in but it had a different title").
+    The record's label when it has no title, or for a row that is no chat."""
+    sid = str(w.get("session") or "")
+    if sid:
+        try:
+            from . import sessions
+
+            # The last sweep as it is, never a new one: the sweep's own
+            # callers come here (add_projects), under its lock.
+            cached = sessions._STATES_CACHE[1]
+            rows = (cached[0] if isinstance(cached, tuple) else None) or []
+            title = next((str(r.get("title") or "") for r in rows
+                          if isinstance(r, dict) and r.get("session") == sid), "")
+            if title:
+                return sessions.whole_title(sid, title)
+        except Exception:  # noqa: BLE001 — a name is never worth failing the view
+            pass
+    return str(w.get("label") or "")
 
 
 def add_restart_status(row: dict, session: str, view: dict | None) -> None:

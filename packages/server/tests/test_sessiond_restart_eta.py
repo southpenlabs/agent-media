@@ -78,3 +78,20 @@ def test_a_session_cut_off_for_the_drain_waits_for_the_restart(host):
     _fresh(host.sup)
     assert host.sup.deliver_due() == []
     assert [m["text"] for m in sessiond.read_record(sid)["held"]] == ["reply: kept"]
+
+
+def test_a_waited_on_chat_is_named_by_its_title_not_its_first_words(host, monkeypatch):
+    # David, 16 Nov 2026: "It was the chat I was in but it had a different title".
+    from agent_media_server import sessions
+
+    _pend(waiting_on=[{"session": "s-renamed", "kind": "turn",
+                       "label": "session s-rename (I wonder if sessions…)", "why": "w"},
+                      {"session": "s-untitled", "kind": "turn", "label": "session s-untitl", "why": "w"},
+                      {"session": "", "kind": "speech", "label": "a reply is being spoken", "why": "w"}])
+    monkeypatch.setattr(sessions, "_STATES_CACHE",
+                        (time.monotonic(), ([{"session": "s-renamed", "title": "ETA for session restarts"},
+                                             {"session": "s-untitled", "title": ""}], {})))
+    labels = [w["label"] for w in sessiond.restart_view()["waiting_on"]]
+    assert labels == ["ETA for session restarts", "session s-untitl", "a reply is being spoken"]
+    monkeypatch.setattr(sessions, "_STATES_CACHE", (0.0, []))   # no sweep yet
+    assert sessiond.restart_view()["waiting_on"][0]["label"].startswith("session s-rename")
