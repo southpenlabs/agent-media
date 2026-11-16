@@ -5795,6 +5795,7 @@ local look, never a network call:
 | `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), open to anyone, paired or not (16 Nov 2026); the app offers updating itself only then |
+| `app_update_bridges` | always: those routes also offer the Sasonica Bridges app with `app=bridges`, to paired admin and member devices only (§6.52, 16 Nov 2026); the app offers updating Bridges only then. Not a check that this server can read the private bridges repo |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
@@ -10857,6 +10858,32 @@ files (web_app.py).
   download. 400 unless `build` is digits and `flavor` one of the two; 404
   when that build has no APK of that flavor; 502 when it cannot be fetched.
   The app checks the sha256 itself before installing.
+- **The Sasonica Bridges app** (16 Nov 2026; Android package
+  `org.sasonica.bridges`, plan in
+  docs/proposals/2026-11-04-bridges-on-the-phone.md). Both routes take
+  `app=<sasonica|bridges>`; absent is `sasonica`, everything above,
+  unchanged. Any other `app` is 400.
+  - `GET /app/update?app=bridges&current=<versionCode>` → the same shape,
+    `url` `/app/update/apk?app=bridges&build=<N>`. `GET
+    /app/update/apk?app=bridges&build=<N>` → its APK, as above.
+  - No flavor: a `flavor` with `app=bridges` is 400.
+  - **Paired devices only**, unlike Sasonica's: no token or one this server
+    does not know is 401 `"code": "not_paired"`, a guest device 403 `"code":
+    "guest"`; an admin or member device is answered. The bridges repo is
+    private and its AGPL app is not published yet (who publishes it is an
+    open question). The auth is checked before the parameters, so an
+    unpaired caller learns nothing more.
+  - The source: `MEDIA_BRIDGES_UPDATE_REPO` (`owner/name`, default
+    `davidj4tech/sasonica-bridges`), `build-<N>` releases with an asset
+    `sasonica-bridges-<N>-<sha7>.apk`; `sha256` and `commit` read as above.
+    A Sasonica asset never matches it, nor it either Sasonica flavor. Its
+    own list cache (same TTL) and its own download dir,
+    `<state_dir>/app-update/bridges/`, keeping its own last two; the older
+    build rule (admin any, others the newest) is the same.
+  - Offered where `/features` says `app_update_bridges` (§6.11a). It is
+    always true where the route exists: whether this server's `gh` can read
+    that private repo is not checked (it would cost a GitHub call per
+    `/features`); a server that cannot answers 502.
 
 ### 6.54 Movies and Shows from Trakt — gated; its sign-in admins (built 9 Nov 2026)
 

@@ -13,10 +13,12 @@ except /pair, which is how a device gets its token):
                   a bundle is present (MEDIA_WEB_APP_DIR, else the binary's
                   own copy); no auth, client routes fall back to index.html.
                   See web_app.py
-  GET  /app/update?flavor=&current= → the newest phone-app build newer than
+  GET  /app/update?app=&flavor=&current= → the newest phone-app build newer than
                   `current`, or versionCode null; GET /app/update/apk?build=&flavor=
-                  → its APK, fetched once from the release and kept. Admins
-                  only; answered before the web app's files (app_update.py, §6.52)
+                  → its APK, fetched once from the release and kept. Open to
+                  anyone; `app=bridges` (the Bridges companion, no flavor) is
+                  for paired non-guest devices only; answered before the web
+                  app's files (app_update.py, §6.52)
   POST /pair      {"code", "device"} → trade a one-time pairing code (minted
                   by `media-visual-canvas pair --device NAME`) for a device
                   token. No auth; failures rate-limited per source address.
@@ -1006,10 +1008,10 @@ def _app_update(h: BaseHTTPRequestHandler, path: str) -> bool:
     q = parse_qs(urlsplit(h.path).query)
     arg = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     if path == "/app/update":
-        ok, detail = app_update.check(_bearer(h), arg("flavor"), arg("current"))
+        ok, detail = app_update.check(_bearer(h), arg("flavor"), arg("current"), arg("app"))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
         return True
-    f, err = app_update.apk(_bearer(h), arg("build"), arg("flavor"))
+    f, err = app_update.apk(_bearer(h), arg("build"), arg("flavor"), arg("app"))
     if f is None:
         _json(h, err.pop("status", 403), {"ok": False, **err})
         return True

@@ -1,5 +1,6 @@
 """The phone app updating itself (server-contract.md §6.52; app_update.py):
-`GET /app/update` and `GET /app/update/apk`, admins only. gh is replaced in
+`GET /app/update` and `GET /app/update/apk`, Sasonica's and (app=bridges)
+the Bridges app's. gh is replaced in
 every test: nothing here reaches GitHub."""
 
 from __future__ import annotations
@@ -49,16 +50,38 @@ RELEASES = [
 ]
 
 
+BRIDGES_APK = b"bridges apk bytes " * 40
+
+#: The bridges repo: 12 the newest, its sha256 in the notes; 11 older; a
+#: Sasonica-named asset in it that must never be taken for the bridges app.
+BRIDGES_RELEASES = [
+    {"tag_name": "build-12", "published_at": "2026-11-16T01:00:00Z",
+     "body": f"commit: 0123abc{'2' * 33}\nsha256:\n    {_sha(BRIDGES_APK)}  sasonica-bridges-12-0123abc.apk\n",
+     "assets": [_asset("sasonica-bridges-12-0123abc.apk", BRIDGES_APK, digest=False),
+                _asset("sasonica-bridges-debug-12-0123abc.apk", b"debug")]},
+    {"tag_name": "build-11", "published_at": "2026-11-15T01:00:00Z",
+     "assets": [_asset("sasonica-bridges-11-fedcba9.apk", BRIDGES_APK),
+                _asset("sasonica-personal-11-fedcba9.apk", PERSONAL),
+                _asset("sasonica-11-fedcba9.apk", RELEASE)]},
+]
+
+
 @pytest.fixture()
 def gh(monkeypatch):
     """gh replaced: counts list reads and downloads, writes the asset bytes."""
-    seen = {"lists": 0, "downloads": [], "releases": RELEASES}
+    seen = {"lists": 0, "bridges_lists": 0, "downloads": [], "releases": RELEASES}
     data = {a["name"]: d for a, d in (
         (_asset("sasonica-personal-1963-de8e1e7.apk", PERSONAL), PERSONAL),
         (_asset("sasonica-personal-1962-b5babc3.apk", PERSONAL), PERSONAL),
         (_asset("sasonica-1962-b5babc3.apk", RELEASE), RELEASE))}
 
+    data.update({"sasonica-bridges-12-0123abc.apk": BRIDGES_APK,
+                 "sasonica-bridges-11-fedcba9.apk": BRIDGES_APK})
+
     def releases(name):
+        if name == "davidj4tech/sasonica-bridges":
+            seen["bridges_lists"] += 1
+            return BRIDGES_RELEASES
         assert name == "southpenlabs/sasonica-app"
         seen["lists"] += 1
         return seen["releases"]
@@ -71,6 +94,7 @@ def gh(monkeypatch):
     monkeypatch.setattr(app_update, "_gh_releases", releases)
     monkeypatch.setattr(app_update, "_gh_download", download)
     monkeypatch.delenv("MEDIA_APP_UPDATE_REPO", raising=False)
+    monkeypatch.delenv("MEDIA_BRIDGES_UPDATE_REPO", raising=False)
     monkeypatch.delenv("MEDIA_APP_UPDATE_TTL", raising=False)
     app_update.reset()
     yield seen
@@ -222,3 +246,126 @@ def test_a_download_that_does_not_match_is_not_kept(server, signed_in, gh):
 def test_features_says_so(server, signed_in):
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj["app_update"] is True
+
+
+# --- the Sasonica Bridges app (app=bridges, 16 Nov 2026) ----------------------
+
+def _paired(server, role: str) -> dict:
+    code, _ = devices.mint_code(f"phone {role}", role=role)
+    _, paired = call(server, "POST", "/pair", {"code": code, "device": f"phone {role}"})
+    return {"Authorization": f"Bearer {paired['token']}"}
+
+
+def test_the_asset_names_never_cross():
+    """A Sasonica asset is never taken for the bridges app, nor a bridges one
+    for either Sasonica flavor."""
+    mixed = [{"tag_name": "build-5", "assets": [
+        _asset("sasonica-bridges-5-abcdef0.apk", BRIDGES_APK)]},
+        {"tag_name": "build-4", "assets": [
+            _asset("sasonica-personal-4-abcdef0.apk", PERSONAL),
+            _asset("sasonica-4-abcdef0.apk", RELEASE)]}]
+    sas = app_update._builds(mixed)
+    assert [(b["versionCode"], sorted(b["apks"])) for b in sas] == [(4, ["personal", "release"])]
+    br = app_update._builds(mixed, "bridges")
+    assert [(b["versionCode"], sorted(b["apks"])) for b in br] == [(5, ["bridges"])]
+    assert br[0]["apks"]["bridges"]["name"] == "sasonica-bridges-5-abcdef0.apk"
+
+
+def test_the_bridges_listing(server, signed_in, gh):
+    res, obj = call(server, "GET", "/app/update?app=bridges&current=10", headers=AUTH)
+    assert res.status == 200, obj
+    assert obj == {"ok": True, "versionCode": 12, "commit": "0123abc" + "2" * 33,
+                   "sha256": _sha(BRIDGES_APK), "size": len(BRIDGES_APK),
+                   "published": "2026-11-16T01:00:00Z",
+                   "url": "/app/update/apk?app=bridges&build=12"}
+    _, obj = call(server, "GET", "/app/update?app=bridges&current=12", headers=AUTH)
+    assert obj == {"ok": True, "versionCode": None}
+    # Its own list and cache: Sasonica's is not read, and is not confused with it.
+    assert gh["bridges_lists"] == 1 and gh["lists"] == 0
+    _, obj = call(server, "GET", "/app/update?flavor=personal", headers=AUTH)
+    assert obj["versionCode"] == 1963 and gh["lists"] == 1 and gh["bridges_lists"] == 1
+
+
+def test_the_bridges_repo_is_set_by_its_own_variable(monkeypatch):
+    monkeypatch.delenv("MEDIA_BRIDGES_UPDATE_REPO", raising=False)
+    monkeypatch.setenv("MEDIA_APP_UPDATE_REPO", "someone/else")
+    assert app_update.repo("bridges") == "davidj4tech/sasonica-bridges"
+    monkeypatch.setenv("MEDIA_BRIDGES_UPDATE_REPO", "org/bridges")
+    assert app_update.repo("bridges") == "org/bridges"
+    assert app_update.repo() == "someone/else"
+    monkeypatch.setenv("MEDIA_BRIDGES_UPDATE_REPO", "../x")
+    with pytest.raises(app_update.Unavailable):
+        app_update.repo("bridges")
+
+
+def test_bridges_is_for_paired_devices_only(server, gh):
+    """The bridges repo is private and its AGPL app not published yet: no
+    token or an unknown one is 401, a guest 403; a member and an admin get it."""
+    for hdr in ({}, {"Authorization": "Bearer forgotten-token"}):
+        res, obj = call(server, "GET", "/app/update?app=bridges", headers=hdr)
+        assert res.status == 401 and obj["code"] == "not_paired", hdr
+        res, obj = call(server, "GET", "/app/update/apk?app=bridges&build=12", headers=hdr)
+        assert res.status == 401, hdr
+    guest = _paired(server, "guest")
+    res, obj = call(server, "GET", "/app/update?app=bridges", headers=guest)
+    assert res.status == 403 and obj["code"] == "guest"
+    res, _ = call(server, "GET", "/app/update/apk?app=bridges&build=12", headers=guest)
+    assert res.status == 403
+    assert gh["bridges_lists"] == 0 and gh["downloads"] == []
+    for role in ("member", "admin"):
+        hdr = _paired(server, role)
+        res, obj = call(server, "GET", "/app/update?app=bridges", headers=hdr)
+        assert res.status == 200 and obj["versionCode"] == 12, (role, obj)
+        res, body = call(server, "GET", "/app/update/apk?app=bridges&build=12", headers=hdr)
+        assert res.status == 200 and body == BRIDGES_APK, role
+    # The guest still updates Sasonica, as anyone may.
+    res, _ = call(server, "GET", "/app/update?flavor=personal", headers=guest)
+    assert res.status == 200
+
+
+def test_the_bridges_apk(server, signed_in, gh):
+    res, body = call(server, "GET", "/app/update/apk?app=bridges&build=12", headers=AUTH)
+    assert res.status == 200 and body == BRIDGES_APK
+    assert res.getheader("Content-Type") == "application/vnd.android.package-archive"
+    assert gh["downloads"] == [("build-12", "sasonica-bridges-12-0123abc.apk")]
+    # Its own dir, apart from Sasonica's APKs and their keep-last-two.
+    d = app_update.cache_dir("bridges")
+    assert d == app_update.cache_dir() / "bridges"
+    assert (d / "sasonica-bridges-12-0123abc.apk").is_file()
+    for build, flavor in (("1962", "personal"), ("1962", "release"), ("1963", "personal")):
+        res, _ = call(server, "GET", f"/app/update/apk?build={build}&flavor={flavor}", headers=AUTH)
+        assert res.status == 200
+        time.sleep(0.02)
+    assert (d / "sasonica-bridges-12-0123abc.apk").is_file()
+    assert len(list(app_update.cache_dir().glob("*.apk"))) == 2
+    # The older bridges build: an admin device (the signed-in owner) may.
+    res, body = call(server, "GET", "/app/update/apk?app=bridges&build=11", headers=AUTH)
+    assert res.status == 200 and body == BRIDGES_APK
+    # A build with no bridges APK is 404 (the Sasonica-named ones in 11's
+    # release are not it; 1963 is Sasonica's).
+    res, _ = call(server, "GET", "/app/update/apk?app=bridges&build=1963", headers=AUTH)
+    assert res.status == 404
+
+
+@pytest.mark.parametrize("path", [
+    "/app/update?app=other", "/app/update?app=Bridges", "/app/update/apk?app=other&build=12",
+    "/app/update?app=bridges&flavor=personal", "/app/update/apk?app=bridges&build=12&flavor=release",
+    "/app/update?app=bridges&current=x", "/app/update/apk?app=bridges", "/app/update/apk?app=bridges&build=1x",
+])
+def test_bridges_bad_parameters_are_400(server, signed_in, gh, path):
+    res, obj = call(server, "GET", path, headers=AUTH)
+    assert res.status == 400, obj
+    assert gh["downloads"] == [] and gh["lists"] == 0 and gh["bridges_lists"] == 0
+
+
+def test_app_sasonica_is_the_default(server, signed_in, gh):
+    _, a = call(server, "GET", "/app/update?flavor=personal", headers=AUTH)
+    _, b = call(server, "GET", "/app/update?app=sasonica&flavor=personal", headers=AUTH)
+    assert a == b and a["url"] == "/app/update/apk?build=1963&flavor=personal"
+    res, _ = call(server, "GET", "/app/update?app=sasonica", headers=AUTH)
+    assert res.status == 400
+
+
+def test_features_says_bridges(server, signed_in):
+    _, obj = call(server, "GET", "/features", headers=AUTH)
+    assert obj["app_update_bridges"] is True

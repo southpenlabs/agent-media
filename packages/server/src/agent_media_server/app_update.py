@@ -29,6 +29,17 @@ newest build of a flavor, so old builds cannot be made to churn the cache.
 The repo is
 MEDIA_APP_UPDATE_REPO (owner/name, default southpenlabs/sasonica-app; the old
 davidj4tech/sasonica-app redirects there).
+
+The Sasonica Bridges companion app (org.sasonica.bridges,
+docs/proposals/2026-11-04-bridges-on-the-phone.md) is offered the same way
+with `app=bridges` (absent: `sasonica`, everything above): no flavor (one
+given is 400), the repo MEDIA_BRIDGES_UPDATE_REPO (default
+davidj4tech/sasonica-bridges), `build-<N>` releases carrying
+`sasonica-bridges-<N>-<sha7>.apk`, its own list cache and its own download
+dir (state_dir()/app-update/bridges, keeping its own last two). Unlike
+Sasonica's, it is for paired devices only, admins and members: 401 without
+one, 403 for a guest, because that repo is private and its AGPL app is not
+published yet (who publishes it is an open question, 16 Nov 2026).
 """
 
 from __future__ import annotations
@@ -45,7 +56,11 @@ from pathlib import Path
 from . import auth
 
 DEFAULT_REPO = "southpenlabs/sasonica-app"
+DEFAULT_BRIDGES_REPO = "davidj4tech/sasonica-bridges"
 FLAVORS = ("personal", "release")
+APPS = ("sasonica", "bridges")
+#: The bridges app has no flavors; its one APK is kept under this key.
+BRIDGES = "bridges"
 APK_TYPE = "application/vnd.android.package-archive"
 
 _REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
@@ -56,13 +71,17 @@ _ASSET = {
     "personal": re.compile(r"sasonica-personal-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
     "release": re.compile(r"sasonica-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
 }
+_BRIDGES_ASSET = {
+    BRIDGES: re.compile(r"sasonica-bridges-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
+}
 #: The least time between forced re-reads of the releases list.
 FRESH_FLOOR_S = 60.0
 #: How many APKs the disk cache keeps.
 KEEP = 2
 
 _lock = threading.Lock()
-_cache: dict = {"at": None, "repo": "", "releases": []}
+_caches: dict[str, dict] = {a: {"at": None, "repo": "", "releases": []} for a in APPS}
+_cache = _caches["sasonica"]
 _downloads: dict[str, threading.Lock] = {}
 
 
@@ -70,10 +89,16 @@ class Unavailable(Exception):
     """GitHub could not be read (gh missing, signed out, offline)."""
 
 
-def repo() -> str:
-    r = (os.environ.get("MEDIA_APP_UPDATE_REPO") or "").strip() or DEFAULT_REPO
+def _assets(app: str) -> dict:
+    return _BRIDGES_ASSET if app == BRIDGES else _ASSET
+
+
+def repo(app: str = "sasonica") -> str:
+    var, default = (("MEDIA_BRIDGES_UPDATE_REPO", DEFAULT_BRIDGES_REPO) if app == BRIDGES
+                    else ("MEDIA_APP_UPDATE_REPO", DEFAULT_REPO))
+    r = (os.environ.get(var) or "").strip() or default
     if not _REPO.fullmatch(r) or ".." in r:
-        raise Unavailable("MEDIA_APP_UPDATE_REPO must be owner/name")
+        raise Unavailable(f"{var} must be owner/name")
     return r
 
 
@@ -84,10 +109,11 @@ def _ttl() -> float:
         return 300.0
 
 
-def cache_dir() -> Path:
+def cache_dir(app: str = "sasonica") -> Path:
     from agent_media_core._paths import state_dir
 
-    return state_dir() / "app-update"
+    d = state_dir() / "app-update"
+    return d / BRIDGES if app == BRIDGES else d
 
 
 # --- gh (the only way out; tests replace these two) ---------------------------
@@ -139,8 +165,9 @@ def _body_sha256(body: str, asset: str) -> str:
     return ""
 
 
-def _builds(raw: list) -> list[dict]:
-    """Every build-<N> release with an APK of either flavor, newest first:
+def _builds(raw: list, app: str = "sasonica") -> list[dict]:
+    """Every build-<N> release with an APK of either flavor (bridges: its one
+    APK, under "bridges"), newest first:
     {versionCode, tag, commit, published, apks: {flavor: {name, size, sha256}}}."""
     out = []
     for r in raw:
@@ -155,7 +182,7 @@ def _builds(raw: list) -> list[dict]:
         sha7 = ""
         for a in r.get("assets") or []:
             name = str((a or {}).get("name") or "")
-            for flavor, pat in _ASSET.items():
+            for flavor, pat in _assets(app).items():
                 am = pat.fullmatch(name)
                 if not am or int(am.group(1)) != n:
                     continue
@@ -174,17 +201,18 @@ def _builds(raw: list) -> list[dict]:
     return out
 
 
-def builds(fresh: bool = False) -> list[dict]:
+def builds(fresh: bool = False, app: str = "sasonica") -> list[dict]:
     """The builds, from the cache when it is younger than the TTL. A failed
     read with an older answer in hand answers the older one."""
-    name = repo()
+    name = repo(app)
+    _cache = _caches[app]
     with _lock:
         at = _cache["at"]
         if (at is not None and _cache["repo"] == name
                 and time.monotonic() - at < (FRESH_FLOOR_S if fresh else _ttl())):
             return _cache["releases"]
         try:
-            got = _builds(_gh_releases(name))
+            got = _builds(_gh_releases(name), app)
         except Unavailable:
             if at is not None and _cache["repo"] == name:
                 return _cache["releases"]
@@ -193,35 +221,65 @@ def builds(fresh: bool = False) -> list[dict]:
         return got
 
 
-def newest(flavor: str, current: int = 0) -> dict | None:
-    for b in builds():
+def _url(app: str, n: int, flavor: str) -> str:
+    if app == BRIDGES:
+        return f"/app/update/apk?app=bridges&build={n}"
+    return f"/app/update/apk?build={n}&flavor={flavor}"
+
+
+def newest(flavor: str, current: int = 0, app: str = "sasonica") -> dict | None:
+    for b in builds(app=app):
         if b["versionCode"] <= current:
             return None
         a = b["apks"].get(flavor)
         if a:
             return {"versionCode": b["versionCode"], "commit": b["commit"],
                     "sha256": a["sha256"], "size": a["size"], "published": b["published"],
-                    "url": f"/app/update/apk?build={b['versionCode']}&flavor={flavor}"}
+                    "url": _url(app, b["versionCode"], flavor)}
     return None
 
 
 # --- the routes -----------------------------------------------------------------
 
-def check(bearer: str, flavor: str, current: str) -> tuple[bool, dict]:
-    """`GET /app/update?flavor=&current=`. Open: the bearer is not read."""
-    if flavor not in FLAVORS:
-        return False, {"status": 400, "error": "flavor must be personal or release"}
+def _which(bearer: str, app: str, flavor: str) -> tuple[str, str, dict]:
+    """(app, flavor key, {}) or ("", "", error with a status). `app` absent is
+    sasonica, open to anyone, its flavor one of the two; bridges takes no
+    flavor and a paired device that is not a guest."""
+    app = app or "sasonica"
+    if app not in APPS:
+        return "", "", {"status": 400, "error": "app must be sasonica or bridges"}
+    if app == "sasonica":
+        if flavor not in FLAVORS:
+            return "", "", {"status": 400, "error": "flavor must be personal or release"}
+        return app, flavor, {}
+    if not auth.is_device(bearer):
+        return "", "", {"status": 401, "code": "not_paired",
+                        "error": "the bridges app is offered to paired devices only"}
+    if auth.is_guest(bearer):
+        return "", "", {"status": 403, "code": "guest",
+                        "error": "the bridges app is not offered to a guest device"}
+    if flavor:
+        return "", "", {"status": 400, "error": "the bridges app has no flavor"}
+    return app, BRIDGES, {}
+
+
+def check(bearer: str, flavor: str, current: str, app: str = "") -> tuple[bool, dict]:
+    """`GET /app/update?app=&flavor=&current=`. Sasonica's is open: the
+    bearer is not read; bridges' wants a paired device, not a guest."""
+    app, flavor, err = _which(bearer, app, flavor)
+    if err:
+        return False, err
     if current and not _BUILD.fullmatch(current):
         return False, {"status": 400, "error": "current must be a versionCode"}
     try:
-        found = newest(flavor, int(current or 0))
+        found = newest(flavor, int(current or 0), app)
     except Unavailable as e:
         return False, {"status": 502, "error": f"could not read the app's releases ({e})"}
     return True, found or {"versionCode": None}
 
 
 def _prune(keep: Path) -> None:
-    files = sorted((p for p in cache_dir().glob("*.apk") if p.is_file()),
+    files = sorted((p for p in keep.parent.glob("*.apk") if p.is_file()),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     kept = [keep] + [p for p in files if p != keep][:KEEP - 1]
     for p in files:
@@ -240,29 +298,31 @@ def _sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def apk(bearer: str, build: str, flavor: str) -> tuple[Path | None, dict]:
-    """`GET /app/update/apk?build=&flavor=` → (the cached file, {}) or
-    (None, error with a status). Open; the bearer only widens which builds:
-    an admin device any listed one, anyone else the newest of the flavor."""
+def apk(bearer: str, build: str, flavor: str, app: str = "") -> tuple[Path | None, dict]:
+    """`GET /app/update/apk?app=&build=&flavor=` → (the cached file, {}) or
+    (None, error with a status). Sasonica's is open; bridges' wants a paired
+    device, not a guest. The bearer widens which builds: an admin device any
+    listed one, anyone else the newest of the flavor."""
+    app, flavor, err = _which(bearer, app, flavor)
+    if err:
+        return None, err
     admin, _ = auth.may_admin(bearer) if bearer else (None, {})
-    if flavor not in FLAVORS:
-        return None, {"status": 400, "error": "flavor must be personal or release"}
     if not _BUILD.fullmatch(build or ""):
         return None, {"status": 400, "error": "build must be a versionCode"}
     n = int(build)
     try:
-        b = next((b for b in builds() if b["versionCode"] == n), None)
+        b = next((b for b in builds(app=app) if b["versionCode"] == n), None)
         if b is None:  # newer than the cached list, perhaps
-            b = next((b for b in builds(fresh=True) if b["versionCode"] == n), None)
+            b = next((b for b in builds(fresh=True, app=app) if b["versionCode"] == n), None)
     except Unavailable as e:
         return None, {"status": 502, "error": f"could not read the app's releases ({e})"}
     a = (b or {}).get("apks", {}).get(flavor)
-    if not a or not _ASSET[flavor].fullmatch(a["name"]):
+    if not a or not _assets(app)[flavor].fullmatch(a["name"]):
         return None, {"status": 404, "error": f"no {flavor} APK for build {n}"}
-    if not admin and (newest(flavor) or {}).get("versionCode") != n:
+    if not admin and (newest(flavor, 0, app) or {}).get("versionCode") != n:
         return None, {"status": 404, "error": f"build {n} is not the newest {flavor} build",
                       "code": "not_newest"}
-    d = cache_dir()
+    d = cache_dir(app)
     path = d / a["name"]
     with _lock:
         one = _downloads.setdefault(a["name"], threading.Lock())
@@ -274,7 +334,7 @@ def apk(bearer: str, build: str, flavor: str) -> tuple[Path | None, dict]:
         d.mkdir(parents=True, exist_ok=True)
         part = d / (a["name"] + ".part")
         try:
-            _gh_download(repo(), b["tag"], a["name"], part)
+            _gh_download(repo(app), b["tag"], a["name"], part)
             if a["sha256"] and _sha256_of(part) != a["sha256"]:
                 raise Unavailable("the download's sha256 does not match the release's")
             part.replace(path)
@@ -288,4 +348,5 @@ def apk(bearer: str, build: str, flavor: str) -> tuple[Path | None, dict]:
 def reset() -> None:
     """Forget the cached releases list (tests)."""
     with _lock:
-        _cache.update(at=None, repo="", releases=[])
+        for c in _caches.values():
+            c.update(at=None, repo="", releases=[])

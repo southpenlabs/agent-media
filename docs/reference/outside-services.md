@@ -61,7 +61,7 @@ Sorted with what blocks a public release first. 52 rows.
 | 18 | Community camera reports | phone and seatbelt camera reports on the Map | none (read through the phone) | a community site; add-on | Not in the product | **yes** |
 | 19 | Stremio | "Open in Stremio" | none | deep link for everyone; its web app inside ours is personal | Nothing for the link | page: yes |
 | 20 | Google Fonts | the app's two typefaces, fetched at run time | none | loaded from Google on every start | **Needs work** (small): bundle the fonts (both OFL), so no request goes to Google | no |
-| 21 | GitHub | install scripts, releases, app updates, CI | the owner's `gh` login for the private app repo | app repo private | **Needs work**: a public place for the APK and its updates | no |
+| 21 | GitHub | install scripts, releases, app updates (Sasonica's, and the Bridges app's from `MEDIA_BRIDGES_UPDATE_REPO`, default davidj4tech/sasonica-bridges, served to paired devices only), CI | the owner's `gh` login for the private app and bridges repos | app and bridges repos private | **Needs work**: a public place for the APK and its updates | no |
 | 22 | OpenAI | optional voices, realtime voice, speech-to-text, spoken summaries, pictures | the user's own key | off unless set | Tell listeners the voice is AI-generated (OpenAI's rule); check current terms on user-supplied keys | no |
 | 23 | Groq, OpenRouter, Google Gemini API | speech-to-text; free coding models | the user's own key | off unless set | nothing; each user's own account | no |
 | 24 | Alibaba DashScope (Qwen voices) | optional voice engine | the user's own key | off unless set | nothing | no |
