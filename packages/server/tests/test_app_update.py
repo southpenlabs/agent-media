@@ -124,19 +124,32 @@ def test_the_list_is_cached(server, signed_in, gh, monkeypatch):
     assert res.status == 502 and not obj["ok"]
 
 
-def test_admins_only(server, gh):
-    for role, want in (("member", 403), ("guest", 403), ("admin", 200)):
+def test_open_to_anyone(server, gh):
+    """A TV whose pairing was forgotten still updates (David, 16 Nov 2026:
+    "Anyone, anywhere"): no token, an unknown token, a member or a guest all
+    get the answer and the newest APK."""
+    hdrs = [{}, {"Authorization": "Bearer forgotten-token"}]
+    for role in ("member", "guest"):
         code, _ = devices.mint_code(f"phone {role}", role=role)
         _, paired = call(server, "POST", "/pair", {"code": code, "device": f"phone {role}"})
-        hdr = {"Authorization": f"Bearer {paired['token']}"}
+        hdrs.append({"Authorization": f"Bearer {paired['token']}"})
+    for hdr in hdrs:
         res, obj = call(server, "GET", "/app/update?flavor=personal", headers=hdr)
-        assert res.status == want, (role, obj)
+        assert res.status == 200 and obj["versionCode"] == 1963 and obj["sha256"], (hdr, obj)
         res, _ = call(server, "GET", "/app/update/apk?build=1963&flavor=personal", headers=hdr)
-        assert res.status == want, role
-    res, _ = call(server, "GET", "/app/update?flavor=personal")
-    assert res.status in (401, 403)
-    # Only the admin's request downloaded anything.
+        assert res.status == 200, hdr
+    # One download however many asked.
     assert gh["downloads"] == [("build-1963", "sasonica-personal-1963-de8e1e7.apk")]
+
+
+def test_an_older_build_is_for_admins(server, gh, signed_in):
+    """Anyone can ask, so only an admin device may fetch a build that is not
+    the newest: old builds cannot be made to churn the cache."""
+    res, obj = call(server, "GET", "/app/update/apk?build=1962&flavor=personal",
+                    headers={"Authorization": ""})
+    assert res.status == 404 and obj["code"] == "not_newest"
+    res, _ = call(server, "GET", "/app/update/apk?build=1962&flavor=personal", headers=AUTH)
+    assert res.status == 200
 
 
 @pytest.mark.parametrize("query", [

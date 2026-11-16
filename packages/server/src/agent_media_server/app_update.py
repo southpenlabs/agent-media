@@ -18,7 +18,15 @@ build).
       state_dir()/app-update and checked against its sha256; the last two
       are kept. One download per file however many ask at once.
 
-Admins only (auth.may_admin): a member or guest device is 403. The repo is
+Open to anyone, with no token or a token this server no longer knows (David,
+16 Nov 2026: a TV whose pairing was forgotten could not update — "It should
+be able to update even when not paired"; he chose "Anyone, anywhere"). The
+personal build is meant to be public and free anyway — the release flavor is
+the one that may be sold (David, same day). Since
+anyone can ask, a forced re-read of the list happens at most once per
+`FRESH_FLOOR_S`, and a caller that is not an admin device downloads only the
+newest build of a flavor, so old builds cannot be made to churn the cache.
+The repo is
 MEDIA_APP_UPDATE_REPO (owner/name, default southpenlabs/sasonica-app; the old
 davidj4tech/sasonica-app redirects there).
 """
@@ -48,6 +56,8 @@ _ASSET = {
     "personal": re.compile(r"sasonica-personal-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
     "release": re.compile(r"sasonica-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
 }
+#: The least time between forced re-reads of the releases list.
+FRESH_FLOOR_S = 60.0
 #: How many APKs the disk cache keeps.
 KEEP = 2
 
@@ -170,8 +180,8 @@ def builds(fresh: bool = False) -> list[dict]:
     name = repo()
     with _lock:
         at = _cache["at"]
-        if (not fresh and at is not None and _cache["repo"] == name
-                and time.monotonic() - at < _ttl()):
+        if (at is not None and _cache["repo"] == name
+                and time.monotonic() - at < (FRESH_FLOOR_S if fresh else _ttl())):
             return _cache["releases"]
         try:
             got = _builds(_gh_releases(name))
@@ -198,10 +208,7 @@ def newest(flavor: str, current: int = 0) -> dict | None:
 # --- the routes -----------------------------------------------------------------
 
 def check(bearer: str, flavor: str, current: str) -> tuple[bool, dict]:
-    """`GET /app/update?flavor=&current=`."""
-    user, err = auth.may_admin(bearer)
-    if not user:
-        return False, err
+    """`GET /app/update?flavor=&current=`. Open: the bearer is not read."""
     if flavor not in FLAVORS:
         return False, {"status": 400, "error": "flavor must be personal or release"}
     if current and not _BUILD.fullmatch(current):
@@ -235,10 +242,9 @@ def _sha256_of(path: Path) -> str:
 
 def apk(bearer: str, build: str, flavor: str) -> tuple[Path | None, dict]:
     """`GET /app/update/apk?build=&flavor=` → (the cached file, {}) or
-    (None, error with a status)."""
-    user, err = auth.may_admin(bearer)
-    if not user:
-        return None, err
+    (None, error with a status). Open; the bearer only widens which builds:
+    an admin device any listed one, anyone else the newest of the flavor."""
+    admin, _ = auth.may_admin(bearer) if bearer else (None, {})
     if flavor not in FLAVORS:
         return None, {"status": 400, "error": "flavor must be personal or release"}
     if not _BUILD.fullmatch(build or ""):
@@ -253,6 +259,9 @@ def apk(bearer: str, build: str, flavor: str) -> tuple[Path | None, dict]:
     a = (b or {}).get("apks", {}).get(flavor)
     if not a or not _ASSET[flavor].fullmatch(a["name"]):
         return None, {"status": 404, "error": f"no {flavor} APK for build {n}"}
+    if not admin and (newest(flavor) or {}).get("versionCode") != n:
+        return None, {"status": 404, "error": f"build {n} is not the newest {flavor} build",
+                      "code": "not_newest"}
     d = cache_dir()
     path = d / a["name"]
     with _lock:

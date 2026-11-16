@@ -5794,7 +5794,7 @@ local look, never a network call:
 | `device_log` | always: `POST /device/log` takes a paired device's own log lines (the app's updater: `source: "update"`), the newest 200 per device, read by an admin with `GET /device/log` (§6.21i, 15 Nov 2026); the app sends its lines only then |
 | `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
-| `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), admins only; the app offers updating itself only then |
+| `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), open to anyone, paired or not (16 Nov 2026); the app offers updating itself only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
 | `watch` | a Trakt API app is set (`MEDIA_TRAKT_CLIENT_ID`) and this server is signed in to Trakt (a token kept): the Media tab shows Movies and Shows (§6.54) |
 | `pair_request` | `MEDIA_PAIR_REQUESTS` is not 0: a device can ask to be paired and this phone approve it (`POST /pair/request`, §9 "Pairing from the new device", 16 Nov 2026); Settings → Devices offers "Type a code from a TV". Also on the open `GET /enrol`, for the unpaired device |
@@ -10801,8 +10801,15 @@ thread's roam id (a to-do's `:SESSION:`).
 David, 7 Nov 2026: "Can we build some sort of auto update feature?", from
 every CI build of main. The sasonica-app repo is private, so the phone
 cannot read its releases; the server reads them with `gh` and answers.
-Code: `app_update.py`; tests in `test_app_update.py`. Admins only
-(`auth.may_admin`): a member or guest device is 403 `not_admin`. Offered
+Code: `app_update.py`; tests in `test_app_update.py`. Open to anyone
+since 16 Nov 2026 (it was admins only): no token, a member's, a guest's, or
+a token this server no longer knows are all answered, so a device that lost
+its pairing (the TV) can still update (David: "It should be able to update
+even when not paired", "Anyone, anywhere"; the personal build is meant to be
+public and free, the release flavor is the one that may be sold). Because
+anyone can ask, the APK route serves only the newest build of a flavor to a
+caller that is not an admin device (404 `not_newest` for an older one), and
+the list is re-read for an unknown build at most once a minute. Offered
 where `/features` says `app_update` (§6.11a). Both paths are API routes
 although they sit under `/app/`: they are answered before the web app's
 files (web_app.py).
@@ -11641,13 +11648,6 @@ refusal. The device row gains `iss`, `sub` and `account` (the email);
 `media-visual-canvas devices --revoke-account <sub|email>` drops every device
 an account enrolled. The issuer decided on is Drupal (cms.sasonica.com).
 
-### Migration
-
-The gate was "a known device token, **or** an ABS bearer that passed the old
-§4.1". The ABS branch (the fallback lines in `auth.py`, and `auth_abs.py`)
-was deleted at the ABS exit, 11 Nov 2026 (David: "I'd like to move away
-from audiobookshelf"); the gate is now a known device token only.
-
 ### Pairing from the new device — BUILT 16 Nov 2026
 
 The reverse of minting a code: the new device asks and a phone says yes, for
@@ -11708,6 +11708,13 @@ POST /pair/deny {"id"}                                        auth.may_enrol
   `"pair_request": true` (it cannot read `/features` yet); a paired phone
   reads `/features`' `pair_request`. `MEDIA_PAIR_REQUESTS=0` turns both off
   and the routes answer 404 `no_pair_requests`.
+
+### Migration
+
+The gate was "a known device token, **or** an ABS bearer that passed the old
+§4.1". The ABS branch (the fallback lines in `auth.py`, and `auth_abs.py`)
+was deleted at the ABS exit, 11 Nov 2026 (David: "I'd like to move away
+from audiobookshelf"); the gate is now a known device token only.
 
 Over the Cloudflare link, device tokens must travel over https only. The
 tunnel terminates TLS; the canvas itself stays plain http on the tailnet.
