@@ -276,3 +276,9 @@ chats show in Chats as "On this phone", open, and David sent and received
 through them (agent-mail #653). Chats asks for the permission once per
 install of the companion (9833405d). Not yet tried: reactions, read marks
 seen on the network, media.
+
+**The label** (David, 16 Nov 2026): the companion's chats are "Local" on the
+phone that bridges them (sasonica-app cdd2a7d5; was "On this phone"). Seen
+anywhere else — once the second stage copies them into the user's Matrix
+rooms — they carry the phone's name instead ("from p8a"), which says where
+they came from ("yep, that makes sense").
