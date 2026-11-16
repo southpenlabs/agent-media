@@ -294,3 +294,23 @@ def test_v2_relocate_without_the_server_open_asks_opencodes_own(host, tmp_path, 
     out = host.sup._oc_relocate(sid, str(other))
     assert out["relocated"] and out["cwd"] == str(other)
     assert calls == [("POST", f"/api/session/{sid}/move", {"directory": str(other)})]
+
+
+def test_the_gateway_key_opencodes_config_names_is_given_to_its_server(tmp_path, monkeypatch):
+    """sessiond's environment has no login shell's secrets: opencode's
+    `{env:LITELLM_MASTER_KEY}` went empty and the gateway refused every
+    request (red2, 16 Nov 2026). Only that key, only when the config names it."""
+    cfg = tmp_path / "cfg" / "opencode"
+    cfg.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    keyfile = tmp_path / "litellm.env"
+    keyfile.write_text("VENICE_API_KEY=v\nLITELLM_MASTER_KEY=sk-master\nOPENAI_API_KEY=o\n")
+    monkeypatch.setenv("MEDIA_SUMMARY_KEY_FILE", str(keyfile))
+    (cfg / "opencode.json").write_text('{"provider": {"gateway": {"options": {"apiKey": "{env:LITELLM_MASTER_KEY}"}}}}')
+    got = oc.config_env({"PATH": "/usr/bin"})
+    assert got["LITELLM_MASTER_KEY"] == "sk-master"
+    assert "OPENAI_API_KEY" not in got and "VENICE_API_KEY" not in got
+    assert oc.config_env({"LITELLM_MASTER_KEY": "mine"})["LITELLM_MASTER_KEY"] == "mine"
+    (cfg / "opencode.json").write_text('{"model": "opencode/big-pickle"}')
+    assert "LITELLM_MASTER_KEY" not in oc.config_env({"PATH": "/usr/bin"})

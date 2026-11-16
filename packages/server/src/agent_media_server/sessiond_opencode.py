@@ -368,6 +368,36 @@ def split_command(text: str, names) -> tuple[str, str] | None:
     return m.group(1), (m.group(2) or "").strip()
 
 
+def config_env(env: dict) -> dict:
+    """`env` with the gateway key opencode's config asks for, when sessiond
+    lacks it. opencode reads `{env:NAME}` in its config from the server's
+    environment, and sessiond's (a systemd unit's) has no login shell's
+    secrets: on red2 every request to the gateway went without its key and
+    failed (16 Nov 2026, the gateway thread d0815027). Only
+    LITELLM_MASTER_KEY, and only when the config names it, found as the
+    summary's is (intake._summary: the environment, else litellm.env), so no
+    other secret reaches the agents."""
+    from pathlib import Path
+
+    if env.get("LITELLM_MASTER_KEY"):
+        return env
+    cfg = Path(env.get("XDG_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+               or Path.home() / ".config") / "opencode"
+    names: set[str] = set()
+    for f in ("opencode.json", "opencode.jsonc", "config.json"):
+        try:
+            names |= set(re.findall(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}",
+                                    (cfg / f).read_text(encoding="utf-8")))
+        except OSError:
+            continue
+    if "LITELLM_MASTER_KEY" not in names:
+        return env
+    from agent_media_core.intake import _summary
+
+    key = _summary._litellm_master_key()
+    return {**env, "LITELLM_MASTER_KEY": key} if key else env
+
+
 def program_version(exe: str) -> str:
     """`opencode --version` (core opencode_api.cli_version)."""
     from agent_media_core import opencode_api
@@ -461,7 +491,7 @@ class Host:
                 s.bind(("127.0.0.1", 0))
                 self.port = s.getsockname()[1]
             self.password = secrets.token_urlsafe(24)
-            env = self.sup._base_env(exe)
+            env = config_env(self.sup._base_env(exe))
             env[HOST_MARK] = str(self.sup.root)
             env["OPENCODE_SERVER_PASSWORD"] = self.password
             try:
@@ -513,7 +543,7 @@ class Host:
 
         # Not marked headless: the desk's chats share this server, and which
         # chat is the phone's is the plugin's to ask (it is per session).
-        env = self.sup._base_env(exe)
+        env = config_env(self.sup._base_env(exe))
         env.pop("MEDIA_SOURCE_KIND", None)
         svc = opencode_api.Service(env=env, program=exe)
         if os.environ.get("MEDIA_OPENCODE_SERVICE_START") == "0":
