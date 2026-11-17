@@ -6469,6 +6469,23 @@ rows) and shown on screen, `?show=&project=&agent=`. The server is asked for
 everything regardless: the narrowing is applied to the hits, which already
 carry `project`, `harness`, `live` and `archived`.
 
+**Other machines, and other servers (17 Nov 2026).** The index also reads
+agent-sessions' archive of other machines' chats
+(`$XDG_DATA_HOME/agent-sessions/archive/<origin host>/<harness>/…`, each
+harness's own layout; `MEDIA_SEARCH_ARCHIVE` names another, empty turns it
+off), Claude, pi and Codex so far; a native file of the same chat wins.
+Another server may search this one as a **search peer**: paired with
+`media-visual-canvas pair --device "<it> search" --search` here and `media
+peer pair <name> '<link>'` there. Its token answers `GET /search` (as the
+owner sees the chats; `memory` and `translate` are ignored) and is refused
+by every other route, as a jobs-only token is. `media find`, and so the
+`search_history` tool, asks every search peer on its first page, at once,
+8 s each, and merges their hits: each carries `server`, a hit in a chat this
+server's index already has is dropped (a copy), newest and oldest re-sort
+by time, and the answer's `peers` lists `{server, ok, error?}`. Later pages
+are this server's only. `MEDIA_FIND_PEERS=0` asks none. The app's own search
+already asks every paired server itself and is unchanged.
+
 ### 6.15 Move a thread to another project — gated (built 23 Sep 2026; waits out a turn since 15 Oct 2026; waits out questions and background agents, cancellable, since 19 Oct 2026)
 
 **Local chats** (17 Nov 2026, §6.61): a `local:` id is 400 `code: "not_for_local"`: no transcript or folder to move.
@@ -7639,6 +7656,10 @@ same worker (`packages/core/services/jobs-worker/jobs-worker.py --generic`,
 installed by `media jobs pair` for systemd --user, runit or a Windows logon
 task), each its own device:
 
+- A **search peer** is paired with `media-visual-canvas pair --device NAME
+  --search` (the bit rides on the code; `POST /pair` answers `search: true`
+  for such a code only): another server's `media find` asking this one's
+  chats. Its token answers `GET /search` and nothing else (§6.14).
 - A **jobs-only device** is paired with `media-visual-canvas pair --device
   "pn jobs" --jobs` (the bit rides on the code, like `--enrol`, and the
   redeemed row carries `jobs: true`; `POST /pair` adds `jobs: true` to its answer

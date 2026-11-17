@@ -1173,3 +1173,53 @@ def test_a_local_file_wins_over_a_synced_copy_of_the_same_chat(home, gate):
     claude(home, SID3).prompt("newer words here")
     files = [f for f, sid in search._claude_files() if sid == SID3]
     assert len(files) == 1 and "/claude/projects/" in files[0]
+
+
+# --- other machines' chats, and another server's search (17 Nov 2026) -----------
+
+
+def test_the_archive_of_other_machines_chats_is_indexed(home, gate, monkeypatch, tmp_path):
+    arch = tmp_path / "archive"
+    monkeypatch.setenv("MEDIA_SEARCH_ARCHIVE", str(arch))
+    s = Sess(arch / "p8a" / "claude" / "-home-ryer" / f"{SID3}.jsonl", SID3)
+    s.prompt("the heron on the jetty again")
+    s.end_turn()
+    [hit] = ask("heron")["messages"]
+    assert hit["session"] == SID3
+    # A native copy of the same chat wins over the archived one.
+    claude(home, SID3).prompt("native words")
+    files = [f for f, sid in search._claude_files() if sid == SID3]
+    assert len(files) == 1 and "/archive/" not in files[0]
+    monkeypatch.setenv("MEDIA_SEARCH_ARCHIVE", "")
+    assert search.archive_root() == "" and not search._archived("claude", "*", "*.jsonl")
+
+
+def test_known_sessions_says_which_chats_this_index_has(home, gate):
+    s = claude(home, SID)
+    s.prompt("something to index")
+    s.end_turn()
+    ask("something")
+    assert search.known_sessions([SID, SID2, ""]) == {SID}
+    assert search.known_sessions([]) == set()
+
+
+def test_a_search_peer_reads_search_and_nothing_else(home):
+    from agent_media_server import auth, devices
+
+    code, _ = devices.mint_code("red2 search", search=True)
+    got = devices.redeem(code, "x")
+    assert got["search"] is True and not got["jobs"]
+    tok = got["token"]
+    assert auth.search_peer(tok)
+    user, err = auth.gate(tok)
+    assert user is None and err                      # no other route
+    s = claude(home, SID)
+    s.prompt("kingfisher by the creek")
+    s.end_turn()
+    ok, out = search.search("kingfisher", tok, memory=True, translate_nl=True)
+    assert ok and [h["session"] for h in out["messages"]] == [SID]
+    assert not out.get("memory") and not out.get("translated")
+    # A jobs code never becomes a search peer too.
+    code, _ = devices.mint_code("w jobs", jobs=True, search=True)
+    assert not devices.redeem(code, "y").get("search")
+    assert not search.search("kingfisher", "nonsense")[0]

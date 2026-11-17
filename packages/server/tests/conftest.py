@@ -425,3 +425,12 @@ def _targets_unshared(monkeypatch):
     sessions._reset_builds_for_tests()
     yield
     sessions._reset_builds_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _no_search_archive_or_peers(monkeypatch):
+    """The index also reads agent-sessions' archive of other machines' chats
+    (search.archive_root) and `media find` asks linked servers: neither may
+    reach this machine's real ones. test_search_peers sets its own."""
+    monkeypatch.setenv("MEDIA_SEARCH_ARCHIVE", "")
+    monkeypatch.setenv("MEDIA_FIND_PEERS", "0")

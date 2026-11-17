@@ -57,7 +57,15 @@ def _device(bearer: str) -> dict | None:
     another host's worker token takes jobs down its stream and is no way in
     to anything else (it is refused like an unknown token)."""
     dev = devices.lookup(bearer, getattr(_REQ, "ip", ""))
-    return None if devices.is_jobs_worker(dev) else dev
+    if devices.is_jobs_worker(dev) or devices.is_search_peer(dev):
+        return None
+    return dev
+
+
+def search_peer(bearer: str) -> bool:
+    """This bearer is another server's search of this one (`pair --search`):
+    let into `GET /search` only (search.search)."""
+    return devices.is_search_peer(devices.lookup(bearer, getattr(_REQ, "ip", "")))
 
 
 def jobs_device_id(bearer: str) -> str:

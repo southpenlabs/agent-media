@@ -145,6 +145,8 @@ def pair(name: str, link: str, server: str = "") -> dict:
     rec = {"alias": alias, "url": base, "token": got["token"],
            "device_id": got.get("device_id"), "name": got.get("name"),
            "server_name": (got.get("server") or {}).get("name"),
+           # A search-only pairing (`pair --search` there): media find asks it.
+           **({"search": True} if got.get("search") else {}),
            "paired_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     path = _file(alias)
     path.parent.mkdir(parents=True, exist_ok=True)

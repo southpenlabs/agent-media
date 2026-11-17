@@ -595,3 +595,11 @@ def _no_live_sessiond(monkeypatch, tmp_path):
     monkeypatch.delenv("MEDIA_HEADLESS", raising=False)
     monkeypatch.setenv("MEDIA_SESSIOND_TRANSPORT", "unix")
     monkeypatch.setenv("MEDIA_SESSIOND_SOCKET", str(tmp_path / "sessiond.sock"))
+
+
+@pytest.fixture(autouse=True)
+def _no_search_peers(monkeypatch):
+    """`media find` also asks the other servers this host has search links
+    with (history_search.ask_peers): a test must never reach a real one.
+    test_history_search_peers turns it back on against fakes."""
+    monkeypatch.setenv("MEDIA_FIND_PEERS", "0")

@@ -689,6 +689,13 @@ def set_sessions(device_id: str, on: bool = True) -> bool:
         return True
 
 
+def is_search_peer(device: dict | None) -> bool:
+    """A search-only device (`pair --device NAME --search`): another
+    server's `media find`, asking this one's chats. Its token answers
+    `GET /search` and opens no other route (auth._device leaves it out)."""
+    return bool((device or {}).get("search"))
+
+
 def is_session_worker(device: dict | None) -> bool:
     """A jobs worker that may also run agent sessions sent down its stream
     (phone_jobs.session, roadmap 56): only with the jobs bit too, so the
@@ -697,7 +704,8 @@ def is_session_worker(device: dict | None) -> bool:
 
 
 def mint_code(name: str, enrol: bool = False, jobs: bool = False,
-              role: str = "", sessions: bool = False) -> tuple[str, float]:
+              role: str = "", sessions: bool = False,
+              search: bool = False) -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
     Several may be outstanding at once (pairing a phone and a tablet in the
@@ -727,6 +735,10 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False,
             codes[code]["jobs"] = True
             if sessions:
                 codes[code]["sessions"] = True
+        if search and not jobs:
+            # Another server's search of this one's chats (`pair --search`):
+            # granted by whoever mints, like `jobs`.
+            codes[code]["search"] = True
         if role:
             codes[code]["role"] = role
         _write(codes_path(), codes)
@@ -788,11 +800,14 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
             row["jobs"] = True
             if entry.get("sessions"):
                 row["sessions"] = True
+        if entry.get("search") and not row.get("jobs"):
+            row["search"] = True
         if entry.get("role") in ROLES:
             row["role"] = entry["role"]
         _save(list(_load(fresh=True)) + [row])
     return {"token": token, "device_id": row["id"], "name": name,
-            "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row)}
+            "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row),
+            **({"search": True} if row.get("search") else {})}
 
 
 #: Fields that never leave the store: the token's hash, and an account's
@@ -1031,6 +1046,7 @@ def cli_devices(argv: list[str]) -> int:
               f"  {role_of(d)}"
               f"{'  [enrols]' if may_enrol(d) else ''}"
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
+              f"{'  [search peer]' if is_search_peer(d) else ''}"
               f"{'  [sessions]' if is_session_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}"
               f"{'  app ' + app_words(d) + ' (said ' + when(d.get('app_at')) + ')' if d.get('app') else ''}")

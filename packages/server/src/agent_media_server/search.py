@@ -375,7 +375,54 @@ def _claude_files() -> list[tuple[str, str]]:
                 out.append((f, sid))
     except Exception:  # noqa: BLE001 - the index never fails on the mirror
         log.debug("search: the session workers' transcripts were not read", exc_info=True)
+    # Other machines' chats kept by agent-sessions (its archive, same layout
+    # as Claude's own folder under <host>/claude/); a file here wins.
+    seen = {sid for _, sid in out}
+    for f in _archived("claude", "*", "*.jsonl"):
+        sid = os.path.basename(f)[:-6]
+        if transcript_session(sid) and sid not in seen:
+            seen.add(sid)
+            out.append((f, sid))
     return out
+
+
+def known_sessions(ids) -> set[str]:
+    """Which of `ids` this server's index has a thread for: another
+    server's hit in one of them is a copy of a chat this one already holds
+    (history_search.merge)."""
+    ids = [str(i) for i in ids if i]
+    if not ids:
+        return set()
+    try:
+        conn = _connect()          # this thread's, kept open (not closed here)
+        got: set[str] = set()
+        for i in range(0, len(ids), 500):
+            part = ids[i:i + 500]
+            got |= {r[0] for r in conn.execute(
+                f"SELECT session FROM threads WHERE session IN ({','.join('?' * len(part))})",
+                part)}
+        return got
+    except Exception:  # noqa: BLE001 - no index: nothing known
+        return set()
+
+
+def archive_root() -> str:
+    """agent-sessions' archive of other machines' chats
+    (`<root>/<origin host>/<harness>/…`, the harness's own layout), or ""
+    when there is none. MEDIA_SEARCH_ARCHIVE names another; empty turns it
+    off."""
+    env = os.environ.get("MEDIA_SEARCH_ARCHIVE")
+    if env is not None:
+        return os.path.expanduser(env.strip())
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(data, "agent-sessions", "archive")
+
+
+def _archived(harness: str, *parts: str) -> list[str]:
+    root = archive_root()
+    if not root or not os.path.isdir(root):
+        return []
+    return glob.glob(os.path.join(root, "*", harness, *parts))
 
 
 def _owned_elsewhere() -> set[str]:
@@ -552,9 +599,12 @@ def _pi_files() -> list[tuple[str, str]]:
     from agent_media_core import harnesses
 
     out = []
-    for f in glob.glob(str(harnesses._pi_dir() / "sessions" / "*" / "*.jsonl")):
+    seen: set = set()
+    for f in (glob.glob(str(harnesses._pi_dir() / "sessions" / "*" / "*.jsonl"))
+              + _archived("pi", "*", "*.jsonl")):
         m = _UUID.search(os.path.basename(f))
-        if m:
+        if m and m.group(0) not in seen:
+            seen.add(m.group(0))
             out.append((f, m.group(0)))
     return out
 
@@ -563,9 +613,13 @@ def _codex_files() -> list[tuple[str, str]]:
     from agent_media_core import harnesses
 
     out = []
-    for f in glob.glob(str(harnesses._codex_dir() / "sessions" / "*" / "*" / "*" / "rollout-*.jsonl")):
+    seen: set = set()
+    for f in (glob.glob(str(harnesses._codex_dir() / "sessions" / "*" / "*" / "*" / "rollout-*.jsonl"))
+              + _archived("codex", "*", "*", "*", "rollout-*.jsonl")):
         m = harnesses._ROLLOUT.search(f)
-        if m and not harnesses.codex_subagent(f) and not harnesses.codex_scripted(f):
+        if m and m.group(1) not in seen and not harnesses.codex_subagent(f) \
+                and not harnesses.codex_scripted(f):
+            seen.add(m.group(1))
             out.append((f, m.group(1)))
     return out
 
@@ -2229,7 +2283,13 @@ def search(q: str, bearer: str, **kw) -> tuple[bool, dict]:
     """`GET /search` (server-contract.md §6.14): the gate, then `answer`."""
     user, err = auth.gate(bearer)
     if not user:
-        return False, err
+        if not auth.search_peer(bearer):
+            return False, err
+        # Another server's `media find` (a search peer): the chats, as the
+        # owner sees them, and nothing that costs a model call or reads the
+        # memory store.
+        kw = {k: v for k, v in kw.items() if k not in ("memory", "translate_nl")}
+        return answer(q, memory=False, **kw)
     return answer(q, **kw)
 
 
