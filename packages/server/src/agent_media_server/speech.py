@@ -600,8 +600,10 @@ def unheard_counts() -> dict[str, int]:
     """`/sessions/state` `unheard`: each thread's replies held and never
     played, by session id; threads with none are left out. The same test
     as `/speech/recent`'s `unheard` (a held copy of a reply heard in another
-    copy is not counted; private threads are left out), so the thread
-    list's Play key shows only where `replay-unheard` has something to read
+    copy is not counted; private threads are left out), counting only the
+    unheard replies the thread ends on, so the thread list's Play key shows
+    only where the thread's own Play all unheard and `replay-unheard` have
+    something to read
     (David, 12 Nov 2026: "The play button on the threadlist should only
     display for unheard replies. not necessarily those marked unread")."""
     global _UNHEARD_CACHE
@@ -636,19 +638,31 @@ def _count_unheard() -> dict[str, int]:
     counts: dict[str, int] = {}
     seen: set[tuple[str, str]] = set()
     secret: dict[str, bool] = {}
+    # Only the unheard replies a thread ends on, as the thread's own Play all
+    # unheard (cli._oldest_unheard, the app's trailingUnheard): the run back
+    # from the newest reply ends at one heard (or stopped part-way) and at
+    # the listener's own turn. Every unheard reply of the week had put a Play
+    # key on 117 threads (David, 18 Nov 2026: "change the chat list play
+    # button to match it").
+    ended: set[str] = set()
     for row in rows:    # newest first
         ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
-        if not ex.get("held") or ex.get("heard") or not _recent_kind(row, ex):
-            continue
         session = str(ex.get("source_session") or ex.get("session") or "")
-        if not sessions._SESSION.fullmatch(session):
+        if session in ended or not sessions._SESSION.fullmatch(session):
+            continue
+        if row.get("source") == "listener" or ex.get("listener"):
+            ended.add(session)
+            continue
+        if not _recent_kind(row, ex):
             continue
         key = str(ex.get("dedup_key") or "")
         if key:
             if (session, key) in seen:
                 continue
             seen.add((session, key))
-        if reply_position.heard_to_any(row, rows) != 0 or _resume_of(ex):
+        if (not ex.get("held") or ex.get("heard") or _resume_of(ex)
+                or reply_position.heard_to_any(row, rows) != 0):
+            ended.add(session)
             continue
         if session not in secret:
             secret[session] = hidden(session)

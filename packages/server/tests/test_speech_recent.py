@@ -123,3 +123,19 @@ def test_an_unheard_reply_keeps_its_play_past_a_busy_day(monkeypatch):
     for i in range(1000):
         _add(f"Spoken {i}.", session=B, at=t + 1 + i, kind="stop", heard=True)
     assert speech.unheard_counts() == {A: 1}
+
+
+def test_unheard_counts_only_the_replies_a_thread_ends_on(monkeypatch):
+    """The list's Play key matches the thread's Play all unheard: the run
+    back from the newest reply ends at one heard and at the listener's own
+    turn (18 Nov 2026)."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 80
+    _add("Held, then a heard one after.", at=t, kind="stop", held=True)
+    _add("Heard.", at=t + 1, kind="stop", heard=True)
+    _add("Held before the listener spoke.", session=B, at=t + 2, kind="stop", held=True)
+    _add("You: and then?", session=B, at=t + 3, source="listener", listener=True)
+    _add("Held after.", session=B, at=t + 4, kind="stop", held=True)
+    _add("Mail from elsewhere.", session=B, at=t + 5, kind="notif")
+    _add("Held last.", session=B, at=t + 6, kind="stop", held=True)
+    assert speech.unheard_counts() == {B: 2}
