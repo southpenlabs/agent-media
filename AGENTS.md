@@ -169,6 +169,11 @@ per clone with `git config core.hooksPath .githooks`).
 
 ## Design rules
 
+- Dependencies stay current: Dependabot opens a grouped minor/patch PR per
+  ecosystem each Monday (.github/dependabot.yml). The repo's session merges
+  the green ones that week after skimming their changelogs, and deploys as
+  usual; a major or a red one goes to David with what changed and what it
+  would take. docs/proposals/2026-11-17-dependency-upgrades.md
 - Open source first, and contribute back: before building something new,
   look for a reliable open-source project that does it, and say in the
   proposal or commit what was found and why it was used or not; where we
