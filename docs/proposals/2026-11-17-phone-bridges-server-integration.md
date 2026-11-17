@@ -189,3 +189,11 @@ is made. Mute becomes a real per-chat notification mute (optionally until a
 time), separate from the speech level, kept on the server and honoured by
 Sasonica's and the companion's notifications ("mute ... a notification
 sound ... maybe we should?").
+
+**No switch** (David, 18 Nov 2026: "should it be a per network leave alone
+or a per account leave alone? ... Or not bother with either", then "y" to
+not bothering): Local chats are always kept in step with the networks where
+they allow it; the marks say what reaches each network. The server keeps
+`apply_to_networks` and `network_exceptions` (default on, no exceptions) so
+a per-account "Leave alone" can come back if a real need turns up; the app
+shows neither.
