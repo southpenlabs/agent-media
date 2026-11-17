@@ -1126,6 +1126,20 @@ def _sources() -> list[tuple[str, str, str]]:
                     out.append(("claude", path, sid))
     except Exception:  # noqa: BLE001 - the index never fails on the archive
         log.debug("search: the archive's documents were not read", exc_info=True)
+    # An opencode chat this server runs on a session worker: its synced
+    # txcript document (sessiond_remote.doc_path), read the same way.
+    try:
+        from . import frozen
+        from .sessiond import state_root
+        from .sessiond_remote import mirror_dir
+
+        for f in glob.glob(str(mirror_dir(state_root()) / "*.json")):
+            sid = os.path.basename(f)[:-5]
+            path = frozen.as_claude(f, sid)
+            if path:
+                out.append(("claude", path, sid))
+    except Exception:  # noqa: BLE001
+        log.debug("search: the session workers' documents were not read", exc_info=True)
     from agent_media_core.deleted import deleted
     from agent_media_core.private import marked
     from agent_media_core.sealed import sealed

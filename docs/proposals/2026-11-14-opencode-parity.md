@@ -95,6 +95,11 @@ let's get them working for opencode".
     Claude transcript mirror, since sessiond_remote syncs a Claude JSONL
     and opencode keeps a database. It also needs the reply spoken here on
     its idle event, and `start` let through for opencode.
+    **Built 18 Nov 2026** (thread b9b50d6f; David: "let's start with option
+    1"): the worker sends the chat as a txcript document when it changed,
+    the server keeps it as the record, reads and searches it, and speaks
+    each new reply; the plugin there stays quiet for another server's chat.
+    Server contract §17.1.
 12. **Moving a chat to another folder.** Done (David, 15 Nov 2026: "We
     really need to be able to move a chat between projects"). A prompt or a
     fork sent from another folder still runs in the session's own folder.

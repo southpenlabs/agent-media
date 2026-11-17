@@ -271,9 +271,11 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         agent, agent_source = default_agent.resolve(cwd, headless=True)
         from .sessiond_remote import is_local as _here
 
-        if (host or "").strip() and not _here(host.strip()) and agent != "claude":
-            # Only Claude runs on another host yet: a named host keeps the
-            # chat Claude rather than refusing a default nobody asked for.
+        from .sessiond_remote import AGENTS as _remote
+
+        if (host or "").strip() and not _here(host.strip()) and agent not in _remote:
+            # Only some agents run on another host yet: a named host keeps
+            # the chat Claude rather than refusing a default nobody asked for.
             agent, agent_source = "claude", "host"
     agent = agent.strip()
     if agent not in AGENTS:
@@ -290,7 +292,9 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
         host = "local"      # this host, never the default one (sessiond_remote)
     if host and host != "local" and (persona or role):
         return RC_USAGE, {"error": "a persona cannot start on another host yet", "code": "persona"}
-    if host and host != "local" and agent != "claude":
+    from .sessiond_remote import AGENTS as _remote_agents
+
+    if host and host != "local" and agent not in _remote_agents:
         return RC_USAGE, {"error": f"{agent} cannot start on another host yet", "code": "agent"}
     prompt_file = None
     if persona or role:

@@ -1451,10 +1451,29 @@ def messages(session: str, *, limit: int | None = None, before: str = "") \
         # Another machine's chat, frozen here (frozen.py): read from the archive.
         from . import frozen
 
-        harness, path = frozen.readable(session)
+        harness, path = _worker_doc(session)
+        if not path:
+            harness, path = frozen.readable(session)
         if not path:
             return None
     return messages_at(path, limit=limit, before=before, harness=harness)
+
+
+def _worker_doc(session: str) -> tuple[str, str]:
+    """`("claude", path)` for an opencode chat this server runs on a session
+    worker: its synced txcript document (sessiond_remote.doc_path), read as
+    Claude records; else ("", "")."""
+    try:
+        from . import frozen
+        from .sessiond_remote import doc_path
+
+        p = doc_path(session)
+        if p.is_file():
+            got = frozen.as_claude(str(p), session)
+            return ("claude", got) if got else ("", "")
+    except Exception:  # noqa: BLE001 - no copy: read on as before
+        pass
+    return "", ""
 
 
 def _opencode_page(session: str, *, limit: int | None, before: str) \

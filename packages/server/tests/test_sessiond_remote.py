@@ -166,7 +166,7 @@ def test_a_host_that_is_down_says_so_at_once_and_keeps_nothing(this_server):
 
 def test_no_persona_or_other_agent_on_another_host_yet(this_server):
     sup, fake, _said, work = this_server
-    assert _start(sup, work, agent="opencode")["code"] == "unsupported"
+    assert _start(sup, work, agent="antigravity")["code"] == "unsupported"
     assert _start(sup, work, system_prompt_file="/x")["code"] == "unsupported"
     assert not fake.seen
 
@@ -269,7 +269,7 @@ def test_a_refused_start_there_starts_it_here(default_other_host, monkeypatch):
     assert _new_chat(sup, work) == "here"
 
 
-@pytest.mark.parametrize("kw", [{"agent": "opencode"}, {"system_prompt_file": "/x"},
+@pytest.mark.parametrize("kw", [{"agent": "antigravity"}, {"system_prompt_file": "/x"},
                                 {"fork_from": "a", "fork_at": "b"}, {"session": SID},
                                 {"host": "local"}])
 def test_only_a_plain_new_chat_goes_to_the_default_host(default_other_host, kw):
@@ -736,3 +736,114 @@ def test_the_worker_gathers_a_put_and_renames_it_into_place_at_the_end(tmp_path,
     assert f.read_text() == '{"a":1}\n{"b":2}\n'
     for bad in ("", "../x", "a/b", ".hidden"):
         assert worker.put_copy({"session": SID, "dir": bad, "data": "x"})["code"] == "bad_request"
+
+
+# --- opencode on a session worker (threads across machines, 18 Nov 2026) ----------
+
+OC = "ses_" + "a" * 26
+
+
+class OcHost(FakeHost):
+    """A worker running an opencode chat: its sync sends a txcript document."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.view = {**self.view, "session": OC, "agent": "opencode", "last_event_at": 200.0}
+        self.doc = {"cwd": "/home/other/work", "messages": [
+            {"role": "user", "content": "say hi"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Hi there."}]}]}
+
+    def __call__(self, body: dict, timeout: float):
+        req = (body or {}).get("request") or {}
+        if req.get("op") == "start":
+            self.seen.append(body)
+            return 200, {"ok": True, "session": OC, "state": "working", "acked": True}
+        if req.get("op") == "sync":
+            self.seen.append(body)
+            mark = req["sessions"].get(OC, {})
+            out = {"ok": True, "host": {"host": OTHER_NAME}, "sessions": [self.view],
+                   "events": {}, "transcripts": {}}
+            if float(self.view["last_event_at"]) > float(mark.get("doc_at") or 0):
+                out["transcripts"][OC] = {"doc": self.doc, "doc_at": self.view["last_event_at"]}
+            return 200, out
+        return super().__call__(body, timeout)
+
+
+@pytest.fixture
+def oc_server(tmp_path):
+    sup = sessiond.Supervisor(root=tmp_path / "sd")
+    fake = OcHost()
+    sup.remote.call = fake
+    said: list[tuple[str, str]] = []
+    sup.remote.speak = lambda rec, text: said.append((rec["session"], text))
+    work = tmp_path / "work"
+    work.mkdir()
+    return sup, fake, said, work
+
+
+def test_an_opencode_chat_starts_there_and_its_document_is_kept_here(oc_server):
+    sup, fake, said, work = oc_server
+    got = _start(sup, work, agent="opencode")
+    assert got["ok"] and got["session"] == OC
+    assert fake.seen[-1]["request"]["agent"] == "opencode"
+    rec = sessiond.read_record(OC, sup.root)
+    assert rec["agent"] == "opencode" and rec["replies_seen"] == 0
+    sup.remote.sync_once()
+    doc = json.loads(sessiond_remote.doc_path(OC, sup.root).read_text())
+    assert doc["messages"][-1]["role"] == "assistant"
+    assert said == [(OC, "Hi there.")]                 # its first reply, spoken here
+    sup.remote.sync_once()                              # unchanged: not sent again
+    assert said == [(OC, "Hi there.")]
+    sent = [b["request"]["sessions"][OC] for b in fake.seen if b["request"]["op"] == "sync"]
+    assert sent[-1]["doc_at"] == 200.0
+    # A new turn there: only the new reply is said.
+    fake.doc["messages"] += [{"role": "user", "content": "and?"},
+                             {"role": "assistant", "content": "And more."}]
+    fake.view = {**fake.view, "last_event_at": 300.0}
+    sup.remote.sync_once()
+    assert said[-1] == (OC, "And more.") and len(said) == 2
+
+
+def test_an_adopted_opencode_record_does_not_say_old_replies(oc_server):
+    sup, fake, said, work = oc_server
+    assert _start(sup, work, agent="opencode")["ok"]
+    rec = sessiond.read_record(OC, sup.root)
+    rec.pop("replies_seen")
+    sup.remote.adopt(rec)
+    sup.remote.sync_once()
+    assert said == [] and sessiond.read_record(OC, sup.root)["replies_seen"] == 1
+
+
+def test_an_opencode_copy_is_never_dropped_there(oc_server, monkeypatch):
+    sup, fake, said, work = oc_server
+    assert _start(sup, work, agent="opencode")["ok"]
+    sup.remote._maybe_drop(OTHER_NAME, OC, {"size": 10})
+    assert not [b for b in fake.seen if b["request"]["op"] == "drop_copy"]
+
+
+def test_the_server_reads_and_searches_the_document(oc_server, monkeypatch, tmp_path):
+    from agent_media_server import search, transcript
+
+    sup, fake, said, work = oc_server
+    monkeypatch.setattr(sessiond, "state_root", lambda: sup.root)
+    assert _start(sup, work, agent="opencode")["ok"]
+    sup.remote.sync_once()
+    harness, path = transcript._worker_doc(OC)
+    assert harness == "claude" and path
+    got = transcript.messages(OC)
+    msgs = got[0] if isinstance(got, tuple) else got
+    assert any("Hi there." in json.dumps(m) for m in msgs)
+    assert any(sid == OC for _h, _p, sid in search._sources())
+
+
+def test_the_worker_exports_an_opencode_chat_only_when_it_changed(monkeypatch):
+    worker = _load_worker()
+    view = {"session": OC, "agent": "opencode", "seq": 0, "last_event_at": 500.0}
+    monkeypatch.setattr(worker, "sessiond_call", lambda req, timeout=30.0: (
+        {"ok": True, "sessions": [view]} if req["op"] == "list" else {"ok": True}))
+    made = []
+    monkeypatch.setattr(worker, "txcript_doc", lambda sid: made.append(sid) or {"messages": []})
+    got = worker.session_sync({"sessions": {OC: {"seq": 0, "doc_at": 0}}})
+    assert got["transcripts"][OC] == {"doc": {"messages": []}, "doc_at": 500.0}
+    got = worker.session_sync({"sessions": {OC: {"seq": 0, "doc_at": 500.0}}})
+    assert OC not in got["transcripts"] and made == [OC]

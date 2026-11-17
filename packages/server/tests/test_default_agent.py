@@ -92,13 +92,14 @@ def test_media_session_start_uses_it_and_says_so(here, monkeypatch, tmp_path, ca
     rc, d = hm.start(str(tmp_path), "hi")
     assert rc == hm.RC_SENT and d["agent"] == "opencode" and d["agent_source"] == "fallback"
     assert [kw["agent"] for op, kw in calls if op == "start"] == ["opencode"]
-    # Named on another host, a default other than Claude stays Claude there.
+    # Named on another host: opencode runs on session workers too (18 Nov
+    # 2026), so the default stays opencode there.
     calls.clear()
     monkeypatch.setattr(hm, "_call", lambda op, **kw: calls.append((op, kw)) or {
-        "ok": True, "session": "1" * 8 + "-1111-4111-8111-" + "1" * 12, "host": "w1"})
+        "ok": True, "session": "ses_" + "b" * 26, "host": "w1"})
     rc, d = hm.start(str(tmp_path), "hi", host="w1")
-    assert rc == hm.RC_SENT and d.get("agent_source") == "host"
-    assert [kw["agent"] for op, kw in calls if op == "start"] == ["claude"]
+    assert rc == hm.RC_SENT and d.get("agent_source") == "fallback"
+    assert [kw["agent"] for op, kw in calls if op == "start"] == ["opencode"]
     # The command shows it and sets it.
     assert hm.main(["default-agent", "claude", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["effective"] == "claude"

@@ -239,7 +239,7 @@ Claude JSONL by byte offset, and `start` refuses any other agent
 |---|---|---|---|---|
 | Claude Code | JSONL file | yes | byte offset, as now | yes |
 | antigravity | managed file (`antigravity.path`) | yes | byte offset, if append-only (to check) | yes |
-| opencode | SQLite db | yes | by message: its export, as `opencode_move.py` does | yes: export, then import on resume |
+| opencode | SQLite db | yes | **built 18 Nov 2026**: the whole chat as a txcript document (`txcript export`) when it changed; the server's copy is the record (one-history-store proposal) | not yet: both copies kept |
 | Codex | JSONL rollout | no (pane) | byte offset | yes |
 | pi | JSONL file | no (pane) | byte offset | yes |
 | Hermes | SQLite db | no | by message, from its rows | risky: no export/import seen; leave its copy |

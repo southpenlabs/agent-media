@@ -13698,7 +13698,7 @@ side), `phone_jobs.session` (the channel),
 - **Starting one.** `media session start <folder> --host red2 <text>` (or the
   socket's `start` with `host`). The folder goes as `~/…`, the server's home
   being not the host's; a folder missing there is cloned from the server
-  checkout's `origin`, or refused with a sentence (`bad_cwd`). Claude only;
+  checkout's `origin`, or refused with a sentence (`bad_cwd`). Claude or opencode (18 Nov 2026);
   no persona or branch yet (`unsupported`). The server keeps the session's
   record (`<state>/sessiond/<id>.json` with `host`, `remote_cwd`,
   `seq_seen`), so the canvas treats the thread as headless (§17) even while
@@ -13722,6 +13722,19 @@ side), `phone_jobs.session` (the channel),
   host runs a chat that has one with `MEDIA_HOOK_ENABLED=0`: it never speaks
   (a start with `server_permissions` and no owner, from an older server,
   counts as another server's too).
+- **opencode there (18 Nov 2026).** opencode keeps a database, not a
+  file, so its worker's `sync` sends the whole chat as a txcript document
+  (`txcript export <id> --from opencode`; MEDIA_TXCRIPT, PATH, then
+  ~/.local/bin) whenever its `last_event_at` is newer than the `doc_at` the
+  server last took, and the server keeps it as `<state>/sessiond/remote/<id>.json`,
+  its record: the thread log and search read it as Claude records
+  (`frozen.as_claude`), and each new reply in it is spoken here
+  (`replies_seen`, the Stop hook as for Claude). The worker's opencode plugin
+  stays quiet for it: the shared `opencode serve` can't carry a per-chat
+  environment, so the hook reads `owner_server` from sessiond's record
+  (`hook_opencode._owned_elsewhere`). Both copies are kept (no drop for
+  opencode yet). Following docs/proposals/2026-11-18-one-history-store.md:
+  a database harness's record is a txcript document.
 - **One owner.** A thread belongs to the server that started it. A machine
   that is another server's worker and has a server of its own leaves those
   chats out of its own thread list, its cards and its search index

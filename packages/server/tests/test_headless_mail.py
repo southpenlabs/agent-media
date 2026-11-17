@@ -287,7 +287,7 @@ def test_start_names_its_agent_and_checks_that_agents_model(host, capsys, monkey
     rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--model", "opus", "hi")
     assert rc == 2 and "not a model opencode takes" in d["error"]
     assert not [c for c in calls if c[0] == "start"]
-    rc, d = run(capsys, "start", str(host.work), "--agent", "opencode", "--host", "red5", "hi")
+    rc, d = run(capsys, "start", str(host.work), "--agent", "antigravity", "--host", "red5", "hi")
     assert rc == 2 and "another host" in d["error"]
     assert not [c for c in calls if c[0] == "start"]
 

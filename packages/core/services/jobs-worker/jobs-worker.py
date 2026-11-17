@@ -823,6 +823,42 @@ def put_copy(req: dict) -> dict:
         return {"ok": False, "code": "write", "error": str(e)}
 
 
+def txcript() -> str:
+    """The txcript program: MEDIA_TXCRIPT, PATH, then ~/.local/bin."""
+    import shutil
+
+    env = (os.environ.get("MEDIA_TXCRIPT") or "").strip()
+    if env:
+        return env
+    return shutil.which("txcript") or (
+        str(Path.home() / ".local" / "bin" / "txcript")
+        if (Path.home() / ".local" / "bin" / "txcript").exists() else "")
+
+
+def txcript_doc(session: str) -> "dict | None":
+    """An opencode session as a txcript document (`txcript export <id>
+    --from opencode`), or None when it can't be made here."""
+    import tempfile
+
+    exe = txcript()
+    if not exe or not SESSION_ID_RE.fullmatch(session or ""):
+        return None
+    with tempfile.TemporaryDirectory(prefix="txcript-") as d:
+        out = Path(d) / "doc.json"
+        try:
+            r = subprocess.run([exe, "export", session, "--from", "opencode", "--out", str(out)],
+                               capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if r.returncode != 0 or not out.exists():
+            return None
+        try:
+            doc = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+    return doc if isinstance(doc, dict) else None
+
+
 def session_sync(req: dict) -> dict:
     """The server's poll: views, new events and transcript lines of the
     sessions it names (`{"sessions": {id: {"seq", "offset"}}}`)."""
@@ -848,6 +884,19 @@ def session_sync(req: dict) -> dict:
             ev = sessiond_call({"op": "events", "session": sid, "since": seq}, timeout=10.0)
             if ev.get("ok"):
                 out["events"][sid] = ev.get("events") or []
+        if v.get("agent") == "opencode":
+            # A row in opencode's database, not a file: the whole chat as a
+            # txcript document, sent only when it changed since the server's.
+            try:
+                since = float(mark.get("doc_at") or 0)
+            except (TypeError, ValueError):
+                since = 0.0
+            at = float(v.get("last_event_at") or 0) or time.time()
+            if at > since:
+                doc = txcript_doc(sid)
+                if doc is not None:
+                    out["transcripts"][sid] = {"doc": doc, "doc_at": at}
+            continue
         out["transcripts"][sid] = transcript_chunk(sid, offset)
     return out
 

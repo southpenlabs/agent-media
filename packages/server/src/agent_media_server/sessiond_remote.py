@@ -81,6 +81,11 @@ from . import permissions as _perms
 
 log = logging.getLogger("agent-media.sessiond")
 
+#: The agents a session worker runs: Claude (its transcript a JSONL synced
+#: by byte offset) and opencode (a database there; synced as the txcript
+#: document its worker exports, docs/proposals/2026-11-18-one-history-store.md).
+AGENTS = ("claude", "opencode")
+
 #: Ops on a session that go to its host as they are.
 FORWARD_OPS = frozenset({"send", "answer", "interrupt", "close", "park", "resume",
                          "configure", "rename", "release", "run_now", "stop_task"})
@@ -159,6 +164,26 @@ def _owner_id() -> str:
 
 def mirror_dir(root: Path) -> Path:
     return root / "remote"
+
+
+def _text_of(msg: dict) -> str:
+    """A txcript message's words: its text blocks, or its content string."""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    return "\n".join(str(b.get("text") or "") for b in content or []
+                     if isinstance(b, dict) and b.get("type") == "text").strip()
+
+
+def doc_path(session: str, root: Path | None = None) -> Path:
+    """Where this host keeps an opencode session's transcript from another
+    host: the txcript document its worker exported (frozen.as_claude reads
+    it as Claude records)."""
+    if root is None:
+        from .sessiond import state_root
+
+        root = state_root()
+    return mirror_dir(root) / f"{session}.json"
 
 
 def mirror_path(session: str, root: Path | None = None) -> Path:
@@ -257,7 +282,7 @@ class Remote:
         with self.lock:
             return self._copy_locks.setdefault(sid, threading.Lock())
 
-    def _maybe_drop(self, host: str, sid: str, chunk: dict) -> None:
+    def _maybe_drop(self, host: str, sid: str, chunk: dict) -> None:  # noqa: C901
         """The worker's copy of an ended chat, dropped once this server's
         matches it byte for byte (the worker checks the size and sha256)."""
         import hashlib
@@ -267,6 +292,10 @@ class Remote:
         if chunk.get("missing") or chunk.get("error"):
             return
         with self.lock:
+            if (self.recs.get(sid) or {}).get("agent") not in (None, "claude"):
+                # opencode's chat is a row in the worker's database: both
+                # copies are kept (no drop for it yet).
+                return
             rec = self.recs.get(sid)
             v = self.views.get(sid) or {}
             if rec is None or rec.get("copy") or v.get("live") or v.get("pending"):
@@ -455,8 +484,8 @@ class Remote:
         host = default_host()
         if not host or is_local(host):
             return "", ""
-        if str(req.get("agent") or "claude") != "claude":
-            return "", "not a Claude chat"
+        if str(req.get("agent") or "claude") not in AGENTS:
+            return "", "not an agent session workers run"
         if req.get("system_prompt_file") or req.get("fork_from"):
             return "", "a persona or a branch"
         if req.get("session"):
@@ -520,9 +549,10 @@ class Remote:
         host = str(req.get("host") or "").strip()
         cwd = str(req.get("cwd") or "")
         agent = str(req.get("agent") or "claude")
-        if agent != "claude":
+        if agent not in AGENTS:
             return {"ok": False, "code": "unsupported",
-                    "error": f"only Claude Code sessions run on another host yet, not {agent}"}
+                    "error": f"only {' and '.join(AGENTS)} sessions run on another host yet, "
+                             f"not {agent}"}
         if req.get("system_prompt_file") or req.get("fork_from"):
             return {"ok": False, "code": "unsupported",
                     "error": "a persona or a branch cannot start on another host yet"}
@@ -531,7 +561,7 @@ class Remote:
         if not os.path.isdir(cwd):
             return {"ok": False, "code": "bad_cwd", "error": f"no such directory {cwd!r}"}
         fwd = {"op": "start", "cwd": home_relative(cwd), "text": req.get("text"),
-               "agent": "claude", "workspace": str(req.get("workspace") or ""),
+               "agent": agent, "workspace": str(req.get("workspace") or ""),
                "permissions": str(req.get("permissions") or ""),
                # This server's own default, for a worker with none of its own.
                "server_permissions": _perms.mode(""),
@@ -551,7 +581,7 @@ class Remote:
         if not sid:
             return {"ok": False, "code": "internal", "error": f"{host} made no session"}
         now = time.time()
-        rec = {"session": sid, "agent": "claude", "cwd": os.path.realpath(cwd),
+        rec = {"session": sid, "agent": agent, "cwd": os.path.realpath(cwd),
                "host": host, "remote_cwd": "", "workspace": fwd["workspace"],
                "permissions": fwd["permissions"], "model": fwd["model"], "mode": fwd["mode"],
                "driver": "headless", "state": str(got.get("state") or "starting"),
@@ -559,7 +589,11 @@ class Remote:
                "last_event_at": round(now, 3), "pid": None,
                "first_text": " ".join(str(req.get("text") or "").split())[:200],
                "seq": 0, "seq_seen": 0, "turns": 0, "pending": [], "lost": [], "queued": [],
-               "held": []}
+               "held": [],
+               # opencode: replies counted in its synced document, each new
+               # one spoken here (_took_doc); a record without it is adopted
+               # quietly, its old replies not said again.
+               **({"replies_seen": 0} if agent == "opencode" else {})}
         with self.lock:
             self.recs[sid] = rec
             self.hosts.setdefault(host, {}).update(connected=True, error="")
@@ -624,7 +658,9 @@ class Remote:
                 if self._wanted(sid, now):
                     by_host.setdefault(str(rec.get("host") or ""), {})[sid] = {
                         "seq": int(rec.get("seq_seen") or 0),
-                        "offset": self._mirror_size(sid)}
+                        "offset": self._mirror_size(sid),
+                        **({"doc_at": float(rec.get("doc_at") or 0)}
+                           if rec.get("agent") == "opencode" else {})}
         for host, want in by_host.items():
             if not host:
                 continue
@@ -644,6 +680,9 @@ class Remote:
                 self._took_view(host, v)
         for sid, chunk in (got.get("transcripts") or {}).items():
             if isinstance(chunk, dict) and self.owns(sid):
+                if "doc" in chunk:
+                    self._took_doc(sid, chunk)
+                    continue
                 self._mirror(sid, chunk)
                 self._maybe_drop(host, sid, chunk)
         for sid, evs in (got.get("events") or {}).items():
@@ -702,6 +741,43 @@ class Remote:
             return mirror_path(sid, self.root).stat().st_size
         except OSError:
             return 0
+
+    def _took_doc(self, sid: str, chunk: dict) -> None:
+        """An opencode session's txcript document, newer than the last: kept
+        as this server's record of it, and a turn finished since the last one
+        spoken here (opencode's plugin there is off for it: the hook reads
+        its owner, hook_opencode._owned_elsewhere)."""
+        doc = chunk.get("doc")
+        if not isinstance(doc, dict):
+            return
+        path = doc_path(sid, self.root)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            log.exception("sessiond: keeping the opencode transcript of %s", sid[:8])
+            return
+        said = ""
+        with self.lock:
+            rec = self.recs.get(sid)
+            if rec is None:
+                return
+            rec["doc_at"] = float(chunk.get("doc_at") or time.time())
+            msgs = [m for m in doc.get("messages") or [] if isinstance(m, dict)]
+            n = sum(1 for m in msgs if m.get("role") == "assistant")
+            seen = rec.get("replies_seen")
+            if seen is not None and n > int(seen):
+                said = _text_of(msgs[-1]) if msgs and msgs[-1].get("role") == "assistant" else ""
+            rec["replies_seen"] = n
+            self._save(rec)
+            rec = dict(rec)
+        if said.strip():          # speak() honours MEDIA_SESSIOND_REMOTE_SPEECH
+            try:
+                self.speak(rec, said)
+            except Exception:  # noqa: BLE001
+                log.exception("sessiond: speaking %s's reply", sid[:8])
 
     def _mirror(self, sid: str, chunk: dict) -> None:
         data = str(chunk.get("data") or "")

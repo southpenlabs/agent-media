@@ -121,6 +121,24 @@ def _v2_pane(folder: str) -> str:
     return panes.pop() if len(panes) == 1 else ""
 
 
+def _owned_elsewhere(session: str) -> bool:
+    """This opencode chat was started here by another server, this machine
+    being its session worker: that server speaks and files its replies from
+    the document it syncs, so the hook here stays quiet. A `claude -p` is
+    told so by MEDIA_HOOK_ENABLED=0 in its environment; the one shared
+    `opencode serve` can't be, so sessiond's record of the chat says
+    (`owner_server`, threads across machines)."""
+    import json
+
+    from .._paths import state_dir
+
+    try:
+        rec = json.loads((state_dir() / "sessiond" / f"{session}.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(rec, dict) and bool(rec.get("owner_server"))
+
+
 def _sessiond_session(session: str) -> None:
     """The restart note asks `MEDIA_SESSIOND_SESSION`, which a `claude -p`
     carries in its environment; the one shared `opencode serve` cannot, so
@@ -252,13 +270,18 @@ def main(argv: list[str] | None = None) -> int:
             payload = json.loads(sys.stdin.read() or "{}")
         except ValueError:
             return 0
-        _v2_place(str(payload.get("session_id") or "") if isinstance(payload, dict) else "")
+        sid = str(payload.get("session_id") or "") if isinstance(payload, dict) else ""
+        if sid and _owned_elsewhere(sid):
+            return 0
+        _v2_place(sid)
         return handle(payload, "opencode")
     if len(args) < 2 or args[0] != "--session":
         return 0
     from .. import harnesses
 
     session = args[1]
+    if _owned_elsewhere(session):
+        return 0
     if not harnesses.is_opencode(session):
         return 0
     _v2_place(session)
