@@ -20,10 +20,29 @@ leaves their phone.
 | Backup | **History to your own server**: nightly, encrypted, chats and media; network sign-ins never backed up (pair again after a restore). | **Google Drive** through Android's backup, and **No backup**. |
 | Archive, mute and the like on the network | **Pushed where the network allows** (mute and pin on WhatsApp and Instagram today; no connector can archive yet), Sasonica's setting being the source. | **Leave the networks alone**: settings stay in Sasonica. |
 
-"Everything" and "Plain" overlap: Plain copy is how Everything gets the
-messages to the server. Choosing Everything turns Plain on; Encrypted can be
-chosen instead of Plain for the same reach without the server reading them
-(once the second stage exists).
+### Refined (David, 17 Nov 2026: "Agreed, update the plan")
+
+The first two rows above are one question, how much of these chats leaves
+the phone, so they become **one dial with three steps**:
+
+- **Settings only** (default): the light list and the chats' Sasonica
+  settings. No messages.
+- **Encrypted copy**: messages too, as ciphertext only the user's own
+  devices can read (the second stage).
+- **Full copy**: messages the server can read, so agents, search and the
+  desk can use them; offered with the plain explanation of why.
+
+**Defaults follow whose server it is.** On a person's own server the light
+list carries names. On a server South Pen Labs hosts it carries ids and
+networks only (no names: other people's personal data on SPL's machines),
+and backups are encrypted with a key only the user holds. The server already
+knows which kind it is; the app reads the defaults from it.
+
+**Apply to the networks** is one switch with per-network exceptions (mirror
+WhatsApp's mute but leave Messenger alone), the exceptions under a "Per
+network" line so the main screen stays one switch.
+
+So three settings: the dial, backup, and applying to the networks.
 
 ## The parts
 
@@ -75,10 +94,12 @@ Encrypted or Plain is on — otherwise "on p8a only".
 
 ## Settings
 
-In the companion and mirrored in Sasonica's Settings → Bridges: **Share with
-my server** (Light list / Everything, with the explanation), **Messages on
-other devices** (Phone only / Encrypted / Plain), **Backup** (My server /
-Google Drive / Off), **Apply to the networks** (on / leave them alone).
+In the companion and mirrored in Sasonica's Settings → Bridges, three:
+**What leaves the phone** (Settings only / Encrypted copy / Full copy, with
+the explanation), **Backup** (My server / Google Drive / Off), **Apply to the
+networks** (on / leave them alone, with per-network exceptions). Defaults
+come from the server: names in the list and server-held backup keys only on
+a person's own server.
 
 ## Order of work
 
@@ -89,8 +110,8 @@ Google Drive / Off), **Apply to the networks** (on / leave them alone).
 3. Companion: posting the chat list, following settings for notifications,
    pushing mute/pin to the network, the settings screen.
 4. Backup to the server.
-5. Plain copy (and with it Everything).
-6. Encrypted (the second stage).
+5. Full copy.
+6. Encrypted copy (the second stage).
 
 ## Open
 
