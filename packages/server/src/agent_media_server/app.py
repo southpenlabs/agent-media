@@ -443,7 +443,7 @@ CORS_PATHS = frozenset({
     "/session/answer", "/session/archive", "/session/seal", "/session/pin", "/session/tags", "/session/tags/suggest", "/contacts/tags", "/session/handoff", "/tags/auto", "/tags", "/spaces", "/spaces/suggestion", "/session/priority", "/session/pocket", "/device/black", "/threads/hold", "/threads/open",
     "/session/stop", "/session/release", "/session/run-now", "/sessions/slots", "/session/thinking-speech", "/session/voice",
     "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
-    "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
+    "/session/paths", "/session/file", "/session/file/link", "/files", "/files/read", "/files/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
@@ -2485,6 +2485,46 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, detail.pop("status", 404), {"ok": False, **detail})
             return True
         _send_file(h, detail["file"], detail["size"], detail["type"])
+    elif path == "/files":
+        # A folder's files, for the app's browser (files_browse.py, §6.18b).
+        from . import files_browse
+
+        qs = parse_qs(query)
+        ok, detail = files_browse.listing({k: (v or [""])[0] for k, v in qs.items()}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    elif path == "/files/read":
+        # A browsed file: its bytes, or `&text=1` its text; a signed link
+        # (POST /files/link) stands in for the bearer.
+        from . import files_browse
+
+        qs = parse_qs(query)
+        path_q = (qs.get("path") or [""])[0]
+        if qs.get("sig"):
+            if not files_browse.signed_ok(path_q, (qs.get("exp") or [""])[0], (qs.get("sig") or [""])[0]):
+                _json(h, 403, {"ok": False, "error": "that link is not good (or no longer)"})
+                return True
+            ok, detail = files_browse.open_file(path_q, "", signed=True)
+        elif (qs.get("text") or [""])[0] == "1":
+            ok, detail = files_browse.read_text(path_q, _bearer(h))
+            _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+            return True
+        else:
+            ok, detail = files_browse.open_file(
+                path_q, _bearer(h),
+                permission="download" if (qs.get("download") or [""])[0] == "1" else "open")
+        if not ok:
+            _json(h, detail.pop("status", 404), {"ok": False, **detail})
+            return True
+        from urllib.parse import quote as _q
+
+        extra = {"Cache-Control": "private, max-age=60",
+                 "Content-Security-Policy": "sandbox; default-src 'none'"}
+        ctype = detail["type"]
+        if detail["active"]:
+            ctype = "application/octet-stream"
+        if detail["active"] or (qs.get("download") or [""])[0] == "1":
+            extra["Content-Disposition"] = f"attachment; filename*=UTF-8''{_q(detail['name'])}"
+        _send_file(h, detail["file"], detail["size"], ctype, extra)
     elif path == "/session/file":
         # A file a reply names, opened from the app (session_files.py, §6.18a):
         # its bytes, or `&text=1` its text for the viewer. A signed link
@@ -3884,6 +3924,12 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = session_files.resolve(_read_json(h) or {}, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/files/link":
+        # A link to a browsed file that needs no bearer (files_browse.link).
+        from . import files_browse
+
+        ok, detail = files_browse.link(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
     elif path == "/session/file/link":
         # A link to one of them that needs no bearer (session_files.link).
         from . import session_files

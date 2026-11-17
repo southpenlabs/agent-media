@@ -1,6 +1,6 @@
 # A file browser per folder, and folders limited by Drupal permissions (proposal, 17 Nov 2026)
 
-**Status:** proposal (17 Nov 2026); step 1 built 17 Nov 2026 (contract §9, "Folder grants").
+**Status:** proposal (17 Nov 2026); step 1 built 17 Nov 2026 (contract §9, "Folder grants"); step 2's server routes built the same day (§6.18b).
 
 David, 17 Nov 2026 (from the footer thread): "I'm thinking about adding a
 file browser for each directory and limiting directories by Drupal
@@ -177,6 +177,36 @@ the grants. `own_user` is what makes the grants hold inside a chat too.
   does not record who deleted what. Not used: the server's own trash is a
   few dozen lines.
 
+### A wider look, before step 2 (17 Nov 2026)
+
+David asked to look for other file managers we could drive before building
+the browser ourselves. What was found:
+
+| project | licence | fit | against |
+|---|---|---|---|
+| File Browser (filebrowser/filebrowser) | Apache-2.0 | per-user scope and rights, proxy sign-in | now maintenance-only; proxy-auth bypass CVE-2026-54089 (fixed 2.63.19) and per-user isolation CVE-2026-72837 (before 2.63.20) |
+| FileBrowser Quantum (gtsteffaniak) | Apache-2.0 fork | active; folder rules per user or group, OIDC, proxy auth, API tokens, Swagger | its own users and rules to keep in step with ours; advisory GHSA-qqqm-5547-774x / CVE-2026-48777 |
+| copyparty (9001/copyparty) | MIT, Python | volumes with r/w/m/d permissions per user and group map closely onto our roles; sign-in from proxy headers checked with a shared secret (`idp-h-usr`, `idp-h-grp`, `idp-h-key`); resumable, deduplicated uploads | a second server and its own config generated from our grants; secret-file filtering redone in its terms; its UI is its own page, not the app's |
+| SFTPGo (drakkan/sftpgo) | AGPL-3.0 | per-path permissions (list, upload, overwrite, download, delete, rename, mkdir), virtual folders, quotas, REST API, WebDAV | AGPL, a separate service with its own users; built for SFTP/FTP rather than an app's file view |
+
+None of them knows the app's viewers (document reader, text view with
+line numbers, Listen), its secret-file rules or its devices. Each would be
+a second server with a second permission model kept in step with the grants.
+The read-only browser is mostly the existing `session_files` code with a
+folder listing. Where a project earns its place is **large resumable
+uploads** (step 3), where copyparty's uploader is the best found.
+
+**Chosen** (David, 17 Nov 2026, question card): our own code for the
+browser, and at step 3 try copyparty behind the server for large resumable
+uploads only, signed in by our headers, kept only if it earns its place.
+
+Sources: [linuxiac on File Browser](https://linuxiac.com/popular-self-hosted-file-manager-file-browser-is-shutting-down/),
+[CVE-2026-54089](https://securelayer7.net/lab/cve-2026-54089-filebrowser-proxy-auth-header-forgery),
+[CVE-2026-72837](https://osv.dev/vulnerability/CVE-2026-72837),
+[FileBrowser Quantum](https://github.com/gtsteffaniak/filebrowser),
+[copyparty IdP docs](https://github.com/9001/copyparty/blob/hovudstraum/docs/idp.md),
+[SFTPGo](https://sourceforge.net/mirror/sftpgo/).
+
 ## Order
 
 1. **Built 17 Nov 2026.** Grants and permissions on the server
@@ -186,6 +216,8 @@ the grants. `own_user` is what makes the grants hold inside a chat too.
    Thread lists and chats are not limited yet: they come with step 5's
    `checked` level, since a scoped member's chats need it anyway.
 2. Read-only browser: `GET /files`, `/files/read`, and the app's Files view.
+   **Server built 17 Nov 2026** (contract §6.18b); the app's view asked of
+   sasonica-app.
 3. Writes and the trash.
 4. Drupal: the Group type and roles in sasonica.com's module, projects in
    the servers report, and `project_ceiling` back.

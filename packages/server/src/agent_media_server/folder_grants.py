@@ -238,6 +238,42 @@ def may(dev: dict | None, path: Path | str, permission: str) -> bool:
     return bool(hit) and permission in _perms(dev, hit[1])
 
 
+def perms_at(dev: dict | None, path: Path | str) -> list[str]:
+    """What this device may do at `path`, in PERMISSIONS order: every
+    permission for an unscoped admin or member (the routes' own checks
+    still apply), the read ones for an unscoped guest, else its grant's."""
+    if not scoped(dev):
+        if dev and devices.role_of(dev) == "guest":
+            return [p for p in PERMISSIONS if p not in WRITES]
+        return list(PERMISSIONS)
+    try:
+        real = Path(path).resolve()
+    except OSError:
+        return []
+    hit = _match(dev, real)
+    got = _perms(dev, hit[1]) if hit else set()
+    return [p for p in PERMISSIONS if p in got]
+
+
+def leads_to(dev: dict | None, folder: Path | str) -> bool:
+    """Whether a granted folder (one it may browse) lies below `folder`:
+    a scoped device may list a folder above its grants, seeing only the
+    way down to them."""
+    if not scoped(dev):
+        return True
+    try:
+        real = Path(folder).resolve()
+    except OSError:
+        return False
+    for place, role in (_grants_of(subject_of(dev)) or {}).items():
+        if "browse" not in _perms(dev, role):
+            continue
+        for base in place_paths(place):
+            if base != real and base.is_relative_to(real):
+                return True
+    return False
+
+
 def may_bearer(bearer: str, path: Path | str, permission: str) -> bool:
     return may(auth._device(bearer), path, permission)
 

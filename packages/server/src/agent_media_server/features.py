@@ -116,6 +116,8 @@ never a network call, so the app can ask on every start.
             personal use ("google-image-signin")
   models_view  GET /settings/models: which model each feature uses, where it
             runs and suggestions, read-only (model_roles.py, §6.60, 17 Nov 2026)
+  files_browse  GET /files?dir=|project=&path=, GET /files/read, POST /files/link:
+            the read-only file browser (files_browse.py, §6.18b, 17 Nov 2026)
   folder_grants  GET/POST /folders/grants, POST /folders/roles: an admin limits a
             member or guest to project folders through roles of permissions;
             GET /me `projects` says what this device may reach (§9, 17 Nov 2026).
@@ -263,7 +265,7 @@ def _agents() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "folder_grants": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,

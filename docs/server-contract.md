@@ -6950,6 +6950,50 @@ open; only those become links, so "a/b" in prose stays words. Code:
   `text` in a text view with line numbers, `image` in the photo viewer,
   anything else as a shared file's chip does (above).
 
+### 6.18b The file browser, read only — gated (built 17 Nov 2026)
+
+docs/proposals/2026-11-17-file-browser-and-folder-permissions.md, step 2
+(David, 17 Nov 2026; our own code rather than a second file server, after
+a look at File Browser, FileBrowser Quantum, copyparty and SFTPGo — see the
+proposal). A folder's files, opened from a folder in a chat's path row or a
+project's page. Code: `agent_media_server/files_browse.py`; pinned by
+`packages/server/tests/test_files_browse.py`. `/features` `files_browse`.
+
+- `GET /files?dir=<folder>` (absolute or `~/…`) or `?project=<name>[&path=<rel>]`
+  (a project as `/project/list` names it, or `group:<name>`; `path` under it,
+  no `..`) → `{"ok", "dir", "name", "base", "parent", "crumbs": [{name, path}],
+  "project", "root", "entries": [{name, path, dir, kind, size?, mtime}],
+  "truncated", "may"}`. Folders first, then files, each by name. `kind` is
+  `dir`, or how the app opens a file, from its name alone (`doc`, `text`,
+  `image`, `video`, `audio`, `pdf`, `file`); `/files/read`'s is the exact one.
+  `path` is the entry's real path (a link followed). `base` is the browsable
+  folder it is under (a projects root, a project folder of its own, a doc
+  root, the upload root), `crumbs` run from it down to `dir`, `parent` is null
+  at the base (or where the device may not go). `project` and `root` are the
+  project the folder is in (null outside one). `may` is what this device may
+  do here (§9 "Folder grants"; every permission for an unscoped admin or
+  member, though only reading is built). At most 2000 entries (`truncated`).
+- **What may be browsed** is what §6.18a may open: under a base, with no
+  hidden, "secret" or key-store folder on the way. Hidden entries, secret
+  names (as §6.18a), and links leading outside are left out. The home
+  folder, `/` and anything above a root are not browsable. 404 for anything
+  else (a folder that is not there looks the same), 400 with neither `dir`
+  nor `project`.
+- `GET /files/read?path=<file>` → the bytes, as `/session/file` (Range,
+  `nosniff`, the sandbox CSP, html/svg/js as attachments), `&download=1` an
+  attachment, `&text=1` → `{"ok", "path", "name", "size", "kind", "text",
+  "binary", "truncated"}`. `POST /files/link {"path"}` → `{"ok", "url",
+  "expires", "type", "name", "kind"}`, a signed link for 6 hours (`url` is
+  `/files/read?path=…&exp=…&sig=…`; altered or expired 403). 404 for a file
+  outside the above.
+- **Who.** A guest is 403 `guest`, unless an admin has granted it folders.
+  A device limited to its folders (§9 "Folder grants") lists a folder where
+  it may `browse`, and a folder above its grants showing only the way down
+  (`may` `[]` there, no files); opens a file where it may `open`;
+  `&download=1` and the link need `download`.
+- **Not yet**: upload, new folder, rename, move, delete and the trash
+  (step 3).
+
 ### 6.19 Take back your last message — gated (built 27 Sep 2026)
 
 Code: `agent_media_server/retract.py`, the drivers' `interrupt(drop_queued=)`.
@@ -11733,8 +11777,8 @@ Code: `agent_media_server/folder_grants.py`; pinned by
   until it expires.
 - **Not yet**: thread lists, search's chat hits, replying and starting
   chats are not limited by grants (`chat` and `start_chat` are kept for
-  that step); the file browser itself (`GET /files`), writes and the
-  trash; Drupal's per-project ceiling; agent levels. `/features`
+  that step); the browser's writes and the trash (the read-only browser is
+  §6.18b); Drupal's per-project ceiling; agent levels. `/features`
   `folder_grants`.
 
 ### Enrolling with an account — BUILT 29 Sep 2026
