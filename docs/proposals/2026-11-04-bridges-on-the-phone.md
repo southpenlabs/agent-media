@@ -345,3 +345,14 @@ the test number on the phone's — with pictures both ways ("it's working
 through both Bridges from the right numbers and pictures are going both
 ways"). Lesson for the guide: set WhatsApp Business up on the test number
 from the start; it offers the phone's existing number first.
+
+## Google Messages (17 Nov 2026)
+
+mautrix-gmessages as the fourth network (sasonica-bridges 0181686,
+build-108). Paired on p8a through the Google Account flow — Google's sign-in
+page in the companion's WebView, then the emoji tapped in Google Messages on
+the same phone — with no user-agent change; QR (sharable to another screen)
+kept as the fallback. Google Messages takes more than one paired device, so
+red5's own Google Messages bridge stayed connected. It bridges both SIMs'
+texts (the phone's Messages handles both). All four networks connected on
+the phone: Messenger, Instagram, WhatsApp, Google Messages.
