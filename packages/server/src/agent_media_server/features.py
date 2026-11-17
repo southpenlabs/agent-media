@@ -88,6 +88,9 @@ never a network call, so the app can ask on every start.
             (`app=bridges`, paired non-guest devices, 16 Nov 2026); always true
             here — whether this server's gh can read that private repo is not
             checked (that would cost a GitHub call per /features)
+  app_update_web  GET /app/update takes native=/web= and answers `web`, a
+            web bundle for that shell, served at /app/update/web (17 Nov
+            2026, sasonica-app's web updates); always true here
   tidy_draft  this server answers POST /voice/tidy/draft (tidy_draft.py, 16 Nov
             2026): the composer offers Draft; always true here
   weather   a place for the weather is set (Settings or MEDIA_MUSIC_BED_WEATHER)
@@ -268,7 +271,7 @@ def _agents() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "app_update_web": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,

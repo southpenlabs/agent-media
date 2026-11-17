@@ -5857,6 +5857,7 @@ local look, never a network call:
 | `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
 | `room_delegate` | Matrix rooms are read here (the sync loop runs) and there is an agent workspace: a room can be handed to an agent (§6.53, 8 Nov 2026); the app offers ⋮ → Hand to… only then |
 | `app_update` | always: this server answers `GET /app/update` and `/app/update/apk` (§6.52), open to anyone, paired or not (16 Nov 2026); the app offers updating itself only then |
+| `app_update_web` | always: `GET /app/update` takes `native=`/`web=` and answers `web`, a web bundle for that shell served at `/app/update/web` (§6.52, 17 Nov 2026); the app updates its web code without a new APK only then |
 | `app_update_bridges` | always: those routes also offer the Sasonica Bridges app with `app=bridges`, to paired admin and member devices only (§6.52, 16 Nov 2026); the app offers updating Bridges only then. Not a check that this server can read the private bridges repo |
 | `tidy_draft` | always: this server answers `POST /voice/tidy/draft` (§6.3 "POST /voice/tidy", Draft, 16 Nov 2026); the app offers Draft only then |
 | `trakt` | always: this server answers `/accounts/trakt` and `GET /watch` (§6.54, 9 Nov 2026); the app's Settings shows the Trakt card only then |
@@ -11036,6 +11037,34 @@ files (web_app.py).
     always true where the route exists: whether this server's `gh` can read
     that private repo is not checked (it would cost a GitHub call per
     `/features`); a server that cannot answers 502.
+- **Web code without a new APK** (17 Nov 2026; David: "yep, do it";
+  sasonica-app docs/proposals/2026-11-17-web-updates.md). From sasonica-app
+  aac84ed6 each `build-<N>` release also carries
+  `sasonica-shellweb-<N>-<sha7>.tar.gz` (the web code its APK bundles, not
+  the `/app/` one) and its notes a line `native: <hex>`, the fingerprint of
+  the native shell it was built against (the APK's
+  `BuildConfig.NATIVE_FINGERPRINT`).
+  - `GET /app/update?flavor=…&current=…&native=<fingerprint>&web=<build>`
+    → the answer above plus `"web": {"build": 2003, "commit": "<sha>",
+    "sha256": "<hex>", "size": 412345, "published": "<iso>", "url":
+    "/app/update/web?build=2003", "native": "<fingerprint>"}`, the newest
+    build whose notes' `native` equals the asked one and newer than `web`
+    (absent: 0), else `"web": null`. Without `native` there is no `web`
+    field (the answer is as before); a `native` that is not hex (`dev`, a
+    local build's) is `null`. A `web` that is not digits is 400. Ignored
+    with `app=bridges`. `sha256`, `commit` and `size` are read as for the
+    APKs. A build whose notes have no `native:` line (all before aac84ed6)
+    offers no bundle, whatever its assets.
+  - `GET /app/update/web?build=<N>` → the tarball, `Content-Type:
+    application/gzip` with its `Content-Length` (`Range` honoured). Fetched
+    and checked as the APKs are, into `<state_dir>/app-update/web/`, the
+    last two kept. Open as the APK is: an admin device may fetch any listed
+    bundle, anyone else only the newest for that build's shell (404 `"code":
+    "not_newest"`). 400 unless `build` is digits; 404 when that build has
+    no bundle; 502 when it cannot be fetched.
+  - The phone checks the sha256, unpacks and switches with Capacitor's
+    `setServerBasePath`, rolling back when the page does not say it started
+    (the app's side). Offered where `/features` says `app_update_web`.
 
 ### 6.54 Movies and Shows from Trakt — gated; its sign-in admins (built 9 Nov 2026)
 

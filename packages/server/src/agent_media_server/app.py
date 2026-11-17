@@ -489,7 +489,7 @@ CORS_PATHS = CORS_PATHS | MUSIC_PATHS
 
 # The phone app updating itself (app_update.py, §6.52): API routes under
 # /app/, answered before the web app's files.
-APP_UPDATE_PATHS = frozenset({"/app/update", "/app/update/apk"})
+APP_UPDATE_PATHS = frozenset({"/app/update", "/app/update/apk", "/app/update/web"})
 CORS_PATHS = CORS_PATHS | APP_UPDATE_PATHS
 
 # Saved practice: meditations, yoga, any practice (practice.py, §6.45).
@@ -1042,14 +1042,24 @@ def _delete(h: BaseHTTPRequestHandler, path: str) -> bool:
 
 
 def _app_update(h: BaseHTTPRequestHandler, path: str) -> bool:
-    """`GET /app/update` and `GET /app/update/apk` (app_update.py, §6.52)."""
+    """`GET /app/update`, `/app/update/apk` and `/app/update/web`
+    (app_update.py, §6.52)."""
     from . import app_update
 
     q = parse_qs(urlsplit(h.path).query)
     arg = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     if path == "/app/update":
-        ok, detail = app_update.check(_bearer(h), arg("flavor"), arg("current"), arg("app"))
+        ok, detail = app_update.check(_bearer(h), arg("flavor"), arg("current"), arg("app"),
+                                      arg("native"), arg("web"))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        return True
+    if path == "/app/update/web":
+        f, err = app_update.bundle(_bearer(h), arg("build"))
+        if f is None:
+            _json(h, err.pop("status", 403), {"ok": False, **err})
+            return True
+        _send_file(h, f, f.stat().st_size, app_update.WEB_TYPE,
+                   {"Content-Disposition": f'attachment; filename="{f.name}"'})
         return True
     f, err = app_update.apk(_bearer(h), arg("build"), arg("flavor"), arg("app"))
     if f is None:

@@ -40,6 +40,18 @@ dir (state_dir()/app-update/bridges, keeping its own last two). Unlike
 Sasonica's, it is for paired devices only, admins and members: 401 without
 one, 403 for a guest, because that repo is private and its AGPL app is not
 published yet (who publishes it is an open question, 16 Nov 2026).
+
+Web code without a new APK (sasonica-app
+docs/proposals/2026-11-17-web-updates.md, David 17 Nov 2026: "yep, do it"):
+from sasonica-app aac84ed6 each build-<N> also carries
+`sasonica-shellweb-<N>-<sha7>.tar.gz`, the web code its APK bundles, and its
+notes a line `native: <hex>`, the fingerprint of the native shell that web
+code was built against. `check(..., native=, web=)` adds `web`: the newest
+bundle whose native equals the asking shell's, newer than the web build it
+runs, else None; `bundle(bearer, build)` serves its bytes, cached like the
+APKs in state_dir()/app-update/web (last two kept). A build whose notes have
+no native line offers no bundle. Open as the APK is: a caller that is not an
+admin device gets only the newest bundle of that build's native.
 """
 
 from __future__ import annotations
@@ -62,6 +74,9 @@ APPS = ("sasonica", "bridges")
 #: The bridges app has no flavors; its one APK is kept under this key.
 BRIDGES = "bridges"
 APK_TYPE = "application/vnd.android.package-archive"
+WEB_TYPE = "application/gzip"
+#: The web bundles' download dir, under cache_dir().
+WEB = "web"
 
 _REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 _TAG = re.compile(r"build-([0-9]{1,9})")
@@ -71,6 +86,10 @@ _ASSET = {
     "personal": re.compile(r"sasonica-personal-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
     "release": re.compile(r"sasonica-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
 }
+_SHELLWEB = re.compile(r"sasonica-shellweb-([0-9]{1,9})-([0-9a-f]{7,40})\.tar\.gz")
+#: A shell's native fingerprint, as the notes and the app give it ("dev", a
+#: local build's, is not one and is offered nothing).
+_NATIVE = re.compile(r"[0-9a-f]{6,64}")
 _BRIDGES_ASSET = {
     BRIDGES: re.compile(r"sasonica-bridges-([0-9]{1,9})-([0-9a-f]{7,40})\.apk"),
 }
@@ -113,7 +132,7 @@ def cache_dir(app: str = "sasonica") -> Path:
     from agent_media_core._paths import state_dir
 
     d = state_dir() / "app-update"
-    return d / BRIDGES if app == BRIDGES else d
+    return d / app if app in (BRIDGES, WEB) else d
 
 
 # --- gh (the only way out; tests replace these two) ---------------------------
@@ -152,8 +171,8 @@ def _gh_download(name: str, tag: str, asset: str, dest: Path) -> None:
 
 # --- reading the releases ------------------------------------------------------
 
-def _body_field(body: str, key: str) -> str:
-    m = re.search(rf"^\s*{key}:\s*([0-9a-f]{{7,40}})\s*$", body or "", re.M)
+def _body_field(body: str, key: str, width: str = "7,40") -> str:
+    m = re.search(rf"^\s*{key}:\s*([0-9a-f]{{{width}}})\s*$", body or "", re.M)
     return m.group(1) if m else ""
 
 
@@ -168,7 +187,9 @@ def _body_sha256(body: str, asset: str) -> str:
 def _builds(raw: list, app: str = "sasonica") -> list[dict]:
     """Every build-<N> release with an APK of either flavor (bridges: its one
     APK, under "bridges"), newest first:
-    {versionCode, tag, commit, published, apks: {flavor: {name, size, sha256}}}."""
+    {versionCode, tag, commit, published, apks: {flavor: {name, size, sha256}},
+    web: {name, size, sha256, native} or None}. Sasonica's web bundle counts
+    only with a `native:` line in the notes."""
     out = []
     for r in raw:
         if not isinstance(r, dict) or r.get("draft"):
@@ -179,9 +200,19 @@ def _builds(raw: list, app: str = "sasonica") -> list[dict]:
         n = int(m.group(1))
         body = str(r.get("body") or "")
         apks = {}
+        web = None
         sha7 = ""
+        native = _body_field(body, "native", "6,64") if app != BRIDGES else ""
         for a in r.get("assets") or []:
             name = str((a or {}).get("name") or "")
+            wm = _SHELLWEB.fullmatch(name) if native else None
+            if wm and int(wm.group(1)) == n:
+                digest = str(a.get("digest") or "").removeprefix("sha256:")
+                sha = digest if _SHA256.fullmatch(digest) else _body_sha256(body, name)
+                web = {"name": name, "size": int(a.get("size") or 0), "sha256": sha,
+                       "native": native}
+                sha7 = sha7 or wm.group(2)
+                continue
             for flavor, pat in _assets(app).items():
                 am = pat.fullmatch(name)
                 if not am or int(am.group(1)) != n:
@@ -190,13 +221,14 @@ def _builds(raw: list, app: str = "sasonica") -> list[dict]:
                 sha = digest if _SHA256.fullmatch(digest) else _body_sha256(body, name)
                 apks[flavor] = {"name": name, "size": int(a.get("size") or 0), "sha256": sha}
                 sha7 = sha7 or am.group(2)
-        if not apks:
+        if not apks and not web:
             continue
         commitish = str(r.get("target_commitish") or "")
         commit = _body_field(body, "commit") or (
             commitish if re.fullmatch(r"[0-9a-f]{40}", commitish) else sha7)
         out.append({"versionCode": n, "tag": m.group(0), "commit": commit,
-                    "published": str(r.get("published_at") or ""), "apks": apks})
+                    "published": str(r.get("published_at") or ""), "apks": apks,
+                    "web": web})
     out.sort(key=lambda b: b["versionCode"], reverse=True)
     return out
 
@@ -239,6 +271,22 @@ def newest(flavor: str, current: int = 0, app: str = "sasonica") -> dict | None:
     return None
 
 
+def newest_web(native: str, current: int = 0) -> dict | None:
+    """The newest web bundle built for the shell `native`, newer than the web
+    build `current`, as the offer's `web` field; None when there is none."""
+    if not _NATIVE.fullmatch(native or ""):
+        return None
+    for b in builds():
+        if b["versionCode"] <= current:
+            return None
+        w = b.get("web")
+        if w and w["native"] == native:
+            return {"build": b["versionCode"], "commit": b["commit"], "sha256": w["sha256"],
+                    "size": w["size"], "published": b["published"],
+                    "url": f"/app/update/web?build={b['versionCode']}", "native": native}
+    return None
+
+
 # --- the routes -----------------------------------------------------------------
 
 def _which(bearer: str, app: str, flavor: str) -> tuple[str, str, dict]:
@@ -263,23 +311,30 @@ def _which(bearer: str, app: str, flavor: str) -> tuple[str, str, dict]:
     return app, BRIDGES, {}
 
 
-def check(bearer: str, flavor: str, current: str, app: str = "") -> tuple[bool, dict]:
-    """`GET /app/update?app=&flavor=&current=`. Sasonica's is open: the
-    bearer is not read; bridges' wants a paired device, not a guest."""
+def check(bearer: str, flavor: str, current: str, app: str = "",
+          native: str = "", web: str = "") -> tuple[bool, dict]:
+    """`GET /app/update?app=&flavor=&current=&native=&web=`. Sasonica's is
+    open: the bearer is not read; bridges' wants a paired device, not a
+    guest. With `native` (Sasonica only) the answer carries `web`, the
+    newest web bundle for that shell newer than the web build `web`."""
     app, flavor, err = _which(bearer, app, flavor)
     if err:
         return False, err
     if current and not _BUILD.fullmatch(current):
         return False, {"status": 400, "error": "current must be a versionCode"}
+    if web and not _BUILD.fullmatch(web):
+        return False, {"status": 400, "error": "web must be a build number"}
     try:
-        found = newest(flavor, int(current or 0), app)
+        found = dict(newest(flavor, int(current or 0), app) or {"versionCode": None})
+        if native and app != BRIDGES:
+            found["web"] = newest_web(native, int(web or 0))
     except Unavailable as e:
         return False, {"status": 502, "error": f"could not read the app's releases ({e})"}
-    return True, found or {"versionCode": None}
+    return True, found
 
 
-def _prune(keep: Path) -> None:
-    files = sorted((p for p in keep.parent.glob("*.apk") if p.is_file()),
+def _prune(keep: Path, pattern: str = "*.apk") -> None:
+    files = sorted((p for p in keep.parent.glob(pattern) if p.is_file()),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     kept = [keep] + [p for p in files if p != keep][:KEEP - 1]
     for p in files:
@@ -322,27 +377,56 @@ def apk(bearer: str, build: str, flavor: str, app: str = "") -> tuple[Path | Non
     if not admin and (newest(flavor, 0, app) or {}).get("versionCode") != n:
         return None, {"status": 404, "error": f"build {n} is not the newest {flavor} build",
                       "code": "not_newest"}
-    d = cache_dir(app)
+    return _fetch(app, b["tag"], a, cache_dir(app), "*.apk", "the APK")
+
+
+def _fetch(app: str, tag: str, a: dict, d: Path, pattern: str,
+           what: str) -> tuple[Path | None, dict]:
+    """The asset `a` of release `tag` into `d` once, checked against its
+    sha256, the last KEEP matching `pattern` kept."""
     path = d / a["name"]
     with _lock:
         one = _downloads.setdefault(a["name"], threading.Lock())
     with one:
         if path.is_file() and (not a["size"] or path.stat().st_size == a["size"]):
             path.touch()
-            _prune(path)
+            _prune(path, pattern)
             return path, {}
         d.mkdir(parents=True, exist_ok=True)
         part = d / (a["name"] + ".part")
         try:
-            _gh_download(repo(app), b["tag"], a["name"], part)
+            _gh_download(repo(app), tag, a["name"], part)
             if a["sha256"] and _sha256_of(part) != a["sha256"]:
                 raise Unavailable("the download's sha256 does not match the release's")
             part.replace(path)
         except Unavailable as e:
             part.unlink(missing_ok=True)
-            return None, {"status": 502, "error": f"could not fetch the APK ({e})"}
-        _prune(path)
+            return None, {"status": 502, "error": f"could not fetch {what} ({e})"}
+        _prune(path, pattern)
         return path, {}
+
+
+def bundle(bearer: str, build: str) -> tuple[Path | None, dict]:
+    """`GET /app/update/web?build=` → (the cached web bundle, {}) or (None,
+    error with a status). Open as Sasonica's APK is; an admin device may
+    fetch any listed bundle, anyone else only the newest for its native."""
+    admin, _ = auth.may_admin(bearer) if bearer else (None, {})
+    if not _BUILD.fullmatch(build or ""):
+        return None, {"status": 400, "error": "build must be a build number"}
+    n = int(build)
+    try:
+        b = next((b for b in builds() if b["versionCode"] == n), None)
+        if b is None:
+            b = next((b for b in builds(fresh=True) if b["versionCode"] == n), None)
+    except Unavailable as e:
+        return None, {"status": 502, "error": f"could not read the app's releases ({e})"}
+    w = (b or {}).get("web")
+    if not w or not _SHELLWEB.fullmatch(w["name"]):
+        return None, {"status": 404, "error": f"no web bundle for build {n}"}
+    if not admin and (newest_web(w["native"]) or {}).get("build") != n:
+        return None, {"status": 404, "error": f"build {n} is not the newest web bundle "
+                      "for its shell", "code": "not_newest"}
+    return _fetch("sasonica", b["tag"], w, cache_dir(WEB), "*.tar.gz", "the web bundle")
 
 
 def reset() -> None:

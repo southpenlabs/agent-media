@@ -369,3 +369,128 @@ def test_app_sasonica_is_the_default(server, signed_in, gh):
 def test_features_says_bridges(server, signed_in):
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj["app_update_bridges"] is True
+
+
+# --- web bundles without a new APK (native=/web=, 17 Nov 2026) ----------------
+
+WEB_A = b"web bundle for shell a " * 60
+WEB_A_OLD = b"older web bundle for shell a " * 30
+WEB_B = b"web bundle for shell b " * 20
+NATIVE_A, NATIVE_B = "0123456789ab", "ba9876543210"
+
+#: 2003 web-only for shell a (sha256 in the notes), 2002 a new shell b,
+#: 2001 shell a, 2000 a bundle with no native line (before aac84ed6), 1999 a
+#: native line with the old web asset only.
+WEB_RELEASES = [
+    {"tag_name": "build-2003", "published_at": "2026-11-17T13:00:00Z",
+     "body": f"commit: aaaa003{'3' * 33}\nnative: {NATIVE_A}\nsha256:\n"
+             f"    {_sha(WEB_A)}  sasonica-shellweb-2003-aaaa003.tar.gz\n",
+     "assets": [_asset("sasonica-personal-2003-aaaa003.apk", PERSONAL),
+                _asset("sasonica-shellweb-2003-aaaa003.tar.gz", WEB_A, digest=False),
+                _asset("sasonica-web-2003-aaaa003.tar.gz", b"web")]},
+    {"tag_name": "build-2002", "published_at": "2026-11-17T12:00:00Z",
+     "body": f"native: {NATIVE_B}\n",
+     "assets": [_asset("sasonica-personal-2002-bbbb002.apk", PERSONAL),
+                _asset("sasonica-shellweb-2002-bbbb002.tar.gz", WEB_B)]},
+    {"tag_name": "build-2001", "published_at": "2026-11-17T11:00:00Z",
+     "body": f"native: {NATIVE_A}\n",
+     "assets": [_asset("sasonica-personal-2001-cccc001.apk", PERSONAL),
+                _asset("sasonica-shellweb-2001-cccc001.tar.gz", WEB_A_OLD)]},
+    {"tag_name": "build-2000", "published_at": "2026-11-17T10:00:00Z",
+     "assets": [_asset("sasonica-personal-2000-dddd000.apk", PERSONAL),
+                _asset("sasonica-shellweb-2000-dddd000.tar.gz", WEB_A)]},
+    {"tag_name": "build-1999", "body": f"native: {NATIVE_A}\n",
+     "assets": [_asset("sasonica-personal-1999-eeee999.apk", PERSONAL),
+                _asset("sasonica-web-1999-eeee999.tar.gz", b"web")]},
+]
+
+
+@pytest.fixture()
+def webgh(gh, monkeypatch):
+    gh["releases"] = WEB_RELEASES
+    data = {"sasonica-shellweb-2003-aaaa003.tar.gz": WEB_A,
+            "sasonica-shellweb-2002-bbbb002.tar.gz": WEB_B,
+            "sasonica-shellweb-2001-cccc001.tar.gz": WEB_A_OLD}
+
+    def download(name, tag, asset, dest):
+        gh["downloads"].append((tag, asset))
+        dest.write_bytes(gh.get("corrupt") or data[asset])
+    monkeypatch.setattr(app_update, "_gh_download", download)
+    return gh
+
+
+def test_the_web_offer(server, webgh):
+    res, obj = call(server, "GET", f"/app/update?flavor=personal&current=2001&native={NATIVE_A}&web=2001")
+    assert res.status == 200, obj
+    assert obj["versionCode"] == 2003
+    assert obj["web"] == {"build": 2003, "commit": "aaaa003" + "3" * 33, "sha256": _sha(WEB_A),
+                          "size": len(WEB_A), "published": "2026-11-17T13:00:00Z",
+                          "url": "/app/update/web?build=2003", "native": NATIVE_A}
+    # Another shell gets its own; a web build already as new gets none.
+    _, obj = call(server, "GET", f"/app/update?flavor=personal&native={NATIVE_B}")
+    assert obj["web"]["build"] == 2002 and obj["web"]["sha256"] == _sha(WEB_B)
+    _, obj = call(server, "GET", f"/app/update?flavor=personal&native={NATIVE_A}&web=2003")
+    assert obj["web"] is None
+    # Without native, no web field at all (an older app's answer is unchanged);
+    # "dev" or an unknown shell is offered nothing.
+    _, obj = call(server, "GET", "/app/update?flavor=personal")
+    assert "web" not in obj
+    for native in ("dev", "ffffffffffff"):
+        _, obj = call(server, "GET", f"/app/update?flavor=personal&native={native}")
+        assert obj["web"] is None, native
+    res, _ = call(server, "GET", f"/app/update?flavor=personal&native={NATIVE_A}&web=x")
+    assert res.status == 400
+    assert "/app/update/web" in app.CORS_PATHS
+
+
+def test_no_native_line_no_bundle(webgh):
+    """A build before aac84ed6 (no native line) offers none, whatever its
+    assets; the old sasonica-web asset is never a bundle."""
+    by = {b["versionCode"]: b for b in app_update.builds()}
+    assert by[2000]["web"] is None and by[1999]["web"] is None
+    assert app_update.newest_web(NATIVE_A, 2002)["build"] == 2003
+    assert app_update.newest_web(NATIVE_A, 0)["build"] == 2003
+
+
+def test_the_bundle_is_served_and_kept(server, signed_in, webgh):
+    res, body = call(server, "GET", "/app/update/web?build=2003")
+    assert res.status == 200 and body == WEB_A
+    assert res.getheader("Content-Type") == "application/gzip"
+    assert res.getheader("Content-Length") == str(len(WEB_A))
+    assert (app_update.cache_dir("web") / "sasonica-shellweb-2003-aaaa003.tar.gz").is_file()
+    res, body = call(server, "GET", "/app/update/web?build=2003")
+    assert body == WEB_A and len(webgh["downloads"]) == 1
+    # The newest of another shell is open too; an older one of the same
+    # shell is for admins; a build with no bundle is 404.
+    res, _ = call(server, "GET", "/app/update/web?build=2002")
+    assert res.status == 200
+    res, obj = call(server, "GET", "/app/update/web?build=2001", headers={"Authorization": ""})
+    assert res.status == 404 and obj["code"] == "not_newest"
+    res, _ = call(server, "GET", "/app/update/web?build=2001", headers=AUTH)
+    assert res.status == 200
+    for b in ("2000", "1999", "1700"):
+        res, _ = call(server, "GET", f"/app/update/web?build={b}", headers=AUTH)
+        assert res.status == 404, b
+    kept = sorted(p.name for p in app_update.cache_dir("web").glob("*.tar.gz"))
+    assert kept == ["sasonica-shellweb-2001-cccc001.tar.gz", "sasonica-shellweb-2002-bbbb002.tar.gz"]
+    # The APKs' own cache is untouched by the bundles.
+    assert list(app_update.cache_dir().glob("*.apk")) == []
+
+
+@pytest.mark.parametrize("query", ["", "build=", "build=x", "build=..%2F2003", "build=1234567890"])
+def test_bad_bundle_parameters_are_400(server, webgh, query):
+    res, _ = call(server, "GET", f"/app/update/web?{query}")
+    assert res.status == 400
+    assert webgh["downloads"] == []
+
+
+def test_a_bundle_that_does_not_match_is_not_kept(server, webgh):
+    webgh["corrupt"] = b"not the bundle"
+    res, obj = call(server, "GET", "/app/update/web?build=2003")
+    assert res.status == 502 and "web bundle" in obj["error"]
+    assert list(app_update.cache_dir("web").iterdir()) == []
+
+
+def test_features_says_web(server, signed_in):
+    _, obj = call(server, "GET", "/features", headers=AUTH)
+    assert obj["app_update_web"] is True
