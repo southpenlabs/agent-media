@@ -401,9 +401,17 @@ def known_sessions(ids) -> set[str]:
             got |= {r[0] for r in conn.execute(
                 f"SELECT session FROM threads WHERE session IN ({','.join('?' * len(part))})",
                 part)}
-        return got
     except Exception:  # noqa: BLE001 - no index: nothing known
         return set()
+    # Another machine's chat this one only holds frozen (frozen.py) is not
+    # "here": its own server's hit is the live one, and is kept.
+    try:
+        from . import frozen
+
+        got = {s for s in got if not frozen.is_frozen(s)}
+    except Exception:  # noqa: BLE001
+        pass
+    return got
 
 
 def archive_root() -> str:
@@ -1040,6 +1048,18 @@ def _sources() -> list[tuple[str, str, str]]:
     out += [("pi", f, s) for f, s in _pi_files()]
     out += [("codex", f, s) for f, s in _codex_files()]
     out += [("hermes", str(p), "") for p in harnesses.hermes_stores()]
+    # Other machines' opencode and Hermes chats, archived as txcript documents
+    # (frozen.py): read as Claude records.
+    try:
+        from . import frozen
+
+        for sid, hit in frozen._scan().items():
+            if hit["harness"] in frozen.DOCS and not frozen._native(sid, hit["harness"]):
+                path = frozen.as_claude(hit["path"], sid)
+                if path:
+                    out.append(("claude", path, sid))
+    except Exception:  # noqa: BLE001 - the index never fails on the archive
+        log.debug("search: the archive's documents were not read", exc_info=True)
     from agent_media_core.deleted import deleted
     from agent_media_core.private import marked
     from agent_media_core.sealed import sealed

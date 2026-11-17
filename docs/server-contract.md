@@ -12123,6 +12123,22 @@ in…" with those, leaving out the thread's own agent.
 At the desk: `media session convert <id> --to <agent>` prints the new
 thread's link.
 
+#### Other machines' chats, frozen here (18 Nov 2026)
+
+Code: `agent_media_server/frozen.py`. Pinned by `test_frozen.py`. Proposal:
+`docs/proposals/2026-11-18-archived-chats.md`. A chat agent-sessions keeps in
+its archive for another machine (`search.archive_root()`,
+`MEDIA_SEARCH_ARCHIVE`), and this machine's own stores do not have, is
+**frozen**: its `/targets` row has `frozen: {"host": "<machine it ran on>"}`,
+`live: false`, `drivable: false`, its `harness`; it reads like any other
+thread (`/conversation/log`), and search finds it under the same rules as a
+local chat (folder grants by the folder it ran in). A native copy wins, and
+this machine's own folder of the archive is never frozen. `POST /reply` to a
+frozen chat answers 409 `{"code": "frozen", "host", "error"}` with what to do
+instead; a branch (`mode: "branch"`) is not refused. Coming: the reply
+forwarded to the owner's server where a peer link may reply (step 3), and
+Continue here (step 2).
+
 ---
 
 ### 6.57 Sasonica's prompts, read-only — gated; personas not for guests (built 16 Nov 2026)

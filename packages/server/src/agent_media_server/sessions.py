@@ -169,7 +169,13 @@ def agent_of(session: str) -> str:
     rec = sessiond.read_record(session) if _SESSION.fullmatch(session or "") else None
     if rec and rec.get("agent"):
         return str(rec["agent"])
-    return harnesses.harness_of(session) or harnesses.CLAUDE
+    found = harnesses.harness_of(session)
+    if not found:
+        from . import frozen
+
+        hit = frozen.find(session)
+        found = hit["harness"] if hit else ""
+    return found or harnesses.CLAUDE
 
 
 def _agent_of_pane(pane: str) -> str:
@@ -221,7 +227,10 @@ def transcript_cwd(session: str) -> str:
                         return cwd
         except (OSError, ValueError):
             continue
-    return ""
+    # Another machine's chat, frozen here: the folder its archived copy names.
+    from . import frozen
+
+    return frozen.cwd(session)
 
 
 #: `{session: cwd}` — a session's directory never changes once its
@@ -1815,6 +1824,16 @@ def _sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     # And the conversations no pane, no driver and no shelf knows about —
     # every harness's own store (§6.16).
     out += _stored_rows(store, seen, flags, pinned, marks, days=days)
+    # And other machines' chats from agent-sessions' archive, frozen here
+    # (frozen.py): `frozen: {"host"}`, read-only.
+    from . import frozen
+
+    try:
+        out += frozen.rows(seen, flags, pinned, days=days)
+    except Exception as e:  # noqa: BLE001 — a list without them, not no list
+        import logging
+
+        logging.getLogger(__name__).warning("frozen chats: %s", e)
     # And the Matrix rooms the canvas reads, as threads of their own (matrix.py).
     from . import matrix
 

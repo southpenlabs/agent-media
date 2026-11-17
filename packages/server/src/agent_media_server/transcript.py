@@ -1445,7 +1445,15 @@ def messages(session: str, *, limit: int | None = None, before: str = "") \
     if harness in _WHOLE:
         return _page(_WHOLE[harness](path), limit=limit, before=before)
     if not path:
-        return _opencode_page(session, limit=limit, before=before)
+        got = _opencode_page(session, limit=limit, before=before)
+        if got is not None:
+            return got
+        # Another machine's chat, frozen here (frozen.py): read from the archive.
+        from . import frozen
+
+        harness, path = frozen.readable(session)
+        if not path:
+            return None
     return messages_at(path, limit=limit, before=before, harness=harness)
 
 

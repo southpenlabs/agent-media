@@ -1193,6 +1193,14 @@ def reply(text: str, bearer: str, *, quote: str = "",
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    if mode != "branch":
+        # Another machine's chat, frozen here (frozen.py): read-only. Step 3
+        # sends it to its own machine where a peer link may reply.
+        from . import frozen
+
+        no = frozen.refusal(session)
+        if no:
+            return False, no
     from . import driver
 
     from . import matrix, quick
