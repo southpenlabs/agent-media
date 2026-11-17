@@ -86,10 +86,26 @@ or stay as a catalogue lookup).
 Each step leaves both repos working; the walk it replaces is removed only
 after a run that matches it.
 
-## The choice
+## Decided (18 Nov 2026): all of it moves to agent-sessions, in stages
 
-Whether agent-sessions should also take the full-text index (option B) or
-only the catalogue (option A, above). B makes agent-sessions the whole
-history plane as its README says, at the cost of moving search.py's
-indexer, query language and tests across repos and wiring the app's search
-to it. A is smaller and keeps search where it is used. Recommended: A.
+David: "I like the idea of it all moving into agent-sessions ... It might
+give us the opportunity to plug in some more specialised searching and
+indexing systems", and yes to staging it. So full text moves too (option B),
+but not as a lift of today's index:
+
+1. **The catalogue first** (steps 1-4 above). Any engine in agent-sessions
+   needs it to feed it, so it is needed either way.
+2. **A search interface in agent-sessions that engines plug into**: a query
+   in, ranked hits with session, message and snippet out, behind which sits
+   today's SQLite full-text index to start. agent-media's search box, `media
+   find` and its peers call that interface, so the app does not change.
+3. **Full text moves when a specialised engine is picked**: meaning-based
+   search (agent-sessions already keeps embeddings for its notes, zk_related),
+   a dedicated engine (Tantivy, Apache-2.0; Meilisearch, MIT; to be looked at
+   under "open source first"), or agent-memory's recall. The move then has a
+   reason, and each engine's answers are compared with today's before the
+   switch.
+
+agent-media's query language (`from:`, `in:`, `after:`, `NEAR`…) is part of
+the interface, not of the engine: an engine that cannot answer an operator
+says so and the interface falls back.
