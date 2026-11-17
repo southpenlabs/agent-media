@@ -93,6 +93,12 @@ FORWARD_OPS = frozenset({"send", "answer", "interrupt", "close", "park", "resume
 FRESH_S = 6.0
 #: A session is polled while live, and this long after its last event.
 RECENT_S = 900.0
+#: A worker that nudges when its chats change (jobs worker `watch`) is
+#: polled only this often between nudges, as a safety net...
+PUSH_POLL_S = 30.0
+#: ...for as long as its last nudge is this recent; after that it is polled
+#: every pass again (an older worker, or one whose watcher stopped).
+PUSH_TRUST_S = 600.0
 #: An ended chat whose copy here matches the worker's, idle this long, has
 #: the worker's copy dropped: this server's is the record (step 3 of
 #: docs/proposals/2026-11-15-threads-across-machines.md). Inside RECENT_S,
@@ -265,6 +271,8 @@ class Remote:
         #: By host: `{"connected", "at", "facts", "error"}` from the last poll.
         self.hosts: dict[str, dict] = {}
         self.wake = threading.Event()
+        #: Hosts that nudged since their last sync (`nudge`).
+        self.due: set[str] = set()
         #: Who calls the other host; None is `canvas_call`, looked up at each
         #: call (the tests' conftest replaces it, so no test reaches a host).
         self.call = None
@@ -428,6 +436,8 @@ class Remote:
             return None
         if op == "hosts":
             return {"ok": True, "hosts": self.host_list()}
+        if op == "remote_nudge":
+            return self.nudge(str(req.get("host") or ""))
         if not sid or not self.owns(sid):
             return None
         with self.lock:
@@ -661,9 +671,15 @@ class Remote:
                         "offset": self._mirror_size(sid),
                         **({"doc_at": float(rec.get("doc_at") or 0)}
                            if rec.get("agent") == "opencode" else {})}
+        mono = time.monotonic()
         for host, want in by_host.items():
             if not host:
                 continue
+            with self.lock:
+                if self._skip(host, mono):
+                    continue
+                self.due.discard(host)
+                self.hosts.setdefault(host, {})["synced_at"] = mono
             got = self.request(host, {"op": "sync", "sessions": want}, SYNC_TIMEOUT_S)
             if not got.get("ok"):
                 continue
@@ -800,6 +816,30 @@ class Remote:
                 fh.write(data.encode("utf-8"))
         except (OSError, ValueError):
             log.exception("sessiond: mirroring the transcript of %s", sid[:8])
+
+    def nudge(self, host: str) -> dict:
+        """A worker says its chats changed: that host is synced at once, and
+        from now on it is trusted to say so, so between nudges it is only
+        polled every PUSH_POLL_S (step 4 of threads across machines)."""
+        if not host:
+            return {"ok": False, "code": "bad_request"}
+        with self.lock:
+            self.hosts.setdefault(host, {})["nudged_at"] = time.monotonic()
+            self.due.add(host)
+        self.wake.set()
+        return {"ok": True}
+
+    def _skip(self, host: str, now: float) -> bool:
+        """Whether this pass leaves `host` alone: it pushes (nudged within
+        PUSH_TRUST_S), nothing was nudged since its last sync, and its last
+        sync is under PUSH_POLL_S old. A worker that never nudges is polled
+        every pass, as before."""
+        h = self.hosts.get(host) or {}
+        nudged = h.get("nudged_at")
+        if nudged is None or now - nudged > PUSH_TRUST_S or host in self.due:
+            return False
+        last = h.get("synced_at")
+        return last is not None and now - last < PUSH_POLL_S
 
     def loop(self, stopped) -> None:
         """The poll, until `stopped()`: every SYNC_S, sooner when an op woke it."""

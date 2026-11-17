@@ -847,3 +847,90 @@ def test_the_worker_exports_an_opencode_chat_only_when_it_changed(monkeypatch):
     assert got["transcripts"][OC] == {"doc": {"messages": []}, "doc_at": 500.0}
     got = worker.session_sync({"sessions": {OC: {"seq": 0, "doc_at": 500.0}}})
     assert OC not in got["transcripts"] and made == [OC]
+
+
+# --- push, not poll (threads across machines step 4, 18 Nov 2026) ------------------
+
+
+def _syncs(fake):
+    return len([b for b in fake.seen if b.get("request", {}).get("op") == "sync"])
+
+
+def test_a_worker_that_never_nudges_is_polled_every_pass(this_server):
+    sup, fake, _said, work = this_server
+    assert _start(sup, work)["ok"]
+    for _ in range(3):
+        sup.remote.sync_once()
+    assert _syncs(fake) == 3
+
+
+def test_a_nudging_worker_is_synced_when_it_nudges_and_rarely_otherwise(this_server, monkeypatch):
+    sup, fake, _said, work = this_server
+    assert _start(sup, work)["ok"]
+    assert sup.remote.handle("remote_nudge", "", {"op": "remote_nudge", "host": OTHER_NAME})["ok"]
+    sup.remote.sync_once()                       # the nudge: synced now
+    sup.remote.sync_once()                       # nothing new: left until PUSH_POLL_S
+    sup.remote.sync_once()
+    assert _syncs(fake) == 1
+    sup.remote.nudge(OTHER_NAME)
+    sup.remote.sync_once()
+    assert _syncs(fake) == 2
+    # The safety poll once PUSH_POLL_S has passed.
+    monkeypatch.setattr(sessiond_remote, "PUSH_POLL_S", 0.0)
+    sup.remote.sync_once()
+    assert _syncs(fake) == 3
+    # A worker silent past PUSH_TRUST_S is polled every pass again.
+    monkeypatch.setattr(sessiond_remote, "PUSH_POLL_S", 30.0)
+    monkeypatch.setattr(sessiond_remote, "PUSH_TRUST_S", -1.0)
+    sup.remote.sync_once()
+    sup.remote.sync_once()
+    assert _syncs(fake) == 5
+    assert not sup.remote.nudge("")["ok"]
+
+
+def test_the_nudge_route_takes_only_a_session_worker(monkeypatch):
+    from agent_media_server.driver import headless
+
+    monkeypatch.setattr(phone_jobs, "session_workers", lambda: [
+        {"id": "d_w", "name": "w1 jobs", "host": "w1", "connected": True}])
+    called = []
+    monkeypatch.setattr(headless, "call", lambda op, **kw: called.append((op, kw)) or {"ok": True})
+    ok, d = phone_jobs.nudge("d_w", {"sessions": ["x"]})
+    assert ok and d == {"host": "w1", "woke": True}
+    assert called == [("remote_nudge", {"host": "w1", "timeout": 5.0})]
+    ok, d = phone_jobs.nudge("d_other", {})
+    assert not ok and d["status"] == 403
+
+
+def test_the_worker_watcher_nudges_when_a_servers_chat_changes(monkeypatch):
+    import threading as _t
+
+    worker = _load_worker()
+    views = [{"session": SID, "owner_server": "S", "seq": 1, "last_event_at": 1.0},
+             {"session": "local-one", "seq": 9, "last_event_at": 9.0}]
+    monkeypatch.setattr(worker, "sessiond_call",
+                        lambda req, timeout=30.0: {"ok": True, "sessions": [dict(v) for v in views]})
+    monkeypatch.setattr(worker, "transcript_file", lambda sid: None)
+    assert list(worker.chat_marks()) == [SID]          # only another server's chats
+    posts = []
+    stop = _t.Event()
+
+    def post(path, body, token="", timeout=30):
+        posts.append((path, body))
+        views[0]["seq"] += 0                            # unchanged after the first
+        if len(posts) >= 2:
+            stop.set()
+        return {"ok": True}
+
+    monkeypatch.setattr(worker, "_post", post)
+    monkeypatch.setattr(worker, "WATCH_S", 0.01)
+    monkeypatch.setattr(worker, "NUDGE_MIN_S", 0.0)
+    t = _t.Thread(target=worker.watch, args=("tok", stop), daemon=True)
+    t.start()
+    import time as _time
+    _time.sleep(0.1)
+    views[0]["seq"] = 2                                  # a new event there
+    t.join(2.0)
+    stop.set()
+    assert [p for p, _b in posts] == ["/jobs/nudge", "/jobs/nudge"]
+    assert posts[0][1] == {"sessions": [SID]}

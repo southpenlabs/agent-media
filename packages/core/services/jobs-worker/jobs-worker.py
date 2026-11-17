@@ -1068,6 +1068,57 @@ def pair(code: str) -> int:
     return 0
 
 
+#: How often the watcher looks at this host's chats for another server.
+WATCH_S = 1.0
+#: The server is told at most this often per change burst.
+NUDGE_MIN_S = 0.5
+
+
+def chat_marks() -> dict:
+    """`{session: (seq, last_event_at, transcript size)}` for the chats
+    another server started here (their sessiond records carry `owner_server`):
+    what changes when such a chat has something new for the server."""
+    got = sessiond_call({"op": "list"}, timeout=5.0)
+    if not got.get("ok"):
+        return {}
+    out = {}
+    for v in got.get("sessions") or []:
+        if not isinstance(v, dict) or not v.get("owner_server"):
+            continue
+        sid = str(v.get("session") or "")
+        size = 0
+        if v.get("agent") != "opencode":
+            path = transcript_file(sid)
+            try:
+                size = path.stat().st_size if path else 0
+            except OSError:
+                size = 0
+        out[sid] = (int(v.get("seq") or 0), float(v.get("last_event_at") or 0), size)
+    return out
+
+
+def watch(token: str, stop: "threading.Event") -> None:
+    """Push, not poll (threads across machines step 4): tell the server when
+    one of its chats here changes (`POST /jobs/nudge`), so it syncs at once
+    and otherwise polls only now and then. The data still comes through its
+    `sync`: this only says when."""
+    last: dict = {}
+    sent_at = 0.0
+    while not stop.wait(WATCH_S):
+        try:
+            now = chat_marks()
+        except Exception:  # noqa: BLE001 - a bad pass is skipped
+            continue
+        changed = [sid for sid, mark in now.items() if last.get(sid) != mark]
+        last = now
+        if changed and time.monotonic() - sent_at >= NUDGE_MIN_S:
+            try:
+                _post("/jobs/nudge", {"sessions": changed[:64]}, token, timeout=10)
+                sent_at = time.monotonic()
+            except Exception:  # noqa: BLE001 - the server polls anyway
+                pass
+
+
 def main(argv=None) -> int:
     global GENERIC
     args = list(sys.argv[1:] if argv is None else argv)
@@ -1092,6 +1143,10 @@ def main(argv=None) -> int:
             continue
         said = False
         t0 = time.monotonic()
+        stop = threading.Event()
+        if GENERIC and sessions_on():
+            threading.Thread(target=watch, args=(token, stop), daemon=True,
+                             name="session-watch").start()
         try:
             _stream(token)
             why = "the server closed the stream"
@@ -1099,6 +1154,7 @@ def main(argv=None) -> int:
             why = f"HTTP {e.code}"
         except (OSError, ValueError) as e:
             why = str(e) or e.__class__.__name__
+        stop.set()
         # A stream that lasted a while was healthy: start the backoff again.
         if time.monotonic() - t0 > 60:
             backoff = 2.0

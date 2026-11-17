@@ -643,6 +643,20 @@ def session_workers() -> list[dict]:
     return out
 
 
+def nudge(device_id: str, body) -> tuple[bool, dict]:
+    """`POST /jobs/nudge {sessions?}` from a session worker: something of its
+    chats changed, so this server's sessiond syncs that host now instead of
+    at its next poll (sessiond_remote push; threads across machines step 4).
+    Only a device that may take session jobs."""
+    host = next((w["host"] for w in session_workers() if w["id"] == device_id), "")
+    if not device_id or not host:
+        return False, {"status": 403, "error": "not a session worker of this server"}
+    from .driver import headless
+
+    got = headless.call("remote_nudge", host=host, timeout=5.0)
+    return True, {"host": host, "woke": bool(got.get("ok"))}
+
+
 def session(name: str, request, timeout: float = 30.0) -> tuple[int, dict]:
     """A sessiond request (`{"op", …}`) for the host NAME names, relayed by its
     worker to its own media-sessiond: `(status, answer)`. 200 and sessiond's

@@ -224,6 +224,11 @@ is no longer a mirror of the real file but the record. In order:
 4. **Push, not poll (later).** The worker sends new lines down the link it
    already holds open, in place of the 2 s `sync` poll and its 900 s
    cut-off. This is an efficiency change, not a change of model.
+   **Built 18 Nov 2026** (David: "let's make our way through all four
+   options"), as a nudge: the worker says when one of the server's chats
+   changed (`POST /jobs/nudge`), the server syncs that host at once and
+   otherwise polls a pushing worker every 30 s. The data path is still
+   `sync`, so there is one way the lines travel.
 
 ## Across harnesses
 

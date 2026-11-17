@@ -13768,6 +13768,17 @@ side), `phone_jobs.session` (the channel),
   host runs a chat that has one with `MEDIA_HOOK_ENABLED=0`: it never speaks
   (a start with `server_permissions` and no owner, from an older server,
   counts as another server's too).
+- **Push, not poll (18 Nov 2026).** The worker's jobs worker watches the
+  chats another server started there (records with `owner_server`) about
+  once a second, locally, and when one changes (its event count, last
+  event, or transcript size) posts `POST /jobs/nudge {sessions}` with its
+  device token; the server's sessiond (`remote_nudge`) syncs that host at
+  once. A host that has nudged within `PUSH_TRUST_S` (600 s) is otherwise
+  polled only every `PUSH_POLL_S` (30 s), as a safety net; one that never
+  nudges (an older worker) is polled every `MEDIA_SESSIOND_REMOTE_SYNC_S`
+  as before. The data still comes through `sync`: the nudge only says when.
+  `/jobs/nudge` is refused (403) for a device that may not take session
+  jobs.
 - **opencode there (18 Nov 2026).** opencode keeps a database, not a
   file, so its worker's `sync` sends the whole chat as a txcript document
   (`txcript export <id> --from opencode`; MEDIA_TXCRIPT, PATH, then
