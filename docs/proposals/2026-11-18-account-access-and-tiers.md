@@ -70,3 +70,17 @@ allows (which services, from which servers), reaching the server so
 3. App: Settings → People on the server; a service not allowed shows why.
 4. Member privacy (the roles proposal's step 3, `owners.json`): a granted
    member sees their own chats and the rooms they're in, not the owner's.
+
+## Decided so far (David, 18 Nov 2026, on the card)
+
+**Tiers: "option one for members and option 2 for resellers".** A member's
+tier is a role on their sasonica.com account (free, member, supporter…),
+reaching the servers in their report. A reseller, someone running servers
+for their own customers, sets their customers' tiers on those servers
+themselves: on a reseller's server the owner's per-account setting is the
+tier, and sasonica.com's role doesn't apply there.
+
+**Access: not decided** ("maybe a bit of both. take me through a few
+different scenarios of each"). Scenarios given in the thread; a hybrid is
+proposed there: the server keeps the grants and decides, and sasonica.com
+can show and propose them.
