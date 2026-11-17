@@ -169,6 +169,13 @@ per clone with `git config core.hooksPath .githooks`).
 
 ## Design rules
 
+- Open source first, and contribute back: before building something new,
+  look for a reliable open-source project that does it, and say in the
+  proposal or commit what was found and why it was used or not; where we
+  work around one or need a change in it, add it to
+  docs/reference/upstream-contributions.md, and offer fixes upstream (each
+  issue or PR asked of David first: it goes out under his name).
+  docs/decisions/2026-11-17-open-source-first.md
 - The app stays generic and the server knows the setup: when the app needs
   to know about a host, add a server endpoint and render its answer.
   docs/decisions/2026-09-21-app-stays-generic.md

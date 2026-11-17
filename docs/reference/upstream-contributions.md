@@ -77,8 +77,32 @@ sasonica-app session.
   `useSheetSwipeDown.ts`: gestures on the app's own player and footer, no
   assistant-ui code).
 
-## Others to watch
+## The rest we stand on (to watch and give back to)
 
-mautrix bridges (AGPL) and mautrix-go (MPL) for the phone companion:
-anything in our `localmatrix` connector that a general "no homeserver"
-connector upstream would make unnecessary.
+The rule behind this file: `docs/decisions/2026-11-17-open-source-first.md`.
+No entries yet for these; add one when we work around or need something.
+
+Federated and messaging:
+- **Matrix**: the tuwunel homeserver (mel.ryer.org, red5), the protocol
+  and its specs (MSCs we lean on, e.g. MSC4144 per-message profiles for the
+  bridges' second stage).
+- **mautrix** bridges (AGPL: meta, whatsapp, gmessages, telegram, teams) and
+  **mautrix-go** (MPL): for the phone companion, anything in our
+  `localmatrix` connector that a general "no homeserver" connector upstream
+  would make unnecessary.
+
+AI and agents:
+- **LiteLLM** (above), **CLIProxyAPI** (the Gemini sign-in route),
+  **Meridian** (Claude Max through the Agent SDK), **opencode**, **txcript**
+  (copying a chat into another agent), **Ollama**, **Kokoro** and **Piper**
+  (voices), **Whisper** (speech to text).
+
+Music, books and media:
+- **Mopidy**, **Snapcast**, **spotifyd**, **beets**, **mpv**,
+  **Audiobookshelf** (forked, GPL v3: kept upstream-mergeable), **yt-dlp**.
+
+Mail, backup, plumbing:
+- **notmuch**, **isync/mbsync**, **restic**, **rclone**, **cloudflared**.
+
+The app:
+- **assistant-ui** (above), **Capacitor**, **React Router**.
