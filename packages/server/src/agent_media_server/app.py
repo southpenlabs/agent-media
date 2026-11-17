@@ -446,7 +446,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -2613,10 +2613,17 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = prompt_settings.settings(_bearer(h), q)
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/models":
-        # Settings → Models: which model each feature uses, read-only (§6.60).
+        # Settings → Models: which model each feature uses, its usage (§6.60).
         from . import model_roles
 
         ok, detail = model_roles.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/models/usage":
+        # Settings → Models: one role's daily usage, for a chart (§6.60).
+        from . import model_roles
+
+        q = {k: v[0] for k, v in parse_qs(h.path.partition("?")[2]).items()}
+        ok, detail = model_roles.usage(_bearer(h), q)
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you (personal.py, §6.42).
@@ -4872,6 +4879,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import default_agent
 
         ok, detail = default_agent.settings(_bearer(h), _read_json(h) or {})
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/models":
+        # Settings → Models: an admin chooses a feature's model; null puts
+        # back the env file's (model_roles.settings, §6.60).
+        from . import model_roles
+
+        ok, detail = model_roles.settings(_bearer(h), _read_json(h) or {})
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/personal":
         # Settings → Music → About you: some fields at once, null forgets one.

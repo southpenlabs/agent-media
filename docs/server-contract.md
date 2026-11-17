@@ -12134,7 +12134,7 @@ POST /devices/rules {"id", "rules": {<rule>: value | null}}            auth.may_
   the new routes and ignores `kind`.
 
 
-### 6.60 Which model each feature uses, read-only — gated; not for guests (built 17 Nov 2026)
+### 6.60 Which model each feature uses, choosing it, and its usage — gated; not for guests (built 17 Nov 2026)
 
 Settings → Models (David, 16 Nov 2026: "do we need a list of model and
 provider suggestions based on features?";
@@ -12160,9 +12160,18 @@ GET /settings/models → {"ok": true,
              "last"?: {"ok": bool, "at": <unix s>},
              "fallback"?: "<engine>", "extras"?: ["<opencode model>"…], "service"?: "<stt service>",
              "note"?: "<text>",
+             "choosable": bool,                  // POST may choose it (below)
+             "chosen": bool,                     // an admin's choice is in effect;
+                                                 //   then "source": "settings"
+             "usage": {"today": <window>, "d7": <window>, "d30": <window>},
              "suggestions": [{"model", "provider", "provider_name",
                               "cost": "free" | "cheap" | "costly", "personal": bool}…]}…],
   "left_out": [{"key": "memory", "why"}]}
+
+<window> = {"calls", "failures", "failed": {"timeout", "refused", "error"},
+            "avg_ms": <int> | null, "tokens_in", "tokens_out", "images",
+            "cost_est": <USD> | null,
+            "models": [{"model", …the same counts…}…]}   // most calls first
 ```
 
 - `key`, in this order: `agents`, `quick`, `tidy` (tidy-up, Draft, suggested
@@ -12186,9 +12195,68 @@ GET /settings/models → {"ok": true,
   as `{"key", "label", "needs", "error"}`; the rest still come.
 
 Any paired device may read (401 `not_paired` otherwise); a guest is 403
-`code: "guest"`. Read-only: choosing (`POST /settings/models`, saved in
-`<state>/models.json`) is step 3. In `CORS_PATHS`. `/features` has
-`models_view: true`.
+`code: "guest"`. In `CORS_PATHS`. `/features` has `models_view: true`.
+
+**Choosing** (steps 2 and 3, 17 Nov 2026; `models_choose: true`):
+
+```
+POST /settings/models {"key": "<role key>", "model": "<name>" | null}
+  → 200 the same body as GET
+```
+
+- Admin devices only: a member or guest is 403 `not_admin` (`auth.may_admin`).
+- `key` must be a role (400 `key`); `agents`, `stt` and `voices` have their
+  own pickers (Settings → Default agent, Speech to text, the voice) and are
+  400 `not_choosable`. `model` is a plain name, at most 120 characters of
+  letters, digits and `. _ : / @ + -` (400 `model`); `null` (or "") forgets
+  the choice, back to the env file's.
+- Saved in `<state>/models.json` (0600), it wins over the env file and is
+  read by mtime at the next call: no restart. Every feature asks for its
+  model through `agent_media_core/model_choice.py` (fast.py's chain,
+  `_summary._chat`'s default, describe, follow-ups, the canvas) or
+  `photo_edit.models()`. With nothing chosen each resolves exactly as before.
+- For the list roles (`quick`, `tidy`, `voice_check`, `private`, `photo`)
+  the choice goes first and the env file's list stays after it as the
+  fallbacks; for the others it replaces the setting. A role that falls back
+  to "the summary's model" gets the summary's choice too (`source`:
+  `"settings (summary)"`).
+
+**Usage** (17 Nov 2026, David: "it would be nice to have usage metrics on
+those models too"; `models_usage: true`): every model call is counted by
+`agent_media_core/model_usage.py`, per day (server's local date), per role,
+per model — counts only, never prompt or answer text: calls, failures by
+kind (`timeout`; `refused`: the provider said no, an HTTP 4xx or an image
+model's refusal; `error`: anything else), total latency, tokens in and out
+when the answer carried a `usage` block, pictures for photo edits. Kept 90
+days in `<state>/model-usage.json`, written at most every 5 s (and on exit)
+by each process that makes calls. Calls from features without a row (tags,
+titles, recaps) are counted under their own word and not shown.
+
+`cost_est` is a rough USD estimate from the list prices in
+`model_roles.PRICES` (sourced and dated in a comment); null when any model
+in the window has no known price or sent no token counts. Through a gateway
+or a borrowed sign-in the real bill may differ, so the app labels it an
+estimate.
+
+```
+GET /settings/models/usage?key=<role>&days=<1..90, default 30>
+  → {"ok": true, "key", "days", "estimate": "<label>",
+     "series": [{"date": "YYYY-MM-DD", "calls", "failures", "failed",
+                 "avg_ms", "tokens_in", "tokens_out", "images", "cost_est"}…]}
+```
+
+Oldest first, a day with no calls included as zeros. Same gate as GET
+(guests 403); an unknown `key` is 400 `key`. In `CORS_PATHS`.
+
+**Tags for the gateway's own spend tracking** (17 Nov 2026): a call whose
+route is the summary gateway (LiteLLM: `MEDIA_SUMMARY_BASE_URL` that is not
+a provider's own API or Ollama's :11434) carries the header
+`x-litellm-tags: sasonica,feature:<role key>,server:<MEDIA_SERVER_NAME or
+host name>` (e.g. `feature:tidy`; fast.py purposes without a row use their
+own word, e.g. `feature:tag`), which LiteLLM 1.93 merges into the request's
+metadata tags, so its spend logs (once its database is on) count per
+feature too. Photo edits carry it only for a `gateway:` model. Nothing from
+the content is ever in a tag; other routes send nothing new.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

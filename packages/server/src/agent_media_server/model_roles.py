@@ -12,10 +12,12 @@ the table with what is in effect on this server and where it runs. A new
 feature that calls a model adds its row here in the same change, as a new
 prompt adds one to prompt_settings.py.
 
-Read-only for now. `models(key)` resolves a chat role exactly as its feature
-does (the tests hold each one to that feature's code); step 2 has each
-feature ask `model(key)` instead of reading its settings, and step 3 puts a
-saved choice (`<state>/models.json`) ahead of the settings, in `models`.
+`models(key)` resolves a role exactly as its feature does: the chat roles'
+features ask agent_media_core.model_choice (step 2), which puts an admin's
+saved choice (`POST /settings/models`, `<state>/models.json`) ahead of the
+env file (step 3); photo edits ask photo_edit.models(), which does the same.
+Each row carries the role's usage from agent_media_core.model_usage: calls,
+failures, latency and tokens, never any text.
 
 Nothing here makes a call, and no key, token or URL credential is ever in
 the answer: a route is named by its host and port only.
@@ -29,8 +31,10 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from agent_media_core import model_choice, model_usage
+
 #: The summary gateway's own default (intake/_summary.py DEFAULT_MODEL).
-SUMMARY_DEFAULT = "gpt-4o-mini"
+SUMMARY_DEFAULT = model_choice.SUMMARY_DEFAULT
 #: The summary gateway's default base (intake/_summary.py DEFAULT_BASE_URL).
 GATEWAY_DEFAULT_BASE = "https://api.openai.com/v1"
 
@@ -170,7 +174,14 @@ _SMALL_SUGGESTIONS = (
     Suggestion("gemini-2.5-flash", "gemini-api", "cheap"),
     Suggestion("gemini-3-flash", "google-signin", "free", True),
 )
-_FAST_CHAIN = ("MEDIA_FAST_MODELS", "MEDIA_FOLLOWUP_MODEL")
+
+
+def _chat(key: str) -> dict:
+    """A chat role's settings, mode, fallback and default, from the one place
+    its feature reads them (agent_media_core.model_choice.CHAT_ROLES)."""
+    mode, settings, fallback, default = model_choice.CHAT_ROLES[key]
+    return {"settings": settings, "mode": mode, "fallback": fallback, "default": default}
+
 
 ROLES: tuple[Role, ...] = (
     Role("agents", "Agent chats", "the strongest coding model, with tools",
@@ -182,43 +193,31 @@ ROLES: tuple[Role, ...] = (
          note="each agent runs on its own sign-in or key; opencode's extra models "
               "come from MEDIA_OPENCODE_MODELS",
          route="agents"),
-    Role("quick", "Quick answers", "fast and cheap, short answers",
-         ("MEDIA_QUICK_MODEL",) + _FAST_CHAIN, mode="list",
-         fallback=("MEDIA_SUMMARY_MODEL",), default=SUMMARY_DEFAULT,
+    Role("quick", "Quick answers", "fast and cheap, short answers", **_chat("quick"),
          suggestions=_FAST_SUGGESTIONS),
     Role("tidy", "Tidy-up, Draft and suggested replies", "fast, careful with names and numbers",
-         ("MEDIA_TIDY_MODEL",) + _FAST_CHAIN, mode="list",
-         fallback=("MEDIA_SUMMARY_MODEL",), default=SUMMARY_DEFAULT,
-         suggestions=_FAST_SUGGESTIONS, on=_env_on("MEDIA_VOICE_TIDY", "1")),
-    Role("voice_check", "The voice check", "fast: answers in a few seconds",
-         ("MEDIA_VOICE_CHECK_MODEL",) + _FAST_CHAIN, mode="list",
-         fallback=("MEDIA_SUMMARY_MODEL",), default=SUMMARY_DEFAULT,
+         **_chat("tidy"), suggestions=_FAST_SUGGESTIONS, on=_env_on("MEDIA_VOICE_TIDY", "1")),
+    Role("voice_check", "The voice check", "fast: answers in a few seconds", **_chat("voice_check"),
          suggestions=(Suggestion("gemini-3-flash", "google-signin", "free", True),
                       Suggestion("gemini-2.5-flash", "gemini-api", "cheap"),
                       Suggestion("llama-3.1-8b-instant", "groq", "cheap")),
          on=_env_on("MEDIA_VOICE_CHECK", "1")),
-    Role("summary", "Spoken summaries of a reply", "fast, follows a format",
-         ("MEDIA_SUMMARY_MODEL",), default=SUMMARY_DEFAULT,
+    Role("summary", "Spoken summaries of a reply", "fast, follows a format", **_chat("summary"),
          suggestions=(Suggestion("gpt-4o-mini", "openai", "cheap"),
                       Suggestion("gemini-2.5-flash", "gemini-api", "cheap"),
                       Suggestion("qwen2.5:7b", "ollama", "free")),
          on=_env_is_1("MEDIA_SPEECH_SUMMARY")),
-    Role("followups", "Follow-up questions", "fast",
-         ("MEDIA_FOLLOWUP_MODEL", "MEDIA_SUMMARY_MODEL"), default=SUMMARY_DEFAULT,
+    Role("followups", "Follow-up questions", "fast", **_chat("followups"),
          suggestions=_SMALL_SUGGESTIONS, on=_env_on("MEDIA_FOLLOWUP", "1")),
-    Role("describe", "Describing code and tables aloud", "fast, one sentence",
-         ("MEDIA_DESCRIBE_MODEL", "MEDIA_SUMMARY_MODEL"), default=SUMMARY_DEFAULT,
+    Role("describe", "Describing code and tables aloud", "fast, one sentence", **_chat("describe"),
          suggestions=_SMALL_SUGGESTIONS, on=_env_is_1("MEDIA_SPEECH_DESCRIBE"),
          last=_describe_last),
-    Role("canvas", "The canvas's drawings", "good at SVG",
-         ("MEDIA_VISUAL_SVG_MODEL", "MEDIA_VISUAL_SHAPE_MODEL", "MEDIA_SUMMARY_MODEL"),
-         default=SUMMARY_DEFAULT,
+    Role("canvas", "The canvas's drawings", "good at SVG", **_chat("canvas"),
          suggestions=(Suggestion("claude-sonnet-4-5", "anthropic", "costly"),
                       Suggestion("gemini-2.5-pro", "gemini-api", "costly"),
                       Suggestion("gpt-4.1", "openai", "costly")),
          note="the scene is shaped by MEDIA_VISUAL_SHAPE_MODEL, then the summary's model"),
-    Role("private", "Private and sealed threads", "never leaves a private route",
-         ("MEDIA_PRIVATE_MODELS",), mode="list",
+    Role("private", "Private and sealed threads", "never leaves a private route", **_chat("private"),
          suggestions=(Suggestion("venice/e2ee-qwen-2-5-7b-p", "venice", "cheap"),
                       Suggestion("venice/e2ee-gemma-4-26b-a4b-uncensored-p", "venice", "cheap"),
                       Suggestion("qwen2.5:7b", "ollama", "free")),
@@ -268,26 +267,14 @@ def models(key: str) -> list[str]:
     them today (step 3 puts a saved choice first). `[]` is none at all. For
     the agents, voices and speech to text: what `report` names."""
     r = BY_KEY[key]
-    env = os.environ
-    if r.mode == "list":
-        out = list(dict.fromkeys(m for s in r.settings for m in _list(env.get(s))))
-        if out or not r.default:
-            return out
-    elif r.mode == "photo":
+    if key in model_choice.CHAT_ROLES:
+        return model_choice.models(key)
+    if r.mode == "photo":
         from . import photo_edit
 
         return photo_edit.models()
-    elif r.mode == "first":
-        for s in r.settings:
-            if env.get(s):
-                return [str(env.get(s))]
-    else:
-        got = _special(r).get("model")
-        return [got] if got else []
-    for s in r.fallback:
-        if env.get(s):
-            return [str(env.get(s))]
-    return [r.default] if r.default else []
+    got = _special(r).get("model")
+    return [got] if got else []
 
 
 def model(key: str) -> Optional[str]:
@@ -299,6 +286,10 @@ def model(key: str) -> Optional[str]:
 def _source(r: Role) -> Optional[str]:
     """The setting the model in effect came from, or None for the default."""
     env = os.environ
+    if r.key in model_choice.CHAT_ROLES:
+        return model_choice.source(r.key)
+    if r.key in model_choice.CHOOSABLE and model_choice.chosen(r.key):
+        return "settings"
     if r.mode in ("list", "photo", "first"):
         for s in r.settings + r.fallback:
             if (_list(env.get(s)) if r.mode != "first" else env.get(s)):
@@ -507,6 +498,11 @@ def row(r: Role) -> dict:
             if sp.get(k):
                 out[k] = sp[k]
     out["default"] = r.default
+    out["choosable"] = r.key in model_choice.CHOOSABLE
+    out["chosen"] = bool(out["choosable"] and model_choice.chosen(r.key))
+    if out["chosen"]:
+        out["source"] = "settings"
+    out["usage"] = usage_windows(r.key)
     if r.on is not None:
         out["on"] = bool(r.on())
     got = r.last() if r.last else None
@@ -518,6 +514,131 @@ def row(r: Role) -> dict:
                            "provider_name": PROVIDERS[s.provider].name, "cost": s.cost,
                            "personal": s.personal} for s in r.suggestions]
     return out
+
+
+# --- usage ------------------------------------------------------------------------
+
+#: Rough list prices, USD per 1M tokens (in, out), for the cost estimate only.
+#: Only well-known public prices read on the day, never a guess; a model not
+#: here has `cost_est` null. Through a gateway or a borrowed sign-in the real
+#: bill may differ or be nothing at all, so it is labelled an estimate.
+#:   OpenAI, developers.openai.com/api/docs/pricing (Standard), read 17 Nov 2026:
+#:     gpt-4o-mini $0.15 / $0.60, gpt-4.1 $2.00 / $8.00.
+#:   Anthropic, the Claude API's model table (cached 3 Nov 2026), read
+#:     17 Nov 2026: claude-haiku-4-5 $1 / $5, claude-sonnet-4-6 $3 / $15,
+#:     claude-sonnet-5-5 $2 / $10, claude-haiku-5-5 $0.10 / $0.50.
+#: Gemini's prices were not read verbatim that day, so they are left out.
+PRICES: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1": (2.00, 8.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+}
+#: USD per picture, for image models (none sourced yet).
+IMAGE_PRICES: dict[str, float] = {}
+
+USAGE_DAYS_MAX = model_usage.KEEP_DAYS
+
+
+def price_of(name: str) -> Optional[tuple[float, float]]:
+    """The price for a model name as a gateway may spell it ("gateway:",
+    "openai/" or "anthropic/" in front), or None."""
+    n = (name or "").lower().removeprefix("gateway:")
+    for pre in ("openai/", "anthropic/"):
+        n = n.removeprefix(pre)
+    return PRICES.get(n)
+
+
+def _cost(model: str, c: dict) -> Optional[float]:
+    if c.get("images"):
+        per = IMAGE_PRICES.get((model or "").lower().removeprefix("gateway:"))
+        return None if per is None else per * c["images"]
+    if not c.get("calls"):
+        return 0.0
+    p = price_of(model)
+    if p is None or not (c.get("tokens_in") or c.get("tokens_out")):
+        return None
+    return (c.get("tokens_in", 0) * p[0] + c.get("tokens_out", 0) * p[1]) / 1_000_000
+
+
+def _shape(c: dict, cost: Optional[float]) -> dict:
+    calls = int(c.get("calls") or 0)
+    return {"calls": calls, "failures": int(c.get("failures") or 0),
+            "failed": {k: int(c.get(k) or 0) for k in model_usage.KINDS},
+            "avg_ms": round(c.get("ms", 0) / calls) if calls else None,
+            "tokens_in": int(c.get("tokens_in") or 0), "tokens_out": int(c.get("tokens_out") or 0),
+            "images": int(c.get("images") or 0),
+            "cost_est": None if cost is None else round(cost, 4)}
+
+
+def _sum(rows: list[tuple[str, dict]]) -> dict:
+    """One window: the totals, and each model's."""
+    per: dict[str, dict] = {}
+    for model, c in rows:
+        acc = per.setdefault(model, dict.fromkeys(model_usage.FIELDS, 0))
+        for f in model_usage.FIELDS:
+            acc[f] += int(c.get(f) or 0)
+    total = dict.fromkeys(model_usage.FIELDS, 0)
+    cost: Optional[float] = 0.0
+    models_out = []
+    for model, acc in sorted(per.items(), key=lambda kv: -kv[1]["calls"]):
+        for f in model_usage.FIELDS:
+            total[f] += acc[f]
+        mc = _cost(model, acc)
+        cost = None if (cost is None or mc is None) else cost + mc
+        models_out.append({"model": model, **_shape(acc, mc)})
+    out = _shape(total, cost)
+    out["models"] = models_out
+    return out
+
+
+def _day_list(n: int, now: Optional[float] = None) -> list[str]:
+    import time
+
+    t = now if now is not None else time.time()
+    return [model_usage._today(t - i * 86400) for i in range(n - 1, -1, -1)]
+
+
+def usage_windows(key: str, now: Optional[float] = None) -> dict:
+    """`{today, d7, d30}` for one role: calls, failures, avg_ms, tokens,
+    images and cost_est (USD, an estimate; null when a price is unknown)."""
+    days = model_usage.days()
+    out = {}
+    for name, n in (("today", 1), ("d7", 7), ("d30", 30)):
+        rows = [(m, c) for d in _day_list(n, now) for m, c in (days.get(d, {}).get(key) or {}).items()]
+        out[name] = _sum(rows)
+    return out
+
+
+def usage_series(key: str, n: int, now: Optional[float] = None) -> list[dict]:
+    """One role's last `n` days, oldest first, a zero day included."""
+    days = model_usage.days()
+    out = []
+    for d in _day_list(n, now):
+        got = _sum(list((days.get(d, {}).get(key) or {}).items()))
+        got.pop("models", None)
+        out.append({"date": d, **got})
+    return out
+
+
+def usage(bearer: str, query: dict) -> tuple[bool, dict]:
+    """`GET /settings/models/usage?key=&days=` (paired; guests 403): one
+    role's daily series, for a chart."""
+    ok, err = _readable(bearer)
+    if not ok:
+        return False, err
+    key = str(query.get("key") or "")
+    if key not in BY_KEY:
+        return False, {"status": 400, "code": "key", "error": f"key is one of {', '.join(BY_KEY)}"}
+    try:
+        n = int(query.get("days") or 30)
+    except ValueError:
+        return False, {"status": 400, "code": "days", "error": "days is a number"}
+    n = max(1, min(USAGE_DAYS_MAX, n))
+    return True, {"key": key, "days": n, "series": usage_series(key, n),
+                  "estimate": "cost_est is a rough USD estimate from list prices"}
 
 
 def report() -> dict:
@@ -532,8 +653,7 @@ def report() -> dict:
             "agent-memory's models are its own settings; this server cannot see them"}]}
 
 
-def settings(bearer: str) -> tuple[bool, dict]:
-    """`GET /settings/models`: any paired device; a guest is 403."""
+def _readable(bearer: str) -> tuple[bool, dict]:
     from . import auth
 
     user, err = auth.gate(bearer)
@@ -541,4 +661,38 @@ def settings(bearer: str) -> tuple[bool, dict]:
         return False, err
     if auth.is_guest(bearer):
         return False, {"status": 403, "code": "guest", "error": "a guest cannot read the server's settings"}
+    return True, {}
+
+
+def settings(bearer: str, body: Optional[dict] = None) -> tuple[bool, dict]:
+    """`GET /settings/models` (any paired device; a guest is 403) and
+    `POST /settings/models {"key", "model": "<name>" | null}` (an admin;
+    members and guests 403): the choice is saved in `<state>/models.json`,
+    wins over the env file and is used from the next call; null puts back
+    the env file's choice. Agents, speech to text and voices have pickers of
+    their own: 400 `not_choosable`."""
+    if body is None:
+        ok, err = _readable(bearer)
+        return (True, report()) if ok else (False, err)
+    from . import auth
+
+    user, err = auth.may_admin(bearer)
+    if not user:
+        return False, err
+    key = body.get("key")
+    if not isinstance(key, str) or key not in BY_KEY:
+        return False, {"status": 400, "code": "key", "error": f"key is one of {', '.join(BY_KEY)}"}
+    if key not in model_choice.CHOOSABLE:
+        return False, {"status": 400, "code": "not_choosable",
+                       "error": f"{BY_KEY[key].label} is chosen in its own settings"}
+    if "model" not in body:
+        return False, {"status": 400, "code": "model", "error": "model is a name, or null"}
+    name = body.get("model")
+    if isinstance(name, str):
+        name = name.strip() or None
+    if name is not None and not model_choice.valid_name(name):
+        return False, {"status": 400, "code": "model",
+                       "error": (f"model is a plain name of at most {model_choice.NAME_MAX} "
+                                 "characters: letters, digits and . _ : / @ + -")}
+    model_choice.save(key, name)
     return True, report()
