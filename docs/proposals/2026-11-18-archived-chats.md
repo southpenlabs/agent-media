@@ -58,5 +58,10 @@ thread), if it takes it.
    link is sent to that server for the same chat; the app shows the answer
    as it arrives there (the thread opened on the owner server). With no such
    link, or the owner not answering, the app offers Continue here.
+   **Built 18 Nov 2026** (thread b9b50d6f): `pair --reply`, `peer_link.reply_link`,
+   `send._to_owner`; the answer carries `forwarded: {host, server, server_id}`
+   for the app (step 4). It only reaches a host that runs a server of its own
+   (red5 today; the phone and hpo don't), and red5's small server runs no
+   chats, so nothing is passed on in practice until one does.
 4. **The app** (sasonica-app): the frozen mark and the host, Continue on
    <host> / Continue here, and the refusal's words.

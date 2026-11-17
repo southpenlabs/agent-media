@@ -1137,6 +1137,40 @@ def _record_turn(session: str, text: str, pane: str = "") -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+#: How long the owner's server gets to take a passed-on reply.
+OWNER_TIMEOUT_S = 25.0
+
+
+def _to_owner(no: dict, session: str, text: str, *, quote: str = "", reply_to: str = "",
+              quote_part: bool = False) -> tuple[bool, dict]:
+    """A reply to another machine's chat, frozen here, passed on to that
+    machine's own server when this one has a peer link there that may reply
+    (`pair --reply` there, `media peer pair` here; archived chats step 3).
+    Its answer comes back with `forwarded: {host, server, server_id}`, so the
+    app opens the thread on that server. No such link, or no answer: the
+    refusal (409 frozen), with what went wrong when it was tried."""
+    from agent_media_core import peer_link
+
+    host = str(no.get("host") or "")
+    link = peer_link.reply_link(host)
+    if not link:
+        return False, no
+    body = {"session": session, "text": text, "mode": "continue",
+            **({"quote": quote} if quote else {}), **({"reply_to": reply_to} if reply_to else {}),
+            **({"quote_part": True} if quote_part else {})}
+    try:
+        status, ans = peer_link._http(link["url"].rstrip("/") + "/reply", body, link["token"],
+                                      OWNER_TIMEOUT_S, "POST")
+    except Exception as e:  # noqa: BLE001 - the owner down is the refusal, said why
+        return False, {**no, "owner_error": str(e)}
+    where = {"host": host, "server": link["url"],
+             **({"server_id": link["server_id"]} if link.get("server_id") else {})}
+    if status == 200 and ans.get("ok", True):
+        return True, {**{k: v for k, v in ans.items() if k != "ok"}, "forwarded": where}
+    return False, {**no, "owner_error": str(ans.get("error") or f"HTTP {status}"),
+                   "forwarded": where}
+
+
 def reply(text: str, bearer: str, *, quote: str = "",
           mode: str = "continue", session: str = "",
           keep_reading: bool = False, voice: bool = False,
@@ -1192,7 +1226,12 @@ def reply(text: str, bearer: str, *, quote: str = "",
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)
     if not user:
-        return False, err
+        # Another server passing on a reply to one of this server's chats
+        # that is frozen there (`pair --reply`, archived chats step 3).
+        user, err = auth.reply_peer(bearer)
+        if not user:
+            return False, err
+    peer = isinstance(user, dict) and bool(user.get("peer"))
     if mode != "branch":
         # Another machine's chat, frozen here (frozen.py): read-only. Step 3
         # sends it to its own machine where a peer link may reply.
@@ -1200,7 +1239,14 @@ def reply(text: str, bearer: str, *, quote: str = "",
 
         no = frozen.refusal(session)
         if no:
-            return False, no
+            if peer:
+                # Passed on to us, and frozen here too: never passed on again.
+                return False, no
+            return _to_owner(no, session, text, quote=quote, reply_to=reply_to,
+                             quote_part=quote_part)
+    if peer and (mode != "continue" or nudge):
+        return False, {"error": "a passed-on reply only continues a chat", "status": 403,
+                       "code": "peer_reply"}
     from . import driver
 
     from . import matrix, quick

@@ -696,6 +696,14 @@ def is_search_peer(device: dict | None) -> bool:
     return bool((device or {}).get("search"))
 
 
+def is_reply_peer(device: dict | None) -> bool:
+    """A reply-only device (`pair --device NAME --reply`): another server
+    passing on a message to a chat that is this server's and frozen there
+    (docs/proposals/2026-11-18-archived-chats.md, step 3). Its token may
+    POST /reply and opens no other route."""
+    return bool((device or {}).get("reply"))
+
+
 def is_session_worker(device: dict | None) -> bool:
     """A jobs worker that may also run agent sessions sent down its stream
     (phone_jobs.session, roadmap 56): only with the jobs bit too, so the
@@ -705,7 +713,7 @@ def is_session_worker(device: dict | None) -> bool:
 
 def mint_code(name: str, enrol: bool = False, jobs: bool = False,
               role: str = "", sessions: bool = False,
-              search: bool = False) -> tuple[str, float]:
+              search: bool = False, reply: bool = False) -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
     Several may be outstanding at once (pairing a phone and a tablet in the
@@ -739,6 +747,10 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False,
             # Another server's search of this one's chats (`pair --search`):
             # granted by whoever mints, like `jobs`.
             codes[code]["search"] = True
+        if reply and not jobs:
+            # Another server's reply to a chat that is this one's and frozen
+            # there (`pair --reply`, archived chats step 3).
+            codes[code]["reply"] = True
         if role:
             codes[code]["role"] = role
         _write(codes_path(), codes)
@@ -802,12 +814,15 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
                 row["sessions"] = True
         if entry.get("search") and not row.get("jobs"):
             row["search"] = True
+        if entry.get("reply") and not row.get("jobs"):
+            row["reply"] = True
         if entry.get("role") in ROLES:
             row["role"] = entry["role"]
         _save(list(_load(fresh=True)) + [row])
     return {"token": token, "device_id": row["id"], "name": name,
             "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row),
-            **({"search": True} if row.get("search") else {})}
+            **({"search": True} if row.get("search") else {}),
+            **({"reply": True} if row.get("reply") else {})}
 
 
 #: Fields that never leave the store: the token's hash, and an account's
@@ -1047,6 +1062,7 @@ def cli_devices(argv: list[str]) -> int:
               f"{'  [enrols]' if may_enrol(d) else ''}"
               f"{'  [jobs worker]' if is_jobs_worker(d) else ''}"
               f"{'  [search peer]' if is_search_peer(d) else ''}"
+              f"{'  [reply peer]' if is_reply_peer(d) else ''}"
               f"{'  [sessions]' if is_session_worker(d) else ''}"
               f"{'  account ' + d['account'] if d.get('account') else ''}"
               f"{'  app ' + app_words(d) + ' (said ' + when(d.get('app_at')) + ')' if d.get('app') else ''}")

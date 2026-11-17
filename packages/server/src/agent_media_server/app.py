@@ -3059,7 +3059,8 @@ def _pair(h: BaseHTTPRequestHandler) -> None:
                    # Only for a jobs-only device (`pair --jobs`): `media jobs
                    # pair` checks it; the app's answer is unchanged.
                    **({"jobs": True} if got.get("jobs") else {}),
-                   **({"search": True} if got.get("search") else {})})
+                   **({"search": True} if got.get("search") else {}),
+                   **({"reply": True} if got.get("reply") else {})})
 
 
 def _services_restart(h: BaseHTTPRequestHandler) -> None:

@@ -147,6 +147,10 @@ def pair(name: str, link: str, server: str = "") -> dict:
            "server_name": (got.get("server") or {}).get("name"),
            # A search-only pairing (`pair --search` there): media find asks it.
            **({"search": True} if got.get("search") else {}),
+           # One that may pass on replies (`pair --reply` there): a chat that is
+           # that server's and frozen here is continued there.
+           **({"reply": True} if got.get("reply") else {}),
+           **({"server_id": got["server_id"]} if got.get("server_id") else {}),
            "paired_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     path = _file(alias)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,6 +160,27 @@ def pair(name: str, link: str, server: str = "") -> dict:
         json.dump(rec, fh, indent=2)
     os.replace(tmp, path)
     return rec
+
+
+def reply_link(host: str) -> "Optional[dict]":
+    """The stored link to `host`'s own server when it may pass on replies
+    (`pair --reply` there), or None. `host` is a machine's name as the
+    archive knows it (red5): matched against a link's alias, its configured
+    peer's host, and the server's name."""
+    want = (host or "").strip().split(".")[0].lower()
+    if not want:
+        return None
+    for row in links():
+        if not row.get("paired"):
+            continue
+        got = load(row["alias"])
+        if not got or not got.get("reply"):
+            continue
+        names = {str(row.get("alias") or ""), str(row.get("host") or ""),
+                 str(got.get("server_name") or "")}
+        if want in {n.split(".")[0].lower() for n in names if n}:
+            return got
+    return None
 
 
 def links() -> list[dict]:

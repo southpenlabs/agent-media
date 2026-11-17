@@ -577,9 +577,15 @@ def _cmd_pair(argv: list[str]) -> int:
                     help="with --device: another server's search of this one's chats "
                          "(media peer pair there, then its media find asks here too). "
                          "Its token answers GET /search and opens no other route")
+    ap.add_argument("--reply", action="store_true",
+                    help="with --device: another server passing on replies to this "
+                         "one's chats that are frozen there (media peer pair there). "
+                         "Its token may POST /reply and opens no other route; "
+                         "with --search, both")
     args = ap.parse_args(argv)
-    if args.search and (args.device is None or args.jobs or args.enrol or args.role):
-        print("pair: --search goes with --device NAME alone", file=sys.stderr)
+    if (args.search or args.reply) and (args.device is None or args.jobs or args.enrol
+                                        or args.role):
+        print("pair: --search and --reply go with --device NAME alone", file=sys.stderr)
         return 2
     if args.sessions and not args.jobs:
         print("pair: --sessions goes with --jobs", file=sys.stderr)
@@ -610,7 +616,7 @@ def _cmd_pair(argv: list[str]) -> int:
         return _cmd_pair_device(args.device, args.host, args.port, enrol=args.enrol,
                                 server=args.server, tunnelled=tunnelled, lookup=lookup,
                                 jobs=args.jobs, role=args.role, sessions=args.sessions,
-                                search=args.search)
+                                search=args.search, reply=args.reply)
 
     if not _host_token():
         print("no host key on this host (media-visual-canvas makes one when it starts) — nothing to pair.",
@@ -632,7 +638,8 @@ def _cmd_pair(argv: list[str]) -> int:
 def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
                      server: str = "", tunnelled: bool = False,
                      lookup: str = "", jobs: bool = False, role: str = "",
-                     sessions: bool = False, search: bool = False) -> int:
+                     sessions: bool = False, search: bool = False,
+                     reply: bool = False) -> int:
     """`pair --device NAME`: a code the app trades for a device token at
     `POST /pair`. The code lives in the server package's own store
     (agent_media_server.devices), NOT the spool's `pair-code` above — the two
@@ -645,15 +652,20 @@ def _cmd_pair_device(name: str, host: str, port: int, enrol: bool = False,
         print("--device needs a name, e.g. --device \"Pixel 8a\"", file=sys.stderr)
         return 2
     code, _expires = _devices.mint_code(name, enrol=enrol, jobs=jobs, role=role,
-                                        sessions=sessions, search=search)
+                                        sessions=sessions, search=search, reply=reply)
     app_link, web_link = _devices.links(code, host, port, server, lookup)
-    if search:
+    if search or reply:
         # Another server's command line takes this one, not the app.
-        print(f"\n  Pair {name!r} as a search peer (valid {_devices.pair_ttl() // 60} min, "
+        what = " and ".join(w for w, on in (("search", search), ("reply", reply)) if on)
+        print(f"\n  Pair {name!r} as a {what} peer (valid {_devices.pair_ttl() // 60} min, "
               "one-time). On the server that should search here, run:\n")
         print(f"    media peer pair <a name for this server> '{app_link}'\n")
-        print("  Its media find (and its agents') then asks this server's chats too.\n"
-              "  Give --server this server's public https address when pairing.\n")
+        if search:
+            print("  Its media find (and its agents') then asks this server's chats too.")
+        if reply:
+            print("  A reply there to one of this server's chats (frozen there) is\n"
+                  "  passed on here and continued on this machine.")
+        print("  Give --server this server's public https address when pairing.\n")
         return 0
     if jobs:
         # Not the app: the host's own command line takes this one.
