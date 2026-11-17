@@ -2350,7 +2350,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             # no Local chats to a guest (§6.61).
             detail = {**detail, "sessions": local_chats.for_bearer(
                 _bearer(h), device_kinds.filter_for(_bearer(h), detail.get("sessions")))}
-        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        # Compressed: 776 KB of rows on red2, 141 KB gzipped (18 Nov 2026).
+        _json_z(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/dashboard":
         # The home screen: one cheap aggregate of the sweeps the other
         # routes keep warm (dashboard.py).
@@ -2515,7 +2516,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
             # A device whose rules say no private threads is not sent them
             # (§6.59); a guest no Local chats (§6.61).
-            _json(h, 200, {"ok": True, "sessions": local_chats.for_bearer(_bearer(h), device_kinds.filter_for(
+            _json_z(h, 200, {"ok": True, "sessions": local_chats.for_bearer(_bearer(h), device_kinds.filter_for(
                 _bearer(h), sessions.sessions_index()))})
     elif path == "/devices":
         # Which devices are paired (§9). Gated on the enrol bit, not merely
@@ -2538,7 +2539,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
             # No private threads to a device whose rules say so (§6.59).
             detail["sessions"] = device_kinds.filter_for(_bearer(h), detail.get("sessions"))
-        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+        _json_z(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/sessions/slots":
         # Who holds the session slots and why, and who waits (§6.3 "Run now").
         from . import stop
