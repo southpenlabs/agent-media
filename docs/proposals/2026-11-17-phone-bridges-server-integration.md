@@ -176,3 +176,16 @@ pin, unread; Instagram and Telegram mute, pin; Discord mute; none archive),
 held while Apply to the networks or the network's exception says no.
 Sasonica's side (the settings screen, calling applySettings) with
 sasonica-app.
+
+**Kept in step both ways** (David, 18 Nov 2026: "we should probably do the
+same for the opposite", "agreed"): mute, pin, archive and unread are kept in
+step with the networks in both directions where a network allows it, the
+latest change winning whichever side made it (replacing "Sasonica's setting
+is the source"); one switch, renamed "Keep in step with the networks", with
+the per-network exceptions leaving a network alone both ways. Each network
+and feature shows a mark: ↔ both ways, → Sasonica sets it but the network
+does not report it, — not shared; the same mark beside a mute or pin as it
+is made. Mute becomes a real per-chat notification mute (optionally until a
+time), separate from the speech level, kept on the server and honoured by
+Sasonica's and the companion's notifications ("mute ... a notification
+sound ... maybe we should?").
