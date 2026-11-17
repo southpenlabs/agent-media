@@ -309,6 +309,21 @@ def rename_conversation(session: str, title: str, bearer: str,
     if not user:
         return False, err
     session = (session or "").strip()
+    from . import local_chats
+
+    if local_chats.is_local(session):
+        # A Local chat (the phone's bridges, §6.61): Sasonica's own name for
+        # it, kept on the server; auto-naming needs its words, which the
+        # server never has.
+        if auto and not (title or "").strip():
+            return False, {"error": "a Local chat's words are on the phone", "why": "not_for_local",
+                           "status": 400}
+        ok, out = local_chats.rename(session, title)
+        if ok:
+            from . import thread_events
+
+            thread_events.renamed(session, out["title"])
+        return ok, out
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     title = " ".join((title or "").split())

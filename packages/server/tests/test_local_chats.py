@@ -270,3 +270,35 @@ def test_gone_chats_leave_targets(server, phone, shelf):
 def test_features_say_so(server, signed_in):
     res, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj["local_chats"] is True
+
+
+# --- rename (sasonica-app mail #835) ----------------------------------------------
+
+def test_rename_keeps_sasonicas_own_name_over_the_networks(server, phone):
+    _seed(server, phone)
+    t = phone["token"]
+    res, obj = call(server, "POST", "/rename", {"session": WA, "title": "  Ana  (climbing) "}, _auth(t))
+    assert res.status == 200 and obj["title"] == "Ana (climbing)" and obj["local"] is True, obj
+    rec = local_chats.record(WA)
+    assert rec["title"] == "Ana (climbing)" and rec["name"] == "Ana"
+    rows = {r["session"]: r for r in local_chats.rows()}
+    assert rows[WA]["title"] == "Ana (climbing)"
+    # A phone's next list does not undo it.
+    _seed(server, phone)
+    assert local_chats.record(WA)["title"] == "Ana (climbing)"
+    # An empty title puts the network's name back.
+    res, obj = call(server, "POST", "/rename", {"session": WA, "title": ""}, _auth(t))
+    assert res.status == 200 and obj["title"] == "Ana"
+    assert "title" not in local_chats.record(WA)
+
+
+def test_rename_a_local_chat_refuses_unlisted_auto_and_names_off(server, phone, monkeypatch):
+    t = phone["token"]
+    res, _ = call(server, "POST", "/rename", {"session": WA, "title": "x"}, _auth(t))
+    assert res.status == 404
+    _seed(server, phone)
+    res, obj = call(server, "POST", "/rename", {"session": WA, "auto": True}, _auth(t))
+    assert res.status == 400 and obj["why"] == "not_for_local"
+    monkeypatch.setenv("MEDIA_LOCAL_CHAT_NAMES", "0")
+    res, obj = call(server, "POST", "/rename", {"session": WA, "title": "x"}, _auth(t))
+    assert res.status == 400 and obj["why"] == "names_off"

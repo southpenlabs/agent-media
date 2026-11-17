@@ -12428,6 +12428,16 @@ like to move away from audiobookshelf"):
 - the item forms in the table above (`?item=`, `{item}`, `player_item`).
 `/conversation` and `/conversation/log` without a `session` answer 400.
 
+- **Rename** (`POST /rename {"session": "local:…", "title"}`, 17 Nov 2026,
+  sasonica-app mail #835): a listed Local chat takes Sasonica's own name,
+  kept on its record as `title` and shown over the network's name in
+  `/targets` and `GET /local/chats` (`title` beside `name`); a phone's next
+  list never undoes it; an empty title clears it (the answer's `title` is
+  then the network's name). Answers `{ok, session, title, terminal: false,
+  local: true}`. 404 unlisted; 400 `why: not_for_local` for `auto` (its words
+  are on the phone); 400 `why: names_off` where `MEDIA_LOCAL_CHAT_NAMES` is
+  off (no name of either kind is kept).
+
 ### Deviations from the 21 Sep draft
 
 - `start`/`end` are always `null` on `/conversation/log?session=`, not

@@ -115,6 +115,37 @@ def _clean_name(raw) -> str:
     return s[:MAX_NAME]
 
 
+def rename(session: str, title: str) -> tuple[bool, dict]:
+    """Sasonica's own name for a listed Local chat, shown over the network's
+    (sasonica-app mail #835: Rename on a Local chat). Kept on the record as
+    `title`; an empty title clears it, and the network's name shows again.
+    Follows MEDIA_LOCAL_CHAT_NAMES like the network's name: off, no name of
+    either kind is kept here."""
+    if not known(session):
+        return False, {"error": "no such chat: a phone has not listed it", "status": 404}
+    if not names_on():
+        return False, {"error": "names of Local chats are not kept on this server",
+                       "why": "names_off", "status": 400}
+    title = _clean_name(" ".join((title or "").split()))
+
+    def fn(rows: dict) -> bool:
+        rec = rows.get(session)
+        if not isinstance(rec, dict):
+            return False
+        if title:
+            rec["title"] = title
+        else:
+            rec.pop("title", None)
+        return True
+    try:
+        STORE.update(fn)
+    except OSError as e:
+        return False, {"error": f"could not save the name ({e.strerror or 'write failed'})", "status": 500}
+    rec = record(session) or {}
+    shown = rec.get("title") or rec.get("name") or ""
+    return True, {"session": session, "title": shown, "terminal": False, "why": None, "local": True}
+
+
 def _device_names() -> dict[str, str]:
     from . import devices
 
@@ -134,6 +165,8 @@ def _view(session: str, rec: dict, dev_names: dict[str, str], names: bool) -> di
            "gone": rec.get("gone")}
     if names and rec.get("name"):
         out["name"] = rec["name"]
+    if names and rec.get("title"):
+        out["title"] = rec["title"]
     return out
 
 
@@ -152,7 +185,7 @@ def rows(flags=frozenset(), pinned=frozenset()) -> list[dict]:
         if not isinstance(rec, dict) or rec.get("gone") or not is_local(sid):
             continue
         v = _view(sid, rec, dev_names, names)
-        out.append({"session": sid, "title": v.get("name") or "", "live": False, "pane": None,
+        out.append({"session": sid, "title": v.get("title") or v.get("name") or "", "live": False, "pane": None,
                     "at": rec.get("updated") or rec.get("last_seen"), "recap": None,
                     "archived": sid in flags, "rested": None, "pinned": sid in pinned,
                     "harness": "local", "source": "local", "local": True,
