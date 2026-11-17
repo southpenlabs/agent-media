@@ -24,7 +24,7 @@ change would be, and its state (idea, drafted, sent with a link, merged).
 
 ## assistant-ui (assistant-ui/assistant-ui, MIT) — the app's chat components
 
-The app uses `@assistant-ui/react` 0.15.32 (latest 0.15.36, 12 Nov 2026).
+The app uses `@assistant-ui/react` 0.15.36 (17 Nov 2026).
 No pnpm patches and no forked components: the app builds on the primitives
 and works around them in its own code. The first review was 4 Nov 2026
 (sasonica-app handover 70a18b06, agent-mail #160); entries from the
@@ -56,9 +56,10 @@ sasonica-app session.
   plus a guard in sasonica-app `app/hooks/useFollowAlong.ts` that holds it
   off until a hand scrolls (the follow-along reader owns the scroll anyway).
   Upstream: issue #10228, fixed by PR #10266 (merged 2 Nov), after our
-  0.15.32. State: fixed upstream. To do on our side: upgrade to 0.15.36, check
-  it is in, and see whether the guard can shrink to just the follow-along
-  part. Nothing to send.
+  0.15.32. State: fixed upstream, in store 0.3.23; the app is on 0.15.36
+  with it since sasonica-app c2875e52 (17 Nov). The guard stays: it is the
+  app's rule that assistant-ui never scrolls the thread by itself. Nothing
+  to send.
 - **Loading older messages keeps the reader's place.** Upstream's viewport
   has handled prepends since 0.15.x (`messagesPrepended`, `hasEarlier`,
   `onLoadEarlier`, `ThreadPrimitive.LoadEarlier`, #8798). The app pages
