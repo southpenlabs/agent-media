@@ -80,7 +80,9 @@ def put(email: str, *, role: str | None = None, services=KEEP, remove: bool = Fa
     key = _norm(email)
     if not key:
         return False
-    at = float(changed_at if changed_at is not None else time.time())
+    # Rounded before it is compared, as it is kept: an add and a remove
+    # within a millisecond must not see the first, rounded up, as newer.
+    at = round(float(changed_at if changed_at is not None else time.time()), 3)
     applied = []
 
     def change(d: dict) -> bool:
@@ -96,7 +98,7 @@ def put(email: str, *, role: str | None = None, services=KEEP, remove: bool = Fa
             row["role"] = r if r in devices.ROLES else "member"
             if services is not KEEP:
                 row["services"] = [str(x) for x in services] if isinstance(services, list) else None
-        row.update(changed_at=round(at, 3), by=by)
+        row.update(changed_at=at, by=by)
         d[key] = row
         applied.append(True)
         return True

@@ -97,3 +97,14 @@ def test_an_admins_report_carries_the_people_and_takes_the_websites(monkeypatch)
     servers_report.keep_ceiling("d_member", {"people": [
         {"email": "eve@example.com", "role": "admin", "changed_at": 300}]})
     assert grants.role_for({"email": "eve@example.com"}) == ""
+
+
+def test_an_add_and_a_remove_in_the_same_millisecond_keep_their_order(monkeypatch):
+    # The stored time is rounded to the millisecond; the next change's time
+    # is rounded before it is compared (CI 18 Nov 2026: a remove 0.4 ms after
+    # an add was taken as older and ignored).
+    times = iter([1000.0006, 1000.0008])
+    monkeypatch.setattr(grants.time, "time", lambda: next(times))
+    grants.put("ana@example.com", role="member")
+    grants.put("ana@example.com", remove=True)
+    assert grants.people() == []
