@@ -35,6 +35,7 @@ import os
 import secrets
 import socket
 import sys
+import time
 import threading
 import urllib.error
 import urllib.request
@@ -157,6 +158,12 @@ def describe(device_id: str = "") -> dict:
     if device_id:
         body["devices"] = account_devices(device_id)
         role = account_role(device_id)
+        if role == "admin":
+            # The server's people (grants.py), for the website to show; only
+            # with an admin's report, as only an admin may change them.
+            from . import grants
+
+            body["people"] = grants.for_report()
         if role:
             body["role"] = role
         body["hosts"] = paired_hosts()
@@ -240,10 +247,41 @@ def report(device_id: str) -> bool:
     return True
 
 
+#: Each account's membership tier from its issuer's answer (account access
+#: and tiers proposal): `{"<account key>": {"tier", "services", "at"}}`.
+_TIERS = None
+
+
+def _tiers():
+    global _TIERS
+    if _TIERS is None:
+        from ._jsonmap import JsonMap
+
+        _TIERS = JsonMap("account-tiers.json", mode=0o600)
+    return _TIERS
+
+
+def tier_of(account_key: str) -> dict | None:
+    """`{"tier", "services"}` the issuer last said for this account, or None."""
+    got = _tiers().get(account_key) if account_key else None
+    return dict(got) if isinstance(got, dict) else None
+
+
 def keep_ceiling(device_id: str, answer: dict) -> None:
     """The account's role ceiling from the issuer's answer, kept for
     devices.role_of. An issuer that sends none (one from before the
-    ceiling) leaves what was kept."""
+    ceiling) leaves what was kept. Its tier too (`tier`,
+    `services_allowed`), and for an admin's report the changes to this
+    server's people made on the website (`people`, grants.merge_from_web)."""
+    me = next((d for d in devices.list_devices() if d.get("id") == device_id), None)
+    _keep_tier(me, answer)
+    if isinstance(answer.get("people"), list) and account_role(device_id) == "admin":
+        from . import grants
+
+        n = grants.merge_from_web(answer["people"])
+        if n:
+            print(f"servers: {n} change(s) to this server's people from the website",
+                  file=sys.stderr)
     ceiling = str(answer.get("role_ceiling") or "")
     if ceiling not in devices.ROLES:
         return
@@ -251,6 +289,30 @@ def keep_ceiling(device_id: str, answer: dict) -> None:
     iss, sub = str((me or {}).get("iss") or ""), str((me or {}).get("sub") or "")
     if devices.set_ceiling(iss, sub, ceiling):
         print(f"servers: {iss} caps account {sub} at {ceiling}", file=sys.stderr)
+
+
+def _keep_tier(me: dict | None, answer: dict) -> None:
+    if "tier" not in answer and "services_allowed" not in answer:
+        return
+    from .auth import account_key_of
+
+    iss, sub = str((me or {}).get("iss") or ""), str((me or {}).get("sub") or "")
+    if not (iss and sub):
+        return
+    allowed = answer.get("services_allowed")
+    row = {"tier": str(answer.get("tier") or ""),
+           "services": [str(x) for x in allowed] if isinstance(allowed, list) else None,
+           "at": round(time.time(), 3)}
+    key = account_key_of(iss, sub)
+
+    def change(d: dict) -> bool:
+        old = d.get(key) or {}
+        if {k: old.get(k) for k in ("tier", "services")} == {k: row[k] for k in ("tier", "services")}:
+            return False
+        d[key] = row
+        return True
+
+    _tiers().update(change)
 
 
 def report_soon(device_id: str, base: str = "") -> None:

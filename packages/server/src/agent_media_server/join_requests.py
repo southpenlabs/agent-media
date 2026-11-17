@@ -145,6 +145,10 @@ def forget(who: str) -> int:
     who = (who or "").strip().lower()
     if not who:
         return 0
+    from . import grants
+
+    if "@" in who:
+        grants.put(who, remove=True)
     with _txn():
         data = _load()
         gone = [k for k, v in data["allowed"].items()
@@ -230,6 +234,12 @@ def act(alert_id: str, action: str) -> tuple[bool, dict]:
         else:
             req.pop("rt", None)
         devices._write(path(), data)
+    if role and req.get("email"):
+        # On the server's list of people too (grants.py), so it shows in
+        # Settings → People and sasonica.com, and can be changed there.
+        from . import grants
+
+        grants.put(str(req.get("email")), role=role)
     who = req.get("username") or req.get("email") or "the account"
     note = (f"{who} may join as a {role}; their app signs in by itself." if role
             else f"{who} was turned away.")

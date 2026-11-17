@@ -62,10 +62,30 @@ def _choices() -> list[dict]:
 
 
 def _allowed(service: str, user: dict | None) -> bool:
-    """The account's tier allows this service. Every one until membership
-    tiers are built (the account-roles item of the threads-across-machines
-    plan)."""
-    return True
+    """The account's tier allows this service (the ceiling layer; account
+    access and tiers proposal, David, 18 Nov 2026: "option one for members
+    and option 2 for resellers"). The owner, and a caller with no account,
+    may use everything. A member's tier is their sasonica.com role, its
+    `services_allowed` kept from the server's report (servers_report.tier_of);
+    on a reseller's server (MEDIA_TIERS_FROM=owner) the owner's own setting
+    for that person (Settings → People, grants.services_for) is the tier.
+    Nothing said either way: allowed."""
+    from . import auth
+
+    key = auth.account_key(user)
+    if not key or key == auth.NOBODY:
+        return True
+    if (os.environ.get("MEDIA_TIERS_FROM") or "account").strip() == "owner":
+        from . import devices, grants
+
+        email = next((str(d.get("account") or "") for d in devices.list_devices()
+                      if auth.device_account(d) == key and d.get("account")), "")
+        allowed = grants.services_for(email) if email else None
+    else:
+        from . import servers_report
+
+        allowed = (servers_report.tier_of(key) or {}).get("services")
+    return allowed is None or service in allowed
 
 
 def chosen(service: str) -> dict | None:

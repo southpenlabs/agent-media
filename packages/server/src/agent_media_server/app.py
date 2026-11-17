@@ -450,7 +450,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/files", "/files/read", "/files/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/prompts", "/settings/models", "/settings/models/usage",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -2736,6 +2736,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # The app's language, every device's (language.py).
         ok, detail = pins.settings_language(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/people":
+        # Settings → People: who may come in here and with what role (grants.py).
+        from . import grants
+
+        ok, detail = grants.settings(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/services":
         # Settings → Services: which server serves music, maps, … (services.py).
         from . import services
@@ -3386,9 +3392,12 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
     if oidc.allowed(claims):
         role = oidc.role_of(claims)
     else:
-        # Allowed by answering its request (join_requests.py), with the role
-        # it was given then; else it asks now.
-        role = join_requests.allowed_role(claims)
+        # On the server's list of people (grants.py: Settings → People, or
+        # sasonica.com), or allowed by answering its request
+        # (join_requests.py), with the role it was given then; else it asks now.
+        from . import grants
+
+        role = grants.role_for(claims) or join_requests.allowed_role(claims)
     if not role:
         who = claims.get('email') or claims.get('sub')
         out = {"ok": False, "code": "not_enrolled", "error": "that account has no access to this server"}
@@ -5151,6 +5160,12 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = read_receipts.settings(_bearer(h), str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/people":
+        # Settings → People: grant, change or remove one person (an admin).
+        from . import grants
+
+        ok, detail = grants.settings(_bearer(h), _read_json(h) or {})
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/services":
         # Settings → Services: one service's server, null back to this one.

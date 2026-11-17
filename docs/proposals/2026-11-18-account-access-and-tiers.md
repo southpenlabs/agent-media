@@ -5,7 +5,7 @@ Rule 4 of the general model in `2026-11-15-threads-across-machines.md`
 granting access to a server, not just listing the ones the account owns"),
 and the first layer of services per server (`2026-11-18-services-per-server.md`:
 "the account's membership tier is the ceiling"). David, 18 Nov 2026: "let's
-make our way through all four options". Nothing here is built.
+make our way through all four options". The server's part is built (18 Nov 2026); sasonica.com's is next.
 
 ## What exists (mapped 18 Nov 2026)
 
@@ -84,3 +84,21 @@ tier, and sasonica.com's role doesn't apply there.
 different scenarios of each"). Scenarios given in the thread; a hybrid is
 proposed there: the server keeps the grants and decides, and sasonica.com
 can show and propose them.
+
+**Access: the hybrid** (David, 18 Nov 2026: "Yes, the hybrid", after five
+scenarios). The server keeps the list of who may come in and with what role,
+and has the final say: it works with sasonica.com down, a removal takes
+effect at once, and the list moves with the server. sasonica.com shows each
+server's list, and an owner (or a reseller, across their servers) can add or
+remove people there; the server picks those up at its next report and the
+newest change wins either way.
+
+**Built 18 Nov 2026, the server's part:** `grants.py` (Settings → People,
+`<state>/grants.json`, sign-in by a granted email, join approvals and
+revocations on the list), the report carrying `people` for an admin and
+taking the website's changes and the account's `tier`/`services_allowed`
+back (`servers_report`), and `services._allowed` reading the tier
+(`MEDIA_TIERS_FROM=owner` for a reseller). Contract §9 "People". Next:
+sasonica.com's part (tier roles, `tier`/`services_allowed` and `people` in
+the `/api/servers` answer, a server's people shown and editable there), and
+the app's Settings → People.

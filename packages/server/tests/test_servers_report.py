@@ -55,7 +55,7 @@ def test_one_report_per_account_through_its_latest_device(monkeypatch):
     assert servers_report.report_all() == 2
     assert sorted(a for _, a, _ in sent) == ["tok-d_new", "tok-d_two"]
     body = sent[0][2]
-    assert body["name"] == "red5" and body["id"] == servers_report.server_id() and set(body) == {"id", "name", "api", "web", "devices", "role", "hosts"}
+    assert body["name"] == "red5" and body["id"] == servers_report.server_id() and set(body) == {"id", "name", "api", "web", "devices", "role", "hosts", "people"}
     assert body["role"] == "admin" and body["hosts"] == []
 
 

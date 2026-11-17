@@ -11922,6 +11922,29 @@ POST /enrol {"id_token": "<jwt>", "device": "Pixel 8a"}     no credential, like 
   → 429 {"code": "rate_limited"}   as /pair (failures count the same way)
 ```
 
+#### People: who may come in, kept here and shown on sasonica.com — BUILT 18 Nov 2026
+
+The server keeps its list of people and has the final say (David, 18 Nov
+2026: "Yes, the hybrid"; docs/proposals/2026-11-18-account-access-and-tiers.md).
+`GET /settings/people` → `{"people": [{"email", "role", "services"?,
+"changed_at", "by": "server" | "web"}…]}` and `POST /settings/people
+{"email", "role"?, "services"?: [...] | null, "remove"?: true}` → the same,
+an admin's (`auth.may_admin`); 400 `code` `email`, `role` or `services`.
+A signed-in account whose verified email is on the list comes in with that
+role (`POST /enrol`, before an answered join request); an allowed join
+request is added to the list, and `devices --revoke-account <email>`
+removes it there too. Kept in `<state>/grants.json` (0600) by email, a
+removal as a tombstone. An admin's report to sasonica.com (`POST
+{iss}/api/servers`) carries `people` (removals included), and its answer may
+carry `people: [{email, role?, services?, removed?, changed_at}]`, changes
+made on the website, applied when newer than what's kept (the newest wins
+either way). The answer may also carry the account's membership tier,
+`tier` and `services_allowed`, kept per account (`<state>/account-tiers.json`)
+and read by §6.62's `allowed`; on a reseller's server
+(`MEDIA_TIERS_FROM=owner`) the owner's `services` for that person is the
+tier instead. The owner, and an account the website said nothing for, may
+use every service.
+
 #### Asking to join — BUILT 16 Nov 2026
 
 Anyone can make a Sasonica account (cms.sasonica.com takes sign-ups), and an
@@ -12947,7 +12970,7 @@ Which server serves each part of the app (David, 15 Nov 2026: "it would be
 good to serve other parts of the app independently... like media and maps";
 docs/proposals/2026-11-18-services-per-server.md). Three layers, David's
 (18 Nov 2026): the account's membership tier says which services it may use
-(`allowed`; every one until tiers are built), **this server sets each
+(`allowed`: from the account's tier, §9 "People"), **this server sets each
 service's default server** (here), and a device may override a service for
 itself within what the tier allows (kept by the app).
 
