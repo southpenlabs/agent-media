@@ -72,3 +72,12 @@ Not built yet. This is the design and the order to build it in.
 4. Tidying and the list.
 
 sasonica-app opts in after step 3, since its main checkout serves `/app/`.
+
+sasonica-app's links (mail #866, 17 Nov 2026), all made by `cap sync` and
+gitignored: `node_modules`, `android/capacitor-cordova-android-plugins`,
+`android/app/src/main/assets/capacitor.config.json`,
+`android/app/src/main/assets/capacitor.plugins.json`,
+`android/app/src/main/res/xml/config.xml`, `android/local.properties`, and
+`android/app/src/main/assets/public` (an empty folder is enough for compile
+and unit tests; linked, it is the main checkout's web build). With these
+`:app:testDebugUnitTest` and `compilePersonalJavaWithJavac` ran in a copy.
