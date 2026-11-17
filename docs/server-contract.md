@@ -5844,6 +5844,7 @@ local look, never a network call:
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
 | `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |
+| `local_backup` | always true (§6.61 Backup, 17 Nov 2026): `POST /local/backup`, `GET /local/backups`, `GET`/`DELETE /local/backup/<id>`: the phone's encrypted Local chats bundles, kept as ciphertext |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -12507,6 +12508,61 @@ not gone, with every settings field any row has, and:
 A guest is sent none. The app merges these with the companion's live rows
 by id, shows the server's settings, and for a chat whose phone is not this
 device says where it lives (`device_name`).
+
+#### Backup: the phone's encrypted bundle, kept as ciphertext (built 17 Nov 2026)
+
+Step 4 of the design (David, 17 Nov 2026: "Do the backup"). The companion
+packs its local chat store and media, never the networks' sign-ins (each
+network is paired again after a restore), into one bundle encrypted with a
+key only the user holds (a recovery code); Sasonica uploads it with its own
+device token. The server stores bytes it cannot read: it never opens, parses
+or logs a bundle. Code: `agent_media_server/local_backup.py`.
+
+```
+POST /local/backup?created=<unix s>&format=<fmt>&sha256=<hex>[&size_plain=<bytes>]
+     Content-Type: application/octet-stream, Content-Length required; body = the bundle
+     (or the same as headers: X-Backup-Created, X-Backup-Format, X-Backup-Sha256, X-Backup-Size-Plain)
+  → {"ok": true, "id": "<device id>.<created>-<sha8>", "size": <bytes>, "created": <unix s>,
+     "kept": <bundles this device now has>}
+GET /local/backups → {"ok": true, "keep": <n>, "max_bytes": <n>, "backups": [<backup>…]}   // newest first
+GET /local/backup/<id>    → the bytes, application/octet-stream; Range as /upload; X-Backup-Sha256
+DELETE /local/backup/<id> → {"ok": true, "id", "deleted": true}
+
+<backup> = {"id", "device", "device_name": "<its name>" | null, "created", "size", "sha256",
+            "format", "size_plain": <bytes> | null, "uploaded": <unix s>}
+```
+
+- **Upload**: streamed to a `.part` file a chunk at a time while hashed,
+  never held in memory. `sha256` (64 hex) is checked against the body:
+  400 `code: "sha256_mismatch"` and nothing kept. `created` is 1 to now +
+  1 day; `format` 1–32 of letters, digits, `. _ -` (`sbb1`); 400 for
+  either missing or bad, 411 with no Content-Length. Over
+  `MEDIA_LOCAL_BACKUP_MAX_MB` (2048) is 413 `code: "too_big"`, `limit`,
+  answered from the header with the body left unread and the connection
+  closed. An identical upload (same created and hash) replaces itself.
+- **Kept** under `<state_dir>/local-backups/<device id>/<created>-<sha8>.sbb`
+  with a `.json` beside it (what the upload said, the device, its name and
+  its account then); folders 0700, files 0600. After a good write the
+  device's bundles past the newest `MEDIA_LOCAL_BACKUP_KEEP` (7), by
+  `created`, are deleted; other devices' are untouched.
+- **Who**: paired devices only (401 without a bearer); a guest is 403
+  `code: "guest"` on all four. An **admin** sees every bundle; any other
+  device sees its own device's and those of every device enrolled by the
+  same signed-in account (`iss`/`sub`, recorded at upload), so a phone
+  reinstalled and paired again finds its old pairing's bundles; a
+  code-paired member sees only its own device's. A bundle the caller may
+  not see is 404 `not_found` to `GET` and `DELETE`, as one that is not there.
+- **This server's own backup** (`media backup`, backup.py) carries
+  `local-backups` in the nightly (`daily`, the `record` tier) while all
+  bundles together come to at most `MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB`
+  (1024), and only in `full` (the `media` tier, a move) above it. Why:
+  they are ciphertext, so copying them anywhere is safe, and when this
+  server dies that copy is the phone's only other one; snapshots hardlink an
+  unchanged bundle, so a night costs just the new one, and restic encrypting
+  them again costs CPU, not space. Past the threshold, seven large bundles
+  per phone would crowd the store's cap (`MEDIA_BACKUP_MAX_BYTES`), so they
+  wait for `full`. A restore puts them back.
+- `/features` `local_backup: true`.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

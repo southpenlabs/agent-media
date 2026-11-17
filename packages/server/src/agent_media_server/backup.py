@@ -106,6 +106,36 @@ MEDIA_DIRS = ("audio", "visual", "feed", "sealed", "photos")
 #: The `transcripts` tier: sessiond's thread records and the workers' mirrors.
 TRANSCRIPT_DIRS = ("sessiond",)
 
+#: The phones' Local chats backups (local_backup.py, §6.61 Backup): bundles
+#: encrypted on the phone with a key the server never has. Kept in the
+#: nightly (`record`) while all of them come to at most
+#: MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB (1024), else only in `full` (`media`).
+#: Ciphertext is safe to copy anywhere, and for a server that dies this copy
+#: is the phone's only other one; a snapshot hardlinks unchanged bundles, so
+#: a night costs only the new one, and restic encrypting it again costs CPU,
+#: not space. Past the threshold seven big bundles per phone would crowd
+#: the store's cap, and a move (`full`) still carries them.
+LOCAL_BACKUPS_DIR = "local-backups"
+
+
+def local_backups_nightly_max() -> int:
+    try:
+        mb = int(os.environ.get("MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB") or 1024)
+    except ValueError:
+        mb = 1024
+    return max(0, mb) << 20
+
+
+def _tree_bytes(p: Path) -> int:
+    n = 0
+    for dirpath, _dirs, files in os.walk(p):
+        for f in files:
+            try:
+                n += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                pass
+    return n
+
 #: The passphrase restic is given, by name here because EXCLUDE needs it
 #: before the repository section defines the rest. Mode 600, and genuinely
 #: never inside a backup (see EXCLUDE below).
@@ -233,7 +263,8 @@ def manifest(roots: dict[str, Path] | None = None) -> list[Item]:
                               "dumped with VACUUM INTO, never copied live"))
 
     # --- everything else under the state root, by rule ------------------
-    named = set(JEWELS_STATE) | set(DATABASES) | set(MEDIA_DIRS) | set(TRANSCRIPT_DIRS)
+    named = (set(JEWELS_STATE) | set(DATABASES) | set(MEDIA_DIRS) | set(TRANSCRIPT_DIRS)
+             | {LOCAL_BACKUPS_DIR})
     if state.is_dir():
         for entry in sorted(os.scandir(state), key=lambda e: e.name):
             if entry.name in named or excluded_reason(entry.name):
@@ -248,6 +279,15 @@ def manifest(roots: dict[str, Path] | None = None) -> list[Item]:
             items.append(Item("state", entry.name,
                               "tree" if entry.is_dir(follow_symlinks=False) else "file",
                               "record", "state, kept by rule rather than by name"))
+
+    lb = state / LOCAL_BACKUPS_DIR
+    if lb.is_dir():
+        small = _tree_bytes(lb) <= local_backups_nightly_max()
+        items.append(Item("state", LOCAL_BACKUPS_DIR, "tree", "record" if small else "media",
+                          "the phones' Local chats backups, ciphertext only their owners "
+                          "can open" + ("" if small else
+                                        "; over MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB, so "
+                                        "not nightly")))
 
     for name in TRANSCRIPT_DIRS:
         if (state / name).is_dir():

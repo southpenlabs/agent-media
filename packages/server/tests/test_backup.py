@@ -815,3 +815,20 @@ def test_a_restic_time_out_is_a_failed_step_not_a_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(b, "_restic", stalled)
     out = b.to_repo(tmp_path, "daily", repo_url="sftp:red5:/x")
     assert out["ok"] is False and "did not finish" in out["error"]
+
+
+def test_local_backups_are_nightly_until_they_grow_past_the_threshold(install, monkeypatch):
+    """The phones' Local chats backups (§6.61 Backup) are ciphertext: in the
+    nightly while small, only in `full` once past
+    MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB."""
+    d = install["state"] / bk.LOCAL_BACKUPS_DIR / "d_abc"
+    d.mkdir(parents=True)
+    (d / "1763400000-0123abcd.sbb").write_bytes(b"\0" * (2 << 20))
+    got = {i.rel: i for i in bk.manifest()}
+    assert got[bk.LOCAL_BACKUPS_DIR].tier == "record"
+    assert bk.LOCAL_BACKUPS_DIR in {i.rel for i in bk.selected("daily")}
+    monkeypatch.setenv("MEDIA_LOCAL_BACKUP_NIGHTLY_MAX_MB", "1")
+    got = {i.rel: i for i in bk.manifest()}
+    assert got[bk.LOCAL_BACKUPS_DIR].tier == "media"
+    assert bk.LOCAL_BACKUPS_DIR not in {i.rel for i in bk.selected("daily")}
+    assert bk.LOCAL_BACKUPS_DIR in {i.rel for i in bk.selected("full")}

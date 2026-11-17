@@ -1858,6 +1858,11 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
     def _json(self, code: int, obj: dict) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json")
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        # The app's DELETE routes only (app.dispatch): a Local chats backup.
+        if not _app.dispatch(self, "DELETE", self.path.split("?", 1)[0]):
+            self._send(404, b"not found\n", "text/plain")
+
     def do_HEAD(self) -> None:  # noqa: N802
         # The web app's files only (app.dispatch): an /app/dl/ download is asked about first.
         if not _app.dispatch(self, "HEAD", self.path.partition("?")[0]):
@@ -2386,6 +2391,10 @@ class PublicHandler(Handler):
     def do_HEAD(self) -> None:  # noqa: N802
         self._caller()
         super().do_HEAD()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._caller()
+        super().do_DELETE()
 
     def do_GET(self) -> None:  # noqa: N802
         self._caller()

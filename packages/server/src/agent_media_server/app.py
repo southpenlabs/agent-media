@@ -448,7 +448,7 @@ CORS_PATHS = frozenset({
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
-    "/local/chats",
+    "/local/chats", "/local/backup", "/local/backups",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -605,6 +605,8 @@ CONTACT_LEVEL = re.compile(r"/contacts/([0-9a-f-]{36})/(level|notify)")
 CONTACT_FIND = re.compile(r"/contacts/([0-9a-f-]{36})/find")
 # The services they can be texted on, and a chat started (contacts_text.py, §6.25).
 CONTACT_TEXT = re.compile(r"/contacts/([0-9a-f-]{36})/text")
+#: One Local chats backup by id (local_backup.ID, §6.61): GET its bytes, DELETE it.
+LOCAL_BACKUP = re.compile(r"/local/backup/([A-Za-z0-9_-]{1,64}\.\d{1,12}-[0-9a-f]{8})")
 # A bridge's icon, its sign-ins and signing out (bridges.py, §6.26).
 BRIDGE_ICON = re.compile(r"/bridges/([A-Za-z0-9_.-]+)/icon")
 BRIDGE_AVATAR = re.compile(r"/bridges/([A-Za-z0-9_.-]+)/avatar/([^/]+)")
@@ -626,7 +628,7 @@ def cors_path(path: str) -> bool:
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
-                                                        *BRIDGE_ROUTES))
+                                                        LOCAL_BACKUP, *BRIDGE_ROUTES))
 
 
 # Long enough that a chat page's polling is not preceded by a preflight every
@@ -659,6 +661,10 @@ def body_limit(path: str) -> int:
         from . import local_chats
 
         return local_chats.MAX_BODY    # a phone's whole list of one network
+    if path == "/local/backup":
+        # Past the guard: the route checks the bearer first, then refuses a
+        # body over local_backup.max_bytes() unread, as JSON (§6.61 Backup).
+        return 1 << 40
     if path == "/transcribe":
         from . import voice_clips
 
@@ -1018,7 +1024,21 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
             sessions.targets_changed()
     if method == "OPTIONS":
         return _options(h, path)
+    if method == "DELETE":
+        return _delete(h, path)
     return False
+
+
+def _delete(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """The app's DELETE routes: a Local chats backup (local_backup.py, §6.61)."""
+    m = LOCAL_BACKUP.fullmatch(path)
+    if not m:
+        return False
+    from . import local_backup
+
+    ok, detail = local_backup.delete(m.group(1), _bearer(h))
+    _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    return True
 
 
 def _app_update(h: BaseHTTPRequestHandler, path: str) -> bool:
@@ -1177,7 +1197,9 @@ def _options(h: BaseHTTPRequestHandler, path: str) -> bool:
     h.send_response(204)
     h.send_header("Access-Control-Allow-Origin", "*")
     h.send_header("Access-Control-Allow-Methods",
-                  "POST, OPTIONS" if path in CORS_POST_PATHS else "GET, POST, OPTIONS")
+                  "POST, OPTIONS" if path in CORS_POST_PATHS
+                  else "GET, DELETE, OPTIONS" if LOCAL_BACKUP.fullmatch(path)
+                  else "GET, POST, OPTIONS")
     h.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
     h.send_header("Access-Control-Max-Age", CORS_MAX_AGE)
     h.send_header("Content-Length", "0")
@@ -2260,6 +2282,27 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = local_chats.listing(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/backups":
+        # The Local chats backups the caller may see (local_backup.py, §6.61).
+        from . import local_backup
+
+        ok, detail = local_backup.listing(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif LOCAL_BACKUP.fullmatch(path):
+        # One backup's bytes, ciphertext only the phone's key opens; Range
+        # honoured, so a restore can resume.
+        from . import local_backup
+
+        ok, detail = local_backup.open_bundle(LOCAL_BACKUP.fullmatch(path).group(1), _bearer(h))
+        if not ok:
+            _json(h, detail.pop("status", 404), {"ok": False, **detail})
+            return True
+        from urllib.parse import quote as _q
+
+        _send_file(h, detail["file"], detail["size"], "application/octet-stream",
+                   {"Cache-Control": "private, no-store",
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{_q(detail['name'])}",
+                    "X-Backup-Sha256": detail["sha256"]})
     elif path == "/targets":
         # Everything a message can be pointed at — running sessions and
         # the directories a fresh one can open in — so the app renders a
@@ -4619,6 +4662,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             ok, detail = room_edit.session_unsend(str(body.get("session") or ""),
                                                   str(body.get("id") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/backup":
+        # A Local chats backup from the phone's companion: ciphertext,
+        # streamed to disk, its hash checked (local_backup.py, §6.61).
+        from . import local_backup
+
+        try:
+            length = int(h.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        ok, detail, was_read = local_backup.save(
+            h.rfile, length, parse_qs(h.path.partition("?")[2]), h.headers, _bearer(h))
+        if not was_read:
+            h.close_connection = True      # refused first: the body is left unread
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/chats":
         # The phone's companion says which Local chats it carries: ids,
         # kind, name where kept, never content (local_chats.py, §6.61).
@@ -5648,6 +5705,10 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
             _send(self, 413, b"request body too large\n", "text/plain")
             return
         if not dispatch(self, "POST", self.path.split("?", 1)[0]):
+            self._not_found()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not dispatch(self, "DELETE", self.path.split("?", 1)[0]):
             self._not_found()
 
     def do_OPTIONS(self) -> None:  # noqa: N802
