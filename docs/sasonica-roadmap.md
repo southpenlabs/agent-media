@@ -1783,8 +1783,12 @@ ahead.
     accounts already in red5's notmuch, msmtp set up), Outlook next through
     the calendar's Microsoft Graph sign-in. The plan and its open questions
     (All Mail or Gmail's API, mbsync or lieer, spam, read aloud) are in
-    docs/proposals/2026-10-20-mail-in-sasonica.md. Not started. First
-    piece built (30 Oct 2026): the thread list's Show → Sent (threads you
+    docs/proposals/2026-10-20-mail-in-sasonica.md. Step 1 built (20 Oct
+    2026): an email opens in Sasonica's own reader (`GET /mail/message`,
+    the card's newest mail). Step 2, replying, server side built 18 Nov
+    2026 (`GET`/`POST /mail/reply` through msmtp, contract §6.25
+    "Replying to an email"); the app's Reply next. Also built (30 Oct
+    2026): the thread list's Show → Sent (threads you
     wrote in, latest first) and Waiting for reply (your message last,
     unanswered), built generic so mail threads join them like Gmail's Sent
     label (David: "I was thinking of eventually including email and was

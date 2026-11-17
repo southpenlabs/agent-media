@@ -316,6 +316,9 @@ except /pair, which is how a device gets its token):
   GET  /mail/attachment?id=&part= → one attachment's bytes
                   (`?access_token=` for a plain link)
   POST /mail/say {"id"} → read that email aloud, only when asked
+  GET  /mail/reply?id=[&all=1][&from=] → who a reply would go to and from
+  POST /mail/reply {"id", "text", "all"?, "from"?} → send it through msmtp
+                  (mail_send.py)
   GET  /contacts/<id>/timeline[?limit=] → their texts, calls, mail and
                   notes by day, from the CRM's daily rollups (timeline.py)
   POST /contacts/<id>/notes {"text"} → a note on them, today, kept in the CRM
@@ -466,7 +469,7 @@ CORS_PATHS = frozenset({
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
-    "/mail/message", "/mail/attachment", "/mail/say",
+    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
@@ -1591,6 +1594,61 @@ def _mail_say(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "chars": len(text)})
 
 
+def _mail_reply_draft(h: BaseHTTPRequestHandler, query: str) -> None:
+    """`GET /mail/reply?id=<notmuch id>[&all=1][&from=]` (§6.25 "Replying"):
+    who a reply would go to and from, and its subject; nothing is sent."""
+    from . import mail_read, mail_send
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    q = parse_qs(query)
+    mid = ((q.get("id") or [""])[0]).strip()
+    if not mail_read.valid_id(mid):
+        _json(h, 400, {"ok": False, "error": "expected ?id=<message id>"})
+        return
+    try:
+        got = mail_send.draft(mid, everyone=(q.get("all") or [""])[0] == "1",
+                              want_from=((q.get("from") or [""])[0]).strip())
+    except mail_read.NotFound as e:
+        _json(h, 404, {"ok": False, "error": str(e)})
+    except mail_send.Refused as e:
+        _json(h, 422, {"ok": False, "error": str(e)})
+    except (RuntimeError, OSError) as e:
+        _json(h, 503, {"ok": False, "error": str(e) if isinstance(e, RuntimeError)
+                       else "the message could not be read"})
+    else:
+        _json(h, 200, {"ok": True, **got})
+
+
+def _mail_reply(h: BaseHTTPRequestHandler) -> None:
+    """`POST /mail/reply {"id", "text", "all"?, "from"?}` (§6.25
+    "Replying"): send a reply through msmtp, from the account the mail came
+    to. Only on David's Send; nothing kept or logged."""
+    from . import mail_read, mail_send
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    body = _read_json(h)
+    body = body if isinstance(body, dict) else {}
+    mid = str(body.get("id") or "").strip()
+    text = body.get("text")
+    if not mail_read.valid_id(mid) or not isinstance(text, str):
+        _json(h, 400, {"ok": False, "error": 'expected {"id", "text"}'})
+        return
+    try:
+        got = mail_send.send(mid, text, everyone=bool(body.get("all")),
+                             want_from=str(body.get("from") or "").strip())
+    except mail_read.NotFound as e:
+        _json(h, 404, {"ok": False, "error": str(e)})
+    except mail_send.Refused as e:
+        _json(h, 422, {"ok": False, "error": str(e)})
+    except (RuntimeError, OSError) as e:
+        _json(h, 502, {"ok": False, "error": str(e) if isinstance(e, RuntimeError)
+                       else "the message could not be read"})
+    else:
+        _json(h, 200, {"ok": True, "sent": True, **got})
+
+
 #: The most `/speech/say` reads at once, as `/org/say` caps a note.
 SAY_MAX = 6000
 
@@ -2288,6 +2346,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_message(h, query)
     elif path == "/mail/attachment":
         _mail_attachment(h, query)
+    elif path == "/mail/reply":
+        _mail_reply_draft(h, query)
     elif ROOM_AVATAR.fullmatch(path):
         _room_avatar(h, ROOM_AVATAR.fullmatch(path).group(1), query)
     elif ROOM_MEDIA.fullmatch(path):
@@ -3981,6 +4041,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_level(h, m.group(1), m.group(2) == "notify")
     elif path == "/mail/say":
         _mail_say(h)
+    elif path == "/mail/reply":
+        _mail_reply(h)
     elif path == "/speech/say":
         _speech_say(h)
     elif path == "/storage":

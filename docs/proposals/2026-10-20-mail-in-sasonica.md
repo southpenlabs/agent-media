@@ -4,7 +4,9 @@ David, 20 Oct 2026, after the Gmail app turned out to take no search link
 and Outlook was not on the phone: "On second thought, I think I'd like to
 handle emails from Sasonica." He chose **both** places (mail in Messages,
 by person, *and* a Mail tab with the full inbox) and **Gmail now, Outlook
-next**. Status: **plan, nothing built.** Open questions at the end.
+next**. Status: **step 1 built (20 Oct 2026); step 2's server side built
+(18 Nov 2026: `/mail/reply`, mail_send.py), the app's Reply next.**
+Decisions at the end.
 
 ## Why
 

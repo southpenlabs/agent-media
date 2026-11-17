@@ -583,7 +583,10 @@ hosted tier), every one of these becomes a reseller question.
   (https://developer.themoviedb.org/reference/movie-watch-providers). Done
   in `tmdb.py:42`.
 - **Calendars and mail:** published ICS links the user pastes
-  (`calendar_sources.py`), the host's own notmuch mail (`mail_read.py`).
+  (`calendar_sources.py`), the host's own notmuch mail (`mail_read.py`),
+  and replies sent through the host's own msmtp (`mail_send.py`, 18 Nov
+  2026): the owner's own mail accounts and app passwords, set up outside
+  agent-media; nothing of ours is registered with the mail provider.
 - **Exports:** Google Takeout and Meta's download, read from files
   (`contacts_exports.py:60`, `:74`).
 
