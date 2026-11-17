@@ -25,7 +25,9 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 #: Our agent names (sessions.agent_of) → txcript's harness ids.
 TXCRIPT_IDS = {
@@ -116,15 +118,68 @@ def _epoch(stamp: str) -> float | None:
 def message_times(session: str, source: str, exe: str, cwd: str) -> list[float | None]:
     """When each message of txcript's view of `session` was written, in its
     order: message N here is txcript's `#N` (`txcript export`, the same
-    numbering as `view`'s; measured equal on a finished chat)."""
-    rc, out, err = _run([exe, "export", session, "--from", TXCRIPT_IDS[source]], cwd)
-    if rc != 0:
-        raise ConvertError(_clean(err or out) or f"txcript export failed ({rc})")
+    numbering as `view`'s; measured equal on a finished chat). A frozen
+    chat's (frozen.py) is read from its document."""
+    from . import frozen
+
+    hit = frozen.find(session)
+    if hit:
+        try:
+            out = Path(frozen_doc(session, hit, exe)).read_text(encoding="utf-8")
+        except OSError as e:
+            raise ConvertError(f"the archived chat could not be read: {e}") from None
+    else:
+        rc, out, err = _run([exe, "export", session, "--from", TXCRIPT_IDS[source]], cwd)
+        if rc != 0:
+            raise ConvertError(_clean(err or out) or f"txcript export failed ({rc})")
     try:
         msgs = json.loads(out).get("messages") or []
     except (ValueError, AttributeError):
         raise ConvertError("txcript's export was not JSON") from None
     return [_epoch(m.get("timestamp")) if isinstance(m, dict) else None for m in msgs]
+
+
+#: Where each harness keeps a session file under a home, by how many of the
+#: archived file's parent folders it keeps (Claude: the project folder; pi:
+#: the session folder; Codex: year/month/day).
+_STAND_IN = {"claude": ((".claude", "projects"), 1), "pi": ((".pi", "agent", "sessions"), 1),
+             "codex": ((".codex", "sessions"), 3)}
+
+
+def frozen_doc(session: str, hit: dict, exe: str) -> str:
+    """A txcript document of the frozen chat `session` (frozen.find's `hit`):
+    the archive's own for opencode and Hermes; for a Claude, pi or Codex file,
+    `txcript export` run against a stand-in home whose store holds a link to
+    the archived file, kept in <state>/frozen/<id>.simple.json until the file
+    changes."""
+    from . import frozen
+
+    if hit["harness"] in frozen.DOCS:
+        return hit["path"]
+    out = frozen._cache_dir() / f"{session}.simple.json"
+    try:
+        if out.exists() and out.stat().st_mtime >= os.stat(hit["path"]).st_mtime:
+            return str(out)
+    except OSError:
+        pass
+    store, keep = _STAND_IN[hit["harness"]]
+    src = Path(hit["path"])
+    with tempfile.TemporaryDirectory(prefix="am-frozen-") as home:
+        where = Path(home, *store, *src.parts[-1 - keep:-1])
+        where.mkdir(parents=True)
+        (where / src.name).symlink_to(src)
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR")}
+        env["HOME"] = home
+        rc, text, err = _run([exe, "export", session, "--from", TXCRIPT_IDS[hit["harness"]]],
+                             home, env)
+    if rc != 0:
+        raise ConvertError(_clean(err or text) or f"txcript export failed ({rc})")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(out)
+    return str(out)
 
 
 def cut_count(session: str, mid: str, mode: str, times: list[float | None]) -> int | None:
@@ -169,7 +224,10 @@ def convert(session: str, to: str, *, source: str = "", cwd: str = "",
     source = (source or sessions.agent_of(session) or "").strip().lower()
     if source not in TXCRIPT_IDS:
         raise ConvertError(f"cannot read a {source or 'chat of unknown'} agent's chat")
-    if source == to:
+    from . import frozen
+
+    hit = frozen.find(session)
+    if source == to and not hit:
         raise ConvertError(f"it is already a {to} chat")
     exe = binary()
     if not exe:
@@ -178,12 +236,20 @@ def convert(session: str, to: str, *, source: str = "", cwd: str = "",
     cwd = cwd or sessions.transcript_cwd(session) or os.path.expanduser("~")
     if not os.path.isdir(cwd):
         cwd = os.path.expanduser("~")
-    which = session if upto is None else f"{session}#1-{upto}"
-    argv = [exe, "continue", which, "--from", TXCRIPT_IDS[source],
-            "--with", TXCRIPT_IDS[to], "--no-resume"]
+    if hit:
+        # Another machine's chat, frozen here: Continue here copies it from
+        # its archived document into this machine's store (any agent, its
+        # own included), under a new id.
+        ref = frozen_doc(session, hit, exe)
+        argv = [exe, "continue", ref if upto is None else f"{ref}#1-{upto}",
+                "--with", TXCRIPT_IDS[to], "--no-resume"]
+    else:
+        ref = session
+        argv = [exe, "continue", session if upto is None else f"{session}#1-{upto}",
+                "--from", TXCRIPT_IDS[source], "--with", TXCRIPT_IDS[to], "--no-resume"]
     env, imported = _opencode2_env(to)
     try:
-        return _convert(argv, cwd, env, imported, session, upto, source, to)
+        return _convert(argv, cwd, env, imported, ref, upto, source, to)
     finally:
         if env is not None:
             import shutil as _sh
@@ -252,12 +318,14 @@ def _origins() -> dict:
     return d if isinstance(d, dict) else {}
 
 
-def record_origin(new: str, old: str, source: str, to: str, mid: str = "") -> None:
-    """`<state>/converted.json`, `{"<new>": {"session", "agent", "to", "id", "at"}}`:
-    which chat a copy came from, for the thread's "continued from"."""
+def record_origin(new: str, old: str, source: str, to: str, mid: str = "",
+                  host: str = "") -> None:
+    """`<state>/converted.json`, `{"<new>": {"session", "agent", "to", "id",
+    "at", "host"?}}`: which chat a copy came from, for the thread's "continued
+    from"; `host` when it was another machine's chat, frozen here."""
     d = _origins()
     d[new] = {"session": old, "agent": source, "to": to, "id": mid,
-              "at": round(time.time(), 3)}
+              "at": round(time.time(), 3), **({"host": host} if host else {})}
     p = _origins_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
@@ -320,7 +388,10 @@ def session_convert(session: str, to: str, bearer: str, *, text: str = "",
         got = convert(session, to, source=source, upto=upto)
     except ConvertError as e:
         return False, {"error": str(e), "status": 502}
-    record_origin(got["session"], session, source, to, mid)
+    from . import frozen
+
+    hit = frozen.find(session)
+    record_origin(got["session"], session, source, to, mid, hit["host"] if hit else "")
     out = {"session": got["session"], "converted": True, "agent": to,
            "from": {"session": session, "agent": source, "id": mid},
            "resume": got["resume"], "loss": got["loss"]}

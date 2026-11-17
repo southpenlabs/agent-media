@@ -1062,7 +1062,8 @@ def _build_targets(history: str = "") -> dict:
         for r in rows:
             o = copies.get(str(r.get("session") or ""))
             if isinstance(o, dict) and o.get("session"):
-                r["converted_from"] = {"session": o["session"], "agent": o.get("agent") or ""}
+                r["converted_from"] = {"session": o["session"], "agent": o.get("agent") or "",
+                                       **({"host": o["host"]} if o.get("host") else {})}
     out = {"sessions": rows, "places": where}
     mail = mailbox.by_project(
         [(r.get("project"), r.get("cwd")) for r in rows]

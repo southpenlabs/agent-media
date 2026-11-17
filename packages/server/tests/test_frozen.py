@@ -135,3 +135,77 @@ def test_search_reads_the_documents_and_keeps_peers_hits(archive, monkeypatch, t
     monkeypatch.setattr(search, "_connect", lambda: conn)
     # A frozen copy is not "already here": a peer's live hit in it is kept.
     assert search.known_sessions([CL, "local-one"]) == {"local-one"}
+
+
+# --- Continue here: a frozen chat copied into this machine (convert.py) -------------
+
+def _fake_txcript(tmp_path, out: str) -> str:
+    """A txcript that records each call's argv and HOME, and answers
+    `export` with a small document and `continue` with `out`."""
+    log = tmp_path / "calls.jsonl"
+    exe = tmp_path / "txcript"
+    doc = json.dumps({"messages": [
+        {"role": "user", "content": "the gate code is 4471", "timestamp": "2026-11-17T01:00:00.000Z"},
+        {"role": "assistant", "content": "Noted.", "timestamp": "2026-11-17T01:00:01.000Z"}]})
+    exe.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        f"open({str(log)!r}, 'a').write(json.dumps({{'argv': sys.argv[1:], 'home': os.environ.get('HOME'),"
+        " 'linked': [os.path.join(r, f) for r, _, fs in os.walk(os.environ.get('HOME', '/')) for f in fs]"
+        " if sys.argv[1] == 'export' else []}) + '\\n')\n"
+        f"sys.stdout.write({doc!r} if sys.argv[1] == 'export' else {out!r})\n")
+    exe.chmod(0o755)
+    return str(exe)
+
+
+def _calls(tmp_path):
+    return [json.loads(l) for l in (tmp_path / "calls.jsonl").read_text().splitlines()]
+
+
+@pytest.fixture
+def here(archive, tmp_path, monkeypatch):
+    from agent_media_server import auth, default_agent
+
+    monkeypatch.setattr(auth, "gate", lambda b: ({"name": "someone"}, {}))
+    monkeypatch.setattr(default_agent, "_installed", lambda a: a in ("claude", "opencode"))
+    return tmp_path
+
+
+NEW = "99999999-8888-4777-8666-555555555555"
+OUT = (f"simple → claude_code  /home/x/.claude/projects/-home-x-proj/{NEW}.jsonl\n"
+       f"  resume with: claude --resume {NEW}\n")
+
+
+def test_continue_here_copies_a_claude_file_through_a_stand_in_home(here, monkeypatch):
+    from agent_media_server import convert
+
+    monkeypatch.setenv("MEDIA_TXCRIPT", _fake_txcript(here, OUT))
+    ok, out = convert.session_convert(CL, "claude", "tok")
+    assert ok and out["session"] == NEW and out["from"]["agent"] == "claude"
+    export, cont = _calls(here)
+    assert export["argv"] == ["export", CL, "--from", "claude_code"]
+    assert any(p.endswith(f".claude/projects/-home-x-proj/{CL}.jsonl") for p in export["linked"])
+    assert export["home"] != os.environ.get("HOME")
+    assert cont["argv"][0] == "continue" and cont["argv"][1].endswith(f"{CL}.simple.json")
+    assert cont["argv"][2:] == ["--with", "claude_code", "--no-resume"]
+    assert convert.origin(NEW)["host"] == "red5"
+
+
+def test_continue_here_uses_an_archived_document_as_it_is(here, monkeypatch):
+    from agent_media_server import convert
+
+    monkeypatch.setenv("MEDIA_TXCRIPT", _fake_txcript(here, OUT))
+    ok, out = convert.session_convert(OC, "claude", "tok")
+    assert ok
+    (cont,) = _calls(here)
+    assert cont["argv"][1] == str(frozen.find(OC)["path"])
+
+
+def test_a_local_chat_into_its_own_agent_is_still_refused(here, monkeypatch):
+    from agent_media_server import convert
+
+    monkeypatch.setattr(frozen, "find", lambda s: None)
+    monkeypatch.setattr(sessions, "agent_of", lambda s: "claude")
+    monkeypatch.setenv("MEDIA_TXCRIPT", _fake_txcript(here, OUT))
+    ok, out = convert.session_convert(CL, "claude", "tok")
+    assert not ok and "already a claude chat" in out["error"]

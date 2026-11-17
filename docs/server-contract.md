@@ -12135,8 +12135,15 @@ thread (`/conversation/log`), and search finds it under the same rules as a
 local chat (folder grants by the folder it ran in). A native copy wins, and
 this machine's own folder of the archive is never frozen. `POST /reply` to a
 frozen chat answers 409 `{"code": "frozen", "host", "error"}` with what to do
-instead; a branch (`mode: "branch"`) is not refused. Coming: Continue here
-(step 2).
+instead; a branch (`mode: "branch"`) is not refused.
+
+**Continue here (step 2, built 18 Nov 2026).** `POST /session/convert` on a
+frozen chat copies it into this machine as a new chat, into any agent in
+`convert_targets`, its own included (a local chat into its own agent stays
+refused). The copy is made from the archived document (opencode, Hermes) or
+from `txcript export` run against a stand-in home holding a link to the
+archived file (Claude, Codex, pi), and its `/targets` row's
+`converted_from` carries `host`, the machine the original ran on.
 
 **Continued on its own machine (step 3, built 18 Nov 2026).** Where this
 server has a peer link to the chat's host's own server that may reply
