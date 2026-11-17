@@ -8,6 +8,7 @@ server knows what each tab does with it).
   GET  /media/links → {"ok", "to": [{"id", "label", "takes"}]}
   POST /media/links {"url", "to", "title"?}       → {"ok", "added", "title", …}
                     {"action": "remove", "id", "keep_link"?}   (a saved podcast link)
+                    {"action": "download", "id"}   (a saved podcast link's file, again)
 
 - podcast — a YouTube video, saved and downloaded small
   (agent_media_core.podcast_links); the Podcasts tab's `saved` list.
@@ -62,6 +63,11 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not podcast_links.remove(str(body.get("id") or ""), keep_link=bool(body.get("keep_link"))):
             return False, {"error": "no saved podcast link under that id", "status": 404}
         return True, {"removed": str(body.get("id"))}
+    if body.get("action") == "download":
+        got = podcast_links.download(str(body.get("id") or ""))
+        if got is None:
+            return False, {"error": "no saved podcast link under that id", "status": 404}
+        return True, {"id": str(body.get("id")), **got}
     url = str(body.get("url") or "").strip()
     to = str(body.get("to") or "")
     title = str(body.get("title") or "")

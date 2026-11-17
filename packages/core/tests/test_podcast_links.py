@@ -168,3 +168,20 @@ def test_off_the_tailnet_a_download_has_a_signed_public_link(_dirs, monkeypatch,
     # A link no longer saved is not served, signature or not.
     podcast_links.remove("AAAAAAAAAAA", keep_link=False)
     assert podcast_links.served("AAAAAAAAAAA.opus", sig) is None
+
+
+def test_a_saved_link_can_be_downloaded_again(_dirs, monkeypatch):
+    # David, 17 Nov 2026: a link whose download never came had nothing to start it.
+    started = []
+    monkeypatch.setattr(podcast_links, "start_fetch", lambda vid: started.append(vid) or True)
+    assert podcast_links.download("podcast-link:ZZZZZZZZZZZ") is None
+    podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
+    started.clear()  # the add's own download
+    assert podcast_links.download("podcast-link:AAAAAAAAAAA") == {"fetching": True, "downloaded": False}
+    assert started == ["AAAAAAAAAAA"]
+    # Already here: nothing started.
+    _dirs.mkdir()
+    (_dirs / "Talk [AAAAAAAAAAA].opus").write_bytes(b"x")
+    assert podcast_links.download("AAAAAAAAAAA") == {"fetching": False, "downloaded": True}
+    assert started == ["AAAAAAAAAAA"]
+

@@ -122,3 +122,17 @@ def test_a_youtube_video_goes_to_music_and_says_where_to_play_it(server, shelf, 
     res, obj = call(server, "POST", "/music", {"action": "play", "uri": row["uri"]}, AUTH)
     assert res.status == 409, obj
     assert obj["code"] == "youtube" and obj["link"] == "https://www.youtube.com/watch?v=8r31DFrFs5A"
+
+
+def test_a_saved_link_is_downloaded_again(server, shelf, signed_in, monkeypatch):
+    # David, 17 Nov 2026: a saved link not downloaded had nothing to start it.
+    from agent_media_core import podcast_links
+    started = []
+    monkeypatch.setattr(podcast_links, "start_fetch", lambda vid: started.append(vid) or True)
+    call(server, "POST", "/media/links", {"url": "https://youtu.be/AAAAAAAAAAA", "to": "podcast"}, AUTH)
+    started.clear()
+    res, obj = call(server, "POST", "/media/links", {"action": "download", "id": "podcast-link:AAAAAAAAAAA"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["fetching"] is True and obj["downloaded"] is False and started == ["AAAAAAAAAAA"]
+    res, obj = call(server, "POST", "/media/links", {"action": "download", "id": "podcast-link:ZZZZZZZZZZZ"}, AUTH)
+    assert res.status == 404, obj

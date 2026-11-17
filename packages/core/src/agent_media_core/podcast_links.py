@@ -242,6 +242,26 @@ def remove(key: str, keep_link: bool = False) -> bool:
     return True
 
 
+def download(key: str) -> Optional[dict]:
+    """Download a saved link's file again (``podcast-link:<vid>`` or the bare
+    id): one whose download never came, or was cleared for space or by hand.
+    None when nothing is saved under it; otherwise ``{"fetching",
+    "downloaded"}``: already here, or started in the background (its
+    progress is GET /music `downloads`, purpose "podcast"); an episode
+    (``ep-…``) plays from its own address and has nothing to download.
+    David, 17 Nov 2026: a saved link not downloaded showed no progress,
+    because nothing could start its download."""
+    vid = key.split(":", 1)[1] if key.startswith("podcast-link:") else key
+    if not any(_key(x) == vid for x in _load()):
+        return None
+    if vid.startswith("ep-"):
+        return {"fetching": False, "downloaded": False}
+    f = file_for(vid)
+    if f is not None and f.parent == folder():
+        return {"fetching": False, "downloaded": True}
+    return {"fetching": start_fetch(vid), "downloaded": False}
+
+
 def items() -> list[dict]:
     """The saved links, newest first, in Recently played's row shape."""
     from . import music_recent

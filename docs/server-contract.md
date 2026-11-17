@@ -10419,6 +10419,16 @@ downloaded version has been removed to save space".
   "removed"}`: a saved podcast link and its download, or with `keep_link`
   only the download (it plays from the link after), or a saved album
   (`album:…`). 404 when nothing was saved under it.
+- `POST /media/links {"action": "download", "id"}` → `{"ok", "id",
+  "fetching", "downloaded"}` (17 Nov 2026; David: a saved link not
+  downloaded showed no progress, since nothing could start its download):
+  download a saved podcast link's file again — one whose download never
+  came, or was cleared for space or with `keep_link`. `fetching` true when
+  it started (its progress is `GET /music` `downloads`, purpose
+  `"podcast"`, §6.9a); `downloaded` true when the file is already here and
+  nothing was started; a podcast app's episode (`podcast-link:ep-…`) plays
+  from its own address and answers both false. 404 when nothing is saved
+  under it. Not a guest POST.
 - Kept in `<state_dir>/podcast-links.json` and `music-links.json`, the
   downloads in `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`);
   past `MEDIA_PODCAST_LINK_MAX_MB` (1000) the oldest downloads are deleted
