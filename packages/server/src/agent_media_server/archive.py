@@ -135,8 +135,11 @@ def session_archive(session: str, flag, bearer: str) -> tuple[bool, dict]:
     A session no harness has, that is not running and not on the shelf, is
     404 — the same test `/reply {session}` makes before typing.
     """
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     if flag is None:
         flag = True
@@ -152,15 +155,19 @@ def session_archive(session: str, flag, bearer: str) -> tuple[bool, dict]:
     # A sealed thread has none of these any more, and is still listed. A
     # Matrix room's thread (§6.1 "Matrix rows") is archived like any other:
     # its row reads the same flags.
-    if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
-            or sessions._folder_for_session(session) or is_sealed(session)
-            or matrix.room(session) is not None or _quick(session)):
+    # A Local chat (§6.61) is archived once a phone has listed it.
+    if local:
+        if not local_chats.known(session):
+            return False, {"error": "no such Local chat", "status": 404}
+    elif not (sessions.live_sessions().get(session) or sessions.session_exists(session)
+              or sessions._folder_for_session(session) or is_sealed(session)
+              or matrix.room(session) is not None or _quick(session)):
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
         changed = set_archived(session, flag)
     except OSError as e:
         return False, {"error": f"could not save the flag ({e})", "status": 500}
-    if flag and changed:
+    if flag and changed and not local:
         from . import reap
 
         reap.recap_soon(session)

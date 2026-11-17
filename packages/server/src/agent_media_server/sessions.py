@@ -1823,6 +1823,15 @@ def _sessions_index(*, days: float = STORE_DAYS) -> list[dict]:
     from . import quick
 
     out += quick.rows(flags, pinned)
+    # And the phone's Local chats, by id, with no content (local_chats.py, §6.61).
+    from . import local_chats
+
+    try:
+        out += local_chats.rows(flags, pinned)
+    except Exception as e:  # noqa: BLE001 — a list without them, not no list
+        import logging
+
+        logging.getLogger(__name__).warning("local chats: %s", e)
     # And `speech`, its level (interrupt | auto | normal | quiet), with
     # `priority` kept for older clients: its replies are never held or muted.
     # A thread with no level of its own has its fallback — a Matrix room the
@@ -1904,7 +1913,7 @@ def _you_wrote(row: dict, paths: dict) -> tuple:
     from . import you_wrote
 
     harness, path = paths.get(row["session"]) or (str(row.get("harness") or ""), "")
-    if harness in ("hermes", "matrix", "quick"):
+    if harness in ("hermes", "matrix", "quick", "local"):
         return None, False, None
     try:
         return you_wrote.with_reply(row["session"], harness, path)
@@ -1943,4 +1952,14 @@ def seal_row(session: str, rec: dict, archived: bool = False, pinned: bool = Fal
             "session": session, "title": "", "live": False, "pane": None,
             "at": rec.get("at"), "recap": None, "archived": archived, "rested": None,
             "pinned": pinned, "sealed": True, "harness": rec.get("harness") or "claude",
-            "cwd": rec.get("cwd") or None, "project": rec.get("project") or None}
+            "cwd": rec.get("cwd") or None, "project": rec.get("project") or None,
+            # A sealed Local chat (local_chats.py, §6.61) still says it is one.
+            **({"local": True, "network": {"id": rec.get("network") or "",
+                                           "name": _local_network_name(rec.get("network"))},
+                "device": rec.get("device") or None} if rec.get("local") else {})}
+
+
+def _local_network_name(net) -> str:
+    from .local_chats import NETWORKS
+
+    return NETWORKS.get(str(net or ""), str(net or ""))

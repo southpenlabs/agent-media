@@ -69,11 +69,12 @@ def spaces_of(row: dict, group_keys: set[str], project_keys: dict[str, str]) -> 
     tagged.discard("")
     out = [f"group:{k}" for k in sorted(tagged & group_keys)]
     projects = []
-    if row.get("project") and row.get("harness") != "matrix":
+    people = row.get("harness") in ("matrix", "local")    # a chat with people (§6.61 for Local)
+    if row.get("project") and not people:
         projects.append(row["project"])
     projects += [p for k, p in sorted(project_keys.items()) if k in tagged and p not in projects]
     out += [f"project:{p}" for p in projects]
-    if row.get("harness") == "matrix" and not any(s.startswith("group:") for s in out):
+    if people and not any(s.startswith("group:") for s in out):
         out.append(PEOPLE)
     return out or [INBOX]
 
@@ -82,7 +83,7 @@ def _project_keys(rows: list[dict]) -> dict[str, str]:
     keys: dict[str, str] = {}
     for r in rows:
         p = r.get("project")
-        if p and r.get("harness") != "matrix":
+        if p and r.get("harness") not in ("matrix", "local"):
             # A project's tag is its last path part: "spl/sasonica-app" is
             # #sasonica_app, as a person would type it.
             k = _key(str(p).rstrip("/").rsplit("/", 1)[-1])

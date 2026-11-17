@@ -108,9 +108,9 @@ def _said(text: str, cands: list[dict]) -> dict | None:
 def _private(thread: str) -> bool:
     from agent_media_core.private import hidden
 
-    from . import matrix
+    from . import local_chats, matrix
 
-    return bool(hidden(thread)) or matrix.room(thread) is not None
+    return bool(hidden(thread)) or local_chats.is_local(thread) or matrix.room(thread) is not None
 
 
 def pick(thread: str, title: str, cands: list[dict]) -> dict | None:

@@ -21,8 +21,11 @@ from typing import Callable
 class JsonMap:
     """`<state_dir>/<name>`: a dict of session → JSON value."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, mode: int | None = None):
         self.name = name
+        # The file's permissions, set on each write before it takes the
+        # file's place (0o600 for one holding people's names); None: umask.
+        self.mode = mode
         self._lock = threading.Lock()
         # Keyed by path as well as mtime: the state dir moves (XDG_STATE_HOME),
         # in tests every time.
@@ -95,7 +98,13 @@ class JsonMap:
                     if not fn(rows):
                         return False
                     tmp = path.with_suffix(f".tmp.{os.getpid()}.{threading.get_ident()}")
-                    tmp.write_text(json.dumps(rows, indent=0, sort_keys=True))
+                    if self.mode is not None:
+                        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, self.mode)
+                        with os.fdopen(fd, "w") as fh:
+                            fh.write(json.dumps(rows, indent=0, sort_keys=True))
+                        os.chmod(tmp, self.mode)
+                    else:
+                        tmp.write_text(json.dumps(rows, indent=0, sort_keys=True))
                     tmp.replace(path)
                     try:
                         st = path.stat()

@@ -105,6 +105,13 @@ a person's own server.
 
 1. Server: the `local:` records and `POST /local/chats`; the flag routes
    take `local:` ids; `/targets` carries Local rows. Contract section.
+   **Built 17 Nov 2026** (contract §6.61, `local_chats.py`). The server had
+   no signal for "hosted by South Pen Labs" (personal use says what an
+   install may run, not whose data it holds), so `MEDIA_LOCAL_CHAT_NAMES`
+   (default on; off on a hosted server) says whether names are kept. Seal is
+   the mark alone; close, resume, move and tag suggestions are 400
+   `not_for_local`; guests see no Local chats. Not yet: a Local chat's
+   person in Contacts (so `/contacts/tags` and the person's level reach it).
 2. App: Local chats' settings through the server (archive first, the first
    thing David hit), merged rows, "on p8a only" elsewhere.
 3. Companion: posting the chat list, following settings for notifications,

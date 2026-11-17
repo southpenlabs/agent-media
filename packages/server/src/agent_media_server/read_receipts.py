@@ -104,8 +104,11 @@ def session_read(session: str, bearer: str, *, mid: str = "", why: str = "",
     the message the network was told of now, or null when nothing was told
     (a peek, or already told); `up_to` the last one it has been told of
     since the server started, or null."""
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     if mode and mode not in MODES + ("default",):
         return False, {"error": f"mode is one of {', '.join(MODES)}", "status": 400}
@@ -114,6 +117,16 @@ def session_read(session: str, bearer: str, *, mid: str = "", why: str = "",
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    if local:
+        # A Local chat (§6.61): the mode is kept here, the receipt itself is
+        # the phone's to send. `tell` says whether it should, for `why`.
+        if not local_chats.known(session):
+            return False, {"error": "no such Local chat", "status": 404}
+        if mode:
+            set_mode(session, mode)
+        now = mode_of(session)
+        return True, {"session": session, "mode": now, "own": own(session), "read": None,
+                      "up_to": None, "tell": told(now, why) if why else None}
     from . import matrix
 
     room = matrix.room(session)

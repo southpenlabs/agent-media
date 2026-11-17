@@ -345,8 +345,9 @@ def add_tags(rows: list[dict]) -> list[dict]:
             r["chat_tags"], r["person_tags"], r["label_tags"] = chat, person, label
             r["auto_tags"] = auto
             r["tags"] = list(dict.fromkeys(chat + auto + person + label))
-        elif r.get("harness") == "quick":
-            # A quick chat has no org node: its own, kept as a chat's are.
+        elif r.get("harness") in ("quick", "local"):
+            # A quick chat has no org node, nor a Local chat (local_chats.py,
+            # §6.61): their own, kept as a chat's are.
             r["tags"] = [t for t in (chats.get(sid) or []) if isinstance(t, str)]
         else:
             r["tags"] = list(dict.fromkeys(by.get(sid, []) + held.get(sid, [])))
@@ -468,8 +469,10 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
     kept here (`chat-tags.json`), never 409."""
     from . import auth, matrix, sessions
 
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    if not (sessions._SESSION.fullmatch(session) or local_chats.is_local(session)):
         return False, {"error": "not a session id", "status": 400}
     edit, err = _edit(body)
     if err:
@@ -483,7 +486,9 @@ def session_tags(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         return False, {"error": "a sealed thread has no tags", "status": 423}
     from . import quick
 
-    if matrix.room(session) is not None or quick.has(session):
+    if local_chats.is_local(session) and not local_chats.known(session):
+        return False, {"error": "no such Local chat", "status": 404}
+    if local_chats.is_local(session) or matrix.room(session) is not None or quick.has(session):
         ok, detail = _store_edit(_jsonmaps()[0], session, edit)
         kept = body.get("auto")
         if ok and isinstance(kept, list):
@@ -714,7 +719,12 @@ def session_suggest(session: str, bearer: str) -> tuple[bool, dict]:
     id, 423 sealed, 503 when the model gave nothing to suggest."""
     from . import auth, sessions
 
+    from . import local_chats
+
     session = (session or "").strip()
+    if local_chats.is_local(session):
+        # Auto reads the chat, and its words are on the phone (§6.61).
+        return False, local_chats.refuse(session)
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)

@@ -73,7 +73,8 @@ def add_marks(rows: list[dict]) -> list[dict]:
         got = m if isinstance(m, dict) else {}
         row["top"] = got.get("top")
         row["marked_unread"] = bool(got.get("unread"))
-        row["mark_carried"] = carried(row.get("network"))
+        # A Local chat's network is the phone's to tell (§6.61): null.
+        row["mark_carried"] = None if row.get("local") else carried(row.get("network"))
     return rows
 
 
@@ -115,8 +116,11 @@ def _room_unread(room, unread: bool) -> None:
 def session_mark(session: str, bearer: str, *, top=None, unread=None) -> tuple[bool, dict]:
     """`{"session", "top"?: bool, "unread"?: bool}` → `{"session", "top",
     "marked_unread", "carried"}`."""
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     if top is None and unread is None:
         return False, {"error": "mark needs top or unread", "status": 400}
@@ -128,8 +132,10 @@ def session_mark(session: str, bearer: str, *, top=None, unread=None) -> tuple[b
         return False, err
     from . import matrix, quick
 
-    room = matrix.room(session)
-    if room is None and not (sessions.live_sessions().get(session)
+    room = None if local else matrix.room(session)
+    if local and not local_chats.known(session):
+        return False, {"error": "no such Local chat", "status": 404}
+    if not local and room is None and not (sessions.live_sessions().get(session)
                              or sessions.session_exists(session)
                              or driver.owned_headless(session) or quick.has(session)):
         return False, {"error": f"no such session {session[:8]}", "status": 404}

@@ -85,8 +85,11 @@ def session_priority(session: str, flag, bearer: str, level=None) -> tuple[bool,
     auto. Answers the level it now has, and `own`: whether that is its own."""
     from agent_media_core import speak_priority
 
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     if level is None:
         if flag is None:
@@ -102,8 +105,12 @@ def session_priority(session: str, flag, bearer: str, level=None) -> tuple[bool,
         return False, err
     from . import matrix
 
-    if not (_known(session)
-            or matrix.room(session) is not None):     # a Matrix room's level
+    if local:
+        # A Local chat's level (§6.61), for when its messages can be spoken.
+        if not local_chats.known(session):
+            return False, {"error": "no such Local chat", "status": 404}
+    elif not (_known(session)
+              or matrix.room(session) is not None):     # a Matrix room's level
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
         if level == "default":

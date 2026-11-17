@@ -150,8 +150,11 @@ def session_remind(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
     (or null or false, which cancel) or more than a year off, 404 for a
     session nothing knows. `held`, optional: the thread's activity time as
     the caller sorts it, which it keeps meanwhile (default now)."""
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     at = body.get("at")
     held = body.get("held")
@@ -169,9 +172,13 @@ def session_remind(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         return False, err
     from . import matrix
 
-    if not (sessions.live_sessions().get(session) or sessions.session_exists(session)
-            or sessions._folder_for_session(session)
-            or matrix.room(session) is not None):
+    if local:
+        # A Local chat (§6.61): kept by its id once a phone has listed it.
+        if not local_chats.known(session):
+            return False, {"error": "no such Local chat", "status": 404}
+    elif not (sessions.live_sessions().get(session) or sessions.session_exists(session)
+              or sessions._folder_for_session(session)
+              or matrix.room(session) is not None):
         return False, {"error": f"no such session {session[:8]}", "status": 404}
     try:
         set_remind(session, at or None, held)

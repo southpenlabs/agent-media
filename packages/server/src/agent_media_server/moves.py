@@ -354,6 +354,11 @@ def move(session: str, project: str = "", cwd: str = "",
     `why_waiting`, and moved by a waiter the moment it can be.
     """
     session = (session or "").strip()
+    from . import local_chats
+
+    if local_chats.is_local(session):
+        # A Local chat has no transcript or folder to move (§6.61).
+        return False, local_chats.refuse(session)
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)

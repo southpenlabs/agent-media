@@ -2055,6 +2055,8 @@ Clients: S (`ReplyBox.vue`).
 
 #### `POST /session/resume` · `POST /session/close` — gated
 
+**Local chats** (17 Nov 2026, §6.61): a `local:` id is 400 `code: "not_for_local"`: a Local chat has no session to end or bring back (the app offers Archive for Exit & archive).
+
 `{"session"}`.
 
 - resume, already live: `{"ok": true, "session", "pane", "live": true, "opened": false}`
@@ -2096,6 +2098,8 @@ Clients: S (`ReplyBox.vue`), W (`useConversationSession.ts`).
 Pinned by `packages/server/tests/test_discard.py`.
 
 #### `POST /session/archive` — gated (22 Sep 2026)
+
+**Local chats** (17 Nov 2026, §6.61): takes a `local:<network>:<id>` id once a phone has listed it (404 before); kept in the same `archived.json`, read back on its `/targets` row and in `GET /local/chats`. No recap is asked for.
 
 `{"session", "archived": true | false}` → `{"ok": true, "session", "archived"}`.
 
@@ -2159,6 +2163,8 @@ Pinned by `packages/server/tests/test_reap.py` and `test_queued_chat_level.py`.
 
 #### `POST /session/quiet` — gated (26 Oct 2026)
 
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id; kept by it in the same store.
+
 `{"session", "until": epoch | null | false, "at"?: epoch}` →
 `{"ok": true, "session", "quiet": {"until", "at"} | null}`.
 
@@ -2206,6 +2212,8 @@ Pinned by `packages/server/tests/test_quiet.py`.
 
 #### `POST /session/remind` — gated (30 Oct 2026)
 
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id; kept by it in the same store.
+
 `{"session", "at": epoch | null | false, "held"?: epoch}` → `{"ok": true,
 "session", "remind": {"at", "held"} | null, "reminded", "quiet"}`.
 
@@ -2244,6 +2252,8 @@ Pinned by `packages/server/tests/test_quiet.py`.
 Pinned by `packages/server/tests/test_remind.py`.
 
 #### `POST /session/tags`, `GET /tags` — gated (24 Oct 2026)
+
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id; its tags are kept in `chat-tags.json` as a room's are, never 409. `/session/tags/suggest` is 400 `not_for_local`: Auto reads the chat, whose words are on the phone. A Local row carries `tags` only (no person yet).
 
 `{"session", "add"?: [tag], "remove"?: [tag], "tags"?: [tag]}` →
 `{"ok": true, "session", "tags"}`, the thread's tags after the change.
@@ -2347,6 +2357,8 @@ A tag taken off (the sheet's `auto`) is never put back on that chat.
 `chat-auto-dismissed.json`.
 
 #### `POST /session/priority` — gated (24 Sep 2026)
+
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id (its level waits for Local messages to be spoken).
 
 `{"session", "level"}` → `{"ok": true, "session", "level", "own", "from", "priority"}`
 (`from`: where the level now comes from, as a row's `speech_from`; 20 Oct
@@ -5831,6 +5843,7 @@ local look, never a network call:
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
+| `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -6457,6 +6470,8 @@ everything regardless: the narrowing is applied to the hits, which already
 carry `project`, `harness`, `live` and `archived`.
 
 ### 6.15 Move a thread to another project — gated (built 23 Sep 2026; waits out a turn since 15 Oct 2026; waits out questions and background agents, cancellable, since 19 Oct 2026)
+
+**Local chats** (17 Nov 2026, §6.61): a `local:` id is 400 `code: "not_for_local"`: no transcript or folder to move.
 
 #### `POST /session/move` — gated
 
@@ -9536,6 +9551,8 @@ in front) is taken off too.
 
 ### 6.32 Read on the network, or a peek — gated (built 29 Oct 2026)
 
+**Local chats** (17 Nov 2026, §6.61): a listed `local:` id keeps its mode here (`mode`, `own`), and the receipt is the phone's to send: the answer has `read: null`, `up_to: null` and `tell`, whether a read for the `why` sent should go to the network in this mode (null with no `why`). Local rows carry `read_receipts` and `read_receipts_own`.
+
 Code: `agent_media_server/read_receipts.py`, `matrix.Room.read`. Pinned by
 `packages/server/tests/test_read_receipts.py`. From the list of what the
 bridged apps do (David, 20 Oct 2026): reading a chat here marks it read in
@@ -9804,6 +9821,8 @@ speech-to-text set up, or `MEDIA_VOICE_NOTES=0`, there is no `transcript`.
 At most 200 wait at once; more are asked for when their page is read again.
 
 ### 6.38 Pin to top and Mark unread — gated (built 29 Oct 2026)
+
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id; `carried` and a Local row's `mark_carried` are null (the phone, not the server, tells the network).
 
 Code: `agent_media_server/chat_marks.py`. Pinned by
 `packages/server/tests/test_chat_marks.py`. From the list of what the
@@ -10103,6 +10122,8 @@ the pop-up's place.
   false`.
 
 ### 6.44 Issues: a thread as a ticket — gated (built 31 Oct 2026)
+
+**Local chats** (17 Nov 2026, §6.61): takes a listed `local:` id, a flag like any other.
 
 Code: `agent_media_server/issues.py`. Pinned by
 `packages/server/tests/test_issues.py`. David, 31 Oct 2026: "I could
@@ -12257,6 +12278,80 @@ own word, e.g. `feature:tag`), which LiteLLM 1.93 merges into the request's
 metadata tags, so its spend logs (once its database is on) count per
 feature too. Photo edits carry it only for a `gateway:` model. Nothing from
 the content is ever in a tag; other routes send nothing new.
+
+### 6.61 Local chats: the phone's bridged chats, by id — gated; not for guests (built 17 Nov 2026)
+
+The chats Sasonica Bridges carries on the phone (WhatsApp, Messenger,
+Instagram, Google Messages) keep their messages there; their Sasonica
+settings live here, through the same routes a server room uses, so every
+device shows the same (docs/proposals/2026-11-17-phone-bridges-server-integration.md,
+step 1; David, 17 Nov 2026). Code: `agent_media_server/local_chats.py`.
+
+**The id**: `local:<network>:<the network's own chat id>`, `network` one of
+`meta`, `instagram`, `whatsapp`, `gmessages`; the chat id is the portal id
+(`portal_id` in the companion's `/v1/chats`), 1–128 of letters, digits and
+`. _ @ + = -`, starting with a letter or digit. Not the companion's
+`!…:sasonica.local` room id: that is minted per install, and the id must
+survive a reinstall. The app maps its `phone.` rows to these by network and
+portal id.
+
+```
+POST /local/chats {"network", "chats": [{"id": "<network chat id>", "name"?, "kind": "person"|"group",
+                                         "updated"?: <unix s>}…], "full"?: bool}
+  → {"ok": true, "chats": [<chat>…]}          // the chats sent, in order
+GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // every record, gone ones too
+
+<chat> = {"id": "local:<network>:<id>", "network": {"id", "name"}, "kind",
+          "name"?,                            // only where names are kept (below)
+          "device": "<device id>", "device_name": "<its name>" | null,
+          "updated": <unix s> | null, "last_seen": <unix s>, "gone": <unix s> | null,
+          "settings": {"archived", "archived_at", "sealed", "speech", "speech_own", "priority",
+                       "read_receipts", "read_receipts_own", "top", "marked_unread",
+                       "quiet", "remind", "reminded", "tags", "issue"}}   // as on a /targets row
+```
+
+- **From a paired device**, which becomes the chat's `device` (the token
+  says which; a `device` in the body is ignored). A guest is 403 `guest` on
+  both routes; no bearer 401.
+- **Upsert**: a chat sent is created or updated (kind, name, updated) and
+  its `last_seen` set; settings are untouched. **`full: true`**: the list is
+  the whole of that network on that device, so its other chats there get
+  `gone` (another device's and another network's are left alone); a gone
+  chat sent again comes back, its settings with it.
+- **Never content**: any field not named above, in the body or a chat, is
+  400 `code: "field_not_accepted"`, `field` naming it (text, previews,
+  senders). 400 for a network not in the list, a bad id, kind or time; at
+  most 5000 chats a post.
+- **Names**: kept and answered only while `MEDIA_LOCAL_CHAT_NAMES` is on
+  (the default, a person's own server); `0`/`off` on a server South Pen
+  Labs hosts, where a posted name is dropped, a kept one removed when the
+  chat is next sent, and none answered. `names` says which.
+- Stored in `<state_dir>/local-chats.json`, 0600.
+
+**The flag routes take these ids**, once a phone has listed the chat (404
+before): `/session/archive`, `/session/mark`, `/session/read` (the mode;
+`tell` says whether the phone should send the receipt), `/session/quiet`,
+`/session/remind`, `/session/tags`, `/session/priority`, `/session/issue`,
+`/speech/heard` (nothing is held: `marked: 0`), and `/session/seal`, which
+for a Local chat is the mark alone (nothing of it is here to encrypt): its
+row is then a sealed row with no title on every device, `local`, `network`
+and `device` kept; unsealing takes the mark off; 409 when already so. 400
+`code: "not_for_local"` from `/session/close`, `/session/resume`,
+`/session/move` and `/session/tags/suggest`.
+
+**In the lists**: `/targets` and `/conversations` carry a row for each chat
+not gone, with every settings field any row has, and:
+
+```
+{"session": "local:…", "harness": "local", "source": "local", "local": true,
+ "network": {"id", "name"}, "kind", "device", "device_name",
+ "title": "<name>" | "", "at": <updated or last_seen>, "recap": null, "live": false,
+ "drivable": false, "mark_carried": null, "spaces": ["people"] (or its groups), …}
+```
+
+A guest is sent none. The app merges these with the companion's live rows
+by id, shows the server's settings, and for a chat whose phone is not this
+device says where it lives (`device_name`).
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

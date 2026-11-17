@@ -448,6 +448,7 @@ CORS_PATHS = frozenset({
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
+    "/local/chats",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -653,6 +654,10 @@ def body_limit(path: str) -> int:
         from . import contacts
 
         return contacts.IMPORT_MAX
+    if path == "/local/chats":
+        from . import local_chats
+
+        return local_chats.MAX_BODY    # a phone's whole list of one network
     if path == "/transcribe":
         from . import voice_clips
 
@@ -2248,6 +2253,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # People, from the phone's contacts (contacts.py, §6.25): the list or
         # matches as you type, and one person's card with their rooms.
         _contacts(h, path, query)
+    elif path == "/local/chats":
+        # The phone's Local chats and their settings (local_chats.py, §6.61).
+        from . import local_chats
+
+        ok, detail = local_chats.listing(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/targets":
         # Everything a message can be pointed at — running sessions and
         # the directories a fresh one can open in — so the app renders a
@@ -2257,8 +2268,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         if ok:
             from . import device_kinds
 
-            # No private threads to a device whose rules say so (§6.59).
-            detail = {**detail, "sessions": device_kinds.filter_for(_bearer(h), detail.get("sessions"))}
+            from . import local_chats
+
+            # No private threads to a device whose rules say so (§6.59), and
+            # no Local chats to a guest (§6.61).
+            detail = {**detail, "sessions": local_chats.for_bearer(
+                _bearer(h), device_kinds.filter_for(_bearer(h), detail.get("sessions")))}
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/dashboard":
         # The home screen: one cheap aggregate of the sweeps the other
@@ -2411,11 +2426,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not user:
             _json(h, err.get("status", 401), {"ok": False, "error": "not allowed"})
         else:
-            from . import device_kinds
+            from . import device_kinds, local_chats
 
-            # A device whose rules say no private threads is not sent them (§6.59).
-            _json(h, 200, {"ok": True, "sessions": device_kinds.filter_for(
-                _bearer(h), sessions.sessions_index())})
+            # A device whose rules say no private threads is not sent them
+            # (§6.59); a guest no Local chats (§6.61).
+            _json(h, 200, {"ok": True, "sessions": local_chats.for_bearer(_bearer(h), device_kinds.filter_for(
+                _bearer(h), sessions.sessions_index()))})
     elif path == "/devices":
         # Which devices are paired (§9). Gated on the enrol bit, not merely
         # on being a device: what else is paired is the owner's business, and
@@ -3969,7 +3985,11 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 200, {"ok": True, **info})
             return True
         us = str(body.get("session") or "")
-        if not sessions._SESSION.fullmatch(us):
+        from . import local_chats
+
+        # A Local chat (§6.61) has no spoken replies yet: it is accepted, and
+        # nothing is held to mark.
+        if not (sessions._SESSION.fullmatch(us) or local_chats.is_local(us)):
             _json(h, 400, {"ok": False, "error": "not a session id"})
             return True
         if body.get("with_undo") is True:
@@ -4166,7 +4186,11 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         # like /reply.
         body = _read_json(h) or {}
         fn = send.session_resume if path.endswith("resume") else send.session_close
-        ok, detail = fn(str(body.get("session") or ""), _bearer(h))
+        from . import local_chats
+
+        # A Local chat has no session to end or bring back (§6.61).
+        refused = local_chats.refuse(str(body.get("session") or "").strip())
+        ok, detail = (False, refused) if refused else fn(str(body.get("session") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/discard":
         # A new chat taken back while it opened, to start again where the
@@ -4526,6 +4550,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             ok, detail = room_edit.session_unsend(str(body.get("session") or ""),
                                                   str(body.get("id") or ""), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/chats":
+        # The phone's companion says which Local chats it carries: ids,
+        # kind, name where kept, never content (local_chats.py, §6.61).
+        from . import local_chats
+
+        ok, detail = local_chats.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/mark":
         # Pin to top and Mark unread, from a chat's long press or ⋮

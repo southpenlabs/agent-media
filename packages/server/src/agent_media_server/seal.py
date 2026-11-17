@@ -410,8 +410,11 @@ def session_seal(session: str, flag, bearer: str) -> tuple[bool, dict]:
     live session ends it first. 409 when it cannot be sealed (a shared-store
     harness, already sealed, would not exit), 404 when nothing of it is here.
     """
+    from . import local_chats
+
     session = (session or "").strip()
-    if not sessions._SESSION.fullmatch(session):
+    local = local_chats.is_local(session)
+    if not (sessions._SESSION.fullmatch(session) or local):
         return False, {"error": "not a session id", "status": 400}
     if flag is None:
         flag = True
@@ -420,6 +423,8 @@ def session_seal(session: str, flag, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    if local:
+        return _seal_local(session, flag)
     try:
         if flag:
             got = seal(session)
@@ -433,6 +438,26 @@ def session_seal(session: str, flag, bearer: str) -> tuple[bool, dict]:
         return False, {"error": msg, "status": status}
     except OSError as e:
         return False, {"error": f"could not seal ({e})", "status": 500}
+
+
+def _seal_local(session: str, flag: bool) -> tuple[bool, dict]:
+    """A Local chat (local_chats.py, §6.61): the server keeps nothing of its
+    content to encrypt, so sealing it is the mark alone. Its row is then
+    listed as any sealed thread's, with no title, on every device; the
+    phone keeps the chat itself. Unsealing takes the mark off."""
+    from . import local_chats
+
+    rec = local_chats.record(session)
+    if rec is None:
+        return False, {"error": "no such Local chat", "status": 404}
+    if flag == sealed.is_sealed(session):
+        return False, {"error": "already sealed" if flag else "not sealed", "status": 409}
+    if flag:
+        sealed.mark(session, harness="local", cwd="", project="", bundle="", local=True,
+                    network=str(rec.get("network") or ""), device=str(rec.get("device") or ""))
+        return True, {"session": session, "sealed": True, "history": 0, "items": 0}
+    sealed.unmark(session)
+    return True, {"session": session, "sealed": False, "skipped": []}
 
 
 def run(session: str, *, unseal_: bool = False, dry_run: bool = False) -> int:
