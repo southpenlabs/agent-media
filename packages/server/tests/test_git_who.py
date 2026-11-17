@@ -191,3 +191,30 @@ def test_add_changes_outside_a_checkout(tmp_path):
     assert git_who.top_of(str(tmp_path)) is None
     rows = [{"session": "aaaaaaaa-0000-0000-0000-000000000001", "cwd": str(tmp_path)}]
     assert git_who.add_changes(rows)[0]["changes"] is None
+
+
+def test_what_was_read_outlives_a_restart(repo, monkeypatch):
+    """The reads are kept on disk: a new server reads a transcript only
+    from where the last one stopped (18 Nov 2026: 1 GB re-read after each
+    restart on red2)."""
+    r, proj = repo
+    proj.mkdir(parents=True)
+    t = proj / "a.jsonl"
+    t.write_text(json.dumps({"type": "user", "cwd": str(r), "timestamp": "2026-11-18T00:00:00Z",
+                             "message": {"content": "hi"}}) + "\n")
+    git_who._scan(str(t))
+    git_who.save()
+    offset = git_who._seen[str(t)][0]
+    assert offset > 0
+    git_who._seen.clear()
+    monkeypatch.setitem(git_who._disk, "loaded", False)
+    reads = []
+    real_open = open
+
+    def spy(path, *a, **k):
+        if str(path) == str(t):
+            reads.append(path)
+        return real_open(path, *a, **k)
+    monkeypatch.setattr("builtins.open", spy)
+    git_who._scan(str(t))
+    assert git_who._seen[str(t)][0] == offset and reads == []

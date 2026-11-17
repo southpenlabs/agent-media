@@ -25,7 +25,11 @@ rather than listed (`changes: {"files", "commits", "at"}`), from a snapshot
 per checkout that a list refreshes behind itself.
 
 Each transcript is read once and then only from where it was read up to,
-so asking again costs only what was appended since.
+so asking again costs only what was appended since. What was read is kept on
+disk too (`<state>/git-who.pickle`, saved at most every SAVE_EVERY_S): read
+from nothing, the two weeks of transcripts were about 1 GB and 37 s of CPU
+on red2, paid again after every restart of the server, and the thread list
+took 7-23 s while it lasted (18 Nov 2026: speedups).
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import pickle
 import re
 import threading
 import time
@@ -63,6 +68,82 @@ _lock = threading.Lock()
 # transcript path -> (bytes read, its events, the folders it ran in, the
 # committing commands whose output has not come yet)
 _seen: dict[str, tuple[int, list[tuple], set[str], dict[str, str]]] = {}
+
+
+#: The kept reads: written at most this often while anything new was read.
+SAVE_EVERY_S = 300.0
+_CACHE_VERSION = 1
+_disk = {"loaded": False, "dirty": False, "saved": 0.0, "saving": False}
+
+
+def _cache_path() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "agent-media" / "git-who.pickle"
+
+
+def _load() -> None:
+    """The reads kept by the last server, once per process; a transcript
+    since rewritten is read again by _scan (its size under the offset)."""
+    with _lock:
+        if _disk["loaded"]:
+            return
+        _disk["loaded"] = True
+    try:
+        with open(_cache_path(), "rb") as fh:
+            got = pickle.load(fh)
+    except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ValueError):
+        return
+    if not isinstance(got, dict) or got.get("v") != _CACHE_VERSION:
+        return
+    kept = {p: v for p, v in (got.get("seen") or {}).items() if os.path.exists(p)}
+    with _lock:
+        for p, v in kept.items():
+            _seen.setdefault(p, v)
+
+
+def save(path: Path | None = None) -> None:
+    """Write the reads to disk (owner-only, replaced whole), to `path` or
+    the state folder's."""
+    with _lock:
+        snap = dict(_seen)
+        _disk["dirty"] = False
+    # Gone, or past the age no transcript is read at: not kept.
+    now = time.time()
+    for p in list(snap):
+        try:
+            if now - os.path.getmtime(p) > MAX_AGE_S:
+                del snap[p]
+        except OSError:
+            del snap[p]
+    path = path or _cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump({"v": _CACHE_VERSION, "seen": snap}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+    except OSError:
+        with _lock:
+            _disk["dirty"] = True
+    finally:
+        with _lock:
+            _disk["saved"] = time.monotonic()
+            _disk["saving"] = False
+
+
+def _maybe_save() -> None:
+    """Save on a thread of its own when something new was read and the last
+    save is SAVE_EVERY_S old (or there was none)."""
+    with _lock:
+        due = (_disk["dirty"] and not _disk["saving"]
+               and (not _disk["saved"] or time.monotonic() - _disk["saved"] >= SAVE_EVERY_S))
+        if due:
+            _disk["saving"] = True
+    if due:
+        # The folder as it is now, not when the thread runs.
+        threading.Thread(target=save, args=(_cache_path(),), name="git-who-save", daemon=True).start()
 
 
 def _slug(path: str) -> str:
@@ -106,6 +187,7 @@ def _scan(path: str) -> tuple[list[tuple], set[str]]:
     """The transcript's events, read on from where the last call stopped:
     ("edit", at, abs path), ("shell", at, command, cwd), ("commit", at,
     {hashes}); and the folders it ran in."""
+    _load()
     try:
         size = os.path.getsize(path)
     except OSError:
@@ -170,6 +252,8 @@ def _scan(path: str) -> tuple[list[tuple], set[str]]:
         offset += end
         with _lock:
             _seen[path] = (offset, events, cwds, pending)
+            _disk["dirty"] = True
+        _maybe_save()
     return events, cwds
 
 
