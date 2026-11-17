@@ -56,9 +56,13 @@ _CHUNK = 256 * 1024
 #: conservatively — a trailing parenthetical that talks about recaps — so a
 #: summary that happens to end in an ordinary "(…)" keeps it.
 _HINT = re.compile(r"\s*\([^()]*\brecaps?\b[^()]*\)\s*$", re.IGNORECASE)
-#: How many transcripts' answers to keep. Far more than /targets lists; the
-#: bound is only there so a long-running canvas cannot grow without limit.
-_CACHE_MAX = 512
+#: How many transcripts' answers to keep: well above what /targets lists, or
+#: each build pushes out the entries the next needs. It was 512 with about
+#: 570 chats listed on red2, so every build re-read some 515 transcripts from
+#: their ends, the largest part of a warm build (18 Nov 2026: speedups). An
+#: entry is a few hundred bytes; the bound only stops a long-running server
+#: growing without limit.
+_CACHE_MAX = 8192
 #: How many bytes before the read offset are kept to tell an append from a
 #: rewrite in place. A transcript line ends in a uuid and a timestamp, so
 #: this much of it is as good as unique.

@@ -660,3 +660,25 @@ def test_the_speech_history_is_read_again_only_when_it_changed(clip, monkeypatch
     store.sig = (2, 2, 20)
     assert [t.text for t in session_feed.turns(SESSION, store=store)] == ["First.", "Second."]
     assert Signed.reads == 2
+
+
+def test_titles_are_read_on_from_where_the_last_read_stopped(tmp_path, monkeypatch):
+    """A long chat's transcript was read whole for its title on every list
+    build; now only what was appended since (18 Nov 2026)."""
+    monkeypatch.setattr(session_feed, "_TITLES", {})
+    p = tmp_path / "t.jsonl"
+    p.write_text(json.dumps({"type": "user", "message": {"content": "the first question"}}) + "\n"
+                 + json.dumps({"type": "ai-title", "aiTitle": "Old name"}) + "\n")
+    assert session_feed._titles_in(p) == ("", "Old name", "the first question")
+    size = p.stat().st_size
+    with open(p, "a") as fh:
+        fh.write(json.dumps({"type": "ai-title", "aiTitle": "New name"}) + "\n")
+        fh.write('{"type": "custom-title", "customTitle": "Half wr')       # still being written
+    reads = []
+    real = type(p).open
+    monkeypatch.setattr(type(p), "open", lambda self, *a, **k: reads.append(1) or real(self, *a, **k))
+    assert session_feed._titles_in(p) == ("", "New name", "the first question")
+    assert session_feed._TITLES[str(p)][1] > size
+    with open(p, "a") as fh:
+        fh.write('itten"}\n')
+    assert session_feed._titles_in(p) == ("Half written", "New name", "the first question")

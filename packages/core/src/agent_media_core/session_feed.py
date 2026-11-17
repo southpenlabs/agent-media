@@ -391,6 +391,82 @@ def asked_for(session: str, ts: list[Turn]) -> str:
     return _asked(session, ts)
 
 
+#: path -> (inode, bytes read, custom title, ai title, first prompt): what
+#: `_asked` has read of each Claude transcript, so a call reads only what was
+#: appended since. It read the whole file every time, tens of MB for a long
+#: chat, on every thread list build for each chat that had changed (18 Nov
+#: 2026: speedups).
+_TITLES: dict[str, tuple[int, int, str, str, str]] = {}
+_TITLES_LOCK = threading.Lock()
+
+
+def _titles_in(path: Path) -> tuple[str, str, str]:
+    """`(custom title, last ai-title, first prompt)` in a Claude transcript,
+    read on from where the last call stopped (from the start when the file
+    was replaced or shrank). A line still being written waits."""
+    st = path.stat()
+    key = str(path)
+    with _TITLES_LOCK:
+        hit = _TITLES.get(key)
+    if hit and hit[0] == st.st_ino and hit[1] <= st.st_size:
+        pos, custom, title, prompt = hit[1], hit[2], hit[3], hit[4]
+    else:
+        pos, custom, title, prompt = 0, "", "", ""
+    if st.st_size > pos:
+        with path.open("rb") as fh:
+            fh.seek(pos)
+            for raw in fh:
+                if not raw.endswith(b"\n"):
+                    break
+                pos += len(raw)
+                line = raw.decode("utf-8", "replace")
+                # A name given with /rename, which beats Claude's own.
+                if '"custom-title"' in line:
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        continue
+                    custom = (d.get("customTitle") or "").strip() or custom
+                    continue
+                if '"ai-title"' in line:
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        continue
+                    title = (d.get("aiTitle") or "").strip() or title
+                    continue
+                # `"user"` rather than `"type":"user"`: the transcripts
+                # this reads are written without spaces after the colons,
+                # but nothing promises that, and a fast path that depends
+                # on JSON formatting is a fast path that silently stops
+                # finding anything.
+                if prompt or '"user"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("type") != "user":
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if isinstance(content, list):      # blocks, not a string
+                    content = next((b.get("text") for b in content
+                                    if isinstance(b, dict)
+                                    and b.get("type") == "text"), None)
+                if not isinstance(content, str):
+                    continue
+                text = " ".join(content.split())
+                # Tool results, hook injections and system reminders are
+                # user-role messages too, and none of them is a question
+                # anybody asked.
+                if not text or text.startswith(("<", "Caveat:", "[media ")):
+                    continue
+                prompt = text
+    with _TITLES_LOCK:
+        _TITLES[key] = (st.st_ino, pos, custom, title, prompt)
+    return custom, title, prompt
+
+
 def _asked(session: str, ts: list[Turn]) -> str:
     """What to call this conversation.
 
@@ -414,50 +490,7 @@ def _asked(session: str, ts: list[Turn]) -> str:
     title = custom = prompt = ""
     if path is not None:
         try:
-            with path.open(errors="replace") as fh:
-                for line in fh:
-                    # A name given with /rename, which beats Claude's own.
-                    if '"custom-title"' in line:
-                        try:
-                            d = json.loads(line)
-                        except ValueError:
-                            continue
-                        custom = (d.get("customTitle") or "").strip() or custom
-                        continue
-                    if '"ai-title"' in line:
-                        try:
-                            d = json.loads(line)
-                        except ValueError:
-                            continue
-                        title = (d.get("aiTitle") or "").strip() or title
-                        continue
-                    # `"user"` rather than `"type":"user"`: the transcripts
-                    # this reads are written without spaces after the colons,
-                    # but nothing promises that, and a fast path that depends
-                    # on JSON formatting is a fast path that silently stops
-                    # finding anything.
-                    if prompt or '"user"' not in line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                    except ValueError:
-                        continue
-                    if d.get("type") != "user":
-                        continue
-                    content = (d.get("message") or {}).get("content")
-                    if isinstance(content, list):      # blocks, not a string
-                        content = next((b.get("text") for b in content
-                                        if isinstance(b, dict)
-                                        and b.get("type") == "text"), None)
-                    if not isinstance(content, str):
-                        continue
-                    text = " ".join(content.split())
-                    # Tool results, hook injections and system reminders are
-                    # user-role messages too, and none of them is a question
-                    # anybody asked.
-                    if not text or text.startswith(("<", "Caveat:", "[media ")):
-                        continue
-                    prompt = text
+            custom, title, prompt = _titles_in(path)
         except OSError as e:
             log.debug("transcript unreadable for %s: %s", session, e)
     else:
