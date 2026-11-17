@@ -91,7 +91,7 @@ branch `sasonica` (two commits on its v32.0; sasonica-bridges b0705e7,
   `ASIntent.Matrix` is a method, so its call, meeting and presence code no
   longer compiled beside the other bridges (which all share v0.33.0).
   Change: call `Matrix()` (fork commit 6c1473e). Upstream: a PR.
-  State: drafted (the branch), not sent: waiting for David's yes.
+  State: drafted (the branch), sent 18 Nov 2026 (David: "yeah, let's do it"): https://github.com/YourSandwich/mautrix-teams/pull/4 (mautrix-go v0.33) and /pull/5 (without the appservice connector).
 - **Running without the appservice connector.** Element Call and Teams
   presence need a homeserver (MatrixRTC state events, OpenID for LiveKit,
   TURN, ghost presence, all through `*matrix.ASIntent`). Under any other
