@@ -309,6 +309,40 @@ they are deleted only if asked.
 5. App: the dial's step, "open in Element" on a Local chat's row elsewhere.
 6. A day on p8a against a test account's chats, then David's.
 
+### Step 1, the red2 test — done (18 Nov 2026)
+
+A private tuwunel 1.9.4 (red5's version) on red2's loopback, a throwaway
+`@david:spike.test`, and a Go program on mautrix-go v0.33.0 built with
+`-tags goolm` as the core is (`/tmp/e2ee-spike/prog/main.go`, not kept in a
+repo). Nothing touched red5's homeserver or David's account.
+
+- **One-time sign-in works.** tuwunel advertises `get_login_token`; the
+  user's client asked for a token (with a password check), the "phone"
+  signed in with it (2-minute life), and a second use was refused (403).
+- **Verifying works with the recovery key alone.** A client set up
+  cross-signing, secret storage and a key backup as Element does; the phone
+  typed the recovery key once (`VerifyWithRecoveryKey`), was cross-signed,
+  and the other client saw it as `cross-signed-verified`. It read the
+  backup key from secret storage and trusted the backup.
+- **The layout works.** Space "Local chats" › sub-space "WhatsApp" › an
+  encrypted room "Alice", with `com.sasonica.local` state.
+- **Sending works and is idempotent.** Messages as Alice with
+  `com.beeper.per_message_profile` and `com.sasonica.local` {message,
+  origin_ts}; the same txn id sent twice gave the same event. An edit
+  (`m.replace`) and a delete (a redaction: the content emptied for
+  everyone) went through.
+- **Reading works, live and later.** The user's other device decrypted the
+  messages, profile and edit as they came; a device added afterwards
+  verified with the recovery key, restored the key backup and decrypted the
+  whole history.
+- **What we write ourselves:** mautrix-go reads key backups but has no
+  upload helper; uploading a session is about 40 lines on its
+  `backup.EncryptSessionData` and `PutKeysInBackupForRoomAndSession`.
+- **Still to see:** Element's own rendering (per-message profiles) and the
+  phone's SAS/emoji verification as an alternative to the recovery key;
+  both in step 6's day on p8a, or earlier against Element Web on the test
+  server.
+
 ### What's risky
 
 - **Our device's keys.** A crypto store lost or a session not backed up
