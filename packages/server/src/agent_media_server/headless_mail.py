@@ -179,8 +179,12 @@ def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
         return None, "no session or folder named"
     if target.startswith(("/", "~")):
         want = _real(target)
-        here = [v for v in views if v.get("live") and _real(str(v.get("cwd") or "")) == want
-                and not _foreign(v)]
+        from . import chat_worktree
+
+        # A chat in its own worktree (chat_worktree.py) is in the repo.
+        here = [v for v in views if v.get("live") and not _foreign(v)
+                and want in (_real(str(v.get("cwd") or "")),
+                             chat_worktree.owner(str(v.get("cwd") or "")))]
         if not here:
             return None, f"no live headless session in {target}"
         return here[0], ""

@@ -3310,6 +3310,12 @@ class Supervisor:
             raise Refused(QUOTA_REFUSED.format(at=_clock(float(lim["resets_at"]))),
                           "quota_limited", quota=q.view(rec=lim))
         session = session or str(uuid.uuid4())
+        if not fork_from and session not in self.sessions:
+            # A repo that opts in gives each chat its own worktree
+            # (chat_worktree.py); a branch with history stays where its
+            # transcript is filed.
+            from . import chat_worktree
+            cwd = chat_worktree.make(cwd, session)
         slot_from = "message" if slot else ""
         if not slot and _speech_level(session) == "interrupt":
             # The speech level is the slot default (§6.4): Interrupt runs now.
