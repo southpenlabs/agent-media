@@ -1,21 +1,37 @@
-# A Trybe connector: Sasonica's first booking system (proposal, 17 Nov 2026)
+# Booking systems: a calendar-feed reader first, then Trybe (proposal, 17 Nov 2026)
 
 David, 17 Nov 2026: "how much Sasonica interface with a booking system? ...
 like timely or tribe or netbookings?", then, of Trybe (try.be): "write it
-up". Nothing built. Business context:
+up", then "I think we'd be better doing [the Timely venue] first" and
+"yep!" to the order below. Nothing built. Business context:
 `docs/proposals/2026-10-19-opening-to-the-public-legally.md` ("Integrations
 are the moat").
 
-## Why Trybe first
+## The order
+
+1. **A calendar-feed booking reader, first.** Most booking systems give
+   staff (or a venue) an iCal feed of appointments, Timely included. A
+   provider that reads a feed gives step 1 below (read-only rundowns,
+   alerts on new, moved and cancelled bookings) for any of them, with no
+   partner deal. The first venue is a Timely one, as soon as its manager
+   turns the staff feed on; that replaces the signed-in-session script.
+2. **Timely with an API key, if offered.** Where a venue's Timely plan
+   issues an admin API key and the manager agrees, availability and
+   booking follow. Unconfirmed: what the key reaches.
+3. **Trybe**, the first full connector (below), when a Trybe venue is
+   ready to approve production; the playground needs no venue.
+4. **Netbookings** waits on a partner deal.
+
+## Who offers what
 
 | system | official access for a third party | today |
 |---|---|---|
 | **Trybe** (try.be, UK spa and wellness) | public REST API and docs, a playground, partner onboarding | nothing |
-| Timely (gettimely.com, salons; Marlo) | no published partner API; reviewers report an admin-issued, plan-gated key and Zapier ([Supergood](https://supergood.ai/api-report-card/timely), [Truto](https://truto.one/integrations/detail/timely/)). Not timely.com, a different company's time tracker | personal script reading Marlo bookings with David's signed-in session; move to Timely's calendar feed pending (reminder 24 Nov) |
+| Timely (gettimely.com, salons and spas) | no published partner API; reviewers report an admin-issued, plan-gated key and Zapier ([Supergood](https://supergood.ai/api-report-card/timely), [Truto](https://truto.one/integrations/detail/timely/)). Not timely.com, a different company's time tracker | personal script reading David's staff bookings through his signed-in session (fragile: expires, and Timely added a bot check in Nov 2026); the staff calendar feed is being asked of the venue |
 | Netbookings (Peninsula Hot Springs) | no public API or developer programme; integrations are its own deals ([integrations](https://netbookings.com.au/integrations/)) | personal `phs-session`/`phs-rundown` scripts over the staff portal |
 
-Trybe is the only one Sasonica can build against properly without first
-negotiating, so it is where a booking connector gets built and tested.
+Trybe is the only one with a full public API; the feed reader is the only
+thing that works everywhere now.
 
 ## What Trybe offers (docs.try.be, read 17 Nov 2026)
 
@@ -69,10 +85,15 @@ In order of how little they need:
 
 ## How it fits the server
 
-- A `booking` provider interface in the server (availability, offerings,
-  bookings list, basket, checkout link, webhook intake), Trybe its first
-  implementation, so Timely's feed or a Netbookings partner API can slot
-  in beside it.
+- A `booking` provider interface in the server (bookings list, and where
+  a system allows: availability, offerings, basket, checkout link, webhook
+  intake), each provider saying which it has. The calendar-feed reader is
+  the first (bookings list only, polled; changes found by diffing UIDs and
+  times, as the Rye booking mirror does), Trybe the first full one.
+- The feed URL is a credential (whoever has it reads the bookings): kept
+  in the secrets store, never logged; open source first — an existing
+  iCal parser (`icalendar`, already used for calendars here) rather than
+  our own.
 - Per venue: site ID, token (secrets store, never the repo or a log),
   environment, webhook secret. A webhook endpoint on the server's public
   HTTPS (off-tailnet rule) that checks the signature and dedupes by event id.
@@ -90,8 +111,9 @@ answer. Revisit if Trybe publishes an OpenAPI file worth generating from.
 
 ## Questions for David
 
-- Which venue first? A real Trybe site is needed for production; the
-  playground is enough to build steps 1–3.
+- Which venue first? Decided: a Timely venue, through its staff feed
+  (David, 17 Nov 2026). For Trybe, a real site is needed for production;
+  the playground is enough to build steps 1–3.
 - Who writes to Trybe? The kickoff email goes out under David's name
   (draft on request), asking for: playground access, a `partner_id`,
   partner terms and fees, a DPA, and whether a partner-level (not
