@@ -78,6 +78,37 @@ sasonica-app session.
   `useSheetSwipeDown.ts`: gestures on the app's own player and footer, no
   assistant-ui code).
 
+## mautrix-teams (YourSandwich/mautrix-teams, AGPL-3.0) — Teams in Sasonica Bridges
+
+The Microsoft Teams bridge (Go, bridgev2; what red5 runs) is not a mautrix
+project. Sasonica Bridges runs it on the phone under its own
+`localmatrix` connector, from our public fork
+[davidj4tech/mautrix-teams](https://github.com/davidj4tech/mautrix-teams),
+branch `sasonica` (two commits on its v32.0; sasonica-bridges b0705e7,
+17 Nov 2026).
+
+- **mautrix-go v0.33.0.** It was on v0.32.0; in v0.33.0
+  `ASIntent.Matrix` is a method, so its call, meeting and presence code no
+  longer compiled beside the other bridges (which all share v0.33.0).
+  Change: call `Matrix()` (fork commit 6c1473e). Upstream: a PR.
+  State: drafted (the branch), not sent: waiting for David's yes.
+- **Running without the appservice connector.** Element Call and Teams
+  presence need a homeserver (MatrixRTC state events, OpenID for LiveKit,
+  TURN, ghost presence, all through `*matrix.ASIntent`). Under any other
+  `bridgev2.MatrixConnector`, `Start` now turns both off with one log line
+  instead of failing each call or presence update; nothing changes under
+  the appservice connector (fork commit 9fe17b5, with a test). Upstream: a
+  PR, with the v0.33 one or after it. State: drafted, not sent: waiting
+  for David's yes.
+- **Its module path, `go.mau.fi/mautrix-teams`, does not resolve**, so
+  sasonica-bridges needs a `replace`. Upstream: an issue asking for a
+  resolvable path (a vanity import or `github.com/YourSandwich/...`).
+  State: idea.
+- **A build tag that leaves the call code out.** pion and LiveKit add
+  17 MB to the phone's core, and pion's Android interface lookup
+  (wlynxg/anet) needs `-checklinkname=0` to link. A tag (or a separate
+  package) for calls would drop both where calls cannot run. State: idea.
+
 ## The rest we stand on (to watch and give back to)
 
 The rule behind this file: `docs/decisions/2026-11-17-open-source-first.md`.
@@ -87,7 +118,7 @@ Federated and messaging:
 - **Matrix**: the tuwunel homeserver (mel.ryer.org, red5), the protocol
   and its specs (MSCs we lean on, e.g. MSC4144 per-message profiles for the
   bridges' second stage).
-- **mautrix** bridges (AGPL: meta, whatsapp, gmessages, telegram, teams) and
+- **mautrix** bridges (AGPL: meta, whatsapp, gmessages, telegram, slack, discord, signal; teams above) and
   **mautrix-go** (MPL): for the phone companion, anything in our
   `localmatrix` connector that a general "no homeserver" connector upstream
   would make unnecessary.
