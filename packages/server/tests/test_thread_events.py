@@ -727,3 +727,16 @@ def test_the_fast_re_read_lasts_past_the_turn(monkeypatch):
     assert w._interval() == thread_events.FAST_S
     w._busy, w._quick_until = True, 0.0
     assert w._interval() == thread_events.FAST_S
+
+
+def test_one_scan_of_the_running_agents_answers_every_stream(monkeypatch):
+    """Each open thread's re-read walked every process; one walk now answers
+    them all for LIVE_REUSE_S (18 Nov 2026)."""
+    calls = []
+    monkeypatch.setattr(sessions, "live_sessions", lambda: calls.append(1) or {"s1": "%1"})
+    monkeypatch.setattr(thread_events, "LIVE_REUSE_S", 30.0)
+    assert thread_events._live_panes() == {"s1": "%1"}
+    assert thread_events._live_panes() == {"s1": "%1"} and len(calls) == 1
+    monkeypatch.setattr(thread_events, "LIVE_REUSE_S", 0.0)
+    thread_events._live_panes()
+    assert len(calls) == 2

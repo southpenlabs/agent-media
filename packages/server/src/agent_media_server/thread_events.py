@@ -173,11 +173,31 @@ def _state(state: str, live: bool, pane, bg: dict | None = None) -> dict:
             "background": bg if state == "waiting" else None}
 
 
+#: How long one scan of the running agents (sessions.live_sessions, a walk of
+#: every process: 0.075 s on red2) answers every open thread's re-read: each
+#: stream did its own every second while a turn worked (18 Nov 2026: speedups).
+LIVE_REUSE_S = 0.8
+_LIVE: tuple[float | None, dict] = (None, {})
+_LIVE_LOCK = threading.Lock()
+
+
+def _live_panes() -> dict:
+    """sessions.live_sessions(), shared by the streams for LIVE_REUSE_S."""
+    global _LIVE
+    with _LIVE_LOCK:
+        at, panes_now = _LIVE
+        if at is not None and time.monotonic() - at < LIVE_REUSE_S:
+            return panes_now
+        panes_now = sessions.live_sessions()
+        _LIVE = (time.monotonic(), panes_now)
+        return panes_now
+
+
 def session_state(session: str) -> dict:
     """`{"state", "session_live", "live", "pane"}` — what the session is
     doing, from its pane, or for a headless session (MEDIA_HEADLESS) from
     sessiond."""
-    pane = sessions.live_sessions().get(session, "")
+    pane = _live_panes().get(session, "")
     if not pane:
         hl = driver.headless_state(session)
         if hl is not None:

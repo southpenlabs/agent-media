@@ -632,3 +632,31 @@ def test_a_swept_clip_takes_its_start_with_it(tmp_path, clip):
     turn = session_feed.turns(SESSION, store=store)[0]
     assert turn.sentences == ["Two."]
     assert turn.starts == [1.4]
+
+
+def test_the_speech_history_is_read_again_only_when_it_changed(clip, monkeypatch):
+    """An open thread re-reads its turns every second while a turn works:
+    the rows are kept while the history's signature is the same (18 Nov 2026)."""
+    monkeypatch.setattr(session_feed, "_ROWS", ("", (), []))
+    a = clip("a.mp3")
+
+    class Signed(_Store):
+        path = "/tmp/speech-test.db"
+        sig = (1, 1, 10)
+        reads = 0
+
+        def history_signature(self, *, sink, limit):
+            return self.sig
+
+        def recent_history(self, *, sink=None, limit=0):
+            Signed.reads += 1
+            return list(self._rows)
+
+    store = Signed([_row([a], text="First.")])
+    assert [t.text for t in session_feed.turns(SESSION, store=store)] == ["First."]
+    assert [t.text for t in session_feed.turns(SESSION, store=store)] == ["First."]
+    assert Signed.reads == 1
+    store._rows = [_row([a], at=200.0, text="Second."), _row([a], text="First.")]
+    store.sig = (2, 2, 20)
+    assert [t.text for t in session_feed.turns(SESSION, store=store)] == ["First.", "Second."]
+    assert Signed.reads == 2

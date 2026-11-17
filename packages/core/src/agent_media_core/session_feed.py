@@ -47,6 +47,7 @@ import json
 import logging
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -163,7 +164,7 @@ def turns(session: str, *, store=None) -> list[Turn]:
         return []
     st = store or StateStore()
     out: list[Turn] = []
-    for row in st.recent_history(sink="speech", limit=_FETCH):
+    for row in _speech_rows(st):
         ex = row.get("extras")
         if not isinstance(ex, dict) or ex.get("source_session") != session:
             continue
@@ -212,6 +213,34 @@ def turns(session: str, *, store=None) -> list[Turn]:
                         song=_song_of(ex)))
     out.sort(key=lambda t: t.at)
     return out
+
+
+#: (db path, signature, rows): the last speech history read, kept while its
+#: StateStore.history_signature stays the same. An open thread's stream
+#: re-reads its turns every second while a turn works, and reading 4,000 rows
+#: was most of that (0.12 s of 0.3 s on red2); the signature is 9 ms (18 Nov
+#: 2026: speedups). The rows are only read, never changed.
+_ROWS: tuple[str, tuple, list[dict]] = ("", (), [])
+_ROWS_LOCK = threading.Lock()
+
+
+def _speech_rows(st) -> list[dict]:
+    """`st.recent_history(sink="speech", limit=_FETCH)`, read again only
+    when the speech history has changed since the last read."""
+    global _ROWS
+    try:
+        sig = st.history_signature(sink="speech", limit=_FETCH)
+    except Exception:  # noqa: BLE001 — unknown: read afresh
+        sig = ()
+    key = str(getattr(st, "path", ""))
+    with _ROWS_LOCK:
+        path, seen, rows = _ROWS
+        if sig and path == key and seen == sig:
+            return rows
+    rows = st.recent_history(sink="speech", limit=_FETCH)
+    with _ROWS_LOCK:
+        _ROWS = (key, sig, rows) if sig else ("", (), [])
+    return rows
 
 
 def _song_of(ex: dict) -> dict:

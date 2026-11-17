@@ -444,3 +444,13 @@ def _voice_model_sweep_inline(monkeypatch):
     from agent_media_server import voice_model
 
     monkeypatch.setattr(voice_model, "_sweep_later", voice_model.sweep)
+
+
+@pytest.fixture(autouse=True)
+def _live_scan_not_shared(monkeypatch):
+    """thread_events shares one scan of the running agents across streams
+    for LIVE_REUSE_S; a test's fake panes must not answer the next test's."""
+    from agent_media_server import thread_events
+
+    monkeypatch.setattr(thread_events, "LIVE_REUSE_S", 0.0)
+    monkeypatch.setattr(thread_events, "_LIVE", (None, {}))
