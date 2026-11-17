@@ -302,3 +302,15 @@ def test_rename_a_local_chat_refuses_unlisted_auto_and_names_off(server, phone, 
     monkeypatch.setenv("MEDIA_LOCAL_CHAT_NAMES", "0")
     res, obj = call(server, "POST", "/rename", {"session": WA, "title": "x"}, _auth(t))
     assert res.status == 400 and obj["why"] == "names_off"
+
+
+def test_listing_says_which_chats_the_asking_device_bridges(server, phone):
+    _seed(server, phone)
+    other = _paired(server, name="Pixel Tablet")
+    st, _ = post(server, other["token"], {"network": "meta", "chats": [{"id": "100777", "kind": "person"}]})
+    assert st == 200
+    res, got = call(server, "GET", "/local/chats", headers=_auth(phone["token"]))
+    assert res.status == 200, got
+    mine = {c["id"]: c["mine"] for c in got["chats"]}
+    assert mine[WA] is True and mine["local:meta:100777"] is False
+    assert got["device"]

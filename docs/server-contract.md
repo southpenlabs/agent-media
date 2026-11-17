@@ -12135,9 +12135,25 @@ thread (`/conversation/log`), and search finds it under the same rules as a
 local chat (folder grants by the folder it ran in). A native copy wins, and
 this machine's own folder of the archive is never frozen. `POST /reply` to a
 frozen chat answers 409 `{"code": "frozen", "host", "error"}` with what to do
-instead; a branch (`mode: "branch"`) is not refused. Coming: the reply
-forwarded to the owner's server where a peer link may reply (step 3), and
-Continue here (step 2).
+instead; a branch (`mode: "branch"`) is not refused. Coming: Continue here
+(step 2).
+
+**Continued on its own machine (step 3, built 18 Nov 2026).** Where this
+server has a peer link to the chat's host's own server that may reply
+(`media-visual-canvas pair --device "<this> reply" --reply` there, with
+`--search` too if wanted; `media peer pair <name> '<link>'` here), `POST
+/reply` to a frozen chat is passed on there: `POST /reply {session, text,
+mode: "continue", quote?, reply_to?, quote_part?}` with that link's token,
+25 s. Its answer comes back as this one's, with `forwarded: {"host",
+"server": "<its address>", "server_id"?}`, so the app opens the thread on
+that server to watch it. The link is found by the host's name against the
+link's alias, its configured peer's host or the server's name
+(`peer_link.reply_link`). No such link: the 409 above. The owner refusing
+or not answering: the 409 with `owner_error` (and `forwarded` when it was
+asked). A reply-only token (`pair --reply`, `devices.is_reply_peer`) is let
+into `POST /reply` alone (`auth.reply_peer`, as the owner, marked `peer`),
+only to continue a chat (403 `code: "peer_reply"` otherwise), and a reply it
+brings to a chat frozen there too is refused, never passed on again.
 
 ---
 
@@ -12508,6 +12524,9 @@ POST /local/chats {"network", "chats": [{"id": "<network chat id>", "name"?, "ki
                                          "updated"?: <unix s>}…], "full"?: bool}
   → {"ok": true, "chats": [<chat>…]}          // the chats sent, in order
 GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // every record, gone ones too
+  Each chat also carries `mine` (the asking device is the one that bridges
+  it) and the answer `device` (the asking device's id), so a phone hands its
+  companion only its own chats' settings (18 Nov 2026, sasonica-app mail #884).
 
 <chat> = {"id": "local:<network>:<id>", "network": {"id", "name"}, "kind",
           "name"?,                            // only where names are kept (below)

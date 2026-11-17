@@ -254,7 +254,12 @@ def listing(bearer: str) -> tuple[bool, dict]:
         return False, {"code": "guest", "status": 403,
                        "error": "a guest does not see the phone's chats"}
     ids = sorted(k for k, v in STORE.all().items() if isinstance(v, dict) and is_local(k))
-    return True, {"chats": _answer(ids), "names": names_on()}
+    # `mine`: the asking device is the one that bridges the chat, so a phone
+    # hands its companion only its own chats (sasonica-app mail #884: the
+    # app's native side does not know its device id).
+    me = auth.device_id(bearer) or ""
+    chats = [{**c, "mine": bool(me) and c.get("device") == me} for c in _answer(ids)]
+    return True, {"chats": chats, "names": names_on(), "device": me or None}
 
 
 def _bad(error: str, **extra) -> tuple[bool, dict]:
