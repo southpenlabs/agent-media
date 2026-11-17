@@ -282,8 +282,15 @@ they are deleted only if asked.
 - **Rooms**: one per chat (a chat moved to another phone carries on in the
   same room), in a "Local chats" space with a sub-space per network, named
   as the chat is, the bridging device in the topic and the state event.
-- **Edits and deletes**: not asked separately; the recommendation stands
-  (mirrored edits, deletes as redactions) unless David says otherwise.
+- **Edits and deletes, and a Trash space** (David, 18 Nov 2026: "let's
+  have a trash space that's deleted after time"): an edit is copied as
+  `m.replace`. A message deleted on the network is redacted in its chat's
+  room (shown as deleted) and its words and media are posted to that
+  chat's room in a **Trash** space; a deleted chat's room moves into Trash
+  whole. After the trash time the companion deletes them for good
+  (redacts, then leaves and forgets the room). The time is **a setting**,
+  30 days by default, in Settings → Bridges beside the dial (kept with the
+  other three in `/local/settings`).
 
 ### Steps
 
