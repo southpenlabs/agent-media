@@ -1302,7 +1302,7 @@ def test_ask_new_starts_a_headless_session_and_it_is_listed(app_host, server, si
                    "speech_from": "default", "speech_fallback": {"level": "normal", "from": "default"},
                    "driver": "headless", "drivable": True, "harness": "claude",
                    "source": "sessiond", "project": "work", "cwd": row["cwd"], "tags": [],
-                   "quiet": None, "quiet_rule": None, "remind": None, "reminded": False, "issue": None, "spaces": ["project:work"], "mail_from": None,
+                   "quiet": None, "quiet_rule": None, "muted": False, "remind": None, "reminded": False, "issue": None, "spaces": ["project:work"], "mail_from": None,
                    "top": None, "marked_unread": False, "mark_carried": None,
                    "model": None, "model_label": None,
                    # What it holds in its folder's checkout, once the server has

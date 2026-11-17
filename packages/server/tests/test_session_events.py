@@ -247,6 +247,21 @@ def test_a_quiet_thread_says_so(monkeypatch):
         {"session": "b", "title": "B", "state": "working", "quiet": True}]
 
 
+def test_a_muted_thread_says_so(monkeypatch):
+    from agent_media_server import mute, quiet
+
+    monkeypatch.setattr(quiet, "quieted", lambda now=None: {"b": {"until": None, "at": 1.0}})
+    monkeypatch.setattr(mute, "muted", lambda now=None: {"a": {"until": None},
+                                                          "b": {"until": None}})
+    rows = [{"session": "a", "title": "", "state": "waiting"},
+            {"session": "b", "title": "B", "state": "working"},
+            {"session": "c", "title": "C", "state": "waiting"}]
+    assert session_events.with_quiet(rows) == [
+        {"session": "a", "title": "", "state": "waiting", "muted": True},
+        {"session": "b", "title": "B", "state": "working", "quiet": True, "muted": True},
+        {"session": "c", "title": "C", "state": "waiting"}]
+
+
 # --- alerts ---------------------------------------------------------------------------
 
 def _raise(title="red5: / at 91% (7G free)", level="warn", step=90):

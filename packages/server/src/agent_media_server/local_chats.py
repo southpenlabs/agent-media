@@ -212,12 +212,12 @@ def for_bearer(bearer: str, rows):
 
 def settings_of(ids: list[str]) -> dict[str, dict]:
     """`{id: settings}`: the fields a `/targets` row carries for these chats
-    (archived, top, marked_unread, quiet, remind, tags, speech, issue, read
+    (archived, top, marked_unread, quiet, muted, remind, tags, speech, issue, read
     mode, sealed), made by the same functions the list uses."""
     from agent_media_core.sealed import sealed
     from agent_media_core.speak_priority import SPEAKS, default_level, levels
 
-    from . import archive, chat_marks, issues, quiet, read_receipts, remind, tags
+    from . import archive, chat_marks, issues, mute, quiet, read_receipts, remind, tags
 
     flags, lv, dflt, locked = archive.archived(), levels(), default_level(), sealed()
     base = []
@@ -229,9 +229,9 @@ def settings_of(ids: list[str]) -> dict[str, dict]:
                      "priority": speech in SPEAKS,
                      "read_receipts": read_receipts.mode_of(sid),
                      "read_receipts_own": read_receipts.own(sid)})
-    base = issues.add_issues(chat_marks.add_marks(remind.add_remind(quiet.add_quiet(tags.add_tags(base)))))
+    base = issues.add_issues(chat_marks.add_marks(remind.add_remind(mute.add_mute(quiet.add_quiet(tags.add_tags(base))))))
     keep = ("archived", "archived_at", "sealed", "speech", "speech_own", "priority",
-            "read_receipts", "read_receipts_own", "top", "marked_unread", "quiet", "quiet_rule",
+            "read_receipts", "read_receipts_own", "top", "marked_unread", "quiet", "quiet_rule", "muted",
             "remind", "reminded", "tags", "chat_tags", "issue")
     return {r["session"]: {k: r.get(k) for k in keep if k in r} for r in base}
 

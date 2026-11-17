@@ -13,7 +13,8 @@ thread's one word.
                so a notification can offer the answers; a new question is a
                new `key`, so a change of question sends the list again. A
                `waiting` row carries its latest reply's one-tap chips,
-               `suggestions` [{text, source}] (§6.2.1), when it has any
+               `suggestions` [{text, source}] (§6.2.1), when it has any;
+               `quiet: true` / `muted: true` on a thread quiet or muted now
     alerts     {"last", "notices": [...]} — only when asked, `?alerts=<n>`:
                the alert store's notices after cursor n (alerts.notices),
                first on connecting, then whenever there are new ones. The
@@ -54,8 +55,8 @@ thread's one word.
                "group", "id", "sender": {"id", "name"}, "avatar"?: {"url",
                "etag"}, "text", "at"}` — not David's own, the bridge bot's,
                edits, reactions or history, nor in a chat that is quiet or
-               archived. Like `alerts`: first on connecting, then whenever
-               there are new ones; `?rooms=` empty is a first connection,
+               archived, nor ever in a muted one. Like `alerts`: first on
+               connecting, then whenever there are new ones; `?rooms=` empty is a first connection,
                just the head. One-tap answers ready after their message was
                told come as `answers` [{"n", "thread", "id", "suggestions"}]
                on the same cursor (room_notices.answers_ready)
@@ -123,15 +124,28 @@ def with_quiet(rows: list[dict], now: float | None = None) -> list[dict]:
     for…", a rule outside its shifts included), so the phone holds its "New
     reply" and posts one when the quiet ends — read every sweep, so the end
     is a change of the list (≤ POLL_S late). David, 7 Nov 2026: hold
-    options on the notice."""
-    from . import quiet
+    options on the notice. And `muted: true` on each thread muted now
+    (mute.py): the phone posts no "New reply" for it, nor a sound."""
+    from . import mute, quiet
 
     try:
         hushed = quiet.quieted(now)
     except Exception:  # noqa: BLE001 — the state still goes out
         log.exception("session events: quiet")
-        return rows
-    return [{**r, "quiet": True} if r["session"] in hushed else r for r in rows]
+        hushed = {}
+    try:
+        silenced = mute.muted(now)
+    except Exception:  # noqa: BLE001 — the state still goes out
+        log.exception("session events: mute")
+        silenced = {}
+    out = []
+    for r in rows:
+        if r["session"] in hushed:
+            r = {**r, "quiet": True}
+        if r["session"] in silenced:
+            r = {**r, "muted": True}
+        out.append(r)
+    return out
 
 
 def brief(ap: dict) -> dict:

@@ -143,6 +143,10 @@ except /pair, which is how a device gets its token):
                   for a standing rule (quiet except during shifts); rows carry
                   `quiet: {until, at, rule?}` and `quiet_rule`, and Home's
                   replies leave it out (quiet.py). GET → the rules on offer
+  POST /session/mute {"session", "muted": bool, "until"?} → the chat's
+                  notifications off (none told, the phone posts none), until
+                  then or turned off; rows carry `muted: {until}|false`
+                  (mute.py)
   POST /session/remind {"session", "at": epoch|null|false, "held"?} → bring a
                   thread back as unread at a time (the opposite of quiet): held
                   down until then, then unread, in Home's replies and told to
@@ -447,7 +451,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
-    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
+    "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
@@ -736,6 +740,7 @@ def _status(h: BaseHTTPRequestHandler, code: int) -> int:
 def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str,
           headers: dict | None = None) -> None:
     headers = dict(headers or {})
+    h._sent_code = code
     h.send_response(_status(h, code))
     h.send_header("Content-Type", ctype)
     h.send_header("Content-Length", str(len(body)))
@@ -847,6 +852,9 @@ def _json_z(h: BaseHTTPRequestHandler, code: int, obj: dict,
 
 
 def _read_json(h: BaseHTTPRequestHandler) -> dict | None:
+    held = getattr(h, "_flag_body", None)
+    if held is not None:          # already read by _post (flag_clock)
+        return held
     try:
         # Never read past the route's cap even if a caller reached here
         # without the POST guard (defence in depth for the #139 OOM). The
@@ -3870,6 +3878,43 @@ def _devices_rules(h: BaseHTTPRequestHandler) -> None:
 
 
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """The POST routes, a flag route's change checked against its clock
+    first: latest wins (flag_clock.py, David, 18 Nov 2026)."""
+    from . import flag_clock
+
+    if path not in flag_clock.ROUTES:
+        return _post_routes(h, path)
+    body = _read_json(h)
+    if isinstance(body, dict):
+        _, bad = flag_clock.change_time(path, body)
+        if bad:
+            _json(h, 400, {"ok": False, "error": bad})
+            return True
+        session = str(body.get("session") or "").strip()
+        body, stored = flag_clock.check(path, body)
+        if body is None:
+            user, err = auth.gate(_bearer(h))
+            if not user:
+                code = err.pop("status", 401)
+                _json(h, code, {"ok": False, **err})
+                return True
+            _json(h, 200, {"ok": True, "session": session,
+                           "stale": True, "changed_at": stored})
+            return True
+    h._flag_body = {} if body is None else body   # read once: the route's _read_json gets it
+    h._sent_code = None
+    try:
+        return _post_routes(h, path)
+    finally:
+        h._flag_body = None
+        if isinstance(body, dict) and getattr(h, "_sent_code", None) == 200:
+            try:
+                flag_clock.record(path, body)
+            except OSError as e:
+                print(f"flag clock: {path} not noted ({e})", file=sys.stderr, flush=True)
+
+
+def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
     elif path == "/enrol":
@@ -4888,6 +4933,14 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = quiet.session_quiet(str(body.get("session") or ""), body, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/session/mute":
+        # Mute: the chat's notifications off, its speech level untouched
+        # (mute.py). Gated like /session/quiet.
+        from . import mute
+
+        body = _read_json(h) or {}
+        ok, detail = mute.session_mute(str(body.get("session") or ""), body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/remind":
         # Bring back…: the thread reappears as unread at a time (remind.py).

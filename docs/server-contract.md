@@ -407,6 +407,10 @@ Everything a message can be pointed at.
   which then shows as it is; once due, `quiet` is `null` whatever the
   thread's own quiet says. The app sorts a due row by `max(activity, at)`
   and counts it unread.
+- `muted` (every row, 18 Nov 2026): `{"until": epoch | null}` while the
+  chat's notifications are off (`POST /session/mute`, §6.4), else `false`.
+  Nothing else about the row changes: it sorts, counts unread and speaks as
+  ever (the speech level is `speech`); only notifications go.
 - `quiet_rule` (every row, 26 Oct 2026): the thread's standing quiet rule,
   `{"rule": "shifts", "source", "label", "shifts": [[start, end], …]}`, or
   `null` — there during a shift too, when `quiet` is `null`. `shifts` are
@@ -2250,6 +2254,57 @@ Pinned by `packages/server/tests/test_quiet.py`.
   and `/dashboard`'s `recent`.
 
 Pinned by `packages/server/tests/test_remind.py`.
+
+#### `POST /session/mute` — gated (18 Nov 2026)
+
+`{"session", "muted": bool, "until"?: epoch, "at"?: epoch}` → `{"ok": true,
+"session", "muted": {"until"} | false}`.
+
+- Mute (David, 18 Nov 2026: "mute ... a notification sound ... do we even do
+  that? ... maybe we should?"): the chat's notifications off, apart from its
+  speech level (`/session/priority`) and from Quiet for… (which holds the
+  thread's place and tells what came when it ends). `muted: true` with an
+  `until` to come is "until then", without one "until I turn it off";
+  `muted: false` ends it. Any chat: an agent thread, a Matrix room, a listed
+  `local:` id (§6.61).
+- While muted: the `rooms` frame (§6.13) tells nothing of the chat — not
+  told, not kept aside, and what a quiet kept aside is dropped if the chat
+  is muted when the quiet ends; the `sessions` frame marks its row
+  `muted: true`, and the phone posts no "New reply" for it and a "Needs
+  you" without sound. A Bring back… reminder is still told (David set it).
+- Kept here, per chat, in `<state_dir>/mute.json` (`{"<session>": {"until",
+  "set"}}`, the same atomic write-and-lock as the pin). A mute past its
+  `until` is ignored on read and dropped on the next write.
+- 400 `"muted must be true or false"`, `"until must be a time to come or
+  null"`; the other refusals and CORS exactly as `/session/quiet`.
+- Rows carry it as `muted` on `/targets` and `/conversations` (§6.1), and a
+  Local chat's `settings` on `GET /local/chats` (§6.61).
+- `/features` `mute: true`.
+
+Pinned by `packages/server/tests/test_mute.py`.
+
+#### Latest wins: the flag routes' `changed_at` (18 Nov 2026)
+
+A chat's settings are kept in step with its network both ways (David, 18
+Nov 2026, "agreed"): a mute, pin, archive or unread changed in WhatsApp
+comes back through the phone's bridges as well as going out from Sasonica,
+and the latest change wins. So every flag route takes the time the change
+was made, `changed_at` (epoch seconds, at most 60 s ahead of the server's
+clock, else 400 `"changed_at must be a time that has passed"`); `at` means
+the same on every one but `/session/quiet` and `/session/remind`, where
+`at` keeps its own meaning. Absent, the change is made now. A change older
+than the last one applied to that flag of that chat is answered `{"ok":
+true, "session", "stale": true, "changed_at": <the stored one>}` (after the
+usual gate) and not applied; the caller re-reads the row for the state.
+
+One clock per flag per chat: `/session/mute`, `/session/archive`,
+`/session/pin`, `/session/mark`'s `top` and `unread` each (a body with one
+stale and one not applies the newer alone), `/session/quiet`,
+`/session/remind`, `/session/tags`, `/session/priority`, `/session/issue`,
+and `/session/read`'s `mode` (a read mark is an event, not a flag). Kept in
+`<state_dir>/flag-changes.json` (`{"<session>": {"<flag>": epoch}}`),
+written only when a change is applied (200). flag_clock.py; pinned by
+`test_mute.py`.
 
 #### `POST /session/tags`, `GET /tags` — gated (24 Oct 2026)
 
@@ -6082,6 +6137,10 @@ data: {}
   one when `quiet` goes; a "Needs you" still comes. Its notice's Hold 1
   hour / Until morning buttons set the quiet (David, 7 Nov 2026: hold
   options on the banner).
+  **A muted row says so** (18 Nov 2026): `muted: true` while the chat is
+  muted (§6.4 `POST /session/mute`), absent otherwise; the phone posts no
+  "New reply" for it, nothing when the mute ends, and a "Needs you" without
+  sound.
 - `alerts` (27 Sep 2026; only with `?alerts=`): the alert store's
   **notices** (§6.17) after cursor `n` —
   `{"last": 57, "notices": [{"n", "id", "change", "level", "title", "detail",
@@ -6118,7 +6177,9 @@ data: {}
   someone else's message is not kept. No
   older than 5 min when it arrives (a bridge's catch-up replays history),
   each once, and **not while the chat is quiet** (§6.4 Quiet for…, a
-  standing rule included) **or archived** after §6.4's archive wake has had
+  standing rule included), **never while it is muted** (§6.4 `POST
+  /session/mute`: not kept aside either, and what a quiet kept aside is
+  dropped if the chat is muted when it ends), **or archived** after §6.4's archive wake has had
   its say (a message that brings the chat back is told; one that leaves it
   archived is not). What comes while the chat is quiet is kept aside, the
   newest one a chat, and told when the quiet ends with `held: <how many
@@ -12551,7 +12612,7 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
           "updated": <unix s> | null, "last_seen": <unix s>, "gone": <unix s> | null,
           "settings": {"archived", "archived_at", "sealed", "speech", "speech_own", "priority",
                        "read_receipts", "read_receipts_own", "top", "marked_unread",
-                       "quiet", "remind", "reminded", "tags", "issue"}}   // as on a /targets row
+                       "quiet", "muted", "remind", "reminded", "tags", "issue"}}   // as on a /targets row
 ```
 
 - **From a paired device**, which becomes the chat's `device` (the token
@@ -12575,7 +12636,7 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
 **The flag routes take these ids**, once a phone has listed the chat (404
 before): `/session/archive`, `/session/mark`, `/session/read` (the mode;
 `tell` says whether the phone should send the receipt), `/session/quiet`,
-`/session/remind`, `/session/tags`, `/session/priority`, `/session/issue`,
+`/session/mute` (18 Nov 2026; `settings.muted`), `/session/remind`, `/session/tags`, `/session/priority`, `/session/issue`,
 `/speech/heard` (nothing is held: `marked: 0`), and `/session/seal`, which
 for a Local chat is the mark alone (nothing of it is here to encrypt): its
 row is then a sealed row with no title on every device, `local`, `network`

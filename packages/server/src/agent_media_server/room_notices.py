@@ -20,6 +20,9 @@ here. On top of that:
   `held` saying how many came meanwhile (release_held, each sweep of
   session_events; David, 7 Nov 2026: hold options on the notice — "anything
   you missed shows as one notice"). Kept in memory: a restart forgets it;
+* never while the chat is muted (mute.py, `POST /session/mute`): not told,
+  not kept aside, and what was kept aside while quiet is dropped if the
+  chat is muted when the quiet ends;
 * not while it is archived, after archive_wake has had its say (a message
   that wakes the chat is told; one that leaves it archived is not);
 * not history: a message older than `FRESH_S` (a bridge's catch-up after a
@@ -117,7 +120,7 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
     archive_wake have taken it. Returns the notice kept, or None. Never
     raises: a notice is not worth the sync loop."""
     try:
-        from . import archive, archive_wake, quiet
+        from . import archive, archive_wake, mute, quiet
 
         reaction = archive_wake._reacting(ev, r.owner, bridges)
         if not reaction and not archive_wake._from_someone(ev, r.owner, bridges):
@@ -130,6 +133,10 @@ def on_event(r, ev: dict, bridges: set[str], now: float | None = None) -> dict |
         with _LOCK:
             if ev_id in _TOLD:
                 return None
+        if mute.is_muted(r.thread, now):
+            with _LOCK:                    # muted: never told, not kept aside
+                _TOLD.append(ev_id)
+            return None
         hush = quiet.quiet_of(r.thread, now) is not None
         if not hush and r.thread in archive.archived():
             return None
@@ -236,7 +243,7 @@ def release_held(now: float | None = None) -> int:
     if not _QUIET:
         return 0
     try:
-        from . import archive, quiet
+        from . import archive, mute, quiet
 
         now = time.time() if now is None else now
         with _LOCK:
@@ -245,11 +252,12 @@ def release_held(now: float | None = None) -> int:
         if not done:
             return 0
         shelved = archive.archived()
+        silenced = mute.muted(now)       # muted since: dropped, not told
         told = 0
         with _LOCK:
             for t in done:
                 m = _QUIET.pop(t, None)
-                if m is not None and t not in shelved:
+                if m is not None and t not in shelved and t not in silenced:
                     if not m.get("suggestions"):
                         chips = _ready(t, m.get("id") or "")
                         if chips:

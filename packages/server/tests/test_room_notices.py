@@ -8,7 +8,7 @@ import time
 import pytest
 
 from agent_media_core import matrix as core_matrix
-from agent_media_server import archive, matrix, quiet, room_notices, session_events
+from agent_media_server import archive, matrix, mute, quiet, room_notices, session_events
 
 ROOM = "!sms:ryer.org"
 ME, BOT, SAM = "@david:ryer.org", "@gmessagesbot:ryer.org", "@sam:ryer.org"
@@ -218,6 +218,29 @@ def test_what_came_while_quiet_is_not_told_if_the_chat_is_archived_by_then():
     _feed(r, _ev())
     quiet.set_quiet(r.thread, False)
     archive.set_archived(r.thread, True)
+    assert room_notices.release_held() == 0
+    assert room_notices.notices(head)["messages"] == []
+
+
+def test_a_muted_chat_is_not_told_nor_kept_aside():
+    r = _room()
+    mute.set_mute(r.thread, True)
+    head = room_notices.last_seq()
+    _feed(r, _ev(body="hush"))
+    assert room_notices.notices(head)["messages"] == []
+    mute.set_mute(r.thread, False)
+    assert room_notices.release_held() == 0            # nothing held for later
+    _feed(r, _ev(body="loud"))
+    assert [m["text"] for m in room_notices.notices(head)["messages"]] == ["loud"]
+
+
+def test_what_came_while_quiet_is_dropped_if_the_chat_is_muted_by_then():
+    r = _room()
+    quiet.set_quiet(r.thread, time.time() + 3600)
+    head = room_notices.last_seq()
+    _feed(r, _ev())
+    mute.set_mute(r.thread, True, time.time() + 3600)
+    quiet.set_quiet(r.thread, False)
     assert room_notices.release_held() == 0
     assert room_notices.notices(head)["messages"] == []
 
