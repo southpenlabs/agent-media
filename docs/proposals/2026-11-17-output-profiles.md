@@ -2,6 +2,8 @@
 
 David, 17 Nov 2026: "how might we define speech and different forms of media
 output for different projects or chats?" Then: "Yes, write the proposal."
+18 Nov 2026: "agreed. also maybe profiles per device" (the three suggested
+answers agreed; the device layer added below).
 
 Not built. This is the design, and the order to build it in.
 
@@ -52,10 +54,10 @@ Profile = {
 }
 ```
 
-### Three layers, most specific wins
+### Four layers, most specific wins
 
 ```
-server default  →  project folder  →  chat
+server default  →  device  →  project folder  →  chat        then the device's limits
 ```
 
 - **Server**: today's settings (`/speech/default`, `/speech/thinking`, the
@@ -64,6 +66,9 @@ server default  →  project folder  →  chat
 - **Project**: a folder (`sessions.project_of`, the same key the thread list
   files by) can name a profile and/or override fields. Every chat in that
   folder, new or old, without its own choice follows it.
+- **Device**: see "Per device" below. Between the server and the project,
+  so a project's or a chat's real choice still wins over where you happen
+  to be, except where the device simply cannot do it.
 - **Chat**: today's per-chat settings, unchanged. They become overrides on
   top of the project's profile.
 
@@ -72,6 +77,47 @@ Each field resolves on its own. It uses the same `own` / `default` pattern
 value came from: `"from": "chat" | "project" | "person" | "server"`. A Matrix
 room keeps its person layer (§6.25) between project and chat, since a room
 has no folder.
+
+### Per device
+
+Device kinds already give each device rules with a default per kind, which
+the owner can change per device (§6.59, `speaks`: on, room, when_asked, off).
+A device's output profile is the same idea extended: each kind brings a
+default profile, and the owner can choose another per device.
+
+| Kind | Default profile |
+|---|---|
+| phone | the server's (no change) |
+| tablet | the server's, visuals on |
+| tv | Rooms through the TV: level normal, bed on, thinking off, no end tones |
+| computer | Text only unless asked (today's `speaks: when_asked`) |
+
+Which device's profile applies? It depends on the field:
+
+- **Where it plays** (voice, speed, music bed, tunes, thinking): the device
+  that plays it, i.e. the speech target. A reply played on the TV uses the
+  TV's voice and bed whichever device you asked from.
+- **What is shown** (visuals, sounds, chips, `text_only`): each viewing
+  device on its own. The TV can show figures that the phone in your pocket
+  skips, for the same reply.
+- **The level** stays the chat's and the project's. A device does not make a
+  chat more or less important. It only says what it can do: a device with
+  `speaks: off` limits everything to text, at the end, after every layer.
+
+**Limits** come from the device rules and are applied after the chat layer:
+a device that cannot speak, show a canvas, or play music (no bed on a TV
+with `speaks: room` when no room is on) drops those fields whatever the
+layers above say. `from` then says `"device_limit"`, so the Speech card can
+explain why a chat set to speak was not heard.
+
+A project or a chat can also vary by device kind:
+`{"by_kind": {"tv": "Rooms", "computer": "Text only"}}`. This is for "this
+project is Text only on the computer, spoken everywhere else". It is in step
+6, if wanted after living with the plain device layer.
+
+`GET /device/rules` gains `output: {"profile", "source": "kind" | "owner" |
+"default"}`, and `POST /devices/rules` takes `"output": "<profile>" | null`,
+on the same terms as the other rules (`auth.may_enrol`).
 
 ### Time rules
 
@@ -154,15 +200,16 @@ specific match winning. Neither is something to import.
 3. **The other fields**: music bed, tunes, visuals, sounds, text only,
    speed. Each consumer reads the resolver.
 4. **Presets carry a profile.**
-5. **Time rules**, generalising shift-quiet.
+5. **Device layer**: kind defaults, the owner's per-device choice in
+   device rules, the playing/viewing split, and limits after the chat layer.
+6. **Time rules**, generalising shift-quiet; `by_kind` on a project or chat
+   if still wanted.
 
-## Questions for David
+## Settled (David, 18 Nov 2026: "agreed")
 
-- Should the project layer key on the folder (worktrees then get their own,
-  unless they inherit from the main checkout), or on the repo (a worktree
-  shares its main checkout's)? Suggested: the repo, with a worktree able to
-  override.
-- When a chat moves folders (`/session/move`), does it keep its own fields?
-  Suggested: yes; only the project layer under it changes.
-- Should tags (§6.1 `tags`) be a layer too, e.g. every chat tagged `deploy`
-  is Interrupt me? Suggested: later, after time rules, if wanted.
+- The project layer keys on the **repo**: a worktree shares its main
+  checkout's, and can override it.
+- A chat moved to another folder (`/session/move`) **keeps its own
+  fields**; only the project layer under it changes.
+- **Tags** as a layer (every chat tagged `deploy` is Interrupt me):
+  later, after time rules, if wanted.
