@@ -336,3 +336,12 @@ registered in WhatsApp Business so David's own WhatsApp is untouched; the
 bridge links to it with WhatsApp's **pairing code** (the bridge runs on the
 same phone, so a QR cannot be scanned). Connected on p8a beside Messenger
 and Instagram.
+
+**Checked end to end** (17 Nov 2026): WhatsApp through both bridges at once,
+each from its own number — David's own on red5's server bridge (relinked by
+pairing code from red2's Settings → Bridges after WhatsApp Business had
+briefly taken his number at set-up and logged red5's device out, 11:07), and
+the test number on the phone's — with pictures both ways ("it's working
+through both Bridges from the right numbers and pictures are going both
+ways"). Lesson for the guide: set WhatsApp Business up on the test number
+from the start; it offers the phone's existing number first.
