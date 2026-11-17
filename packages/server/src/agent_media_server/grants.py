@@ -150,4 +150,29 @@ def settings(bearer: str, body: dict | None = None) -> tuple[bool, dict]:
         if services is not KEEP and services is not None and not isinstance(services, list):
             return False, {"status": 400, "code": "services", "error": "services is a list or null"}
         put(email, role=role, services=services, remove=bool(body.get("remove")))
+    _report_soon(user)
     return True, {"people": people()}
+
+
+#: Settings → People reports to sasonica.com at most this often per device,
+#: so a change made on the website arrives when an admin looks, and one made
+#: here shows there, rather than at the next daily report.
+REPORT_EVERY_S = 300.0
+_REPORTED: dict[str, float] = {}
+
+
+def _report_soon(user: dict) -> None:
+    device = str((user or {}).get("device") or "")
+    if not device:
+        return
+    now = time.monotonic()
+    last = _REPORTED.get(device)
+    if last is not None and now - last < REPORT_EVERY_S:
+        return
+    _REPORTED[device] = now
+    try:
+        from . import servers_report
+
+        servers_report.report_soon(device)
+    except Exception:  # noqa: BLE001 - the daily report still comes
+        pass

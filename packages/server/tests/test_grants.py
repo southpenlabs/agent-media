@@ -108,3 +108,18 @@ def test_an_add_and_a_remove_in_the_same_millisecond_keep_their_order(monkeypatc
     grants.put("ana@example.com", role="member")
     grants.put("ana@example.com", remove=True)
     assert grants.people() == []
+
+
+def test_settings_people_reports_soon_at_most_every_few_minutes(monkeypatch):
+    from agent_media_server import auth, servers_report
+
+    monkeypatch.setattr(auth, "may_admin", lambda b: ({"device": "d_a"}, {}))
+    sent = []
+    monkeypatch.setattr(servers_report, "report_soon", lambda d, base="": sent.append(d))
+    grants._REPORTED.clear()
+    grants.settings("tok")
+    grants.settings("tok", {"email": "ana@example.com", "role": "guest"})
+    assert sent == ["d_a"]                         # once in REPORT_EVERY_S
+    monkeypatch.setattr(grants, "REPORT_EVERY_S", 0.0)
+    grants.settings("tok")
+    assert sent == ["d_a", "d_a"]

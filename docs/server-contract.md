@@ -9104,6 +9104,47 @@ is read: "From <name>. <subject>." then its words (the plain part, else
 the HTML's words), with quoted lines (`> …`) left
 out and at most 6,000 characters. 422 when nothing readable is left.
 
+#### Replying to an email — `GET /mail/reply`, `POST /mail/reply` — gated, owner only (18 Nov 2026)
+
+Step 2 of docs/proposals/2026-10-20-mail-in-sasonica.md (mail_send.py): a
+reply sent from Sasonica through the host's own msmtp, which already has the
+owner's mail accounts set up. Same gate as reading one (§ above): a device
+of this server's, the owner's book; another book is 403. Nothing is kept or
+logged: the reply goes to msmtp and is dropped.
+
+`GET /mail/reply?id=<id>[&all=1][&from=<address>]` → `{"ok", "id",
+"from": {"name", "address"}, "to", "cc": [{"name", "address"}], "subject",
+"accounts": [<address>]}`: what a reply would be, for the app to show
+before Send; nothing is sent.
+- **From** is the account the mail came to: one of the owner's addresses
+  among the original's Delivered-To, X-Original-To, To and Cc that msmtp
+  has an account for (`from` in `~/.msmtprc`), else the account whose
+  maildir holds the file (mbsync's channel and msmtp's account share a
+  name). `from=` picks another of `accounts` (msmtp's sending addresses);
+  one not among them is 422. A reply to the owner's own mail is sent from
+  the address it was sent from.
+- **To** is the original's Reply-To, else its From; a reply to the owner's
+  own mail goes to its first To. **all=1** adds the other To and Cc
+  people as Cc (all of the original's To as To when replying to his own
+  mail). The owner's own addresses are never among them.
+- **Subject** gets "Re: " unless it already starts with it.
+- 422 when msmtp has no account, no account fits, or nobody is left to
+  reply to; 404 for a message notmuch does not know.
+
+`POST /mail/reply {"id", "text", "all"?, "from"?}` → the same fields plus
+`"sent": true, "message_id", "date": <epoch s>, "text"`. Sent only on the
+owner's Send, never by itself. The message is plain text (UTF-8), the
+words then the original quoted ("On <date>, <name> wrote:" and each line
+behind "> ", at most 64 KB of it); In-Reply-To is the original's
+Message-ID and References its References plus that id, so it threads in
+every mail client. It goes to `msmtp -a <account> -t`
+(`MEDIA_MAIL_SENDMAIL` stands in for `msmtp`). Gmail files its own copy in
+Sent Mail, which the next sync brings to notmuch; `MEDIA_MAIL_AFTER_SEND`,
+a command, is started after each send (e.g. the host's mail sync) so that
+is soon. 400 without `id` and a string `text`; 422 for no words, words over
+256 KB, or the refusals above; 502 with msmtp's last line when it fails
+(`"not sent: …"`).
+
 #### Speech level — `POST /contacts/<id>/level` — gated (20 Oct 2026)
 
 A person's speech level, on the same scale as a thread's (§6.4
@@ -11938,7 +11979,7 @@ removal as a tombstone. An admin's report to sasonica.com (`POST
 {iss}/api/servers`) carries `people` (removals included), and its answer may
 carry `people: [{email, role?, services?, removed?, changed_at}]`, changes
 made on the website, applied when newer than what's kept (the newest wins
-either way). The answer may also carry the account's membership tier,
+either way). Opening or changing Settings → People also sends that report, at most every 5 minutes per device, so a website change arrives when an admin looks (sasonica.com's side: websites 4bc0fae, 18 Nov 2026). The answer may also carry the account's membership tier,
 `tier` and `services_allowed`, kept per account (`<state>/account-tiers.json`)
 and read by §6.62's `allowed`; on a reseller's server
 (`MEDIA_TIERS_FROM=owner`) the owner's `services` for that person is the
