@@ -118,6 +118,37 @@ def test_missing_text_is_400(srv):
     assert e.value.code == 400
 
 
+
+def test_a_request_left_waiting_too_long_is_503_not_read():
+    fake = FakeKokoro()
+    eng = server.Engine(fake)
+    eng.lock.acquire()  # another synthesis holds the model
+    try:
+        with pytest.raises(server.Busy):
+            eng.synth("hi", "af_heart", 1.0, "en-us", wait_s=0.05)
+    finally:
+        eng.lock.release()
+    assert fake.calls == []
+
+
+def test_a_request_whose_client_left_is_dropped_not_read():
+    fake = FakeKokoro()
+    with pytest.raises(server.Busy):
+        server.Engine(fake).synth("hi", "af_heart", 1.0, "en-us", wanted=lambda: False)
+    assert fake.calls == []
+    assert not server.Engine(fake).lock.locked()
+
+
+def test_client_gone_sees_a_closed_peer():
+    import socket
+    a, b = socket.socketpair()
+    try:
+        assert not server.client_gone(a)
+        b.close()
+        assert server.client_gone(a)
+    finally:
+        a.close()
+
 class _Resp(io.BytesIO):
     def __enter__(self):
         return self

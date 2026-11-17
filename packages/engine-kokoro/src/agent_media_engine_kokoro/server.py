@@ -24,6 +24,14 @@ Config (env):
   KOKORO_LANG       language when the voice does not say (default en-us)
   KOKORO_BIND       bind host                (default 127.0.0.1)
   KOKORO_PORT       bind port                (default 8880)
+  KOKORO_QUEUE_WAIT_S  longest a request waits for the model before a 503
+                    (default 25: the render engine gives up at 30 and reads
+                    the sentence with edge instead)
+
+A request whose client has hung up while it waited is dropped, not read:
+with every core busy, abandoned requests used to pile up behind the lock and
+keep the server at full CPU for long after anyone wanted them (red2,
+17 Nov 2026).
 
 Bound to loopback by default: the render engine runs on the same machine
 (docs/decisions/2026-10-18-off-the-tailnet.md). Needs the `[server]` extra
@@ -35,6 +43,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import select
+import socket
 import sys
 import threading
 import wave
@@ -100,6 +110,26 @@ def to_wav(samples, sr: int) -> bytes:
     return buf.getvalue()
 
 
+class Busy(Exception):
+    """The model stayed busy past the queue wait, or the client left."""
+
+
+def queue_wait_s() -> float:
+    try:
+        return float(os.environ.get("KOKORO_QUEUE_WAIT_S") or 25)
+    except ValueError:
+        return 25.0
+
+
+def client_gone(sock) -> bool:
+    """True when the client has closed its end (readable, and a peek reads EOF)."""
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+        return bool(readable) and sock.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
+
+
 class Engine:
     """The loaded model, behind the one lock every synthesis takes."""
 
@@ -117,9 +147,16 @@ class Engine:
     def voices(self) -> list[str]:
         return sorted(self.kokoro.get_voices())
 
-    def synth(self, text: str, voice: str, speed: float, lang: str) -> bytes:
-        with self.lock:
+    def synth(self, text: str, voice: str, speed: float, lang: str,
+              wanted=lambda: True, wait_s: float | None = None) -> bytes:
+        if not self.lock.acquire(timeout=queue_wait_s() if wait_s is None else wait_s):
+            raise Busy("busy")
+        try:
+            if not wanted():
+                raise Busy("client gone")
             samples, sr = self.kokoro.create(text, voice=voice, speed=speed, lang=lang)
+        finally:
+            self.lock.release()
         return to_wav(samples, sr)
 
 
@@ -135,7 +172,10 @@ def make_handler(engine: Engine):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # the client gave up; nothing to tell it
 
         def do_GET(self):
             path = self.path.split("?", 1)[0].rstrip("/")
@@ -175,7 +215,15 @@ def make_handler(engine: Engine):
             except (TypeError, ValueError):
                 speed = 1.0
             try:
-                wav = engine.synth(text, voice, speed, lang)
+                wav = engine.synth(text, voice, speed, lang,
+                                   wanted=lambda: not client_gone(self.connection))
+            except Busy as e:
+                print(f"kokoro-tts: dropped a {len(text)}-char request ({e})",
+                      file=sys.stderr, flush=True)
+                if str(e) != "client gone":
+                    self._send(503, b"busy", "text/plain")
+                self.close_connection = True
+                return
             except Exception as e:  # noqa: BLE001
                 self._send(500, f"synth failed: {e}".encode(), "text/plain")
                 return
