@@ -45,7 +45,7 @@ jobs:
           HOME=$(mktemp -d) "$b" version
           HOME=$(mktemp -d) "$b" commands | grep -qx media
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sasonica-linux-${{ matrix.arch }}
           path: build/binary/sasonica-linux-${{ matrix.arch }}
@@ -93,7 +93,7 @@ jobs:
           kill %1 %2 || true
           cat serve.log sessiond.log | tail -20
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sasonica-macos-aarch64
           path: build/binary/sasonica-macos-aarch64
@@ -137,7 +137,7 @@ jobs:
           "$b" pair --device CI | tr -d '\r' | grep -q "server=$(printf %s "$url" | sed 's|:|%3A|; s|/|%2F|g')&code="
           kill %1 %2 || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sasonica-windows-x86_64
           path: build/binary/sasonica-windows-x86_64.exe
