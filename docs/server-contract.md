@@ -12208,7 +12208,7 @@ GET /settings/models → {"ok": true,
              "usage": {"today": <window>, "d7": <window>, "d30": <window>},
              "suggestions": [{"model", "provider", "provider_name",
                               "cost": "free" | "cheap" | "costly", "personal": bool}…]}…],
-  "left_out": [{"key": "memory", "why"}]}
+  "left_out": [{"key", "why"}…]}               // memory, or memory_extract (below)
 
 <window> = {"calls", "failures", "failed": {"timeout", "refused", "error"},
             "avg_ms": <int> | null, "tokens_in", "tokens_out", "images",
@@ -12218,9 +12218,34 @@ GET /settings/models → {"ok": true,
 
 - `key`, in this order: `agents`, `quick`, `tidy` (tidy-up, Draft, suggested
   replies), `voice_check`, `summary`, `followups`, `describe`, `canvas`,
-  `private`, `photo`, `stt`, `voices`. Memory's reranking and dreams are
-  `left_out`: their models are agent-memory's own settings, which this
-  server cannot see.
+  `private`, `photo`, `stt`, `voices`, then agent-memory's read-only rows
+  (below).
+- **agent-memory's models** (17 Nov 2026, David: "Will we be adding the
+  agent-memory models too?"; `agent_media_server/memory_models.py`): read
+  from agent-memory's own settings in `$XDG_CONFIG_HOME/agent-memory`
+  (`MEDIA_AGENT_MEMORY_CONFIG` names another folder), as its code reads
+  them: `hippocampus.toml` (or the file `HIPPOCAMPUS_CONFIG` names), its env
+  files winning over it. One row per purpose: `memory_summarize`
+  (Hippocampus's summariser, `[summarizer]`), `memory_rerank` (the governor
+  reorders recalled memories, `MG_RERANK_MODEL` through `LITELLM_BASE_URL`,
+  `on` from `MG_RERANK_ENABLE`), `memory_dream` (the nightly REM reflection;
+  the model is fixed in agent-memory's code, `rem.py REM_MODEL`, the gateway
+  is a setting), `memory_reply` (Sam's Matrix replies: the gateway alias
+  `SAM_DEFAULT_ALIAS` at `SAM_LLM_BASE_URL`, `on` from `[sam] enabled` /
+  `SAM_LLM_ENABLED`), `memory_agent` (the Agno agent, `[agno]`). Each has
+  `"owner": "agent-memory"`, `"choosable": false`, `"note": "agent-memory's
+  own setting"`, an optional `detail`, `settings` as `"<file> <KEY>"` or
+  `"<file> [section] key"`, `source` the one that set `model` (null:
+  agent-memory's default), `where` from the base URL like the others
+  (localhost is this server: the settings are read here), zero `usage`
+  (agent-memory's calls are not counted here) and suggestions. POST with one
+  is 400 `not_choosable`. `left_out` then carries `memory_extract` (the
+  ChatGPT import takes its model on the command line). There are no
+  embeddings to show: the store searches words. Without the folder there are
+  no memory rows and `left_out` is `[{"key": "memory", "why"}]`. Never read:
+  `secrets.env`; env keys matching `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASS*`
+  are skipped as read, and from the toml only `model`, `base_url`,
+  `enabled` and `provider`.
 - `where.route`: `server` runs here (Ollama, Whisper, Kokoro, Piper,
   cli-proxy-api), `gateway` is the summary gateway (`MEDIA_SUMMARY_BASE_URL`)
   with `provider` what the model's name points to behind it, `provider` a
@@ -12249,7 +12274,7 @@ POST /settings/models {"key": "<role key>", "model": "<name>" | null}
 - Admin devices only: a member or guest is 403 `not_admin` (`auth.may_admin`).
 - `key` must be a role (400 `key`); `agents`, `stt` and `voices` have their
   own pickers (Settings → Default agent, Speech to text, the voice) and are
-  400 `not_choosable`. `model` is a plain name, at most 120 characters of
+  400 `not_choosable`, as are agent-memory's `memory_*` rows. `model` is a plain name, at most 120 characters of
   letters, digits and `. _ : / @ + -` (400 `model`); `null` (or "") forgets
   the choice, back to the env file's.
 - Saved in `<state>/models.json` (0600), it wins over the env file and is

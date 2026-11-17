@@ -249,9 +249,9 @@ ROLES: tuple[Role, ...] = (
          note="the app can choose a voice per device; this is the server's own",
          route="voices"),
 )
-#: Left out: memory's reranking and nightly dreams. Their models are
-#: agent-memory's own settings, and this server only knows that store's
-#: address (AGENT_MEMORY_HIPPOCAMPUS_URL), not what it runs on.
+#: agent-memory's models (summarising, reranking, the nightly dream, Sam's
+#: replies, the Agno agent) are read-only rows after these, read from its own
+#: settings by memory_models.py; memory is left out when those are not here.
 
 BY_KEY = {r.key: r for r in ROLES}
 
@@ -629,8 +629,10 @@ def usage(bearer: str, query: dict) -> tuple[bool, dict]:
     ok, err = _readable(bearer)
     if not ok:
         return False, err
+    from . import memory_models
+
     key = str(query.get("key") or "")
-    if key not in BY_KEY:
+    if key not in BY_KEY and key not in memory_models.KEYS:
         return False, {"status": 400, "code": "key", "error": f"key is one of {', '.join(BY_KEY)}"}
     try:
         n = int(query.get("days") or 30)
@@ -649,8 +651,14 @@ def report() -> dict:
         except Exception as e:  # noqa: BLE001 — one role never hides the rest
             roles.append({"key": r.key, "label": r.label, "needs": r.needs,
                           "error": f"{type(e).__name__}: {e}"[:200]})
-    return {"roles": roles, "left_out": [{"key": "memory", "why":
-            "agent-memory's models are its own settings; this server cannot see them"}]}
+    from . import memory_models
+
+    try:
+        mem_rows, left_out = memory_models.report()
+    except Exception as e:  # noqa: BLE001 — memory's settings never hide the rest
+        mem_rows, left_out = [], [{"key": "memory", "why": f"agent-memory's settings could not be read: "
+                                   f"{type(e).__name__}"}]
+    return {"roles": roles + mem_rows, "left_out": left_out}
 
 
 def _readable(bearer: str) -> tuple[bool, dict]:
@@ -679,7 +687,12 @@ def settings(bearer: str, body: Optional[dict] = None) -> tuple[bool, dict]:
     user, err = auth.may_admin(bearer)
     if not user:
         return False, err
+    from . import memory_models
+
     key = body.get("key")
+    if isinstance(key, str) and key in memory_models.KEYS:
+        return False, {"status": 400, "code": "not_choosable",
+                       "error": f"{key} is {memory_models.NOTE}, chosen in agent-memory's settings"}
     if not isinstance(key, str) or key not in BY_KEY:
         return False, {"status": 400, "code": "key", "error": f"key is one of {', '.join(BY_KEY)}"}
     if key not in model_choice.CHOOSABLE:

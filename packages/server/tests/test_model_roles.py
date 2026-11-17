@@ -40,7 +40,8 @@ def scrubbed(monkeypatch, tmp_path):
     """No key, gateway or engine from this machine; a scratch home and state."""
     for k in list(os.environ):
         if k.startswith(("OPENAI_", "CLIPROXY_", "GROQ_", "OPENROUTER_", "GEMINI_", "GOOGLE_API",
-                         "LITELLM_", "CLAUDE_TTS_", "AGENT_MEMORY_", "HIPPOCAMPUS_")):
+                         "LITELLM_", "CLAUDE_TTS_", "AGENT_MEMORY_", "HIPPOCAMPUS_",
+                         "MEDIA_AGENT_MEMORY_")):
             monkeypatch.delenv(k, raising=False)
     for name in ("HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
@@ -235,3 +236,138 @@ def test_every_provider_named_has_a_row_in_outside_services():
         for n in p.rows:
             assert n in rows, (key, n)
         assert any(p.doc_word.lower() in rows[n].lower() for n in p.rows), (key, p.doc_word)
+
+
+# --- agent-memory's models, read-only (memory_models.py) ---------------------------
+
+MEMORY_SECRETS = ("hippo-KEY-SECRET-1", "litellm-SECRET-2", "secrets-env-SECRET-3",
+                  "toml-api-SECRET-4", "auth-keys-SECRET-5", "pw-SECRET-6", "mem0-SECRET-7")
+
+
+def _memory_dir(tmp_path, *, hippo_env: str = "", toml_extra: str = "") -> Path:
+    d = tmp_path / "agent-memory"
+    d.mkdir()
+    (d / "hippocampus.toml").write_text(f"""
+[auth]
+enabled = true
+api_keys = ["auth-keys-SECRET-5"]
+
+[summarizer]
+enabled = true
+provider = "litellm"
+model = "ollama/huihui_ai/llama3.2-abliterate:3b"
+base_url = "http://localhost:11434"
+api_key = "toml-api-SECRET-4"
+
+[mem0]
+api_key = "mem0-SECRET-7"
+
+[agno]
+enabled = false
+model = "openai:gpt-4o-mini"
+base_url = ""
+
+[sam]
+enabled = false
+base_url = "http://100.65.209.67:4000"
+model = "gpt-4o-mini"
+{toml_extra}
+""")
+    (d / "hippocampus.env").write_text(
+        "# Hippocampus\n"
+        f"HIPPOCAMPUS_CONFIG={d / 'hippocampus.toml'}\n"
+        "SAM_DEFAULT_ALIAS=sam-deep\n"
+        "SAM_LLM_BASE_URL=http://sam:pw-SECRET-6@100.65.209.67:4000\n"
+        "SAM_LLM_ENABLED=true\n"
+        "HIPPOCAMPUS_API_KEY=hippo-KEY-SECRET-1\n" + hippo_env)
+    (d / "memory-governor.env").write_text(
+        "LITELLM_BASE_URL=http://100.65.209.67:4000\nLITELLM_API_KEY=litellm-SECRET-2\n"
+        "MG_RERANK_ENABLE=true\nMG_RERANK_MODEL=red2-rerank\nMG_DREAM_USERS=ryer\n")
+    (d / "secrets.env").write_text("LITELLM_API_KEY=secrets-env-SECRET-3\n")
+    return d
+
+
+def test_memory_is_left_out_without_its_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(tmp_path / "nowhere"))
+    d = mr.report()
+    assert not any(r["key"].startswith("memory") for r in d["roles"])
+    assert d["left_out"] == [{"key": "memory", "why": d["left_out"][0]["why"]}]
+    assert "not on this server" in d["left_out"][0]["why"]
+
+
+def test_memory_rows_from_its_own_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(_memory_dir(tmp_path)))
+    d = mr.report()
+    keys = [r["key"] for r in d["roles"]]
+    assert keys[:12] == [r.key for r in mr.ROLES]
+    assert keys[12:] == ["memory_summarize", "memory_rerank", "memory_dream", "memory_reply",
+                         "memory_agent"]
+    rows = {r["key"]: r for r in d["roles"]}
+    s = rows["memory_summarize"]
+    assert s["model"] == "ollama/huihui_ai/llama3.2-abliterate:3b"
+    assert s["source"] == "hippocampus.toml [summarizer] model"
+    assert s["where"]["route"] == "server" and s["where"]["provider"] == "ollama" and s["on"] is True
+    r = rows["memory_rerank"]
+    assert r["model"] == "red2-rerank" and r["source"] == "memory-governor.env MG_RERANK_MODEL"
+    assert r["where"]["route"] == "gateway" and r["where"]["host"] == "100.65.209.67:4000"
+    assert r["on"] is True
+    dream = rows["memory_dream"]
+    assert dream["model"] == "claude-opus-4-8-liberated" and dream["source"] is None
+    assert dream["where"]["route"] == "gateway" and dream["where"]["provider"] == "anthropic"
+    sam = rows["memory_reply"]
+    assert sam["model"] == "sam-deep" and sam["source"] == "hippocampus.env SAM_DEFAULT_ALIAS"
+    assert sam["on"] is True  # the env file's SAM_LLM_ENABLED wins over the toml's false
+    assert sam["where"]["host"] == "100.65.209.67:4000"
+    agno = rows["memory_agent"]
+    assert agno["on"] is False and agno["where"]["route"] == "provider"
+    assert agno["where"]["provider"] == "openai"
+    for row in rows.values():
+        if not row["key"].startswith("memory"):
+            continue
+        assert row["choosable"] is False and row["chosen"] is False
+        assert row["note"] == "agent-memory's own setting" and row["owner"] == "agent-memory"
+        assert row["settings"] and len(row["suggestions"]) >= 3
+        assert set(row["usage"]) == {"today", "d7", "d30"}
+        assert all(s["provider"] in mr.PROVIDERS for s in row["suggestions"])
+    assert d["left_out"][0]["key"] == "memory_extract"
+
+
+def test_memory_env_file_wins_over_the_toml(monkeypatch, tmp_path):
+    d = _memory_dir(tmp_path, hippo_env="HIPPOCAMPUS_SUMMARIZER_MODEL=gpt-4o-mini\n"
+                                        "HIPPOCAMPUS_SUMMARIZER_BASE_URL=https://api.openai.com/v1\n"
+                                        "HIPPOCAMPUS_SUMMARIZER_ENABLED=false\n")
+    monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(d))
+    s = {r["key"]: r for r in mr.report()["roles"]}["memory_summarize"]
+    assert s["model"] == "gpt-4o-mini" and s["source"] == "hippocampus.env HIPPOCAMPUS_SUMMARIZER_MODEL"
+    assert s["where"]["route"] == "provider" and s["where"]["provider"] == "openai"
+    assert s["on"] is False
+
+
+def test_memory_xdg_config_home_and_defaults(monkeypatch, tmp_path):
+    d = tmp_path / "xdg" / "agent-memory"
+    d.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    rows = {r["key"]: r for r in mr.report()["roles"]}
+    assert rows["memory_summarize"]["model"] == "ollama:llama3" and rows["memory_summarize"]["on"] is False
+    assert rows["memory_rerank"]["model"] == "gpt-4o-mini" and rows["memory_rerank"]["on"] is False
+    assert rows["memory_reply"]["model"] == "sam-fast"
+    assert all(rows[k]["source"] is None for k in ("memory_summarize", "memory_rerank", "memory_reply"))
+
+
+def test_no_memory_key_or_token_is_in_the_answer(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(_memory_dir(tmp_path)))
+    text = json.dumps(mr.report())
+    for secret in MEMORY_SECRETS:
+        assert secret not in text
+    assert "SECRET" not in text and "API_KEY" not in text
+
+
+def test_memory_rows_are_not_choosable_and_have_usage(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(_memory_dir(tmp_path)))
+    monkeypatch.setattr(auth, "may_admin", lambda b: ({"username": "d"}, {}))
+    ok, err = mr.settings("admin", {"key": "memory_rerank", "model": "gpt-4o-mini"})
+    assert not ok and err["status"] == 400 and err["code"] == "not_choosable"
+    monkeypatch.setattr(auth, "gate", lambda b: ({"username": "d"}, {}))
+    monkeypatch.setattr(auth, "is_guest", lambda b: False)
+    ok, got = mr.usage("admin", {"key": "memory_dream", "days": "3"})
+    assert ok and len(got["series"]) == 3 and got["series"][-1]["calls"] == 0
