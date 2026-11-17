@@ -209,3 +209,37 @@ def test_a_local_chat_into_its_own_agent_is_still_refused(here, monkeypatch):
     monkeypatch.setenv("MEDIA_TXCRIPT", _fake_txcript(here, OUT))
     ok, out = convert.session_convert(CL, "claude", "tok")
     assert not ok and "already a claude chat" in out["error"]
+
+
+# --- agent-sessions' catalogue, where there is one ------------------------------------
+
+def _catalogue(path, rows):
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE catalogue (harness, id, origin, copy, folder, project, title, model,"
+                 " started_at, n_messages, file, format, mtime, size, missing, deleted, private,"
+                 " sealed, uid, changed_at)")
+    for r in rows:
+        conn.execute("INSERT INTO catalogue (harness, id, origin, copy, file, missing, deleted,"
+                     " private, sealed) VALUES (?,?,?,?,?,?,?,?,?)", r)
+    conn.commit()
+    conn.close()
+
+
+def test_the_catalogue_is_read_instead_of_the_folder(archive, tmp_path):
+    f = frozen.find(CL)["path"]
+    _catalogue(tmp_path / "index.sqlite", [
+        ("claude", CL, "red5", "archive", f, 0, 0, 0, 0),
+        ("pi", PI, "p8a", "archive", "/gone.jsonl", 1, 0, 0, 0),     # missing
+        ("codex", CX, "red5", "archive", "/x.jsonl", 0, 1, 0, 0),    # deleted
+        ("opencode", OC, "red5", "archive", "/y.json", 0, 0, 1, 0),  # private
+        ("claude", "native-one", "red2", "native", "/z.jsonl", 0, 0, 0, 0),
+        ("opencode", MINE, "red2", "archive", "/w.json", 0, 0, 0, 0)])  # this host's own
+    frozen._reset_for_tests()
+    assert frozen.catalogue_path() == str(tmp_path / "index.sqlite")
+    assert set(frozen._scan()) == {CL}
+    assert frozen.find(CL) == {"host": "red5", "harness": "claude", "path": f}
+    assert frozen.find(OC) is None and frozen.find(PI) is None
+
+
+def test_no_catalogue_walks_the_folder(archive):
+    assert frozen._from_catalogue() is None and CL in frozen._scan()

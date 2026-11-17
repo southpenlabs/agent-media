@@ -76,7 +76,12 @@ or stay as a catalogue lookup).
    --since <t> --json`, and a Python reader both repos can call without
    importing each other (a JSON-lines file or the SQLite file read-only).
 2. agent-media: frozen.py reads the catalogue instead of scanning the archive
-   (smallest, newest, easiest to check).
+   (smallest, newest, easiest to check). **Built 18 Nov 2026**: the catalogue
+   is read from beside the archive folder (one setting); with no catalogue
+   (agent-media installed without agent-sessions) the folder is still walked,
+   so the walk stays as the fallback rather than being removed. Equal on
+   red2 (no other machines' chats there); red5's comparison waits for its
+   agent-sessions checkout to be pulled.
 3. agent-media: search's `_sources` from the catalogue; the index rebuilt and
    compared with today's before the walk is removed.
 4. agent-media: the thread list's store rows from the catalogue.

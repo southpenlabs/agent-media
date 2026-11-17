@@ -48,13 +48,51 @@ def this_host() -> str:
     return (os.environ.get("MEDIA_ARCHIVE_HOST") or socket.gethostname()).split(".")[0]
 
 
+def catalogue_path() -> str:
+    """agent-sessions' catalogue (its docs/catalogue.md): the index beside the
+    archive folder, so the one archive setting (MEDIA_SEARCH_ARCHIVE) names
+    both."""
+    base = root()
+    return os.path.join(os.path.dirname(base.rstrip("/")), "index.sqlite") if base else ""
+
+
+def _from_catalogue() -> dict[str, dict] | None:
+    """The archived chats as agent-sessions' catalogue lists them: one row per
+    chat, a native copy already winning, marks to act on. None when there is
+    no catalogue (agent-sessions not installed, or an older one), and the
+    archive folder is walked instead."""
+    import sqlite3
+
+    path = catalogue_path()
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        try:
+            rows = conn.execute(
+                "SELECT harness, id, origin, file FROM catalogue WHERE copy = 'archive' "
+                "AND NOT deleted AND NOT missing AND NOT private AND NOT sealed").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    me = this_host()
+    return {str(i): {"host": str(o), "harness": str(h), "path": str(f)}
+            for h, i, o, f in rows if i and f and o and o != me}
+
+
 def _scan() -> dict[str, dict]:
     """`{session: {"host", "harness", "path"}}` for every archived chat of
-    another machine, cached CACHE_S."""
+    another machine, cached CACHE_S: from agent-sessions' catalogue where
+    there is one, else by walking the archive folder."""
     base = root()
     now = time.monotonic()
     if _SCAN["at"] is not None and _SCAN["root"] == base and now - _SCAN["at"] < CACHE_S:
         return _SCAN["map"]
+    listed = _from_catalogue() if base else None
+    if listed is not None:
+        _SCAN.update(at=now, root=base, map=listed)
+        return listed
     out: dict[str, dict] = {}
     if base and os.path.isdir(base):
         me = this_host()
