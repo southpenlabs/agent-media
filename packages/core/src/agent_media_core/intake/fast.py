@@ -44,9 +44,18 @@ def _list(raw: str | None) -> list[str]:
 
 def models(purpose_env: str | None = None, *, private: bool = False) -> list[str | None]:
     """The models to try, in order. `[None]` is the summary's own model;
-    `[]` (private, none set) is none at all."""
+    `[]` (private, none set) is none at all.
+
+    A purpose that is a role in Settings → Models (quick, tidy, the voice
+    check) and private threads ask model_choice, so a saved choice goes
+    first; with none it is the same list as before."""
+    from .. import model_choice
+
     if private:
-        return list(dict.fromkeys(_list(os.environ.get("MEDIA_PRIVATE_MODELS"))))
+        return list(model_choice.chain("private"))
+    role = model_choice.PURPOSE_ROLES.get(purpose_env or "")
+    if role:
+        return list(model_choice.chain(role)) or [None]
     out = (_list(os.environ.get(purpose_env) if purpose_env else None)
            + _list(os.environ.get("MEDIA_FAST_MODELS"))
            + _list(os.environ.get("MEDIA_FOLLOWUP_MODEL")))
@@ -74,17 +83,33 @@ def _mark(model: str | None, ok: bool) -> None:
             _down[model or ""] = time.monotonic() + _cooldown()
 
 
+def usage_role(purpose_env: str | None, private: bool = False) -> str:
+    """The role a call is counted under (model_usage): Settings → Models'
+    key, or the purpose's own word (MEDIA_TAG_MODEL → "tag")."""
+    from .. import model_choice
+
+    if private:
+        return "private"
+    role = model_choice.PURPOSE_ROLES.get(purpose_env or "")
+    if role:
+        return role
+    word = (purpose_env or "").removeprefix("MEDIA_").removesuffix("_MODELS").removesuffix("_MODEL")
+    return word.lower() or "fast"
+
+
 def _once(system: str, user: str, model: str | None,
-          left: float) -> tuple[bool, str | None, str]:
+          left: float, role: str = "fast") -> tuple[bool, str | None, str]:
     """`(finished, text, why)`: one call with a hard deadline (its own
     thread); `why` is the gateway's reason when it gave no text."""
+    from .. import model_usage
     from . import _summary
 
     out: list[tuple[str | None, str]] = []
 
     def run() -> None:
         try:
-            text = _summary._chat(system, user, max(1, int(left + 0.999)), model=model)
+            with model_usage.as_role(role):
+                text = _summary._chat(system, user, max(1, int(left + 0.999)), model=model)
             out.append((text, "" if text else _summary.last_error()))
         except Exception as e:  # noqa: BLE001 — a failed model is the next one's turn
             out.append((None, f"{type(e).__name__}: {e}"[:160]))
@@ -118,13 +143,14 @@ def chat_why(system: str, user: str, timeout: float, *, purpose_env: str | None 
     if not (user or "").strip():
         return None, "nothing to ask about"
     live = [m for m in order if not _is_down(m)] or order
+    role = usage_role(purpose_env, private)
     deadline = time.monotonic() + max(0.5, float(timeout))
     why = ""
     for m in live:
         left = deadline - time.monotonic()
         if left < 0.3:
             break
-        finished, text, failed = _once(system, user, m, left)
+        finished, text, failed = _once(system, user, m, left, role)
         if text and text.strip():
             _mark(m, True)
             return text, ""

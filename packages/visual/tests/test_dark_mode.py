@@ -25,7 +25,7 @@ def test_svg_system_prompt_gains_dark_clause(monkeypatch):
     monkeypatch.delenv("MEDIA_VISUAL_DARK", raising=False)
     seen = {}
 
-    def fake_chat(system, user, timeout):
+    def fake_chat(system, user, timeout, model=None):
         seen["system"] = system
         return VALID_SVG
 
@@ -39,7 +39,7 @@ def test_svg_system_prompt_clean_when_disabled(monkeypatch):
     monkeypatch.setenv("MEDIA_VISUAL_DARK", "0")
     seen = {}
 
-    def fake_chat(system, user, timeout):
+    def fake_chat(system, user, timeout, model=None):
         seen["system"] = system
         return VALID_SVG
 

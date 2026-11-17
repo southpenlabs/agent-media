@@ -169,11 +169,15 @@ def suggest_followup(raw_reply: str, session: str, key: str) -> str | None:
     prompt = os.environ.get("MEDIA_FOLLOWUP_PROMPT") or DEFAULT_PROMPT
     timeout = _int_env("MEDIA_FOLLOWUP_TIMEOUT",
                        _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
-    model = os.environ.get("MEDIA_FOLLOWUP_MODEL") or None
+    from .. import model_choice, model_usage
+
+    # Settings → Models' choice, then MEDIA_FOLLOWUP_MODEL, then the summary's.
+    model = model_choice.model("followups")
     # Framed, so a short reply ("You're welcome. Enjoy the bigger text.") is
     # read as the assistant's words and not as a message to the model.
     framed = f"<reply>\n{text}\n</reply>"
-    lines = _clean_lines(_chat(prompt, framed, timeout, model=model) or "")
+    with model_usage.as_role("followups"):
+        lines = _clean_lines(_chat(prompt, framed, timeout, model=model) or "")
     if not lines:
         return None
     save_followup(session, lines[0], key, replies=lines, source="model")

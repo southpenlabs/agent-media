@@ -45,6 +45,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -136,21 +137,46 @@ def _http_why(base: str, e: urllib.error.HTTPError) -> str:
 
 
 def _chat(system_prompt: str, user_text: str, timeout: int,
-          model: str | None = None) -> str | None:
+          model: str | None = None, *, role: str | None = None) -> str | None:
     """POST one system+user turn to the configured OpenAI-compatible endpoint
     and return the assistant text, or ``None`` on any problem (empty/HTTP/JSON/
     timeout), with the reason in `last_error()`. Never raises. Shared by the
-    summary and describe paths."""
+    summary and describe paths.
+
+    `model` None is the summary's model in effect (Settings → Models' choice,
+    then MEDIA_SUMMARY_MODEL, then the default: model_choice.model). Each
+    call that reaches the gateway is counted under `role` (model_usage:
+    counts and tokens only, never the text)."""
     _failed("")
     user_text = (user_text or "").strip()
     if not user_text:
         _failed("nothing to send")
         return None
+    from .. import model_choice, model_usage
+
+    model = model or model_choice.model("summary") or DEFAULT_MODEL
+    role = role or model_usage.current_role() or "other"
+    t0 = time.monotonic()
+    data_box: list = []
+    out = _chat_call(system_prompt, user_text, timeout, model, data_box, role)
+    why = "" if out else last_error()
+    t_in, t_out = model_usage.tokens(data_box[0] if data_box else None)
+    model_usage.record(role, model, ok=bool(out), kind=None if out else model_usage.kind_of(why),
+                       ms=(time.monotonic() - t0) * 1000, tokens_in=t_in, tokens_out=t_out)
+    return out
+
+
+def _chat_call(system_prompt: str, user_text: str, timeout: int, model: str,
+               data_box: list, role: str = "other") -> str | None:
+    """`_chat`'s one request; the answer's JSON is left in `data_box` for its
+    usage block. A call to the gateway carries the feature's tags
+    (model_usage.gateway_headers) for LiteLLM's spend tracking."""
+    from .. import model_usage
+
     base = (os.environ.get("MEDIA_SUMMARY_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
             or DEFAULT_BASE_URL).rstrip("/")
     api_key = _resolve_api_key()
-    model = model or os.environ.get("MEDIA_SUMMARY_MODEL") or DEFAULT_MODEL
 
     body = json.dumps({
         "model": model,
@@ -161,7 +187,8 @@ def _chat(system_prompt: str, user_text: str, timeout: int,
     req = urllib.request.Request(
         f"{base}/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {api_key}"})
+                 "Authorization": f"Bearer {api_key}",
+                 **model_usage.gateway_headers(base, role)})
     host = urllib.parse.urlsplit(base).netloc or base
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -178,6 +205,7 @@ def _chat(system_prompt: str, user_text: str, timeout: int,
     except (OSError, ValueError, json.JSONDecodeError) as e:
         _failed(f"the gateway at {host} failed: {type(e).__name__}")
         return None
+    data_box.append(data)
     try:
         out = (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError):
@@ -193,7 +221,10 @@ def summarize_for_speech(text: str) -> str | None:
     endpoint. Returns the summary, or ``None`` on any problem (caller falls
     back to the mechanically-stripped text). Never raises."""
     prompt = os.environ.get("MEDIA_SUMMARY_PROMPT") or DEFAULT_PROMPT
-    return _chat(prompt, text, _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
+    from .. import model_usage
+
+    with model_usage.as_role("summary"):
+        return _chat(prompt, text, _int_env("MEDIA_SUMMARY_TIMEOUT", DEFAULT_TIMEOUT))
 
 
 # --- Optional per-block description (MEDIA_SPEECH_DESCRIBE=1) -----------------
@@ -269,12 +300,16 @@ def _timed_describe(kind: str, prompt: str, text: str) -> str | None:
     directory tree or a config file came back as "I don't see a code block in
     your message" — which was then spoken as if it were the description."""
     import time as _time
+
+    from .. import model_choice, model_usage
+
     t0 = _time.perf_counter()
     tag = "table" if kind == "table" else "code"
     body = (text or "").strip("\n")
-    out = _chat(prompt, f"<{tag}>\n{body}\n</{tag}>" if body.strip() else "",
-                _int_env("MEDIA_DESCRIBE_TIMEOUT", DEFAULT_DESCRIBE_TIMEOUT),
-                model=os.environ.get("MEDIA_DESCRIBE_MODEL") or None)
+    with model_usage.as_role("describe"):
+        out = _chat(prompt, f"<{tag}>\n{body}\n</{tag}>" if body.strip() else "",
+                    _int_env("MEDIA_DESCRIBE_TIMEOUT", DEFAULT_DESCRIBE_TIMEOUT),
+                    model=model_choice.model("describe"))
     if out is not None and not _is_description(out):
         out = None
     _log_describe(kind, len(text or ""), _time.perf_counter() - t0, out)

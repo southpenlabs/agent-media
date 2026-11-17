@@ -111,10 +111,50 @@ def _shape_timeout() -> int:
     return 30
 
 
-def _gateway_chat(system_prompt: str, user_text: str, timeout: int) -> str | None:
+def _shape_model() -> str:
+    """The scene's model: Settings → Models' canvas choice, then
+    MEDIA_VISUAL_SHAPE_MODEL, then the summary's model in effect
+    (agent_media_core.model_choice)."""
+    from agent_media_core import model_choice
+
+    return (model_choice.chosen("canvas") or os.environ.get("MEDIA_VISUAL_SHAPE_MODEL")
+            or model_choice.model("summary") or "gpt-4o-mini")
+
+
+def _gateway_chat(system_prompt: str, user_text: str, timeout: int,
+                  model: str | None = None) -> str | None:
     """One chat turn against the summary gateway. None on any failure —
     identical resolution order to core intake/_summary.py so the two paths
-    always target the same endpoint."""
+    always target the same endpoint. Counted under the canvas's role
+    (model_usage: counts and tokens only)."""
+    import time
+
+    from agent_media_core import model_usage
+
+    model = model or _shape_model()
+    t0 = time.monotonic()
+    data: dict = {}
+    kind = "error"
+    out = None
+    try:
+        out = _gateway_call(system_prompt, user_text, timeout, model, data)
+    except Exception as e:  # noqa: BLE001 — counted, then None as before
+        if isinstance(e, TimeoutError) or "timed out" in str(e):
+            kind = "timeout"
+        elif isinstance(e, urllib.error.HTTPError) and 400 <= e.code < 500:
+            kind = "refused"
+    t_in, t_out = model_usage.tokens(data.get("answer"))
+    model_usage.record("canvas", model, ok=bool(out), kind=None if out else kind,
+                       ms=(time.monotonic() - t0) * 1000, tokens_in=t_in, tokens_out=t_out)
+    return out
+
+
+def _gateway_call(system_prompt: str, user_text: str, timeout: int, model: str,
+                  box: dict) -> str | None:
+    """`_gateway_chat`'s request; raises on a failed one. Through the gateway
+    it carries the canvas's tags (model_usage.gateway_headers)."""
+    from agent_media_core import model_usage
+
     base = (os.environ.get("MEDIA_SUMMARY_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
             or "https://api.openai.com/v1").rstrip("/")
@@ -124,8 +164,6 @@ def _gateway_chat(system_prompt: str, user_text: str, timeout: int) -> str | Non
                os.path.expanduser("~/.config/litellm/litellm.env"),
                "LITELLM_MASTER_KEY")
            or os.environ.get("OPENAI_API_KEY") or "")
-    model = (os.environ.get("MEDIA_VISUAL_SHAPE_MODEL")
-             or os.environ.get("MEDIA_SUMMARY_MODEL") or "gpt-4o-mini")
     body = json.dumps({
         "model": model,
         "messages": [{"role": "system", "content": system_prompt},
@@ -135,14 +173,12 @@ def _gateway_chat(system_prompt: str, user_text: str, timeout: int) -> str | Non
     req = urllib.request.Request(
         f"{base}/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        out = (data["choices"][0]["message"]["content"] or "").strip()
-    except (urllib.error.URLError, OSError, ValueError, KeyError,
-            IndexError, TypeError, json.JSONDecodeError):
-        return None
+                 "Authorization": f"Bearer {key}",
+                 **model_usage.gateway_headers(base, "canvas")})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    box["answer"] = data
+    out = (data["choices"][0]["message"]["content"] or "").strip()
     return out or None
 
 
@@ -376,20 +412,11 @@ def generate_svg(prompt: str) -> tuple[bytes | None, str]:
               if os.environ.get("MEDIA_VISUAL_FIGURE") == "1" else PROMPT_SVG)
     if dark_mode():
         system += PROMPT_SVG_DARK
-    if os.environ.get("MEDIA_VISUAL_SVG_MODEL"):
-        # _gateway_chat honours MEDIA_VISUAL_SHAPE_MODEL first; route the
-        # override through it for this one call.
-        saved = os.environ.get("MEDIA_VISUAL_SHAPE_MODEL")
-        os.environ["MEDIA_VISUAL_SHAPE_MODEL"] = os.environ["MEDIA_VISUAL_SVG_MODEL"]
-        try:
-            raw = _gateway_chat(system, prompt, _svg_timeout())
-        finally:
-            if saved is None:
-                os.environ.pop("MEDIA_VISUAL_SHAPE_MODEL", None)
-            else:
-                os.environ["MEDIA_VISUAL_SHAPE_MODEL"] = saved
-    else:
-        raw = _gateway_chat(system, prompt, _svg_timeout())
+    # Settings → Models' canvas choice, then MEDIA_VISUAL_SVG_MODEL, then the
+    # shaping model (model_choice.model("canvas") resolves exactly that).
+    from agent_media_core import model_choice
+
+    raw = _gateway_chat(system, prompt, _svg_timeout(), model=model_choice.model("canvas"))
     if not raw:
         return None, "svg: gateway returned nothing"
     svg = _extract_svg(raw)

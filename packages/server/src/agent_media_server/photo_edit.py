@@ -66,6 +66,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from agent_media_core import model_usage
+
 MAX_BYTES = 15 * 1024 * 1024
 LONG_SIDE = 2048
 TIMEOUT_S = 60.0
@@ -142,12 +144,20 @@ def _list(raw: str | None) -> list[str]:
 
 
 def models(private: bool = False) -> list[str]:
+    """The image models to try, in order. Settings → Models' choice
+    (model_choice.chosen("photo"), §6.60) goes first, the env file's list
+    after it; a private thread's pictures go only to
+    MEDIA_PRIVATE_IMAGE_MODELS."""
     if private:
         return list(dict.fromkeys(_list(os.environ.get("MEDIA_PRIVATE_IMAGE_MODELS"))))
+    from agent_media_core import model_choice
+
+    pick = model_choice.chosen("photo")
     raw = os.environ.get("MEDIA_IMAGE_EDIT_MODELS")
     if raw is not None and raw.strip() in ("-", "0", "off"):
-        return []
-    return list(dict.fromkeys(_list(raw if raw and raw.strip() else DEFAULT_MODELS)))
+        return [pick] if pick else []
+    return list(dict.fromkeys(([pick] if pick else [])
+                              + _list(raw if raw and raw.strip() else DEFAULT_MODELS)))
 
 
 def _key_file() -> str:
@@ -305,12 +315,21 @@ class Failed(Exception):
     pass
 
 
+def _gateway_tags(base: str) -> dict:
+    """The feature's LiteLLM tags (model_usage.gateway_headers) when `base`
+    is the summary gateway (a `gateway:` model); cli-proxy-api and an image
+    endpoint of its own get nothing new."""
+    gw = (os.environ.get("MEDIA_SUMMARY_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "").rstrip("/")
+    return model_usage.gateway_headers(base, "photo") if gw and base.rstrip("/") == gw else {}
+
+
 def _post(base: str, key: str, body: dict, timeout: float) -> dict:
     """POST one chat completion and return its JSON; raises Failed with the
     reason. The one place a test replaces (never a real call from a test)."""
     req = urllib.request.Request(
         f"{base}/chat/completions", data=json.dumps(body).encode("utf-8"), method="POST",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}",
+                 **_gateway_tags(base)})
     host = urllib.parse.urlsplit(base).netloc or base
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -335,6 +354,13 @@ def instruction(preset: str | None, describe: str | None) -> str | None:
     return f"{FRAME}\n\nThe edit, in the person's own words: {words}" if words else None
 
 
+def _count_use(model: str, t0: float, ok: bool, kind: str | None, data: object = None) -> None:
+    """One edit attempt in model_usage (§6.60): counts, tokens, a picture."""
+    t_in, t_out = model_usage.tokens(data)
+    model_usage.record("photo", model, ok=ok, kind=kind, ms=(time.monotonic() - t0) * 1000,
+                       tokens_in=t_in, tokens_out=t_out, images=1 if ok else 0)
+
+
 def run(picture: bytes, ctype: str, prompt: str, order: list[str],
         timeout: float = TIMEOUT_S) -> tuple[bytes | None, str, str, str, str]:
     """`(picture, type, model, why, message)`: the first model's edit inside
@@ -352,18 +378,23 @@ def run(picture: bytes, ctype: str, prompt: str, order: list[str],
             continue
         base, key, name = r
         used = model
+        t0 = time.monotonic()
         try:
             data = _post(base, key, body_of(name), left)
         except Failed as e:
+            _count_use(model, t0, False, model_usage.kind_of(str(e)))
             why, message = "failed", f"{model}: {e}"
             continue
         out, out_type, said = parse_answer(data if isinstance(data, dict) else {})
         if out and out_type in ("image/png", "image/jpeg", "image/webp"):
+            _count_use(model, t0, True, None, data)
             return out, out_type, model, "", ""
         # Words and no picture: the model would not make this edit. Its
         # reason, in its words; another model would most likely say the same.
         if said:
+            _count_use(model, t0, False, "refused", data)
             return None, "", model, "refused", said[:400]
+        _count_use(model, t0, False, "error", data)
         why, message = "failed", f"{model}: the answer had no picture"
     return None, "", used, why, message
 

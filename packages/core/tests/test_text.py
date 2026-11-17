@@ -170,7 +170,10 @@ def test_describe_model_overrides_summary_model(monkeypatch):
     summary.describe_table("| a | b |")
     monkeypatch.delenv("MEDIA_DESCRIBE_MODEL")
     summary.describe_table("| a | b |")
-    assert seen == ["claude-haiku-4-5", None]
+    # Unset, the summary's model in effect (Settings → Models, §6.60): the
+    # same model `_chat` used for None before.
+    from agent_media_core import model_choice
+    assert seen == ["claude-haiku-4-5", model_choice.model("summary")]
 
 
 # --- urls ---------------------------------------------------------------
