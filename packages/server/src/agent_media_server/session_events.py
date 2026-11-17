@@ -89,7 +89,7 @@ import threading
 import time
 
 from . import (alerts, auth, follow, mic, notes, phone, remind, room_notices, sessions,
-               stage)
+               stage, unheard_watch)
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -391,7 +391,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
           handoff_after: int | None = None, book_device: str | None = None,
           book_after: int | None = None, want_notes: bool = False,
           want_remind: bool = False, follow_device: str | None = None,
-          rooms_after: int | None = None) -> bool:
+          rooms_after: int | None = None, want_unheard: bool = False) -> bool:
     """Hold the connection and stream the session list until it goes. Auth
     is the caller's (app.py), done before this. `mic_for` is None when the
     client did not ask for `mic` frames, else the connecting device's id
@@ -418,6 +418,10 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     phone this device follows.
     `rooms_after`: `rooms` frames (room_notices.py) after this cursor
     (alerts_of's: None not asked, FIRST a first connection).
+    `want_unheard`: `unheard` frames (unheard_watch.py, `?unheard=1`) —
+    {"unheard": {session: n}}, /sessions/state's `unheard`, on connecting and
+    whenever it changes, within a quarter second of a reply being saved or
+    heard: the list's Play keys (18 Nov 2026).
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
@@ -433,6 +437,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         return True
     h.close_connection = True
     phone.listening(phone_kinds, True)
+    if want_unheard:
+        unheard_watch.want(True)
     if want_notes:
         notes.listening(True)
     from . import device_kinds, speech_frames
@@ -486,6 +492,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         seen_phone: list[dict] = []
         seen_notes: list[dict] = []
         seen_remind: list[dict] | None = None
+        seen_unheard = -1
         seen_follow: dict | None = None
         from agent_media_core import catchup as _catchup
         latest = _catchup.last() if catchup else None
@@ -567,6 +574,12 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                         last_sent = time.monotonic()
                     elif seen_remind is None:
                         seen_remind = due_now
+                if want_unheard:
+                    uv, counts = unheard_watch.current()
+                    if uv != seen_unheard:
+                        seen_unheard = uv
+                        send("unheard", {"unheard": counts})
+                        last_sent = time.monotonic()
                 if follow_device is not None:
                     # Compared without its title: a title settling later is
                     # not a reason to tell the device again.
@@ -596,6 +609,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         log.exception("session events: stream failed")
     finally:
         phone.listening(phone_kinds, False)
+        if want_unheard:
+            unheard_watch.want(False)
         if want_notes:
             notes.listening(False)
         for ch, pl in players.items():

@@ -2960,6 +2960,8 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
     wants_notes = (qs.get("notes") or [""])[0] in ("1", "true")
     # `?remind=1`: a `reminders` frame for the Bring back… reminders that are due (remind.py).
     wants_remind = (qs.get("remind") or [""])[0] in ("1", "true")
+    # `?unheard=1`: an `unheard` frame, the list's Play keys, as soon as they change (unheard_watch.py).
+    wants_unheard = (qs.get("unheard") or [""])[0] in ("1", "true")
     # `?follow=1`: a `follow` frame naming the thread open on the phone this
     # device follows (follow.py, §6.21g).
     follow_dev = (auth.device_id(bearer) or None) if (
@@ -2985,6 +2987,7 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
                          handoff_after=_after("handoff_after"),
                          book_device=book_dev, book_after=_after("book_after"),
                          want_notes=wants_notes, want_remind=wants_remind,
+                         want_unheard=wants_unheard,
                          follow_device=follow_dev,
                          # `?rooms=<n>`: people's new messages in bridged
                          # chats after cursor n (room_notices.py) — the

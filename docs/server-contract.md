@@ -6155,6 +6155,15 @@ data: {}
   twice. The notifier posts "Back · <title>", tapping it opens the thread.
   A thread that was archived is unarchived as it comes due (§6.4
   `/session/remind`), so the one it opens is in the list.
+- `unheard` (18 Nov 2026; only with `?unheard=1`): `{"unheard": {session:
+  n}}` — `/sessions/state`'s `unheard` (§6.1: each thread's unheard replies
+  it ends on; threads with none left out). Sent after the first `sessions`
+  frame always, then whenever the counts change, within about a quarter
+  second of a reply being saved, played or marked heard (the server watches
+  its state database's files while any stream asks). The list keeps the
+  stream open while it is on screen and sets its Play keys from it; the
+  `/sessions/state` poll still carries the same map, for a server without
+  the frame.
 - `follow` (3 Nov 2026; only with `?follow=1`): `{"phone", "name",
   "session", "title", "at"}` — the thread open on the phone this device
   follows, every field null while it follows none (§6.21g). After the first
