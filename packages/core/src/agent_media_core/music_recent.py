@@ -512,6 +512,18 @@ SEARCH_LIMIT = 200
 
 def listed(kind: str = "music", which: str = "recent", store: Optional[StateStore] = None,
            limit: int = 40, q: str = "") -> list[dict]:
+    """`_listed`, with a saved podcast link's plays saying whether its file
+    is here and which link downloads it (podcast_links.annotate)."""
+    rows = _listed(kind, which, store, limit, q)
+    if kind == "podcast" and which in ("recent", "most"):
+        from . import podcast_links
+
+        rows = podcast_links.annotate(rows)
+    return rows
+
+
+def _listed(kind: str = "music", which: str = "recent", store: Optional[StateStore] = None,
+            limit: int = 40, q: str = "") -> list[dict]:
     """One of a kind's lists (LISTS), in Recently played's shape. `recent`
     is what was played; `most` the same by how often (`plays`, then the
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
@@ -528,7 +540,7 @@ def listed(kind: str = "music", which: str = "recent", store: Optional[StateStor
             if which == "most":
                 rows.sort(key=lambda r: (-(r.get("plays") or 1), -float(r.get("at") or 0)))
             return rows
-        return [r for r in listed(kind, which, store, limit=1000) if matches(r, q)][:SEARCH_LIMIT]
+        return [r for r in _listed(kind, which, store, limit=1000) if matches(r, q)][:SEARCH_LIMIT]
     if which == "recent":
         return recent(limit=limit, store=store, kind=kind)
     if which == "most":

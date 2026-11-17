@@ -10476,6 +10476,12 @@ downloaded version has been removed to save space".
   nothing was started; a podcast app's episode (`podcast-link:ep-…`) plays
   from its own address and answers both false. 404 when nothing is saved
   under it. Not a guest POST.
+- A saved link's plays (`GET /music/recent?kind=podcast`, `list` `recent`
+  or `most`, searches too; 18 Nov 2026) carry `link` (its
+  `podcast-link:<vid>`) and `downloaded` as its saved row does, so a page
+  opened from a play (a show's page) can say where it plays from and offer
+  Download by `link`; a play whose file has gone plays the file there is
+  now, or the link. Other plays have neither field.
 - Kept in `<state_dir>/podcast-links.json` and `music-links.json`, the
   downloads in `MEDIA_PODCAST_LINK_DIR` (default `<cache>/podcast-links/`);
   past `MEDIA_PODCAST_LINK_MAX_MB` (1000) the oldest downloads are deleted

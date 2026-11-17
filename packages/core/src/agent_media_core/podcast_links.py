@@ -262,6 +262,37 @@ def download(key: str) -> Optional[dict]:
     return {"fetching": start_fetch(vid), "downloaded": False}
 
 
+_VID_IN_URI = re.compile(r"\[([A-Za-z0-9_-]{11})\]|[?&]v=([A-Za-z0-9_-]{11})|youtu\.be/([A-Za-z0-9_-]{11})")
+
+
+def annotate(rows: list[dict]) -> list[dict]:
+    """Play-history rows (Recently played, Most played, a show's page) of a
+    saved link: each gains ``link`` (its ``podcast-link:<vid>``) and
+    ``downloaded`` as the saved row says, and a row whose file has gone
+    (moved to the books, cleared for space) plays the file there is now, or
+    the link. David, 18 Nov 2026: the Talking Drupal episode opened from its
+    show's page said nothing and offered no Download, because those rows
+    are its plays, which knew nothing of the saved link."""
+    saved = {_key(x) for x in _load() if not x.get("ep")}
+    if not saved:
+        return rows
+    for r in rows:
+        if r.get("link") or str(r.get("id") or "").startswith("podcast-link:"):
+            continue
+        m = _VID_IN_URI.search(str(r.get("uri") or ""))
+        vid = m and next(g for g in m.groups() if g)
+        if not vid or vid not in saved:
+            continue
+        f = file_for(vid)
+        r["link"] = f"podcast-link:{vid}"
+        r["downloaded"] = f is not None
+        uri = str(r.get("uri") or "")
+        if uri.startswith("/") and not Path(uri).exists():
+            url = next((x.get("url") for x in _load() if _key(x) == vid), None)
+            r["uri"] = str(f) if f else f"yt:{url or 'https://www.youtube.com/watch?v=' + vid}"
+    return rows
+
+
 def items() -> list[dict]:
     """The saved links, newest first, in Recently played's row shape."""
     from . import music_recent

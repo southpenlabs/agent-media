@@ -185,3 +185,21 @@ def test_a_saved_link_can_be_downloaded_again(_dirs, monkeypatch):
     assert podcast_links.download("AAAAAAAAAAA") == {"fetching": False, "downloaded": True}
     assert started == ["AAAAAAAAAAA"]
 
+
+
+def test_a_saved_links_plays_say_its_state(_dirs, tmp_path):
+    # David, 18 Nov 2026: opened from its show's page (its plays), the
+    # episode said nothing and offered no Download.
+    podcast_links.add("https://youtu.be/AAAAAAAAAAA", title="Talk")
+    gone = str(tmp_path / "old" / "Talk [AAAAAAAAAAA].opus")
+    rows = [{"id": 1, "uri": gone}, {"id": 2, "uri": "yt:https://www.youtube.com/watch?v=AAAAAAAAAAA"},
+            {"id": 3, "uri": "https://feed.example/ep.mp3"}]
+    out = podcast_links.annotate(rows)
+    assert [r.get("link") for r in out] == ["podcast-link:AAAAAAAAAAA"] * 2 + [None]
+    assert out[0]["downloaded"] is False and out[0]["uri"].startswith("yt:")
+    assert "downloaded" not in out[2]
+    _dirs.mkdir()
+    f = _dirs / "Talk [AAAAAAAAAAA].opus"
+    f.write_bytes(b"x")
+    [r] = podcast_links.annotate([{"id": 1, "uri": gone}])
+    assert r["downloaded"] is True and r["uri"] == str(f)
