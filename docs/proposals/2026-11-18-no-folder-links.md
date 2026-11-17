@@ -52,6 +52,29 @@ agent-sessions' catalogue skip linked folders (6fe8688e, agent-sessions
 4. **Readers key on the chat's id**, as search, the thread list and the
    catalogue now do, so a stray copy is never a duplicate thread.
 
+## Links where they make sense, each with a way out (18 Nov 2026)
+
+David: links are fine where they make sense, "but have a plan to remove them
+in the case of deprecation". So a link is a supported tool, not a failure,
+and every one is retired by a rule, not by memory:
+
+- **Each link is recorded** when made: `<state>/claude-folder-links.json`,
+  `{"<old folder name>": {"to", "old_path", "why", "at"}}` (the move tool
+  writes it; today's three are entered by hand: agent-media, websites,
+  somahz-home).
+- **Deprecated** when the old path is: nothing exists at `old_path` any more
+  (the `~/projects/<repo>` compatibility link to the new place removed), or
+  David marks it so.
+- **Retired** by the check (step 3) once deprecated and quiet: no chat has
+  been written through the old name for 14 days (Claude writes under the
+  folder it was resumed from, so a write there means something still opens
+  the old path). It then moves anything still filed under the old name into
+  the real folder (as step 1 does), removes the link and the record, and
+  says so; a write through the old name instead raises an alert naming what
+  still uses it.
+- Until then the link stays and costs nothing: search, the thread list and
+  agent-sessions' catalogue already read linked folders once.
+
 ## Steps
 
 1, then 3, then 2 (the resume paths are the riskiest to touch and the
