@@ -10208,6 +10208,11 @@ def cmd_session(a) -> int:
         return live_copy.main(a.args[1:])
     if a.args and a.args[0] == "deliver":
         return _session_deliver(a.args[1:])
+    if a.args and a.args[0] in ("move-folder", "folder-links"):
+        # Claude's chat folders: a moved repo's chats, the recorded links
+        # (agent_media_server.claude_folders).
+        folders = _server_module("claude_folders")
+        return 1 if folders is None else folders.main(a.args)
     mail = _server_module("headless_mail")
     if mail is None:
         return 1

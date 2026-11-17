@@ -79,3 +79,21 @@ and every one is retired by a rule, not by memory:
 
 1, then 3, then 2 (the resume paths are the riskiest to touch and the
 check will say whether they still make copies).
+
+## Built (18 Nov 2026)
+
+Steps 1 and 3 and the retirement rule, in
+`packages/server/src/agent_media_server/claude_folders.py`:
+
+- `media session move-folder <old path> <new path> [--link --why …] [--apply]`
+  (a dry run without `--apply`). Live chats (written in the last 15 minutes)
+  are left and the old folder kept until a later run; what loses a
+  larger-then-newer comparison goes to `~/backups/claude-duplicates/<when>/`.
+  On an old name that is already a link, the chats that started at the old
+  path get their `moved.json` row before the link goes.
+- `media session folder-links list|record|deprecate|check [--apply]`; the
+  record is `<state>/claude-folder-links.json`, today's three entered.
+- The scheduler's `claude-folders` job runs `check --apply` daily at 04:30
+  (origin hosts) and reports on `claude-folders.<host>`.
+
+Step 2 is still to do.

@@ -173,6 +173,12 @@ JOBS: "tuple[Job, ...]" = (
     Job("automode-hosts", ["media", "automode-hosts"],
         what="refresh auto mode's line of the machines this account administers",
         at=("05:10",), jitter=1800, requires_role="server"),
+    # Claude chat folders: copies in two folders and unrecorded links raise
+    # `claude-folders.<host>`; a recorded link deprecated and quiet 14 days is
+    # retired (agent_media_server/claude_folders.py, 18 Nov 2026).
+    Job("claude-folders", ["media", "session", "folder-links", "check", "--apply"],
+        what="check Claude's chat folders, retire deprecated links", at=("04:30",),
+        jitter=1800, requires_role="origin"),
 )
 
 
