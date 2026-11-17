@@ -379,3 +379,43 @@ def test_desk_rows_name_every_harness_not_only_claude(monkeypatch):
     rows = hm.desk_rows(set())
     assert {r["session"]: (r["agent"], r["pane"]) for r in rows} == {
         "ses_desk": ("opencode", ""), "rollout-x": ("codex", "%4")}
+
+
+# --- --mail: a letter naming no chat goes to a mail chat, never a person's ---
+# The fake claude keeps no transcript, so which chats began as mail is faked
+# at mail_threads.mail_from.
+
+def _mail_chats(monkeypatch, senders: dict[str, str]):
+    from agent_media_server import mail_threads
+
+    monkeypatch.setattr(mail_threads, "mail_from", lambda sid: senders.get(sid))
+
+
+def test_send_mail_by_folder_passes_over_a_persons_newer_chat(host, capsys, monkeypatch):
+    mail = start(host, "reply: from mail")
+    wait_for(lambda: state(host, mail) == "waiting")
+    davids = start(host, "reply: his own")           # the newer, most recently active
+    wait_for(lambda: state(host, davids) == "waiting")
+    _mail_chats(monkeypatch, {mail: "Sasonica-app"})
+    view, _ = hm.find(str(host.work), hm.rows()[0])
+    assert view["session"] == davids                 # without --mail, as before
+    rc, d = run(capsys, "send", str(host.work), "--mail", "reply:", "a letter")
+    assert rc == 0 and d["session"] == mail
+
+
+def test_send_mail_with_only_a_persons_chat_live_is_rc_5(host, capsys, monkeypatch):
+    davids = start(host, "reply: his own")
+    wait_for(lambda: state(host, davids) == "waiting")
+    _mail_chats(monkeypatch, {})
+    rc, d = run(capsys, "send", str(host.work), "--mail", "reply:", "a letter")
+    assert rc == 5 and "mail chat" in d["error"]
+    assert not any("a letter" in (r or "") for r in results(host, davids))
+
+
+def test_wake_mail_starts_a_mail_chat_beside_a_persons(host, capsys, monkeypatch):
+    davids = start(host, "reply: his own")
+    wait_for(lambda: state(host, davids) == "waiting")
+    _mail_chats(monkeypatch, {})
+    rc, d = run(capsys, "wake", str(host.work), "--mail", "reply:", "a letter")
+    assert rc == 0 and d["woke"] == "started" and d["session"] != davids
+    assert not any("a letter" in (r or "") for r in results(host, davids))

@@ -13,6 +13,12 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   and whether a card is up or work is in flight — `ListAgents` for these.
 * `send` puts a message into one, named by id (or its first 8+ characters)
   or by folder: the live session there, the most recently active if several.
+  With `--mail` (agent-mail-deliver's, for a letter that names no chat) only a
+  mail chat is taken: one that began with another agent's mail and that no
+  person has written in since (mail_threads.py). A chat David is having is
+  never handed someone else's letter because it happened to be the newest in
+  the folder (18 Nov 2026: a phone chat about Android auto-update took on
+  the project's CI test mail, and every follow-up stuck to it).
   A session mid-turn takes it after the turn (sessiond queues it; nothing is
   interrupted). A session with a question or permission card up is never
   sent to, since a message answers the card the way typing does: it is
@@ -34,7 +40,8 @@ thread sounds like a gap"). This is the way in, through sessiond's own
 * `wake` is a scheduled turn's way in (a timer's standing order, David,
   3 Nov 2026: agents that run day-to-day work on their own): the folder's
   live session is sent the order, and with none live a new one is started
-  with it, as `--persona` if given. A card up is never answered: the wake is
+  with it, as `--persona` if given. `--mail` as for `send`: a mail chat or a
+  new one, never a person's. A card up is never answered: the wake is
   refused `pending` and the order waits for the next one.
 
 Nothing here records the words as David's turn (send._record_turn): they
@@ -171,9 +178,24 @@ def desk_rows(known: set[str]) -> list[dict]:
     return out
 
 
-def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
+def mail_chat(view: dict) -> bool:
+    """Whether `view` is a mail chat: begun by another agent's mail, and no
+    person has written in it since (mail_threads.mail_from). Never raises."""
+    if str(view.get("agent") or "claude") != "claude":
+        return False
+    try:
+        from . import mail_threads
+
+        return bool(mail_threads.mail_from(str(view.get("session") or "")))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def find(target: str, views: list[dict], *, mail: bool = False) -> tuple[dict | None, str]:
     """The session `target` names: an id or 8+ character prefix of one, or a
-    folder's live session (the most recently active). `(view, why_not)`."""
+    folder's live session (the most recently active; with `mail`, the most
+    recently active mail chat, so a person's chat is never picked).
+    `(view, why_not)`."""
     target = (target or "").strip()
     if not target:
         return None, "no session or folder named"
@@ -187,6 +209,11 @@ def find(target: str, views: list[dict]) -> tuple[dict | None, str]:
                              chat_worktree.owner(str(v.get("cwd") or "")))]
         if not here:
             return None, f"no live headless session in {target}"
+        if mail:
+            here = [v for v in here if mail_chat(v)]
+            if not here:
+                return None, (f"no live mail chat in {target} (its live chats are "
+                              "a person's)")
         return here[0], ""
     if len(target) < 8:
         return None, "a session id needs at least 8 characters"
@@ -337,14 +364,15 @@ def start(cwd: str, text: str, *, model: str = "", plan: bool = False,
 
 
 def wake(cwd: str, text: str, *, model: str = "", persona: str = "", role: str = "",
-         permissions: str = "", views: list[dict] | None = None) -> tuple[int, dict]:
+         permissions: str = "", views: list[dict] | None = None,
+         mail: bool = False) -> tuple[int, dict]:
     """`text` to the live session in `cwd`, or a new one started with it
     (`start`, as `persona`/`role`); `(rc, answer)`, `woke` "sent" or
     "started". Never over a card: that is RC_PENDING, with nothing started
     beside it."""
     if views is None:
         views, _up = rows()
-    view, _why = find(_real(cwd), views)
+    view, _why = find(_real(cwd), views, mail=mail)
     if view is not None:
         rc, ans = send(str(view["session"]), text)
         return rc, {**ans, "woke": "sent"} if rc == RC_SENT else ans
@@ -399,6 +427,9 @@ def _parser() -> argparse.ArgumentParser:
     wk.add_argument("--model", default="", help="for a session it starts")
     wk.add_argument("--permissions", default="", choices=("", "strict", "normal", "folder"),
                     help="for a session it starts (see start)")
+    wk.add_argument("--mail", action="store_true",
+                    help="agent mail naming no chat: only a mail chat is sent it (one begun "
+                         "by mail that no person has written in), else a new one is started")
     wk.add_argument("--json", action="store_true")
     da = sub.add_parser("default-agent", help="the agent a new chat gets when none is "
                                               "named: show it, or set it")
@@ -428,6 +459,9 @@ def _parser() -> argparse.ArgumentParser:
                     help="who it is from: prefixed as '[From Name]' unless the text has one")
     sd.add_argument("--wait", type=float, default=0.0,
                     help="seconds to wait for a card to be answered (default 0)")
+    sd.add_argument("--mail", action="store_true",
+                    help="by folder, only a mail chat (one begun by another agent's mail "
+                         "that no person has written in), never a person's chat")
     sd.add_argument("--json", action="store_true")
     return ap
 
@@ -584,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
         return rc
     if a.cmd == "wake":
         rc, ans = wake(a.cwd, text, model=a.model, persona=a.persona, role=a.role,
-                       permissions=a.permissions, views=views)
+                       permissions=a.permissions, views=views, mail=a.mail)
         if a.json:
             print(json.dumps({"ok": rc == RC_SENT, **ans}))
         elif rc == RC_SENT:
@@ -592,7 +626,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"media session wake: {ans.get('error')}", file=sys.stderr)
         return rc
-    view, why = find(a.target, views)
+    view, why = find(a.target, views, mail=a.mail)
     if view is None:
         print(json.dumps({"ok": False, "code": "none", "error": why}) if a.json
               else f"media session send: {why}", file=sys.stdout if a.json else sys.stderr)
