@@ -434,3 +434,13 @@ def _no_search_archive_or_peers(monkeypatch):
     reach this machine's real ones. test_search_peers sets its own."""
     monkeypatch.setenv("MEDIA_SEARCH_ARCHIVE", "")
     monkeypatch.setenv("MEDIA_FIND_PEERS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _voice_model_sweep_inline(monkeypatch):
+    """voice_model's sweep runs on the reply's own thread in tests: on one of
+    its own it outlived its test and wrote the next test's Claude settings,
+    found by CLAUDE_CONFIG_DIR when it ran (test_voice_model, CI 17 Nov 2026)."""
+    from agent_media_server import voice_model
+
+    monkeypatch.setattr(voice_model, "_sweep_later", voice_model.sweep)

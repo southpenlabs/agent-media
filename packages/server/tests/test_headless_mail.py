@@ -54,6 +54,11 @@ def host(monkeypatch, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.setenv("MEDIA_HEADLESS", "1")
+    # Put back after the scrub (conftest's): a fake chat's exit would start
+    # sessiond's reply recovery, which opens the state database 45 s later,
+    # by then in another test's HOME (test_project_roots found a ~/.local
+    # in its temporary home, CI 17 Nov 2026).
+    monkeypatch.setenv("MEDIA_SESSIOND_RECOVER_REPLY", "0")
     monkeypatch.setenv("MEDIA_SESSIOND_TRANSPORT", "unix")
     monkeypatch.setenv("MEDIA_SESSIOND_SOCKET", str(sock))
     monkeypatch.setenv("MEDIA_SESSIOND_CLAUDE", runnable(FAKE, tmp_path))

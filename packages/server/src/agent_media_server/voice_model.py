@@ -255,4 +255,12 @@ def on_reply(session: str, voice: bool) -> None:
     except Exception as e:  # noqa: BLE001
         log.warning("voice-model: %s (%s)", session[:8], e)
     if voice_mode.all_switched():
-        threading.Thread(target=sweep, daemon=True).start()
+        _sweep_later()
+
+
+def _sweep_later() -> None:
+    """`sweep` on a thread of its own. Tests run it inline: on a thread it
+    outlived its test and wrote the next test's settings file, whose path
+    it reads from the environment when it runs (test_voice_model, CI 17 Nov
+    2026)."""
+    threading.Thread(target=sweep, daemon=True, name="voice-model-sweep").start()

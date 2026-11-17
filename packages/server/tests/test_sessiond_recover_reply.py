@@ -26,6 +26,10 @@ def _run(monkeypatch, rows):
     monkeypatch.setattr(sessiond, "RECOVER_AFTER_S", 0.0)
     monkeypatch.setattr(core_state, "StateStore", lambda: _Store(rows))
     monkeypatch.setattr(sessiond.subprocess, "run", lambda argv, **k: ran.append((argv, k)))
+    # Its follow-up reads the real history for two minutes, outliving the
+    # test and opening state databases in later tests' homes: tested on its
+    # own below.
+    monkeypatch.setattr(sessiond, "confirm_recovered", lambda sid, at: True)
     sessiond.Supervisor._recover_reply(None, "sid-1", "All done.", time.time() - 1, "/tmp", {"PATH": "/bin"})
     return ran
 
