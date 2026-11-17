@@ -276,11 +276,14 @@ they are deleted only if asked.
 - **Who reads it**: Sasonica too, not only Element: the app decrypts with
   matrix-rust-sdk's crypto-wasm, each app install a verified device of the
   account. A step of its own after the copier.
-- **Account** and **room names**: asked again with more detail. Proposed for
-  rooms, since a chat's id is the same from any device: one room per chat
-  (so a chat moved to another phone carries on in the same room), grouped
-  in a "Local chats" space with a sub-space per network, and the bridging
-  device in the topic and the state event, not the name.
+- **Account**: the user's own, the phone a device of theirs (one-time
+  login token from the server, verified once); a lost phone is signed out
+  from any client.
+- **Rooms**: one per chat (a chat moved to another phone carries on in the
+  same room), in a "Local chats" space with a sub-space per network, named
+  as the chat is, the bridging device in the topic and the state event.
+- **Edits and deletes**: not asked separately; the recommendation stands
+  (mirrored edits, deletes as redactions) unless David says otherwise.
 
 ### Steps
 
