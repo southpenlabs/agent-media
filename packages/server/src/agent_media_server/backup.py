@@ -77,6 +77,8 @@ import fnmatch
 import hashlib
 import json
 import os
+import shlex
+import re
 import shutil
 import socket
 import sqlite3
@@ -648,6 +650,23 @@ def key_path() -> Path:
     return Path.home() / ".config" / "agent-media" / KEY_NAME
 
 
+def _sftp_options(url: str) -> list[str]:
+    """For an sftp: repository, restic's own ssh: never through a shared
+    ControlMaster connection (a hung master held the 17 Nov 2026 night's
+    backup for its whole hour: the network and red5 were fine, the mux
+    socket was not), and with keepalives so a dead link fails in a minute,
+    not at the timeout. Other repositories: nothing added."""
+    m = re.fullmatch(r"sftp:(?:([^@/:]+)@)?([^:/]+):(.*)", url or "")
+    if not m:
+        return []
+    user, host = m.group(1), m.group(2)
+    target = f"{user}@{host}" if user else host
+    cmd = ("ssh -o ControlMaster=no -o ControlPath=none -o BatchMode=yes"
+           " -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+           f" {shlex.quote(target)} -s sftp")
+    return ["-o", f"sftp.command={cmd}"]
+
+
 def _restic(argv: list[str], *, repo_url: str | None = None,
             timeout: float = 3600.0) -> subprocess.CompletedProcess:
     """restic, with the repository and its password file supplied."""
@@ -655,7 +674,7 @@ def _restic(argv: list[str], *, repo_url: str | None = None,
     env = dict(os.environ)
     env["RESTIC_REPOSITORY"] = url
     env["RESTIC_PASSWORD_FILE"] = str(key_path())
-    return subprocess.run(["restic", *argv], capture_output=True, text=True,
+    return subprocess.run(["restic", *_sftp_options(url), *argv], capture_output=True, text=True,
                           env=env, timeout=timeout)
 
 

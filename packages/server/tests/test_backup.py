@@ -784,3 +784,17 @@ def test_a_store_back_under_the_line_clears_the_space_alert(install, monkeypatch
     monkeypatch.setattr(bk.shutil, "disk_usage", lambda p: tight)
     bk.backup(tier="jewels")
     assert ("space", "warn") in raised and ("space", "ok") not in raised
+
+
+def test_restic_over_sftp_never_rides_a_shared_ssh_connection():
+    """A hung ControlMaster held a night's backup for its whole hour (17 Nov
+    2026): an sftp: repository gets restic's own ssh with keepalives."""
+    from agent_media_server import backup as b
+    opts = b._sftp_options("sftp:red5:/mnt/data/agent-media-restic")
+    assert opts[0] == "-o" and opts[1].startswith("sftp.command=ssh ")
+    cmd = opts[1]
+    for want in ("ControlMaster=no", "ControlPath=none", "ServerAliveInterval=15", "BatchMode=yes",
+                 " red5 -s sftp"):
+        assert want in cmd, cmd
+    assert "ryer@red5 -s sftp" in b._sftp_options("sftp:ryer@red5:/x")[1]
+    assert b._sftp_options("/home/x/restic") == [] and b._sftp_options("s3:host/bucket") == []
