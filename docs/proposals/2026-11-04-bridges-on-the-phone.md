@@ -356,3 +356,18 @@ kept as the fallback. Google Messages takes more than one paired device, so
 red5's own Google Messages bridge stayed connected. It bridges both SIMs'
 texts (the phone's Messages handles both). All four networks connected on
 the phone: Messenger, Instagram, WhatsApp, Google Messages.
+
+## Slack, Discord, Telegram, Signal and Teams (17 Nov 2026)
+
+David: "let's just do all of them". Added to the companion as networks five
+to nine (sasonica-bridges build-117, -118): Slack and Discord sign in on
+their own pages in the in-app browser (Discord from its unreleased
+bridgev2 `megadiscord` branch, pinned), Telegram by phone number and code
+with the user's own API keys (none shipped), Signal by QR from another
+screen (libsignal built from source in CI), and Teams from a fork,
+davidj4tech/mautrix-teams branch `sasonica` (mautrix-go v0.33, calls and
+presence off without the appservice connector; both offered upstream on
+David's yes), signing in with Microsoft's device code in a cleared in-app
+browser (build-119; the code filled in by itself next). A free personal
+Microsoft account made through it; Teams connected on p8a beside Messenger,
+Instagram, WhatsApp and Google Messages.
