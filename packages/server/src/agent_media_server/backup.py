@@ -748,8 +748,20 @@ def to_repo(snap: Path, tier: str, *, repo_url: str | None = None) -> dict:
         return {"ok": True, "skipped": "no repository configured"}
     if not key_path().exists():
         return {"ok": False, "error": f"no key at {key_path()}: run `media backup init`"}
-    r = _restic(["backup", "--tag", f"tier:{tier}", "--tag", f"snapshot:{snap.name}",
-                 str(snap)])
+    # Up to MEDIA_BACKUP_REPO_TIMEOUT (4 h): over a slow uplink a day's
+    # changes can take longer than the old hour (17 Nov 2026: two nights'
+    # worth, red2's upload shared with a transcript sync to red5). A time-out
+    # is a failed step with its reason, not a traceback that takes the run.
+    try:
+        limit = float(os.environ.get("MEDIA_BACKUP_REPO_TIMEOUT", "") or 4 * 3600)
+    except ValueError:
+        limit = 4 * 3600.0
+    try:
+        r = _restic(["backup", "--tag", f"tier:{tier}", "--tag", f"snapshot:{snap.name}",
+                     str(snap)], repo_url=url, timeout=limit)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "repo": url,
+                "error": f"restic backup did not finish in {int(limit // 60)} min (a slow or stalled link to the repository)"}
     out = {"ok": r.returncode in (0, 3), "repo": url,
            "error": r.stderr.strip()[:400] or None}
     if r.returncode == 3:

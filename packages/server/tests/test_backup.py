@@ -798,3 +798,20 @@ def test_restic_over_sftp_never_rides_a_shared_ssh_connection():
         assert want in cmd, cmd
     assert "ryer@red5 -s sftp" in b._sftp_options("sftp:ryer@red5:/x")[1]
     assert b._sftp_options("/home/x/restic") == [] and b._sftp_options("s3:host/bucket") == []
+
+
+def test_a_restic_time_out_is_a_failed_step_not_a_crash(tmp_path, monkeypatch):
+    """17 Nov 2026: restic's backup over a slow uplink ran past its limit and
+    the TimeoutExpired took the whole run with a traceback."""
+    import subprocess
+    from agent_media_server import backup as b
+    key = tmp_path / "backup.key"
+    key.write_text("k")
+    monkeypatch.setattr(b, "key_path", lambda: key)
+    monkeypatch.setenv("MEDIA_BACKUP_REPO_TIMEOUT", "5")
+
+    def stalled(argv, **kw):
+        raise subprocess.TimeoutExpired(["restic", *argv], kw.get("timeout"))
+    monkeypatch.setattr(b, "_restic", stalled)
+    out = b.to_repo(tmp_path, "daily", repo_url="sftp:red5:/x")
+    assert out["ok"] is False and "did not finish" in out["error"]
