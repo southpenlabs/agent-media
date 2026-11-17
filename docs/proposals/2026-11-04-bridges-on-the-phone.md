@@ -326,3 +326,13 @@ you in"); the cookie sign-in's blank page was the WebView (no height, its
 storage cleared while the page loaded; fixed in 29e441c, build-105, with a
 switch to debug the sign-in browser and remembered sign-in addresses). With
 build-105 David signed two Instagram accounts in on p8a.
+
+## WhatsApp (17 Nov 2026)
+
+mautrix-whatsapp as the third network in the same core (sasonica-bridges
+045ba28, build-107; mautrix-meta and mautrix-go moved up with it, existing
+accounts reconnected). A test number on a prepaid eSIM in p8a's second slot,
+registered in WhatsApp Business so David's own WhatsApp is untouched; the
+bridge links to it with WhatsApp's **pairing code** (the bridge runs on the
+same phone, so a QR cannot be scanned). Connected on p8a beside Messenger
+and Instagram.
