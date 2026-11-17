@@ -645,6 +645,17 @@ def _count_unheard() -> dict[str, int]:
     # key on 117 threads (David, 18 Nov 2026: "change the chat list play
     # button to match it").
     ended: set[str] = set()
+    # Each reply's copies by (thread, dedup key), found once: heard_to_any
+    # scanning all 4,000 rows for each candidate took most of a second, on
+    # every poll of the list (18 Nov 2026: Play keys "a little bit slow to
+    # come up").
+    copies: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        rx = r.get("extras") if isinstance(r.get("extras"), dict) else {}
+        k = rx.get("dedup_key")
+        if k and not rx.get("listener"):
+            s = str(rx.get("source_session") or rx.get("session") or "")
+            copies.setdefault((s, str(k)), []).append(r)
     for row in rows:    # newest first
         ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
         session = str(ex.get("source_session") or ex.get("session") or "")
@@ -661,7 +672,7 @@ def _count_unheard() -> dict[str, int]:
                 continue
             seen.add((session, key))
         if (not ex.get("held") or ex.get("heard") or _resume_of(ex)
-                or reply_position.heard_to_any(row, rows) != 0):
+                or reply_position.heard_to_any(row, copies.get((session, key), [])) != 0):
             ended.add(session)
             continue
         if session not in secret:

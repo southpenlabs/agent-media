@@ -715,3 +715,15 @@ def test_an_open_with_no_waiting_toast_plays_the_unheard_replies(monkeypatch):
     monkeypatch.setattr(toast, "_open_ttl", lambda: 10)
     thread_events._play_waiting(SID, "p8a")
     assert ran == []
+
+
+def test_the_fast_re_read_lasts_past_the_turn(monkeypatch):
+    """A reply's held clip lands just after its words: the re-read stays at
+    FAST_S for AFTER_S after the turn or a new message (18 Nov 2026)."""
+    w = thread_events.Watcher.__new__(thread_events.Watcher)
+    w._busy, w._quick_until = False, 0.0
+    assert w._interval() == thread_events.SLOW_S
+    w._quick_until = time.monotonic() + thread_events.AFTER_S
+    assert w._interval() == thread_events.FAST_S
+    w._busy, w._quick_until = True, 0.0
+    assert w._interval() == thread_events.FAST_S

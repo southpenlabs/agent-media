@@ -34,8 +34,10 @@ first subscriber and stopped when the last one leaves. It does two things:
   terminal: no speech, no poll interval in the way.
 * **Re-reads the rest** — speech (which message is spoken, and the live one),
   working, the dialog, the suggestion, the session's state, the recap —
-  every `FAST_S` (1 s) while a turn is working or speech is live, else every
-  `SLOW_S` (3 s). Each is sent only when it changed.
+  every `FAST_S` (1 s) while a turn is working or speech is live and for
+  `AFTER_S` (20 s) after it or after a new message (a reply's held clip, and
+  so its Play, lands just after its words), else every `SLOW_S` (3 s). Each
+  is sent only when it changed.
 
 The server keeps no history per client. A reconnect gets a fresh snapshot;
 `Last-Event-ID` is accepted and ignored. A client that falls `QUEUE_MAX`
@@ -83,6 +85,11 @@ DEBOUNCE_MAX_S = 1.0
 FAST_S = 1.0
 #: … and otherwise.
 SLOW_S = 3.0
+#: … but still FAST_S this long after a turn ends or a message comes in: a
+#: reply's held clip is written just after its words, and its Play waited up
+#: to SLOW_S for the next re-read (18 Nov 2026: Play keys "a little bit slow
+#: to come up").
+AFTER_S = 20.0
 #: Silence before a ping.
 PING_S = 15.0
 #: Connections to one thread, and in all.
@@ -247,6 +254,7 @@ class Watcher:
         self._live_read = 0.0
         self._last: dict = {}
         self._busy = False
+        self._quick_until = 0.0
         self._stat = None
 
     # -- lifecycle --
@@ -295,7 +303,7 @@ class Watcher:
     def _run(self) -> None:
         stat = self._stat
         first = last = 0.0
-        next_full = time.monotonic() + (FAST_S if self._busy else SLOW_S)
+        next_full = time.monotonic() + self._interval()
         seq = self._headless_seq()
         # While a burst of writes settles, look again after the debounce
         # rather than a whole poll: the wait is the debounce, not both.
@@ -310,6 +318,8 @@ class Watcher:
                 if first and (now - last >= DEBOUNCE_S or now - first >= DEBOUNCE_MAX_S):
                     first = 0.0
                     self._messages()
+                    self._quick_until = now + AFTER_S
+                    next_full = min(next_full, now + FAST_S)
                 if seq is not None:
                     got = self._headless_seq()
                     if got is not None and got != seq:
@@ -317,7 +327,7 @@ class Watcher:
                         next_full = now      # state or approval moved: re-read now
                 if now >= next_full:
                     self._full(emit=True)
-                    next_full = time.monotonic() + (FAST_S if self._busy else SLOW_S)
+                    next_full = time.monotonic() + self._interval()
             except Exception:  # noqa: BLE001
                 log.exception("thread events %s: read failed", self.session[:8])
 
@@ -392,6 +402,14 @@ class Watcher:
         for name, value in now.items():
             self._update(name, value, emit)
         self._busy = bool(env.get("working")) or bool(live) or st["state"] == "working"
+        if self._busy:
+            self._quick_until = time.monotonic() + AFTER_S
+
+    def _interval(self) -> float:
+        """The wait to the next full re-read: FAST_S while busy and for
+        AFTER_S after, else SLOW_S."""
+        quick = self._busy or time.monotonic() < self._quick_until
+        return FAST_S if quick else SLOW_S
 
     def _update(self, name: str, value, emit: bool) -> None:
         """Remember `value` as the latest `name`; send it if it changed (and
