@@ -589,11 +589,16 @@ def _recent_kind(row: dict, ex: dict) -> str:
     return ""
 
 
-#: How long `unheard_counts` is reused: the list polls /sessions/state every
-#: few seconds, from every open app.
-_UNHEARD_TTL_S = 3.0
+#: How long `unheard_counts` is reused while the speech history's signature
+#: (StateStore.history_signature) stays the same: a change there (a reply
+#: held, played, marked heard) is seen at the next ask, and this only bounds
+#: what the signature cannot see (a thread made private). It was a flat 3 s,
+#: so the list's Play key could wait out the cache after its poll (18 Nov
+#: 2026: Play keys "a little bit slow to come up").
+_UNHEARD_TTL_S = 60.0
 _UNHEARD_LOCK = threading.Lock()
 _UNHEARD_CACHE: tuple[float | None, dict[str, int]] = (None, {})
+_UNHEARD_SIG: tuple = ()
 
 
 def unheard_counts() -> dict[str, int]:
@@ -606,13 +611,20 @@ def unheard_counts() -> dict[str, int]:
     something to read
     (David, 12 Nov 2026: "The play button on the threadlist should only
     display for unheard replies. not necessarily those marked unread")."""
-    global _UNHEARD_CACHE
+    global _UNHEARD_CACHE, _UNHEARD_SIG
+    from agent_media_core.state import StateStore
+
     with _UNHEARD_LOCK:
+        try:
+            sig = StateStore().history_signature(sink="speech", limit=UNHEARD_ROWS)
+        except Exception:  # noqa: BLE001 — unknown: counted again
+            sig = ()
         at, counts = _UNHEARD_CACHE
-        if at is not None and time.monotonic() - at <= _UNHEARD_TTL_S:
+        if (at is not None and sig and sig == _UNHEARD_SIG
+                and time.monotonic() - at <= _UNHEARD_TTL_S):
             return counts
         counts = _count_unheard()
-        _UNHEARD_CACHE = (time.monotonic(), counts)
+        _UNHEARD_CACHE, _UNHEARD_SIG = (time.monotonic(), counts), sig
         return counts
 
 
@@ -620,7 +632,7 @@ def unheard_counts() -> dict[str, int]:
 #: 400, which had come to cover about 16 hours, so a thread's unheard replies
 #: lost their Play by the next morning though nothing had heard them (David, 14
 #: Nov 2026: "a whole heap of unheard play buttons that have disappeared").
-#: 4,000 rows count in about 0.2 s, and the answer is cached for _UNHEARD_TTL_S.
+#: 4,000 rows count in about 0.15 s, and the answer is kept while they stay the same.
 UNHEARD_ROWS = 4000
 
 

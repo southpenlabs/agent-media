@@ -139,3 +139,19 @@ def test_unheard_counts_only_the_replies_a_thread_ends_on(monkeypatch):
     _add("Mail from elsewhere.", session=B, at=t + 5, kind="notif")
     _add("Held last.", session=B, at=t + 6, kind="stop", held=True)
     assert speech.unheard_counts() == {B: 2}
+
+
+def test_unheard_counts_are_fresh_the_moment_a_reply_is_heard(monkeypatch):
+    """Kept while the speech history is the same, counted again the moment
+    it changes: a reply held, then marked heard (18 Nov 2026)."""
+    from agent_media_core.state import StateStore
+
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    calls = []
+    real = speech._count_unheard
+    monkeypatch.setattr(speech, "_count_unheard", lambda: calls.append(1) or real())
+    rid = _add("Held.", at=time.time() - 10, kind="stop", held=True)
+    assert speech.unheard_counts() == {A: 1}
+    assert speech.unheard_counts() == {A: 1} and len(calls) == 1
+    StateStore().mark_heard(rid)
+    assert speech.unheard_counts() == {} and len(calls) == 2

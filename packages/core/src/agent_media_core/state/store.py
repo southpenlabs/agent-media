@@ -1463,6 +1463,18 @@ class StateStore:
             result.append(row)
         return result
 
+    def history_signature(self, *, sink: str, limit: int) -> tuple:
+        """What changes when `recent_history(sink=, limit=)` would: its
+        newest id, its row count and the length of its extras together (a
+        new row, a heard mark, its undo, a stop). Milliseconds where reading
+        the rows is a tenth of a second; for a cache of what is worked out
+        from them (the thread list's unheard counts)."""
+        q = ("SELECT max(id), count(*), total(length(extras)) FROM (SELECT id, "
+             "extras FROM history WHERE sink = ? ORDER BY started_at DESC LIMIT ?)")
+        with self._cursor() as cur:
+            cur.execute(q, (sink, int(limit)))
+            return tuple(cur.fetchone() or ())
+
     # ---- retention -------------------------------------------------------
 
     def relocate_prefix(self, old: str, new: str) -> int:
