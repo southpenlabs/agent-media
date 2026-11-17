@@ -365,6 +365,11 @@ def _claude_files() -> list[tuple[str, str]]:
     out = []
     theirs = _owned_elsewhere()
     for f in glob.glob(str(root / "*" / "*.jsonl")):
+        # A project folder that is a link to another (a repo moved: the old
+        # folder's name linked to the new one, 17 Nov 2026) holds the same
+        # files: read them once, under the real folder.
+        if os.path.islink(os.path.dirname(f)):
+            continue
         sid = os.path.basename(f)[:-6]
         if transcript_session(sid) and sid not in theirs:
             out.append((f, sid))
