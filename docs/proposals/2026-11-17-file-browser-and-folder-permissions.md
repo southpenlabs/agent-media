@@ -1,6 +1,6 @@
 # A file browser per folder, and folders limited by Drupal permissions (proposal, 17 Nov 2026)
 
-**Status:** proposal (17 Nov 2026). Nothing built.
+**Status:** proposal (17 Nov 2026); step 1 built 17 Nov 2026 (contract §9, "Folder grants").
 
 David, 17 Nov 2026 (from the footer thread): "I'm thinking about adding a
 file browser for each directory and limiting directories by Drupal
@@ -179,8 +179,12 @@ the grants. `own_user` is what makes the grants hold inside a chat too.
 
 ## Order
 
-1. Grants and permissions on the server (`folder-grants.json`, the check,
-   `GET /me` projects), with the existing file routes moved onto it.
+1. **Built 17 Nov 2026.** Grants and permissions on the server
+   (`folder-grants.json`, the check, `GET /me` projects), with the existing
+   file routes moved onto it. A member or guest with no grants is unscoped
+   (today's behaviour), so nothing changes until an admin grants something.
+   Thread lists and chats are not limited yet: they come with step 5's
+   `checked` level, since a scoped member's chats need it anyway.
 2. Read-only browser: `GET /files`, `/files/read`, and the app's Files view.
 3. Writes and the trash.
 4. Drupal: the Group type and roles in sasonica.com's module, projects in

@@ -33,7 +33,9 @@ keystores, `auth.json`, `devices.json`, …), and /proc, /sys, /dev and /run
 are never served. Only a regular, readable file. Anything else is simply not
 in the answer (resolve) or 404 (file).
 
-Guests get none of it (403): a guest reads and listens.
+Guests get none of it (403): a guest reads and listens. A member limited to
+its folders (folder_grants.py) opens only files in a folder it may `open`
+in; a download (`&download=1`, a signed link) needs `download` there.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ import re
 import stat
 from pathlib import Path
 
-from . import auth
+from . import auth, folder_grants
 
 #: The most paths one resolve looks at (a message's worth).
 MAX_PATHS = 64
@@ -306,6 +308,8 @@ def resolve(body: dict, bearer: str) -> tuple[bool, dict]:
         if not isinstance(raw, str) or raw in out:
             continue
         got = find(raw, cwd, top, among)
+        if got and not folder_grants.may_bearer(bearer, got[0], "open"):
+            got = None                          # outside this device's folders
         if got:
             try:
                 out[raw] = describe(*got)
@@ -318,9 +322,12 @@ def _missing() -> dict:
     return {"error": "not a file this thread may open", "status": 404}
 
 
-def open_file(session: str, path: str, bearer: str, signed: bool = False) -> tuple[bool, dict]:
+def open_file(session: str, path: str, bearer: str, signed: bool = False,
+              permission: str = "open") -> tuple[bool, dict]:
     """`GET /session/file`: the file, as `{file, size, type, name, kind, active}`
-    (the caller streams it). `signed`: a link `link` made was checked instead."""
+    (the caller streams it). `signed`: a link `link` made was checked instead.
+    `permission`: what a device limited to its folders (folder_grants) needs
+    there: `open` to view, `download` for its bytes as a file."""
     if signed:
         from . import sessions
 
@@ -335,6 +342,8 @@ def open_file(session: str, path: str, bearer: str, signed: bool = False) -> tup
     if not got:
         return False, _missing()
     real = got[0]
+    if not signed and not folder_grants.may_bearer(bearer, real, permission):
+        return False, _missing()
     try:
         size = real.stat().st_size
     except OSError:
@@ -379,7 +388,8 @@ def link(body: dict, bearer: str, now: float | None = None) -> tuple[bool, dict]
     from urllib.parse import urlencode
 
     session = str((body or {}).get("session") or "")
-    ok, got = open_file(session, str((body or {}).get("path") or ""), bearer)
+    ok, got = open_file(session, str((body or {}).get("path") or ""), bearer,
+                        permission="download")
     if not ok:
         return False, got
     real = str(got["file"])

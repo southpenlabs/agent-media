@@ -22,7 +22,7 @@ from pathlib import Path
 
 from agent_media_core import docs, layout
 
-from . import auth, new_project
+from . import auth, folder_grants, new_project
 
 SUFFIXES = (".md", ".org", ".txt")
 MAX_READ = 256 * 1024
@@ -123,6 +123,9 @@ def read(raw: str, bearer: str, since: float | None = None) -> tuple[bool, dict]
     user, err = auth.gate(bearer)
     if not user:
         return False, err
+    p = safe_path(raw)
+    if p and not folder_grants.may_bearer(bearer, p, "open"):
+        return False, {"error": "outside the folders this device may open", "status": 404}
     if since is not None:
         p = safe_path(raw)
         try:
@@ -317,7 +320,7 @@ def project_docs(project: str, path: str, bearer: str,
     if not user:
         return False, err
     root = project_dir(project, path)
-    if not root:
+    if not root or not folder_grants.may_bearer(bearer, root, "browse"):
         return False, {"error": "no such project", "status": 404}
     rows = []
     for p in sorted(docs.walk_docs(root)):

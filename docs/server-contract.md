@@ -11682,6 +11682,61 @@ for nothing.
   bridges and contacts setup still take any member; a member's chats are not
   yet permission-checked, so a member's agent can do what the owner's can.
 
+### Folder grants — step 1 BUILT 17 Nov 2026
+
+docs/proposals/2026-11-17-file-browser-and-folder-permissions.md. An admin
+may limit a member or guest to some project folders, and say what it may
+do in each through a **role**: a set of permissions from `browse`, `open`,
+`download`, `upload`, `edit`, `organise`, `delete`, `restore`, `chat`,
+`start_chat`. Built in: `viewer` (browse, open, download), `editor` (+
+upload, edit, organise, chat, start_chat), `maintainer` (+ delete,
+restore) and `none` (nothing: carves a project out of a group's grant).
+Code: `agent_media_server/folder_grants.py`; pinned by
+`packages/server/tests/test_folder_grants.py`.
+
+- **Who is limited.** A member or guest with an entry (a *scoped* device).
+  An admin, and anyone without an entry, is not: it reaches what its role
+  did before, so nothing changes until an admin grants something. A guest
+  never gets a write or chat permission, whatever its role there says.
+- **What a grant names.** A project, by the name `GET /project/list` gives
+  it (a bare folder name or an old label is accepted and kept as that
+  name), or a group, `group:<name>` (every root's folder of it). It goes to
+  the device's account when it signed in with one (`account:<iss>|<sub>`:
+  every device of that person), else to the device (`device:<id>`). The
+  most specific grant holding a path wins. Kept in
+  `<state_dir>/folder-grants.json` (0600).
+- `GET /me` carries `projects`: null when not scoped, else `[{project,
+  path, role, may: [permissions]}]` (a `none` grant left out).
+- `GET /folders/grants` (admin; else 403 `not_admin`) → `{"ok",
+  "permissions", "roles": {name: [permissions]}, "builtin", "subjects":
+  [{subject, devices: [{id, name, account, role}], grants: {place: role} |
+  null, scoped}]}`.
+- `POST /folders/grants` (admin): `{"device": <id>` or `"subject",
+  "project", "role"}` grants a place, `"role": null` takes it away;
+  `{"device"|"subject", "scoped": false}` drops every grant (unscoped
+  again), `"scoped": true` with none limits it to nothing. 404
+  `no_such_device`, 404 `no_such_project`, 400 `no_such_role`. Answers
+  `{"ok", "subject", "grants", "scoped"}`.
+- `POST /folders/roles {"name", "permissions"}` (admin) adds or changes a
+  role of the admin's own; `"permissions": null` removes it and every grant
+  of it. 400 `bad_name` (letters, digits, - and _, up to 32), `builtin`,
+  `bad_permissions`; 404 `no_such_role`. Answers `{"ok", "roles"}`.
+- **Where it is checked** for a scoped device: `POST /session/paths` and
+  `GET /session/file` (§6.18a) need `open` where the file is (a file
+  outside is left out, or 404), `&download=1` and `POST
+  /session/file/link` need `download`; `GET /doc/read` needs `open` (404
+  "outside the folders this device may open"); `GET /docs` and `GET
+  /project/info` need `browse` on the project (404 as no such project);
+  `GET /project/list` lists only those, and no agent folders; `GET
+  /search`'s `docs` only those it may open. Uploads and doc roots outside
+  a project are outside every grant. A signed link already made works
+  until it expires.
+- **Not yet**: thread lists, search's chat hits, replying and starting
+  chats are not limited by grants (`chat` and `start_chat` are kept for
+  that step); the file browser itself (`GET /files`), writes and the
+  trash; Drupal's per-project ceiling; agent levels. `/features`
+  `folder_grants`.
+
 ### Enrolling with an account — BUILT 29 Sep 2026
 
 The accounts proposal, steps 2 and 3. An account enrols a device; it does not

@@ -2290,7 +2290,17 @@ def search(q: str, bearer: str, **kw) -> tuple[bool, dict]:
         # memory store.
         kw = {k: v for k, v in kw.items() if k not in ("memory", "translate_nl")}
         return answer(q, memory=False, **kw)
-    return answer(q, **kw)
+    ok, out = answer(q, **kw)
+    if ok and out.get("docs"):
+        # A device limited to its folders sees only the documents there
+        # (folder_grants.py).
+        from . import folder_grants
+
+        dev = auth._device(bearer)
+        if folder_grants.scoped(dev):
+            out["docs"] = [d for d in out["docs"]
+                           if folder_grants.may(dev, str(d.get("path") or ""), "open")]
+    return ok, out
 
 
 def answer(q: str, *, limit=None, before=None, tools: bool = False,

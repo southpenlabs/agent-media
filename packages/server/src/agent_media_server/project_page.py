@@ -23,7 +23,7 @@ import os
 
 from agent_media_core import layout
 
-from . import agent_workspaces, auth, doc_read, git_state
+from . import agent_workspaces, auth, doc_read, folder_grants, git_state
 
 
 def _last_commit(cwd: str) -> dict | None:
@@ -58,6 +58,8 @@ def page(project: str, path: str, bearer: str) -> tuple[bool, dict]:
     if not user:
         return False, err
     agent = agent_workspaces.find(project, path)
+    if agent and not folder_grants.may_bearer(bearer, agent["path"], "browse"):
+        return False, {"error": "no such project", "status": 404}
     if agent:
         out = {"project": agent["project"], "root": agent["path"], **_agent_fields(agent)}
         git = git_summary(agent["path"])
@@ -65,7 +67,7 @@ def page(project: str, path: str, bearer: str) -> tuple[bool, dict]:
             out["git"] = git
         return True, out
     root = doc_read.project_dir(project, path)
-    if not root:
+    if not root or not folder_grants.may_bearer(bearer, root, "browse"):
         return False, {"error": "no such project", "status": 404}
     out = {"project": project or _name_of(str(root)) or root.name, "root": str(root),
            "kind": "project"}
@@ -80,11 +82,19 @@ def listing(bearer: str) -> tuple[bool, dict]:
     if not user:
         return False, err
     agents = agent_workspaces.workspaces()
+    dev = auth._device(bearer)
+    if folder_grants.scoped(dev):
+        # Limited to its folders (folder_grants.py): those projects only.
+        agents = []
+        keep = lambda p: folder_grants.may(dev, p, "browse")  # noqa: E731
+    else:
+        keep = lambda p: True  # noqa: E731
     mine = {a["path"] for a in agents}
     rows = [{"project": name, "path": row["path"], "group": row["group"] or None,
              "folder": row["folder"], "kind": "project"}
             for name, row in layout._index()["projects"].items()
-            if os.path.isdir(row["path"]) and os.path.realpath(row["path"]) not in mine]
+            if os.path.isdir(row["path"]) and os.path.realpath(row["path"]) not in mine
+            and keep(row["path"])]
     rows.sort(key=lambda r: ((r["group"] or "").lower(), r["folder"].lower()))
     rows += [{"project": a["project"], "path": a["path"], "group": None,
               "folder": os.path.basename(a["path"]), **_agent_fields(a)} for a in agents]

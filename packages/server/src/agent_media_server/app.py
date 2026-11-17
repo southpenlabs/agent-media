@@ -454,6 +454,7 @@ CORS_PATHS = frozenset({
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
+    "/folders/grants", "/folders/roles",
     "/setup", "/setup/run", "/services/restart", "/shell", "/shell/signins", "/shell/signin", "/enrol", "/enrol/wait", "/pair/request", "/pair/wait", "/pair/pending", "/pair/approve", "/pair/deny", "/me", "/me/signout", "/me/account", "/me/servers",
     "/share", "/read", "/upload", "/upload/link", "/link/preview", "/dashboard", "/features",
     "/photo/edit/presets", "/photo/edit",
@@ -2309,6 +2310,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = presets.listing(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/folders/grants":
+        # Who may reach which project folders, and the roles (folder_grants.py).
+        from . import folder_grants
+
+        ok, detail = folder_grants.listing(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/projects/roots":
         # The folders a new project may go in (project_roots.py, §6.24).
         from . import project_roots
@@ -2335,6 +2342,9 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _refresh_profile_soon(dev)
             _json(h, 200, {"ok": True, "device_id": dev.get("id"), "name": dev.get("name"),
                            "enrol": devices.may_enrol(dev), "role": devices.role_of(dev),
+                           # The folders it is limited to (folder_grants.py):
+                           # null when it is not (it reaches what its role does).
+                           "projects": _folder_places(dev),
                            "account": dev.get("account") or None,
                            "username": dev.get("username") or None,
                            "picture": dev.get("picture") or None,
@@ -2494,7 +2504,9 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
             return True
         else:
-            ok, detail = session_files.open_file(sess, path_q, _bearer(h))
+            ok, detail = session_files.open_file(
+                sess, path_q, _bearer(h),
+                permission="download" if (qs.get("download") or [""])[0] == "1" else "open")
         if not ok:
             _json(h, detail.pop("status", 404), {"ok": False, **detail})
             return True
@@ -3021,6 +3033,15 @@ def _public_base(h: BaseHTTPRequestHandler) -> str:
         return server_address.current() or _base_url(h)
     except Exception:  # noqa: BLE001 — a link still goes out
         return _base_url(h)
+
+
+def _folder_places(dev: dict) -> list | None:
+    from . import folder_grants
+
+    try:
+        return folder_grants.places(dev)
+    except Exception:  # noqa: BLE001  (a bad grants file never breaks /me)
+        return None
 
 
 def _lookup_for(base: str) -> str:
@@ -4960,6 +4981,15 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import persona_scope
 
         ok, detail = persona_scope.put(_read_json(h) or {}, _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path in ("/folders/grants", "/folders/roles"):
+        from . import folder_grants
+
+        body = _read_json(h) or {}
+        if path == "/folders/grants":
+            ok, detail = folder_grants.put_grant(body, _bearer(h))
+        else:
+            ok, detail = folder_grants.put_role_route(body, _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/projects/roots", "/projects/roots/remove", "/projects/roots/default",
                   "/projects/roots/recreate"):
