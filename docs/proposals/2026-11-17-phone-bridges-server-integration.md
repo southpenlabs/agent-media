@@ -197,3 +197,108 @@ they allow it; the marks say what reaches each network. The server keeps
 `apply_to_networks` and `network_exceptions` (default on, no exceptions) so
 a per-account "Leave alone" can come back if a real need turns up; the app
 shows neither.
+
+## Step 6, the encrypted copy — plan to agree (draft, 18 Nov 2026)
+
+Not built. Picked up from the bridges thread; David to decide the questions
+below in the morning.
+
+**What it is.** The companion becomes a Matrix device of the user's own
+account on their own homeserver (red2's tuwunel for David) and copies each
+Local chat into an end-to-end encrypted room of that account. The server
+stores only ciphertext; the user's other devices read it. This is option (b)
+of the 4 Nov proposal's Step 1, now on top of (a), which holds up on p8a.
+
+**Open source first.** Nothing to write ourselves in the crypto:
+mautrix-go's `crypto` and `crypto/cryptohelper` (MPL-2.0), with `-tags
+goolm` (pure Go, already how the core cross-builds) and its SQL crypto
+store in a new `crypto.db` beside `local.db`. That is the stack the mautrix
+bridges themselves run as an encrypting device. Readers: Element (any
+platform) at first; Sasonica's app later through matrix-rust-sdk's
+crypto-wasm (Apache-2.0), not a crypto of our own.
+
+**How the 4 Nov blockers are met.**
+
+- *One account can't send as other people*: every message is sent by the
+  user's account with MSC4144's per-message profile
+  (`com.beeper.per_message_profile`: the sender's id, name, avatar) and a
+  plain fallback in the body ("Alice: …") for clients without it.
+- *No BatchSend, no deterministic ids*: the copy is an ordinary client
+  sending in order; each event carries the original time and ids in its
+  content (`com.sasonica.local`: chat id, message id, origin_ts), and
+  `copy_state` in `local.db` maps message → Matrix event id, so a retry or a
+  restart never sends twice (the txn id is the message id). Element shows
+  the copy time; Sasonica will show origin_ts.
+- *Our own Olm device, cross-signing, key sharing*: the device is
+  cross-signed once (David verifies it from Element by emoji, or types his
+  security key into the companion once); its Megolm sessions go to the
+  account's server-side key backup, so any of his verified devices,
+  including later ones, reads the history.
+
+**The room.** One per Local chat, created by the companion, with a state
+event `com.sasonica.local` {chat: `local:<network>:<id>`, network, device}
+so the server's record can point at it (`matrix_room` on the `local:`
+record). Encrypted from creation; only the user's account is a member.
+
+**What the server reads at Encrypted copy.** The light list as now, plus
+each chat's room id. No message text, so no search, no agents, no desk
+replies through the server; that stays Full copy's.
+
+**Edits and deletes** (recommended): an edit is copied as `m.replace`; a
+delete as a redaction (Matrix's own "deleted", as the local store does).
+Leaving Encrypted copy: the companion stops copying and leaves the rooms;
+they are deleted only if asked.
+
+### The questions
+
+1. **Which account the phone signs in as**: the user's own (recommended,
+   as decided: "a device of theirs"; the server hands the companion a
+   one-time login token, device name "Sasonica bridges · p8a"), or a
+   separate account per phone inviting the user (no cross-signing of his
+   identity, but every room shows a stranger and the key-sharing is
+   harder).
+2. **Room names**: a space per phone ("Chats on p8a") with each room named
+   as the chat is, network in the topic (recommended), or the phone's name
+   in every room's name ("Alice · WhatsApp · p8a").
+3. **How far back**: from switch-on and the last 30 days (recommended:
+   copies are slow and rate-limited, a few messages a second), from
+   switch-on only, or everything on the phone.
+4. **Who reads it first**: Element only (recommended: no app work; the
+   Sasonica app shows "open in Element"), or Sasonica's app decrypting too
+   (crypto-wasm in the app, a device per app install: a second project).
+5. **Edits and deletes**: mirrored as above (recommended), or deletes kept
+   as a record.
+
+### Steps
+
+1. Spike on red2 with a test account on tuwunel: the core as a goolm
+   device, an encrypted room, a message with a per-message profile, read in
+   Element; check tuwunel's cross-signing, key backup and
+   `/login/get_token`.
+2. Sign-in: `POST /local/matrix-login` on the server (admin's own token,
+   one-time login token), AIDL v6 `matrixSignIn`; the device made and
+   verified.
+3. The copier: rooms and the space, `copy_state`, live messages, the
+   backfill window, edits, deletes, reactions, media as encrypted
+   attachments; key backup.
+4. Server: `encrypted` choosable on the dial, `matrix_room` on the records,
+   contract §6.61.
+5. App: the dial's step, "open in Element" on a Local chat's row elsewhere.
+6. A day on p8a against a test account's chats, then David's.
+
+### What's risky
+
+- **Our device's keys.** A crypto store lost or a session not backed up
+  means messages nobody can read; the companion's backup must carry
+  `crypto.db` (it carries no network session today, and this is not one).
+- **tuwunel's gaps.** Key backup, cross-signing and login tokens are newer
+  in tuwunel than in Synapse; step 1 finds out before anything else.
+- **Per-message profiles.** Element's support is partial; the body's
+  "Alice:" fallback is what most clients show.
+- **Load.** Copying is a second upload of every message and picture over
+  the phone's data; it waits for Wi-Fi like the backup unless the user says
+  otherwise.
+- **Metadata.** The homeserver sees room count, sizes and timing, never
+  names or text (room names are encrypted state only with MSC3414, so the
+  names themselves are visible to the server: on David's own server that is
+  fine, on a hosted one names stay off as `MEDIA_LOCAL_CHAT_NAMES` says).
