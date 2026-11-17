@@ -130,3 +130,21 @@ a person's own server.
 - The backup key: where its second copy lives (the account, a printed
   recovery code, or both).
 - Whether a guest device sees Local chats at all (proposed: no).
+
+## Step 4, backup — as built (17 Nov 2026)
+
+The companion (sasonica-bridges build-123) makes an "sbb1" bundle nightly on
+unmetered network while charging: its local store (`VACUUM INTO`) and media,
+never `bridge*.db` or any network session; AES-256-GCM in 1 MiB chunks under
+a per-bundle key derived from the user's key, which lives wrapped by the
+Android Keystore and is shown once as a **recovery code** (56 base32
+characters, checksummed) that alone decrypts. Sasonica uploads it on the
+companion's behalf (AIDL v4: backupStatus, openBackup, backupUploaded,
+restoreBackup) to `POST /local/backup` (agent-media 0df756e7, §6.61), which
+keeps the newest seven per device as ciphertext, visible to that device, its
+account's other devices and admins, and carried in the server's own nightly
+while under 1 GB. Restoring checks everything before swapping files; the
+networks are then signed in again, and their chats land in the same rooms
+(local room ids are deterministic from the networks' portal keys). The
+second copy of the key is the user's own (the recovery code in their
+password manager) — the open question above, answered for now.
