@@ -163,3 +163,20 @@ def test_a_long_reply_is_cut_as_a_recap(monkeypatch):
     assert got["source"] == "last" and got["text"].endswith("…")
     assert len(got["text"]) <= sessions.REPLY_RECAP_CHARS + 1
     assert sessions._reply_recap(SID, {"text": "short", "at": 5.0})["text"] == "short"
+
+
+def test_an_unchanged_file_answers_from_the_last_servers_save(path, monkeypatch):
+    """A restart read every transcript again (542 on red2, 7 s): the answers
+    are kept on disk, and a file not changed since is not opened (18 Nov 2026)."""
+    write(path, user("hello there", 100))
+    assert state(path) == (100.0, True)
+    you_wrote.save()
+    you_wrote._reset_for_tests()
+    monkeypatch.setitem(you_wrote._disk, "loaded", False)
+    real_open = open
+    opened = []
+    monkeypatch.setattr("builtins.open", lambda p, *a, **k: (opened.append(str(p)) if str(p) == str(path) else None) or real_open(p, *a, **k))
+    assert state(path) == (100.0, True) and opened == []
+    monkeypatch.setattr("builtins.open", real_open)
+    write(path, reply("Hi.", 102))
+    assert state(path) == (100.0, False)

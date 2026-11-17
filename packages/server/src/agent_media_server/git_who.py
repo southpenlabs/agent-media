@@ -105,6 +105,7 @@ def _load() -> None:
 def save(path: Path | None = None) -> None:
     """Write the reads to disk (owner-only, replaced whole), to `path` or
     the state folder's."""
+    _load()      # never write over what is on disk with less than it holds
     with _lock:
         snap = dict(_seen)
         _disk["dirty"] = False

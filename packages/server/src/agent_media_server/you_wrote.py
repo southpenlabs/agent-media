@@ -37,8 +37,11 @@ hold (matrix.py, quick.py).
 from __future__ import annotations
 
 import os
+import pickle
 import re
 import threading
+import time
+from pathlib import Path
 
 #: User-side words that are not the listener: agent mail and the session
 #: host's notes (`[From …]`), an interrupt, another session's raw message, a
@@ -128,6 +131,91 @@ def _reset_for_tests() -> None:
     with _LOCK:
         _FILES.clear()
         _WHOLE.clear()
+        _SAVED.clear()
+
+
+#: The answers kept on disk (<state>/you-wrote.pickle) by file:
+#: `{path: (sig, (you_at, last_from_you, reply))}`. A restart read every
+#: transcript again from its listener's newest prompt, 542 on red2 and 7 s the
+#: first thread list after it waited on (18 Nov 2026: speedups); a file not
+#: changed since answers from here. One that has changed is read as on first
+#: sight, as before.
+_SAVED: dict[str, tuple[tuple, tuple]] = {}
+SAVE_EVERY_S = 300.0
+_disk = {"loaded": False, "dirty": False, "saved": 0.0, "saving": False, "timer": False}
+
+
+def _cache_path() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "agent-media" / "you-wrote.pickle"
+
+
+def _load() -> None:
+    with _LOCK:
+        if _disk["loaded"]:
+            return
+        _disk["loaded"] = True
+    try:
+        with open(_cache_path(), "rb") as fh:
+            got = pickle.load(fh)
+    except Exception:  # noqa: BLE001 — unreadable: read the files afresh
+        return
+    if not isinstance(got, dict) or got.get("v") != 1:
+        return
+    with _LOCK:
+        for k, v in (got.get("answers") or {}).items():
+            _SAVED.setdefault(k, v)
+
+
+def save(path: Path | None = None) -> None:
+    """Write each file's answer to disk (owner-only, replaced whole)."""
+    _load()      # never write over what is on disk with less than it holds
+    with _LOCK:
+        snap = dict(_SAVED)
+        files = list(_FILES.items())
+        _disk["dirty"] = False
+    for k, f in files:
+        if f.sig:
+            snap[k] = (f.sig, (f.you_at, f.from_you, f.reply))
+    snap = {k: v for k, v in snap.items() if os.path.exists(k)}
+    path = path or _cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump({"v": 1, "answers": snap}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 — not saved: read again after a restart
+        with _LOCK:
+            _disk["dirty"] = True
+    finally:
+        with _LOCK:
+            _disk["saved"] = time.monotonic()
+            _disk["saving"] = False
+
+
+def _maybe_save() -> None:
+    with _LOCK:
+        if not _disk["dirty"] or _disk["saving"]:
+            return
+        wait = 0.0 if not _disk["saved"] else SAVE_EVERY_S - (time.monotonic() - _disk["saved"])
+        if wait > 0:
+            if not _disk["timer"]:
+                _disk["timer"] = True
+                t = threading.Timer(wait + 1.0, _timer_fired)
+                t.daemon = True
+                t.start()
+            return
+        _disk["saving"] = True
+    threading.Thread(target=save, args=(_cache_path(),), name="you-wrote-save", daemon=True).start()
+
+
+def _timer_fired() -> None:
+    with _LOCK:
+        _disk["timer"] = False
+    _maybe_save()
 
 
 def _start(fh, end: int, reader) -> int:
@@ -193,9 +281,13 @@ def _of_file(path: str, harness: str) -> tuple:
     except OSError:
         return None, False, None
     sig = (st.st_ino, st.st_size, st.st_mtime)
+    _load()
     with _LOCK:
         f = _FILES.get(path)
         if f is None:
+            kept = _SAVED.get(path)
+            if kept and kept[0] == sig:
+                return kept[1]          # unchanged since the last server saved it
             f = _FILES[path] = _File()
     with f.lock:
         if f.sig == sig:
@@ -218,7 +310,11 @@ def _of_file(path: str, harness: str) -> tuple:
             return None, False, None
         _fold(f)
         f.sig = sig
-        return f.you_at, f.from_you, f.reply
+        ans = (f.you_at, f.from_you, f.reply)
+    with _LOCK:
+        _disk["dirty"] = True
+    _maybe_save()
+    return ans
 
 
 def _of_whole(key: str, sig, read) -> tuple:

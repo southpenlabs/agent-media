@@ -37,6 +37,7 @@ import datetime as dt
 import hashlib
 import logging
 import os
+import pickle
 import re
 import threading
 import time
@@ -123,8 +124,94 @@ def _icalendar():
         return None
 
 
+#: The parsed files kept on disk (<state>/calendar-parsed.pickle), written at
+#: most this often after a parse: a restart parsed every .ics file again,
+#: 3,787 on red2, 5-16 s that the first thread list after it waited on for
+#: its Quiet shifts (18 Nov 2026: speedups). Kept per icalendar version.
+SAVE_EVERY_S = 300.0
+_disk = {"loaded": False, "dirty": False, "saved": 0.0, "saving": False, "timer": False}
+
+
+def _cache_path() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "agent-media" / "calendar-parsed.pickle"
+
+
+def _cache_version() -> str:
+    ical = _icalendar()
+    return f"1:{getattr(ical, '__version__', '?')}"
+
+
+def _load_parsed() -> None:
+    """The last server's parses, once per process; a file changed since is
+    parsed again by its mtime and size, as ever."""
+    with _LOCK:
+        if _disk["loaded"]:
+            return
+        _disk["loaded"] = True
+    try:
+        with open(_cache_path(), "rb") as fh:
+            got = pickle.load(fh)
+    except Exception:  # noqa: BLE001 — unreadable or from another icalendar: parse afresh
+        return
+    if not isinstance(got, dict) or got.get("v") != _cache_version():
+        return
+    with _LOCK:
+        for k, v in (got.get("parsed") or {}).items():
+            _PARSED.setdefault(k, v)
+
+
+def save_parsed(path: Path | None = None) -> None:
+    """Write the parses to disk (owner-only, replaced whole); files gone are not kept."""
+    _load_parsed()      # never write over what is on disk with less than it holds
+    with _LOCK:
+        snap = {k: v for k, v in _PARSED.items() if os.path.exists(k)}
+        _disk["dirty"] = False
+    path = path or _cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump({"v": _cache_version(), "parsed": snap}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 — not saved: parsed again after a restart
+        with _LOCK:
+            _disk["dirty"] = True
+    finally:
+        with _LOCK:
+            _disk["saved"] = time.monotonic()
+            _disk["saving"] = False
+
+
+def _maybe_save() -> None:
+    """Save on a thread of its own once SAVE_EVERY_S after the last (at once
+    the first time); not yet due, one timer comes back for it."""
+    with _LOCK:
+        if not _disk["dirty"] or _disk["saving"]:
+            return
+        wait = 0.0 if not _disk["saved"] else SAVE_EVERY_S - (time.monotonic() - _disk["saved"])
+        if wait > 0:
+            if not _disk["timer"]:
+                _disk["timer"] = True
+                t = threading.Timer(wait + 1.0, _timer_fired)
+                t.daemon = True
+                t.start()
+            return
+        _disk["saving"] = True
+    threading.Thread(target=save_parsed, args=(_cache_path(),), name="calendar-save", daemon=True).start()
+
+
+def _timer_fired() -> None:
+    with _LOCK:
+        _disk["timer"] = False
+    _maybe_save()
+
+
 def _parse_file(path: Path) -> list:
     """The VEVENTs in one .ics file, parsed once per change."""
+    _load_parsed()
     try:
         st = path.stat()
     except OSError:
@@ -143,6 +230,8 @@ def _parse_file(path: Path) -> list:
         log.info("calendar: skipping %s (%s)", path.name, type(e).__name__)
     with _LOCK:
         _PARSED[key] = (st.st_mtime, st.st_size, events)
+        _disk["dirty"] = True
+    _maybe_save()
     return events
 
 

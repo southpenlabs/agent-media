@@ -258,3 +258,18 @@ def test_the_route_merges_events_for_the_owner_only(server):
     owner["is"] = False
     _, got = _get(addr, "/calendar?from=2026-10-19&to=2026-10-25")
     assert [i["title"] for i in got["items"]] == ["Report"] and got["calendars"] == []
+
+
+def test_parsed_files_outlive_a_restart(home, monkeypatch):
+    """A restart parsed every .ics again (3,787 on red2, 5-16 s): the parses
+    are kept on disk and a file not changed since is not parsed again (18 Nov 2026)."""
+    folder = vdir(home, "work", "SUMMARY:Shift\nDTSTART:20261020T090000\nDTEND:20261020T170000")
+    p = folder / "0.ics"
+    assert len(calendar_sources._parse_file(p)) == 1
+    calendar_sources.save_parsed()
+    monkeypatch.setattr(calendar_sources, "_PARSED", {})
+    monkeypatch.setitem(calendar_sources._disk, "loaded", False)
+    ical = calendar_sources._icalendar()
+    monkeypatch.setattr(ical.Calendar, "from_ical", classmethod(lambda cls, b: (_ for _ in ()).throw(AssertionError("parsed again"))))
+    got = calendar_sources._parse_file(p)
+    assert len(got) == 1 and str(got[0].get("SUMMARY")) == "Shift"
