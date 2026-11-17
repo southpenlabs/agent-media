@@ -5845,6 +5845,7 @@ local look, never a network call:
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
 | `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |
 | `local_backup` | always true (§6.61 Backup, 17 Nov 2026): `POST /local/backup`, `GET /local/backups`, `GET`/`DELETE /local/backup/<id>`: the phone's encrypted Local chats bundles, kept as ciphertext |
+| `local_settings` | always true (§6.61 Settings, 18 Nov 2026): `GET`/`POST /local/settings`: what leaves the phone, backup, applying to the networks |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -12508,8 +12509,8 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
   senders). 400 for a network not in the list, a bad id, kind or time; at
   most 5000 chats a post.
 - **Names**: kept and answered only while `MEDIA_LOCAL_CHAT_NAMES` is on
-  (the default, a person's own server); `0`/`off` on a server South Pen
-  Labs hosts, where a posted name is dropped, a kept one removed when the
+  (unset: on, unless `MEDIA_HOSTED` says South Pen Labs hosts the server,
+  18 Nov 2026); `0`/`off` on a server South Pen Labs hosts, where a posted name is dropped, a kept one removed when the
   chat is next sent, and none answered. `names` says which.
 - Stored in `<state_dir>/local-chats.json`, 0600.
 
@@ -12592,6 +12593,55 @@ DELETE /local/backup/<id> → {"ok": true, "id", "deleted": true}
   per phone would crowd the store's cap (`MEDIA_BACKUP_MAX_BYTES`), so they
   wait for `full`. A restore puts them back.
 - `/features` `local_backup: true`.
+
+#### Settings: what leaves the phone, backup, applying to the networks (built 18 Nov 2026)
+
+The design's three settings ("Refined"; David, 18 Nov 2026: "Do the
+settings link"), read and written here by the companion and by Sasonica's
+Settings → Bridges, so every device shows the same and the phone follows
+them. **One per server**, not per account: Local chats are kept per server
+(their records carry no account), so their settings are too. Code:
+`agent_media_server/local_settings.py`.
+
+```
+GET /local/settings → <settings>
+POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network_exceptions"?}
+  → <settings>                                   // a partial change; null = back to the default
+
+<settings> = {"ok": true,
+  "leaves_phone": "settings" | "encrypted" | "full",
+  "backup": "server" | "drive" | "off",
+  "apply_to_networks": bool,
+  "network_exceptions": {"<network>": bool},     // that network's own choice over the main switch
+  "defaults": {"leaves_phone", "backup", "apply_to_networks", "network_exceptions": {}, "names": bool},
+  "hosted": bool,
+  "choosable": {"leaves_phone": [{"id", "available": bool, "why"?: "not built yet"}…],
+                "backup": [{"id", "available": true}…],
+                "networks": [{"id", "name"}…]},
+  "updated": <unix s> | null, "by": "<device id>" | null}
+```
+
+- **Who**: any paired device that is not a guest, on both (the settings are
+  the user's, not the host's); a guest 403 `code: "guest"`, no bearer 401.
+- **Defaults follow whose server it is.** The same three on a person's own
+  server and a hosted one: `settings`, `server`, apply on. A hosted server
+  keeps no names of Local chats (`defaults.names` false). `hosted` is
+  `MEDIA_HOSTED` (default off; added 18 Nov 2026, the server had no such
+  signal); `MEDIA_LOCAL_CHAT_NAMES`, when set, still decides names either
+  way, and unset now follows `MEDIA_HOSTED`.
+- **The dial**: only `settings` is choosable today; `encrypted` and `full`
+  are listed `available: false`, `why: "not built yet"`, and choosing one
+  is 400 `code: "not_available"`, `field: "leaves_phone"`.
+- **Exceptions** merge by network: `true`/`false` sets that network's,
+  `null` drops it back to the main switch; `"network_exceptions": null`
+  drops them all. A key not a network of §6.61 is 400
+  `code: "unknown_network"`, `field` naming it; a value not true, false or
+  null 400.
+- Any other field is 400 `code: "field_not_accepted"`; a bad value 400.
+  Nothing is written on a refusal.
+- Stored in `<state_dir>/local-settings.json`, 0600, as only what was
+  chosen (plus `updated`, `by`): a field never chosen follows the default.
+- `/features` `local_settings: true`.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

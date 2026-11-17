@@ -448,7 +448,7 @@ CORS_PATHS = frozenset({
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
-    "/local/chats", "/local/backup", "/local/backups",
+    "/local/chats", "/local/backup", "/local/backups", "/local/settings",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -2291,6 +2291,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import local_chats
 
         ok, detail = local_chats.listing(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/settings":
+        # The phone bridges' three settings (local_settings.py, §6.61 Settings).
+        from . import local_settings
+
+        ok, detail = local_settings.get(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/local/backups":
         # The Local chats backups the caller may see (local_backup.py, §6.61).
@@ -4685,6 +4691,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             h.rfile, length, parse_qs(h.path.partition("?")[2]), h.headers, _bearer(h))
         if not was_read:
             h.close_connection = True      # refused first: the body is left unread
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/settings":
+        # What leaves the phone, backup, applying to the networks: a partial
+        # change from any non-guest device (local_settings.py, §6.61 Settings).
+        from . import local_settings
+
+        ok, detail = local_settings.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/chats":
         # The phone's companion says which Local chats it carries: ids,

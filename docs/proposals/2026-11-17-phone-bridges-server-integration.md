@@ -116,6 +116,11 @@ a person's own server.
    thing David hit), merged rows, "on p8a only" elsewhere.
 3. Companion: posting the chat list, following settings for notifications,
    pushing mute/pin to the network, the settings screen.
+   **The settings' server store built 18 Nov 2026** (contract §6.61
+   "Settings", `local_settings.py`; David: "Do the settings link"):
+   `GET`/`POST /local/settings`, one per server, any non-guest device;
+   only Settings only is choosable on the dial until the copies are built.
+   `MEDIA_HOSTED` (default off) is the hosted signal the defaults follow.
 4. Backup to the server. **Server side built 17 Nov 2026** (contract §6.61
    "Backup", `local_backup.py`): `POST /local/backup` keeps the bundle as
    ciphertext per device (hash checked, 2 GB cap, newest 7 kept), listed,

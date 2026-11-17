@@ -30,12 +30,12 @@ Never message text: `POST /local/chats` refuses any field it does not name.
 
 **Names.** On a person's own server the list carries each chat's name; on a
 server South Pen Labs hosts it carries ids and networks only (other
-people's names on SPL's machines). The server has no setting that says
-which kind it is yet (personal use, `MEDIA_PERSONAL_USE`, says what an
-install may run, not whose data it holds, and is off by default on a
-person's own install too), so `MEDIA_LOCAL_CHAT_NAMES` says it: on by
-default, `0`/`off`/`false`/`no` on a hosted server. Off, a posted name is
-dropped and a kept one is not answered.
+people's names on SPL's machines). `MEDIA_HOSTED` (default off, 18 Nov
+2026, local_settings.py) says a server is hosted (personal use,
+`MEDIA_PERSONAL_USE`, says what an install may run, not whose data it
+holds); `MEDIA_LOCAL_CHAT_NAMES` says it outright when set, `0`/`off`/
+`false`/`no` for none. Off, a posted name is dropped and a kept one is not
+answered.
 
 **Where they show.** `/targets` and `/conversations` carry a row for each
 chat not gone (`harness: "local"`, `local: true`, `network`, `device`),
@@ -86,8 +86,13 @@ def parse(session: str) -> tuple[str, str] | None:
 
 
 def names_on() -> bool:
-    """Whether chats' names are kept (`MEDIA_LOCAL_CHAT_NAMES`, default on)."""
+    """Whether chats' names are kept (`MEDIA_LOCAL_CHAT_NAMES`; unset, on
+    unless `MEDIA_HOSTED` says South Pen Labs hosts this server)."""
     v = (os.environ.get("MEDIA_LOCAL_CHAT_NAMES") or "").strip().lower()
+    if not v:
+        from .local_settings import hosted
+
+        return not hosted()
     return v not in ("0", "off", "false", "no")
 
 
