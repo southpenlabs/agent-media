@@ -148,3 +148,7 @@ networks are then signed in again, and their chats land in the same rooms
 (local room ids are deterministic from the networks' portal keys). The
 second copy of the key is the user's own (the recovery code in their
 password manager) — the open question above, answered for now.
+Sasonica's side landed in sasonica-app 0d6834fe (mail #880): the upload at
+app start and on the hourly job when the companion has a bundle ready, and
+Settings → Bridges' Backup line and Restore from a backup…; it reaches p8a
+with the next APK.
