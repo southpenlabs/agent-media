@@ -163,3 +163,67 @@ def test_dl_is_its_own_folder_and_a_gone_file_is_404(bundle, server, tmp_path, m
     (bundle / "dl" / "tok" / "old.apk").write_bytes(b"old")
     res, _ = _get(server, "/app/dl/tok/old.apk")
     assert res.status == 404
+
+
+# --- /app/preview/<id8>/: a chat's own build (preview_link.py, agent mail #924)
+
+@pytest.fixture()
+def preview(tmp_path, monkeypatch):
+    from agent_media_core import preview_link as PL
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    repo = tmp_path / "app"
+    (repo / "build-app" / "client").mkdir(parents=True)
+    monkeypatch.setenv("MEDIA_WEB_APP_DIR", str(repo / "build-app" / "client"))
+    monkeypatch.delenv("MEDIA_WEB_PREVIEW_REPO", raising=False)
+    built = repo / ".worktrees" / "chat-0123abcd" / "build-app" / "client"
+    (built / "assets").mkdir(parents=True)
+    (built / "index.html").write_bytes(b"<title>preview</title>")
+    (built / "assets" / "x-1.js").write_bytes(b"1;")
+    (repo / ".worktrees" / "chat-89abcdef").mkdir()  # a worktree not built yet
+    return PL
+
+
+def test_preview_is_admin_only_and_the_link_becomes_a_cookie(server, preview):
+    res, body = _get(server, "/app/preview/0123abcd/")
+    assert res.status == 403 and b"media preview 0123abcd" in body
+    res, _ = _get(server, "/app/preview/0123abcd/x?k=" + "0" * 32)
+    assert res.status == 403
+    res, _ = _get(server, f"/app/preview/0123abcd/t/1?k={preview.sign('0123abcd')}&a=b")
+    assert res.status == 302
+    assert res.getheader("Location") == "/app/preview/0123abcd/t/1?a=b"
+    cookie = res.getheader("Set-Cookie").split(";")[0]
+    assert "Path=/app/preview/0123abcd/" in res.getheader("Set-Cookie")
+    res, body = _get(server, "/app/preview/0123abcd/t/1", {"Cookie": cookie})
+    assert res.status == 200 and body == b"<title>preview</title>"
+    res, body = _get(server, "/app/preview/0123abcd/assets/x-1.js", {"Cookie": cookie})
+    assert res.status == 200 and body == b"1;" and "immutable" in res.getheader("Cache-Control")
+    res, _ = _get(server, "/app/preview/0123abcd/../../../secret.txt", {"Cookie": cookie})
+    assert res.status in (403, 404)
+    # One preview's cookie opens no other.
+    other = cookie.replace("0123abcd", "89abcdef")
+    res, _ = _get(server, "/app/preview/89abcdef/", {"Cookie": other})
+    assert res.status == 403
+
+
+def test_preview_gone_or_unbuilt_is_a_404_that_says_so(server, preview):
+    res, body = _get(server, f"/app/preview/89abcdef/?k={preview.sign('89abcdef')}")
+    cookie = res.getheader("Set-Cookie").split(";")[0]
+    res, body = _get(server, "/app/preview/89abcdef/", {"Cookie": cookie})
+    assert res.status == 404 and b"SASONICA_BASE=/app/preview/89abcdef/ pnpm build" in body
+    res, _ = _get(server, f"/app/preview/deadbeef/?k={preview.sign('deadbeef')}")
+    cookie = res.getheader("Set-Cookie").split(";")[0]
+    res, body = _get(server, "/app/preview/deadbeef/", {"Cookie": cookie})
+    assert res.status == 404 and b"worktree is gone" in body
+    res, _ = _get(server, "/app/preview/nothex!!/")
+    assert res.status == 404
+
+
+def test_preview_link_and_id8(preview, monkeypatch):
+    monkeypatch.setenv("MEDIA_PUBLIC_URL", "https://example.test")
+    sid = "0123abcd-4567-89ab-cdef-0123456789ab"
+    assert preview.id8_of(sid) == "0123abcd"
+    assert preview.id8_of("/r/app/.worktrees/chat-0123abcd/app/routes") == "0123abcd"
+    assert preview.link("0123abcd") == f"https://example.test/app/preview/0123abcd/?k={preview.sign('0123abcd')}"
+    assert preview.good("0123abcd", preview.sign("0123abcd"))
+    assert not preview.good("89abcdef", preview.sign("0123abcd"))

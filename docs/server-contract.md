@@ -11059,6 +11059,21 @@ where `/features` says `app_update` (§6.11a). Both paths are API routes
 although they sit under `/app/`: they are answered before the web app's
 files (web_app.py).
 
+A chat's own build of the web app is served at `GET /app/preview/<id8>/…`
+(sasonica-app docs/proposals/2026-11-18-workflow-ideas.md §2, agent mail
+#924, 18 Nov 2026): the `build-app/client` of
+`<repo>/.worktrees/chat-<id8>`, built there with
+`SASONICA_BASE=/app/preview/<id8>/ pnpm build`, where `<repo>` is
+`MEDIA_WEB_PREVIEW_REPO`, else the repo whose `build-app/client` is
+`MEDIA_WEB_APP_DIR`. Admin only, unlike `/app/`: an admin bearer, or the
+signed link `media preview <chat>` prints (`?k=`, an HMAC of the id8 under
+the host's clip-sign key), which is answered with a 302 to the same address
+without `k` and a cookie `sasonica_preview_<id8>` on that preview's path
+alone (HttpOnly, SameSite=Lax, 30 days). Otherwise 403. With the worktree or
+its build gone, a plain-text 404 that says which and how to build it.
+Files as `/app/` serves them (hashed assets immutable, routes the SPA's
+index.html). Code: `web_app.py` `_preview`, `agent_media_core/preview_link.py`.
+
 - `GET /app/update?flavor=<personal|release>&current=<versionCode>` →
   `{"ok": true, "versionCode": 1963, "commit": "<40-hex sha>", "sha256":
   "<hex>", "size": 8632897, "published": "<iso>", "url":

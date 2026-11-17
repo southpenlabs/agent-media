@@ -24,6 +24,9 @@ download link gave me a 404"). MEDIA_WEB_DL_DIR, else `app-dl` in the state
 dir. A file there is itself; anything else under `/app/dl/` is a 404, never
 index.html, so a gone link says so instead of opening the app.
 
+`/app/preview/<id8>/` is chat <id8>'s own build from its worktree, admin only
+(agent_media_core/preview_link.py says how), served whether or not `/app/` is.
+
 Open on every listener, the public one too (contract §19): it is the same
 static files app.sasonica.com will host, carries no credential, and a server
 reached through its tunnel then has a web app at `<tunnel>/app/` as well.
@@ -124,24 +127,71 @@ def _file(h: BaseHTTPRequestHandler, p: Path, cache: str, extra: dict[str, str] 
     _send(h, 200, body, headers)
 
 
-def serve(h: BaseHTTPRequestHandler, path: str) -> bool:
-    """Answer a GET under `/app` if a bundle is served. False otherwise, for
-    the caller's 404. `path` is the request path without its query."""
-    if path != PREFIX and not path.startswith(PREFIX + "/"):
-        return False
-    root = bundle_dir()
-    if root is None:
-        return False
-    if path == PREFIX:
-        # Relative asset and route URLs need the trailing slash.
-        query = h.path.partition("?")[2]
-        _send(h, 301, b"", {"Location": PREFIX + "/" + (f"?{query}" if query else ""),
+def _text(h: BaseHTTPRequestHandler, code: int, msg: str, extra: dict[str, str] | None = None) -> None:
+    _send(h, code, (msg + "\n").encode(), {"Content-Type": "text/plain; charset=utf-8",
+                                           "Cache-Control": "no-store", **(extra or {})})
+
+
+def _preview(h: BaseHTTPRequestHandler, rel: str) -> None:
+    """`/app/preview/<id8>/…`: chat <id8>'s own build, admin only
+    (agent_media_core.preview_link)."""
+    from http.cookies import SimpleCookie
+    from urllib.parse import parse_qsl, urlencode
+
+    from agent_media_core import preview_link as PL
+
+    id8, slash, rest = rel.partition("/")
+    if not PL.ID8.fullmatch(id8):
+        _text(h, 404, "not found")
+        return
+    query = h.path.partition("?")[2]
+    if not slash:
+        _send(h, 301, b"", {"Location": PL.path(id8) + (f"?{query}" if query else ""),
                             "Cache-Control": "no-cache"})
-        return True
-    rel = unquote(path[len(PREFIX) + 1:])
-    if rel.startswith("dl/"):
-        _dl(h, rel[3:])
-        return True
+        return
+    pairs = parse_qsl(query, keep_blank_values=True)
+    key = next((v for k, v in pairs if k == "k"), "")
+    name = f"{PL.COOKIE}_{id8}"
+    if key and PL.good(id8, key):
+        # The link traded for a cookie on this preview's path alone, and the
+        # key taken out of the address bar.
+        https = (h.headers.get("X-Forwarded-Proto") or "").lower() == "https"
+        left = urlencode([(k, v) for k, v in pairs if k != "k"])
+        cookie = (f"{name}={key}; Path={PL.path(id8)}; Max-Age=2592000; HttpOnly; SameSite=Lax"
+                  + ("; Secure" if https else ""))
+        _send(h, 302, b"", {"Location": f"{PREFIX}/preview/{rel}" + (f"?{left}" if left else ""),
+                            "Set-Cookie": cookie, "Cache-Control": "no-store",
+                            "Referrer-Policy": "no-referrer"})
+        return
+    jar = SimpleCookie()
+    try:
+        jar.load(h.headers.get("Cookie") or "")
+    except Exception:  # noqa: BLE001 - a malformed cookie header is no cookie
+        pass
+    allowed = name in jar and PL.good(id8, jar[name].value)
+    if not allowed:
+        from . import auth
+
+        bearer = (h.headers.get("Authorization") or "").removeprefix("Bearer").strip()
+        allowed = bool(bearer) and auth.may_admin(bearer)[0] is not None
+    if not allowed:
+        _text(h, 403, f"Chat {id8}'s preview is for an admin: open the link "
+                      f"`media preview {id8}` prints on the server.")
+        return
+    root = PL.bundle(id8)
+    if root is None:
+        wt = PL.worktree(id8)
+        why = ("its build is not there yet: build it in the worktree with "
+               f"`{PL.build_cmd(id8)}`") if wt and wt.is_dir() else \
+            "its worktree is gone (the chat's change landed or was dropped)"
+        _text(h, 404, f"No preview for chat {id8}: {why}.")
+        return
+    _bundle_file(h, root, unquote(rest))
+
+
+def _bundle_file(h: BaseHTTPRequestHandler, root: Path, rel: str) -> None:
+    """`rel` under a bundle: a file as itself, a missing asset or a climb out a
+    404, any other path the SPA's index.html."""
     root = root.resolve()
     try:
         p = (root / rel).resolve()
@@ -156,4 +206,29 @@ def serve(h: BaseHTTPRequestHandler, path: str) -> bool:
         _send(h, 404, b"not found\n", {"Content-Type": "text/plain", "Cache-Control": "no-store"})
     else:
         _file(h, root / "index.html", "no-cache")
+
+
+def serve(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """Answer a GET under `/app` if a bundle is served. False otherwise, for
+    the caller's 404. `path` is the request path without its query."""
+    if path != PREFIX and not path.startswith(PREFIX + "/"):
+        return False
+    if path.startswith(PREFIX + "/preview/"):
+        # A chat's own build, served whether or not /app/ itself is.
+        _preview(h, path[len(PREFIX) + len("/preview/"):])
+        return True
+    root = bundle_dir()
+    if root is None:
+        return False
+    if path == PREFIX:
+        # Relative asset and route URLs need the trailing slash.
+        query = h.path.partition("?")[2]
+        _send(h, 301, b"", {"Location": PREFIX + "/" + (f"?{query}" if query else ""),
+                            "Cache-Control": "no-cache"})
+        return True
+    rel = unquote(path[len(PREFIX) + 1:])
+    if rel.startswith("dl/"):
+        _dl(h, rel[3:])
+        return True
+    _bundle_file(h, root, rel)
     return True

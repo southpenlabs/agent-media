@@ -9779,6 +9779,33 @@ def _ago(seconds: float) -> str:
     return f"{int(seconds // 86400)}d"
 
 
+def cmd_preview(a) -> int:
+    """`media preview [chat]`: the signed link to chat <id8>'s preview
+    (preview_link.py), for the reply; when its build is missing, the command
+    that makes it, and exit 1."""
+    from . import preview_link as PL
+
+    id8 = PL.id8_of(a.chat or os.getcwd())
+    if not id8:
+        print("media preview: name the chat (session id or id8), or run it inside "
+              "its worktree (.worktrees/chat-<id8>)", file=sys.stderr)
+        return 2
+    if PL.repo() is None:
+        print("media preview: no app repo here (set MEDIA_WEB_PREVIEW_REPO, or "
+              "MEDIA_WEB_APP_DIR to <repo>/build-app/client)", file=sys.stderr)
+        return 2
+    if PL.bundle(id8) is None:
+        wt = PL.worktree(id8)
+        if wt is None or not wt.is_dir():
+            print(f"media preview: no worktree for chat {id8} ({wt})", file=sys.stderr)
+        else:
+            print(f"media preview: not built yet; in {wt} run:\n  {PL.build_cmd(id8)}",
+                  file=sys.stderr)
+        return 1
+    print(PL.link(id8))
+    return 0
+
+
 def cmd_attach(a) -> int:
     """Copy files where the app can show them in a reply (§6.18).
 
@@ -11896,6 +11923,13 @@ def _build_parser() -> argparse.ArgumentParser:
                              "prints the `Shared file:` line for each")
     at.add_argument("files", nargs="+", help="the files")
     at.set_defaults(func=cmd_attach)
+
+    pv = sub.add_parser("preview",
+                        help="print the link to a chat's own build of the web app "
+                             "(/app/preview/<id8>/, admin only), or how to build it")
+    pv.add_argument("chat", nargs="?", default="",
+                    help="the chat's session id or id8 (default: the worktree you are in)")
+    pv.set_defaults(func=cmd_preview)
 
     return p
 
