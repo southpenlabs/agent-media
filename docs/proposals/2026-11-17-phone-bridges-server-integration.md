@@ -269,6 +269,19 @@ they are deleted only if asked.
 5. **Edits and deletes**: mirrored as above (recommended), or deletes kept
    as a record.
 
+### Answers so far (David, 18 Nov 2026)
+
+- **How far back**: the last 30 days, with an option for more and a plain
+  explanation of what it costs (time, data, battery).
+- **Who reads it**: Sasonica too, not only Element: the app decrypts with
+  matrix-rust-sdk's crypto-wasm, each app install a verified device of the
+  account. A step of its own after the copier.
+- **Account** and **room names**: asked again with more detail. Proposed for
+  rooms, since a chat's id is the same from any device: one room per chat
+  (so a chat moved to another phone carries on in the same room), grouped
+  in a "Local chats" space with a sub-space per network, and the bridging
+  device in the topic and the state event, not the name.
+
 ### Steps
 
 1. Spike on red2 with a test account on tuwunel: the core as a goolm
