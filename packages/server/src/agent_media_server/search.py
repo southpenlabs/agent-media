@@ -40,6 +40,13 @@ same id. What is indexed, per harness:
   what is in memory, and passes over a room whose lock a read holds. Only
   in the canvas's process: `python -m … rebuild` from a shell has no rooms
   (the canvas reads them again on its next pass).
+- **Local chats** (18 Nov 2026, §6.61 Full copy) — the phone's bridged chats
+  whose messages its phone sent while the dial was at `full`
+  (local_messages.py, their own store): harness `local`, the network as the
+  thread's project (`in:whatsapp`), indexed by event id from the store's
+  change counter (the `rooms` signature), an edit taking the new words and a
+  redaction dropping the row. Kept from a guest and from a device limited to
+  its folders; dropped with the store when the dial leaves `full`.
 
 Text (the words of both sides, the narration, an ask's question and answer)
 goes into one full-text table; tool steps (name, title, input and result
@@ -1037,6 +1044,60 @@ def backfill(pages: int = BACKFILL_PAGES) -> int:
     return fetched
 
 
+# --- Local chats (Full copy) -----------------------------------------------------
+#
+# Their words are kept in local_messages.py's store, the only copy here; each
+# chat's `rooms` signature is the store's change counter last indexed, so a
+# pass reads only what changed since, and a wiped index reads it all again.
+
+
+def _index_local(conn: sqlite3.Connection) -> int:
+    """Bring every Local chat's rows up to the store. The chats written."""
+    from agent_media_core.sealed import is_sealed
+
+    from . import local_chats, local_messages
+
+    clocks = local_messages.chats_clock()
+    if not clocks:
+        return 0
+    have = {sid: sig for sid, sig in conn.execute(
+        "SELECT session, sig FROM rooms WHERE session LIKE 'local:%'")}
+    names = local_chats.names_on()
+    n = 0
+    for chat, clock in clocks.items():
+        if is_sealed(chat):
+            continue
+        try:
+            done = int(have.get(chat) or 0)
+        except ValueError:
+            done = 0
+        if done >= clock:
+            continue
+        rows = local_messages.changed_since(chat, done)
+        rec = local_chats.record(chat) or {}
+        net = str(rec.get("network") or "")
+        network = local_chats.NETWORKS.get(net, net)
+        title = (rec.get("title") or rec.get("name") or "") if names else ""
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for mid, role, at, words, shown in rows:
+                if shown and words.strip():
+                    _put_room_msg(conn, chat, mid, role, at, words)
+                else:
+                    _delete_docs(conn, "session=? AND msg=?", (chat, mid))
+            first, last = local_messages.span(chat)
+            _upsert_thread(conn, chat, "local", {"title": _one_line(title or network),
+                                                 "first_at": first, "last_at": last})
+            conn.execute("UPDATE threads SET project=? WHERE session=?", (network, chat))
+            conn.execute("INSERT OR REPLACE INTO rooms VALUES (?, ?)", (chat, str(clock)))
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        n += 1
+    return n
+
+
 # --- the sweep ------------------------------------------------------------------
 
 
@@ -1125,6 +1186,10 @@ def refresh(budget_s: float | None = None, pause_s: float = 0.0) -> dict:
                 continue
             rooms_left += got is None
             rooms_changed += bool(got)
+        try:
+            rooms_changed += _index_local(conn)
+        except sqlite3.Error as e:
+            print(f"search: indexing Local chats failed ({e})", file=sys.stderr)
         done = 0
         for _mt, harness, path, session, st, k in todo:
             if budget_s is not None and time.monotonic() - t0 > budget_s:
@@ -1221,7 +1286,7 @@ KINDS = ("text", "tool")
 #: act on, 05453168's `_as_query`) rather than a query that quietly matches
 #: nothing: `harness:claude-code` is the kind of near miss a model writes.
 #: `in:`, `thread:` and `tool:` stay free text — those sets are open.
-HARNESSES = ("claude", "codex", "pi", "hermes", "matrix")
+HARNESSES = ("claude", "codex", "pi", "hermes", "matrix", "local")
 #: Field operators, each onto the one thing it narrows.
 FIELDS = {"from": "from", "who": "from",
           "in": "in", "project": "in", "folder": "in",
@@ -1248,7 +1313,8 @@ OPERATORS = (
     ("in:<words>", "the thread's project or folder", "in:agent-media"),
     ("thread:<words>", "its title, Claude's own title, or its first prompt",
      'thread:"speech gauge"'),
-    ("harness:<name>", "claude, codex, pi, hermes or matrix", "harness:matrix"),
+    ("harness:<name>", "claude, codex, pi, hermes, matrix or local (the phone's chats)",
+     "harness:matrix"),
     ("tool:<name>", "a step that ran that tool (`ran:` is the same)", "tool:bash grep"),
     ("kind:text, kind:tool", "the words only, or the tool steps only", "kind:tool ocelot"),
     ("after:<date>, before:<date>",
@@ -1640,6 +1706,10 @@ def _hidden(entrypoint: str | None, session: str, owned: set[str],
         # A room is answered only while matrix.py serves it: one taken off
         # the allow list (or with the sync off) keeps its rows, unanswered.
         return not _room_served(session)
+    if harness == "local":
+        from agent_media_core.sealed import is_sealed
+
+        return is_sealed(session)
     return bool(entrypoint) and entrypoint.startswith("sdk") and session not in owned
 
 
@@ -1790,7 +1860,7 @@ def _thread_hits(parsed: dict, rows: dict[str, dict], listed: dict[str, dict],
             continue
         if since is not None and (view["at"] or 0) < since:
             continue
-        if rooms and (view["harness"] == "matrix") != (rooms == "only"):
+        if rooms and (view["harness"] in _ROOM_HARNESSES) != (rooms == "only"):
             continue
         view["match"] = {k: _mark_terms(v, terms) for k, v in fields.items()
                          if v and _mark_terms(v, terms)}
@@ -1809,8 +1879,10 @@ def _thread_hits(parsed: dict, rows: dict[str, dict], listed: dict[str, dict],
 SORTS = ("newest", "oldest", "best")
 #: `who=`: whose words — the owner's (`user`) or anyone else's (`assistant`).
 WHO = {"me": "user", "agent": "assistant"}
-#: `rooms=`: only the Messages tab's rooms (Matrix), or none of them.
+#: `rooms=`: only the Messages tab's rooms (Matrix, and the phone's Local
+#: chats), or none of them.
 ROOMS = ("only", "none")
+_ROOM_HARNESSES = ("matrix", "local")
 
 
 #: The threads columns a `thread:` or `in:` operator looks in.
@@ -1863,7 +1935,7 @@ def _narrowing(fts: str, *, since: float | None, who: str | None,
         args.append(WHO[who])
     if rooms:
         sql += (" AND d.session " + ("IN" if rooms == "only" else "NOT IN")
-                + " (SELECT session FROM threads WHERE harness = 'matrix')")
+                + " (SELECT session FROM threads WHERE harness IN ('matrix', 'local'))")
     return sql, args
 
 
@@ -2310,7 +2382,10 @@ def search(q: str, bearer: str, **kw) -> tuple[bool, dict]:
         # memory store.
         kw = {k: v for k, v in kw.items() if k not in ("memory", "translate_nl")}
         return answer(q, memory=False, **kw)
-    ok, out = answer(q, **kw)
+    from . import local_messages
+
+    # The phone's chats are not a guest's, nor a folder-limited device's.
+    ok, out = answer(q, no_local=local_messages.hidden_from(bearer), **kw)
     if ok and out.get("docs"):
         # A device limited to its folders sees only the documents there
         # (folder_grants.py).
@@ -2326,7 +2401,7 @@ def search(q: str, bearer: str, **kw) -> tuple[bool, dict]:
 def answer(q: str, *, limit=None, before=None, tools: bool = False,
            memory: bool = True, sort=None, after=None, offset=None, since=None,
            who=None, rooms=None, session=None,
-           translate_nl: bool = False) -> tuple[bool, dict]:
+           translate_nl: bool = False, no_local: bool = False) -> tuple[bool, dict]:
     """The same answer with no credential asked for: `search` is the gated
     way in, and this is what it answers with.
 
@@ -2370,6 +2445,10 @@ def answer(q: str, *, limit=None, before=None, tools: bool = False,
     # The query's own operators, over the parameters: `from:` is `who`,
     # `after:` is `since` (the later of the two), `kind:` picks the tables.
     ops = parsed["filters"]
+    if no_local:
+        # Kept from this caller: narrowed as `-harness:local` would be, but
+        # not said back in `query`.
+        ops = {**ops, "harness": [*ops.get("harness", []), ("local", True)]}
     who = ops.get("from") or who
     # `tool:` is a question about tool steps, so it turns them on by itself.
     kind = ops.get("kind") or ("tool" if ops.get("tool") else None)
@@ -2425,7 +2504,7 @@ def answer(q: str, *, limit=None, before=None, tools: bool = False,
         out = {"q": q, "terms": terms, "query": operators_of(parsed),
                "help": HELP_PATH,
                "tools": bool(tools) or kind == "tool", "sort": sort,
-               "threads": (_thread_hits(parsed, rows, listed, owned, sort=sort,
+               "threads": (_thread_hits({**parsed, "filters": ops}, rows, listed, owned, sort=sort,
                                         since=times["since"], rooms=rooms)
                            if first and kind != "tool" else []),
                "messages": messages,

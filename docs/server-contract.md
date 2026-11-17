@@ -5846,6 +5846,7 @@ local look, never a network call:
 | `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |
 | `local_backup` | always true (§6.61 Backup, 17 Nov 2026): `POST /local/backup`, `GET /local/backups`, `GET`/`DELETE /local/backup/<id>`: the phone's encrypted Local chats bundles, kept as ciphertext |
 | `local_settings` | always true (§6.61 Settings, 18 Nov 2026): `GET`/`POST /local/settings`: what leaves the phone, backup, applying to the networks |
+| `local_full` | always true (§6.61 Full copy, 18 Nov 2026): `POST /local/messages` while the dial is at `full`; a `local:` id reads through `/conversation/log` and `/threads/<id>/events`; search's harness `local` |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -6230,7 +6231,7 @@ memory as its own section when this host has agent-memory. Code:
   | `from:me`, `from:agent` | whose words — `who=`, and it wins over it (`mine`/`user`/`i`, `assistant`/`ai`/`them` too; `who:` is the same operator) |
   | `in:<words>` | the thread's project or folder holds them (`project:`, `folder:`) |
   | `thread:<words>` | its title, Claude's `ai-title` or its first prompt holds them (`title:`) |
-  | `harness:claude\|codex\|pi\|hermes\|matrix` | that harness only (`agent:`). A closed set: anything else is 400 with the names, so a near miss is said rather than answered with nothing. `in:`, `thread:` and `tool:` stay free text |
+  | `harness:claude\|codex\|pi\|hermes\|matrix\|local` | that harness only (`agent:`). A closed set: anything else is 400 with the names, so a near miss is said rather than answered with nothing. `in:`, `thread:` and `tool:` stay free text |
   | `tool:<name>` | a tool step that ran it (`ran:`) — turns tool steps on by itself, like `kind:tool` |
   | `kind:text`, `kind:tool` | the words only, or tool steps only — `kind:tool` needs no `tools=1` and answers no `threads` (`is:`) |
   | `after:<date>`, `before:<date>` | `2026-11-12`, `2026-11` or `2026` (the start of that day, month or year, local time), `today`, `yesterday`, or `7d` / `3w` / `6m` / `1y` (a bare `ago` straight after one of these belongs to it — `after:7d ago` — and is a word anywhere else). `after:` is `since=` (the later of the two wins); `before:` bounds the words, not the page cursor `before=` (`since:`, `until:`) |
@@ -6359,7 +6360,7 @@ week, the week before" changes the query instead of starting again.
   what is asked: `since=<at>` (messages at or after it; threads whose
   latest activity is), `who=me` (the owner's words, `role: user`) or
   `who=agent` (everyone else's; threads are not narrowed by it), and
-  `rooms=only` (only Matrix rooms, messages and threads) or `rooms=none`
+  `rooms=only` (only Matrix rooms and, since 18 Nov 2026, Local chats (§6.61 Full copy), messages and threads) or `rooms=none`
   (none of them). A bad `sort`, `who` or `rooms`, or a `since`, `after` or
   `offset` that is not a number, is 400.
 - **One thread** (19 Oct 2026, the thread's find bar): `session=<id>`
@@ -12663,10 +12664,12 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   "network_exceptions": {"<network>": bool},     // that network's own choice over the main switch
   "defaults": {"leaves_phone", "backup", "apply_to_networks", "network_exceptions": {}, "names": bool},
   "hosted": bool,
-  "choosable": {"leaves_phone": [{"id", "available": bool, "why"?: "not built yet"}…],
+  "choosable": {"leaves_phone": [{"id", "available": bool, "explain": "<what leaves, who reads it>",
+                                   "why"?: "not built yet" | "not on a server South Pen Labs hosts"}…],
                 "backup": [{"id", "available": true}…],
                 "networks": [{"id", "name"}…]},
-  "updated": <unix s> | null, "by": "<device id>" | null}
+  "updated": <unix s> | null, "by": "<device id>" | null,
+  "purged"?: {"messages": n, "chats": n}}       // POST only, when it moved the dial off full
 ```
 
 - **Who**: any paired device that is not a guest, on both (the settings are
@@ -12677,9 +12680,19 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   `MEDIA_HOSTED` (default off; added 18 Nov 2026, the server had no such
   signal); `MEDIA_LOCAL_CHAT_NAMES`, when set, still decides names either
   way, and unset now follows `MEDIA_HOSTED`.
-- **The dial**: only `settings` is choosable today; `encrypted` and `full`
-  are listed `available: false`, `why: "not built yet"`, and choosing one
-  is 400 `code: "not_available"`, `field: "leaves_phone"`.
+- **The dial**: `settings` and `full` are choosable (`full` since 18 Nov
+  2026, Full copy below); `encrypted` is listed `available: false`, `why:
+  "not built yet"`. On a hosted server (`MEDIA_HOSTED`) `full` is
+  `available: false`, `why: "not on a server South Pen Labs hosts"`, unless
+  `MEDIA_LOCAL_FULL_ON_HOSTED=1`. Choosing a step not available is 400
+  `code: "not_available"`, `field: "leaves_phone"`. Every step carries
+  `explain`, plain words for the settings screen: what leaves the phone
+  and who can read it (on a person's own server, the server and its
+  agents; on a hosted one, South Pen Labs' machines). (`why` stays the
+  reason a step cannot be chosen, as before.)
+- **Leaving `full`** (to `settings`, `encrypted` or null) deletes every
+  Local message held here and its rows in the search index; the answer
+  says how many in `purged`.
 - **Exceptions** merge by network: `true`/`false` sets that network's,
   `null` drops it back to the main switch; `"network_exceptions": null`
   drops them all. A key not a network of §6.61 is 400
@@ -12690,6 +12703,81 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
 - Stored in `<state_dir>/local-settings.json`, 0600, as only what was
   chosen (plus `updated`, `by`): a field never chosen follows the default.
 - `/features` `local_settings: true`.
+
+#### Full copy: the Local chats' messages, readable here (built 18 Nov 2026)
+
+Step 5 of the design (David, 18 Nov 2026: "Full copy"). With the dial at
+`full`, Sasonica sends, on the companion's behalf, the messages of the Local
+chats its phone bridges, so agents, search and the desk read them like any
+thread. Media bytes stay on the phone: a photo is its name, type and size.
+Code: `agent_media_server/local_messages.py`.
+
+```
+POST /local/messages {"chat": "local:<network>:<id>", "messages": [<in>…]}    // at most 500
+  → {"ok": true, "chat", "stored": n, "duplicates": n, "held": <messages kept for the chat>}
+
+<in> = {"event_id": "<the network's / companion's event id>", "ts": <unix s, or ms>,
+        "from": "me" | "<sender's name>", "sender_id"?: "<their id>",
+        "kind": "text"|"image"|"video"|"audio"|"file"|"notice"|"reaction"|"edit"|"redaction",
+        "text"?: "…",                          // a reaction's emoji; an edit's new words
+        "reply_to"?: "<event id>",             // what it answers; a reaction's target
+        "edits"?: "<event id>",                // kind edit
+        "redacts"?: "<event id>",              // kind redaction (a message or a reaction)
+        "media"?: {"name", "mime", "size"}}    // image/video/audio/file: metadata only
+```
+
+- **Who**: the paired device that bridges the chat (its `device` in
+  `/local/chats`, `mine` there): another device 403 `code: "not_bridging"`,
+  a guest 403 `guest`, no bearer 401. The chat must be listed (404
+  `not_found`). **409 `code: "not_enabled"`** unless the dial is at `full`
+  (and `full` is available: a hosted server's switch turned off stops it).
+- **Stored** in `<state_dir>/local-messages.db` (SQLite, 0600), by `(chat,
+  event_id)`: one sent again is a duplicate and changes nothing (a batch may
+  be resent whole). `ts` over 10¹¹ is read as milliseconds. Text is kept to
+  32768 characters. Any other field, in the body, a message or `media`, is
+  400 `field_not_accepted`; a bad kind, time, id or missing target 400, and
+  one bad message refuses the batch (nothing kept).
+- **Applied**: the newest `edit` (by `ts`) replaces its message's words,
+  even when it came first; a `redaction` blanks what it names — the words,
+  the media, its edits are emptied in the store, not hidden — and a
+  redacted reaction is gone; a `reaction` counts once per sender and emoji.
+- **Read** like any thread, by its `local:` id, on every non-guest device
+  not limited to its folders (403 `guest` otherwise): `GET
+  /conversation/log?session=local:…` (`limit`, `before`, `around`, and
+  `messages=1` as for any thread), the `/threads/local:…/events` stream
+  (its snapshot, and new messages within its re-read; `state: "ended"`),
+  `GET /conversation?session=local:…` (`source: "local"`, never live or
+  resumable). An unlisted chat is 404; a listed one with nothing held (the
+  dial not at full) answers `messages: []`. The host's own token reads it
+  too, as a room's (`media room-log local:…`). The envelope carries
+  `local: {"network": {"id", "name"}, "device", "full": bool, "held": n}`,
+  and each message is a §6.2.2 message as a room's are:
+
+```
+{"id": "<event id>", "role": "user" (from me) | "assistant", "at", "local": true,
+ "parts": [{"type": "text", "text"}] | [{"type": "media", "kind": "image"|"video"|"audio"|"file",
+            "name", "mimetype"?, "size"?, "text": "photo — on the phone", "on_phone": true}
+           (no url: the bytes are on the phone), {"type": "text", "text": "<caption>"}?],
+ "sender": {"id", "name"},                    // "You" for me
+ "peer"?: {"name"},                           // someone else's
+ "reply_to"?: {"id", "text"?, "name"?, "mine"?},
+ "reactions"?: [{"key", "count", "mine", "by": [names]}],
+ "edited"?: true, "redacted"?: true (parts: "_message deleted_"), "notice"?: true (italic text),
+ "spoken": null, "turn": {"running": false}}
+```
+
+- **Search** (§6.14) indexes them as harness `local`, the network's name as
+  the thread's project (`harness:local`, `in:whatsapp`), the chat's name as
+  its title where names are kept; `from:me` is the owner's words; `rooms=
+  only` includes them with the Matrix rooms. An edit takes the new words, a
+  redaction drops the row. A guest and a folder-limited device are never
+  answered them (narrowed as `-harness:local`, not said back); a sealed
+  chat is neither indexed nor answered. `media find` and `search_history`
+  read the same index.
+- **Deleted**: all of it when the dial leaves `full` (above); a chat's when
+  its phone's full list has not had it for 30 days, or it is no longer
+  listed at all (checked when a phone posts a full list or messages).
+- `/features` `local_full: true`.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

@@ -134,6 +134,9 @@ never a network call, so the app can ask on every start.
   local_chats  the phone's Local chats known by id (local_chats.py, §6.61, 17
             Nov 2026): POST and GET /local/chats; `local:<network>:<id>` ids
             taken by the flag routes; Local rows in /targets
+  local_full  Full copy (local_messages.py, §6.61 Full copy, 18 Nov 2026): POST
+            /local/messages while the dial is at full; a local: id reads through
+            /conversation/log and /threads/<id>/events; search harness local
   local_backup  the Local chats' encrypted backups kept as ciphertext (local_backup.py,
             §6.61 Backup, 17 Nov 2026): POST /local/backup, GET /local/backups,
             GET and DELETE /local/backup/<id>
@@ -271,7 +274,7 @@ def _agents() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "local_settings": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "app_update_web": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "local_settings": lambda: True, "local_full": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "app_update_web": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,

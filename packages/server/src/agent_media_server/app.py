@@ -448,7 +448,7 @@ CORS_PATHS = frozenset({
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/remind", "/session/issue",
-    "/local/chats", "/local/backup", "/local/backups", "/local/settings",
+    "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -661,6 +661,10 @@ def body_limit(path: str) -> int:
         from . import local_chats
 
         return local_chats.MAX_BODY    # a phone's whole list of one network
+    if path == "/local/messages":
+        from . import local_messages
+
+        return local_messages.MAX_BODY  # a batch of a Local chat's messages (Full copy)
     if path == "/local/backup":
         # Past the guard: the route checks the bearer first, then refuses a
         # body over local_backup.max_bytes() unread, as JSON (§6.61 Backup).
@@ -861,8 +865,12 @@ def _bearer(h: BaseHTTPRequestHandler) -> str:
 
 
 def _is_room(session: str) -> bool:
-    from . import matrix
+    from . import local_chats, matrix
 
+    if local_chats.is_local(session):
+        # A Local chat's Full copy (local_messages.py): like a room, the one
+        # kind of thread an agent here cannot read off the disk.
+        return local_chats.known(session)
     return sessions._SESSION.fullmatch(session) is not None and matrix.room(session) is not None
 
 
@@ -2857,7 +2865,10 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
 
     qs = parse_qs(query)
     bearer = _bearer(h) or (qs.get("access_token") or [""])[0].strip()
-    if not sessions._SESSION.fullmatch(session or ""):
+    from . import local_chats
+
+    local = local_chats.is_local(session or "")
+    if not local and not sessions._SESSION.fullmatch(session or ""):
         _json(h, 400, {"ok": False, "error": "not a session id"})
         return True
     user, err = auth.gate(bearer)
@@ -2866,7 +2877,18 @@ def _thread_events(h: BaseHTTPRequestHandler, session: str, query: str) -> bool:
         return True
     from . import driver
 
-    if not sessions.live_sessions().get(session) and not sessions.session_exists(session) \
+    if local:
+        # A Local chat (§6.61 Full copy): its messages held here, if any.
+        from . import local_messages
+
+        ok, err = local_messages.may_read(bearer)
+        if not ok:
+            _json(h, err.pop("status", 403), {"ok": False, **err})
+            return True
+        if not local_chats.known(session):
+            _json(h, 404, {"ok": False, "error": "no such session"})
+            return True
+    elif not sessions.live_sessions().get(session) and not sessions.session_exists(session) \
             and threads._manifest_for(session) is None and not driver.owned_headless(session):
         _json(h, 404, {"ok": False, "error": "no such session"})
         return True
@@ -4706,6 +4728,13 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import local_chats
 
         ok, detail = local_chats.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/messages":
+        # Full copy: a Local chat's messages, from the device that bridges
+        # it, while the dial is at full (local_messages.py, §6.61 Full copy).
+        from . import local_messages
+
+        ok, detail = local_messages.post(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/mark":
         # Pin to top and Mark unread, from a chat's long press or ⋮

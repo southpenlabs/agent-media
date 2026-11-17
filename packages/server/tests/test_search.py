@@ -656,7 +656,7 @@ def test_in_thread_and_harness_narrow_by_the_thread(home, gate, monkeypatch):
     # the query builder can act on — not a query that matches nothing.
     ok, err = search.search("marmot harness:claude-code", "tok")
     assert not ok and err["status"] == 400 and "claude, codex, pi, hermes, matrix" in err["error"]
-    assert search._as_query("marmot harness:claude-code") == ("", "harness: is one of claude, codex, pi, hermes, matrix")
+    assert search._as_query("marmot harness:claude-code") == ("", "harness: is one of claude, codex, pi, hermes, matrix, local")
     # The open sets stay free text: projects, titles and tool names change.
     for q in ("marmot in:nowhere", "marmot thread:nothing", "marmot tool:nosuchtool"):
         assert ask(q)["messages"] == [], q
@@ -1135,7 +1135,7 @@ def test_the_near_miss_a_model_writes_comes_back_as_a_complaint_it_can_act_on(
     with caplog.at_level("WARNING"):
         got = search.compose("what did I say about the music bed in Claude Code")
     assert got == {"q": "music bed harness:claude", "note": ""}
-    assert "harness: is one of claude, codex, pi, hermes, matrix" in asked[1]
+    assert "harness: is one of claude, codex, pi, hermes, matrix, local" in asked[1]
     assert search.parse(got["q"])["filters"]["harness"] == [("claude", False)]
 
     # The open sets stay open: a project or a tool that is simply not there

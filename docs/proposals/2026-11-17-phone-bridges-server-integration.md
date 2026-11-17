@@ -127,7 +127,14 @@ a person's own server.
    fetched (Range) and deleted by its device, the same account's devices
    and admins; the server's own nightly carries them while under 1 GB. The
    companion's bundle, its key and the recovery code are still to build.
-5. Full copy.
+5. Full copy. **Server side built 18 Nov 2026** (contract §6.61 "Full
+   copy", `local_messages.py`; David: "Full copy"): `full` choosable on
+   the dial (on a hosted server only with `MEDIA_LOCAL_FULL_ON_HOSTED=1`),
+   `POST /local/messages` from the bridging device, a store of its own
+   (`local-messages.db`: the server has no other copy of these words, while
+   the search index is a cache it rebuilds) fed into the same search index
+   the Matrix rooms use (harness `local`), read through the thread routes;
+   leaving `full` deletes it all. Sasonica's sending side is to build.
 6. Encrypted copy (the second stage).
 
 ## Open

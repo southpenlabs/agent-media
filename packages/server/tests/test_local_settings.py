@@ -42,9 +42,12 @@ def test_defaults_on_a_persons_own_server(server):
     assert got["defaults"] == {"leaves_phone": "settings", "backup": "server",
                                "apply_to_networks": True, "network_exceptions": {}, "names": True}
     lp = {c["id"]: c for c in got["choosable"]["leaves_phone"]}
-    assert lp["settings"] == {"id": "settings", "available": True}
-    assert lp["encrypted"] == {"id": "encrypted", "available": False, "why": "not built yet"}
-    assert lp["full"]["available"] is False
+    assert lp["settings"]["available"] is True and "why" not in lp["settings"]
+    assert lp["encrypted"]["available"] is False and lp["encrypted"]["why"] == "not built yet"
+    assert lp["full"]["available"] is True and "why" not in lp["full"]
+    # Each step says, in plain words, what leaves and who can read it.
+    assert "stay on the phone" in lp["settings"]["explain"]
+    assert "agents" in lp["full"]["explain"] and "yours" in lp["full"]["explain"]
     assert {n["id"] for n in got["choosable"]["networks"]} == set(local_chats.NETWORKS)
     assert not local_settings.STORE.path().exists()     # a read writes nothing
 

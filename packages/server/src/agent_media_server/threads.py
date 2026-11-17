@@ -29,6 +29,19 @@ def conversation_for_session(session: str, bearer: str) -> tuple[bool, dict]:
     with Audiobookshelf on 11 Nov 2026.)
     """
     session = (session or "").strip()
+    from . import local_chats
+
+    if local_chats.is_local(session):
+        # A Local chat (§6.61): nothing runs here; a reply goes by the phone.
+        from . import local_messages
+
+        ok, err = local_messages.may_read(bearer)
+        if not ok:
+            return False, err
+        if not local_chats.known(session):
+            return False, {"error": "no such chat: a phone has not listed it", "status": 404}
+        return True, {"session": session, "live": False, "pane": None, "resumable": False,
+                      "suggestion": "", "source": "local"}
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)
@@ -771,6 +784,19 @@ def log_for_session(session: str, bearer: str, *, limit=None,
       opened does not see an error.
     """
     session = (session or "").strip()
+    from . import local_chats
+
+    if local_chats.is_local(session):
+        # A Local chat (§6.61 Full copy): the messages its phone sent while
+        # the dial was at full; none otherwise.
+        from . import local_messages
+
+        ok, err = local_messages.may_read(bearer)
+        if not ok:
+            return False, err
+        if not local_chats.known(session):
+            return False, {"error": "no such chat: a phone has not listed it", "status": 404}
+        return session_log(session, limit=limit, before=before, around=around)
     if not sessions._SESSION.fullmatch(session):
         return False, {"error": "not a session id", "status": 400}
     user, err = auth.gate(bearer)
@@ -785,8 +811,15 @@ def session_log(session: str, *, limit=None, before: str = "",
     ?session=` answers once the caller is let in, and what the per-thread
     stream sends as its snapshot (thread_events.py). `session` must already
     be a valid id."""
-    from . import matrix, quick
+    from . import local_chats, matrix, quick
 
+    if local_chats.is_local(session):
+        from . import local_messages
+
+        if not local_chats.known(session):
+            return False, {"error": "no such chat: a phone has not listed it", "status": 404}
+        return True, local_messages.envelope(session, limit=_limit(limit), before=before,
+                                             around=around, most=MESSAGES_MAX)
     if quick.has(session):
         # A quick chat (quick.py): its messages, nothing of a session's.
         return True, quick.envelope(session, limit=_limit(limit), before=before)

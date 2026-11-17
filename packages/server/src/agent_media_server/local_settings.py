@@ -36,8 +36,11 @@ KEY = "server"
 LEAVES_PHONE = ("settings", "encrypted", "full")
 BACKUP = ("server", "drive", "off")
 #: The steps of the dial built so far; the others are listed, not choosable.
-AVAILABLE_LEAVES = frozenset({"settings"})
+#: `full` is built (18 Nov 2026, local_messages.py), but on a hosted server
+#: only with MEDIA_LOCAL_FULL_ON_HOSTED=1 (`full_available`).
+AVAILABLE_LEAVES = frozenset({"settings", "full"})
 NOT_BUILT = "not built yet"
+HOSTED_FULL = "not on a server South Pen Labs hosts"
 FIELDS = frozenset({"leaves_phone", "backup", "apply_to_networks", "network_exceptions"})
 
 
@@ -45,6 +48,43 @@ def hosted() -> bool:
     """Whether South Pen Labs hosts this server (`MEDIA_HOSTED`, default off)."""
     v = (os.environ.get("MEDIA_HOSTED") or "").strip().lower()
     return v in ("1", "on", "true", "yes")
+
+
+def full_available() -> bool:
+    """Whether `full` may be chosen: on a person's own server, yes; on one
+    South Pen Labs hosts, only with `MEDIA_LOCAL_FULL_ON_HOSTED=1` (other
+    people's messages, readable, on SPL's machines)."""
+    if not hosted():
+        return True
+    v = (os.environ.get("MEDIA_LOCAL_FULL_ON_HOSTED") or "").strip().lower()
+    return v in ("1", "on", "true", "yes")
+
+
+def _available(step: str) -> tuple[bool, str | None]:
+    if step not in AVAILABLE_LEAVES:
+        return False, NOT_BUILT
+    if step == "full" and not full_available():
+        return False, HOSTED_FULL
+    return True, None
+
+
+def _why(step: str) -> str:
+    """What each step of the dial sends, and who can read it, in plain words."""
+    who = ("South Pen Labs' machines, which host this server" if hosted()
+           else "this server, which is yours, and the agents that run on it")
+    if step == "settings":
+        return ("Only a list of your chats (each one's network and id"
+                + ("" if not hosted() else ", no names") + ") and what you set on them in "
+                "Sasonica, like archive and quiet. Your messages stay on the phone, so other "
+                "devices see the settings but not the words.")
+    if step == "encrypted":
+        return ("Your messages too, encrypted so only your own devices can read them: "
+                "the desk and a tablet show them, but the server, its agents and search "
+                "cannot read them.")
+    return ("Your messages too, readable by " + who + ". Agents can read and answer these "
+            "chats, search finds them, the desk and other devices show them, and a lost "
+            "phone loses nothing. Photos and files stay on the phone. Switching back "
+            "deletes every copied message from the server.")
 
 
 def defaults() -> dict:
@@ -57,9 +97,12 @@ def defaults() -> dict:
 def _choosable() -> dict:
     from .local_chats import NETWORKS
 
-    return {"leaves_phone": [{"id": k, "available": k in AVAILABLE_LEAVES,
-                              **({} if k in AVAILABLE_LEAVES else {"why": NOT_BUILT})}
-                             for k in LEAVES_PHONE],
+    steps = []
+    for k in LEAVES_PHONE:
+        ok, why_not = _available(k)
+        steps.append({"id": k, "available": ok, "explain": _why(k),
+                      **({} if ok else {"why": why_not})})
+    return {"leaves_phone": steps,
             "backup": [{"id": k, "available": True} for k in BACKUP],
             "networks": [{"id": k, "name": v} for k, v in NETWORKS.items()]}
 
@@ -118,8 +161,8 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         v = body["leaves_phone"]
         if v is not None and v not in LEAVES_PHONE:
             return _bad(f"leaves_phone is one of {', '.join(LEAVES_PHONE)}")
-        if v is not None and v not in AVAILABLE_LEAVES:
-            return _bad(f"{v}: {NOT_BUILT}", code="not_available", field="leaves_phone")
+        if v is not None and not _available(v)[0]:
+            return _bad(f"{v}: {_available(v)[1]}", code="not_available", field="leaves_phone")
         change["leaves_phone"] = v
     if "backup" in body:
         v = body["backup"]
@@ -142,6 +185,7 @@ def post(body, bearer: str) -> tuple[bool, dict]:
             if v is not None and not isinstance(v, bool):
                 return _bad(f"network_exceptions.{k} is true, false or null")
     device = auth.device_id(bearer) or None
+    was_full = view()["leaves_phone"] == "full"
 
     def fn(rows: dict) -> bool:
         rec = rows.get(KEY) if isinstance(rows.get(KEY), dict) else {}
@@ -175,4 +219,11 @@ def post(body, bearer: str) -> tuple[bool, dict]:
     except OSError as e:
         return False, {"error": f"could not save the settings ({e.strerror or 'write failed'})",
                        "status": 500}
-    return True, view()
+    out = view()
+    if was_full and out["leaves_phone"] != "full":
+        # Off Full copy: every Local message kept here goes, and its rows in
+        # the search index (§6.61 Full copy).
+        from . import local_messages
+
+        out["purged"] = local_messages.purge()
+    return True, out

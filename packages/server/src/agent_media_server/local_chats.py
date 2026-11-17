@@ -347,7 +347,13 @@ def post(body, bearer: str) -> tuple[bool, dict]:
     except OSError as e:
         return False, {"error": f"could not save the chats ({e.strerror or 'write failed'})",
                        "status": 500}
-    from . import sessions
+    from . import local_messages, sessions
 
     sessions.targets_changed()
+    if full:
+        # A chat gone from its phone's list for 30 days loses its Full copy.
+        try:
+            local_messages.prune()
+        except Exception:  # noqa: BLE001 — the list is saved; the next post prunes
+            pass
     return True, {"chats": _answer(list(clean))}
