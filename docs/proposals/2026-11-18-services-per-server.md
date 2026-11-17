@@ -5,7 +5,7 @@ Rule 5 of the general model in `2026-11-15-threads-across-machines.md`
 picks a server per capability, not only per thread"). David, 15 Nov 2026:
 "it would be good to serve other parts of the app independently... like
 media and maps"; 18 Nov: "let's make our way through all four options".
-Nothing here is built.
+Step 1 (the server) is built; see "Decided" at the end.
 
 ## What exists
 
@@ -67,3 +67,22 @@ paired, but it ties a server's setup to the hosted account.
 2. App: a `SERVICE_ROUTES` table in `routeFor`, read from `/services` at
    start; Settings → Services; a line on a page served from elsewhere.
 3. Which server's feature flags a page reads: the service's.
+
+## Decided (David, 18 Nov 2026, on two cards)
+
+"The home server for the top level but the combination of all three for
+specific features including tiered membership", then "Yes, that layering":
+
+1. **The account's membership tier** says which services an account may use
+   and from which servers: a ceiling. It comes with the account-roles item
+   (sasonica.com roles); until then every service is `allowed`.
+2. **The home server** sets the default server for each service (Settings →
+   Services, §6.62). **Built 18 Nov 2026** (services.py).
+3. **A device** may override a service for itself, within what the tier
+   allows, kept on the phone. The app's part, with the route table read from
+   §6.62's `routes`.
+
+The table above was checked against the server's routes when built: music
+is `/music`, `/podcasts`, `/rooms`; maps `/map`; watch `/watch`,
+`/accounts/trakt`; books `/books`, `/book`; the Organiser `/org`,
+`/calendar`, `/notes`; People `/contacts`.

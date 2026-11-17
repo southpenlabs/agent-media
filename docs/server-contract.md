@@ -5893,6 +5893,7 @@ local look, never a network call:
 | `signed_in` | the app's signed-in browser may read pages and play friends-only videos (`signed-in-reading`); without it the app opens such links in the phone's browser |
 | `personal` | always: this server answers `/settings/personal` (§6.42) |
 | `default_agent` | always: `GET`/`POST /settings/agent`, the agent a new chat that names none gets (§6.55, 15 Nov 2026) |
+| `services` | always: `GET`/`POST /settings/services`, which server serves music, maps, watch, books, the Organiser and People (§6.62, 18 Nov 2026) |
 | `speech_recent` | always: this server answers `GET /speech/recent` (§6.5, 8 Nov 2026); the app's full player shows Recent replies only then |
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
@@ -12937,6 +12938,36 @@ like to move away from audiobookshelf"):
 - When both were sent, `session` won over `item` on `/conversation/log`
   and `/reply`, and `player_session` over `player_item` on `/ask`, until
   the item forms went (11 Nov 2026).
+
+---
+
+### 6.62 Services per server — reading gated, setting admins (built 18 Nov 2026)
+
+Which server serves each part of the app (David, 15 Nov 2026: "it would be
+good to serve other parts of the app independently... like media and maps";
+docs/proposals/2026-11-18-services-per-server.md). Three layers, David's
+(18 Nov 2026): the account's membership tier says which services it may use
+(`allowed`; every one until tiers are built), **this server sets each
+service's default server** (here), and a device may override a service for
+itself within what the tier allows (kept by the app).
+
+```
+GET  /settings/services → {"ok": true, "this": {"base", "server_id", "name"},
+       "choices": [{"base", "server_id", "name", "this"?: true}, …],
+       "services": [{"id": "music" | "maps" | "watch" | "books" | "organiser" | "people",
+                     "label", "routes": ["/music", "/podcasts", …],
+                     "server": {"base", "server_id", "name"} | null, "allowed": true}, …]}
+POST /settings/services {"service", "server": {"base", "server_id"?, "name"?} | null} → the same
+```
+
+`routes` are path prefixes (the path itself, or it followed by `/` or `?`):
+the app sends a service's calls to its `server` with that server's own token
+when it is paired there, and reads that service's feature flags from that
+server's `/features`; `server: null`, a server it isn't paired with, or one
+not answering, is this server (and the page says so). `choices` are this
+server and the servers it has peer links with. `POST` is `auth.may_admin`;
+this server's own address is stored as null; 400 `code: "service"` or
+`"server"`. Stored in `<state>/services.json`. Code: `services.py`.
 
 ---
 
