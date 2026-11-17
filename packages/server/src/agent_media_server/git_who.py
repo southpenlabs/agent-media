@@ -73,7 +73,7 @@ _seen: dict[str, tuple[int, list[tuple], set[str], dict[str, str]]] = {}
 #: The kept reads: written at most this often while anything new was read.
 SAVE_EVERY_S = 300.0
 _CACHE_VERSION = 1
-_disk = {"loaded": False, "dirty": False, "saved": 0.0, "saving": False}
+_disk = {"loaded": False, "dirty": False, "saved": 0.0, "saving": False, "timer": False}
 
 
 def _cache_path() -> Path:
@@ -135,15 +135,29 @@ def save(path: Path | None = None) -> None:
 
 def _maybe_save() -> None:
     """Save on a thread of its own when something new was read and the last
-    save is SAVE_EVERY_S old (or there was none)."""
+    save is SAVE_EVERY_S old (or there was none); not yet due, a timer comes
+    back then, so what was read is saved even if nothing is read after it
+    (a server just started reads everything at once, then may sit idle)."""
     with _lock:
-        due = (_disk["dirty"] and not _disk["saving"]
-               and (not _disk["saved"] or time.monotonic() - _disk["saved"] >= SAVE_EVERY_S))
-        if due:
-            _disk["saving"] = True
-    if due:
-        # The folder as it is now, not when the thread runs.
-        threading.Thread(target=save, args=(_cache_path(),), name="git-who-save", daemon=True).start()
+        if not _disk["dirty"] or _disk["saving"]:
+            return
+        wait = 0.0 if not _disk["saved"] else SAVE_EVERY_S - (time.monotonic() - _disk["saved"])
+        if wait > 0:
+            if not _disk.get("timer"):
+                _disk["timer"] = True
+                t = threading.Timer(wait + 1.0, _timer_fired)
+                t.daemon = True
+                t.start()
+            return
+        _disk["saving"] = True
+    # The folder as it is now, not when the thread runs.
+    threading.Thread(target=save, args=(_cache_path(),), name="git-who-save", daemon=True).start()
+
+
+def _timer_fired() -> None:
+    with _lock:
+        _disk["timer"] = False
+    _maybe_save()
 
 
 def _slug(path: str) -> str:

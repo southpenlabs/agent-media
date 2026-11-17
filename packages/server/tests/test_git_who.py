@@ -218,3 +218,22 @@ def test_what_was_read_outlives_a_restart(repo, monkeypatch):
     monkeypatch.setattr("builtins.open", spy)
     git_who._scan(str(t))
     assert git_who._seen[str(t)][0] == offset and reads == []
+
+
+def test_a_read_after_a_save_is_saved_by_the_timer(repo, monkeypatch):
+    """Read once, then nothing more: the save still comes, SAVE_EVERY_S on."""
+    r, proj = repo
+    proj.mkdir(parents=True)
+    saved = []
+    monkeypatch.setattr(git_who, "save", lambda path=None: saved.append(path) or git_who._disk.update(saving=False, saved=time.monotonic(), dirty=False))
+    monkeypatch.setattr(git_who, "SAVE_EVERY_S", 0.3)
+    monkeypatch.setitem(git_who._disk, "saved", time.monotonic())
+    monkeypatch.setitem(git_who._disk, "timer", False)
+    t = proj / "b.jsonl"
+    t.write_text(json.dumps({"type": "user", "cwd": str(r), "message": {"content": "hi"}}) + "\n")
+    git_who._scan(str(t))
+    assert saved == []
+    deadline = time.monotonic() + 3
+    while not saved and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(saved) == 1
