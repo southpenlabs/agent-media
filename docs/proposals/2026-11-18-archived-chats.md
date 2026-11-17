@@ -22,10 +22,12 @@ David, 18 Nov 2026, chose:
 
 ## What exists
 
-- Search already reaches other machines that run a server: `media find`
+- Cross-server search (f9aa73f1, 17 Nov, thread b9b50d6f): `media find`
   asks its search peers (`peer_link`, `pair --search`) and merges their
-  answers (`agent_media_core.history_search.ask_peers`). The archive adds
-  the machines with no server and copies of machines that are down.
+  answers, and the search index already reads the archive's Claude, pi and
+  Codex chats (`search.archive_root`, `MEDIA_SEARCH_ARCHIVE`; a native copy
+  wins). Not yet: the opencode and Hermes txcript documents, and anything
+  beyond search (opening one, the thread list, continuing).
 - On red5, the hub, the archive holds `hpo/claude`, `p8a/claude` and red5's
   own `opencode` and `hermes` documents (1,496 files, 18 Nov). red2's holds
   only its own opencode documents; it pulls nothing from elsewhere.
@@ -35,6 +37,10 @@ David, 18 Nov 2026, chose:
   writes it into this machine's store under a new id.
 
 ## Steps
+
+Who builds what: steps 1 and 2 here (thread 6ccbe9f4, the converter's);
+step 3 is the cross-machine thread's (b9b50d6f: peer links, one owner per
+thread), if it takes it.
 
 1. **Read the archive.** `archive.py`: the root (`AGENT_SESSIONS_ARCHIVE`,
    default above), a chat's host, harness, file and folder by id. Its
