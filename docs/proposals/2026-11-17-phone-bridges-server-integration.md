@@ -157,3 +157,15 @@ Sasonica's side landed in sasonica-app 0d6834fe (mail #880): the upload at
 app start and on the hourly job when the companion has a bundle ready, and
 Settings → Bridges' Backup line and Restore from a backup…; it reaches p8a
 with the next APK.
+
+## Step 3, the settings link — built (18 Nov 2026)
+
+Server: GET/POST /local/settings (agent-media 27f16c4a, §6.61 Settings): the
+three settings, one set per server, defaults by MEDIA_HOSTED. Companion
+(sasonica-bridges build-125, AIDL v5 `applySettings`): the full state from
+Sasonica each time; archived chats never notify, quiet and muted ones
+silently; changes pushed once to networks that take them (WhatsApp mute,
+pin, unread; Instagram and Telegram mute, pin; Discord mute; none archive),
+held while Apply to the networks or the network's exception says no.
+Sasonica's side (the settings screen, calling applySettings) with
+sasonica-app.
