@@ -109,6 +109,20 @@ branch `sasonica` (two commits on its v32.0; sasonica-bridges b0705e7,
   (wlynxg/anet) needs `-checklinkname=0` to link. A tag (or a separate
   package) for calls would drop both where calls cannot run. State: idea.
 
+## Capacitor (ionic-team/capacitor, MIT) — the Android shell
+
+- **A route with a dot in its last segment is not served as the app.**
+  `WebViewLocalServer` answers `index.html` only when the last path segment
+  has no "." (html5mode), and takes any other path for a bundled file; a
+  reload of a Local chat (`/t/phone.<id>`) failed with "Webpage not
+  available … net::ERR_INVALID_RESPONSE" (David, 18 Nov 2026). Meanwhile:
+  sasonica-app's `AppRoutes` (a `BridgeWebViewClient` on the bridge)
+  answers a main-frame page load of the app's own host whose last segment
+  has a dot as `/` is, leaving `/_capacitor_file_/` alone. Upstream: answer
+  a main-frame request (`isForMainFrame()`) that finds no bundled file with
+  `index.html`, or a setting for it. State: idea (sasonica-app, thread
+  744ce5a2).
+
 ## The rest we stand on (to watch and give back to)
 
 The rule behind this file: `docs/decisions/2026-11-17-open-source-first.md`.
