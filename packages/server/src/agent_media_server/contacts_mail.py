@@ -88,9 +88,9 @@ def _query(addrs: list[str]) -> str:
 
 def recent(c: dict, limit: int = 5) -> list[dict]:
     """The newest mail to and from the person on card `c`, at most `limit`:
-    `[{id, date, from, mine, subject, gmail_url}]`, newest first. Raises
+    `[{id, date, from, mine, subject, preview, unread, gmail_url}]`, newest first. Raises
     RuntimeError when notmuch does not answer."""
-    from . import timeline
+    from . import mail_list, timeline
 
     addrs = addresses(c)
     if not addrs:
@@ -121,11 +121,16 @@ def recent(c: dict, limit: int = 5) -> list[dict]:
         head = timeline._header_block(m.get("filename") or [])
         if head is not None and timeline._bulk(head):
             continue
+        files = m.get("filename") or []
+        files = files if isinstance(files, list) else [files]
         out.append({"id": str(m.get("id") or ""),   # GET /mail/message (mail_read.py)
                     "date": int(float(m.get("timestamp") or 0)),
                     "from": name.strip() or frm.partition("@")[0],
                     "mine": frm in mine,
                     "subject": str(h.get("Subject") or "").strip(),
+                    # One line of its words, as the Mail tab's rows (mail_list).
+                    "preview": mail_list._preview(str(files[0])) if files else "",
+                    "unread": "unread" in (m.get("tags") or []),
                     "gmail_url": message_url(str(m.get("id") or ""))})
         if len(out) >= limit:
             break

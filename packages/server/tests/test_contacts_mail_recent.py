@@ -209,3 +209,15 @@ def test_the_route_is_gated(server, book, monkeypatch):
 
     res, _ = call(server, "GET", f"/contacts/{LIONEL}/mail")
     assert res.status in (401, 403)
+
+
+def test_preview_and_unread_for_the_rows(book, nm):
+    # The card's emails are chats-list rows (sasonica-app 385a5cfa): a line of
+    # the words, quotes left out, and unread for the bold.
+    nm.add('"Lionel Smith" <lionel@example.com>', "david@example.com", subject="Hi",
+           tags=["unread"], file_headers="From: lionel@example.com\nSubject: Hi\n"
+           "Content-Type: text/plain; charset=utf-8")
+    nm.add("David <david@example.com>", "lionel@example.com", days_ago=1, subject="Old")
+    got = contacts_mail.recent(contacts.card(LIONEL), 5)
+    assert got[0]["unread"] is True and got[0]["preview"] == "the body, never read"
+    assert got[1]["unread"] is False and got[1]["preview"] == ""

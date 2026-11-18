@@ -8334,7 +8334,10 @@ hold (and for any path that is not a uuid, as an unknown route).
   card; limit at most 20) → `{"ok": true, "available": true, "limit",
   "items": [{"id": "<notmuch message id>", "date": <epoch s>,
   "from": "Lionel Smith", "mine": false,
-  "subject": "Lunch?", "gmail_url": "https://mail.google.com/mail/u/0/#search/rfc822msgid%3A…"}]}`,
+  "subject": "Lunch?", "preview": "Friday at the café?", "unread": false,
+  "gmail_url": "https://mail.google.com/mail/u/0/#search/rfc822msgid%3A…"}]}`
+  (`preview`: up to 160 characters of its words, quoted lines left out, as
+  the Mail tab's rows; `unread`: notmuch's unread tag; 18 Nov 2026),
   newest first, read live from this host's notmuch index (contacts_mail.py:
   `search --output=messages --sort=newest-first`, then `show --body=false`)
   over the card's addresses and its old chat addresses, raw and decoded:
