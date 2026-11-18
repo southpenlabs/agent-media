@@ -6,8 +6,8 @@ handle emails from Sasonica." He chose **both** places (mail in Messages,
 by person, *and* a Mail tab with the full inbox) and **Gmail now, Outlook
 next**. Status: **step 1 built (20 Oct 2026); step 2's server side built
 (18 Nov 2026: `/mail/reply`, mail_send.py) and the app's Reply; step 4's
-server side built (18 Nov 2026: `/mail/threads`, mail_list.py), the app's
-Mail tab next.**
+server side built (18 Nov 2026: `/mail/threads`, mail_list.py) and the
+app's Mail tab; setup for other installs (below), server side built.**
 Decisions at the end.
 
 ## Why
@@ -137,6 +137,30 @@ personal outlook.com never does.
    lieer, as decided).
 6. **New-mail notices** from contacts.
 7. **Outlook** through Graph, with the calendar's sign-in.
+
+## Setup, for other installs (David, 18 Nov 2026)
+
+Asked "is this distributable for other people that install sasonica?", then
+"Okay, let's do it". Settings → Mail → Add account (mail_accounts.py,
+contract §6.25 "Mail accounts"):
+
+- **Providers:** Gmail and any IMAP, with presets for Gmail, iCloud,
+  Fastmail and Yahoo and a form for any other server; an app password, the
+  logins to IMAP and SMTP tested before anything is saved. No OAuth client
+  of ours, so Gmail's restricted scope never arises. Outlook.com waits for
+  Graph (no app-password IMAP since 2024).
+- **Kept here:** Inbox, Sent and Spam, as red2's accounts. The rest is
+  searchable at the provider (David: "Is it possible to have the rest of
+  the mail searchable with option 1?"): `/mail/remote/search` asks Gmail
+  in All Mail by its own syntax, any other server by IMAP TEXT, and
+  `/mail/remote/fetch` copies one message here to read and reply to.
+- **Config is agent-media's own** (`<config>/agent-media/mail/`), never the
+  host's ~/.mbsyncrc or ~/.msmtprc. red2's 15 hand-made accounts are listed
+  read only ("option one for now. let's make it option two when it's a
+  little bit more established"; an Org TODO for 9 Dec 2026).
+- **The owner only** for now; each household member's own mail later.
+- **Open source:** isync's mbsync, msmtp and notmuch, run as programs
+  (NOTICE); found nothing better to reuse for the account page itself.
 
 ## Decided (David, 20 Oct 2026)
 

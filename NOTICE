@@ -16,6 +16,9 @@ separate process, reached over an IPC socket, HTTP, or the command line:
   yt-dlp        Unlicense         acquisition, run on the phone
   Snapcast      GPLv3             whole-house sync (currently disabled)
   Termux:API    GPLv3             phone sensors and notifications
+  notmuch       GPLv3-or-later    the mail index (Mail tab), command line
+  isync/mbsync  GPLv2-or-later    fetches mail over IMAP, command line
+  msmtp         GPLv3-or-later    sends mail over SMTP, command line
   Piper         GPLv3             local voice (`media-setup voices piper`),
                                   its own venv, reached over HTTP; each
                                   voice under its own licence (MODEL_CARD)

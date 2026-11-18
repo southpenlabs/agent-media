@@ -179,6 +179,12 @@ JOBS: "tuple[Job, ...]" = (
     Job("claude-folders", ["media", "session", "folder-links", "check", "--apply"],
         what="check Claude's chat folders, retire deprecated links", at=("04:30",),
         jitter=1800, requires_role="origin"),
+    # Mail accounts added from Sasonica (agent_media_server/mail_accounts.py):
+    # mbsync each, notmuch new, tag. Nothing to do with none added; a host's
+    # own hand-made sync keeps its own timer (18 Nov 2026).
+    Job("mail-sync", ["media", "mail", "sync"],
+        what="fetch the mail accounts added from Sasonica", every=600, jitter=30,
+        requires_role="server"),
 )
 
 

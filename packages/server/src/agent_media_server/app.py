@@ -323,6 +323,10 @@ except /pair, which is how a device gets its token):
                   list, newest first, rows as the chats list's (mail_list.py)
   GET  /mail/threads/<id>[?images=1] → a thread's messages
   POST /mail/tag {"thread"|"id", "add", "remove"} → read/unread, starred
+  GET  /mail/remote/search?q=[&account=] → older mail at the provider (mail_remote.py)
+  POST /mail/remote/fetch {"account", "folder", "uid"} → copy one here: {id}
+  GET  /settings/mail → the mail accounts, the tools, the presets
+  POST /settings/mail {"action": "add"|"remove"|"sync", …} → (mail_accounts.py)
   GET  /contacts/<id>/timeline[?limit=] → their texts, calls, mail and
                   notes by day, from the CRM's daily rollups (timeline.py)
   POST /contacts/<id>/notes {"text"} → a note on them, today, kept in the CRM
@@ -457,7 +461,7 @@ CORS_PATHS = frozenset({
     "/session/paths", "/session/file", "/session/file/link", "/files", "/files/read", "/files/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
-    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/prompts", "/settings/models", "/settings/models/usage",
+    "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
@@ -473,7 +477,7 @@ CORS_PATHS = frozenset({
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
-    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag",
+    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
@@ -1724,6 +1728,50 @@ def _mail_tag(h: BaseHTTPRequestHandler) -> None:
         _json(h, 200, {"ok": True, **got})
 
 
+def _mail_remote_search(h: BaseHTTPRequestHandler, query: str) -> None:
+    """`GET /mail/remote/search?q=[&account=&limit=]` (§6.25 "Older mail"):
+    the provider's search, for mail not copied here."""
+    from . import mail_remote
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    q = parse_qs(query)
+    try:
+        got = mail_remote.search(((q.get("q") or [""])[0]),
+                                 account=((q.get("account") or [""])[0]).strip(),
+                                 limit=int((q.get("limit") or ["50"])[0] or 50))
+    except ValueError:
+        _json(h, 400, {"ok": False, "error": "limit is a number"})
+    except mail_remote.Refused as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+    else:
+        _json_z(h, 200, {"ok": True, **got})
+
+
+def _mail_remote_fetch(h: BaseHTTPRequestHandler) -> None:
+    """`POST /mail/remote/fetch {"account", "folder", "uid"}` (§6.25 "Older
+    mail"): copy one message here and answer its id."""
+    from . import mail_remote
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    body = _read_json(h)
+    body = body if isinstance(body, dict) else {}
+    try:
+        uid = int(body.get("uid") or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    try:
+        got = mail_remote.fetch(str(body.get("account") or ""), str(body.get("folder") or ""), uid)
+    except mail_remote.Refused as e:
+        _json(h, 422, {"ok": False, "error": str(e)})
+    except (RuntimeError, OSError) as e:
+        _json(h, 503, {"ok": False, "error": str(e) if isinstance(e, RuntimeError)
+                       else "could not store the message"})
+    else:
+        _json(h, 200, {"ok": True, **got})
+
+
 #: The most `/speech/say` reads at once, as `/org/say` caps a note.
 SAY_MAX = 6000
 
@@ -2425,6 +2473,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_reply_draft(h, query)
     elif path == "/mail/threads":
         _mail_threads(h, query)
+    elif path == "/mail/remote/search":
+        _mail_remote_search(h, query)
     elif MAIL_THREAD.fullmatch(path):
         _mail_thread(h, MAIL_THREAD.fullmatch(path).group(1), query)
     elif ROOM_AVATAR.fullmatch(path):
@@ -2874,6 +2924,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
     elif path == "/settings/language":
         # The app's language, every device's (language.py).
         ok, detail = pins.settings_language(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/settings/mail":
+        # Settings → Mail: the mail accounts, added here or on the host (mail_accounts.py).
+        from . import mail_accounts
+
+        ok, detail = mail_accounts.settings(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/settings/people":
         # Settings → People: who may come in here and with what role (grants.py).
@@ -4130,6 +4186,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_reply(h)
     elif path == "/mail/tag":
         _mail_tag(h)
+    elif path == "/mail/remote/fetch":
+        _mail_remote_fetch(h)
     elif path == "/speech/say":
         _speech_say(h)
     elif path == "/storage":
@@ -5311,6 +5369,12 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         body = _read_json(h) or {}
         ok, detail = read_receipts.settings(_bearer(h), str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/settings/mail":
+        # Settings → Mail: add (tested first), remove or sync an account.
+        from . import mail_accounts
+
+        ok, detail = mail_accounts.settings(_bearer(h), _read_json(h) or {})
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/settings/people":
         # Settings → People: grant, change or remove one person (an admin).

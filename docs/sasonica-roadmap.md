@@ -1791,7 +1791,14 @@ ahead.
     (sasonica-app 27857020). Step 4, the Mail tab, server side built 18 Nov
     2026 (`GET /mail/threads`, `/mail/threads/<id>`, `POST /mail/tag`,
     §6.25 "The Mail tab"; David: a top-level Mail item, its list like the
-    chats list); the app's tab next. Also built (30 Oct
+    chats list); the app's tab built the same day (sasonica-app 3889e8d9).
+    Setup for other installs, server side built 18 Nov 2026: Settings →
+    Mail adds an account (Gmail, iCloud, Fastmail, Yahoo or any IMAP; the
+    logins tested first) in agent-media's own config, synced every 10
+    minutes, and older mail is searched at the provider (`/settings/mail`,
+    `/mail/remote/search`, §6.25); the app's page next. red2's 15 hand-made
+    accounts are listed, read only; taking them over is on David's Org
+    agenda for 9 Dec 2026. Also built (30 Oct
     2026): the thread list's Show → Sent (threads you
     wrote in, latest first) and Waiting for reply (your message last,
     unanswered), built generic so mail threads join them like Gmail's Sent

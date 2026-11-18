@@ -5897,6 +5897,8 @@ local look, never a network call:
 | `org` | the notes tree's capture file exists (`/org/setup`'s `org` row is ok) |
 | `music` | `MEDIA_DUCK_ROOMS_STREAM` is set, or the play history has a music row |
 | `contacts` | the contacts store (`contacts.db`) or a Google client file exists |
+| `mail` | this server can list mail for the asking device: notmuch has mail here and its book is the owner's (§6.25 "The Mail tab", 18 Nov 2026) |
+| `mail_accounts` | the asking device's book is the owner's: Settings → Mail answers (`/settings/mail`, §6.25 "Mail accounts", 18 Nov 2026) |
 | `bridges` | the `messaging-bridges` add-on (below) is installed and allowed, and finds a Matrix bridge config (`MATRIX_BRIDGES`, §6.26); else `/bridges` and `/contacts/<id>/find` answer 404 and the bridge watcher does not start |
 | `personas` | the personas repo is there (`MEDIA_PERSONAS_DIR`, default `~/agent-personas`) |
 | `quick` | always: this server answers `/ask {"agent": "quick"}` (an older one never says it, and the app leaves Quick chat out) |
@@ -9267,6 +9269,79 @@ and `flagged` (starred): notmuch writes them as maildir flags and the next
 sync carries them to Gmail (read, and Gmail's star). Archive, delete and
 labels wait for step 5 (lieer). 400 for any other tag, nothing to change,
 or neither target.
+
+#### Mail accounts — `GET` / `POST /settings/mail` — the owner's admin (18 Nov 2026)
+
+Settings → Mail (mail_accounts.py; docs/proposals/2026-10-20-mail-in-sasonica.md
+"Setup"; David, 18 Nov 2026: Gmail and any IMAP, Inbox/Sent/Spam kept, the
+host's own accounts shown and left alone, the owner only for now). Gated by
+`auth.may_admin` and the owner's book (403 `owner` otherwise).
+
+`GET /settings/mail` → `{"ok", "accounts": [{"name", "address",
+"provider", "label", "managed", "added"?, "synced"?, "ok"?, "error"?}],
+"tools": {"notmuch", "mbsync", "msmtp": bool}, "presets": [{"id",
+"label", "help", "note", "servers"}]}`. `managed` accounts were added here
+(with their last sync: `synced` epoch s, `ok`, `error`); the others are the
+host's own msmtp accounts, `label` "Set up on this host", read only.
+`tools` says which programs are installed (the page names what to install
+when one is missing). `presets`: `gmail`, `icloud`, `fastmail`, `yahoo`
+and `imap` (any server: `servers` true means the form asks for them);
+`help` is the provider's page for making an app password.
+
+`POST /settings/mail` → the same answer, after one of:
+- `{"action": "add", "provider", "address", "password", "display_name"?,
+  "user"?, "imap_host"?, "imap_port"?, "smtp_host"?, "smtp_port"?,
+  "smtp_tls"?: "tls"|"starttls"}` — logs in to IMAP and SMTP first and
+  saves only when both accept; finds Sent and Spam by IMAP's special-use
+  flags, else the preset's names; then starts a sync. 422 `refused` with
+  what went wrong (unreachable, login refused, already set up, a bad
+  address or server name). Gmail's app password may be typed with its
+  spaces. The `name` is made from the address and never clashes with the
+  host's accounts. The password is kept in
+  `<config>/agent-media/mail/secrets/<name>` (0600) and never answered.
+- `{"action": "remove", "name", "delete_mail"?}` — an account added here
+  only (422 for one of the host's); its mail stays on disk unless
+  `delete_mail`; nothing changes at the provider.
+- `{"action": "sync", "name"?}` — fetch now (all added accounts, or one).
+
+What it writes is its own, in `<config>/agent-media/mail/` (0700):
+`accounts.json`, `secrets/`, `mbsyncrc` and `msmtprc` (generated; mbsync
+`Expunge None`, so nothing is ever deleted at the provider), and
+`notmuch-config` only on a host without one of its own (then the server
+runs notmuch with `--config=` it). The host's ~/.mbsyncrc, ~/.msmtprc and
+notmuch config are never written. Mail goes to `<notmuch database.path, else
+MEDIA_MAIL_DIR, else ~/Mail>/<name>/`, Inbox, Sent and Spam only. The
+scheduler's `mail-sync` job (every 10 minutes; `media mail sync [name]`,
+`media mail list`) runs mbsync per account, `notmuch new`, then tags each
+new message with its account, Sent's `+sent -inbox -unread` and Spam's
+`+spam -inbox`. Replies from an added account go through its msmtp config
+(`msmtp -C`).
+
+#### Older mail — `GET /mail/remote/search`, `POST /mail/remote/fetch` — gated, owner only (18 Nov 2026)
+
+Only Inbox, Sent and Spam are copied here; older mail is searched at the
+provider (mail_remote.py; David, 18 Nov 2026: "Is it possible to have the
+rest of the mail searchable with option 1?"). Same gate as reading one. An
+account's login is its sync's: an account added here, or the host's
+~/.mbsyncrc (User, Host, Port, Pass or PassCmd run as mbsync runs it).
+
+`GET /mail/remote/search?q=<words>[&account=<name>&limit=50]` → `{"ok",
+"q", "accounts": [names], "results": [{"account", "folder", "uid",
+"message_id", "from": {"name", "address"}, "subject", "date"}], "errors":
+{name: why}}`, newest first. Gmail is searched with its own syntax
+(X-GM-RAW: `from:`, `older_than:3y`, …) in All Mail; any other server with
+IMAP's TEXT search in its \All folder, else Archive and Inbox. At most 25
+per account; mail already here is left out (it is in the local list), and
+the same message twice in one account counts once. One account's failure
+is in `errors`, beside the others' results. 400 for an empty search, one
+over 300 characters or an unknown account. A few seconds per account.
+
+`POST /mail/remote/fetch {"account", "folder", "uid"}` → `{"ok", "id",
+"fetched"}`: that message copied into `<root>/<account>/Archive/` (read),
+indexed and tagged with its account (not inbox, not unread); `id` is its
+notmuch id for `GET /mail/message`, and it threads and replies as any other
+mail from then on. `fetched` false when it was here already. 422 for an
+unknown account, folder or uid.
 
 #### Speech level — `POST /contacts/<id>/level` — gated (20 Oct 2026)
 

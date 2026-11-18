@@ -587,6 +587,20 @@ hosted tier), every one of these becomes a reseller question.
   and replies sent through the host's own msmtp (`mail_send.py`, 18 Nov
   2026): the owner's own mail accounts and app passwords, set up outside
   agent-media; nothing of ours is registered with the mail provider.
+- **Mail providers over IMAP and SMTP** (`mail_accounts.py`,
+  `mail_remote.py`, 18 Nov 2026): Settings → Mail's presets name Gmail
+  (`imap.gmail.com`, `smtp.gmail.com`), iCloud Mail (`imap.mail.me.com`,
+  `smtp.mail.me.com`), Fastmail (`imap.fastmail.com`, `smtp.fastmail.com`)
+  and Yahoo Mail (`imap.mail.yahoo.com`, `smtp.mail.yahoo.com`), or any
+  server the user types. **Whose credential:** the user's own address and
+  an app password they make at the provider; nothing of ours is registered
+  and no OAuth client is involved (so Gmail's restricted mail scope and its
+  yearly assessment do not arise). **Terms:** ordinary mail-client use of
+  each provider's published IMAP and SMTP; Gmail needs 2-Step Verification
+  for an app password (https://support.google.com/accounts/answer/185833).
+  Outlook.com is not offered: Microsoft ended app-password IMAP for personal
+  accounts in 2024; it waits for Microsoft Graph. **Personal-use switch:**
+  not gated; it is the user's own mail. **Fine.**
 - **Exports:** Google Takeout and Meta's download, read from files
   (`contacts_exports.py:60`, `:74`).
 

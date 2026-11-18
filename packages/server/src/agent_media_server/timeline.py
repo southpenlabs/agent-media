@@ -459,7 +459,16 @@ _NM: dict = {}
 def _notmuch_cmd() -> list[str]:
     from .contacts import owner_env
 
-    return shlex.split(owner_env("MEDIA_TIMELINE_NOTMUCH") or "notmuch")
+    set_ = owner_env("MEDIA_TIMELINE_NOTMUCH")
+    if set_:
+        return shlex.split(set_)
+    # A host with no notmuch config of its own, whose mail accounts were
+    # added from Sasonica, uses agent-media's (mail_accounts.py).
+    from . import mail_accounts
+    own = mail_accounts.own_notmuch_config()
+    if own.is_file() and not mail_accounts.host_has_notmuch_config():
+        return ["notmuch", f"--config={own}"]
+    return ["notmuch"]
 
 
 def _notmuch(args: list[str], timeout: float) -> str | None:

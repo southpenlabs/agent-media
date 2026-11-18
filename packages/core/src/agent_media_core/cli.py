@@ -10173,6 +10173,15 @@ def cmd_contacts(a) -> int:
     return contacts.main(a.args or ["--help"])
 
 
+def cmd_mail(a) -> int:
+    """`media mail sync [name] | list`: the mail accounts added from
+    Sasonica (agent_media_server.mail_accounts)."""
+    mod = _server_module("mail_accounts")
+    if mod is None:
+        return 1
+    return mod.main(a.args or ["--help"])
+
+
 def cmd_server(a) -> int:
     """`media server status|check|rename`: this server's public address and
     giving it a new one (agent_media_server.server_address)."""
@@ -11468,6 +11477,12 @@ def _build_parser() -> argparse.ArgumentParser:
     contacts.add_argument("args", nargs=argparse.REMAINDER)
     contacts.set_defaults(func=cmd_contacts)
 
+    mail = sub.add_parser(
+        "mail", add_help=False,
+        help="the mail accounts added from Sasonica: sync [name] (fetch, index, tag), list")
+    mail.add_argument("args", nargs=argparse.REMAINDER)
+    mail.set_defaults(func=cmd_mail)
+
     session = sub.add_parser(
         "session", add_help=False,
         help="headless sessions: list [--all] [--cwd DIR], send <id|folder> [--from NAME] "
@@ -12482,6 +12497,8 @@ def main(argv=None) -> int:
     if argv[:1] == ["contacts"]:
         # Its own parser takes every option (--help, --go), not media's.
         return cmd_contacts(argparse.Namespace(args=list(argv[1:])))
+    if argv[:1] == ["mail"]:
+        return cmd_mail(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["session"]:
         return cmd_session(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["uploads"]:

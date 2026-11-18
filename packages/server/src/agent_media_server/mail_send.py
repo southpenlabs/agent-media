@@ -58,13 +58,10 @@ def _msmtprc() -> Path | None:
     return None
 
 
-def accounts() -> dict[str, str]:
-    """msmtp's accounts, each `from` address (lower case) to its name; an
-    account inheriting another's (`account x : y`) takes its `from` when it
-    has none of its own."""
-    p = _msmtprc()
-    if p is None:
-        return {}
+def _parse_rc(p: Path) -> dict[str, str]:
+    """One msmtp config's accounts, each `from` address (lower case) to its
+    name; an account inheriting another's (`account x : y`) takes its `from`
+    when it has none of its own."""
     try:
         lines = p.read_text(errors="replace").splitlines()
     except OSError:
@@ -98,6 +95,36 @@ def accounts() -> dict[str, str]:
         if addr and "@" in addr and "*" not in addr and addr not in out:
             out[addr] = name
     return out
+
+
+def accounts(include_managed: bool = True) -> dict[str, str]:
+    """msmtp's accounts, each `from` address (lower case) to its name: the
+    host's own config's, then (unless `include_managed` is False) those added
+    from Sasonica (mail_accounts.py), which never take a name or address the
+    host's config has."""
+    p = _msmtprc()
+    out = _parse_rc(p) if p is not None else {}
+    if include_managed:
+        from . import mail_accounts
+
+        names = set(out.values())
+        for addr, name in _parse_rc(mail_accounts.msmtprc()).items():
+            if addr not in out and name not in names:
+                out[addr] = name
+    return out
+
+
+def _rc_args(account: str) -> list[str]:
+    """`-C <file>` for an account added from Sasonica, whose msmtp config is
+    agent-media's own; nothing for the host's."""
+    from . import mail_accounts
+
+    p = _msmtprc()
+    if p is not None and account in _parse_rc(p).values():
+        return []
+    if account in _parse_rc(mail_accounts.msmtprc()).values():
+        return ["-C", str(mail_accounts.msmtprc())]
+    return []
 
 
 # ── Building the reply ────────────────────────────────────────────────────
@@ -271,7 +298,7 @@ def send(mid: str, text: str, *, everyone: bool = False, want_from: str = "") ->
     """Send the reply through msmtp (`-a <account> -t`, the message on
     standard input). RuntimeError with msmtp's last line when it fails."""
     m, out, account = build(mid, text, everyone=everyone, want_from=want_from)
-    cmd = _sendmail() + ["-a", account, "-t"]
+    cmd = _sendmail() + _rc_args(account) + ["-a", account, "-t"]
     try:
         p = subprocess.run(cmd, input=m.as_bytes(), capture_output=True,
                            timeout=SEND_TIMEOUT_S)
