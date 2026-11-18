@@ -467,8 +467,14 @@ def _titles_in(path: Path) -> tuple[str, str, str]:
     return custom, title, prompt
 
 
-def _asked(session: str, ts: list[Turn]) -> str:
+def _asked(session: str, ts: list[Turn], *, whole: bool = False) -> str:
     """What to call this conversation.
+
+    `whole`: the name as it is, not trimmed to a label (`_trim`), for a
+    caller that cuts it itself and keeps the whole for an editor: the app's
+    Rename sheet opened on "…being…" when the chat's name was its first
+    message (David, 18 Nov 2026: "the renaming card gives a truncated title
+    instead of the full one").
 
     **The name it was given with /rename** (a `custom-title` record), else
     **Claude Code's own name for it, when it has one.** The transcript carries
@@ -503,7 +509,7 @@ def _asked(session: str, ts: list[Turn]) -> str:
         prompt = harnesses.first_prompt(session)
     for candidate in (custom, title, prompt, ts[0].title if ts else ""):
         if candidate:
-            return _trim(candidate)
+            return " ".join(candidate.split()) if whole else _trim(candidate)
     return f"Conversation {session[:8]}"
 
 

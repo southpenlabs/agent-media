@@ -9,7 +9,8 @@ LONG = "[From Sam] Fewer services: look at agent-media's unit count and say whic
 
 def test_a_long_title_is_cut_for_the_list_and_whole_for_the_header(monkeypatch):
     short = sessions._cut(SID, LONG)
-    assert len(short) == 60 and short.endswith("…") and LONG.startswith(short[:-1])
+    assert len(short) <= 60 and short.endswith("…") and LONG.startswith(short[:-1])
+    assert short == "[From Sam] Fewer services: look at agent-media's unit count…"  # at a word
     monkeypatch.setattr(sessions, "cached_states", lambda: ([{"session": SID, "title": short}], {}))
     assert sessions.title_of(SID) == short
     assert sessions.title_of(SID, whole=True) == LONG
@@ -53,3 +54,22 @@ def test_targets_carries_the_whole_title_beside_a_cut_one(monkeypatch):
     assert ok
     assert out["sessions"][0]["title_whole"] == LONG
     assert "title_whole" not in out["sessions"][1]
+
+
+def test_a_headless_chat_named_by_its_first_message_keeps_all_of_it(monkeypatch, tmp_path):
+    """The whole first message, not session_feed's 64-character label: the
+    Rename sheet opened on "…being…" (David, 18 Nov 2026: "the renaming card
+    gives a truncated title instead of the full one")."""
+    import json
+    from agent_media_core import conversation
+
+    said = ("I didn't get any follow along for the current message being read out "
+            "in this thread, which is the one about auto update")
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": said}}) + "\n")
+    monkeypatch.setattr(conversation, "transcript", lambda session: path)
+    monkeypatch.setattr(sessions, "_manifest_of", lambda session: {})
+    sessions._HEADLESS_TITLES.pop(SID, None)
+    short = sessions._headless_title(SID, {})
+    assert short == "I didn't get any follow along for the current message being…"
+    assert sessions.whole_title(SID, short) == said

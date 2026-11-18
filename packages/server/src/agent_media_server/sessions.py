@@ -1185,7 +1185,11 @@ def _cut(session: str, title: str) -> str:
         _WHOLE_TITLES.pop(session, None)
         return title
     _WHOLE_TITLES[session] = title if len(title) <= TITLE_WHOLE else title[:TITLE_WHOLE - 1] + "…"
-    return title[:TITLE_LIST - 1] + "…"
+    # At a word, as session_feed._trim does: one that stops mid-word reads
+    # as a fault. Still a prefix of the whole, which `whole_title` needs.
+    at = title[:TITLE_LIST].rfind(" ")
+    cut = title[:at] if at >= TITLE_LIST // 2 else title[:TITLE_LIST - 1]
+    return cut.rstrip(" ,.;:") + "…"
 
 
 def whole_title(session: str, title: str) -> str:
@@ -1539,7 +1543,9 @@ def _headless_title(session: str, view: dict) -> str:
         elif sig:
             from agent_media_core import session_feed
 
-            title = session_feed._asked(session, [])
+            # Whole: `_cut` makes the list's short one and keeps this for
+            # the header and its Rename sheet (`whole_title`).
+            title = session_feed._asked(session, [], whole=True)
             _HEADLESS_TITLES[session] = (sig, title)
     return _cut(session, " ".join((title or str(view.get("first_text") or "")).split()))
 
