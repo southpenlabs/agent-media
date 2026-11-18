@@ -120,3 +120,57 @@ def test_project_forge_route(tree, server, tmp_path, monkeypatch):
     assert got["umbrella"] is None
     assert _call(server, "GET", "/project/forge?project=p-plain")[0] == 404
     assert _call(server, "GET", "/project/forge?project=p-demo", bearer="bad")[0] == 401
+
+
+def test_other_checkouts_fold_under_their_main_one(tree, server, tmp_path, monkeypatch):
+    """A worktree names its main checkout, a clone the one named as its repo
+    (agent mail #1067; forgejo-workflow.md §3); a chain is left to follow."""
+    import os
+
+    from agent_media_server import git_state, project_page
+
+    proj = tmp_path / "projects"
+    app = proj / "app"
+    app.mkdir(parents=True)
+    _git(app, "init", "-q", "-b", "main")
+    (app / "a").write_text("a\n")
+    _git(app, "add", "a")
+    _git(app, "commit", "-q", "-m", "one")
+    _git(app, "remote", "add", "origin", "git@forge.example:me/app.git")
+    _git(proj, "clone", "-q", str(app), str(proj / "app-copy"))
+    copy = proj / "app-copy"
+    _git(copy, "remote", "set-url", "origin", "https://forge.example/me/app")
+    # the copy is younger than app whatever the clock says; app is named as the repo anyway
+    os.utime(app / ".git" / "description", (1, 1))
+    _git(copy, "worktree", "add", "-q", "-b", "feature", str(proj / "app-feature"))
+    _git(app, "worktree", "add", "-q", "--detach", str(proj / "app-look"))
+    inner = app / ".worktrees" / "x"
+    _git(app, "worktree", "add", "-q", "-b", "inner", str(inner))
+    other = proj / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    monkeypatch.setenv("MEDIA_PROJECTS_DIR", str(proj))
+    monkeypatch.setenv("MEDIA_DOC_ROOTS", str(tmp_path / "nowhere"))
+    monkeypatch.setenv("MEDIA_PROJECT_DIRS", "")
+    git_state._cache.clear()
+    monkeypatch.setattr(project_page, "_checkouts", None)
+
+    assert project_page.checkouts() == {
+        "p-app-copy": {"of": "p-app", "how": "clone", "branch": "main"},
+        "p-app-feature": {"of": "p-app-copy", "how": "worktree", "branch": "feature"},
+        "p-app-look": {"of": "p-app", "how": "worktree", "branch": None},
+    }
+    status, got = _call(server, "GET", "/project/list")
+    assert status == 200
+    rows = {r["project"]: r for r in got["projects"]}
+    assert rows["p-app-feature"]["checkout_of"] == "p-app-copy"
+    assert rows["p-app-feature"]["checkout"] == "worktree" and rows["p-app-feature"]["branch"] == "feature"
+    assert "checkout_of" not in rows["p-app"] and "checkout_of" not in rows["p-other"]
+
+
+def test_origin_keys_match_across_schemes():
+    from agent_media_server.project_page import _origin_key
+
+    keys = {_origin_key(u) for u in ("git@github.com:Me/App.git", "https://github.com/me/app",
+                                     "ssh://git@github.com:22/me/app.git", "https://github.com/me/app.git/")}
+    assert keys == {"github.com/me/app"}

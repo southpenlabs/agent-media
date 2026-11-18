@@ -488,6 +488,20 @@ Everything a message can be pointed at.
   and places ran in, each counted once, by the same rule as `mail`.
   Projects with none are left out; the key is **absent** when the mailbox
   can't be read, and from older servers. About 50 ms cold, 10 ms warm.
+- `project_checkouts` (19 Nov 2026; always present, `{}` with none):
+  `{project: {"of", "how": "worktree" | "clone", "branch"}}` for every
+  listed project that is another checkout of one listed, keyed like the
+  rows' `project`, so the app folds it under its main one (David, 19 Nov
+  2026: "Do the worktree grouping next"; agent mail #1067;
+  docs/proposals/2026-11-19-forgejo-workflow.md §3). A worktree's `.git` is
+  a file naming a gitdir under `<main>/.git/worktrees/`, and `of` is the
+  project holding that `.git`; a clone shares its `origin` (host/owner/repo,
+  whatever the scheme) with another listed project, and `of` is the one of
+  them whose folder is named as the repo is, else the oldest. `branch` is
+  the checkout's own, null on a detached HEAD. `of` names the next one up,
+  so a worktree of a clone points at the clone: the app follows it to the
+  top. Only listed projects: a worktree inside a repo (`.worktrees/x`) is
+  not one. Kept a minute (project_page.checkouts).
 - `project_groups` (18 Oct 2026; every root 19 Oct): `{project: {"group",
   "name"}}` for every project that sits in a group, keyed like the rows'
   `project` (`"spl-p-sasonica-app": {"group": "sasonica", "name":
@@ -5539,8 +5553,11 @@ a git checkout, `git`: `{branch, changed, ahead, behind, last: {sha, at,
 subject}}` (`branch` null on a detached HEAD, `last` null with no commits).
 The app's project page draws the chats from its own thread list and the
 documents from `/docs`. `GET /project/list` — gated → `{"ok", "projects":
-[{project, path, group, folder, kind}]}`: every project under the roots and the
-folders of their own, by group then folder, for the menu's All projects
+[{project, path, group, folder, kind, checkout_of?, checkout?, branch?}]}`:
+every project under the roots and the folders of their own, by group then
+folder, for the menu's All projects; `checkout_of`, `checkout` and `branch`
+(19 Nov 2026) are its `/targets` `project_checkouts` entry's `of`, `how`
+and `branch`, on a row whose main checkout is listed too
 (project_page.py; docs/proposals/2026-11-06-project-page.md). `kind` (6 Nov
 2026, every row and `/project/info` too) is `"project"` or `"agent"`: the
 business agents' folders (`/targets` `agent_workspaces`) come last as

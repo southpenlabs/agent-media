@@ -1076,6 +1076,14 @@ def _build_targets(history: str = "") -> dict:
     if mail is not None:
         out["project_mail"] = mail
     out["project_groups"] = project_groups()
+    # The projects that are another checkout of one listed (project_page.py,
+    # 19 Nov 2026: the app folds them under their main one).
+    from . import project_page
+
+    try:
+        out["project_checkouts"] = project_page.checkouts()
+    except Exception:  # noqa: BLE001 — a list without its folding, not no list
+        out["project_checkouts"] = {}
     # Where a thread's link starts, up to its id, for the app's Copy link
     # (David, 12 Nov 2026): the public web app's /app/t/ when this server has
     # a public https address — a browser opens it, Android hands it to the

@@ -193,8 +193,10 @@ def test_targets_shape(server, shelf, signed_in):
     # `agent_workspaces` on 6 Nov 2026: the business agents' folders, always
     # there ([] here: no agents folder), so the app stops guessing.
     # `thread_link` on 12 Nov 2026: where a thread's link starts (Copy link).
+    # `project_checkouts` on 19 Nov 2026: the projects that are another
+    # checkout of one listed, always there ({} with none).
     assert keys(obj) == {"ok", "sessions", "places", "project_groups", "spaces",
-                         "agent_workspaces", "thread_link"}
+                         "agent_workspaces", "thread_link", "project_checkouts"}
     assert obj["agent_workspaces"] == []
     live, shelved = obj["sessions"]
     # `recap` and `archived` joined on 22 Sep 2026, deliberately: Claude
