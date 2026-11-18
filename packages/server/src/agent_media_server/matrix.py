@@ -1061,7 +1061,7 @@ def room(thread: str) -> Room | None:
 def rows(flags: set | frozenset = frozenset()) -> list[dict]:
     """`/targets` rows for the allowed rooms (§6.1): never live, never rested
     or pinned; the last message is the preview line."""
-    from . import archive_wake, room_delegate, you_wrote
+    from . import archive_wake, room_contact, room_delegate, you_wrote
 
     # A chat that waited out its quiet in the archive comes back now if what
     # came meanwhile is unread (archive_wake.py, §6.4).
@@ -1105,6 +1105,9 @@ def rows(flags: set | frozenset = frozenset()) -> list[dict]:
             if contact:
                 # The person the room is with (contacts.py): absent when none.
                 out[-1]["contact"] = contact
+            # The person's number and whether the room can be linked to
+            # someone (room_contact.py, §6.1): absent when not.
+            out[-1].update(room_contact.row_fields(r, contact))
             delegate = room_delegate.view_of(r.thread)
             if delegate is not None:
                 # Handed to an agent (room_delegate.py, §6.53): absent when not.

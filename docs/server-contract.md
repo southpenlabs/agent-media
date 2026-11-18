@@ -567,7 +567,10 @@ Everything a message can be pointed at.
   with them alone is: their bridged account, number, address, or a
   trusted network's name; the owner's book only), so a group chat shows
   each sender's picture and a tap opens their card; either is absent when
-  there is none. `GET /rooms/<session>/avatar[?user=<mxid>]` — gated, the
+  there is none. **Phone and link** (18 Nov 2026, §6.25 "A room linked to
+  someone"): `"phone"`, the number of the one person a 1:1 room is with,
+  and `"link": true` where a room with no `contact` can be linked to
+  someone; each absent otherwise. `GET /rooms/<session>/avatar[?user=<mxid>]` — gated, the
   owner's (403-free: anyone else gets 404) — answers that picture as a 256
   px thumbnail from the homeserver's authenticated media, fetched once and
   kept by its mxc's hash (0600; a failure is not asked again for an hour),
@@ -9009,6 +9012,51 @@ one search every 10 s across the server.
 404 no such person; 403 another account's book; 429 `{retry_after}` within
 10 s of the last search; 503 the bridge cannot search now (none, signed
 out, down); 400 another network or no name.
+
+#### A room linked to someone — `POST /rooms/<session>/contact` — gated, owner only (18 Nov 2026)
+
+Code: `agent_media_server/room_contact.py`. Pinned by
+`packages/server/tests/test_room_contact.py`. For the thread header of a
+Messages room (David, 18 Nov 2026: a picture, a call button, and "Add to
+contacts" / "Link to someone" where Rename was; sasonica-app mail #1018).
+
+**On a Matrix row** (§6.1), each absent when it has nothing to say:
+
+- `"phone": "+61412345678"` — the one number (E.164) of the one person a
+  1:1 room is with: from what the member says about itself (a WhatsApp
+  ghost's id, a displayname that is a number) and from the ghost's profile,
+  where mautrix bridgev2 lists `com.beeper.bridge.identifiers`
+  (`tel:+61…`). The bridges put a number there only with
+  `bridge.phone_numbers_in_profile: true` and a homeserver that keeps extra
+  profile fields, so without those a Google Messages or Signal room has
+  none. Profiles are read in the background and kept a day (a failure, an
+  hour): a row never waits on the homeserver, and the number shows from the
+  next list. Never David's own (`MEDIA_CONTACTS_SELF`); absent in a group
+  or where two numbers are known. The app's call button is `tel:<phone>`.
+- `"link": true` — the room can be linked: the owner's book, a 1:1 room,
+  no `contact` matched. Absent, the app's title tap does as before.
+
+**`POST /rooms/<session>/contact {"id": "<contact id>"}`** — "Link to
+someone": the room's other member is that person from now on. Kept as a
+room join (the matcher's manual join, which wins) and as a join of the
+member's ghost in `merges` (as a Find on pick or "Same person" keeps it),
+so the ghost lands on them in every rebuild, in their other rooms and as a
+sender in a group; their chat links go to Google as a Join's do. → `{"ok":
+true, "contact": {"id", "name"}}`.
+
+**`POST /rooms/<session>/contact {"new": {"name": "<name>"}}`** — "Add to
+contacts": a new Google contact made on the phone (as the card's edits are
+written, `content insert` as shell uid, which Android syncs to Google) in
+the book's signed-in Google account the phone holds (else its busiest), with
+that name (1 to 200 characters) and the row's `phone` as a mobile number,
+the phone read again, and the new person linked as above → the same answer.
+Where the read has not shown it yet: `{"ok": true, "pending": true, "phone"}`
+and no `contact`; one made with a number matches the room by itself at the
+next read. 503 with why when the phone cannot be reached or refuses, has no
+Google account, or writing is off (`MEDIA_CONTACTS_WRITEBACK=0`).
+
+Both: 400 a bad body or session id; 404 no such room or person; 409 a group,
+or a room that already has a contact; 403 for anyone but the owner.
 
 #### Texting someone new — `GET|POST /contacts/<id>/text` — gated, owner only (28 Oct 2026)
 

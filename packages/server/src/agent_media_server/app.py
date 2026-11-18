@@ -599,6 +599,8 @@ CONTACT_MAIL = re.compile(r"/contacts/([0-9a-f-]{36})/mail")
 ROOM_AVATAR = re.compile(r"/rooms/([0-9a-f-]{36})/avatar")
 # A room's photo, video, voice note or file, fetched when asked (room_media.py, §6.29).
 ROOM_MEDIA = re.compile(r"/rooms/([0-9a-f-]{36})/media/([^/]+)")
+# A room with no contact linked to someone, or added (room_contact.py, §6.25).
+ROOM_CONTACT = re.compile(r"/rooms/([0-9a-f-]{36})/contact")
 #: A practice video by signed link (§6.45 "Watching"): fetched by the app's
 #: page to keep offline, so it answers another origin too.
 PRACTICE_FILE = re.compile(r"/practice/files/[^/]+")
@@ -633,7 +635,7 @@ def cors_path(path: str) -> bool:
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
-                                                        CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, PRACTICE_FILE,
+                                                        CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, ROOM_CONTACT, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
                                                         LOCAL_BACKUP, *BRIDGE_ROUTES))
 
@@ -4030,6 +4032,12 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _contact_same(h, m.group(1), m.group(2))
     elif CONTACT_FIND.fullmatch(path):
         _contact_find(h, CONTACT_FIND.fullmatch(path).group(1))
+    elif ROOM_CONTACT.fullmatch(path):
+        from . import room_contact
+
+        status, got = room_contact.handle(ROOM_CONTACT.fullmatch(path).group(1),
+                                          _read_json(h), _bearer(h))
+        _json(h, status, got)
     elif CONTACT_TEXT.fullmatch(path):
         _contact_text(h, CONTACT_TEXT.fullmatch(path).group(1), start=True)
     elif CONTACT_EDIT.fullmatch(path):
