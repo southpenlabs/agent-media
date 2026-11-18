@@ -733,6 +733,13 @@ def room_unheard(thread: str) -> list[int] | None:
 
 
 def _count_unheard() -> dict[str, int]:
+    return {s: len(ids) for s, ids in _unheard_ids().items()}
+
+
+def _unheard_ids() -> dict[str, list[int]]:
+    """Each thread's unheard replies its Play key stands for, as speech row
+    ids (oldest first); threads with none left out. `unheard_counts` counts
+    them, `mark_all_heard` marks them."""
     from agent_media_core import reply_position
     from agent_media_core.private import hidden
     from agent_media_core.session_feed import _resume_of
@@ -743,7 +750,7 @@ def _count_unheard() -> dict[str, int]:
     except Exception as e:  # noqa: BLE001 — none counted, not a 500
         print(f"unheard counts: {e}", file=sys.stderr)
         return {}
-    counts: dict[str, int] = {}
+    found: dict[str, list[int]] = {}
     seen: set[tuple[str, str]] = set()
     secret: dict[str, bool] = {}
     # Only the unheard replies a thread ends on, as the thread's own Play all
@@ -785,8 +792,8 @@ def _count_unheard() -> dict[str, int]:
             continue
         if session not in secret:
             secret[session] = hidden(session)
-        if not secret[session]:
-            counts[session] = counts.get(session, 0) + 1
+        if not secret[session] and isinstance(row.get("id"), int):
+            found.setdefault(session, []).insert(0, int(row["id"]))
     # A chat with people by its own rule (room_unheard): every room with a
     # held message unheard in the window, counted from the room.
     for session in {str(extras_of(r).get("session") or "") for r in rows
@@ -798,10 +805,28 @@ def _count_unheard() -> dict[str, int]:
         if ids is None:
             continue
         if ids:
-            counts[session] = len(ids)
+            found[session] = ids
         else:
-            counts.pop(session, None)
-    return counts
+            found.pop(session, None)
+    return found
+
+
+def mark_all_heard() -> tuple[bool, dict]:
+    """The thread list's Mark all heard (David, 19 Nov 2026, after 96 chats
+    kept a Play key for replies read on screen and never played): every
+    reply a Play key stands for counts as heard, with one Undo for them all
+    (`undo_mark_heard`). `{"marked", "undo", "threads"}`."""
+    global _UNHEARD_CACHE
+    by = _unheard_ids()
+    ids = [i for v in by.values() for i in v]
+    if not ids:
+        return True, {"marked": [], "undo": False, "threads": 0}
+    done, info = mark_rows_heard(ids)
+    with _UNHEARD_LOCK:
+        _UNHEARD_CACHE = (None, {})
+    if not done:
+        return False, info
+    return True, {**info, "threads": len(by)}
 
 
 def speech_recent(bearer: str, limit=None) -> tuple[bool, dict]:

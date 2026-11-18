@@ -155,3 +155,24 @@ def test_unheard_counts_are_fresh_the_moment_a_reply_is_heard(monkeypatch):
     assert speech.unheard_counts() == {A: 1} and len(calls) == 1
     StateStore().mark_heard(rid)
     assert speech.unheard_counts() == {} and len(calls) == 2
+
+
+def test_mark_all_heard_clears_every_play_key_with_one_undo(monkeypatch):
+    """The list's Mark all heard (19 Nov 2026): every reply a Play key
+    stands for is heard, and one Undo brings them all back."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 80
+    _add("Heard already.", at=t, kind="stop", heard=True)
+    _add("Held one.", at=t + 1, kind="stop", held=True)
+    _add("Held two.", at=t + 2, kind="stop", held=True)
+    _add("Another thread's.", session=B, at=t + 3, kind="stop", held=True)
+    assert speech.unheard_counts() == {A: 2, B: 1}
+    ok, out = speech.mark_all_heard()
+    assert ok and len(out["marked"]) == 3 and out["undo"] and out["threads"] == 2
+    assert speech.unheard_counts() == {}
+    ok, _ = speech.undo_mark_heard()
+    assert ok
+    assert speech.unheard_counts() == {A: 2, B: 1}
+    ok, out = speech.mark_all_heard()
+    assert ok
+    assert speech.mark_all_heard() == (True, {"marked": [], "undo": False, "threads": 0})

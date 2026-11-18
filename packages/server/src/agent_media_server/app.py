@@ -4390,6 +4390,16 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             log.info(f"speech/heard: now, reply {info.get('id')}")
             _json(h, 200, {"ok": True, **info})
             return True
+        if body.get("all") is True:
+            # The thread list's Mark all heard (§6.5, 19 Nov 2026): every
+            # reply a Play key stands for, with one Undo.
+            done, info = speech.mark_all_heard()
+            if not done:
+                _json(h, info.pop("status", 404), {"ok": False, **info})
+                return True
+            log.info(f"speech/heard: all, {len(info.get('marked') or [])} in {info.get('threads')} threads")
+            _json(h, 200, {"ok": True, **info})
+            return True
         if "ids" in body:
             # A Play key held (§6.5, 14 Nov 2026): those replies are heard, with an Undo;
             # a heard one's held, with `unheard` (18 Nov 2026): unheard again.

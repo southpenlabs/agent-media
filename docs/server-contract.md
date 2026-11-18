@@ -3757,7 +3757,12 @@ The speech bar.
   a thread waiting on Up next for one of them leaves it. 404 `"no such
   spoken reply"` when none is one. `{"session", "with_undo": true}` does
   the same for every held unheard reply of that thread (the thread list's
-  Play held; `marked` may be empty). Either is undone by `{"undo": true}`
+  Play held; `marked` may be empty). `{"all": true}` (19 Nov 2026, the
+  thread list's Mark all heard) does it for every reply a thread list Play
+  key stands for (the replies `/sessions/state` `unheard` counts, a chat
+  with people's by its own rule), answering `{"ok": true, "marked",
+  "undo", "threads"}` (`marked` empty and `undo` false when there were
+  none; `GET /features` `mark_all_heard`). Any is undone by `{"undo": true}`
   as above (`{"ok": true, "id", "ids"}`): each gets back its resume point
   and is unheard again. `GET /features` `mark_heard_ids` says it is here.
 - **A heard Play held marks it unheard** (18 Nov 2026, David: "let's have
@@ -5953,6 +5958,7 @@ local look, never a network call:
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
+| `mark_all_heard` | always: `POST /speech/heard {"all": true}` marks every reply a thread list Play key stands for heard, with one Undo (§6.5, 19 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
 | `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |
 | `local_backup` | always true (§6.61 Backup, 17 Nov 2026): `POST /local/backup`, `GET /local/backups`, `GET`/`DELETE /local/backup/<id>`: the phone's encrypted Local chats bundles, kept as ciphertext |
