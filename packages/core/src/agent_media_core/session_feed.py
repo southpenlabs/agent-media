@@ -507,7 +507,12 @@ def _asked(session: str, ts: list[Turn], *, whole: bool = False) -> str:
 
         title = harnesses.title_of(session)
         prompt = harnesses.first_prompt(session)
-    for candidate in (custom, title, prompt, ts[0].title if ts else ""):
+    # A first message is the name only for want of one: agent mail's wrapper
+    # and file paths are taken out of it (prompt_title; headless chats get
+    # no ai-title, so it was their name for good).
+    from .prompt_title import clean
+
+    for candidate in (custom, title, clean(prompt), ts[0].title if ts else ""):
         if candidate:
             return " ".join(candidate.split()) if whole else _trim(candidate)
     return f"Conversation {session[:8]}"

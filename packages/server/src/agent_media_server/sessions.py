@@ -1415,7 +1415,9 @@ def _live_title(session: str) -> str:
     """A live Codex or pi session's name, or the first thing asked of it."""
     from agent_media_core import harnesses
 
-    return _cut(session, harnesses.title_of(session) or harnesses.first_prompt(session))
+    from agent_media_core.prompt_title import clean
+
+    return _cut(session, harnesses.title_of(session) or clean(harnesses.first_prompt(session)))
 
 
 #: What Claude Code calls a session it has not named yet. A chat started from
@@ -1465,6 +1467,10 @@ def _claude_first_prompt(session: str) -> str:
                     # the person talking.
                     if not text or text.startswith("<"):
                         continue
+                    from agent_media_core.prompt_title import clean
+
+                    # Agent mail's wrapper and file paths are no name.
+                    text = clean(text) or text
                     _FIRST_PROMPT[session] = text
                     return text
         except (OSError, ValueError):
@@ -1547,7 +1553,11 @@ def _headless_title(session: str, view: dict) -> str:
             # the header and its Rename sheet (`whole_title`).
             title = session_feed._asked(session, [], whole=True)
             _HEADLESS_TITLES[session] = (sig, title)
-    return _cut(session, " ".join((title or str(view.get("first_text") or "")).split()))
+    if not title:
+        from agent_media_core.prompt_title import clean
+
+        title = clean(str(view.get("first_text") or ""))
+    return _cut(session, " ".join(title.split()))
 
 
 def _headless_rows(seen: set[str], flags, pinned, marks) -> list[dict]:
