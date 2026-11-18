@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-media-engine-expressive"
+version = "0.1.0"
+description = "Slow, expressive local voices for agent-media: Chatterbox and Orpheus, each over HTTP to its own server."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+# The render engines use only the stdlib (urllib, subprocess for
+# `systemctl --user start`). The servers need an extra each, in its own venv:
+#   [chatterbox]  chatterbox-tts 0.1.7 (MIT; pins torch 2.6 and numpy<2 on
+#                 Python < 3.13) and setuptools<81 (its perth watermarker
+#                 imports pkg_resources)
+#   [orpheus]     snac (MIT), torch, numpy; llama.cpp's llama-server (MIT) is
+#                 a separate program the server starts. The Orpheus model is
+#                 under the Llama 3.2 Community License.
+dependencies = []
+
+[project.optional-dependencies]
+chatterbox = ["chatterbox-tts==0.1.7", "setuptools<81"]
+orpheus = ["snac>=1.2,<2", "torch", "numpy"]
+
+[project.scripts]
+chatterbox-tts-server = "agent_media_engine_expressive.chatterbox_server:main"
+orpheus-tts-server = "agent_media_engine_expressive.orpheus_server:main"
+
+[project.entry-points."agent_media.render_engines"]
+chatterbox = "agent_media_engine_expressive:render_chatterbox"
+orpheus = "agent_media_engine_expressive:render_orpheus"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_media_engine_expressive"]
