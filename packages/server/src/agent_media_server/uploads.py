@@ -75,6 +75,49 @@ def _free(folder: Path, name: str) -> Path:
         n += 1
 
 
+def _sha256_of(p: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _kept_copy(bearer: str, sha256: str, size: int, folder: Path) -> Path | None:
+    """The file this device already kept today with these bytes, or None.
+
+    The app retries a share whose send failed (sasonica-app 5bab4980), and
+    when the server had kept the file before the connection broke, the retry
+    would be a second copy. Only this device's own kept uploads in `folder`
+    (the upload log's saved lines) count, and only while the file is still
+    there with the same bytes: one deleted or changed since is not reused."""
+    from . import upload_log
+
+    me = upload_log.who(bearer).get("id")
+    if not me:
+        return None
+    try:
+        lines = upload_log.read(days=2)
+    except Exception:  # noqa: BLE001 — no log, no reuse: keep the upload
+        return None
+    for line in reversed(lines):
+        if (line.get("outcome") != "saved" or line.get("sha256") != sha256
+                or line.get("size") != size
+                or (line.get("device") or {}).get("id") != me):
+            continue
+        p = Path(str(line.get("path") or ""))
+        try:
+            if (p.parent.resolve() != folder.resolve() or not p.is_file()
+                    or p.stat().st_size != size or _sha256_of(p) != sha256):
+                continue
+        except OSError:
+            continue
+        return p
+    return None
+
+
 def save(body: BinaryIO, length: int, name: str, bearer: str,
          today: dt.date | None = None) -> tuple[bool, dict]:
     """Write `length` bytes of `body` as `name` in today's folder. Each call,
@@ -121,6 +164,13 @@ def save(body: BinaryIO, length: int, name: str, bearer: str,
         if left:
             reading = True
             raise OSError(f"the upload stopped {left} bytes short")
+        same = _kept_copy(bearer, digest.hexdigest(), length, folder)
+        if same is not None:
+            part.unlink(missing_ok=True)
+            upload_log.record("duplicate", bearer=bearer, status=200, name=name, size=length,
+                              received=length, sha256=digest.hexdigest(), where=str(same))
+            return True, {"path": str(same), "name": same.name, "size": length,
+                          "duplicate": True}
         final = _free(folder, final.name)
         os.replace(part, final)
     except OSError as e:

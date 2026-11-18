@@ -6907,6 +6907,14 @@ Content-Length: 48213
   new ones come; a log that cannot be written never fails the upload. Read
   with `media uploads [--days N] [--json]`. Code:
   `agent_media_server/upload_log.py`.
+- A retry of a file already kept (18 Nov 2026): when the same device kept a
+  file with the same `sha256` and size in today's folder, and it is still
+  there with those bytes, the answer is that file's `path`, `name` and
+  `size` with `"duplicate": true`, and no second copy is kept; the log line's
+  outcome is `duplicate`, its `path` the copy pointed to. The app retries a
+  share whose send failed, and the server may have kept it before the
+  connection broke. Another device's file, or one deleted or changed since,
+  is never reused.
 
 #### `GET /upload?path=<its path>` — the file back (29 Sep 2026)
 

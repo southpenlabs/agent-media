@@ -322,3 +322,39 @@ def test_media_uploads_reads_the_log(shared, capsys):
     assert upload_log.main(["--json", "--days", "1"]) == 0
     rows = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
     assert [r["name"] for r in rows] == ["g.jpg", "h.jpg"]
+
+
+# --- a retry of a file already kept returns that copy (sasonica-app mail
+# #1007: the app retries a failed share, and the server may have kept it) ---
+
+def test_a_retry_of_a_kept_file_returns_that_copy(shared, monkeypatch):
+    from agent_media_server import upload_log
+
+    monkeypatch.setattr(upload_log, "who", lambda bearer: {"id": "d1", "name": "Pixel"})
+    ok, first = uploads.save(io.BytesIO(b"photo bytes"), 11, "PXL_1.jpg", "good", today=DAY)
+    assert ok
+    ok, again = uploads.save(io.BytesIO(b"photo bytes"), 11, "PXL_1.jpg", "good", today=DAY)
+    assert ok and again == {**first, "duplicate": True}
+    assert sorted(p.name for p in (shared / "2026-09-25").iterdir()) == ["PXL_1.jpg"]
+    saved, dup = _logged()
+    assert dup["outcome"] == "duplicate" and dup["path"] == first["path"]
+    assert dup["sha256"] == saved["sha256"]
+
+
+def test_another_device_or_a_deleted_copy_is_kept_afresh(shared, monkeypatch):
+    from agent_media_server import upload_log
+
+    dev = {"id": "d1", "name": "Pixel"}
+    monkeypatch.setattr(upload_log, "who", lambda bearer: dict(dev))
+    ok, first = uploads.save(io.BytesIO(b"photo bytes"), 11, "a.jpg", "good", today=DAY)
+    dev["id"] = "d2"
+    ok, other = uploads.save(io.BytesIO(b"photo bytes"), 11, "a.jpg", "good", today=DAY)
+    assert ok and "duplicate" not in other and other["path"] != first["path"]
+    dev["id"] = "d1"
+    (shared / "2026-09-25" / "a.jpg").unlink()
+    ok, fresh = uploads.save(io.BytesIO(b"photo bytes"), 11, "a.jpg", "good", today=DAY)
+    assert ok and "duplicate" not in fresh
+    assert (shared / "2026-09-25" / "a.jpg").read_bytes() == b"photo bytes"
+    # Same name, other bytes: never the kept copy.
+    ok, changed = uploads.save(io.BytesIO(b"other bytes"), 11, "a.jpg", "good", today=DAY)
+    assert ok and "duplicate" not in changed and changed["name"] == "a-3.jpg"
