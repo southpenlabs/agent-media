@@ -130,6 +130,14 @@ def client_gone(sock) -> bool:
         return True
 
 
+def _threads() -> int:
+    """Threads for one render: KOKORO_THREADS, default 4 (0 = onnxruntime's choice)."""
+    try:
+        return max(0, int(os.environ.get("KOKORO_THREADS") or 4))
+    except ValueError:
+        return 4
+
+
 class Engine:
     """The loaded model, behind the one lock every synthesis takes."""
 
@@ -139,10 +147,24 @@ class Engine:
 
     @classmethod
     def load(cls, directory: str) -> "Engine":
+        import onnxruntime as rt
         from kokoro_onnx import Kokoro
 
-        return cls(Kokoro(os.path.join(directory, MODEL_FILE),
-                          os.path.join(directory, VOICES_FILE)))
+        # onnxruntime takes every core by default: on red2 (16) a render held
+        # 12 at CPUWeight 1000 and starved the rest of the box (18 Nov 2026).
+        # A few threads render a sentence nearly as fast; KOKORO_THREADS=0
+        # gives back onnxruntime's own choice.
+        opts = rt.SessionOptions()
+        opts.intra_op_num_threads = _threads()
+        opts.inter_op_num_threads = 1
+        try:  # kokoro-onnx's own pick (ONNX_PROVIDER, an accelerated build)
+            from kokoro_onnx.session import resolve_providers
+            providers = resolve_providers()
+        except ImportError:
+            providers = ["CPUExecutionProvider"]
+        session = rt.InferenceSession(os.path.join(directory, MODEL_FILE),
+                                      sess_options=opts, providers=providers)
+        return cls(Kokoro.from_session(session, os.path.join(directory, VOICES_FILE)))
 
     def voices(self) -> list[str]:
         return sorted(self.kokoro.get_voices())
