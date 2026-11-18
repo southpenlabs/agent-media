@@ -42,11 +42,81 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Literal, Optional, TypedDict, cast
+
+
+# ── The records (typed: docs/proposals/2026-11-19-typed-records-and-settings.md) ──
+
+class Imap(TypedDict):
+    host: str
+    port: int
+
+
+class Smtp(TypedDict):
+    host: str
+    port: int
+    tls: Literal["tls", "starttls"]
+
+
+class Folders(TypedDict, total=False):
+    inbox: str
+    sent: str
+    spam: str
+
+
+class _AccountBase(TypedDict):
+    name: str            # the slug: secrets/<name>, <maildir root>/<name>/, am-<name>
+    address: str
+    provider: str        # a PRESETS key
+
+
+class Account(_AccountBase, total=False):
+    """One entry of accounts.json."""
+
+    user: str            # the login, when it is not the address
+    display_name: str
+    imap: Imap
+    smtp: Smtp
+    folders: Folders
+    added: int
+
+
+class SyncState(TypedDict):
+    """mail-sync.json, by account name: the last sync."""
+
+    at: int
+    ok: bool
+    error: str
+
+
+class Listed(TypedDict, total=False):
+    """An account as Settings → Mail lists it (contract §6.25)."""
+
+    name: str
+    address: str
+    provider: Optional[str]
+    label: str
+    managed: bool
+    added: Optional[int]
+    synced: Optional[int]
+    ok: Optional[bool]
+    error: Optional[str]
+
+
+class Preset(TypedDict, total=False):
+    label: str
+    imap: Optional[tuple[str, int]]
+    smtp: Optional[tuple[str, int, Literal["tls", "starttls"]]]
+    sent: str
+    spam: str
+    help: str
+    note: str
+    user: Literal["local"]    # log in with the address's local part
 
 #: Presets: servers and the folder names to fall back on when the server
 #: does not mark its special-use folders. Outlook.com is not here: Microsoft
 #: closed app-password IMAP for personal accounts in 2024 (Graph, later).
-PRESETS = {
+PRESETS: dict[str, Preset] = {
     "gmail": {"label": "Gmail", "imap": ("imap.gmail.com", 993),
               "smtp": ("smtp.gmail.com", 587, "starttls"),
               "sent": "[Gmail]/Sent Mail", "spam": "[Gmail]/Spam",
@@ -135,15 +205,16 @@ def tools() -> dict[str, bool]:
 
 # ── The list ──────────────────────────────────────────────────────────────
 
-def load() -> list[dict]:
+def load() -> list[Account]:
     try:
         got = json.loads((mail_dir() / "accounts.json").read_text())
     except (OSError, ValueError):
         return []
-    return [a for a in got if isinstance(a, dict) and a.get("name")] if isinstance(got, list) else []
+    return [cast(Account, a) for a in got if isinstance(a, dict) and a.get("name")] \
+        if isinstance(got, list) else []
 
 
-def _save(accts: list[dict]) -> None:
+def _save(accts: list[Account]) -> None:
     d = mail_dir()
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
@@ -159,7 +230,7 @@ def _state_path() -> Path:
     return base / "agent-media" / "mail-sync.json"
 
 
-def _state() -> dict:
+def _state() -> dict[str, SyncState]:
     try:
         got = json.loads(_state_path().read_text())
         return got if isinstance(got, dict) else {}
@@ -175,16 +246,16 @@ def _record(name: str, ok: bool, error: str = "") -> None:
     p.write_text(json.dumps(st))
 
 
-def listing() -> list[dict]:
+def listing() -> list[Listed]:
     """Every account the Mail tab knows: added here (`managed`) first, then
     the host's own msmtp accounts, read only."""
     from . import mail_send
 
     st = _state()
-    out = []
-    mine = set()
+    out: list[Listed] = []
+    mine: set[str] = set()
     for a in load():
-        s = st.get(a["name"]) or {}
+        s: SyncState | dict = st.get(a["name"]) or {}
         out.append({"name": a["name"], "address": a["address"],
                     "provider": a.get("provider") or "imap",
                     "label": PRESETS.get(a.get("provider") or "imap", {}).get("label", "IMAP"),
@@ -257,7 +328,7 @@ def _test_smtp(host: str, port: int, mode: str, user: str, password: str) -> Non
     ctx = ssl.create_default_context()
     try:
         if mode == "tls":
-            s = smtplib.SMTP_SSL(host, port, timeout=LOGIN_TIMEOUT_S, context=ctx)
+            s: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=LOGIN_TIMEOUT_S, context=ctx)
         else:
             s = smtplib.SMTP(host, port, timeout=LOGIN_TIMEOUT_S)
             s.starttls(context=ctx)
@@ -296,9 +367,11 @@ def add(body: dict, *, test: bool = True) -> dict:
     if any(a["address"].lower() == address.lower() for a in load()) or \
             address.lower() in mail_send.accounts(include_managed=False):
         raise Refused("that address is already set up")
-    if p["imap"]:
-        imap_host, imap_port = p["imap"]
-        smtp_host, smtp_port, smtp_tls = p["smtp"]
+    smtp_tls: Literal["tls", "starttls"]
+    preset_imap, preset_smtp = p.get("imap"), p.get("smtp")
+    if preset_imap and preset_smtp:
+        imap_host, imap_port = preset_imap
+        smtp_host, smtp_port, smtp_tls = preset_smtp
     else:
         imap_host = str(body.get("imap_host") or "").strip()
         smtp_host = str(body.get("smtp_host") or "").strip()
@@ -320,7 +393,7 @@ def add(body: dict, *, test: bool = True) -> dict:
         accts = load()
         taken = {a["name"] for a in accts} | set(mail_send.accounts(include_managed=False).values())
         name = _slug(address, taken)
-        acct = {"name": name, "address": address, "user": user, "provider": provider,
+        acct: Account = {"name": name, "address": address, "user": user, "provider": provider,
                 "display_name": str(body.get("display_name") or "").strip()[:80],
                 "imap": {"host": imap_host, "port": imap_port},
                 "smtp": {"host": smtp_host, "port": smtp_port, "tls": smtp_tls},
@@ -372,7 +445,7 @@ def _q(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _write_configs(accts: list[dict]) -> None:
+def _write_configs(accts: list[Account]) -> None:
     root = maildir_root()
     mb, ms = ["# Written by agent-media (mail_accounts.py); changes are overwritten.", ""], [
         "# Written by agent-media (mail_accounts.py); changes are overwritten.",

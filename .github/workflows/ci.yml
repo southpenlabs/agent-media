@@ -38,10 +38,10 @@ jobs:
         run: pytest -q
 
   types:
-    # mypy over the modules with typed records ([tool.mypy] in
-    # packages/core/pyproject.toml lists them; the list grows a module at a
+    # mypy over the modules with typed records ([tool.mypy] in each
+    # package's pyproject.toml lists them; the list grows a module at a
     # time: docs/proposals/2026-11-19-typed-records-and-settings.md).
-    name: types (core)
+    name: types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,10 +54,14 @@ jobs:
       - name: Install core + mypy
         run: |
           python -m pip install --upgrade pip
-          pip install -e "packages/core[dev]"
+          pip install -e "packages/core[dev]" -e packages/server
 
-      - name: Check types
+      - name: Check types (core)
         working-directory: packages/core
+        run: mypy
+
+      - name: Check types (server)
+        working-directory: packages/server
         run: mypy
 
   server:

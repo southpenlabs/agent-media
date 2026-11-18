@@ -30,3 +30,16 @@ media-tunnel = "agent_media_server.tunnel:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_media_server"]
+
+# The type checker (CI's "types" job), over the modules whose records are
+# typed so far, a module at a time
+# (docs/proposals/2026-11-19-typed-records-and-settings.md).
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "src/agent_media_server/mail_accounts.py",
+    "src/agent_media_server/mail_remote.py",
+]
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true

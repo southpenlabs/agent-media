@@ -127,7 +127,7 @@ def logins() -> dict[str, dict]:
 def _connect(a: dict):
     try:
         if str(a.get("tls", "IMAPS")).upper() == "IMAPS":
-            conn = imaplib.IMAP4_SSL(a["host"], a["port"], timeout=TIMEOUT_S,
+            conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(a["host"], a["port"], timeout=TIMEOUT_S,
                                      ssl_context=ssl.create_default_context())
         else:
             conn = imaplib.IMAP4(a["host"], a["port"], timeout=TIMEOUT_S)
