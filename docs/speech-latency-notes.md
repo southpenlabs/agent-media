@@ -45,12 +45,21 @@ in the CLI render today.
 
 - `_render_workers()` — the pool is bounded, `MEDIA_RENDER_WORKERS=4` by
   default, submitted in order so the early sentences land first. `=0` restores
-  one worker per sentence.
+  one worker per sentence. An engine that renders one request at a time
+  (Kokoro) gets one worker since 18 Nov 2026: four in flight came back in the
+  order its lock was won, so the first sentence was not first.
+  `MEDIA_RENDER_WORKERS_<ENGINE>` sets an engine's own cap.
 - `SinkSpeech.append_clips()` — appends to a playlist that is already playing.
 - `MEDIA_STREAM_CLIPS=1` (off by default) — Phase 1 waits only for a lead of
   `MEDIA_STREAM_LEAD_S` (default 6s) of contiguous audio, starts, and a
   background thread hands the rest over as each lands. Remote-playlist targets
   only; the per-sentence local path would have to learn to wait mid-loop.
+  Since 18 Nov 2026 the lead never waits on a slow sentence: once the first
+  clip is in, the rest of the lead is taken only as far as its renders finish
+  within `MEDIA_STREAM_LEAD_WAIT_S` (default 1s). Renders land out of order
+  under load (red2 at load 53: first clip +4.3s, second +15.5s, and the reply
+  was silent until the second), so playback starts on the first sentence and
+  the slow one joins the playlist when it lands.
 - The follow loop re-reads the reply's length each tick, and an idle player is
   only the end of the reply once every sentence has been resolved — otherwise
   it is a gap while the tail renders.

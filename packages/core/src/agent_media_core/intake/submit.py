@@ -3350,7 +3350,29 @@ class _MuteDuckWatcher:
 _STREAM_ARCHIVE_WAIT_S = 120.0
 
 
-def _render_workers(n_sentences: int) -> int:
+#: Engines that render one request at a time behind their own lock: more than
+#: one request in flight buys nothing and returns the clips in whatever order
+#: the lock is won (18 Nov 2026, Kokoro on red2: 002, 000, 003, 006, 004, 005,
+#: 001, 007), so a reply that streams cannot start on its first sentence. They
+#: get one worker, so the renders go in reading order.
+#: MEDIA_RENDER_WORKERS_<ENGINE> overrides it for an engine.
+_SERIAL_ENGINES = frozenset({"kokoro"})
+
+
+def _engine_workers(engine: str) -> Optional[int]:
+    """The worker count an engine asks for: its MEDIA_RENDER_WORKERS_<ENGINE>,
+    else 1 for an engine that renders one at a time, else None (no cap)."""
+    name = str(engine or "").split(":", 1)[0].strip().lower()
+    raw = os.environ.get(f"MEDIA_RENDER_WORKERS_{name.upper()}", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 1 if name in _SERIAL_ENGINES else None
+
+
+def _render_workers(n_sentences: int, engine: str = "") -> int:
     """How many sentence renders may be in flight at once.
 
     Unbounded — one worker per sentence, which is what this used to do — is
@@ -3370,7 +3392,10 @@ def _render_workers(n_sentences: int) -> int:
     except ValueError:
         want = 4
     if want <= 0:
-        return max(1, n_sentences)
+        want = max(1, n_sentences)
+    cap = _engine_workers(engine)
+    if cap is not None:
+        want = min(want, cap)
     return max(1, min(want, n_sentences or 1))
 
 
@@ -4562,7 +4587,7 @@ def _submit_event(event: Event,
             for i in range(len(sentences))
         ]
         executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=_render_workers(len(sentences)))
+            max_workers=_render_workers(len(sentences), engine))
         futures = [
             executor.submit(renderer, sentence, outfile,
                             engine=engine, voice=voice, on_fallback=_on_fallback)
@@ -4581,6 +4606,9 @@ def _submit_event(event: Event,
                 os.environ.get("MEDIA_STREAM_RENDER_WORKERS", "3") or 3))
         except ValueError:
             _stream_workers = 3
+        _cap = _engine_workers(engine)
+        if _cap is not None:
+            _stream_workers = min(_stream_workers, _cap)
         executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=_stream_workers)
         _feed_from = iter(source)
@@ -4749,7 +4777,8 @@ def _submit_event(event: Event,
     _lead_ready = threading.Event()
 
     def _wait_lead() -> None:
-        """Adopt the lead: contiguous clips until MEDIA_STREAM_LEAD_S of audio,
+        """Adopt the lead: contiguous clips until MEDIA_STREAM_LEAD_S of audio
+        (as far as renders finish within MEDIA_STREAM_LEAD_WAIT_S of the first),
         so the player is unlikely to run dry before the next clip is appended.
         Renders finish far faster than they play, so the lead only has to cover
         the gap at the very start. If every sentence of the lead failed, the
@@ -4766,9 +4795,30 @@ def _submit_event(event: Event,
             # seconds of the model writing before a word is heard. An
             # underrun is the follow loop's to restart (see `idle-active`).
             lead_s = 0.0
+        try:
+            lead_wait_s = float(os.environ.get("MEDIA_STREAM_LEAD_WAIT_S", "1"))
+        except ValueError:
+            lead_wait_s = 1.0
+        # The lead is a cushion, never a wait for a slow sentence: once the
+        # first clip is in, the rest of the lead is taken only as far as its
+        # renders finish within MEDIA_STREAM_LEAD_WAIT_S of it. Renders land
+        # out of order under load: on 18 Nov 2026 (red2 at load 53) a reply's
+        # first clip was ready at +4.3s and its second at +15.5s, and the 6s
+        # lead held the whole reply until then. A clip not in by then joins
+        # during playback, and an underrun is the follow loop's to restart
+        # (`idle-active`).
+        lead_deadline: Optional[float] = None
         while _sentence(lead_n):
+            if clip_data and lead_deadline is not None and not arriving:
+                left = lead_deadline - time.monotonic()
+                done, _ = concurrent.futures.wait(
+                    [futures[lead_n]], timeout=max(0.0, left))
+                if not done:
+                    break
             _adopt(lead_n)
             lead_n += 1
+            if clip_data and lead_deadline is None:
+                lead_deadline = time.monotonic() + max(0.0, lead_wait_s)
             if clip_data and sum(durations) >= lead_s:
                 break
         # The loop does not stop before it has a clip, so a lead whose every

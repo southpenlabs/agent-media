@@ -448,3 +448,53 @@ def test_a_reply_stopped_as_it_starts_does_not_wait_on_the_refilled_list(monkeyp
     assert len(player.list) == 3, "the appends that refilled it"
     ex = (_row(state) or {}).get("extras") or {}
     assert len(ex.get("clip_uris") or []) == 4, "still archived whole"
+
+
+def test_a_slow_second_sentence_does_not_hold_the_first(monkeypatch):
+    """The lead is a cushion, not a wait: renders land out of order under
+    load (18 Nov 2026, red2: the first clip at +4.3s, the second at +15.5s,
+    and a 6s lead held the reply until then). Playback starts on the first
+    clip, the slow one joins the playlist when it lands, and the ones behind
+    it follow in order."""
+    played = threading.Event()
+
+    def _slow_second(text, outfile, **_):
+        if text.startswith("The second"):
+            played.wait(timeout=5)
+        return _render(text, outfile)
+
+    class _Starts(_Sink):
+        def play_playlist(self, uris, target=None, gapless=True):
+            super().play_playlist(uris, target, gapless)
+            played.set()
+
+    monkeypatch.setattr(S, "render_text", _slow_second)
+    monkeypatch.setenv("MEDIA_STREAM_CLIPS", "1")
+    monkeypatch.setenv("MEDIA_STREAM_LEAD_S", "6")      # three clips of 2s
+    monkeypatch.setenv("MEDIA_STREAM_LEAD_WAIT_S", "0.2")
+
+    state, sink = StateStore(), _Starts()
+    S.submit_event(Event(text=FOUR, source=Source.CLI, target=PHONE,
+                         metadata={"pane": "%7"}),
+                   state=state, sink=sink, coordinator=_Coord())
+
+    assert len(sink.loaded) == 1, (
+        f"the reply waited for its slow second sentence: {sink.loaded}")
+    assert len(sink.appended) == 3
+    assert sink.loaded + sink.appended == sorted(sink.loaded + sink.appended)
+    ex = (_row(state) or {}).get("extras") or {}
+    assert len(ex.get("clip_uris") or []) == 4
+
+
+def test_an_engine_that_renders_one_at_a_time_gets_one_worker(monkeypatch):
+    """Kokoro serves one request at a time; four in flight came back in the
+    order its lock was won (18 Nov 2026: 002, 000, 003, …, 001), so the
+    first sentence was not first. One worker keeps reading order."""
+    monkeypatch.delenv("MEDIA_RENDER_WORKERS", raising=False)
+    monkeypatch.delenv("MEDIA_RENDER_WORKERS_KOKORO", raising=False)
+    monkeypatch.delenv("MEDIA_RENDER_WORKERS_EDGE", raising=False)
+    assert S._render_workers(8, "kokoro") == 1
+    assert S._render_workers(8, "kokoro:bf_emma") == 1
+    assert S._render_workers(8, "edge") == 4
+    monkeypatch.setenv("MEDIA_RENDER_WORKERS_KOKORO", "2")
+    assert S._render_workers(8, "kokoro") == 2
