@@ -234,3 +234,13 @@ def test_the_routes(server, signed_in, nm, monkeypatch):
     monkeypatch.setattr(contacts, "is_owner", lambda: False)
     res, obj = call(server, "GET", "/mail/threads", headers=AUTH)
     assert res.status == 403 and "owner" in obj["error"]
+
+
+def test_features_says_mail_for_the_owner_with_notmuch(nm, monkeypatch):
+    from agent_media_server import features
+    assert features.detect()["mail"] is True
+    monkeypatch.setattr(contacts, "is_owner", lambda: False)
+    assert features.detect()["mail"] is False
+    monkeypatch.setattr(contacts, "is_owner", lambda: True)
+    monkeypatch.setattr(timeline, "_notmuch_ok", lambda: False)
+    assert features.detect()["mail"] is False

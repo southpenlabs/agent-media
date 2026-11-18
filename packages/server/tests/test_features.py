@@ -9,7 +9,7 @@ from agent_media_server import app, features
 
 from test_contract import AUTH, call, server, signed_in, typed  # noqa: F401
 
-PARTS = {"org", "music", "contacts", "bridges", "personas"}
+PARTS = {"org", "music", "contacts", "mail", "bridges", "personas"}
 
 
 def _bare(monkeypatch, tmp_path):
@@ -22,6 +22,10 @@ def _bare(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_TXCRIPT", str(tmp_path / "no-txcript"))
     # The machine running the tests may have a session host of its own.
     monkeypatch.setenv("MEDIA_AGENTS", "0")
+    # The machine running the tests may have mail of its own (notmuch).
+    from agent_media_server import timeline
+    monkeypatch.setenv("MEDIA_TIMELINE_NOTMUCH", str(tmp_path / "no-notmuch"))
+    timeline._NM.clear()
 
 
 #: The personal settings' parts (personal_prefs.features), all off on a bare server.
@@ -86,6 +90,12 @@ def test_each_part_turns_on_from_its_own_sign(server, signed_in, monkeypatch, tm
     txcript.write_text("#!/bin/sh\n")
     txcript.chmod(0o755)
     monkeypatch.setenv("MEDIA_TXCRIPT", str(txcript))
+    notmuch = tmp_path / "notmuch"  # mail: a notmuch with a database
+    notmuch.write_text("#!/bin/sh\necho 3\n")
+    notmuch.chmod(0o755)
+    monkeypatch.setenv("MEDIA_TIMELINE_NOTMUCH", str(notmuch))
+    from agent_media_server import timeline
+    timeline._NM.clear()
     from agent_media_core import personal_use
     for m in personal_use.ADDON_METHODS:
         personal_use.register(m, object())

@@ -9240,7 +9240,9 @@ first. `folder` is `inbox` (default), `unread`, `starred` (Gmail's star),
 `sent`, `spam` or `all` (everything but spam); deleted mail is never
 listed; spam only under `spam`. `q` is notmuch's own query language (`from:`,
 `subject:`, a word, `date:`…), ANDed with the folder, at most 500
-characters. `limit` is at most 100; `more` says another page follows
+characters. `GET /features` `mail` says this server can list mail for the
+asking device (notmuch has mail here and its book is the owner's); the app
+shows Mail in its menu only then. `limit` is at most 100; `more` says another page follows
 (`offset` + `limit`). `accounts` (left out with `counts=0`) gives each
 account's unread inbox count, for the account switcher. A **row**:
 `{"id": <thread id>, "subject", "authors": [names], "from": {"name",
