@@ -39,6 +39,19 @@ def _clean_media_env(monkeypatch, tmp_path, request):
         raise RuntimeError("a test asked the real Overpass server")
 
     monkeypatch.setattr(map_osm, "_fetch", _no_overpass)
+    # The forges (forge.py): no test asks a real one or reads gh's login.
+    # One that wants an answer patches forge._open (and _gh_token) itself.
+    from agent_media_server import forge
+
+    def _no_forge(*a, **k):
+        raise RuntimeError("a test asked a real forge")
+
+    monkeypatch.setattr(forge, "_open", _no_forge)
+    monkeypatch.setattr(forge, "_gh_token", lambda: "")
+    forge.forget()
+    from agent_media_server import issues as _issues
+
+    _issues._can.clear()
     # Practice embeds' pictures are read from their makers' pages
     # (practice_embed.fill_art): never from a test.
     from agent_media_core import practice_embed

@@ -551,7 +551,7 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
                          "/org/state", "/org/refile", "/org/date",
                          "/org/priority", "/org/ask", "/org/zettel",
                          "/org/listen", "/org/listen/ctl", "/doc/read", "/doc/ask", "/doc/undo", "/docs",
-                         "/project/info", "/project/list",
+                         "/project/info", "/project/list", "/project/forge",
                          "/session/related",
                          "/calendar"})
 CORS_PATHS = CORS_PATHS | ORG_PATHS
@@ -5924,6 +5924,11 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import project_page
 
         ok, detail = project_page.page(arg("project"), arg("path"), bearer)
+    elif method == "GET" and path == "/project/forge":
+        # The project's issues and PRs across its forge owner (forge.py).
+        from . import project_page
+
+        ok, detail = project_page.forge_page(arg("project"), arg("path"), bearer)
     elif method == "GET" and path == "/project/list":
         # Every project under the roots, for the menu's All projects.
         from . import project_page

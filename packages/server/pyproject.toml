@@ -42,6 +42,7 @@ files = [
     "src/agent_media_server/sessions.py",
     "src/agent_media_server/mail_accounts.py",
     "src/agent_media_server/mail_remote.py",
+    "src/agent_media_server/forge.py",
 ]
 follow_imports = "silent"
 ignore_missing_imports = true

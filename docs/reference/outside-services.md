@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 55 rows.
+Sorted with what blocks a public release first. 58 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -98,6 +98,7 @@ Sorted with what blocks a public release first. 55 rows.
 | 55 | Google's Gemini text models through cli-proxy-api, on the owner's gateway | the fast models (`MEDIA_FAST_MODELS` and the like, e.g. `gemini-3-flash`), suggested in Settings → Models (§6.60) | the Google sign-in the owner's AI gateway holds (a login borrowed from Google's own CLI) | the owner's gateway config; agent-media only names the model | **Needs work**: a public install names a model with a key it holds (Gemini API, row 23); Settings → Models marks this suggestion personal | not gated in code (the route is the gateway's); Settings → Models flags it `personal` |
 | 56 | speedcameralocations.com.au reports | reported phone and seatbelt camera spots on the Map and in the camera alerts (`map_reports.py`, the add-on's `camera_reports`) | none | read through the owner's phone (§6.21 `fetch`; the site refuses cloud hosts), at most once a day | **Blocks** a public install: no licence to reuse the data; personal use only | **yes** (`camera-reports`) |
 | 57 | Valhalla (self-hosted, `pyvalhalla` on PyPI) with Geofabrik's Australia extract | directions: routes and spoken turns (maps proposal step 6; `MEDIA_ROUTER_URL`, `map_route.py`) | none | runs on the owner's server (red2), tiles built from the weekly OSM download | nothing beyond OpenStreetMap's credit (row 31); Valhalla is MIT | no |
+| 58 | Forge APIs: GitHub's REST API (api.github.com), and a self-hosted Forgejo or Gitea (`MEDIA_GIT_FORGES`), Codeberg, gitea.com | a commit's checks on the git line, whether main takes pull requests only, a ticket's issue and its pull request, a project's open issues and PRs (`forge.py`, `issues.py`; §6.49, §6.44, `/project/forge`) | the owner's own: a token file per host (`MEDIA_FORGE_TOKENS`), for github.com else the owner's `gh` login; none for reads of a public repo | reads cached (settled checks for good, the rest 30 s to 10 min); issues opened on the owner's own repos only, by hand or once a tracked chat commits (`MEDIA_FORGE_AUTO_ISSUE=0` to stop) | nothing for the owner's own forge; on GitHub the API terms ask for no excessive or abusive use, which the caching keeps to (unauthenticated: 60 requests an hour); an issue opened carries the chat's first ask and recap, so say so in the privacy policy | no |
 
 ## The services, one by one
 
@@ -729,6 +730,30 @@ hosted tier), every one of these becomes a reseller question.
   model, and the route is the owner's gateway config.
 - **Public alternative:** the Gemini API with the owner's key (row 23), or
   any other fast model Settings → Models suggests.
+
+### 58. Forge APIs (GitHub, Forgejo, Gitea)
+
+- **Used for:** 19 Nov 2026 (agent mail #1064 from sasonica-app): a pushed
+  commit's checks on the git line and whether the default branch takes
+  pull requests only (§6.49), a ticket's issue on the forge and its pull
+  request (§6.44), a project's open issues and PRs across its owner
+  (`/project/forge`). `packages/server/src/agent_media_server/forge.py`;
+  the background half in `issues.sweep`, run by the session reaper.
+- **Credential:** the owner's own. A file per host named in
+  `MEDIA_FORGE_TOKENS` (the token never in the env); for github.com with no
+  entry, the owner's `gh` login (`gh auth token`, kept in memory, never
+  logged). Reads of a public repo go without one.
+- **Terms:** GitHub's API terms
+  (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service,
+  section H) ask for no excessive automated use and rate-limit it; every
+  read is cached (a settled check for good) and a pass touches at most 40
+  tickets. A self-hosted Forgejo is the owner's own (GPL v3, reached only
+  over its HTTP API, never imported). Opening an issue is a write in the
+  owner's own repo under the owner's token; it carries the chat's title,
+  first ask and recap, so a public repo shows them: a private thread never
+  goes there, and `MEDIA_FORGE_AUTO_ISSUE=0` leaves it to the tap.
+- **Not gated** by `personal_use`: each install asks only the forges its
+  own repos are on, with its own owner's tokens.
 
 ### Related repositories
 
