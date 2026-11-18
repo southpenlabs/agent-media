@@ -43,6 +43,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from . import auth, org_listen, uploads
+from agent_media_core import failures as _failures
 
 #: A share this many words long besides its link is words to read, not a link.
 LINK_WORDS = 12
@@ -200,8 +201,8 @@ def article(html: str) -> tuple[str, list[tuple[str, str]]]:
     try:
         p.feed(html)
         p.close()
-    except Exception:  # noqa: BLE001 — a broken page reads as far as it parsed
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a broken page reads as far as it parsed
+        _failures.swallowed(_exc)
     title = unescape(p.og_title or re.sub(r"\s+", " ", p.title)).strip()
     for pick in (lambda b: b[2], lambda b: b[3], lambda b: True):
         got = [(k, t) for k, t, *where in p.blocks if pick((k, t, *where)) and _keep(k, t)]

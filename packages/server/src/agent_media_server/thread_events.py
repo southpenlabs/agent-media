@@ -72,6 +72,7 @@ import time
 import zlib
 
 from . import agents, background, driver, file_links, reactions, replies, retract, sessions, threads, transcript
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.thread_events")
 
@@ -852,8 +853,8 @@ def _publish() -> None:
             from . import speech
 
             speech.recheck_question_soon()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
 
 def watching() -> dict[str, int]:

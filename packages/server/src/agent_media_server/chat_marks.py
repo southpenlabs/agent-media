@@ -35,6 +35,7 @@ import urllib.error
 
 from . import auth, driver, sessions
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.chat_marks")
 
@@ -50,7 +51,8 @@ def carried_networks() -> frozenset[str]:
         from agent_media_core import config
 
         got = (config.load().get("marks") or {}).get("carried")
-    except Exception:  # noqa: BLE001 — a bad config means the default
+    except Exception as _exc:  # noqa: BLE001 — a bad config means the default
+        _failures.swallowed(_exc)
         got = None
     if isinstance(got, list):
         return frozenset(str(n).strip().lower() for n in got if str(n).strip())

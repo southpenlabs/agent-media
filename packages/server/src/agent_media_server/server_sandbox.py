@@ -43,6 +43,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 UNITS = ("agent-media-rehearsal-sessiond", "agent-media-rehearsal-canvas")
 #: Outside credentials and service settings never kept in a practice copy.
@@ -272,11 +273,13 @@ def start(store: str, name: str, units: str = "") -> dict:
     try:
         practice["settle"] = practise_settle(base, own)
     except Exception as e:  # noqa: BLE001 — the practice reports, the copy still starts
+        _failures.swallowed(e)
         practice["settle"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     if units and Path(os.path.expanduser(units)).is_dir():
         try:
             practice["units"] = practise_units(base, Path(os.path.expanduser(units)))
         except Exception as e:  # noqa: BLE001
+            _failures.swallowed(e)
             practice["units"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     fenced = fence(base)
     why = _run_units(name, base)

@@ -24,6 +24,7 @@ import re
 import socket
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: How long a scan of the archive is kept (it is thousands of files on the hub).
 CACHE_S = 60.0
@@ -136,7 +137,8 @@ def _native(session: str, harness: str) -> bool:
 
             return bool(transcript.transcript_path(session))
         return bool(harnesses.transcript(session))
-    except Exception:  # noqa: BLE001 - a store that can't be read has no copy
+    except Exception as _exc:  # noqa: BLE001 - a store that can't be read has no copy
+        _failures.swallowed(_exc)
         return False
 
 

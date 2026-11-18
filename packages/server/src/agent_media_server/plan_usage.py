@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import auth
+from agent_media_core import failures as _failures
 
 URL = "https://api.anthropic.com/api/oauth/usage"
 TTL_S = 60.0
@@ -112,6 +113,7 @@ def get(bearer: str, *, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
     try:
         out = shape(fetch(token))
     except Exception as e:  # network, 401 (expired login), a changed shape
+        _failures.swallowed(e)
         return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
     _cache = (now(), out)
     return True, out

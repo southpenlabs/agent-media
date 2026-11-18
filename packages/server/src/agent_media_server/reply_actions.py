@@ -62,6 +62,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from . import auth
+from agent_media_core import failures as _failures
 
 #: The add-on entry point group a task list is offered through.
 TASKS_GROUP = "agent_media.action_tasks"
@@ -155,7 +156,8 @@ def _builtin() -> list[dict]:
         from agent_media_core import restart_services as rs
 
         svcs = rs.services()
-    except Exception:  # noqa: BLE001 - no service manager here: no restarts
+    except Exception as _exc:  # noqa: BLE001 - no service manager here: no restarts
+        _failures.swallowed(_exc)
         return gate
     out, seen = list(gate), set()
     for s in svcs:
@@ -183,7 +185,8 @@ def _addons() -> list[dict]:
         from importlib.metadata import entry_points
 
         eps = list(entry_points(group=TASKS_GROUP))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return out
     for ep in eps:
         try:
@@ -383,7 +386,8 @@ def actions_for(session: str, last_key: str | None = None) -> list[dict]:
         if isinstance(a, dict):
             try:
                 c = check(a, places)
-            except Exception:  # noqa: BLE001 - an action that fails to check is dropped
+            except Exception as _exc:  # noqa: BLE001 - an action that fails to check is dropped
+                _failures.swallowed(_exc)
                 c = None
             if c:
                 out.append(c)
@@ -424,6 +428,7 @@ def _run(session: str, t: dict) -> None:
         else:
             ok, words = True, str(got or "")
     except Exception as e:  # noqa: BLE001 - the note says it failed
+        _failures.swallowed(e)
         ok, words = False, f"failed: {e}"
     words = " ".join(words.split())[:600] or ("done" if ok else "failed")
     why = _note(session, f"[From actions] {t['label']}: {words}")

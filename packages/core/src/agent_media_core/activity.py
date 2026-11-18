@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 #: A file is trimmed to its newest lines once it grows past this. Old turns
 #: lose their step lists first; nothing else reads them.
@@ -248,8 +249,8 @@ def record(event: dict, now: Optional[float] = None) -> None:
             tmp = path.with_suffix(".tmp")
             tmp.write_text("\n".join(lines) + "\n")
             tmp.replace(path)
-    except Exception:  # noqa: BLE001 — a hook must never break the session
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a hook must never break the session
+        _failures.swallowed(_exc)
 
 
 def _rows(session: str) -> list[dict]:
@@ -332,8 +333,8 @@ def hook_main() -> None:
         if os.environ.get("AGENT_MEDIA_ACTIVITY_DEBUG") or (activity_dir() / ".debug").exists():
             (activity_dir() / ".last-event.json").write_text(json.dumps(event)[:4000])
         record(event)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 if __name__ == "__main__":

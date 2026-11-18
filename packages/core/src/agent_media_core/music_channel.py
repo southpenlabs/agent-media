@@ -50,6 +50,7 @@ import xml.etree.ElementTree as ET
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -261,7 +262,8 @@ def _details(url: str) -> Optional[dict]:
         return None
     try:
         got = addon.channel(url) or {}
-    except Exception:  # noqa: BLE001 — no page, no details
+    except Exception as _exc:  # noqa: BLE001 — no page, no details
+        _failures.swallowed(_exc)
         return {}
     return {k: got.get(k) for k in ("name", "photo", "photo_large", "banner", "description",
                                     "subscribers", "videos", "country", "url")}

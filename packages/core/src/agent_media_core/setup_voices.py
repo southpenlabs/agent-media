@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import setup as _setup
+from agent_media_core import failures as _failures
 
 KOKORO_RELEASE = ("https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
                   "model-files-v1.0/")
@@ -133,8 +134,8 @@ def _wait_http(url: str, timeout: float) -> bool:
             with urllib.request.urlopen(url, timeout=5) as r:
                 if r.status == 200:
                     return True
-        except Exception:  # noqa: BLE001 — not up yet
-            pass
+        except Exception as _exc:  # noqa: BLE001 — not up yet
+            _failures.swallowed(_exc)
         time.sleep(1)
     return False
 
@@ -313,6 +314,7 @@ def _place_kokoro_files(models: Path, from_dir: Path | None, *, dry_run: bool) -
         try:
             _download(url, part)
         except Exception as e:  # noqa: BLE001
+            _failures.swallowed(e)
             part.unlink(missing_ok=True)
             _say(f"  {name}: download failed: {e}")
             return False

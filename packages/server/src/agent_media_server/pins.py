@@ -16,6 +16,7 @@ import time
 
 from . import auth, sessions
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 PINS = JsonMap("pinned.json")
 
@@ -198,8 +199,8 @@ def device_black(flag, bearer: str, device="", session=None, reach=None) -> tupl
         from . import speech
 
         speech.recheck_question_soon()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return True, {"device": device, "on": bool(until), "until": until,
                   "reach": reach, "session": session}
 

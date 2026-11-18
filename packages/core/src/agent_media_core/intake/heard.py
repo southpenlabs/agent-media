@@ -31,6 +31,7 @@ import json
 import os
 import sys
 from typing import Optional
+from agent_media_core import failures as _failures
 
 #: How much of a sentence the note quotes — enough for the agent to find it in
 #: its own reply, not a second copy of the reply.
@@ -145,7 +146,8 @@ def main() -> int:
         notes.append(language_note(payload))
         notes.append(voice_note(payload))
         text = "\n\n".join(n for n in notes if n)
-    except Exception:  # noqa: BLE001 — a missing note never costs the prompt
+    except Exception as _exc:  # noqa: BLE001 — a missing note never costs the prompt
+        _failures.swallowed(_exc)
         return 0
     if text:
         print(json.dumps({"hookSpecificOutput": {

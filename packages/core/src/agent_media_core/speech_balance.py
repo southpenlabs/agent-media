@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 NAME = "speech-balance.json"
 #: The speech and music targets the balance sets (the app's own players).
@@ -114,5 +115,6 @@ def _music_ducked() -> bool:
         from .types import Target
         return bool(ipc.get_property(_socket_for(Target(name=TARGET)),
                                      SPEAKING_PROPERTY))
-    except Exception:  # noqa: BLE001 — unknown is "not ducked"
+    except Exception as _exc:  # noqa: BLE001 — unknown is "not ducked"
+        _failures.swallowed(_exc)
         return False

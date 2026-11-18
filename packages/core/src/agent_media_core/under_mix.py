@@ -44,6 +44,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -166,8 +167,8 @@ class Bed:
             _ipc().command(self.sock, "af-command", label, cmd, f"{value:.4f}", filt,
                            timeout=0.3, retry_errors=False)
             self._sent[label] = value
-        except Exception:  # noqa: BLE001 — a filter step must never cost the bed
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a filter step must never cost the bed
+            _failures.swallowed(_exc)
 
     def apply(self, amount: float) -> None:
         """The ride and the carve for envelope `amount` (0..1)."""
@@ -203,7 +204,8 @@ class Bed:
             now = time.monotonic()
             try:
                 props = _ipc().get_properties(self.broker, names, timeout=0.3)
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 props = {}
             a = self.env.step(voiced(props), now, now - last)
             last = now
@@ -222,7 +224,8 @@ class Bed:
             try:
                 from . import music_bed
                 level = music_bed.gain_db()
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 return
         self.offset_db = self._base_db + float(level) - float(self._made_at)
 
@@ -451,14 +454,15 @@ class Handover:
         try:
             _ipc().command(sock, "af-command", "ride", "volume", f"{max(0.0, amp):.4f}",
                            "volume", timeout=0.3, retry_errors=False)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
     def _pos(self, sock: str) -> Optional[float]:
         try:
             v = _ipc().get_property(sock, "time-pos", timeout=0.5)
             return float(v) if isinstance(v, (int, float)) else None
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
 
     def _start_song(self, at: float) -> bool:
@@ -530,8 +534,8 @@ class Handover:
                 self._ride(self.bed.sock, 0.0)
                 try:
                     _ipc().command(self.bed.sock, "quit", timeout=0.3, retry_errors=False)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
             fade_ms = float(a.get("fade_ms") or 3000)
             while not self._hurry.is_set():
                 p = self._pos(self.sock)

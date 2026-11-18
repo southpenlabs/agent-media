@@ -78,6 +78,7 @@ import urllib.request
 from pathlib import Path
 
 from . import permissions as _perms
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.sessiond")
 
@@ -164,7 +165,8 @@ def _owner_id() -> str:
         from .servers_report import server_id
 
         return server_id()
-    except Exception:  # noqa: BLE001 - never block a start on the id
+    except Exception as _exc:  # noqa: BLE001 - never block a start on the id
+        _failures.swallowed(_exc)
         return "remote"
 
 

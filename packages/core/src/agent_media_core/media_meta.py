@@ -40,6 +40,7 @@ import urllib.request
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 _FILE = "media-meta.json"
 _UA = "agent-media/1.0 ( https://github.com/southpenlabs/agent-media )"
@@ -77,7 +78,8 @@ def _get(url: str, timeout: float = 10.0) -> Optional[dict]:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
-    except Exception:  # noqa: BLE001 — a name is a nicety
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety
+        _failures.swallowed(_exc)
         return None
 
 

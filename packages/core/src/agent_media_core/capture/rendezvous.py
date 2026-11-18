@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 from . import input_claim
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -106,8 +107,8 @@ def _mirror(action: str, ttl_s: float | None = None, note: str = "") -> None:
         from .floor import publish
         publish("input", os.environ.get("MEDIA_FLOOR_OWNER", "local"),
                 action, ttl_s, note)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 class Busy(RuntimeError):

@@ -31,6 +31,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -186,7 +187,8 @@ def _pipe_user() -> str:
         return os.environ["USERNAME"]
     try:
         return getpass.getuser()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return "user"
 
 
@@ -880,8 +882,8 @@ def _log_refusal(verb: str, err: str, command: list) -> None:
         StateStore().log_error(
             "mpv", f"player refused {verb!r}: {err}",
             extras={"command": [str(c) for c in command]})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def event_stream(sock_path: str | Path,

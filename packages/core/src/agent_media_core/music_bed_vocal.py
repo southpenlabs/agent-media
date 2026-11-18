@@ -54,6 +54,7 @@ import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional, cast
+from agent_media_core import failures as _failures
 
 if TYPE_CHECKING:
     from .music_bed_records import VocalIndex, VocalOriginal
@@ -503,7 +504,8 @@ def due() -> bool:
                     for e in fav.tracks(None, fav.load()) if e.get("original_id"))
                 or (any(music_bed_grid.needs(r.get("features")) for r in have.values())
                     and music_bed_grid.python() is not None))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -593,5 +595,6 @@ def _grid_backfill(d: VocalIndex, limit: Optional[int] = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover — a manual pass
-    logging.basicConfig(level=logging.INFO)
+    from agent_media_core import logs
+    logs.setup(logging.INFO, logging.BASIC_FORMAT)
     print(upkeep(int(sys.argv[1]) if len(sys.argv) > 1 else None))

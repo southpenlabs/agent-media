@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 _FILE = "music-sung.json"
 #: How many sung-out songs are kept.
@@ -88,7 +89,8 @@ def _named(rows: list[dict]) -> list[dict]:
         from . import music_bed_vocal
 
         by_measure = music_bed_vocal.measured_keys()
-    except Exception:  # noqa: BLE001 — dropped rather than shown blank
+    except Exception as _exc:  # noqa: BLE001 — dropped rather than shown blank
+        _failures.swallowed(_exc)
         by_measure = {}
     out = []
     for e in rows:
@@ -122,7 +124,8 @@ def _favourite(key: str) -> dict:
         from . import music_bed_favourites as fav
 
         song = fav._song(fav.load(), key) or {}
-    except Exception:  # noqa: BLE001 — what the app said will do
+    except Exception as _exc:  # noqa: BLE001 — what the app said will do
+        _failures.swallowed(_exc)
         song = {}
     return {"title": str(song.get("title") or ""), "artist": str(song.get("artist") or ""),
             "video_id": _vid_ok(song.get("original_id") or song.get("id"))}
@@ -142,8 +145,8 @@ def thread_of(video_id: str, store=None) -> Optional[str]:
             song = ex.get("bed_song")
             if isinstance(song, dict) and song.get("video_id") == video_id and ex.get("source_session"):
                 return str(ex["source_session"])
-    except Exception:  # noqa: BLE001 — a row without its thread
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a row without its thread
+        _failures.swallowed(_exc)
     return None
 
 
@@ -216,8 +219,8 @@ def engaged(key: str, how: str, title: str = "", artist: str = "", video_id: str
                 sink="music", uri=uri(e["video_id"]), started_at=now, target="sasonica",
                 source="sung", content_type="music", text=label(e) or None,
                 extras={"sung": key, **({"source_session": e["session"]} if e.get("session") else {})})
-        except Exception:  # noqa: BLE001 — the list still has it
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the list still has it
+            _failures.swallowed(_exc)
     return dict(e)
 
 

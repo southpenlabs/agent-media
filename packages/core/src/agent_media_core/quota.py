@@ -40,6 +40,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 #: Claude Code's sentence for it ("You've hit your session limit · resets
 #: 2am (Australia/Melbourne)"; weekly and Opus limits say so in its place).
@@ -168,7 +169,8 @@ def parse_reset(text: object, now: Optional[float] = None) -> Optional[float]:
             from zoneinfo import ZoneInfo
 
             tz = ZoneInfo(m.group("tz").strip())
-        except Exception:  # noqa: BLE001 — an unknown zone is local time
+        except Exception as _exc:  # noqa: BLE001 — an unknown zone is local time
+            _failures.swallowed(_exc)
             tz = None
     base = datetime.fromtimestamp(now, tz) if tz else datetime.fromtimestamp(now)
     hour = int(m.group("h")) % 12 if m.group("ap") else int(m.group("h"))

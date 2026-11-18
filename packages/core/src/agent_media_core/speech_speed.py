@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -215,7 +216,8 @@ def _current_rate() -> float | None:
         from .state.store import StateStore
         cur = StateStore().get_speech_speed()
         return float(cur) if isinstance(cur, (int, float)) else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 

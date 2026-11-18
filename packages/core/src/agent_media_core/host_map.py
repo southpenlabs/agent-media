@@ -18,6 +18,7 @@ import json
 import os
 import socket
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 
 def _env_value(path: Path, key: str) -> str:
@@ -47,8 +48,8 @@ def build() -> dict:
         from .setup import effective_roles
         if roles is not None:
             implied = sorted(effective_roles(set(roles))[1])
-    except Exception:  # noqa: BLE001 — the map is information, never a failure
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the map is information, never a failure
+        _failures.swallowed(_exc)
     eff = sorted(roles) if roles is not None else None
     server_url = _env_value(own, "MEDIA_PUBLIC_URL") or _env_value(shared, "MEDIA_PUBLIC_URL")
     shell_env = Path(os.environ.get("SASONICA_CONF") or home / "sasonica") / "env"
@@ -57,14 +58,15 @@ def build() -> dict:
     try:
         services = [{"name": s.name, "short": s.short, "state": s.state}
                     for s in restart_services.services()]
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         services = []
     peers = []
     try:
         for alias, p in sorted(config.peers().items()):
             peers.append({"alias": alias, "host": p.host, "roles": sorted(p.roles)})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return {
         "host": socket.gethostname().split(".")[0],
         "roles": eff,

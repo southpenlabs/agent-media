@@ -38,6 +38,7 @@ from typing import Optional
 from . import media_meta
 from ._paths import state_dir
 from .state import StateStore
+from agent_media_core import failures as _failures
 
 #: How far back from a play its conversation's last speech may be.
 _INFER_S = 300.0
@@ -116,7 +117,8 @@ def oembed_data(vid: str) -> dict:
     try:
         with urllib.request.urlopen(url, timeout=4) as r:
             d = json.loads(r.read().decode())
-    except Exception:  # noqa: BLE001 — a name is a nicety
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety
+        _failures.swallowed(_exc)
         return {}
     return d if isinstance(d, dict) else {}
 
@@ -380,7 +382,8 @@ def _library_by_file() -> dict:
     try:
         from . import book_library
         return book_library.by_name()
-    except Exception:  # noqa: BLE001 — books without their details
+    except Exception as _exc:  # noqa: BLE001 — books without their details
+        _failures.swallowed(_exc)
         return {}
 
 

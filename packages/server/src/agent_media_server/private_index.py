@@ -22,6 +22,7 @@ from pathlib import Path
 from agent_media_core import harnesses, private, private_cards, sealed
 
 from . import seal
+from agent_media_core import failures as _failures
 
 BACKFILL_PER_PASS = 3
 
@@ -40,7 +41,8 @@ def _messages(session: str) -> list[str]:
             return []
     try:
         return reap.your_messages(session)
-    except Exception:  # noqa: BLE001 — the title still makes a card
+    except Exception as _exc:  # noqa: BLE001 — the title still makes a card
+        _failures.swallowed(_exc)
         return []
 
 
@@ -56,7 +58,8 @@ def card_at_seal(session: str, title: str, cwd: str = "", project: str = "") -> 
         private_cards.write(private_cards.build(session, title, msgs, cwd=cwd,
                                                 project=project or ""))
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -159,6 +162,7 @@ def backfill(limit: int = BACKFILL_PER_PASS) -> list[str]:
             tried.drop(sid)
             out.append(f"private-card {sid[:8]} written")
         except Exception as e:  # noqa: BLE001 — one thread's failure is not the pass's
+            _failures.swallowed(e)
             tried.put(sid, stamp)
             out.append(f"private-card {sid[:8]} failed ({e})")
     return out
@@ -184,7 +188,8 @@ def rows_for(session: str, *, limit: int = private_cards.LIMIT) -> list[dict]:
 
         try:
             title = sessions.title_of(session)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             title = ""
         text = "\n".join([title, *_messages(session)]).strip()
         if not text:

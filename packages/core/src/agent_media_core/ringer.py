@@ -236,8 +236,8 @@ def tick(previous: dict | None = None) -> dict:
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     every = interval_s()
     log.info("ringer: asking %s every %.0fs", url(), every)
     previous: dict | None = None

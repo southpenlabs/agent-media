@@ -61,6 +61,7 @@ import time
 from pathlib import Path
 
 from . import server_address
+from agent_media_core import failures as _failures
 
 STORE = ".local/share/agent-media-move"
 STEPS = ("check", "keep", "backup", "transcripts", "mail", "units", "stop", "sync", "restore",
@@ -285,8 +286,8 @@ def busy_chats(to: str = "") -> list[str]:
             for v in (r.get("sessions") or []) if r.get("ok") else []:
                 if v.get("host") == to and v.get("live") and rs.session_busy(v):
                     out.append(f"{rs._label(v)} on {to} {', '.join(rs.session_busy(v))}")
-        except Exception:  # noqa: BLE001 — the local check below still stands
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the local check below still stands
+            _failures.swallowed(_exc)
     me = os.environ.get("MEDIA_SESSIOND_SESSION") or ""
     for v in rs.sessiond_sessions():
         if me and v.get("session") == me:

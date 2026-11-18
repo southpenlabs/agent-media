@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import cache_dir, state_dir
+from agent_media_core import failures as _failures
 
 AUDIO_EXTS = {".mp3", ".m4a", ".mka", ".webm", ".ogg", ".opus", ".aac", ".flac", ".wav"}
 PHONE_DIR = ".cache/agent-media/podcast-links"
@@ -103,7 +104,8 @@ def file_for(vid: str) -> Optional[Path]:
 
         return library.cached_path(vid) or next(
             iter(sorted(library.abs_import_dir().glob(f"*[[]{vid}[]]*"))), None)
-    except Exception:  # noqa: BLE001 — no book library is no file
+    except Exception as _exc:  # noqa: BLE001 — no book library is no file
+        _failures.swallowed(_exc)
         return None
 
 

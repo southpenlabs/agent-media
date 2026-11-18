@@ -36,6 +36,7 @@ import time
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 _VID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _KEY = re.compile(r"^([A-Za-z0-9_-]{11})@(\d+)$")
@@ -75,7 +76,8 @@ def chapters(vid: str, clip_artist: Optional[str] = None) -> list[dict]:
 
     try:
         rows, _ = music_chapters.songs(vid, clip_artist)
-    except Exception:  # noqa: BLE001 — no songs is the whole clip
+    except Exception as _exc:  # noqa: BLE001 — no songs is the whole clip
+        _failures.swallowed(_exc)
         return []
     out = []
     for r in rows:
@@ -205,7 +207,8 @@ def _vid_of(uri: str) -> Optional[str]:
     try:
         from .sinks.music_fetch import watch_id
         return watch_id(uri[3:] if uri.startswith("yt:") else uri) if uri else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 

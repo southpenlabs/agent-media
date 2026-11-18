@@ -45,6 +45,7 @@ import time
 from pathlib import Path
 
 from . import auth, local_chats
+from agent_media_core import failures as _failures
 
 #: Messages one `POST /local/messages` may carry.
 MAX_BATCH = 500
@@ -519,7 +520,8 @@ def _scoped(bearer: str) -> bool:
 
     try:
         return folder_grants.scoped(auth._device(bearer))
-    except Exception:  # noqa: BLE001 — no grants file: nobody is scoped
+    except Exception as _exc:  # noqa: BLE001 — no grants file: nobody is scoped
+        _failures.swallowed(_exc)
         return False
 
 
@@ -594,8 +596,8 @@ def _delete(chats: list[str] | None) -> dict:
     for c in gone:
         try:
             search.forget(c)
-        except Exception:  # noqa: BLE001 — the index is rebuilt from here anyway
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the index is rebuilt from here anyway
+            _failures.swallowed(_exc)
     return {"messages": int(n), "chats": len(gone)}
 
 

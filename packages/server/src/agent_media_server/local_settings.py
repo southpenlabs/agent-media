@@ -29,6 +29,7 @@ import time
 
 from . import auth
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 STORE = JsonMap("local-settings.json", mode=0o600)
 KEY = "server"
@@ -164,7 +165,8 @@ def matrix_user() -> str | None:
                                      headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             user = str(json.loads(resp.read()).get("user_id") or "")
-    except Exception:  # noqa: BLE001 - the settings answer without it
+    except Exception as _exc:  # noqa: BLE001 - the settings answer without it
+        _failures.swallowed(_exc)
         return None
     _MATRIX_USER[0], _MATRIX_USER[1] = user, time.monotonic()
     return user or None

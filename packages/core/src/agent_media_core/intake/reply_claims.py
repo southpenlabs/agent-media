@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Optional
 
 from .._paths import state_dir
+from agent_media_core import failures as _failures
 
 #: How long a done claim is believed: the hook's own dedup window.
 TTL_S = 300.0
@@ -61,7 +62,8 @@ def _alive(pid) -> bool:
     try:
         from .. import procinfo
         return procinfo.alive(int(pid))
-    except Exception:  # noqa: BLE001 — unsure: believe the claim
+    except Exception as _exc:  # noqa: BLE001 — unsure: believe the claim
+        _failures.swallowed(_exc)
         return True
 
 

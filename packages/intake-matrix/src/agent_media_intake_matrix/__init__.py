@@ -47,6 +47,7 @@ from agent_media_core.sinks.music import SinkMusic
 from agent_media_core.sinks.speech import SinkSpeech
 from agent_media_core.state import StateStore
 from agent_media_core.types import Source, Target
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -151,34 +152,36 @@ def _handle_text_command(body: str, *, music: SinkMusic, sink: SinkSpeech,
     if lower in ("!pause", "pause"):
         try:
             sink.pause(target)
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             try:
                 music.pause(target)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _failures.swallowed(_exc)
         return True
     if lower in ("!resume", "resume", "!play", "play"):
         try:
             sink.resume(target)
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             try:
                 music.resume(target)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _failures.swallowed(_exc)
         return True
     if lower in ("!skip", "skip", "!stop", "stop"):
         try:
             sink.stop(target)
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
         return True
     if lower in ("!replay", "replay"):
         rows = state.recent_history(sink="speech", limit=1)
         if rows:
             try:
                 sink.play(rows[0]["uri"], target)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _failures.swallowed(_exc)
         return True
     return False
 
@@ -324,6 +327,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     sys.exit(main())

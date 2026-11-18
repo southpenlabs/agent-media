@@ -39,6 +39,7 @@ from pathlib import Path
 from agent_media_core.render import render_text
 
 from . import personas
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +76,8 @@ def _canvas_on() -> bool:
     try:
         from agent_media_core.intake._visual import visual_enabled
         return visual_enabled()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -93,12 +95,14 @@ def _prepare_text(raw: str) -> tuple[str, tuple[str, str]]:
     try:
         from agent_media_core.intake._visual import extract_visual_markers
         clean, hint, _pre, _post = extract_visual_markers(raw)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         clean, hint = raw, ""
     try:
         from agent_media_core.intake._text import strip_markdown
         spoken = strip_markdown(clean)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         spoken = clean
     return spoken.strip(), (clean.strip(), hint)
 
@@ -243,8 +247,8 @@ def make_server(bind: str, port: int) -> ThreadingHTTPServer:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     ap = argparse.ArgumentParser(prog="media-tts-shim")
     ap.add_argument("--port", type=int,
                     default=int(os.environ.get("MEDIA_SHIM_PORT", DEFAULT_PORT)))

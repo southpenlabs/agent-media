@@ -40,6 +40,7 @@ import logging
 import os
 import subprocess
 import time
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +140,8 @@ def _ssh(host: str, script: str) -> str | None:
         )
         out = (r.stdout or "").strip() if r.returncode == 0 else None
         return out
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     finally:
         window = _breaker_s()

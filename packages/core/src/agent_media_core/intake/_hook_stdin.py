@@ -13,6 +13,7 @@ import sys
 from ..types import Event, Priority, Source
 from ._text import strip_markdown
 from .submit import submit_event
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,8 @@ def run(source: Source, env_prefix: str, *, text: str | None = None,
 
     try:
         raw = sys.stdin.read() if text is None else text
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0
 
     cleaned = strip_markdown(raw)

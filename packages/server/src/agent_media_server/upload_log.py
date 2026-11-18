@@ -30,6 +30,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: Days of lines kept (MEDIA_UPLOAD_LOG_DAYS overrides).
 KEEP_DAYS = 90
@@ -56,7 +57,8 @@ def who(bearer: str) -> dict:
         from . import auth, devices
 
         dev = devices.lookup(bearer, auth.client_ip())
-    except Exception:  # noqa: BLE001 — a log line never fails for want of a name
+    except Exception as _exc:  # noqa: BLE001 — a log line never fails for want of a name
+        _failures.swallowed(_exc)
         return {}
     if not dev:
         return {}

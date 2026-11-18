@@ -27,6 +27,7 @@ import re
 import time
 
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 STORE = JsonMap("grants.json", mode=0o600)
 
@@ -174,5 +175,5 @@ def _report_soon(user: dict) -> None:
         from . import servers_report
 
         servers_report.report_soon(device)
-    except Exception:  # noqa: BLE001 - the daily report still comes
-        pass
+    except Exception as _exc:  # noqa: BLE001 - the daily report still comes
+        _failures.swallowed(_exc)

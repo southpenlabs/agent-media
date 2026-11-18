@@ -39,6 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 EMBED_MODEL = "nomic-embed-text"
 TEXT_CAP = 1500          # nomic reads ~2k tokens; red5 embeds on CPU
@@ -161,7 +162,8 @@ def embed(text: str, timeout: float = 60) -> list[float] | None:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             vec = json.load(resp)["embeddings"][0]
-    except Exception:  # noqa: BLE001 — Ollama down: keywords carry the card
+    except Exception as _exc:  # noqa: BLE001 — Ollama down: keywords carry the card
+        _failures.swallowed(_exc)
         return None
     n = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [round(x / n, 5) for x in vec]

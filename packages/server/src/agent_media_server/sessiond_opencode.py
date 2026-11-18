@@ -66,6 +66,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.sessiond")
 
@@ -841,7 +842,8 @@ class Host:
         """v2: the session `sid` is a child of ("" when none or not found)."""
         try:
             info = _data(self.call("GET", f"/api/session/{sid}", timeout=10)) or {}
-        except Exception:  # noqa: BLE001 — not found is no parent
+        except Exception as _exc:  # noqa: BLE001 — not found is no parent
+            _failures.swallowed(_exc)
             return ""
         return str(info.get("parentID") or "")
 

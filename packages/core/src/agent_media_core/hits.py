@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 FLUSH_S = 30.0
 
@@ -82,7 +83,8 @@ def local_addresses() -> "tuple[str, ...]":
         try:
             from .entrypoints.speech_state import _peer_ip
             ip = _peer_ip()
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             ip = None
         _own = LOCAL + ((ip,) if ip else ())
     return _own
@@ -249,6 +251,6 @@ def counter(endpoint: str):
         try:
             client = (getattr(self, "client_address", None) or ("?",))[0]
             record(endpoint, str(client), getattr(self, "path", "") or "")
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
     return log_message

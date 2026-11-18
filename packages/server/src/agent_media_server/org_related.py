@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 
 from . import auth, org
+from agent_media_core import failures as _failures
 
 RELATED_LIMIT = 20
 WHY_LIMIT = 3
@@ -216,7 +217,8 @@ def _app_title(sid: str) -> str:
         from . import sessions as _sessions
 
         return _sessions.title_of(sid)
-    except Exception:  # noqa: BLE001 — a title is a nicety, the roam one serves
+    except Exception as _exc:  # noqa: BLE001 — a title is a nicety, the roam one serves
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -276,7 +278,8 @@ def related(sid: str, bearer: str, *, private: bool = False) -> tuple[bool, dict
 
         try:
             got["private"] = private_index.rows_for(sid)
-        except Exception:  # noqa: BLE001 — the graph's answer stands without it
+        except Exception as _exc:  # noqa: BLE001 — the graph's answer stands without it
+            _failures.swallowed(_exc)
             got["private"] = []
     return True, got
 

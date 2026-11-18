@@ -56,6 +56,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 DYI_URL = "https://accountscenter.facebook.com/info_and_permissions/dyi"
 REMIND_DAYS = 90
@@ -269,7 +270,8 @@ def _link(msg) -> str | None:
             continue
         try:
             text = part.get_payload(decode=True) or b""
-        except Exception:  # noqa: BLE001 — a part that will not decode has no link
+        except Exception as _exc:  # noqa: BLE001 — a part that will not decode has no link
+            _failures.swallowed(_exc)
             continue
         for u in URL.findall(text.decode("utf-8", "replace").replace("&amp;", "&")):
             u = u.rstrip(".,;")
@@ -401,8 +403,8 @@ def mail(*, now: float | None = None) -> list[str]:
     finally:
         try:
             box.logout()
-        except Exception:  # noqa: BLE001 — closing is best effort
-            pass
+        except Exception as _exc:  # noqa: BLE001 — closing is best effort
+            _failures.swallowed(_exc)
     # Keep the seen list short: a month of keys is plenty.
     state["mail_seen"] = {k: v for k, v in seen.items() if now - v < 31 * 86400}
     state["mail_checked"] = now

@@ -45,6 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import git_state
+from agent_media_core import failures as _failures
 
 # Transcripts untouched for longer than this are not read.
 MAX_AGE_S = 14 * 86400
@@ -450,8 +451,8 @@ def warm(cwd: str | None) -> None:
     def run():
         try:
             who(cwd)
-        except Exception:  # a warm-up is best effort
-            pass
+        except Exception as _exc:  # a warm-up is best effort
+            _failures.swallowed(_exc)
         finally:
             with _lock:
                 _warming.discard(cwd)
@@ -543,8 +544,8 @@ def _read_soon(cwd: str, top: str | None) -> None:
             found = top or top_of(cwd)
             if found:
                 refresh(found)
-        except Exception:  # a mark missing from one list, not a broken list
-            pass
+        except Exception as _exc:  # a mark missing from one list, not a broken list
+            _failures.swallowed(_exc)
         finally:
             with _lock:
                 _refreshing.discard(key)

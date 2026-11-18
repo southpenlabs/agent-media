@@ -69,6 +69,7 @@ import re
 import time
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -210,7 +211,8 @@ def _stored_level() -> float:
     from . import music_bed
     try:
         return round(float(music_bed.gain_db()), 2)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0.0
 
 

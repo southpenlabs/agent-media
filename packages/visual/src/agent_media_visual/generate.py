@@ -42,6 +42,7 @@ import urllib.error
 import urllib.request
 
 from . import state
+from agent_media_core import failures as _failures
 
 VENICE_GENERATE_URL = "https://api.venice.ai/api/v1/image/generate"
 DEFAULT_MODEL = "z-image-turbo"
@@ -139,6 +140,7 @@ def _gateway_chat(system_prompt: str, user_text: str, timeout: int,
     try:
         out = _gateway_call(system_prompt, user_text, timeout, model, data)
     except Exception as e:  # noqa: BLE001 — counted, then None as before
+        _failures.swallowed(e)
         if isinstance(e, TimeoutError) or "timed out" in str(e):
             kind = "timeout"
         elif isinstance(e, urllib.error.HTTPError) and 400 <= e.code < 500:

@@ -25,6 +25,7 @@ from ..types import Event, Priority, Source
 from ._env import load_env_file
 from ._text import IncrementalSentencer
 from .submit import submit_stream
+from agent_media_core import failures as _failures
 
 _SENTINEL = object()
 
@@ -78,8 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                     break
                 for s in sentencer.feed(dec.decode(b)):
                     q.put(s)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         finally:
             q.put(_SENTINEL)
 

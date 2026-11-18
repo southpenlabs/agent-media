@@ -36,6 +36,7 @@ import os
 import re
 import threading
 import time
+from agent_media_core import failures as _failures
 
 MIN_VOCABULARY = 3
 MAX_PER_CHAT = 3
@@ -189,7 +190,8 @@ def run(force: bool = False) -> dict:
                 continue
             try:
                 got = tag_chat(thread, str(r.get("title") or ""))
-            except Exception:  # noqa: BLE001 — one chat's failure is not the pass's
+            except Exception as _exc:  # noqa: BLE001 — one chat's failure is not the pass's
+                _failures.swallowed(_exc)
                 got = None
             if got is not None:
                 autos.put(thread, {"tags": got, "seen": last})
@@ -210,8 +212,8 @@ def kick() -> None:
             return
         _state["at"] = time.time()          # due again only after the interval
         threading.Thread(target=run, daemon=True, name="tags-auto").start()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def post_run(body: dict, bearer: str) -> tuple[bool, dict]:

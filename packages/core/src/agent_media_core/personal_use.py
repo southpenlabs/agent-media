@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Optional
+from agent_media_core import failures as _failures
 
 #: name → (its own setting, what it does that a public product could not).
 METHODS = {
@@ -104,8 +105,8 @@ def _load() -> None:
                 except Exception as e:  # noqa: BLE001 — a broken add-on is no add-on
                     import sys
                     print(f"personal-use: add-on {ep.value} for {ep.name} failed to load: {e}", file=sys.stderr)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def provider(name: str) -> Optional[Any]:

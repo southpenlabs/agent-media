@@ -27,6 +27,7 @@ import os
 import threading
 import time
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +126,8 @@ class Fade:
                 level = top * (1.0 - curve(t))
                 try:
                     self.set_level(level)
-                except Exception:  # noqa: BLE001 — the player went: stop
+                except Exception as _exc:  # noqa: BLE001 — the player went: stop
+                    _failures.swallowed(_exc)
                     break
                 self._sleep(STEP_S)
         finally:
@@ -155,13 +157,13 @@ def fade_in(set_level: Callable[[float], None], end: float,
                 break
             try:
                 set_level(end * curve(t))
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             sleep(STEP_S)
         try:
             set_level(end)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
     th = threading.Thread(target=run, name="under-fade-in", daemon=True)
     th.start()

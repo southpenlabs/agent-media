@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from agent_media_core import failures as _failures
 
 #: The harness wraps a command it ran itself, rather than sending the line the
 #: user typed: `<command-name>/model</command-name><command-args></command-args>`.
@@ -92,7 +93,8 @@ def already_recorded(session: str, cmd: dict, *, store=None) -> bool:
         from .state.store import StateStore
 
         rows = (store or StateStore()).recent_history(sink="speech", limit=_SCAN)
-    except Exception:  # noqa: BLE001 — a missed dedup is better than no turn
+    except Exception as _exc:  # noqa: BLE001 — a missed dedup is better than no turn
+        _failures.swallowed(_exc)
         return False
     for row in rows:
         ex = row.get("extras")

@@ -59,6 +59,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.contacts_photos")
 
@@ -130,7 +131,8 @@ def thumbnail(data: bytes, size: int = SIZE,
         out = io.BytesIO()
         im.save(out, "JPEG", quality=85 if size <= SIZE else 88, optimize=True)
         return out.getvalue(), "image/jpeg"
-    except Exception:  # noqa: BLE001 — an image Pillow cannot read: as sent
+    except Exception as _exc:  # noqa: BLE001 — an image Pillow cannot read: as sent
+        _failures.swallowed(_exc)
         return data, ctype
 
 
@@ -393,7 +395,8 @@ def index(conn) -> dict[tuple[str, str], tuple[str, str]]:
     try:
         return {(k, s): (f, c) for k, s, f, c in conn.execute(
             "SELECT kind, sid, file, ctype FROM photo_src WHERE file != ''")}
-    except Exception:  # noqa: BLE001 — a store from before pictures: none
+    except Exception as _exc:  # noqa: BLE001 — a store from before pictures: none
+        _failures.swallowed(_exc)
         return {}
 
 

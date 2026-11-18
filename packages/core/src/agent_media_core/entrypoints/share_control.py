@@ -49,6 +49,7 @@ import shlex
 import subprocess
 import time
 from typing import Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -337,8 +338,8 @@ def _speech() -> dict:
                 text = (rows[0].get("text") or "").strip()
                 out["title"] = text.splitlines()[0][:120] if text else None
                 out["conversation"] = (rows[0].get("window") or "").strip() or None
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     try:
         from ..state import StateStore
 
@@ -356,8 +357,8 @@ def _speech() -> dict:
         mutes = StateStore().list_mutes() or {}
         out["muted_elsewhere"] = sum(
             1 for bucket in mutes.values() for muted in bucket.values() if muted)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return out
 
 
@@ -411,7 +412,8 @@ def _focus() -> Optional[str]:
         from ..state import StateStore
 
         return StateStore().get_focus()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 

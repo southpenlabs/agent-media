@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import time
+from agent_media_core import failures as _failures
 
 #: The most threads a page may ask for, and a thread's most messages.
 PAGE_MAX = 100
@@ -196,7 +197,8 @@ def threads(*, folder: str = "inbox", account: str = "", q: str = "",
     mine = timeline.mail_self()
     try:
         book = timeline._mail_index()
-    except Exception:  # the book is a nicety here, never a failure
+    except Exception as _exc:  # the book is a nicety here, never a failure
+        _failures.swallowed(_exc)
         book = {}
     out = []
     for r in rows:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ def available() -> bool:
     try:
         import agent_media_server.send  # noqa: F401
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -41,7 +43,8 @@ def owned_headless(session: str) -> bool:
     try:
         from agent_media_server import driver
         return driver.owned_headless(session)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 

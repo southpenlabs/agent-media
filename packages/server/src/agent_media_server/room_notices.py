@@ -50,6 +50,7 @@ import os
 import threading
 import time
 from collections import deque
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -205,7 +206,8 @@ def _ready(thread: str, key: str) -> list[dict]:
         from . import room_replies
 
         return room_replies.ready(thread, key)
-    except Exception:  # noqa: BLE001 — a notice without chips still goes
+    except Exception as _exc:  # noqa: BLE001 — a notice without chips still goes
+        _failures.swallowed(_exc)
         return []
 
 

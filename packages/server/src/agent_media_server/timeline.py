@@ -53,6 +53,7 @@ import threading
 import time
 import uuid as uuidlib
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 CHANNELS = ("sms", "signal", "messenger", "instagram", "teams", "whatsapp", "call", "email",
             "chat", "note")
@@ -640,8 +641,8 @@ def _email_imap(window: list[str]) -> list[tuple]:
     finally:
         try:
             box.logout()
-        except Exception:  # noqa: BLE001 — closing is best effort
-            pass
+        except Exception as _exc:  # noqa: BLE001 — closing is best effort
+            _failures.swallowed(_exc)
     return out
 
 
@@ -695,6 +696,7 @@ def rollup(window: list[str] | None = None, push_: bool = True) -> dict:
                 s[0 if direction == "in" else 1] += 1
                 s[2] += secs
         except Exception as e:  # noqa: BLE001 — one source down is not all of them
+            _failures.swallowed(e)
             errors[name] = str(e) or type(e).__name__
     changed = 0
     with _WRITE:
@@ -834,6 +836,7 @@ def push(only: str | None = None) -> dict:
                 crm_id = contacts_drupal.post(RESOURCE, _payload(row, uuid, None))["data"]["id"]
             pushed += 1
         except Exception as e:  # noqa: BLE001 — kept, and tried again next time
+            _failures.swallowed(e)
             err = str(e) or type(e).__name__
             errors += 1
         with _WRITE:
@@ -888,6 +891,7 @@ def timeline(cid: str, limit: int | str | None = 100) -> dict:
                     continue
                 entries.append(_entry({**a, "key": a.get("source_key") or item.get("id")}, "crm"))
         except Exception as e:  # noqa: BLE001 — the ledger still answers
+            _failures.swallowed(e)
             crm_error = str(e) or type(e).__name__
     order = {c: i for i, c in enumerate(CHANNELS)}
     entries.sort(key=lambda e: (e["day"], -order.get(e["channel"], len(order))), reverse=True)

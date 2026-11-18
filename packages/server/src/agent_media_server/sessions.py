@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import auth, mailbox, panes, procmem, recaps
+from agent_media_core import failures as _failures
 
 if TYPE_CHECKING:
     from .session_records import Host, State, StateRow
@@ -1007,8 +1008,8 @@ def warm() -> None:
 
             with _pass.held():
                 _shared_build("", lambda: _built_and_saved(""))
-        except Exception:  # noqa: BLE001 — a warm-up that fails leaves the first ask to build
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a warm-up that fails leaves the first ask to build
+            _failures.swallowed(_exc)
     threading.Thread(target=run, name="targets-warm", daemon=True).start()
 
 
@@ -1152,7 +1153,8 @@ def _build_targets(history: str = "") -> dict:
 
     try:
         out["project_checkouts"] = project_page.checkouts()
-    except Exception:  # noqa: BLE001 — a list without its folding, not no list
+    except Exception as _exc:  # noqa: BLE001 — a list without its folding, not no list
+        _failures.swallowed(_exc)
         out["project_checkouts"] = {}
     # Where a thread's link starts, up to its id, for the app's Copy link
     # (David, 12 Nov 2026): the public web app's /app/t/ when this server has
@@ -1166,15 +1168,16 @@ def _build_targets(history: str = "") -> dict:
 
     try:
         out["agent_workspaces"] = agent_workspaces.for_targets()
-    except Exception:  # noqa: BLE001 — a list without its Agents heading, not no list
+    except Exception as _exc:  # noqa: BLE001 — a list without its Agents heading, not no list
+        _failures.swallowed(_exc)
         out["agent_workspaces"] = []
     # The spaces the rows are filed in, for the Chats strip (spaces.py).
     from . import spaces
 
     try:
         out["spaces"] = spaces.catalogue(rows)
-    except Exception:  # noqa: BLE001 — a list without its strip, not no list
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a list without its strip, not no list
+        _failures.swallowed(_exc)
     return out
 
 

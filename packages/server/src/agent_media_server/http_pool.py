@@ -21,6 +21,7 @@ import collections
 import os
 import threading
 from http.server import ThreadingHTTPServer
+from agent_media_core import failures as _failures
 
 KEEP = 8
 MOST = 256
@@ -74,8 +75,8 @@ class Pool:
                 fn, args = self.jobs.popleft()
             try:
                 fn(*args)
-            except Exception:  # noqa: BLE001 — a job's failure is its own (the handler logs it)
-                pass
+            except Exception as _exc:  # noqa: BLE001 — a job's failure is its own (the handler logs it)
+                _failures.swallowed(_exc)
 
     def stats(self) -> dict:
         with self.cond:

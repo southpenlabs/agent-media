@@ -25,6 +25,7 @@ import time
 from typing import TYPE_CHECKING, Literal
 
 from . import HEADLESS, Caps
+from agent_media_core import failures as _failures
 
 if TYPE_CHECKING:
     from ..session_records import State
@@ -306,7 +307,8 @@ def foreign(view: dict) -> bool:
         from ..servers_report import server_id
 
         return owner != server_id()
-    except Exception:  # noqa: BLE001 - an owner we can't check isn't us
+    except Exception as _exc:  # noqa: BLE001 - an owner we can't check isn't us
+        _failures.swallowed(_exc)
         return True
 
 

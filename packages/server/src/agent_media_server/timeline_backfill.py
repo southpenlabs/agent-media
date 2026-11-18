@@ -65,6 +65,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.timeline_backfill")
 
@@ -599,6 +600,7 @@ def run(*, phone_on: bool = True, rooms_on: bool = True) -> dict:
         try:
             timeline.push()
         except Exception as e:  # noqa: BLE001 — the CRM down is not the backfill failing
+            _failures.swallowed(e)
             got["push_error"] = str(e)
     return got
 

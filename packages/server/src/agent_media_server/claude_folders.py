@@ -43,6 +43,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 LINKS = JsonMap("claude-folder-links.json")
 #: A chat written this recently is live: its process would go on writing
@@ -292,7 +293,8 @@ def _record_moved(plan: Plan, session: str, new_path: str, old_path: str) -> Non
         return
     try:
         project = sessions.project_of(new_path) or ""
-    except Exception:  # noqa: BLE001 — a project name is a nicety here
+    except Exception as _exc:  # noqa: BLE001 — a project name is a nicety here
+        _failures.swallowed(_exc)
         project = ""
     plan.add("record-move", session=session, cwd=new_path)
     if plan.apply:

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from . import auth
+from agent_media_core import failures as _failures
 
 CHUNK = 1 << 20
 DIR = "local-backups"
@@ -258,7 +259,8 @@ def _device_names() -> dict[str, str]:
 
     try:
         return {str(d.get("id") or ""): str(d.get("name") or "") for d in devices.list_devices()}
-    except Exception:  # noqa: BLE001 — the name kept at upload time stands in
+    except Exception as _exc:  # noqa: BLE001 — the name kept at upload time stands in
+        _failures.swallowed(_exc)
         return {}
 
 

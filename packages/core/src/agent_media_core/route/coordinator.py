@@ -36,6 +36,7 @@ from .policy import (
     detect_content_type,
     policy_for,
 )
+from agent_media_core import failures as _failures
 
 
 def _env_duck_level() -> Optional[int]:
@@ -289,14 +290,14 @@ class Coordinator:
                     remote = _mpris.remote_playing_players(host)
                     self._mpris_remote_paused[host] = remote
                     _mpris.pause_remote(host, remote)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
             for host in android_hosts:
                 try:
                     if _android.pause_for_speech(host):
                         self._android_paused.append(host)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
             self._remote_pause_done.set()
 
         threading.Thread(target=_work, daemon=True).start()
@@ -321,14 +322,14 @@ class Coordinator:
         for host, names in self._mpris_remote_paused.items():
             try:
                 _mpris.resume_remote(host, names)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
         self._mpris_remote_paused = {}
         for host in self._android_paused:
             try:
                 _android.resume(host)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
         self._android_paused = []
 
     # ---- source-agnostic rooms (Snapcast) duck ------------------------
@@ -405,7 +406,8 @@ class Coordinator:
             return
         try:
             marker = self.state.get_rooms_duck()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             marker = None
         if not marker:
             return
@@ -436,6 +438,7 @@ class Coordinator:
             try:
                 snapcast.set_client_volume(str(cid), int(prior))
             except Exception as e:  # noqa: BLE001
+                _failures.swallowed(e)
                 failed.append(f"{cid}: {e}")
                 # Keep owing a client that still exists; the next unduck
                 # retries it. A client that is gone cannot be restored, and
@@ -443,7 +446,8 @@ class Coordinator:
                 try:
                     if snapcast.client_exists(str(cid)):
                         owed[str(cid)] = int(prior)
-                except Exception:  # noqa: BLE001
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
                     owed[str(cid)] = int(prior)
         if failed:
             self._log_err("rooms: snapcast unduck failed", "; ".join(failed))
@@ -451,8 +455,8 @@ class Coordinator:
             try:
                 self.state.set_rooms_duck(
                     {**marker, "vols": owed} if owed else None)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
 
     def _rooms_reduck(self) -> None:
         """Re-apply the rooms duck after a mid-response mute is lifted, reusing
@@ -461,7 +465,8 @@ class Coordinator:
             return
         try:
             marker = self.state.get_rooms_duck()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             marker = None
         if not marker:
             return
@@ -490,7 +495,8 @@ class Coordinator:
         try:
             return (str(_book_socket(self.book_target))
                     == str(_speech._socket_for(self.book_target)))
-        except Exception:  # noqa: BLE001 — unsure means ask, as before
+        except Exception as _exc:  # noqa: BLE001 — unsure means ask, as before
+            _failures.swallowed(_exc)
             return False
 
     def _ease_book_out(self) -> Optional[float]:
@@ -518,7 +524,8 @@ class Coordinator:
             return False
         try:
             return bool(self.book.active(self.book_target))
-        except Exception:  # noqa: BLE001 — surfaced by the caller
+        except Exception as _exc:  # noqa: BLE001 — surfaced by the caller
+            _failures.swallowed(_exc)
             return False
 
     def _music_audible(self) -> bool:
@@ -535,8 +542,8 @@ class Coordinator:
             active = getattr(backend, "active", None)
             if active is not None:
                 return bool(active(self.music_target))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         return True
 
     def _probe_music_uri(self):
@@ -556,7 +563,8 @@ class Coordinator:
                 return True
             if audio_backend.pause_enabled() and audio_backend.backend().playing_players():
                 return True
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return True
         return False
 
@@ -587,7 +595,8 @@ class Coordinator:
                 return True, bool(ducked)
             if audio_backend.pause_enabled() and audio_backend.backend().playing_players():
                 return True, False
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return True, False
         return False, False
 
@@ -712,14 +721,14 @@ class Coordinator:
                         remote = _mpris.remote_playing_players(host)
                         self._mpris_remote_paused[host] = remote
                         _mpris.pause_remote(host, remote)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as _exc:  # noqa: BLE001
+                        _failures.swallowed(_exc)
                 for host in android_hosts:
                     try:
                         if _android.pause_for_speech(host):
                             self._android_paused.append(host)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as _exc:  # noqa: BLE001
+                        _failures.swallowed(_exc)
 
         # Book channel (sink-book): a longform audiobook must *pause* for
         # speech — you can't half-hear narration. Independent of the Mopidy
@@ -756,7 +765,8 @@ class Coordinator:
             try:
                 self.music_ducked = (self._music_strategy(uri)
                                      == InterruptionStrategy.DUCK)
-            except Exception:  # noqa: BLE001 — unsure: not ducked
+            except Exception as _exc:  # noqa: BLE001 — unsure: not ducked
+                _failures.swallowed(_exc)
                 self.music_ducked = False
 
         if defer_music:
@@ -801,7 +811,8 @@ class Coordinator:
         elif policy.strategy == InterruptionStrategy.PAUSE:
             try:
                 pos_ms = self.music.position(self.music_target)
-            except Exception:
+            except Exception as _exc:
+                _failures.swallowed(_exc)
                 pos_ms = None
             extras["pause_pos_ms"] = pos_ms
             extras["lead_in_ms"] = policy.lead_in_ms
@@ -841,7 +852,8 @@ class Coordinator:
                 try:
                     vol_fn = getattr(self.music, "current_volume", None)
                     pre_duck = vol_fn(self.music_target) if vol_fn else None
-                except Exception:  # noqa: BLE001 — best-effort capture
+                except Exception as _exc:  # noqa: BLE001 — best-effort capture
+                    _failures.swallowed(_exc)
                     pre_duck = None
                 baseline = (pre_duck if pre_duck is not None and pre_duck > level
                             else self._fallback_baseline(policy.baseline_volume))
@@ -852,8 +864,8 @@ class Coordinator:
                 self.state.set_music_duck({"level": int(level),
                                            "baseline": int(baseline),
                                            "target": self.music_target.name})
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             try:
                 self.music.duck(self.music_target, level)
             except Exception as e:  # noqa: BLE001
@@ -891,7 +903,8 @@ class Coordinator:
         try:
             vol_fn = getattr(self.music, "current_volume", None)
             pre_duck = vol_fn(self.music_target) if vol_fn else None
-        except Exception:  # noqa: BLE001 — best-effort capture
+        except Exception as _exc:  # noqa: BLE001 — best-effort capture
+            _failures.swallowed(_exc)
             pre_duck = None
         if pre_duck is not None and pre_duck > level:
             return int(pre_duck), int(pre_duck)
@@ -908,7 +921,8 @@ class Coordinator:
         fn = getattr(self.music, "volume_owner", None)
         try:
             owner = fn(claim=claim) if fn else self.music
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             owner = self.music
         return owner, bool(getattr(owner, "fades", False))
 
@@ -927,8 +941,8 @@ class Coordinator:
             self.state.set_music_duck({"level": int(level),
                                        "baseline": int(baseline),
                                        "target": self.music_target.name})
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         owner, fades = self._volume_owner(claim=True)
         if getattr(owner, "self_ducks", False):
             # It fades and stops itself from the cue (_duck_cue); a pause from
@@ -951,7 +965,8 @@ class Coordinator:
             extras["faded"] = bool(fades)
             try:
                 extras["pause_pos_ms"] = self.music.position(self.music_target)
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 extras["pause_pos_ms"] = None
             extras["lead_in_ms"] = 0
             try:
@@ -977,7 +992,8 @@ class Coordinator:
         from the cue's ``swell``."""
         try:
             sock = _speech._socket_for(Target(name=audio_targets.speech_default()))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
         if isinstance(sock, str) or not sock.exists():
             return None
@@ -1011,7 +1027,8 @@ class Coordinator:
             return
         try:
             marker = self.state.get_rooms_duck() or {}
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return
         level = int(marker.get("level") or 0)
         vols = {str(c): int(p) for c, p in (marker.get("vols") or {}).items()
@@ -1033,7 +1050,8 @@ class Coordinator:
             return {}
         try:
             return rider.stop()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return {}
 
     def _dj_restore(self, interruption: dict, ducked: Optional[dict],
@@ -1067,8 +1085,8 @@ class Coordinator:
         finally:
             try:
                 self.state.set_music_duck(None)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             self.state.clear_now_playing("music")
 
     def after_speech(self) -> None:
@@ -1122,8 +1140,8 @@ class Coordinator:
             for host in self._android_paused:
                 try:
                     _android.resume(host)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
             self._android_paused = []
 
         # Resume the book channel if we paused it, backed up by the audiobook
@@ -1184,8 +1202,8 @@ class Coordinator:
                     try:
                         self.music.seek_cur(self.music_target,
                                             max(0, int(pos_ms) - lead_in_ms))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _failures.swallowed(_exc)
                 self.music.resume(self.music_target)
             elif strategy == "duck":
                 baseline = int(interruption.get("baseline_volume")
@@ -1205,7 +1223,8 @@ class Coordinator:
         never break speech."""
         try:
             return self.state.get_music_duck()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
 
     def _music_unduck(self, marker: dict) -> None:
@@ -1219,8 +1238,8 @@ class Coordinator:
         finally:
             try:
                 self.state.set_music_duck(None)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
 
     def _fallback_baseline(self, policy_baseline: int = 45) -> int:
         """Where to put the volume back when no clean pre-duck reading exists.
@@ -1234,7 +1253,8 @@ class Coordinator:
         fn = getattr(self.music, "nominal_volume", None)
         try:
             nominal = fn(self.music_target) if fn else None
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             nominal = None
         return int(nominal) if nominal else int(policy_baseline)
 
@@ -1311,7 +1331,8 @@ class Coordinator:
         """
         try:
             intent = self.state.get_music_intent()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             intent = None
         if intent:
             ct = coerce_content_type(intent.get("content_type"))
@@ -1323,8 +1344,8 @@ class Coordinator:
         log.warning("%s: %s", msg, detail)
         try:
             self.state.log_error("coordinator", msg, extras={"detail": detail})
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
 
 
 __all__ = ["Coordinator", "InterruptionPolicy", "InterruptionStrategy",

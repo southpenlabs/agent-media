@@ -40,6 +40,7 @@ import time
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +140,8 @@ def _likes() -> list[str]:
         from .state import StateStore
 
         return [r.get("title") for r in StateStore().list_likes(limit=15, channel="music") if r.get("title")]
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
 
 

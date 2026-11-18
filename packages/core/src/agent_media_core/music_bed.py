@@ -179,6 +179,7 @@ import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -580,7 +581,8 @@ def astro_stale(now: Optional[float] = None) -> bool:
             return False
     except (ImportError, AttributeError):
         pass
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
     import shutil
     if not shutil.which(os.environ.get("MEDIA_RADIO_ASTROTUNES", "astrotunes")):
@@ -712,7 +714,8 @@ def _fit_axes() -> Optional[dict]:
     try:
         from . import music_mood
         axes = music_mood.bed_axes()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         axes = None
     return axes or astro_reading()
 
@@ -955,7 +958,8 @@ def stored_gain() -> Optional[float]:
     try:
         v = _stored().get("gain_db")
         return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -993,7 +997,8 @@ def duck_scale() -> float:
     every song. Never raises (1.0 on any failure)."""
     try:
         return 10 ** ((gain_db() - DEFAULT_GAIN_DB) / 20.0)
-    except Exception:  # noqa: BLE001 — a duck must never cost a reply
+    except Exception as _exc:  # noqa: BLE001 — a duck must never cost a reply
+        _failures.swallowed(_exc)
         return 1.0
 
 
@@ -1631,7 +1636,8 @@ def _targets() -> list[dict]:
     try:
         from .audio_targets import speech_options
         return [{"name": o["name"], "label": o["label"]} for o in speech_options()]
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
 
 
@@ -1639,7 +1645,8 @@ def _current_target() -> Optional[str]:
     try:
         from .audio_targets import speech_default
         return speech_default()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -1667,7 +1674,8 @@ def _note(source: str, current: Optional[tuple[str, str]]) -> Optional[str]:
         try:
             from . import music_bed_favourites as fav
             return fav.note(current[1])
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
     style = current[1]
     try:
@@ -1677,7 +1685,8 @@ def _note(source: str, current: Optional[tuple[str, str]]) -> Optional[str]:
             from . import music_bed_stream as mod
         n = mod.counts()
         slow = len(mod.playable(None if style == "auto" else style))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     have = sum(n.values()) if style == "auto" else n.get(style, 0)
     if have:
@@ -1842,17 +1851,20 @@ def status() -> dict:
     try:
         from . import music_bed_library as lib
         lib_counts = lib.counts()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         lib_counts = {}
     try:
         from . import music_bed_stream as st
         st_counts = st.counts()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         st_counts = {}
     try:
         from . import music_bed_favourites as fav
         fav_counts = fav.counts()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         fav_counts = {}
     return {"choice": c, "set": stored is not None,
             "slow": slow,

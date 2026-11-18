@@ -64,6 +64,7 @@ from pathlib import Path
 
 from . import auth, panes, sessions
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 MOVES = JsonMap("moved.json")
 # Moves asked for while the session was busy, {session: {project, cwd, at,
@@ -288,7 +289,8 @@ def _agents_running(session: str) -> bool:
 
     try:
         return agents.counts(agents.agents(session, live=True))["running"] > 0
-    except Exception:  # noqa: BLE001 — unreadable is not running
+    except Exception as _exc:  # noqa: BLE001 — unreadable is not running
+        _failures.swallowed(_exc)
         return False
 
 

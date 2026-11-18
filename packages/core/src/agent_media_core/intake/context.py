@@ -68,6 +68,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 BANDS = (
     (85, "Context is {pct}% full ({used}k of {win}k); auto-compaction is near and "
@@ -278,8 +279,8 @@ def last_usage(transcript: str) -> tuple[str, int, int | None] | None:
                                      "window": win_key},
                                     agent="codex",
                                 )
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        _failures.swallowed(_exc)
             info = p.get("info") or {}
             last = info.get("last_token_usage")
             if p.get("type") == "token_count" and last:
@@ -346,8 +347,8 @@ def _is_claude(hook: dict) -> bool:
 
         if tp.startswith(str(harnesses._claude_dir()) + os.sep):
             return True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return ".claude" in Path(tp).parts
 
 
@@ -515,7 +516,8 @@ def _related_note(hook: dict, d: Path) -> str:
         from .. import related_threads
 
         found = related_threads.related(sid, prompt)
-    except Exception:  # noqa: BLE001 — a note is never worth failing a hook
+    except Exception as _exc:  # noqa: BLE001 — a note is never worth failing a hook
+        _failures.swallowed(_exc)
         found = []
     marker.write_text(str(RELATED_PROMPTS if found else tries + 1))
     return related_threads.note(found, thread_link_base()) if found else ""
@@ -579,7 +581,8 @@ def _restart_note(hook: dict, d: Path) -> str:
         from .. import restart_services as rs
 
         rec = rs.pending()
-    except Exception:  # noqa: BLE001 — a note is never worth failing a hook
+    except Exception as _exc:  # noqa: BLE001 — a note is never worth failing a hook
+        _failures.swallowed(_exc)
         return ""
     if not rec:
         return ""
@@ -915,8 +918,8 @@ def _statusline() -> None:
         try:
             from .. import quota
             quota.check_rate_limit_info(rl, agent="claude", session=str(d.get("session_id") or ""))
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
     cw = d.get("context_window") or {}
     size = cw.get("context_window_size")
     pct = cw.get("used_percentage")
@@ -936,12 +939,12 @@ def _statusline() -> None:
 def main() -> None:
     try:
         _hook()
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def main_statusline() -> None:
     try:
         _statusline()
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)

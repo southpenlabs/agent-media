@@ -31,6 +31,7 @@ carries the same list as `spaces`, so the app needs no second request.
 """
 
 from __future__ import annotations
+from agent_media_core import failures as _failures
 
 INBOX = "inbox"
 PEOPLE = "people"
@@ -96,7 +97,8 @@ def add_spaces(rows: list[dict]) -> list[dict]:
     """Give each row `spaces`, in place (after `tags` and `project`)."""
     try:
         gk = {g["id"].split(":", 1)[1] for g in groups()}
-    except Exception:  # noqa: BLE001 — a thread list never fails on spaces
+    except Exception as _exc:  # noqa: BLE001 — a thread list never fails on spaces
+        _failures.swallowed(_exc)
         gk = set()
     pk = _project_keys(rows)
     for r in rows:

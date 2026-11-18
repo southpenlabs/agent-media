@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from agent_media_core import antigravity as store
+from agent_media_core import failures as _failures
 
 SAFE = {'read_file', 'list_directory', 'view_file', 'list_dir', 'find_by_name', 'grep_search', 'sed_file', 'list_permissions'}
 TOOLS = {'read_file': 'Read', 'list_directory': 'LS', 'run_command': 'Bash', 'write_to_file': 'Write', 'write_file': 'Write',
@@ -161,8 +162,8 @@ def _ask_pre(s, tid: str, args: dict) -> None:
             'tool_use_id': tid,
             'transcript_path': str(store.path(s.id)),
         }, harness='antigravity')
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _ask_post(s, tid: str, args: dict, answers: dict) -> None:
@@ -176,8 +177,8 @@ def _ask_post(s, tid: str, args: dict, answers: dict) -> None:
             'tool_use_id': tid,
             'tool_response': {'answers': answers} if answers else {},
         }, harness='antigravity')
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def transcript(s, obj: dict) -> None:
@@ -234,8 +235,8 @@ def event(supervisor, s, obj: dict) -> None:
                 from agent_media_core.intake.submit import end_session_speech_cut, session_reply_read
                 end_session_speech_cut(s.id)
                 session_reply_read(s.id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                _failures.swallowed(_exc)
             s.set_state('working')
             supervisor._save(s)
         elif stype == 'agent_response':

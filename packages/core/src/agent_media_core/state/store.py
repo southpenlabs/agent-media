@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .records import HistoryRow, MatrixSpeech
 
 from .._paths import state_dir
+from agent_media_core import failures as _failures
 
 
 SCHEMA_VERSION = 4
@@ -274,8 +275,8 @@ class StateStore:
         if c is not None:
             try:
                 c.close()
-            except Exception:  # noqa: BLE001 — best-effort release
-                pass
+            except Exception as _exc:  # noqa: BLE001 — best-effort release
+                _failures.swallowed(_exc)
             self._local.conn = None
 
     @contextmanager
@@ -1250,7 +1251,8 @@ class StateStore:
                                     target=target or "", source=source,
                                     content_type=content_type, text=title,
                                     extras={"source_session": sid} if sid else None)
-        except Exception:  # noqa: BLE001 — see the docstring
+        except Exception as _exc:  # noqa: BLE001 — see the docstring
+            _failures.swallowed(_exc)
             return None
 
     def set_history_title(self, sink: str, uri: str, title: str) -> bool:
@@ -1291,7 +1293,8 @@ class StateStore:
                 cur.execute("UPDATE history SET text = ? WHERE id = ?",
                             (title, row[0]))
             return True
-        except Exception:  # noqa: BLE001 — a nicer label is never worth a crash
+        except Exception as _exc:  # noqa: BLE001 — a nicer label is never worth a crash
+            _failures.swallowed(_exc)
             return False
 
     def mark_heard(self, row_id: int) -> bool:

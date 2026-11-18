@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import IO, Callable, Iterator, Optional, Sequence
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 PURPOSES = ("music", "book", "radio", "podcast", "practice", "practice_sound")
 PHASES = ("downloading", "copying")
@@ -232,8 +233,8 @@ def cancel(tag: str, wait: bool = False) -> None:
         try:
             from . import phone_run
             phone_run.cancel(tag)
-        except Exception:  # noqa: BLE001 — a download left running is the old way
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a download left running is the old way
+            _failures.swallowed(_exc)
     if wait:
         go()
     else:

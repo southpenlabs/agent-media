@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager
 
 from agent_media_core import harnesses, native_models
+from agent_media_core import failures as _failures
 
 TIMEOUT = 3.0
 
@@ -81,7 +82,8 @@ def state(session: str) -> dict | None:
             return client.read(session)
     except (OSError, ValueError, RPCError, TimeoutError, ImportError):
         return None
-    except Exception:  # WebSocket handshake/connection errors: fall back to the pane.
+    except Exception as _exc:  # WebSocket handshake/connection errors: fall back to the pane.
+        _failures.swallowed(_exc)
         return None
 
 
@@ -94,7 +96,8 @@ def working(session: str) -> bool | None:
         if status.get("type") not in {"active", "idle"}:
             return None
         return status["type"] == "active" and not status.get("activeFlags")
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
 
 
@@ -124,4 +127,5 @@ def configure(session: str, *, model: str | None, mode: str | None) -> tuple[boo
                 return False, {"error": "Codex did not confirm the settings change", "status": 502}
             return True, {"told": True}
     except Exception as e:
+        _failures.swallowed(e)
         return False, {"error": f"Codex settings unavailable: {e}", "status": 502}

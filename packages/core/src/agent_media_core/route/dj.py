@@ -45,6 +45,7 @@ from typing import Callable, Optional
 
 from ..types import ContentType
 from .policy import InterruptionStrategy, policy_for
+from agent_media_core import failures as _failures
 
 
 def enabled() -> bool:
@@ -73,7 +74,8 @@ def duck_scale() -> float:
     try:
         from .. import music_bed
         return float(music_bed.duck_scale())
-    except Exception:  # noqa: BLE001 — a duck must never cost a reply
+    except Exception as _exc:  # noqa: BLE001 — a duck must never cost a reply
+        _failures.swallowed(_exc)
         return 1.0
 
 
@@ -91,7 +93,8 @@ def breathe_db() -> float:
     try:
         from .. import music_bed_mix as mix
         return float(mix.tunable("BREATHE_DB")) if mix.on("breathe") else 0.0
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0.0
 
 
@@ -101,7 +104,8 @@ def ride_times() -> tuple[float, float, float]:
         from .. import music_bed_mix as mix
         return (mix.tunable("ATTACK_MS"), mix.tunable("RELEASE_MS"),
                 mix.tunable("HOLD_MS"))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 80.0, 400.0, 250.0
 
 
@@ -331,14 +335,16 @@ class Rider:
         if self._props is not None:
             try:
                 return self._props() or {}
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 return {}
         try:
             from ..sinks import _mpv_ipc
             return _mpv_ipc.get_properties(
                 self.broker, ["idle-active", "pause", "core-idle", "time-pos",
                               "duration"], timeout=0.3) or {}
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return {}
 
     def _voiced(self) -> bool:
@@ -359,7 +365,8 @@ class Rider:
             return
         try:
             lane[0](v)
-        except Exception:  # noqa: BLE001 — a step must never cost the reply
+        except Exception as _exc:  # noqa: BLE001 — a step must never cost the reply
+            _failures.swallowed(_exc)
             return
         lane[3] = v
 

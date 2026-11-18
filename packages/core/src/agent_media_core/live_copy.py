@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 from typing import Iterable, Optional
+from agent_media_core import failures as _failures
 
 #: Exit code of `media session holder` when the session is live somewhere.
 HELD_RC = 3
@@ -52,7 +53,8 @@ def holders(session: str, exclude_pids: Iterable[int] = ()) -> list[dict]:
     try:
         from . import claude_sessions
         recs = claude_sessions.records()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
     out = []
     for rec in recs:

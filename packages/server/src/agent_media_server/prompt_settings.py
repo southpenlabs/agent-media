@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: The writing guide's tags, and when each applies.
 NOTE_TAGS = {
@@ -169,6 +170,7 @@ def report(guest: bool = False) -> dict:
         try:
             prompts.append(build())
         except Exception as e:  # noqa: BLE001 — one prompt never hides the rest
+            _failures.swallowed(e)
             prompts.append({"key": build.__name__.lstrip("_"), "error": str(e)})
     return {"prompts": prompts, "personas": [] if guest else _personas(),
             "persona_agents": list(PERSONA_AGENTS)}

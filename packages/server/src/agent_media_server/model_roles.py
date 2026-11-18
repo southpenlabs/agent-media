@@ -33,6 +33,7 @@ from typing import Callable, Optional
 
 from agent_media_core import model_choice, model_usage
 from agent_media_core import settings as _settings
+from agent_media_core import failures as _failures
 
 #: The summary gateway's own default (intake/_summary.py DEFAULT_MODEL).
 SUMMARY_DEFAULT = model_choice.SUMMARY_DEFAULT
@@ -650,6 +651,7 @@ def report() -> dict:
         try:
             roles.append(row(r))
         except Exception as e:  # noqa: BLE001 — one role never hides the rest
+            _failures.swallowed(e)
             roles.append({"key": r.key, "label": r.label, "needs": r.needs,
                           "error": f"{type(e).__name__}: {e}"[:200]})
     from . import memory_models
@@ -657,6 +659,7 @@ def report() -> dict:
     try:
         mem_rows, left_out = memory_models.report()
     except Exception as e:  # noqa: BLE001 — memory's settings never hide the rest
+        _failures.swallowed(e)
         mem_rows, left_out = [], [{"key": "memory", "why": f"agent-memory's settings could not be read: "
                                    f"{type(e).__name__}"}]
     return {"roles": roles + mem_rows, "left_out": left_out}

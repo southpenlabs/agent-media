@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import cache_dir, state_dir
+from agent_media_core import failures as _failures
 
 AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".aac", ".ogg", ".opus", ".flac", ".wav"}
 #: Video files the folder also lists, watchable in the app (`watch`): the
@@ -235,7 +236,8 @@ def read_feed(url: str, fresh: bool = False) -> Optional[dict]:
         return cached
     try:
         got = {**parse_feed(_fetch(url)), "at": time.time()}
-    except Exception:  # noqa: BLE001 — a dead feed keeps its last episodes
+    except Exception as _exc:  # noqa: BLE001 — a dead feed keeps its last episodes
+        _failures.swallowed(_exc)
         return cached
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(got))
@@ -269,7 +271,8 @@ def _all() -> list[dict]:
     try:
         from .practice_embed import items as _embeds
         embeds = _embeds()
-    except Exception:  # noqa: BLE001 — a bad index costs only its own items
+    except Exception as _exc:  # noqa: BLE001 — a bad index costs only its own items
+        _failures.swallowed(_exc)
         embeds = []
     return _made() + yt + _files() + eps + embeds + _podcasts(d)
 
@@ -548,7 +551,8 @@ def _probe(uri: str) -> Optional[int]:
         r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                             "-of", "default=nw=1:nk=1", uri], capture_output=True, text=True, timeout=30)
         return int(float(r.stdout.strip().splitlines()[0])) if r.returncode == 0 and r.stdout.strip() else None
-    except (OSError, ValueError, IndexError, Exception):  # noqa: BLE001
+    except (OSError, ValueError, IndexError, Exception) as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -561,7 +565,8 @@ def _youtube_lengths(vids: list[str]) -> dict:
         return {}
     try:
         return {str(k): int(v) for k, v in dict(addon.lengths(list(vids))).items()}
-    except Exception:  # noqa: BLE001 — no lengths this time
+    except Exception as _exc:  # noqa: BLE001 — no lengths this time
+        _failures.swallowed(_exc)
         return {}
 
 
@@ -703,8 +708,8 @@ def _yt_title(url: str) -> str:
             got = str(addon.title(url) or "")
             if got:
                 return got
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     vid = youtube_id(url)
     return music_recent._oembed(vid) if vid else ""
 
@@ -960,7 +965,8 @@ def teacher_profile(name: str, fresh: bool = False) -> dict:
         return {"name": name, "profile": None}
     try:
         profile = personal_use.provider("insight-timer-profiles").lookup(name)
-    except Exception:  # noqa: BLE001 — the last one known, or none
+    except Exception as _exc:  # noqa: BLE001 — the last one known, or none
+        _failures.swallowed(_exc)
         return {"name": name, "profile": (hit or {}).get("profile")}
     kept[key] = {"profile": profile, "at": time.time()}
     p = _profiles_path()
@@ -1116,7 +1122,8 @@ def _pause_if_heard(it: dict) -> Optional[float]:
         if not (mcp_server.book_pause(target=target) or {}).get("ok"):
             return None
         return at
-    except Exception:  # noqa: BLE001 — the video is shown either way
+    except Exception as _exc:  # noqa: BLE001 — the video is shown either way
+        _failures.swallowed(_exc)
         return None
 
 
@@ -1128,7 +1135,8 @@ def _book_seconds(target: str) -> float:
         t = mcp_server._book_target(target)
         ms = mcp_server._book().position(t)
         return (ms or 0) / 1000
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0.0
 
 
@@ -1182,8 +1190,8 @@ def prepare_sound(it: dict, background: bool = True) -> None:
             elif it.get("video") == "file" and sound_for(it) is None:
                 _extract(Path(it["_uri"]), _sound_dir() / (it["id"].split(":", 1)[1] + ".m4a"))
             _keep_within_cap()
-        except Exception:  # noqa: BLE001 — played without it, it is fetched then
-            pass
+        except Exception as _exc:  # noqa: BLE001 — played without it, it is fetched then
+            _failures.swallowed(_exc)
     if background:
         import threading
         threading.Thread(target=run, daemon=True, name="practice-sound").start()
@@ -1277,8 +1285,8 @@ def keep(item_id: str) -> dict:
             try:
                 _fetch_small(vid, video=True)
                 _keep_within_cap()
-            except Exception:  # noqa: BLE001 — the list says it is not kept
-                pass
+            except Exception as _exc:  # noqa: BLE001 — the list says it is not kept
+                _failures.swallowed(_exc)
         _fetching.add((vid, "video"))       # said at once; _fetch_small takes it over
         def go():
             _fetching.discard((vid, "video"))
@@ -1318,7 +1326,8 @@ def _owned_downloads() -> list[tuple[str, Path]]:
     try:
         from . import podcast_links
         shared = {x.get("vid") for x in podcast_links._load()}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         shared = set()
     out = []
     for v in _load()["youtube"]:

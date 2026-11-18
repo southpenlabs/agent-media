@@ -28,6 +28,7 @@ import re
 import sys
 import threading
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: The thread's name in lists and notices.
 TITLE = "What's new"
@@ -185,7 +186,8 @@ def _link(session: str) -> str:
         from agent_media_core.intake.context import thread_link_base
 
         return thread_link_base() + session
-    except Exception:  # noqa: BLE001 — the id alone still finds it
+    except Exception as _exc:  # noqa: BLE001 — the id alone still finds it
+        _failures.swallowed(_exc)
         return session
 
 

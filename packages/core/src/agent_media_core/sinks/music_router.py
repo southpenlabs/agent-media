@@ -41,6 +41,7 @@ from .music import SinkMusic
 from .music_local import SinkMusicLocal, configured as _local_configured
 from .music_sasonica import SinkMusicSasonica, configured as _sasonica_configured
 from .. import settings as _settings
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -89,7 +90,8 @@ class SinkMusicRouter:
             return False
         try:
             return self.local.loaded()
-        except Exception:  # noqa: BLE001 — bridge down ⇒ treat as not live
+        except Exception as _exc:  # noqa: BLE001 — bridge down ⇒ treat as not live
+            _failures.swallowed(_exc)
             return False
 
     def _sasonica_live(self) -> bool:
@@ -98,7 +100,8 @@ class SinkMusicRouter:
             return False
         try:
             return self.sasonica.loaded()
-        except Exception:  # noqa: BLE001 — app unreachable ⇒ not live
+        except Exception as _exc:  # noqa: BLE001 — app unreachable ⇒ not live
+            _failures.swallowed(_exc)
             return False
 
     def _observe_backend(self):
@@ -209,8 +212,8 @@ class SinkMusicRouter:
         try:
             if self.local.loaded():
                 self.local.stop()
-        except Exception:  # noqa: BLE001 — best-effort tidying
-            pass
+        except Exception as _exc:  # noqa: BLE001 — best-effort tidying
+            _failures.swallowed(_exc)
 
     # ---- coordinator-facing control: follows the live backend -----------
 

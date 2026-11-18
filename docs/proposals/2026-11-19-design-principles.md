@@ -40,16 +40,26 @@ poll is one line per restart. Its logger has a NullHandler, so a short
 program with no logging set up (the `media` CLI, the agent hooks) prints
 nothing new; a service (section 3) sends it to the journal.
 
-Put into the 699 silent handlers mechanically (an `as e` where there was
-none, the call first in the body), so the behaviour of each is as before.
+Put into the silent handlers mechanically (an `as _exc` where there was
+none, the call first in the body), so the behaviour of each is as before:
+679 of the 699; the rest are a `try` around imports only (an optional
+dependency's probe, not a fault) or a one-line `except: pass`, and the
+packages that do not depend on core (the engines, org-paragtd,
+voice-bridge, the `sasonica` installer) are left as they are.
 
 ## 3. One logging setup
 
 `agent_media_core/logs.py`: `logs.setup()` in every long-running program's
 main, replacing each `basicConfig` (keeping its format), and added where
 there was none. `MEDIA_LOG_LEVEL` sets the level for all of them at once
-(DEBUG shows `swallowed`'s repeats). The API server's stderr prints become
-log lines, so they carry their module's name and the level.
+(DEBUG shows `swallowed`'s repeats). Added to the API server
+(`media-visual-canvas`), the tunnel and speech-state, which had none; the
+jobs worker, a script that also runs where core is not installed, keeps
+its prints. The HTTP API's own stderr prints (app.py, 50) become log lines,
+warnings where they report a failure and info otherwise. Elsewhere a print
+to stderr stays: much of it is a command's own output (the contacts CLI
+prints through timeline.py, which has no `main`), and a print made an info
+line would vanish from a terminal where no logging is set up.
 
 ## 4. Coverage, reported
 
@@ -68,6 +78,7 @@ with the real one as its default (`store=None` → `StateStore()`), as
 its own instead of patching the module. Settings already work this way
 (`settings.use(speech=...)`).
 
-## Status
+## Status (19 Nov 2026)
 
-See the commits that name this file.
+1 done (4e0fd2eb); 2, 3 and 4 done (the commit after it); 5 is the rule
+for code as it is touched, in AGENTS.md's design rules.

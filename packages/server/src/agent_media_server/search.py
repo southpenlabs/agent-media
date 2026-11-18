@@ -93,6 +93,7 @@ import time
 from pathlib import Path
 
 from . import auth, transcript
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.search")
 
@@ -317,7 +318,8 @@ def _project(cwd: str) -> str:
 
     try:
         return sessions.project_of(cwd) or "" if cwd else ""
-    except Exception:  # noqa: BLE001 — a name is a nicety, never a failure
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety, never a failure
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -413,7 +415,8 @@ def known_sessions(ids) -> set[str]:
             got |= {r[0] for r in conn.execute(
                 f"SELECT session FROM threads WHERE session IN ({','.join('?' * len(part))})",
                 part)}
-    except Exception:  # noqa: BLE001 - no index: nothing known
+    except Exception as _exc:  # noqa: BLE001 - no index: nothing known
+        _failures.swallowed(_exc)
         return set()
     # Another machine's chat this one only holds frozen (frozen.py) is not
     # "here": its own server's hit is the live one, and is kept.
@@ -421,8 +424,8 @@ def known_sessions(ids) -> set[str]:
         from . import frozen
 
         got = {s for s in got if not frozen.is_frozen(s)}
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return got
 
 
@@ -453,7 +456,8 @@ def _owned_elsewhere() -> set[str]:
         from .driver.headless import foreign
 
         return {str(r.get("session")) for r in sessiond.records() if foreign(r)}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return set()
 
 
@@ -1739,7 +1743,8 @@ def _owned_headless() -> set[str]:
         return set()
     try:
         return {str(v.get("session")) for v in driver.headless_driver().all_rows() if v.get("session")}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return set()
 
 
@@ -2538,13 +2543,15 @@ def answer(q: str, *, limit=None, before=None, tools: bool = False,
         if found_docs is not None:
             try:
                 out["docs"] = found_docs.result(timeout=6)
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 out["docs"] = []
         # Memory: first page only, and only when asked (`memory=0` skips it).
         if mem is not None:
             try:
                 out["memory"] = mem.result(timeout=8)
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 out["memory"] = {"available": True, "items": [], "error": "memory did not answer"}
     return True, out
 

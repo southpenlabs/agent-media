@@ -58,6 +58,7 @@ from pathlib import Path
 
 from . import _lock as fcntl
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 NAME = "speak-priority.json"
 DEFAULT_NAME = "speak-priority-default.json"
@@ -86,7 +87,8 @@ def _fallback(session: str) -> tuple[str, str] | None:
         return None
     try:
         got = fn(session)
-    except Exception:  # noqa: BLE001 — the default, as before, never a crash
+    except Exception as _exc:  # noqa: BLE001 — the default, as before, never a crash
+        _failures.swallowed(_exc)
         return None
     if got and got[0] in LEVELS:
         return got[0], str(got[1] or "")

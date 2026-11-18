@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from . import auth
+from agent_media_core import failures as _failures
 
 CHUNK = 1 << 20
 
@@ -100,7 +101,8 @@ def _kept_copy(bearer: str, sha256: str, size: int, folder: Path) -> Path | None
         return None
     try:
         lines = upload_log.read(days=2)
-    except Exception:  # noqa: BLE001 — no log, no reuse: keep the upload
+    except Exception as _exc:  # noqa: BLE001 — no log, no reuse: keep the upload
+        _failures.swallowed(_exc)
         return None
     for line in reversed(lines):
         if (line.get("outcome") != "saved" or line.get("sha256") != sha256

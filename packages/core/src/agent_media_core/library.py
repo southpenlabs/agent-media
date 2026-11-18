@@ -21,6 +21,7 @@ import os
 import re
 from pathlib import Path
 from typing import Optional, Sequence
+from agent_media_core import failures as _failures
 
 
 # Bare 11-char YouTube id from the common URL shapes (after any `yt:` strip).
@@ -131,7 +132,8 @@ def expand_youtube_playlist(uri: str, *, limit: Optional[int] = None) -> Optiona
         return None
     try:
         ids = list(addon.playlist_ids(purl, cap, 300))
-    except Exception:  # noqa: BLE001 — the single link, as before
+    except Exception as _exc:  # noqa: BLE001 — the single link, as before
+        _failures.swallowed(_exc)
         return None
     return [f"https://www.youtube.com/watch?v={vid}" for vid in ids] or None
 
@@ -166,7 +168,8 @@ def start_fetch_many(urls: Sequence[str], *, play: bool = False, target=None) ->
     lib = abs_import_dir(target) if target is not None and name else None
     try:
         return bool(addon.start_fetch_many(list(urls), play=play, target=target, lib=lib))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 

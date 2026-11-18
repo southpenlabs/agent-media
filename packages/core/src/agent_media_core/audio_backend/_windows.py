@@ -39,6 +39,7 @@ import time
 from typing import Any, Callable, Optional
 
 from . import AudioBackend, log_once, output_devices
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +127,8 @@ class WindowsBackend(AudioBackend):
         for s in sessions:
             try:
                 app = str(s.source_app_user_model_id or "")
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 continue
             n = counts[app] = counts.get(app, 0) + 1
             out.append((app if n == 1 else f"{app}#{n}", s))
@@ -136,7 +138,8 @@ class WindowsBackend(AudioBackend):
     def _status(session: Any) -> Optional[int]:
         try:
             return int(session.get_playback_info().playback_status)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
 
     def playing_players(self) -> list[str]:
@@ -238,9 +241,11 @@ def winrt_status() -> str:
     except ImportError as e:
         return f"not importable: {e}"
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return f"imported; no session manager: {type(e).__name__}: {e}"
     try:
         n = len(list(mgr.get_sessions()))
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return f"imported; sessions unreadable: {type(e).__name__}: {e}"
     return f"ok ({n} media session{'s' if n != 1 else ''})"

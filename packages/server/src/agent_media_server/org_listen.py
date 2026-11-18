@@ -48,6 +48,7 @@ from agent_media_core import docs
 from agent_media_core._paths import state_dir
 
 from . import auth, doc_read, org
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.org_listen")
 
@@ -232,7 +233,8 @@ def _read() -> dict | None:
     from agent_media_core.sinks import _mpv_ipc as ipc
     try:
         p = ipc.display_properties(_socket(), _PROPS, timeout=2.0)
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
     if not p:
         return None
@@ -484,7 +486,8 @@ def _staging() -> dict | None:
     try:
         from agent_media_core.sinks.book import read_stage_status
         st = read_stage_status()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
     if not st or st.get("status") != "copying" or time.time() - float(st.get("ts") or 0) > 90:
         return None
@@ -550,6 +553,7 @@ def control(action: str, bearer: str, value: float | None = None) -> tuple[bool,
             try:
                 _send([["stop"]])
             except Exception as e:
+                _failures.swallowed(e)
                 return False, {"error": f"the player did not take it ({e})", "status": 502}
         else:
             srv.book_stop(target=_target())        # saves the place, clears now-playing
@@ -627,6 +631,7 @@ def control(action: str, bearer: str, value: float | None = None) -> tuple[bool,
     try:
         _send(cmds)
     except Exception as e:
+        _failures.swallowed(e)
         _forget_cache()
         return False, {"error": f"the player did not take it ({e})", "status": 502}
     _predict(new)

@@ -32,6 +32,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Optional
+from agent_media_core import failures as _failures
 
 AUDIO_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac")
 ITUNES_SEARCH = "https://itunes.apple.com/search"
@@ -92,7 +93,8 @@ def _page(url: str) -> tuple[Optional[str], str]:
     be read (a sign-in page, a site that refuses this host)."""
     try:
         doc = _get(url).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 — a page that will not be read
+    except Exception as _exc:  # noqa: BLE001 — a page that will not be read
+        _failures.swallowed(_exc)
         return None, ""
 
     def meta(prop: str) -> str:
@@ -163,8 +165,8 @@ def episode(url: str, text: str = "", search: bool = True) -> Optional[dict]:
         got = _apple(url)
         if got:
             return got
-    except Exception:  # noqa: BLE001 — try the page and the search
-        pass
+    except Exception as _exc:  # noqa: BLE001 — try the page and the search
+        _failures.swallowed(_exc)
     audio, title = _page(url)
     if audio:
         return {"audio": audio, "title": title or words or None, "show": None, "art": None,
@@ -172,7 +174,8 @@ def episode(url: str, text: str = "", search: bool = True) -> Optional[dict]:
     for q in ((words, title, f"{words} {title}") if search else ()):
         try:
             got = _search(q)
-        except Exception:  # noqa: BLE001 — the directory not answering
+        except Exception as _exc:  # noqa: BLE001 — the directory not answering
+            _failures.swallowed(_exc)
             got = None
         if got:
             return got

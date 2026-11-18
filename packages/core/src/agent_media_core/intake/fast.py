@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from agent_media_core import failures as _failures
 
 DEFAULT_COOLDOWN_S = 300.0
 
@@ -112,6 +113,7 @@ def _once(system: str, user: str, model: str | None,
                 text = _summary._chat(system, user, max(1, int(left + 0.999)), model=model)
             out.append((text, "" if text else _summary.last_error()))
         except Exception as e:  # noqa: BLE001 — a failed model is the next one's turn
+            _failures.swallowed(e)
             out.append((None, f"{type(e).__name__}: {e}"[:160]))
 
     t = threading.Thread(target=run, daemon=True)

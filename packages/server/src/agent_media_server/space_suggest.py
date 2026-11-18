@@ -37,6 +37,7 @@ import os
 import re
 import threading
 import time
+from agent_media_core import failures as _failures
 
 #: The pass is started by a thread list being read; at most this often.
 MIN_GAP_S = 600.0
@@ -84,8 +85,8 @@ def candidates(rows: list[dict]) -> list[dict]:
     try:
         for g in spaces.groups():
             out.append({"space": g["id"], "name": g["name"], "tag": g["name"]})
-    except Exception:  # noqa: BLE001 — no contacts, no groups
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no contacts, no groups
+        _failures.swallowed(_exc)
     for key, project in sorted(spaces._project_keys(rows).items()):
         out.append({"space": f"project:{project}", "name": project, "tag": key})
     return out
@@ -170,7 +171,8 @@ def run(rows: list[dict]) -> None:
                 continue
             try:
                 got = pick(thread, str(r.get("title") or ""), cands)
-            except Exception:  # noqa: BLE001 — one chat's failure is not the pass's
+            except Exception as _exc:  # noqa: BLE001 — one chat's failure is not the pass's
+                _failures.swallowed(_exc)
                 continue
             m.put(thread, {"space": got["space"] if got else None, "seen": last})
             done += 1
@@ -190,8 +192,8 @@ def kick(rows: list[dict]) -> None:
         _state["at"] = time.time()
         threading.Thread(target=run, args=(list(rows),), daemon=True,
                          name="space-suggest").start()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def add_suggestions(rows: list[dict]) -> list[dict]:
@@ -208,7 +210,8 @@ def add_suggestions(rows: list[dict]) -> list[dict]:
             sp = v.get("space") if isinstance(v, dict) else None
             if sp and sp in by_space and sp not in (gone.get(str(r["session"])) or []):
                 r["space_suggestion"] = dict(by_space[sp])
-    except Exception:  # noqa: BLE001 — a thread list never fails on this
+    except Exception as _exc:  # noqa: BLE001 — a thread list never fails on this
+        _failures.swallowed(_exc)
         return rows
     kick(rows)
     return rows

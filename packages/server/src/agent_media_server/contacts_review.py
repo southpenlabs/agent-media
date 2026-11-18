@@ -23,6 +23,7 @@ name, sources, labels and last contact (timeline.activity), and why.
 from __future__ import annotations
 
 import json
+from agent_media_core import failures as _failures
 
 #: Short form → the full names it may stand for (folded). Kept small and
 #: common: a guess outside it is no better than chance.
@@ -194,7 +195,8 @@ def pairs() -> dict:
             conn.close()
     try:
         act = timeline.activity()
-    except Exception:  # noqa: BLE001 — the last contact is a nicety
+    except Exception as _exc:  # noqa: BLE001 — the last contact is a nicety
+        _failures.swallowed(_exc)
         act = {}
 
     def side(cid: str) -> dict:

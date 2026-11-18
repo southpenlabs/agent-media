@@ -57,6 +57,7 @@ from .sinks.book import normalize_uri
 from .sinks.music_router import SinkMusicRouter
 from .state import StateStore
 from .types import Event, Priority, Source, Target
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -160,7 +161,8 @@ def _note_media_title(book: "SinkBook", state: StateStore, target, uri: str) -> 
         try:
             props = ipc.display_properties(_socket_for(target),
                                            ["path", "media-title"], timeout=1.0)
-        except Exception:  # noqa: BLE001 — the broker is allowed to be busy
+        except Exception as _exc:  # noqa: BLE001 — the broker is allowed to be busy
+            _failures.swallowed(_exc)
             props = None
         if props:
             # Only trust a title that belongs to the file we just asked for:
@@ -187,8 +189,8 @@ def _save_book_bookmark(book: SinkBook, state: StateStore,
         pos = book.position(target)
         if pos is not None and pos > 0:
             state.set_resume_pos(np["uri"], pos)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def _held(e: "play_gate.PlayHeld") -> dict:
@@ -686,7 +688,8 @@ def music_resume(target: str = "") -> dict:
     m, t = _music(), _music_target(target)
     try:
         loaded = bool(m.now_playing_uri(t))
-    except Exception:  # noqa: BLE001 — unreadable means "just resume"
+    except Exception as _exc:  # noqa: BLE001 — unreadable means "just resume"
+        _failures.swallowed(_exc)
         loaded = True
     if not loaded:
         last = _state().get_music_last()
@@ -836,8 +839,8 @@ def _book_play(uri: str, resume: bool, start_ms: int, target: str, title: str) -
                 ):
                     return {"ok": False, "fetching": True, "uri": norm,
                             "reason": "copying to phone cache; will auto-play when ready"}
-            except Exception:
-                pass
+            except Exception as _exc:
+                _failures.swallowed(_exc)
     # Save the outgoing book's place before switching away from it.
     _save_book_bookmark(b, st, t)
     if start_ms is not None and start_ms >= 0:
@@ -852,8 +855,8 @@ def _book_play(uri: str, resume: bool, start_ms: int, target: str, title: str) -
         try:
             from urllib.parse import unquote
             display_title = Path(unquote(norm.split("?", 1)[0])).stem
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
     st.set_now_playing(sink="book", uri=norm, started_at=time.time(),
                        content_type="audiobook", target=t.name,
                        extras={"title": display_title} if display_title else None)
@@ -950,7 +953,8 @@ def book_now_playing(target: str = "") -> dict:
             "media-title", "chapter-metadata/by-key/title",
             "metadata/by-key/album", "metadata/by-key/artist",
         ], timeout=1.2)
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return {"idle": True}
     if props.get("idle-active") is True:
         return {"idle": True}
@@ -990,8 +994,8 @@ def book_now_playing(target: str = "") -> dict:
             if isinstance(ex, dict):
                 info.update({k: v for k, v in ex.items()
                              if k in ("title", "chapter_title", "source") and v})
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
     return info
 
 
@@ -1472,7 +1476,8 @@ def search(channel: str, query: str = "") -> dict:
                         text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=8,
                         check=False,
                     )
-                except Exception:
+                except Exception as _exc:
+                    _failures.swallowed(_exc)
                     proc = None
                 if proc and proc.returncode == 0:
                     for line in proc.stdout.splitlines():
@@ -1555,8 +1560,8 @@ def channels_status() -> dict:
 # --- entrypoint -----------------------------------------------------------
 
 def _configure_logging() -> None:
-    logging.basicConfig(level=logging.WARNING,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.WARNING, '%(asctime)s %(levelname)s %(name)s: %(message)s')
 
 
 def main() -> None:

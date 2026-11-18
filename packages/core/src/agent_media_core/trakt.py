@@ -48,6 +48,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 API = "https://api.trakt.tv"
 SITE = "https://trakt.tv"
@@ -764,8 +765,8 @@ def search(kind: str, query: str, now: Optional[float] = None) -> list[dict]:
     if tmdb.set_up():
         try:
             tmdb.add_posters(items)
-        except Exception:  # noqa: BLE001 — the results without their pictures
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the results without their pictures
+            _failures.swallowed(_exc)
     return items
 
 
@@ -1008,8 +1009,8 @@ def discover(kind: str, which: str, genre: str = "", year: str = "", page: int =
     if tmdb.set_up():
         try:
             tmdb.add_posters(items)
-        except Exception:  # noqa: BLE001 — the list without its pictures
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the list without its pictures
+            _failures.swallowed(_exc)
     try:
         gs = genres(kind, now)
     except TraktError:

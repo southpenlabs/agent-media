@@ -88,6 +88,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from agent_media_core._paths import state_dir
+from agent_media_core import failures as _failures
 
 # --- what is state ----------------------------------------------------------
 
@@ -221,7 +222,8 @@ def shared_dir_rel() -> str | None:
     try:
         from agent_media_core.shared_files import upload_dir
         d = upload_dir()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         d = Path.home() / "shared"
     try:
         return str(d.resolve().relative_to(Path.home().resolve()))
@@ -352,8 +354,8 @@ def destination(explicit: str | None = None) -> str:
         got = (config.load().get("backup") or {}).get("dest")
         if got:
             return str(got)
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
     return str(Path.home() / ".local" / "share" / "agent-media-backups")
 
 
@@ -365,7 +367,8 @@ def max_bytes() -> int:
         try:
             from agent_media_core import config
             raw = str((config.load().get("backup") or {}).get("max_bytes") or "")
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             raw = ""
     try:
         return int(raw) if raw else 10 * 1024 ** 3
@@ -476,7 +479,8 @@ def _server_id() -> str:
     try:
         from .servers_report import server_id
         return server_id()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -484,7 +488,8 @@ def _version() -> str:
     try:
         from agent_media_core import __version__
         return str(__version__)
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -679,7 +684,8 @@ def repo() -> str:
     try:
         from agent_media_core import config
         return str((config.load().get("backup") or {}).get("repo") or "")
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -1034,8 +1040,8 @@ def _alert(suffix: str, title: str, *, level: str = "warn") -> None:
     try:
         from . import alerts
         alerts.report({"id": aid, "title": title, "level": level})
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 # --- reading one ------------------------------------------------------------
@@ -1057,8 +1063,8 @@ def timer_unit() -> str:
         for unit in setup._template_units(SERVICE_TEMPLATE):
             if unit.endswith(".timer"):
                 return unit
-    except Exception:                               # noqa: BLE001
-        pass
+    except Exception as _exc:                               # noqa: BLE001
+        _failures.swallowed(_exc)
     return TIMER_UNIT_FALLBACK
 
 
@@ -1342,6 +1348,7 @@ def restore(which: str | None = None, *, dest: str | None = None, into: dict[str
                 shutil.copy2(src, target)
             out["restored"].append(p["rel"])
         except Exception as e:                       # noqa: BLE001
+            _failures.swallowed(e)
             out["ok"] = False
             out.setdefault("errors", []).append(f"{p['rel']}: {e}")
     return out

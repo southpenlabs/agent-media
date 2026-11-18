@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 
 from . import auth, sessions
+from agent_media_core import failures as _failures
 
 _LOCK = threading.Lock()
 # Parsed archived.json by (path, mtime_ns, size): `/targets` reads the flags
@@ -118,8 +119,8 @@ def unarchive_quietly(session: str) -> None:
     is not worth failing the send over."""
     try:
         set_archived(session, False)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def _quick(session: str) -> bool:

@@ -35,6 +35,7 @@ import sys
 
 from agent_media_core.intake import strip_markdown, submit_event
 from agent_media_core.types import Event, Priority, Source
+from agent_media_core import failures as _failures
 
 
 # Payload keys that may carry the assistant's final reply, most-preferred first.
@@ -105,8 +106,8 @@ def _play_detached(event: Event) -> None:
         pass
     try:
         submit_event(event)
-    except Exception:  # noqa: BLE001 — detached; nothing to report to
-        pass
+    except Exception as _exc:  # noqa: BLE001 — detached; nothing to report to
+        _failures.swallowed(_exc)
     finally:
         os._exit(0)
 
@@ -126,12 +127,13 @@ def main() -> int:
     try:
         from agent_media_core.intake._env import load_env_file
         load_env_file("hook-hermes")
-    except Exception:  # noqa: BLE001 — never let config layering break the hook
-        pass
+    except Exception as _exc:  # noqa: BLE001 — never let config layering break the hook
+        _failures.swallowed(_exc)
 
     try:
         raw = sys.stdin.read()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0
 
     payload: dict = {}
@@ -170,8 +172,8 @@ def _emit_noop() -> None:
     try:
         sys.stdout.write("{}\n")
         sys.stdout.flush()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 if __name__ == "__main__":

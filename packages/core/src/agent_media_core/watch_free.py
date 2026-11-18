@@ -50,6 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from . import trakt as T
+from agent_media_core import failures as _failures
 
 HOST = "https://archive.org"
 #: The fixed table of sources: id → what it is. One, on purpose.
@@ -196,7 +197,8 @@ def _match(title: str, year: Optional[int], imdb: Optional[str], now: float) -> 
         return None
     try:
         return T._cached(f"d:free:{imdb or ''}:{_fold(title)}:{year}", now, find, MATCH_TTL_S)
-    except Exception:  # noqa: BLE001 — unmatched this time: the film still plays
+    except Exception as _exc:  # noqa: BLE001 — unmatched this time: the film still plays
+        _failures.swallowed(_exc)
         return None
 
 
@@ -276,8 +278,8 @@ def browse(which: str = "", q: str = "", genre: str = "", year: str = "", page: 
     if tmdb.set_up() and matched:
         try:
             tmdb.add_posters(matched)  # a real poster where there is one; else the Archive's frame
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     return {"kind": "movie", "list": which, "lists": list(LISTS), "page": page, "more": more,
             "hide_watched": bool(hide_watched and me), "signed_in": me, "items": items, "q": " ".join(words),
             "genres": [{"slug": s, "name": n} for s, (n, _w) in GENRES.items()],

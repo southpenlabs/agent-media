@@ -464,7 +464,8 @@ def main(argv=None) -> int:
         help="address to listen on (default 127.0.0.1). Anything else needs "
              "MEDIA_SHARE_TOKEN.")
     a = ap.parse_args(argv if argv is not None else sys.argv[1:])
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(message)s')
 
     try:
         srv_ = make_server(a.bind, a.port)

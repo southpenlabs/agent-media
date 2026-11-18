@@ -40,6 +40,7 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import unquote
+from agent_media_core import failures as _failures
 
 PREFIX = "/app"
 
@@ -166,8 +167,8 @@ def _preview(h: BaseHTTPRequestHandler, rel: str) -> None:
     jar = SimpleCookie()
     try:
         jar.load(h.headers.get("Cookie") or "")
-    except Exception:  # noqa: BLE001 - a malformed cookie header is no cookie
-        pass
+    except Exception as _exc:  # noqa: BLE001 - a malformed cookie header is no cookie
+        _failures.swallowed(_exc)
     allowed = name in jar and PL.good(id8, jar[name].value)
     if not allowed:
         from . import auth

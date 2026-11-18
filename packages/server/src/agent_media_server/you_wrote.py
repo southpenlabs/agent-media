@@ -42,6 +42,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: User-side words that are not the listener: agent mail and the session
 #: host's notes (`[From …]`), an interrupt, another session's raw message, a
@@ -159,7 +160,8 @@ def _load() -> None:
     try:
         with open(_cache_path(), "rb") as fh:
             got = pickle.load(fh)
-    except Exception:  # noqa: BLE001 — unreadable: read the files afresh
+    except Exception as _exc:  # noqa: BLE001 — unreadable: read the files afresh
+        _failures.swallowed(_exc)
         return
     if not isinstance(got, dict) or got.get("v") != 1:
         return
@@ -187,7 +189,8 @@ def save(path: Path | None = None) -> None:
         with os.fdopen(fd, "wb") as fh:
             pickle.dump({"v": 1, "answers": snap}, fh, protocol=pickle.HIGHEST_PROTOCOL)
         os.replace(tmp, path)
-    except Exception:  # noqa: BLE001 — not saved: read again after a restart
+    except Exception as _exc:  # noqa: BLE001 — not saved: read again after a restart
+        _failures.swallowed(_exc)
         with _LOCK:
             _disk["dirty"] = True
     finally:

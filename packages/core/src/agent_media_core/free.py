@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 #: A report older than this is ignored: two missed 2-min heartbeats.
 STALE_S = 300.0
@@ -152,8 +153,8 @@ def _ask_jev(rep: dict, now: float) -> None:
                  "minutes": max(0, int((until - now) / 60))}
         threading.Thread(target=jev.event_busy, args=(event, "hold"),
                          daemon=True, name="jev-event").start()
-    except Exception:  # noqa: BLE001 — shadow only
-        pass
+    except Exception as _exc:  # noqa: BLE001 — shadow only
+        _failures.swallowed(_exc)
 
 
 def answer(now: Optional[float] = None, data: Optional[dict] = None) -> dict:
@@ -251,7 +252,8 @@ def held_count(since: Optional[float], store=None) -> int:
             from .state import StateStore
             store = StateStore()
         rows = store.recent_history(sink="speech", limit=500)
-    except Exception:  # noqa: BLE001 — a count, never a reason to fail
+    except Exception as _exc:  # noqa: BLE001 — a count, never a reason to fail
+        _failures.swallowed(_exc)
         return 0
     n = 0
     for r in rows:

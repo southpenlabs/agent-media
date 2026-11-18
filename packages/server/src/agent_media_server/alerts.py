@@ -68,6 +68,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 LEVELS = ("ok", "info", "warn", "needs")
 RANK = {lv: i for i, lv in enumerate(LEVELS)}
@@ -111,7 +112,8 @@ def _action_commands() -> dict[str, list[str]]:
     try:
         from agent_media_core import config
         got = (config.load().get("alerts") or {}).get("actions") or {}
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return {}
     return {str(k): [str(Path(str(x)).expanduser()) if i == 0 else str(x) for i, x in enumerate(v)]
             for k, v in got.items() if k and isinstance(v, list) and v}
@@ -255,8 +257,8 @@ def _speech(key: str | None) -> dict | None:
             ex = row.get("extras")
             if isinstance(ex, dict) and ex.get("dedup_key") == key:
                 return {"id": int(row["id"]), "heard": bool(ex.get("heard"))}
-    except Exception:  # noqa: BLE001 — a missing Play, never a failed listing
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a missing Play, never a failed listing
+        _failures.swallowed(_exc)
     return {"id": None, "heard": False}
 
 
@@ -663,6 +665,7 @@ def act(aid: str, action: str) -> tuple[bool, dict]:
         else:
             ok, detail = _run_action(command, aid, action)
     except Exception as e:  # noqa: BLE001 — the producer's word, not a 500
+        _failures.swallowed(e)
         return False, {"error": str(e)[:300] or type(e).__name__, "status": 502}
     if not ok:
         detail = {"status": 502, **detail}

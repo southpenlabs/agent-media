@@ -32,6 +32,7 @@ import os
 import re
 
 from . import auth, sessions, tidy_intents
+from agent_media_core import failures as _failures
 
 DEFAULT_TIMEOUT_S = 8.0
 MAX_MESSAGES = 30
@@ -197,7 +198,8 @@ def _room_context(session: str) -> list[dict]:
         if r is None:
             return []
         msgs, _older = r.page(MAX_MESSAGES)
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return []
     out = []
     for m in msgs:

@@ -56,6 +56,7 @@ from typing import Any, Mapping, Optional
 from .render import device as device_voice
 from . import feed as feedmod
 from .docs import _ffprobe_duration, _write_chapter_metadata
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -230,7 +231,8 @@ def _speech_rows(st) -> list[dict]:
     global _ROWS
     try:
         sig = st.history_signature(sink="speech", limit=_FETCH)
-    except Exception:  # noqa: BLE001 — unknown: read afresh
+    except Exception as _exc:  # noqa: BLE001 — unknown: read afresh
+        _failures.swallowed(_exc)
         sig = ()
     key = str(getattr(st, "path", ""))
     with _ROWS_LOCK:

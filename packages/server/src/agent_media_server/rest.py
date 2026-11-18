@@ -26,6 +26,7 @@ from __future__ import annotations
 import time
 
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 RESTED = JsonMap("rested.json")
 GENERATED = JsonMap("generated-recaps.json")
@@ -67,8 +68,8 @@ def clear_quietly(session: str) -> None:
     thing that used it already happened."""
     try:
         clear_rested(session)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 # --- the recaps written here -------------------------------------------------------

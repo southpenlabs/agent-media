@@ -28,6 +28,7 @@ played again on the thread's open, and one heard half-way picks up there.
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Optional
+from agent_media_core import failures as _failures
 
 
 def heard_to(ex) -> Optional[int]:
@@ -69,7 +70,8 @@ def copies(row: Mapping[str, Any], rows: Optional[Iterable[Mapping[str, Any]]] =
                 from .state import StateStore
                 store = StateStore()
             rows = store.recent_history(sink="speech", limit=400)
-        except Exception:  # noqa: BLE001 — this row alone, then
+        except Exception as _exc:  # noqa: BLE001 — this row alone, then
+            _failures.swallowed(_exc)
             rows = []
     out = [row]
     for r in rows:

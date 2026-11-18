@@ -25,6 +25,7 @@ import time
 from agent_media_core._paths import state_dir
 
 from . import tidy_intents
+from agent_media_core import failures as _failures
 
 _LOCK = threading.Lock()
 KEEP = 2000
@@ -52,8 +53,8 @@ def _keys(session: str) -> list[str]:
         c = matrix._contact_of(r) if r is not None else None
         if c and c.get("id"):
             out.append(f"contact:{c['id']}")
-    except Exception:  # noqa: BLE001 — no contact is just the room
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no contact is just the room
+        _failures.swallowed(_exc)
     return out
 
 

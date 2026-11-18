@@ -181,10 +181,8 @@ def _run_once(book: SinkBook, state: StateStore) -> None:
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
     book, state = SinkBook(), StateStore()

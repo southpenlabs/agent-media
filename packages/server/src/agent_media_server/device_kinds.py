@@ -25,6 +25,7 @@ back to when the owner's choice is cleared) and `rule_overrides`
 """
 
 from __future__ import annotations
+from agent_media_core import failures as _failures
 
 KINDS = ("phone", "tablet", "tv", "computer")
 
@@ -144,7 +145,8 @@ def device_for(bearer: str) -> dict | None:
 
     try:
         return auth._device(bearer)
-    except Exception:  # noqa: BLE001 — no device is the owner's view
+    except Exception as _exc:  # noqa: BLE001 — no device is the owner's view
+        _failures.swallowed(_exc)
         return None
 
 

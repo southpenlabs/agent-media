@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from agent_media_core import failures as _failures
 
 MODES = {"walk": "pedestrian", "drive": "auto", "bike": "bicycle"}
 TIMEOUT_S = 20
@@ -79,6 +80,7 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "") -> tuple[bool,
             err = {}
         return False, {"status": 404, "code": "no_route", "error": err.get("error") or "no route between these"}
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return False, {"status": 502, "error": f"the routing service did not answer: {e.__class__.__name__}"}
     trip = got.get("trip") or {}
     line: list[list[float]] = []
@@ -116,6 +118,7 @@ def search(q: str, near: str = "") -> tuple[bool, dict]:
     try:
         rows = place_find.find(words, near=pt, limit=8)
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return False, {"status": 502, "error": f"the place search did not answer: {e.__class__.__name__}"}
     if pt:
         import math

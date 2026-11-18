@@ -42,6 +42,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -246,7 +247,8 @@ def _first_message(r, row: dict, why_draft: str) -> str:
     name, thread, mode = row["name"], r.thread, row["mode"]
     try:
         messages, _older = r.page(CONTEXT, "")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         messages = []
     lines = []
     for m in messages:
@@ -393,8 +395,8 @@ def end(thread: str, why: str, now: float | None = None) -> bool:
     try:
         r = _room(thread)
         title = r.title() if r is not None else ""
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     _tell(row.get("session") or "",
           f"[From Sasonica] The hand-over of the chat \"{title or thread}\" has ended: {why}. "
           f"Stop answering it; anything more you reply there is not accepted. Finish what "

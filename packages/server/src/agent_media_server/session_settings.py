@@ -44,6 +44,7 @@ import threading
 import time
 
 from . import auth, driver, sessions
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -385,6 +386,7 @@ def _configure_opencode(session: str, pane: str, model: str) -> tuple[bool, dict
         time.sleep(1.0)
         panes._tmux(["send-keys", "-t", pane, "Enter"])
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return False, {"error": f"send: {e}", "status": 502}
     time.sleep(1.0)
     if not _opencode_footer(panes.capture(pane, lines=12, ansi=False)).startswith(label + " "):

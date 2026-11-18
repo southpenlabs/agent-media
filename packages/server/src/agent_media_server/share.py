@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 
 from . import auth
+from agent_media_core import failures as _failures
 
 
 def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
@@ -84,5 +85,6 @@ def _podcast_episode(text: str) -> dict | None:
         return None
     try:
         return podcast_resolve.episode(url, text, search=podcast_resolve.looks_like_podcast(url))
-    except Exception:  # noqa: BLE001 — the share pipeline decides as before
+    except Exception as _exc:  # noqa: BLE001 — the share pipeline decides as before
+        _failures.swallowed(_exc)
         return None

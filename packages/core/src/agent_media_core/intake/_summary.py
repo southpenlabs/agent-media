@@ -49,6 +49,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from agent_media_core import failures as _failures
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -292,8 +293,8 @@ def _log_describe(kind: str, in_chars: int, secs: float, out: "str | None") -> N
                "secs": round(secs, 1), "ok": out is not None, "out": len(out or "")}
         with open(os.path.expanduser(path), "a") as fh:
             fh.write(json.dumps(rec) + "\n")
-    except Exception:  # noqa: BLE001 — telemetry is never load-bearing
-        pass
+    except Exception as _exc:  # noqa: BLE001 — telemetry is never load-bearing
+        _failures.swallowed(_exc)
 
 
 def _timed_describe(kind: str, prompt: str, text: str) -> str | None:

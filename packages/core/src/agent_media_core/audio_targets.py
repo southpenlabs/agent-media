@@ -43,6 +43,7 @@ from typing import Optional
 
 from ._paths import state_dir
 from .types import target_name
+from agent_media_core import failures as _failures
 
 SPEECH_FILE = "speech-target"
 MUSIC_FILE = "music-where"
@@ -194,7 +195,8 @@ def speech_override() -> Optional[str]:
         return None
     try:
         ok, _why = speech_configured(name)
-    except Exception:  # noqa: BLE001 — a bad override must never stop speech
+    except Exception as _exc:  # noqa: BLE001 — a bad override must never stop speech
+        _failures.swallowed(_exc)
         return None
     return name if ok else None
 
@@ -208,7 +210,8 @@ def speech_default() -> str:
     """
     try:
         return speech_override() or env_speech_default()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return env_speech_default()
 
 
@@ -247,8 +250,8 @@ def _speech_reachability(name: str) -> tuple[bool, Optional[str]]:
 
             if sock in _breaker.load("mpv"):
                 return True, "was slow or unreachable a moment ago"
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         return True, None
     from .sinks import _mpv_ipc
 

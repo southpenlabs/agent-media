@@ -51,6 +51,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -166,12 +167,13 @@ def _clean(text: str) -> str:
     try:
         from agent_media_core.intake._visual import extract_visual_markers
         text = extract_visual_markers(text)[0]
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     try:
         from agent_media_core.intake._text import strip_markdown
         return strip_markdown(text).strip()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return text.strip()
 
 
@@ -336,8 +338,8 @@ def make_server(bind: str, port: int) -> ThreadingHTTPServer:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     ap = argparse.ArgumentParser(prog="media-completions-shim")
     ap.add_argument("--port", type=int,
                     default=int(_env("MEDIA_COMPLETIONS_PORT", str(DEFAULT_PORT))))

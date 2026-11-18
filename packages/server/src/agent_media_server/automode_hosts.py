@@ -35,6 +35,7 @@ import os
 from pathlib import Path
 
 from . import devices, servers_report
+from agent_media_core import failures as _failures
 
 TAG = "(agent-media hosts)"
 
@@ -118,6 +119,7 @@ def build() -> "tuple[str, str]":
     try:
         status, answer = servers_report.account_servers(did, iss)
     except Exception as e:  # noqa: BLE001 — the issuer being away is not an error here
+        _failures.swallowed(e)
         return "", f"the account's issuer did not answer: {e}"
     if status != 200 or not isinstance(answer.get("servers"), list):
         return "", f"the account's issuer answered {status}"

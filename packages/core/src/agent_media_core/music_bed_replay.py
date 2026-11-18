@@ -43,6 +43,7 @@ import logging
 import threading
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +156,8 @@ def _afresh(ex: dict, target, other_audio=None) -> Optional[dict]:
     try:
         from . import earcons
         tone = earcons.reply_name(folder)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         tone = ""
     durs = [float(x) for x in (ex.get("clip_durations_s") or [])
             if isinstance(x, (int, float))]
@@ -182,7 +184,8 @@ def _long(ex: dict) -> bool:
                 if isinstance(x, (int, float))]
         n = len(ex.get("clip_sentences") or ex.get("clip_uris") or [])
         return music_bed_vocal.is_long(sum(durs) if durs else None, n)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 

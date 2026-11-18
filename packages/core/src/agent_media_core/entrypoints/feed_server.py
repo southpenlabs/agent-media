@@ -331,7 +331,8 @@ def main(argv=None) -> int:
                     help="address to listen on (default 127.0.0.1). Anything "
                          "else needs MEDIA_FEED_TOKEN.")
     a = ap.parse_args(argv if argv is not None else sys.argv[1:])
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(message)s')
 
     global TOKEN
     TOKEN = (os.environ.get("MEDIA_FEED_TOKEN") or "").strip()

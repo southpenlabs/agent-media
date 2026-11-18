@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 STORE = JsonMap("default_agent.json")
 
@@ -49,7 +50,8 @@ def _installed(agent: str) -> bool:
 
     try:
         return harnesses.installed(agent)
-    except Exception:  # noqa: BLE001 - a broken probe is "not here"
+    except Exception as _exc:  # noqa: BLE001 - a broken probe is "not here"
+        _failures.swallowed(_exc)
         return False
 
 

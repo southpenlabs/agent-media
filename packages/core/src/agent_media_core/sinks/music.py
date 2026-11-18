@@ -16,6 +16,7 @@ from typing import Iterator, List, Optional
 
 from ..types import Target
 from . import _mpv_ipc as ipc
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -49,8 +50,8 @@ def _set_mpv_volume(level: int) -> None:
         return
     try:
         ipc.set_property(sock, "volume", float(max(0, min(100, level))))
-    except Exception:  # noqa: BLE001  (best-effort; mpv may be idle/down)
-        pass
+    except Exception as _exc:  # noqa: BLE001  (best-effort; mpv may be idle/down)
+        _failures.swallowed(_exc)
 
 
 def _set_mpv_time(secs: float) -> None:
@@ -68,8 +69,8 @@ def _set_mpv_time(secs: float) -> None:
         if ipc.get_property(sock, "idle-active") is not False:
             return
         ipc.set_property(sock, "time-pos", float(max(0.0, secs)))
-    except Exception:  # noqa: BLE001  (best-effort; mpv may be idle/down)
-        pass
+    except Exception as _exc:  # noqa: BLE001  (best-effort; mpv may be idle/down)
+        _failures.swallowed(_exc)
 
 
 def mpv_now_props() -> Optional[dict]:

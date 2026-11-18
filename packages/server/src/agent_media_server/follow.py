@@ -31,6 +31,7 @@ import threading
 import time
 
 from . import auth, devices
+from agent_media_core import failures as _failures
 
 _LOCK = threading.Lock()
 #: {device id: {"session", "at", "view"}} — the thread each device opened
@@ -144,7 +145,8 @@ def state(device_id: str) -> dict:
 
         try:
             title = sessions.title_of(session) or None
-        except Exception:  # noqa: BLE001 — a title is never worth the frame
+        except Exception as _exc:  # noqa: BLE001 — a title is never worth the frame
+            _failures.swallowed(_exc)
             title = None
     return {"phone": phone, "name": rows[phone].get("name") or None, "session": session,
             "title": title, "at": got.get("at"), "view": got.get("view"),

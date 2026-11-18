@@ -37,6 +37,7 @@ from ..route import dj as _dj
 from ..sinks.speech import SinkSpeech, _env_key
 from ..state import StateStore
 from ..types import Event, Priority, Source, Target
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -102,7 +103,8 @@ def _music_ducked_under(coordinator, before_thread, wait_s: float) -> bool:
         if probe is None:
             return False
         return bool(probe()[1])
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -311,7 +313,8 @@ def _pane_scroll_pos(pane: str) -> tuple[bool, str]:
             return (False, "")
         in_mode, _, pos = r.stdout.rstrip("\n").partition("\t")
         return (in_mode.strip() == "1", pos.strip())
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return (False, "")
 
 
@@ -346,7 +349,8 @@ def _last_client_activity(pane: str) -> Optional[int]:
             return None
         epochs = [int(x) for x in r.stdout.split() if x.strip().isdigit()]
         return max(epochs) if epochs else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -448,7 +452,8 @@ def _cursor_sig(pane: str) -> str:
              "#{scroll_position}\t#{copy_cursor_x}\t#{copy_cursor_y}"],
             capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -481,7 +486,8 @@ def _pane_anchor_width(pane: str) -> int:
             ["tmux", "display-message", "-p", "-t", pane, "#{pane_width}"],
             capture_output=True, text=True, timeout=2)
         w = int(r.stdout.strip()) if r.returncode == 0 else 0
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         w = 0
     if w <= 0:
         return 50
@@ -529,7 +535,8 @@ def _pane_alternate_on(pane: str) -> bool:
             ["tmux", "display-message", "-p", "-t", pane, "#{alternate_on}"],
             capture_output=True, text=True)
         return r.returncode == 0 and r.stdout.strip() == "1"
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -734,7 +741,8 @@ def _tmux_highlight_text(text: str, *, first: bool = False,
                     _f.write(str(proc.pid))
             except OSError:
                 pass
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
     return True
 
@@ -1179,8 +1187,8 @@ def stamp_speech_pause(state: StateStore, paused: Optional[bool] = None) -> None
             started_at=np.get("started_at") or now,
             target=np.get("target") or audio_targets.speech_default(),
             extras=ex)
-    except Exception:  # noqa: BLE001 — a pause must still reach the player
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a pause must still reach the player
+        _failures.swallowed(_exc)
 
 
 def elapsed_from_row(extras: dict, origin: float) -> float:
@@ -1444,18 +1452,18 @@ class _SentenceFollower:
                             started_at=np.get("started_at") or self.started_at,
                             target=np.get("target") or self.target_name,
                             extras=extras)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as _exc:  # noqa: BLE001
+                        _failures.swallowed(_exc)
                     highlighter.show(self.sentences[idx], first=(idx == 0),
                                      force=False)
                     if self.on_sentence is not None:
                         try:
                             self.on_sentence(self.sentences[idx])
-                        except Exception:  # noqa: BLE001 — never break the follow
-                            pass
+                        except Exception as _exc:  # noqa: BLE001 — never break the follow
+                            _failures.swallowed(_exc)
                 self._stop.wait(0.1)
-        except Exception:  # noqa: BLE001 — a highlight must never break speech
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a highlight must never break speech
+            _failures.swallowed(_exc)
         finally:
             highlighter.drain()
 
@@ -1738,8 +1746,8 @@ def _mark_speech_ended(state: "StateStore") -> None:
         state.set_now_playing("speech", np["uri"], np["started_at"],
                               target=np.get("target") or "local",
                               content_type=np.get("content_type"), extras=extras)
-    except Exception:  # noqa: BLE001 — the display is a nicety; never cost the reply
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the display is a nicety; never cost the reply
+        _failures.swallowed(_exc)
 
 
 def session_reply_read(session: str, *, keep: bool = False,
@@ -1774,8 +1782,8 @@ def session_reply_read(session: str, *, keep: bool = False,
 
         if speak_priority.level_of(session) == "auto":
             return None
-    except Exception:  # noqa: BLE001 — no level known is Normal
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no level known is Normal
+        _failures.swallowed(_exc)
     return request_session_speech_cut(session, "read", at)
 
 
@@ -1945,8 +1953,8 @@ def _mirror(channel: str, owner: str | None, action: str,
     try:
         from ..capture.floor import publish
         publish(channel, owner or "unnamed", action, ttl_s)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def _read_marker(path: Path) -> float:
@@ -2414,11 +2422,13 @@ class _SpeechPlaybackLock:
         if store is None:
             try:
                 store = self._progress_store = StateStore()
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 return None
         try:
             np = store.get_now_playing("speech")
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return None
         if not np:
             return None
@@ -2441,11 +2451,13 @@ class _SpeechPlaybackLock:
         if store is None:
             try:
                 store = self._progress_store = StateStore()
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 return False
         try:
             np = store.get_now_playing("speech")
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return False
         if not np:
             return False
@@ -2469,7 +2481,8 @@ class _SpeechPlaybackLock:
             if ipc.get_property(sock, "idle-active"):
                 return False
             return bool(ipc.get_property(sock, "pause"))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return False
 
     def _take(self, *, skip_if_busy: bool = False) -> None:
@@ -2851,7 +2864,8 @@ def _other_speaking(state: "StateStore", session: str, pane: str) -> bool:
     a question is not an interruption: it is the same speaker, going on.)"""
     try:
         np = state.get_now_playing("speech") or {}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
     if not np:
         return False
@@ -2949,7 +2963,8 @@ def _clip_duration(path: Path) -> float:
             capture_output=True, text=True, timeout=5,
         )
         return float(r.stdout.strip()) if r.returncode == 0 else 0.0
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0.0
 
 
@@ -3011,7 +3026,8 @@ def _tmux_session_for_pane(pane: str) -> str:
             ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
             capture_output=True, text=True, timeout=2)
         return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -3034,7 +3050,8 @@ def _tmux_window_for_pane(pane: str) -> str:
             ["tmux", "display-message", "-p", "-t", pane,
              "#{window_name}\t#{pane_title}"],
             capture_output=True, text=True, timeout=2)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
     if r.returncode != 0:
         return ""
@@ -3156,15 +3173,15 @@ def _conversation_display_title(session: str) -> str:
         title = _shelf_title(_manifest_of(session))
         if title:
             return title
-    except Exception:  # noqa: BLE001 — metadata must never prevent speech
-        pass
+    except Exception as _exc:  # noqa: BLE001 — metadata must never prevent speech
+        _failures.swallowed(_exc)
     try:
         from .. import harnesses
         title = harnesses.title_of(session)
         if title:
             return title
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     from .hook_claude_code import _thread_title
     return _thread_title(session)
 
@@ -3329,7 +3346,8 @@ class _MuteDuckWatcher:
         if muted is None:
             try:
                 muted = self._sink.muted(self._target)
-            except Exception:  # noqa: BLE001
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
                 return  # can't read mute → don't touch the duck
         if muted == self._muted:
             return
@@ -3477,11 +3495,13 @@ def _wait_and_claim_broker(sink: "SinkSpeech", target: Target, interrupt: bool =
             # paired with (sasonica roadmap item 7), never from this server's own.
             if _with_interrupt(claim, interrupt, target):
                 return
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return
         try:
             info = sink.active_other_owner(target)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             info = None
         if info is not None:
             # Another host holds it; while its claim's deadline keeps advancing
@@ -3573,8 +3593,8 @@ def _watch_remote_progress(proc, state: StateStore, target_name: str,
                 # same breath, just before the first sample.
                 try:
                     on_about_to_play()
-                except Exception:  # noqa: BLE001 — a duck is never worth the reply
-                    pass
+                except Exception as _exc:  # noqa: BLE001 — a duck is never worth the reply
+                    _failures.swallowed(_exc)
                 on_about_to_play = None
             if line.startswith("CLIP "):
                 clip = line.split(None, 1)[1].strip()
@@ -3642,7 +3662,8 @@ def _watch_remote_progress(proc, state: StateStore, target_name: str,
             # Keep reading rather than returning: closing this end early would
             # SIGPIPE a renderer that still has something to say, and the far
             # side's stdout is also how a late failure reaches us.
-    except Exception:  # noqa: BLE001 — a progress bar must not break speech
+    except Exception as _exc:  # noqa: BLE001 — a progress bar must not break speech
+        _failures.swallowed(_exc)
         return
 
 
@@ -3666,7 +3687,8 @@ def _kill_process_group(proc) -> None:
         try:
             proc.wait(timeout=3)
             return
-        except Exception:  # noqa: BLE001 — still alive; escalate to SIGKILL
+        except Exception as _exc:  # noqa: BLE001 — still alive; escalate to SIGKILL
+            _failures.swallowed(_exc)
             continue
 
 
@@ -3805,8 +3827,8 @@ def _gate_text(state: StateStore, event: Event, text: str) -> str:
         pane = (event.metadata or {}).get("pane") or os.environ.get("TMUX_PANE", "")
         if state.resolve_mute(pane, _source_place(event.metadata, pane)[0]):
             return ""
-    except Exception:  # noqa: BLE001 — unknown mute: keep the words
-        pass
+    except Exception as _exc:  # noqa: BLE001 — unknown mute: keep the words
+        _failures.swallowed(_exc)
     return text
 
 
@@ -3835,7 +3857,8 @@ def _busy_hold(target: Target, event: Event, text: str = "") -> "dict | None":
     try:
         from .. import free
         a = free.answer()
-    except Exception:  # noqa: BLE001 — fail towards sound
+    except Exception as _exc:  # noqa: BLE001 — fail towards sound
+        _failures.swallowed(_exc)
         return None
     if a["free"] or a.get("speaking"):
         return None
@@ -3848,8 +3871,8 @@ def _busy_hold(target: Target, event: Event, text: str = "") -> "dict | None":
             from ..speak_priority import level_of
             if level_of(session) == "quiet":
                 return None
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     item = {"kind": "alert" if md.get("alert") else "reply",
             "level": event.priority.value,
             "thread": str(md.get("title") or md.get("kind") or ""),
@@ -3876,7 +3899,8 @@ def _jev_breaks_through(item: dict) -> bool:
         return False
     try:
         return bool(jev.breaks_through(item, False).answer)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -3915,8 +3939,8 @@ def _record_silenced(state: StateStore, event: Event, target: Target,
                                 "mode": (verdict or {}).get("mode", "unknown"),
                                 "dnd": (verdict or {}).get("dnd", "unknown"),
                                 "text": text[:160]})
-    except Exception:  # noqa: BLE001 — a breadcrumb, never the caller's problem
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a breadcrumb, never the caller's problem
+        _failures.swallowed(_exc)
     try:
         return state.add_history(
             sink="speech",
@@ -3933,7 +3957,8 @@ def _record_silenced(state: StateStore, event: Event, target: Target,
                     **{k: v for k, v in (event.metadata or {}).items()
                        if k in ("kind", "session", "pane")}},
         )
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -3942,8 +3967,8 @@ def _arm_feed_debounce() -> None:
     try:
         from ..feed_debounce import arm
         arm()
-    except Exception:  # noqa: BLE001 — the poll is the safety net
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the poll is the safety net
+        _failures.swallowed(_exc)
 
 
 def _duck_grace_s() -> float:
@@ -4095,8 +4120,8 @@ def _submit_remote_say(text: str, cmd: str, coordinator: Coordinator,
                                   extras={"kind": "remote-say", "text": text[:400],
                                           **source_extras,
                                           "writer_pid": os.getpid()})
-        except Exception:  # noqa: BLE001 — observability must not break speech
-            pass
+        except Exception as _exc:  # noqa: BLE001 — observability must not break speech
+            _failures.swallowed(_exc)
         try:
             # Not subprocess.run(..., timeout=): with shell=True the timeout
             # kills the *shell*, and whatever it spawned (an ssh, here) is
@@ -4146,8 +4171,8 @@ def _submit_remote_say(text: str, cmd: str, coordinator: Coordinator,
                 state.log_error("intake", "remote-say failed",
                                 extras={"detail": str(e), "cmd": cmd[:200],
                                         "source": event.source.value})
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
         finally:
             # Before after_speech/clear: a follower still walking its timeline
             # would otherwise write the row back moments after we cleared it,
@@ -4197,8 +4222,8 @@ def _submit_remote_say(text: str, cmd: str, coordinator: Coordinator,
                             **{k: v for k, v in (event.metadata or {}).items()
                                if k in ("kind", "session")}},
                 )
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
     finally:
         lock.release()
     return history_id
@@ -4367,7 +4392,8 @@ def _submit_event(event: Event,
         try:
             from .. import free as _free
             _maybe_busy = not _free.answer()["free"]
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             _maybe_busy = False
         busy = (_busy_hold(target, event, _gather()[:300])
                 if _maybe_busy else None)
@@ -4407,7 +4433,8 @@ def _submit_event(event: Event,
         try:
             from .. import calm
             prosody = calm.prosody() if calm.active() else None
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             prosody = None
     renderer = partial(render_text, prosody=prosody) if prosody and any(prosody) else render_text
     if device_voice.renders_on_device(target.name):
@@ -5429,7 +5456,8 @@ def _submit_event(event: Event,
                             elif _probe is not None:
                                 _other = bool(_probe())
                                 _ducked = False
-                        except Exception:  # noqa: BLE001
+                        except Exception as _exc:  # noqa: BLE001
+                            _failures.swallowed(_exc)
                             _other, _ducked = None, False
                     bed_plan = music_bed.choose(
                         _bed_pick, _other, target,

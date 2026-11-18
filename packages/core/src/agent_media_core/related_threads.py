@@ -35,6 +35,7 @@ import sqlite3
 import urllib.request
 from array import array
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: At most this many threads are told.
 LIMIT = 3
@@ -223,7 +224,8 @@ def embed(text: str, timeout: float) -> tuple[str, list[float]] | None:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             vec = json.load(resp)["embeddings"][0]
-    except Exception:  # noqa: BLE001 — no model, no answer in time: words instead
+    except Exception as _exc:  # noqa: BLE001 — no model, no answer in time: words instead
+        _failures.swallowed(_exc)
         return None
     return model, _unit([float(x) for x in vec[:DIM]])
 
@@ -270,7 +272,8 @@ def _allowed(sid: str, current: str) -> bool:
         from .private import hidden
 
         return not hidden(sid)
-    except Exception:  # noqa: BLE001 — unsure is not allowed
+    except Exception as _exc:  # noqa: BLE001 — unsure is not allowed
+        _failures.swallowed(_exc)
         return False
 
 
@@ -342,7 +345,8 @@ def related(current: str, prompt: str, *, timeout: float | None = None,
             return private_related(current, prompt)
         if hidden(current):
             return []
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
     notes = load_notes(base)
     if not notes:
@@ -389,7 +393,8 @@ def private_related(current: str, prompt: str) -> list[dict]:
         from . import private_cards
 
         rows = private_cards.related(prompt, exclude={current}, limit=LIMIT)
-    except Exception:  # noqa: BLE001 — no cards, no key: nothing to say
+    except Exception as _exc:  # noqa: BLE001 — no cards, no key: nothing to say
+        _failures.swallowed(_exc)
         return []
     return [{"session": r["session"], "title": r.get("title") or r["session"][:8],
              "score": r.get("score"), "private": True, "how": r.get("how") or ""}

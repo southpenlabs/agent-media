@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from agent_media_core import failures as _failures
 
 DEFAULT_MIN_CHARS = 320
 # Only the floor, for a host that configures no image budget at all. The real
@@ -202,7 +203,7 @@ def wait_for_fresh_visual(after_epoch: float,
                 t = float(json.loads(resp.read()).get("t") or 0)
             if t >= after_epoch:
                 return True
-        except Exception:  # noqa: BLE001 — polling; any failure just retries
-            pass
+        except Exception as _exc:  # noqa: BLE001 — polling; any failure just retries
+            _failures.swallowed(_exc)
         time.sleep(1)
     return False

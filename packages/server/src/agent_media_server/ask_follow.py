@@ -23,6 +23,7 @@ import os
 import sys
 import threading
 import time
+from agent_media_core import failures as _failures
 
 #: How often the watcher reads the pane, and how long the card may go unseen
 #: before the watcher takes it as gone (a redraw, a resize, a scroll).
@@ -56,6 +57,7 @@ def _speak(session: str, part: int, tool_use_id: str = "", daemon: bool = True) 
         try:
             why.append(hook.speak_ask_part(session, part, tool_use_id))
         except Exception as e:  # noqa: BLE001 — a part unspoken is on the card
+            _failures.swallowed(e)
             why.append(f"failed: {e}")
         finally:
             done.set()

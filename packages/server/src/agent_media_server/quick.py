@@ -33,6 +33,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 DEFAULT_TIMEOUT_S = 45.0
 #: Messages kept per chat, and sent to the model at most.
@@ -125,8 +126,8 @@ def _speak(session: str, text: str) -> None:
             from agent_media_core.types import Source
 
             submit(Source.QUICK, "QUICK", text=text, metadata={"session": session})
-        except Exception:  # noqa: BLE001 — unspoken, it is still on screen
-            pass
+        except Exception as _exc:  # noqa: BLE001 — unspoken, it is still on screen
+            _failures.swallowed(_exc)
 
     threading.Thread(target=run, daemon=True, name="quick-speak").start()
 

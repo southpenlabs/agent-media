@@ -35,6 +35,7 @@ from typing import Optional
 from .render import device as device_voice
 from . import session_feed
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -266,7 +267,8 @@ def _session_spoke_since(store, session: str, text: str, since: float) -> bool:
     """Whether anything but `text` was said in this session after `since`."""
     try:
         rows = store.recent_history(sink="speech", limit=50)
-    except Exception:  # noqa: BLE001 — no answer, so no evidence of a new turn
+    except Exception as _exc:  # noqa: BLE001 — no answer, so no evidence of a new turn
+        _failures.swallowed(_exc)
         return False
     label = _flat(f"You: {text}")
     for row in rows:
@@ -288,7 +290,8 @@ def _listener_turn_recently(store, session: str, text: str, now: float) -> bool:
     """
     try:
         rows = store.recent_history(sink="speech", limit=50)
-    except Exception:  # noqa: BLE001 — a store that cannot answer cannot dedupe
+    except Exception as _exc:  # noqa: BLE001 — a store that cannot answer cannot dedupe
+        _failures.swallowed(_exc)
         return False
     label = _flat(f"You: {text}")
     for row in rows:  # newest first
@@ -577,7 +580,8 @@ def _live_turn(session: str) -> Optional[dict]:
         from .intake.submit import _playout_delay_s
 
         delay = _playout_delay_s(str(np.get("target") or ""))
-    except Exception:  # noqa: BLE001 — a beat off beats no highlight
+    except Exception as _exc:  # noqa: BLE001 — a beat off beats no highlight
+        _failures.swallowed(_exc)
         delay = 0.0
     if ex.get("clip_starts_s") and not ex.get("clip_offsets_s"):
         # Measured starts are when the player itself reached each sentence, so

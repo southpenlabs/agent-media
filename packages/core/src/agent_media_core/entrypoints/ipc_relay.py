@@ -245,7 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--spares", type=int, default=2)
     ap.add_argument("--max-age", type=float, default=45.0)
     a = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(name)s: %(message)s')
     Relay(_hostport(a.listen), _hostport(a.upstream), a.spares, a.max_age).serve_forever()
     return 0
 

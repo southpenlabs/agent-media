@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 FILE = "model-usage.json"
 KEEP_DAYS = 90
@@ -155,8 +156,8 @@ def record(role: str, model: Optional[str], *, ok: bool, kind: Optional[str] = N
             if images > 0:
                 c["images"] += int(images)
         _schedule()
-    except Exception:  # noqa: BLE001 — counting is never load-bearing
-        pass
+    except Exception as _exc:  # noqa: BLE001 — counting is never load-bearing
+        _failures.swallowed(_exc)
 
 
 def tokens(data: object) -> tuple[Optional[int], Optional[int]]:
@@ -240,7 +241,8 @@ def _flush_one(p: Path, taken: dict) -> None:
             tmp = p.with_name(f".{FILE}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps({"v": 1, "days": days}, sort_keys=True))
             os.replace(tmp, p)
-    except Exception:  # noqa: BLE001 — put them back for the next try
+    except Exception as _exc:  # noqa: BLE001 — put them back for the next try
+        _failures.swallowed(_exc)
         with _lock:
             for (day, role, model), c in taken.items():
                 cur = _pending.setdefault(str(p), {}).setdefault((day, role, model),

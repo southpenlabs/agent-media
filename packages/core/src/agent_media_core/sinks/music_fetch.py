@@ -158,5 +158,6 @@ def spawn_append_fetched(urls: List[str]) -> None:
 
 if __name__ == "__main__":
     import sys
-    logging.basicConfig(level=logging.INFO)
+    from agent_media_core import logs
+    logs.setup(logging.INFO, logging.BASIC_FORMAT)
     append_fetched(sys.argv[1:])

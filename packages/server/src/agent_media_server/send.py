@@ -50,6 +50,7 @@ import time
 import uuid
 
 from . import auth, panes, sessions
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.send")
 
@@ -656,7 +657,8 @@ def _agent_unready(agent: str, profile: str = "") -> str:
     try:
         state, _who = harnesses.auth_state(agent, timeout=5.0,
                                            env=harness_profiles.env(agent, profile))
-    except Exception:          # noqa: BLE001 - a check that fails is not a refusal
+    except Exception as _exc:          # noqa: BLE001 - a check that fails is not a refusal
+        _failures.swallowed(_exc)
         return ""
     return (f"{agent}{f' ({profile})' if profile else ''} is signed out on this host"
             if state == "out" else "")
@@ -674,7 +676,8 @@ def _revive_unready(session: str, agent: str) -> dict:
 
     try:
         profile = harnesses.profile_of(session) or ""
-    except Exception:          # noqa: BLE001 - no profile found is the default one
+    except Exception as _exc:          # noqa: BLE001 - no profile found is the default one
+        _failures.swallowed(_exc)
         profile = ""
     why = _agent_unready(agent, profile) if profile else _agent_unready(agent)
     return {"error": why, "status": 409, "agent": agent, "fix": "harnesses"} if why else {}
@@ -1161,6 +1164,7 @@ def _to_owner(no: dict, session: str, text: str, *, quote: str = "", reply_to: s
         status, ans = peer_link._http(link["url"].rstrip("/") + "/reply", body, link["token"],
                                       OWNER_TIMEOUT_S, "POST")
     except Exception as e:  # noqa: BLE001 - the owner down is the refusal, said why
+        _failures.swallowed(e)
         return False, {**no, "owner_error": str(e)}
     where = {"host": host, "server": link["url"],
              **({"server_id": link["server_id"]} if link.get("server_id") else {})}
@@ -1421,7 +1425,8 @@ def _desk_attended() -> bool:
         from agent_media_core.intake import toast
 
         return toast._desk(within) is not None
-    except Exception:  # noqa: BLE001 — no tmux to ask: nobody at a desk
+    except Exception as _exc:  # noqa: BLE001 — no tmux to ask: nobody at a desk
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1526,5 +1531,6 @@ def _pane_working(session: str, pane: str) -> bool:
     counts as not."""
     try:
         return sessions.activity_of(session, pane)["state"] == "working"
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return False

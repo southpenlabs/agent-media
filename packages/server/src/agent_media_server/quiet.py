@@ -47,6 +47,7 @@ import time
 
 from . import auth, sessions
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 QUIET = JsonMap("quiet.json")
 
@@ -113,7 +114,8 @@ def _build_shift_index(force: bool = False) -> tuple[dict, dict]:
         spans, labels = {}, {}
         try:
             events = _calendar_events()
-        except Exception:  # noqa: BLE001 — no calendar: no shifts, not a 500
+        except Exception as _exc:  # noqa: BLE001 — no calendar: no shifts, not a 500
+            _failures.swallowed(_exc)
             events = []
         for e in events:
             src = str(e.get("shift_source") or "")
@@ -149,7 +151,8 @@ def rules() -> list[dict]:
         from agent_media_core import config
 
         got = (config.load().get("quiet") or {}).get("rules")
-    except Exception:  # noqa: BLE001 — a bad config means none set
+    except Exception as _exc:  # noqa: BLE001 — a bad config means none set
+        _failures.swallowed(_exc)
         got = None
     spans, labels = _shift_index()
     if isinstance(got, list) and got:

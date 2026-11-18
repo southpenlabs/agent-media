@@ -431,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("publish")
     a = ap.parse_args(argv)
     if a.cmd == "run":
+        from agent_media_core import logs
+        logs.setup()
         return run()
     if a.cmd == "url":
         deadline = time.monotonic() + a.wait

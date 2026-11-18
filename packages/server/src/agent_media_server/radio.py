@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from agent_media_core import failures as _failures
 
 _PERIOD_S = 4.0
 _WAKE = threading.Event()
@@ -38,8 +39,8 @@ def _loop() -> None:
         period = _PERIOD_S
         try:
             period = min(period, radio.wait(_PERIOD_S))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         try:
             seg = _segment()
             if seg is not None:

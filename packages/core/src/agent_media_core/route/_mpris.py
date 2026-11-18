@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import subprocess
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +84,8 @@ def _bus_pid(name: str) -> int | None:
              "org.freedesktop.DBus", "GetConnectionUnixProcessID",
              "s", f"org.mpris.MediaPlayer2.{name}"],
             capture_output=True, text=True, timeout=_TIMEOUT)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     if r.returncode != 0:
         return None
@@ -125,7 +127,8 @@ def _run(*args: str) -> str | None:
         r = subprocess.run(["playerctl", *args],
                            capture_output=True, text=True, timeout=_TIMEOUT)
         return (r.stdout or "").strip() if r.returncode == 0 else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -151,7 +154,8 @@ def _ssh(host: str, script: str) -> str | None:
             capture_output=True, text=True, timeout=_SSH_CMD_TIMEOUT,
         )
         return (r.stdout or "").strip() if r.returncode == 0 else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 

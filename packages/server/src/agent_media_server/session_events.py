@@ -91,6 +91,7 @@ import time
 
 from . import (alerts, auth, follow, mic, notes, phone, remind, room_notices, sessions,
                stage, unheard_watch)
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.session_events")
 
@@ -241,7 +242,8 @@ def reminders_due() -> list[dict]:
     for sid, r in sorted(remind.due().items(), key=lambda kv: kv[1]["at"]):
         try:
             title = sessions.title_of(sid)
-        except Exception:  # noqa: BLE001 — a reminder without its title still goes
+        except Exception as _exc:  # noqa: BLE001 — a reminder without its title still goes
+            _failures.swallowed(_exc)
             title = ""
         out.append({"session": sid, "title": title, "at": r["at"]})
     return out
@@ -285,7 +287,8 @@ class _Watcher:
         # whenever something plays (stage.py, §6.21h): noticed here.
         try:
             stage_head = stage.live_key()
-        except Exception:  # noqa: BLE001 — never worth the sweep
+        except Exception as _exc:  # noqa: BLE001 — never worth the sweep
+            _failures.swallowed(_exc)
             stage_head = self.stage_head
         # A reminder coming due is a change, noticed here (≤ POLL_S late).
         remind_head = remind.due_key()

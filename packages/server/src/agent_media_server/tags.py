@@ -60,6 +60,7 @@ import re
 import tempfile
 import threading
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 #: Tags the exporter writes, whatever the thread.
 EXPORTER_TAGS = frozenset({"inbox", "autonomous", "claude", "pi", "codex", "openclaw",
@@ -246,7 +247,8 @@ def _exists(session: str) -> bool:
         from . import sessions
 
         return sessions.session_exists(session)
-    except Exception:  # noqa: BLE001 — unsure means keep the hold
+    except Exception as _exc:  # noqa: BLE001 — unsure means keep the hold
+        _failures.swallowed(_exc)
         return True
 
 
@@ -310,11 +312,13 @@ def add_tags(rows: list[dict]) -> list[dict]:
         # A new thread's held tags: written into its node once there is one
         # (so read back with it below), shown from the hold until then.
         held = _settle_held(_nodes())
-    except Exception:  # noqa: BLE001 — a thread list never fails on tags
+    except Exception as _exc:  # noqa: BLE001 — a thread list never fails on tags
+        _failures.swallowed(_exc)
         held = {}
     try:
         by = tags_by_session()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         by = {}
     rooms = [r for r in rows if r.get("harness") == "matrix" and not r.get("sealed")]
     from . import tags_auto
@@ -325,7 +329,8 @@ def add_tags(rows: list[dict]) -> list[dict]:
         chat_map, people_map = _jsonmaps()
         chats, people = chat_map.all(), people_map.all()
         autos = tags_auto.all_auto() if rooms else {}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         labels, chats, people, autos = {}, {}, {}, {}
     if rooms:
         # Chats get their auto tags in the background (tags_auto.py).

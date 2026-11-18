@@ -37,6 +37,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import alerts, auth, mailbox, sessions, speech
+from agent_media_core import failures as _failures
 
 #: `sessions_index()` is a tmux listing plus a walk of the shelf; the
 #: dashboard is polled every ~5 s, and a title or recap a few seconds old is
@@ -454,7 +455,8 @@ def _role() -> str:
         from agent_media_core import config
 
         roles = config.host_roles()
-    except Exception:  # noqa: BLE001 — a bad config file is not a failed dashboard
+    except Exception as _exc:  # noqa: BLE001 — a bad config file is not a failed dashboard
+        _failures.swallowed(_exc)
         roles = None
     return ",".join(sorted(roles)) if roles else ""
 

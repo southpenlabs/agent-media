@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 KINDS = ("artist", "author", "show")
 TTL_S = 30 * 86400
@@ -163,7 +164,8 @@ def _where(qid: Optional[str], props: tuple) -> dict:
                     return host
                 continue
             return _place(got[0])
-    except Exception:  # noqa: BLE001 — no place
+    except Exception as _exc:  # noqa: BLE001 — no place
+        _failures.swallowed(_exc)
         return {}
     return {}
 
@@ -182,7 +184,8 @@ def _wiki(title: str) -> Optional[dict]:
     """English Wikipedia's summary of `title`: words, picture, page."""
     try:
         d = _json(WIKI_SUMMARY + urllib.parse.quote(title.replace(" ", "_")))
-    except Exception:  # noqa: BLE001 — no page
+    except Exception as _exc:  # noqa: BLE001 — no page
+        _failures.swallowed(_exc)
         return None
     if d.get("type") == "disambiguation" or not d.get("extract"):
         return None
@@ -214,7 +217,8 @@ def _artist(name: str) -> Optional[dict]:
                 ent = _wd(qid)
                 title = ((ent.get("sitelinks") or {}).get("enwiki") or {}).get("title")
                 wiki = _wiki(title) if title else None
-            except Exception:  # noqa: BLE001 — without its words
+            except Exception as _exc:  # noqa: BLE001 — without its words
+                _failures.swallowed(_exc)
                 wiki = None
         elif kind == "bandcamp":
             links.append({"label": "Bandcamp", "url": url})
@@ -262,7 +266,8 @@ def _author(name: str) -> Optional[dict]:
 def _feed_words(feed: str) -> Optional[str]:
     try:
         root = ET.fromstring(_get(feed))
-    except Exception:  # noqa: BLE001 — without its words
+    except Exception as _exc:  # noqa: BLE001 — without its words
+        _failures.swallowed(_exc)
         return None
     ch = root.find("channel")
     if ch is None:
@@ -290,7 +295,8 @@ def _youtube_show(name: str) -> Optional[dict]:
     if addon is not None and hasattr(addon, "channel"):
         try:
             got = addon.channel(url) or {}
-        except Exception:  # noqa: BLE001 — the name and the link still stand
+        except Exception as _exc:  # noqa: BLE001 — the name and the link still stand
+            _failures.swallowed(_exc)
             got = {}
     country = got.get("country")
     return {"source": "youtube", "name": got.get("name") or name,
@@ -316,20 +322,23 @@ def _show(name: str) -> Optional[dict]:
     links = [{"label": "Apple Podcasts", "url": hit["collectionViewUrl"]}] if hit.get("collectionViewUrl") else []
     try:
         qid = _wd_search(hit.get("collectionName") or name, re.compile(r"podcast", re.I))
-    except Exception:  # noqa: BLE001 — no place
+    except Exception as _exc:  # noqa: BLE001 — no place
+        _failures.swallowed(_exc)
         qid = None
     place = _where(qid, ("P740", "P159", "P371", "P50", "P495"))
     if not place:
         # The people or the radio show of the same name (Hamish & Andy, the duo).
         try:
             same = _wd_search(hit.get("collectionName") or name, re.compile(r"comed|duo|radio|show|presenter|host|journalist|author|writer", re.I))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             same = None
         place = _where(same, ("P740", "P159", "P551", "P19", "P495", "P27"))
     if not place and hit.get("artistName"):
         try:
             host = _wd_search(hit["artistName"], re.compile(r"podcast|comed|radio|presenter|host|journalist|author|writer|scientist", re.I))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             host = None
         place = _where(host, ("P551", "P19"))
     return {"source": "itunes", "name": hit.get("collectionName") or name, **place,
@@ -409,7 +418,8 @@ def profile(kind: str, name: str, fresh: bool = False) -> dict:
         return {"name": name, "kind": kind, "profile": (hit or {}).get("profile")}
     try:
         got = {"artist": _artist, "author": _author, "show": _show}[kind](name)
-    except Exception:  # noqa: BLE001 — the last one known, or none
+    except Exception as _exc:  # noqa: BLE001 — the last one known, or none
+        _failures.swallowed(_exc)
         return {"name": name, "kind": kind, "profile": (hit or {}).get("profile")}
     if got:
         # A place not found is still a place looked for: not looked for again.

@@ -46,6 +46,7 @@ from typing import Any, Literal, TypedDict
 
 from . import git_state
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 TIMEOUT_S = 2.0
 #: How long a request waits on the forge before it answers without.
@@ -552,7 +553,8 @@ def fetch_ci(repo: Repo, sha: str) -> Any:
         return _UNKNOWN
     try:
         got = be.ci(repo, sha)
-    except Exception:  # noqa: BLE001 — ForgeError, or an answer not shaped as expected
+    except Exception as _exc:  # noqa: BLE001 — ForgeError, or an answer not shaped as expected
+        _failures.swallowed(_exc)
         _remember(key, _UNKNOWN, FAILED_S)
         return _UNKNOWN
     if got is not None and got["state"] in SETTLED:
@@ -612,7 +614,8 @@ def _needs_pr_now(repo: Repo, branch: str) -> bool:
     try:
         got = bool(be.needs_pr(repo, branch)) if be else False
         _remember(key, got, NEEDS_PR_S)
-    except Exception:  # noqa: BLE001 — not known
+    except Exception as _exc:  # noqa: BLE001 — not known
+        _failures.swallowed(_exc)
         got = False
         _remember(key, got, FAILED_S * 2)
     return got
@@ -688,7 +691,8 @@ def _item_ci(repo: Repo, be: Backend, item: dict) -> None:
     there = Repo(repo.kind, repo.host, owner, name)
     try:
         head = be.pull_head(there, item["number"])
-    except Exception:  # noqa: BLE001 — no dot, then
+    except Exception as _exc:  # noqa: BLE001 — no dot, then
+        _failures.swallowed(_exc)
         return
     if head:
         got = ci_for(there, head, wait_s=TIMEOUT_S)
@@ -713,14 +717,16 @@ def project_view(repo: Repo) -> dict:
     wait([repos_f, items_f], timeout=WAIT_S)
     try:
         repos = repos_f.result(timeout=0) if repos_f.done() else []
-    except Exception:  # noqa: BLE001 — not known
+    except Exception as _exc:  # noqa: BLE001 — not known
+        _failures.swallowed(_exc)
         repos = []
     if len(repos) > 1:
         out["umbrella"] = {"name": repo.owner, "web": f"https://{repo.host}/{repo.owner}",
                            "repos": sorted(repos, key=lambda r: r["name"].lower())}
     try:
         items = items_f.result(timeout=0) if items_f.done() else []
-    except Exception:  # noqa: BLE001 — not known
+    except Exception as _exc:  # noqa: BLE001 — not known
+        _failures.swallowed(_exc)
         items = []
     items.sort(key=lambda i: -i["at"])
     items = items[:MAX_ITEMS]

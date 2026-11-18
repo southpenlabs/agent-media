@@ -196,6 +196,13 @@ per clone with `git config core.hooksPath .githooks`).
   docs/decisions/2026-09-22-licensing.md
 - The canvas carries the reply's words, not ambient art.
   docs/decisions/2026-09-21-canvas-carries-words.md
+- Failures are visible: a handler that drops an exception on purpose calls
+  `failures.swallowed(e)` (logged once per place and kind per process);
+  a long-running program's main calls `logs.setup()` (MEDIA_LOG_LEVEL);
+  CI's `lint` (ruff.toml) and `types` (each package's `[tool.mypy]`) jobs
+  stay green. A function that reads a store, clock, sink or settings takes
+  it as an argument defaulting to the real one, so a test passes its own.
+  docs/proposals/2026-11-19-design-principles.md
 - A new setting or address naming an outside service gets a row in
   docs/reference/outside-services.md in the same change, saying whose
   credential it uses, what its terms ask of us, and whether the personal-use

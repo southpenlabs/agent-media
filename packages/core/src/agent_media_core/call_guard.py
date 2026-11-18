@@ -121,6 +121,7 @@ from pathlib import Path
 from . import _lock as fcntl
 from ._paths import state_dir
 from .sinks import _mpv_ipc as ipc
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -1400,8 +1401,8 @@ class MicSource:
         # with a timeout that outlasts a busy status server, settles it.
         try:
             self._read(timeout=_MIC_CONFIRM_TIMEOUT_S)
-        except Exception:  # noqa: BLE001 — down is down, whatever the reason
-            pass
+        except Exception as _exc:  # noqa: BLE001 — down is down, whatever the reason
+            _failures.swallowed(_exc)
         else:
             log.info("mic source: answered the confirming read — not reviving")
             self._answered()
@@ -1803,10 +1804,8 @@ def main() -> int:
                              "mistaken for proof the trigger is alive.")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
     cfg = Config()

@@ -16,6 +16,7 @@ import json
 import os
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 FILE_NAME = "language.json"
 DEFAULT = "en"
@@ -39,7 +40,8 @@ def current() -> str:
     try:
         data = json.loads((state_dir() / FILE_NAME).read_text())
         code = data.get("language") if isinstance(data, dict) else None
-    except Exception:  # noqa: BLE001 — never raises
+    except Exception as _exc:  # noqa: BLE001 — never raises
+        _failures.swallowed(_exc)
         return DEFAULT
     return code.strip().lower() if isinstance(code, str) and code.strip() else DEFAULT
 
@@ -50,7 +52,8 @@ def locale() -> str:
     try:
         data = json.loads((state_dir() / FILE_NAME).read_text())
         loc = data.get("locale") if isinstance(data, dict) else None
-    except Exception:  # noqa: BLE001 — never raises
+    except Exception as _exc:  # noqa: BLE001 — never raises
+        _failures.swallowed(_exc)
         loc = None
     if isinstance(loc, str) and loc.strip():
         return normalise(loc)
@@ -81,7 +84,8 @@ def accents() -> list[str]:
     try:
         data = json.loads((state_dir() / FILE_NAME).read_text())
         got = data.get("accents") if isinstance(data, dict) else None
-    except Exception:  # noqa: BLE001 — never raises
+    except Exception as _exc:  # noqa: BLE001 — never raises
+        _failures.swallowed(_exc)
         got = None
     lang = loc.split("-", 1)[0]
     out = [normalise(a) for a in got if isinstance(a, str) and a.strip()] if isinstance(got, list) else []

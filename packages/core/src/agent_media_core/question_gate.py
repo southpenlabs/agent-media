@@ -40,6 +40,7 @@ import time
 from . import _lock as fcntl
 from ._paths import state_dir
 from .types import Event, Priority
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -154,8 +155,8 @@ def hold(question: Event, session: str) -> Event | None:
             from . import pending_asks
 
             pending_asks.update(session, card, held=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     if md.get("ask_part"):
         return None          # one cue per card: its first part had it
     return cue_event(question, session)

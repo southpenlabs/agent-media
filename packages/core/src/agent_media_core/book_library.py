@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import cache_dir, state_dir
+from agent_media_core import failures as _failures
 
 AUDIO_EXTS = {".m4b", ".m4a", ".mp3", ".mka", ".opus", ".ogg", ".webm", ".flac", ".aac", ".wav"}
 MIN_BOOK_S = 5 * 60
@@ -172,14 +173,16 @@ def scan() -> dict:
                 continue
             try:
                 got = _probe(p)
-            except Exception:  # noqa: BLE001 — unreadable for now; tried next time
+            except Exception as _exc:  # noqa: BLE001 — unreadable for now; tried next time
+                _failures.swallowed(_exc)
                 continue
             e = _entry(rel, p, got, (prev or {}).get("added") or st.st_mtime)
             e["sig"] = sig
             if e["cover"]:
                 try:
                     _extract_cover(p, e["id"])
-                except Exception:  # noqa: BLE001
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
                     e["cover"] = False
             books[rel] = e
         d = {"at": time.time(), "root": str(base), "books": books}

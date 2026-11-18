@@ -439,6 +439,10 @@ from . import (archive, auth, devices, drafts, harnesses, pins, routing, send,
                sessions, share, speech, threads)
 from . import alerts, audio, doc_chat, doc_read, music, org, org_calendar, org_chat, org_edit, org_listen, org_setup, org_zettel, refs, uploads
 from . import app_links, web_app
+from agent_media_core import failures as _failures
+import logging
+
+log = logging.getLogger(__name__)
 
 # The endpoints a browser on another origin may reach. Everything here
 # carries its own credential — a paired device's token — and none of
@@ -989,7 +993,7 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         except ValueError as e:
             _json(h, 400, {"ok": False, "error": str(e)})
         except Exception as e:  # noqa: BLE001
-            print(f"practice: discover failed: {e}", file=sys.stderr)
+            log.warning(f"practice: discover failed: {e}")
             _json(h, 502, {"ok": False, "error": f"YouTube search failed: {e}"})
         return True
     if path == "/practice/teacher" and method == "GET":
@@ -2374,8 +2378,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # One line per ask: this is a new route and the app is the only
         # caller, so "did the box even ask?" is the first question every
         # time it does not appear.
-        print(f"commands: {h.client_address[0]} {query} -> "
-              f"{len(detail.get('commands') or []) if ok else detail}", file=sys.stderr)
+        log.info(f"commands: {h.client_address[0]} {query} -> "
+              f"{len(detail.get('commands') or []) if ok else detail}")
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
     elif path == "/usage":
         # How much of the Claude plan is spent (plan_usage.py): the card's numbers.
@@ -3057,7 +3061,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         who = h.client_address[0]
         if not ok or who not in _SPEECH_NOW_SEEN:
             _SPEECH_NOW_SEEN.add(who)
-            print(f"speech/now: {who} -> {'ok' if ok else detail}", file=sys.stderr)
+            log.info(f"speech/now: {who} -> {'ok' if ok else detail}")
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     else:
         return False
@@ -3275,18 +3279,18 @@ def _pair(h: BaseHTTPRequestHandler) -> None:
 
     ip = h.client_address[0] if h.client_address else ""
     if devices.rate_limited(ip):
-        print(f"pair: rate-limited {ip}", file=sys.stderr)
+        log.info(f"pair: rate-limited {ip}")
         _json(h, 429, {"ok": False, "code": "rate_limited",
                        "error": "too many pairing attempts; try again in a few minutes"})
         return
     body = _read_json(h) or {}
     got = devices.redeem(str(body.get("code") or ""), str(body.get("device") or ""), ip)
     if not got:
-        print(f"pair: refused a code from {ip}", file=sys.stderr)
+        log.warning(f"pair: refused a code from {ip}")
         _json(h, 403, {"ok": False, "code": "bad_pairing_code",
                        "error": "invalid or expired pairing code"})
         return
-    print(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip}", file=sys.stderr)
+    log.info(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip}")
     # `name` is the one the device will be known by — the name given at the
     # desk wins over the one the phone sent — so the app can say "paired as".
     server = {"name": _server_name(), "base": _base_url(h)}
@@ -3353,9 +3357,8 @@ def _services_restart(h: BaseHTTPRequestHandler) -> None:
     status = {rs.OK: 200, rs.UNKNOWN: 400, rs.BUSY: 409}.get(rc, 500)
     if dry_run and rc != rs.UNKNOWN:
         status = 200
-    print(f"services/restart: {user.get('username')} asked for "
-          f"{' '.join(only or ['all'])} (after {after:g}, dry run {dry_run}): rc {rc}",
-          file=sys.stderr, flush=True)
+    log.info(f"services/restart: {user.get('username')} asked for "
+          f"{' '.join(only or ['all'])} (after {after:g}, dry run {dry_run}): rc {rc}")
     _json(h, status, {"ok": rc == rs.OK, "host": rs.host(), **res})
 
 
@@ -3371,7 +3374,8 @@ def _public_base(h: BaseHTTPRequestHandler) -> str:
 
     try:
         return server_address.current() or _base_url(h)
-    except Exception:  # noqa: BLE001 — a link still goes out
+    except Exception as _exc:  # noqa: BLE001 — a link still goes out
+        _failures.swallowed(_exc)
         return _base_url(h)
 
 
@@ -3380,7 +3384,8 @@ def _folder_places(dev: dict) -> list | None:
 
     try:
         return folder_grants.places(dev)
-    except Exception:  # noqa: BLE001  (a bad grants file never breaks /me)
+    except Exception as _exc:  # noqa: BLE001  (a bad grants file never breaks /me)
+        _failures.swallowed(_exc)
         return None
 
 
@@ -3393,7 +3398,8 @@ def _lookup_for(base: str) -> str:
     try:
         url = tunnel.current_url()
         return tunnel.lookup_url() if url and url == base.rstrip("/") else ""
-    except Exception:  # noqa: BLE001 — pairing works without it
+    except Exception as _exc:  # noqa: BLE001 — pairing works without it
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -3535,7 +3541,7 @@ def _refresh_profile_soon(dev: dict) -> None:
             devices.update_profile(did, str(info.get("email") or ""), oidc.username_of(info),
                                    oidc.picture_of(info))
         except (oidc.OidcError, OSError) as e:
-            print(f"me: profile refresh for {did} refused: {e}", file=sys.stderr)
+            log.warning(f"me: profile refresh for {did} refused: {e}")
         finally:
             _REFRESHING.discard(did)
     _in_background(run)
@@ -3577,7 +3583,7 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
         claims = oidc.verify(id_token)
     except oidc.OidcError as e:
         devices._note_failure(ip)
-        print(f"enrol: refused from {ip}: {e}", file=sys.stderr)
+        log.warning(f"enrol: refused from {ip}: {e}")
         _json(h, 403, {"ok": False, "code": e.code, "error": "that sign-in was not accepted"})
         return
     from . import join_requests
@@ -3603,8 +3609,7 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
                 out["error"] = "that account has asked this server's owner for access"
             else:
                 out.update(req)
-        print(f"enrol: {who} is not allowed here ({out.get('request', {}).get('status') or out['code']})",
-              file=sys.stderr)
+        log.info(f"enrol: {who} is not allowed here ({out.get('request', {}).get('status') or out['code']})")
         _json(h, 403, out)
         return
     _enrolled(h, claims, str(body.get("device") or ""), ip, refresh_token,
@@ -3621,8 +3626,8 @@ def _enrolled(h: BaseHTTPRequestHandler, claims: dict, device: str, ip: str,
     got = devices.enrol_account(claims, device, ip, enrol=enrol, refresh_token=refresh_token,
                                 username=username or oidc.username_of(claims),
                                 picture=picture or oidc.picture_of(claims), role=role)
-    print(f"enrol: {got['device_id']} ({got['name']!r}) for "
-          f"{claims.get('email') or claims.get('sub')} from {ip}", file=sys.stderr)
+    log.info(f"enrol: {got['device_id']} ({got['name']!r}) for "
+          f"{claims.get('email') or claims.get('sub')} from {ip}")
     if refresh_token:
         # This server, on the account's list at sasonica.com (roadmap item 20).
         from . import servers_report
@@ -3673,7 +3678,7 @@ def _pair_request(h: BaseHTTPRequestHandler) -> None:
         _json(h, 429, {"ok": False, **got})
         return
     base = _public_base(h)
-    print(f"pair: {ip} asks to pair {str(body.get('name') or '')[:80]!r} ({got['id']})", file=sys.stderr)
+    log.info(f"pair: {ip} asks to pair {str(body.get('name') or '')[:80]!r} ({got['id']})")
     _json(h, 200, {"ok": True, **got,
                    "approve": f"{base}{web_app.PREFIX}/approve?pair={quote(got['id'])}",
                    "server": {"name": _server_name(), "base": base}, "server_id": _server_id()})
@@ -3698,7 +3703,7 @@ def _pair_wait(h: BaseHTTPRequestHandler) -> None:
     if status == "pending":
         _json(h, 200, {"ok": True, "status": "pending"})
     elif status == "approved":
-        print(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip} by request", file=sys.stderr)
+        log.info(f"pair: paired {got['device_id']} ({got['name']!r}) from {ip} by request")
         server = {"name": _server_name(), "base": _public_base(h)}
         lookup = _lookup_for(server["base"])
         if lookup:
@@ -3774,8 +3779,8 @@ def _pair_decide(h: BaseHTTPRequestHandler, allow: bool) -> None:
         return
     # No role sent: the kind's suggestion (guest for a TV), else member (§6.59).
     role = role or got.get("suggested_role") or pair_requests.DEFAULT_ROLE
-    print(f"pair: {user.get('device')} {'allowed' if allow else 'denied'} {got['id']} "
-          f"({got['name']!r}{', ' + role if allow else ''})", file=sys.stderr)
+    log.warning(f"pair: {user.get('device')} {'allowed' if allow else 'denied'} {got['id']} "
+          f"({got['name']!r}{', ' + role if allow else ''})")
     _json(h, 200, {"ok": True, "request": got, **({"role": role} if allow else {})})
 
 
@@ -3797,8 +3802,7 @@ def _enrol_wait(h: BaseHTTPRequestHandler) -> None:
     if status == "pending":
         _json(h, 200, {"ok": True, "status": "pending"})
     elif status == "allowed":
-        print(f"enrol: request allowed for {got['claims'].get('email') or got['claims'].get('sub')}",
-              file=sys.stderr)
+        log.info(f"enrol: request allowed for {got['claims'].get('email') or got['claims'].get('sub')}")
         _enrolled(h, got["claims"], got["device"], ip, got["rt"], enrol=False, role=got["role"],
                   username=got["username"], picture=got["picture"])
     elif status == "denied":
@@ -3874,7 +3878,7 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
     app_link, browser_link = devices.links(
         code, host, int(port or 8781),
         server=base if base.startswith("https://") else "", lookup=_lookup_for(base))
-    print(f"devices: {user.get('device')} minted a code for {name!r}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} minted a code for {name!r}")
     _json(h, 200, {"ok": True, "code": code, "expires": round(expires, 3),
                    "name": name, "enrol": bool(body.get("enrol")) and role in ("", "admin"),
                    "role": role or "admin",
@@ -3899,7 +3903,7 @@ def _devices_revoke(h: BaseHTTPRequestHandler) -> None:
         _json(h, 404, {"ok": False, "code": "no_such_device",
                        "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} revoked {device_id}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} revoked {device_id}")
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
@@ -3929,7 +3933,7 @@ def _devices_role(h: BaseHTTPRequestHandler) -> None:
         _json(h, 404, {"ok": False, "code": "no_such_device",
                        "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} made {device_id} {role}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} made {device_id} {role}")
     _json(h, 200, {"ok": True, "id": device_id, "role": role, "devices": devices.list_devices()})
 
 
@@ -3954,7 +3958,7 @@ def _devices_rename(h: BaseHTTPRequestHandler) -> None:
         _json(h, 404, {"ok": False, "code": "no_such_device",
                        "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} renamed {device_id} {name!r}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} renamed {device_id} {name!r}")
     _json(h, 200, {"ok": True, "id": device_id, "name": name, "devices": devices.list_devices()})
 
 
@@ -3982,8 +3986,7 @@ def _devices_pause(h: BaseHTTPRequestHandler) -> None:
         _json(h, 404, {"ok": False, "code": "no_such_device",
                        "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} set pause {'on' if on else 'off'} on {device_id}",
-          file=sys.stderr)
+    log.info(f"devices: {user.get('device')} set pause {'on' if on else 'off'} on {device_id}")
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
@@ -4022,8 +4025,7 @@ def _devices_follow(h: BaseHTTPRequestHandler) -> None:
                        "error": "no device with that id"})
         return
     follow.changed()
-    print(f"devices: {user.get('device')} set {device_id} to follow {', '.join(phones) or 'nobody'}",
-          file=sys.stderr)
+    log.info(f"devices: {user.get('device')} set {device_id} to follow {', '.join(phones) or 'nobody'}")
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
@@ -4053,7 +4055,7 @@ def _devices_kind(h: BaseHTTPRequestHandler) -> None:
     if not found:
         _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} set {device_id}'s kind to {body.get('kind')}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} set {device_id}'s kind to {body.get('kind')}")
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
@@ -4081,7 +4083,7 @@ def _devices_rules(h: BaseHTTPRequestHandler) -> None:
     if not found:
         _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
         return
-    print(f"devices: {user.get('device')} changed {device_id}'s rules {sorted(changes)}", file=sys.stderr)
+    log.info(f"devices: {user.get('device')} changed {device_id}'s rules {sorted(changes)}")
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
@@ -4119,7 +4121,7 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
             try:
                 flag_clock.record(path, body)
             except OSError as e:
-                print(f"flag clock: {path} not noted ({e})", file=sys.stderr, flush=True)
+                log.info(f"flag clock: {path} not noted ({e})")
 
 
 def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
@@ -4232,7 +4234,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 401, {"ok": False, "error": "not a device of this server"})
         else:
             devices.revoke(str(dev.get("id") or ""))
-            print(f"devices: {dev.get('id')} ({dev.get('name')!r}) signed out", file=sys.stderr)
+            log.info(f"devices: {dev.get('id')} ({dev.get('name')!r}) signed out")
             _json(h, 200, {"ok": True, "id": dev.get("id")})
     elif path == "/share":
         # "Play with agent-media" from the app's share sheet: media-share's
@@ -4357,7 +4359,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         if got is None:
             _json(h, 404, {"ok": False, "error": "that thread is not up next"})
             return True
-        print(f"speech/up-next: {action} {us[:8]}", file=sys.stderr)
+        log.info(f"speech/up-next: {action} {us[:8]}")
         _json(h, 200, {"ok": True, "up_next": up_next.listing()})
     elif path == "/speech/heard":
         # Mark read (§6.5): the thread's held replies count as heard — no
@@ -4376,7 +4378,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             if not done:
                 _json(h, info.pop("status", 409), {"ok": False, **info})
                 return True
-            print(f"speech/heard: undo, reply {info.get('id')}", file=sys.stderr)
+            log.info(f"speech/heard: undo, reply {info.get('id')}")
             _json(h, 200, {"ok": True, **info})
             return True
         if body.get("now") is True:
@@ -4385,7 +4387,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             if not done:
                 _json(h, info.pop("status", 409), {"ok": False, **info})
                 return True
-            print(f"speech/heard: now, reply {info.get('id')}", file=sys.stderr)
+            log.info(f"speech/heard: now, reply {info.get('id')}")
             _json(h, 200, {"ok": True, **info})
             return True
         if "ids" in body:
@@ -4401,7 +4403,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             if not done:
                 _json(h, info.pop("status", 404), {"ok": False, **info})
                 return True
-            print(f"speech/heard: ids {info.get('marked')}{' unheard' if unheard else ''}", file=sys.stderr)
+            log.info(f"speech/heard: ids {info.get('marked')}{' unheard' if unheard else ''}")
             _json(h, 200, {"ok": True, **info})
             return True
         us = str(body.get("session") or "")
@@ -4419,12 +4421,12 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             if not done:
                 info = {"marked": [], "undo": False}
             up_next.remove(us)
-            print(f"speech/heard: {us[:8]} held, {len(info.get('marked') or [])} marked", file=sys.stderr)
+            log.info(f"speech/heard: {us[:8]} held, {len(info.get('marked') or [])} marked")
             _json(h, 200, {"ok": True, **info})
             return True
         marked = StateStore().mark_thread_heard(us)
         up_next.remove(us)
-        print(f"speech/heard: {us[:8]} {len(marked)} marked", file=sys.stderr)
+        log.info(f"speech/heard: {us[:8]} {len(marked)} marked")
         _json(h, 200, {"ok": True, "marked": len(marked)})
     elif path == "/speech/ctl":
         # The app's speech bar buttons. The caller's device token, like
@@ -4449,7 +4451,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                 _json(h, 400, {"ok": False, "error": "keep-reading needs a session"})
                 return True
             lifted = speech.keep_reading(ks)
-            print(f"speech/ctl: keep-reading {ks[:8]} -> lifted={lifted}", file=sys.stderr)
+            log.info(f"speech/ctl: keep-reading {ks[:8]} -> lifted={lifted}")
             _json(h, 200, {"ok": True, "lifted": lifted})
             return True
         # `arg` is the turn index for prev/replay, kept by the app the way
@@ -4516,7 +4518,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                 action, arg, session = "replay-id", str(ids[0]), ""
         out = (speech.run_ctl(action, arg, sentence, session, then=then)
                if then else speech.run_ctl(action, arg, sentence, session))
-        print(f"speech/ctl: {action} -> {out.strip()[:120]!r}", file=sys.stderr)
+        log.info(f"speech/ctl: {action} -> {out.strip()[:120]!r}")
         reply = {"ok": True, "out": out}
         if out.startswith("error: "):
             # The verb ran and could not do it (a replay whose audio is
@@ -4557,8 +4559,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             # Which thread too: a refusal that names only the reason
             # cannot be told apart from the next one.
             named = f"session {str(body.get('session') or '')[:8]}"
-            print(f"reply: refused {status} ({detail.get('error')}) "
-                  f"for {named} from {h.client_address[0]}", file=sys.stderr)
+            log.warning(f"reply: refused {status} ({detail.get('error')}) "
+                  f"for {named} from {h.client_address[0]}")
         else:
             # A reply in the relay What's new thread goes on to the Sasonica
             # team (feedback.py, roadmap 47; off unless the owner chose it).
@@ -4604,8 +4606,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
 
             discard.note_started(str(detail["session"]))
         if not ok:
-            print(f"ask: refused {status} ({detail.get('error')}) "
-                  f"from {h.client_address[0]}", file=sys.stderr)
+            log.warning(f"ask: refused {status} ({detail.get('error')}) "
+                  f"from {h.client_address[0]}")
         _json(h, 200 if ok else status, {"ok": ok, **detail})
     elif path in ("/session/resume", "/session/close"):
         # Managing the session behind a conversation from the app: bring
@@ -4637,8 +4639,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = stop.session_stop(str(body.get("session") or ""),
                                        str(body.get("speech") or "auto"), _bearer(h))
         if not ok:
-            print(f"stop: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"stop: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/release":
         # Send now on a message held for a restart (stop.py session_release).
@@ -4673,9 +4675,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             ok, detail = mic.cancel(body.get("id"), _bearer(h))
         if ok and path == "/mic/ask":
             a = detail["ask"]
-            print(f"mic: {a['device']!r} asks {a['id']} for "
-                  f"{a['session'][:8] if a['session'] else 'a new chat'}",
-                  file=sys.stderr, flush=True)
+            log.info(f"mic: {a['device']!r} asks {a['id']} for "
+                  f"{a['session'][:8] if a['session'] else 'a new chat'}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/jobs/restart", "/jobs/update"):
         # `media restart-services --host <the phone>` (phone_jobs.restart,
@@ -4694,8 +4695,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         name = str(body.pop("device", "") or "") if isinstance(body, dict) else ""
         fn = phone_jobs.restart if path == "/jobs/restart" else phone_jobs.update
         status, detail = fn(name, body)
-        print(f"{path[1:]}: {name!r} {json.dumps(body)[:200]} → {status} "
-              f"rc {detail.get('rc')}", file=sys.stderr, flush=True)
+        log.info(f"{path[1:]}: {name!r} {json.dumps(body)[:200]} → {status} "
+              f"rc {detail.get('rc')}")
         _json(h, status, detail)
     elif path == "/jobs/result":
         from . import phone_jobs
@@ -4770,8 +4771,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = fn(_bearer(h), _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
         if ok:
-            print(f"devices: stage {path} {detail.get('id') or auth.device_id(_bearer(h))} "
-                  f"→ {(detail.get('stage') or detail).get('mode')}", file=sys.stderr)
+            log.info(f"devices: stage {path} {detail.get('id') or auth.device_id(_bearer(h))} "
+                  f"→ {(detail.get('stage') or detail).get('mode')}", )
     elif path == "/device/mic":
         # A paired device's mic opened or closed (§6.21e, mic_state.py): hpo's
         # ducker pauses its video while one is open.
@@ -4823,9 +4824,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                    body.get("params"))
             if ok:
                 a = detail["ask"]
-                print(f"phone: ask {a['id']} {a['kind']} for "
-                      f"{(a.get('session') or '-')[:8]} → {a['status']}",
-                      file=sys.stderr, flush=True)
+                log.info(f"phone: ask {a['id']} {a['kind']} for "
+                      f"{(a.get('session') or '-')[:8]} → {a['status']}",)
         else:
             ok, detail = phone.cancel(body.get("id"))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
@@ -4906,8 +4906,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             body = _read_json(h) or {}
             ok, detail = agent_actions.agent_message(session, agent_id,
                                                      str(body.get("text") or ""), _bearer(h))
-        print(f"agents: {act} {agent_id[:12]} in {session[:8]} → "
-              f"{detail.get('via') if ok else detail.get('error')}", file=sys.stderr, flush=True)
+        log.info(f"agents: {act} {agent_id[:12]} in {session[:8]} → "
+              f"{detail.get('via') if ok else detail.get('error')}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/retract":
         # Tapping your own latest message in the app, then Cancel or Edit
@@ -4921,8 +4921,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                              str(body.get("id") or ""),
                                              str(body.get("text") or ""), _bearer(h))
         if not ok:
-            print(f"retract: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"retract: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/session/group", "/session/leave"):
         # A group chat renamed or left (server-contract.md §6.41, room_group.py).
@@ -5093,8 +5093,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = seal.session_seal(str(body.get("session") or ""),
                                        body.get("sealed"), _bearer(h))
         if not ok:
-            print(f"seal: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"seal: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/move":
         # Move a conversation to another project: file it there, move its
@@ -5107,8 +5107,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                 project=str(body.get("project") or ""),
                                 cwd=str(body.get("cwd") or ""), bearer=_bearer(h))
         if not ok:
-            print(f"move: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"move: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/move/cancel":
         # Drop a move waiting for its session to be free (moves.py, §6.15).
@@ -5256,8 +5256,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         body = _read_json(h) or {}
         ok, detail = session_settings.post(str(body.get("session") or ""), body, _bearer(h))
         if not ok:
-            print(f"settings: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"settings: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/voice":
         from . import session_voice
@@ -5439,8 +5439,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                  answers=body.get("answers"),
                                  message=str(body.get("message") or ""))
         if not ok:
-            print(f"answer: refused ({detail.get('error')}) for "
-                  f"{str(body.get('session'))[:8]}", file=sys.stderr, flush=True)
+            log.warning(f"answer: refused ({detail.get('error')}) for "
+                  f"{str(body.get('session'))[:8]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/personas/scope":
         from . import persona_scope
@@ -5535,8 +5535,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         else:
             ok, detail = harnesses.close(str(body.get("pane") or ""), bearer)
         if not ok:
-            print(f"harnesses: refused ({detail.get('error')}) on {path} "
-                  f"from {h.client_address[0]}", file=sys.stderr)
+            log.warning(f"harnesses: refused ({detail.get('error')}) on {path} "
+                  f"from {h.client_address[0]}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/draft":
         # Half a reply, held for next time the conversation is opened.
@@ -5657,8 +5657,8 @@ def _free(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import session_events
         session_events.poke()
         if a["free"] != was:
-            print(f"free: {'free' if a['free'] else 'busy (' + ','.join(a['why']) + ')'}"
-                  f" from {device[:8]}", file=sys.stderr, flush=True)
+            log.info(f"free: {'free' if a['free'] else 'busy (' + ','.join(a['why']) + ')'}"
+                  f" from {device[:8]}")
         _json(h, 200, {"ok": True, **a})
         return True
     if method == "GET" and path == "/free":
@@ -5711,8 +5711,8 @@ def _audio(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     elif method == "POST" and path == "/audio/target":
         ok, detail = audio.set_target(_read_json(h) or {}, _bearer(h))
         if not ok:
-            print(f"audio/target: refused ({detail.get('error')}) "
-                  f"from {h.client_address[0]}", file=sys.stderr)
+            log.warning(f"audio/target: refused ({detail.get('error')}) "
+                  f"from {h.client_address[0]}")
     else:
         return False
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
@@ -5868,8 +5868,8 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         ok, detail = org_setup.run(str(body.get("component") or ""),
                                      str(body.get("action") or ""), bearer)
         if not ok:
-            print(f"org/setup: refused ({detail.get('error')}) "
-                  f"from {h.client_address[0]}", file=sys.stderr)
+            log.warning(f"org/setup: refused ({detail.get('error')}) "
+                  f"from {h.client_address[0]}")
     elif method == "POST" and path in ("/org/state", "/org/refile", "/org/date",
                                        "/org/priority"):
         # Marking a heading done (or any state), moving it to another GTD

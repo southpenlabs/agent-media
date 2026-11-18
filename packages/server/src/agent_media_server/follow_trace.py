@@ -21,6 +21,7 @@ import time
 from agent_media_core._paths import state_dir
 
 from . import auth
+from agent_media_core import failures as _failures
 
 #: Lines kept in the log: a reply sends a batch every few seconds.
 KEEP_LINES = 4000
@@ -45,7 +46,8 @@ def _row() -> dict:
         from agent_media_core.state.store import StateStore
 
         np = StateStore().get_now_playing("speech") or {}
-    except Exception:  # noqa: BLE001 — a trace never fails for want of the row
+    except Exception as _exc:  # noqa: BLE001 — a trace never fails for want of the row
+        _failures.swallowed(_exc)
         return {}
     ex = np.get("extras") or {}
     if isinstance(ex, str):

@@ -23,6 +23,7 @@ import socket
 import urllib.parse
 
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 STORE = JsonMap("services.json")
 
@@ -56,8 +57,8 @@ def _choices() -> list[dict]:
             if got and got.get("url"):
                 out.append({"base": got["url"], "server_id": got.get("server_id") or "",
                             "name": got.get("server_name") or row["alias"]})
-    except Exception:  # noqa: BLE001 - no links: this server only
-        pass
+    except Exception as _exc:  # noqa: BLE001 - no links: this server only
+        _failures.swallowed(_exc)
     return out
 
 

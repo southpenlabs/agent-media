@@ -219,8 +219,8 @@ def publish(package: str, mode: str | None, reverted_at: float | None) -> None:
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(asctime)s %(levelname)s %(name)s: %(message)s')
     names = packages()
     if not names:
         # Not an error, and not a reason to crash-loop: this is what every host

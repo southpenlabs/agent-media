@@ -70,6 +70,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import drafts, panes, pins, procmem, recaps, rest, send, sessions
+from agent_media_core import failures as _failures
 
 MODES = ("dry-run", "apply")
 
@@ -358,14 +359,15 @@ def speech_now() -> tuple[bool | None, str]:
 
         np = StateStore().get_now_playing("speech") or {}
         session = str((np.get("extras") or {}).get("source_session") or "")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     try:
         from agent_media_core import cli
 
         idle = cli._speech_display_state()[0]
         return (not idle), session
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None, session
 
 
@@ -436,7 +438,8 @@ def _title(sid: str, pane: str, titles: dict[str, str]) -> str:
     if not t:
         try:
             t = sessions._live_title(sid)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             t = ""
     return t
 
@@ -452,7 +455,8 @@ def decide(cfg: Config, now: float | None = None) -> tuple[list[Decision], dict]
     mem = procmem.tree_mem_mb({sid: pids.get(sid) for sid in live})
     try:
         titles = sessions._pane_titles()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         titles = {}
     pinned = pins.pinned()
     callers = caller_sessions(live, pids)
@@ -461,7 +465,8 @@ def decide(cfg: Config, now: float | None = None) -> tuple[list[Decision], dict]
         from agent_media_core.state.store import StateStore
 
         spoken = StateStore().last_spoken()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         spoken = {}
     out: list[Decision] = []
     for sid, pane in sorted(live.items()):
@@ -509,7 +514,8 @@ def first_ask(session: str) -> str:
 
     try:
         return sessions._claude_first_prompt(session) or harnesses.first_prompt(session)
-    except Exception:  # noqa: BLE001 — the recap is written from the end alone
+    except Exception as _exc:  # noqa: BLE001 — the recap is written from the end alone
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -530,7 +536,8 @@ def your_messages(session: str) -> list[str]:
 
     try:
         got = transcript.messages(session)
-    except Exception:  # noqa: BLE001 — the recap is written from the end alone
+    except Exception as _exc:  # noqa: BLE001 — the recap is written from the end alone
+        _failures.swallowed(_exc)
         got = None
     if got is None:
         first = first_ask(session)
@@ -594,7 +601,8 @@ def generate_recap(session: str) -> dict | None:
         if not out:
             return None
         return rest.save_recap(session, out)
-    except Exception:  # noqa: BLE001 — a recap must never stand in front of a close
+    except Exception as _exc:  # noqa: BLE001 — a recap must never stand in front of a close
+        _failures.swallowed(_exc)
         return None
 
 
@@ -623,8 +631,8 @@ def _soon_worker() -> None:
         try:
             if not _recap_current(sid):
                 generate_recap(sid)
-        except Exception:  # noqa: BLE001 — a recap is a nicety, never a failure
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a recap is a nicety, never a failure
+            _failures.swallowed(_exc)
         finally:
             with _SOON_LOCK:
                 _SOON_HELD.discard(sid)
@@ -853,6 +861,7 @@ def seal_private(now: float, apply: bool) -> list[str]:
             personas.forget(sid)
             out.append(f"{stamp} apply private {sid[:8]} sealed ({why})")
         except Exception as e:  # noqa: BLE001 — one thread's failure is not the pass's
+            _failures.swallowed(e)
             out.append(f"{stamp} apply private {sid[:8]} failed-seal ({e})")
     return out
 

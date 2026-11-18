@@ -47,6 +47,7 @@ import stat
 from pathlib import Path
 
 from . import auth, folder_grants
+from agent_media_core import failures as _failures
 
 #: The most paths one resolve looks at (a message's worth).
 MAX_PATHS = 64
@@ -141,7 +142,8 @@ def folders(session: str) -> tuple[Path | None, Path | None]:
     try:
         got = docs.project_root(cwd)
         top = _resolved(got) if got else None
-    except Exception:  # noqa: BLE001 - a git that fails is no checkout
+    except Exception as _exc:  # noqa: BLE001 - a git that fails is no checkout
+        _failures.swallowed(_exc)
         top = None
     return cwd, top
 

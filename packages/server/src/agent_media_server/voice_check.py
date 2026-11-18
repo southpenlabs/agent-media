@@ -42,6 +42,7 @@ import re
 import threading
 
 from . import auth, sessions
+from agent_media_core import failures as _failures
 
 DEFAULT_TIMEOUT_S = 3.0
 DEFAULT_MIN_CONFIDENCE = 0.5
@@ -148,8 +149,8 @@ def speak(session: str, text: str) -> None:
     def run() -> None:
         try:
             submit_event(event, state=StateStore())
-        except Exception:  # noqa: BLE001 — unspoken, it is still on screen
-            pass
+        except Exception as _exc:  # noqa: BLE001 — unspoken, it is still on screen
+            _failures.swallowed(_exc)
 
     threading.Thread(target=run, daemon=True).start()
 

@@ -26,6 +26,7 @@ import logging
 import sys
 import threading
 import time
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ def reply_live() -> bool:
         from . import speech
 
         s = speech.current_state()
-    except Exception:  # noqa: BLE001 — unreadable is "nothing"
+    except Exception as _exc:  # noqa: BLE001 — unreadable is "nothing"
+        _failures.swallowed(_exc)
         return False
     return bool(s.get("speaking") or s.get("paused")) and not s.get("thinking") \
         and not s.get("notif")
@@ -98,7 +100,8 @@ def _busy() -> bool:
         from . import speech
 
         return bool(speech.current_state().get("queued"))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -183,7 +186,8 @@ def _heard(rid: int) -> bool:
             st.mark_heard(int(rid))
             return True
         return reply_position.heard_to_any(row, store=st) is None
-    except Exception:  # noqa: BLE001 — unsure: play it
+    except Exception as _exc:  # noqa: BLE001 — unsure: play it
+        _failures.swallowed(_exc)
         return False
 
 

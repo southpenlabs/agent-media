@@ -43,6 +43,7 @@ import time
 
 from . import auth, forge, sessions
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 STORE = JsonMap("issues.json")
 #: Every forge issue opened for a chat, kept when it is untracked.
@@ -124,14 +125,16 @@ def _hidden(session: str) -> bool:
 
     try:
         return hidden(session)
-    except Exception:  # noqa: BLE001 — when in doubt, private
+    except Exception as _exc:  # noqa: BLE001 — when in doubt, private
+        _failures.swallowed(_exc)
         return True
 
 
 def _repo_of(session: str) -> forge.Repo | None:
     try:
         return forge.repo_for(sessions.latest_cwd(session))
-    except Exception:  # noqa: BLE001 — no folder, no forge
+    except Exception as _exc:  # noqa: BLE001 — no folder, no forge
+        _failures.swallowed(_exc)
         return None
 
 
@@ -172,7 +175,8 @@ def _issue_text(session: str) -> tuple[str, str]:
         parts.append(ask[:4000])
     try:
         recap = ((recaps.recap_for(session) or {}).get("text") or "").strip()
-    except Exception:  # noqa: BLE001 — the body goes without it
+    except Exception as _exc:  # noqa: BLE001 — the body goes without it
+        _failures.swallowed(_exc)
         recap = ""
     if recap:
         parts.append("Recap: " + recap[:4000])

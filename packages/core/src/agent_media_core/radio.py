@@ -79,6 +79,7 @@ from typing import Iterator, Optional
 from . import _lock as fcntl
 from . import radio_io
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -1124,7 +1125,8 @@ def _liked_ids() -> set:
 
         return {_vid(r.get("media_id") or "") or r.get("media_id")
                 for r in StateStore().list_likes(limit=200, channel="music")}
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return set()
 
 

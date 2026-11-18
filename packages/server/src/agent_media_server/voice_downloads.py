@@ -19,6 +19,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 #: What a download may take on disk beyond its files: the engine's venv.
 VENV_BYTES = {"kokoro": 200_000_000, "piper": 120_000_000}
@@ -143,7 +144,8 @@ def _free_bytes() -> int:
         from agent_media_core import setup_voices
 
         root = setup_voices.tts_root()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         root = Path.home()
     probe = root
     while not probe.exists() and probe.parent != probe:
@@ -201,5 +203,6 @@ def _engine_here(provider: str) -> bool:
         from agent_media_core import setup_voices
 
         return setup_voices.venv_python(setup_voices.engine_dir(provider) / ".venv").exists()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False

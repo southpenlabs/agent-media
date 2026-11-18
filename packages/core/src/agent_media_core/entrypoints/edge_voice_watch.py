@@ -39,6 +39,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 ALERT_ID = "edge-voice"
 APP_REPO = Path.home() / "projects/sasonica-app"
@@ -169,6 +170,7 @@ async def probe(c: dict, text: str = "Checking the voice.", timeout: float = 15.
     except aiohttp.WSServerHandshakeError as e:
         return got, f"Microsoft refused the handshake ({e.status})"
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return got, f"{type(e).__name__}: {e}"
     return got, "" if got else "the service answered but sent no audio"
 
@@ -210,7 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             with urllib.request.urlopen(UPSTREAM, timeout=20) as r:
                 upstream = upstream_constants(r.read().decode("utf-8"))
-        except Exception:  # noqa: BLE001 — GitHub being down is not the voice failing
+        except Exception as _exc:  # noqa: BLE001 — GitHub being down is not the voice failing
+            _failures.swallowed(_exc)
             upstream = None
         level, title, detail = verdict(app, upstream, asyncio.run(probe(app)))
 

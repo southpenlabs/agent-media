@@ -24,6 +24,7 @@ index, and everything else is already in files the agent can open.
 from __future__ import annotations
 
 import time
+from agent_media_core import failures as _failures
 
 #: Hits a call answers with unless it is told otherwise. Ten is a page an
 #: agent can read; the app's own default is 20.
@@ -134,6 +135,7 @@ def ask_peers(query: str, *, limit: int = LIMIT, sort: str = "newest",
             status, ans = peer_link._http(link["url"].rstrip("/") + "/search?" + params,
                                           None, link["token"], PEER_TIMEOUT_S, "GET")
         except Exception as e:  # noqa: BLE001 - one server down is a line, not a failure
+            _failures.swallowed(e)
             return {"server": name, "ok": False, "error": str(e)}
         if status != 200 or not ans.get("ok"):
             return {"server": name, "ok": False,
@@ -160,8 +162,8 @@ def merge(out: dict, answers: list[dict], *, limit: int = LIMIT,
         from agent_media_server import search as _s
 
         mine |= _s.known_sessions(theirs - mine)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     msgs = list(out.get("messages") or [])
     threads = list(out.get("threads") or [])
     out["peers"] = []

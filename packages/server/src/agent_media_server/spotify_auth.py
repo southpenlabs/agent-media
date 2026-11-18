@@ -28,6 +28,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from . import auth
+from agent_media_core import failures as _failures
 
 PATHS = ("/accounts/spotify/start", "/accounts/spotify/callback", "/accounts/spotify/signout",
          "/accounts/spotify-speaker/start", "/accounts/spotify-speaker/finish",
@@ -59,7 +60,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         except ValueError as e:
             _page(h, 400, "Spotify sign-in didn't work", str(e))
             return True
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             _page(h, 502, "Spotify sign-in didn't work", "Spotify could not be reached. Try again.")
             return True
         _page(h, 200, "Signed in with Spotify",
@@ -110,6 +112,7 @@ def _speaker(h: BaseHTTPRequestHandler, path: str, send_json) -> bool:
         send_json(h, 400, {"ok": False, "error": str(e)})
         return True
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         send_json(h, 502, {"ok": False, "error": f"the speaker didn't answer: {e}"})
         return True
     send_json(h, 200, {"ok": True, **(personal_prefs.spotify_speaker_status() or {})})

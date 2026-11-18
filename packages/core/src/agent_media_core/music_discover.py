@@ -51,6 +51,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 LISTENBRAINZ = "https://api.listenbrainz.org/1"
 APPLE = "https://rss.marketingtools.apple.com/api/v2"
@@ -425,7 +426,8 @@ def listing(which: str, page: int = 1, hide_played: bool = True, genre: str = ""
         items = [i for i in items if g in [x.lower() for x in i.get("genres") or []]]
     try:
         played = _played(now)
-    except Exception:  # noqa: BLE001 — nothing marked, not no list
+    except Exception as _exc:  # noqa: BLE001 — nothing marked, not no list
+        _failures.swallowed(_exc)
         played = (set(), [], set())
     start = (out["page"] - 1) * PAGE
     shown: list[dict] = []

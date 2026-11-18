@@ -99,6 +99,7 @@ import wave
 import zlib
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -537,7 +538,8 @@ def _wait_played(sink, target, name: str) -> None:
     try:
         from .sinks.speech import _socket_for
         remote = str(_socket_for(target)).startswith("tcp://")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         remote = False
     # How long to wait for it to START before deciding it never will (a cue
     # that failed to load). The phone fetches before it plays — seconds, on
@@ -556,8 +558,8 @@ def _wait_played(sink, target, name: str) -> None:
         until = time.monotonic() + dur + 1.0
         while time.monotonic() < until and not idle(target):
             time.sleep(0.05)
-    except Exception:  # noqa: BLE001 — the next clip plays either way
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the next clip plays either way
+        _failures.swallowed(_exc)
 
 
 #: One ending, one tick. The app's Stop cuts the thread (`all`) AND stops the

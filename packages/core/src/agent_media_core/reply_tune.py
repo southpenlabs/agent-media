@@ -67,6 +67,7 @@ import time
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,8 @@ def level() -> int:
         from . import music_bed
         db = music_bed.shown_gain(music_bed.gain_db())
         return int(round(min(100.0, max(float(MIN_LEVEL), 100.0 * 10 ** (db / 20.0)))))
-    except Exception:  # noqa: BLE001 — a level must never cost a reply
+    except Exception as _exc:  # noqa: BLE001 — a level must never cost a reply
+        _failures.swallowed(_exc)
         return MIN_LEVEL
 
 

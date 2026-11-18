@@ -29,6 +29,7 @@ from urllib.parse import quote
 
 from .._paths import state_dir
 from . import local_voices
+from agent_media_core import failures as _failures
 
 SUFFIX = ".tts"
 OVERRIDE_NAME = "speech-voice.json"
@@ -133,6 +134,7 @@ def _fetch_edge_voices() -> list[dict]:
             out["voices"] = asyncio.run(asyncio.wait_for(
                 edge_tts.list_voices(), EDGE_FETCH_TIMEOUT_S))
         except BaseException as e:  # noqa: BLE001 — handed to the caller
+            _failures.swallowed(e)
             out["error"] = e
 
     t = threading.Thread(target=run, name="edge-voices", daemon=True)
@@ -165,7 +167,8 @@ def edge_voices() -> list[dict]:
         _last_fetch_try = now
         try:
             fresh = [v for v in map(_edge_voice, _fetch_edge_voices()) if v]
-        except Exception:  # noqa: BLE001 — offline, or edge_tts moved
+        except Exception as _exc:  # noqa: BLE001 — offline, or edge_tts moved
+            _failures.swallowed(_exc)
             fresh = []
         if fresh:
             try:

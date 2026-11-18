@@ -31,6 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p"
@@ -134,7 +135,8 @@ def add_posters(items: list[dict], now: Optional[float] = None) -> None:
             kind, _, tid = key.partition(":")
             try:
                 return key, str(_request(f"/{kind}/{tid}").get("poster_path") or "")
-            except Exception:  # noqa: BLE001 — asked again at a later listing
+            except Exception as _exc:  # noqa: BLE001 — asked again at a later listing
+                _failures.swallowed(_exc)
                 return key, None
         with ThreadPoolExecutor(max_workers=6) as pool:
             for key, path in pool.map(one, want[:NEW_PER_LISTING]):
@@ -223,7 +225,8 @@ def add_photos(people: list[dict], now: Optional[float] = None) -> None:
         def one(key: str):
             try:
                 return key, str(_request(f"/person/{key.partition(':')[2]}").get("profile_path") or "")
-            except Exception:  # noqa: BLE001 — asked again later
+            except Exception as _exc:  # noqa: BLE001 — asked again later
+                _failures.swallowed(_exc)
                 return key, None
         with ThreadPoolExecutor(max_workers=6) as pool:
             for key, path in pool.map(one, want[:NEW_PER_LISTING]):

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -120,13 +121,15 @@ def run(timer_id: str, sleep: Callable[[float], None] = time.sleep,
     mt = srv._music_target(target)
     try:
         start_level = music.current_volume(mt)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         start_level = None
     book = srv._book()
     bt = srv._book_target(target)
     try:
         book_level = book.volume(bt)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         book_level = None
     while clock() < until:
         if not _mine(timer_id):

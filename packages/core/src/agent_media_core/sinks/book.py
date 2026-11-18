@@ -33,6 +33,7 @@ from .._paths import state_dir
 from .. import audio_backend, mopidy
 from ..types import Target
 from . import _mpv_ipc as ipc
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -174,7 +175,8 @@ def remote_cached_path(path: Path, target: Target) -> Optional[str]:
             timeout=_probe_timeout(), check=False,
         )
         return remote_path if p.returncode == 0 else None
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
 
 
@@ -344,7 +346,8 @@ def read_stage_status() -> Optional[dict]:
         if time.time() - float(data.get("ts") or 0) > 86400:
             return None
         return data if isinstance(data, dict) else None
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
 
 
@@ -354,8 +357,8 @@ def _write_stage_status(data: dict) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         data["ts"] = time.time()
         p.write_text(json.dumps(data))
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _write_load_intent(uri: str, start_ms: int) -> None:
@@ -365,8 +368,8 @@ def _write_load_intent(uri: str, start_ms: int) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(
             {"uri": uri, "start_ms": int(start_ms), "ts": time.time()}))
-    except Exception:  # noqa: BLE001 — best-effort breadcrumb
-        pass
+    except Exception as _exc:  # noqa: BLE001 — best-effort breadcrumb
+        _failures.swallowed(_exc)
 
 
 def _env_key(prefix: str, target_name: str) -> str:
@@ -561,8 +564,8 @@ class SinkBook:
                     StateStore().log_error(
                         "sink-book", "staging failed; nothing will play",
                         extras={"uri": str(norm), "target": target.name})
-                except Exception:  # noqa: BLE001 — reporting must not break playback
-                    pass
+                except Exception as _exc:  # noqa: BLE001 — reporting must not break playback
+                    _failures.swallowed(_exc)
         if endpoint == self._sock:
             self._ensure_broker()
             device = _device_for(target)

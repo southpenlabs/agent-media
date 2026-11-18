@@ -31,6 +31,7 @@ import threading
 import time
 
 from . import auth, sessions
+from agent_media_core import failures as _failures
 
 #: How long an ask stays open (the TV's bar and the phone's notification
 #: give up at the same 90 s).
@@ -72,8 +73,8 @@ def _title_of(session: str) -> str | None:
         for r in sessions.cached_states()[0]:
             if r.get("session") == session:
                 return str(r.get("title") or "") or None
-    except Exception:  # noqa: BLE001 — no title is not a reason to refuse
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no title is not a reason to refuse
+        _failures.swallowed(_exc)
     return None
 
 

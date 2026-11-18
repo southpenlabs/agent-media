@@ -26,6 +26,7 @@ import os
 import re
 from importlib.metadata import entry_points
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -161,7 +162,8 @@ def _org_config() -> dict:
     try:
         from agent_media_core import config
         got = config.load().get("org")
-    except Exception:  # noqa: BLE001 — a bad config file means "nothing set"
+    except Exception as _exc:  # noqa: BLE001 — a bad config file means "nothing set"
+        _failures.swallowed(_exc)
         return {}
     return got if isinstance(got, dict) else {}
 

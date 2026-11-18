@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 
 def index_path() -> Optional[Path]:
@@ -153,7 +154,8 @@ def fill_art(limit: Optional[int] = None, gap: float = GAP_S) -> int:
             time.sleep(gap)
         try:
             art = picture_in(_fetch_page(embed))
-        except Exception:  # noqa: BLE001 — that one waits a week; the rest go on
+        except Exception as _exc:  # noqa: BLE001 — that one waits a week; the rest go on
+            _failures.swallowed(_exc)
             art = ""
         cache = _art_cache()
         cache[embed] = {"art": art, "at": time.time()}

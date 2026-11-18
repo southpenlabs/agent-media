@@ -38,6 +38,7 @@ from .sinks import speech as _speech_sink
 from .sinks.speech import SinkSpeech, _broker_max_volume, _socket_for
 from .state import StateStore
 from .types import Event, Priority, Source, Target, target_name
+from agent_media_core import failures as _failures
 
 POPUP_CHANNELS = ("speech", "music", "book")
 
@@ -49,8 +50,8 @@ POPUP_CHANNELS = ("speech", "music", "book")
 try:
     from .intake._env import load_env_file as _load_env_file
     _load_env_file("cli")
-except Exception:  # noqa: BLE001 — config is best-effort; CLI must still run
-    pass
+except Exception as _exc:  # noqa: BLE001 — config is best-effort; CLI must still run
+    _failures.swallowed(_exc)
 
 def _speech_target() -> Target:
     """The speech target the control surface reads/drives while idle, and
@@ -441,7 +442,8 @@ def _tmux_session_for_pane(pane: str) -> str:
             ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
             capture_output=True, text=True, timeout=2)
         return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -518,7 +520,8 @@ def _caller_pane() -> str:
             r = subprocess.run(["tmux", "display-message", "-p", "#{pane_id}"],
                                capture_output=True, text=True)
             pane = r.stdout.strip() if r.returncode == 0 else ""
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             pane = ""
     return pane
 
@@ -814,7 +817,8 @@ def _speech_display_state(allow_remote: bool = True,
         snap = ipc.get_properties(
             _sock(), ["idle-active", "time-pos", "duration", "pause", "mute",
                       "speed", "playlist-pos"])
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         snap = {}
     idle = snap.get("idle-active")
     pos = snap.get("time-pos")
@@ -855,7 +859,8 @@ def _speech_visual_flag() -> str:
     try:
         np = _now_speaking()
         return ((np or {}).get("extras") or {}).get("visual") or ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -1029,7 +1034,8 @@ def _miss_alert_line() -> str:
     try:
         from .sinks._miss_notify import pending_miss
         pm = pending_miss()
-    except Exception:  # noqa: BLE001 — an alert lookup must never break status
+    except Exception as _exc:  # noqa: BLE001 — an alert lookup must never break status
+        _failures.swallowed(_exc)
         return ""
     if not pm:
         return ""
@@ -1126,8 +1132,8 @@ def cmd_popup_status(a) -> int:
                 ns.func(ns)
         except SystemExit:
             pass          # a malformed/parse-failed action must not eat the redraw
-        except Exception:  # noqa: BLE001 — nor may an action error blank the popup
-            pass
+        except Exception as _exc:  # noqa: BLE001 — nor may an action error blank the popup
+            _failures.swallowed(_exc)
         # Leading line = the action's own output (collapsed to one line), which
         # the caller reads before the three status fields.
         print(" ".join(buf.getvalue().split()))
@@ -1249,8 +1255,8 @@ def _focus_pane(pane: str) -> None:
     for args in (["select-window", "-t", pane], ["select-pane", "-t", pane]):
         try:
             subprocess.run(["tmux", *args], capture_output=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     # Resolve the pane's session and switch the client there.
     try:
         r = subprocess.run(
@@ -1260,8 +1266,8 @@ def _focus_pane(pane: str) -> None:
         if sess:
             subprocess.run(["tmux", "switch-client", "-t", sess],
                            capture_output=True)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def _pane_alive(pane: str) -> bool:
@@ -1272,7 +1278,8 @@ def _pane_alive(pane: str) -> bool:
         r = subprocess.run(
             ["tmux", "list-panes", "-a", "-F", "#{pane_id}"],
             capture_output=True, text=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
     if r.returncode != 0:
         return False
@@ -1322,7 +1329,8 @@ def _subject_label() -> "tuple[str, str]":
                 ["tmux", "display-message", "-p", "-t", pane,
                  "#{window_name}\t#{pane_title}"],
                 capture_output=True, text=True)
-        except Exception:  # noqa: BLE001 — popup must never see a traceback
+        except Exception as _exc:  # noqa: BLE001 — popup must never see a traceback
+            _failures.swallowed(_exc)
             r = None
         if r is not None and r.returncode == 0:
             window_name, _, pane_title = r.stdout.strip().partition("\t")
@@ -1377,7 +1385,8 @@ def _marquee(text: str, width: int, *, key: str = "status",
     try:
         saved = json.loads(p.read_text())
         last, since = saved.get("t"), float(saved.get("s", now))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         last, since = None, now
     if last != text or since > now:
         # New subject (or a clock that went backwards): restart the crawl and
@@ -1427,7 +1436,8 @@ def _now_playing_segment(window: int) -> str:
             snap = ipc.get_properties(
                 sock, ["idle-active", "pause", "time-pos", "duration",
                        "media-title", "chapter-metadata/by-key/title"])
-        except Exception:  # noqa: BLE001 — a dead sink is just "not playing"
+        except Exception as _exc:  # noqa: BLE001 — a dead sink is just "not playing"
+            _failures.swallowed(_exc)
             continue
         if not snap or snap.get("idle-active"):
             continue
@@ -1582,11 +1592,13 @@ def _session_cwd(sid: str) -> Optional[str]:
                     continue
                 try:
                     cwd = json.loads(line).get("cwd") or ""
-                except Exception:  # noqa: BLE001
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
                     continue
                 if cwd:
                     return cwd
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     return None
 
@@ -1613,7 +1625,8 @@ def cmd_open_session(a) -> int:
     argv.append(f"env -u ANTHROPIC_API_KEY claude --resume {sid}")
     try:
         subprocess.run(argv, capture_output=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 1
     return 0
 
@@ -1629,7 +1642,8 @@ def _ncmpcpp_pane() -> Optional[str]:
             ["tmux", "list-panes", "-a", "-F",
              "#{pane_id}\t#{pane_current_command}"],
             capture_output=True, text=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     if r.returncode != 0:
         return None
@@ -1656,8 +1670,8 @@ def cmd_goto_track(a) -> int:
     try:
         subprocess.run(["tmux", "send-keys", "-t", pane, "o"],
                        capture_output=True)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return 0
 
 
@@ -1672,7 +1686,8 @@ def cmd_open_ncmpcpp(a) -> int:
     cmd = os.environ.get("MEDIA_NCMPCPP_CMD", "ncmpcpp")
     try:
         subprocess.run(["tmux", "new-window", cmd], capture_output=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 1
     return 0
 
@@ -1695,7 +1710,8 @@ def _mpvc_pane() -> Optional[str]:
             ["tmux", "list-panes", "-a", "-F",
              "#{pane_id}\t#{window_name}\t#{pane_current_command}"],
             capture_output=True, text=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     if r.returncode != 0:
         return None
@@ -1736,7 +1752,8 @@ def cmd_open_mpvc(a) -> int:
     try:
         subprocess.run(["tmux", "new-window", "-n", _MPVC_WINDOW, cmd],
                        capture_output=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 1
     return 0
 
@@ -1787,7 +1804,8 @@ def _ask_context(channel: str) -> str:
         if not ctx:
             return ""
         return f'From the agent speech I\'m listening to: "{ctx}"'
-    except Exception:  # noqa: BLE001 — the popup must never see a traceback
+    except Exception as _exc:  # noqa: BLE001 — the popup must never see a traceback
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -1823,7 +1841,8 @@ def cmd_open_pi(a) -> int:
     cmd = f"zsh -ic {shlex.quote(inner)}"
     try:
         subprocess.run(["tmux", "new-window", cmd], capture_output=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 1
     return 0
 
@@ -1848,7 +1867,8 @@ def _ask_title(channel: str) -> str:
                 return ""
             return " ".join(str(np.get("title") or np.get("media_title")
                                 or "").split())
-    except Exception:  # noqa: BLE001 — a name is not worth a traceback
+    except Exception as _exc:  # noqa: BLE001 — a name is not worth a traceback
+        _failures.swallowed(_exc)
         return ""
     return ""
 
@@ -1991,8 +2011,8 @@ def _print_open_url(url: str) -> int:
         try:
             import webbrowser
             webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     return 0
 
 
@@ -2421,7 +2441,8 @@ def cmd_toggle(a) -> int:
         try:
             ipc.send_nowait(_sock(), "set_property", "pause", want,
                             critical=True)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             ipc.set_property(_sock(), "pause", want, critical=True)
         # Same decision, recorded: the follow-along on this lane runs on a
         # clock and would otherwise read on through the silence.
@@ -2638,7 +2659,8 @@ def _live_panes() -> list[str]:
     try:
         r = subprocess.run(["tmux", "list-panes", "-a", "-F", "#{pane_id}"],
                            capture_output=True, text=True)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
     return r.stdout.split() if r.returncode == 0 else []
 
@@ -2678,8 +2700,8 @@ def _silence_current_if_covered(scope: str, key: str) -> bool:
             from .sinks.speech import mark_speech_stopped
             mark_speech_stopped()
             SinkSpeech().stop(_active_speech_target())
-        except Exception:  # noqa: BLE001 — a dead/absent broker mustn't fail the mute
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a dead/absent broker mustn't fail the mute
+            _failures.swallowed(_exc)
         return True
     return False
 
@@ -3011,8 +3033,8 @@ def _keep_end_resume_point() -> None:
         if not isinstance(rid, int) or ex.get("ask") or not isinstance(at, int) or at <= 0:
             return
         StateStore().set_stopped_at(rid, at)
-    except Exception:  # noqa: BLE001 — the jump matters more than the note
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the jump matters more than the note
+        _failures.swallowed(_exc)
 
 
 def cmd_jump(a) -> int:
@@ -3108,8 +3130,8 @@ def _force_highlight_sentence(sentence: str) -> None:
         os.environ["TMUX"] = "x"
     try:
         _tmux_highlight_text(sentence, force=True)
-    except Exception:  # noqa: BLE001 — popup must never see a traceback
-        pass
+    except Exception as _exc:  # noqa: BLE001 — popup must never see a traceback
+        _failures.swallowed(_exc)
 
 
 def _write_nav_request(idx: int, target_name: str = "local") -> None:
@@ -3352,8 +3374,8 @@ def cmd_skip(a) -> int:
                 started_at=(np or {}).get("started_at") or time.time(),
                 target=(np or {}).get("target") or _speech_target().name,
                 extras=ex)
-        except Exception:  # noqa: BLE001 — the seek already happened
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the seek already happened
+            _failures.swallowed(_exc)
         _force_highlight_sentence(sentences[target])
         return 0
     # Live readout: hand the jump to the reader loop (honored even while
@@ -3384,8 +3406,8 @@ def _restamp_replay_clock(np: Optional[dict], ex: dict, target: int, n: int) -> 
             started_at=(np or {}).get("started_at") or time.time(),
             target=(np or {}).get("target") or _speech_target().name,
             extras=ex)
-    except Exception:  # noqa: BLE001 — the jump already happened
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the jump already happened
+        _failures.swallowed(_exc)
 
 
 def _replay_visual(extras: dict) -> None:
@@ -3565,8 +3587,8 @@ def _next_to_resume(session: str, after_id: int) -> Optional[int]:
     try:
         if any(q.get("session") == session for q in speech_queue()):
             return None
-    except Exception:  # noqa: BLE001 — unsure: look at the rows
-        pass
+    except Exception as _exc:  # noqa: BLE001 — unsure: look at the rows
+        _failures.swallowed(_exc)
     from . import reply_position
     later = [r for r in _speech_history(200, session=session)   # newest first
              if isinstance(r.get("id"), int) and r["id"] > after_id
@@ -3575,7 +3597,8 @@ def _next_to_resume(session: str, after_id: int) -> Optional[int]:
         return None
     try:
         pool = StateStore().recent_history(sink="speech", limit=400)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         pool = []
     for r in reversed(later):                                   # oldest first
         if reply_position.heard_to_any(r, pool) is not None:
@@ -3629,7 +3652,8 @@ def _not_heard_elsewhere(rows: list) -> list:
     try:
         store = StateStore()
         pool = store.recent_history(sink="speech", limit=400)
-    except Exception:  # noqa: BLE001 — unsure: as they are
+    except Exception as _exc:  # noqa: BLE001 — unsure: as they are
+        _failures.swallowed(_exc)
         return rows
     out = []
     for r in rows:
@@ -3637,8 +3661,8 @@ def _not_heard_elsewhere(rows: list) -> list:
                 reply_position.heard_to_any(r, pool) is None:
             try:
                 store.mark_heard(int(r["id"]))
-            except Exception:  # noqa: BLE001 — the mark is cosmetic
-                pass
+            except Exception as _exc:  # noqa: BLE001 — the mark is cosmetic
+                _failures.swallowed(_exc)
             continue
         out.append(r)
     return out
@@ -3651,7 +3675,8 @@ def _resume_start(row: dict) -> Optional[int]:
     from . import reply_position
     try:
         n = reply_position.resume_from(row)
-    except Exception:  # noqa: BLE001 — from the top, then
+    except Exception as _exc:  # noqa: BLE001 — from the top, then
+        _failures.swallowed(_exc)
         return None
     smap = replay_sentence_map(row)
     if not n or not smap:
@@ -3906,7 +3931,8 @@ def _phone_confirmed(since: float) -> bool:
     before."""
     try:
         at = ipc.get_property(_sock(), "user-data/agent-media/reported-at")
-    except Exception:  # noqa: BLE001 — not a frames hub: its own word stands
+    except Exception as _exc:  # noqa: BLE001 — not a frames hub: its own word stands
+        _failures.swallowed(_exc)
         return True
     if not isinstance(at, (int, float)) or isinstance(at, bool):
         return True
@@ -4201,8 +4227,8 @@ def _push_replay(row: dict, ex: dict, clip_uris: list, clip_durations: list,
         # an interrupted reply. A Stop in this replay marks it again.
         try:
             StateStore().set_stopped_at(int(row["id"]), None)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         # What the app's speech bar reads (`/speech/now` `replay`), and what
         # tells a live reply's follow loop that the row is not its to write
         # (submit._replay_is_audible).
@@ -4710,8 +4736,8 @@ def cmd_replay_at_cursor(a) -> int:
             in_mode = parts[0] if len(parts) > 0 else ""
             cur_y = parts[1] if len(parts) > 1 else ""
             scroll = parts[2] if len(parts) > 2 else ""
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
     # Not scrolled into copy-mode → no cursor to point with. Try the *visible
     # screen* first: replay the most recent clip currently on screen. This is
@@ -4726,7 +4752,8 @@ def cmd_replay_at_cursor(a) -> int:
                 ["tmux", "capture-pane", "-p", "-t", pane],
                 capture_output=True, text=True, timeout=4)
             visible = cap.stdout if cap.returncode == 0 else ""
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             visible = ""
         idx = _clip_index_in_text(visible)
         if idx is not None:
@@ -4748,7 +4775,8 @@ def cmd_replay_at_cursor(a) -> int:
              "-S", "-32768", "-E", str(end_line)],
             capture_output=True, text=True, timeout=4)
         captured = cap.stdout if cap.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         captured = ""
     if not captured:
         print("media: could not read pane text", file=sys.stderr)
@@ -4790,8 +4818,8 @@ def _mirror_clock(state, owns, sentences: list, offsets: list,
             "speech", uri=np.get("uri") or "",
             started_at=np.get("started_at") or time.time(),
             target=np.get("target") or _speech_target().name, extras=ex)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 #: How often a replay followed on the clock reads its player, in seconds;
@@ -4923,8 +4951,8 @@ def _trace_anchor(ex: dict, snap: dict, base: float, before: list,
         })
         old = path.read_text().splitlines() if path.exists() else []
         path.write_text("\n".join((old + [line])[-_ANCHOR_TRACE_KEEP:]) + "\n")
-    except Exception:  # noqa: BLE001 — a trace is never worth the replay
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a trace is never worth the replay
+        _failures.swallowed(_exc)
 
 
 #: Set by a replay follower that stopped its replay itself (a barge-in, End
@@ -4950,7 +4978,8 @@ def cmd_replay_track(a) -> int:
             target = Target(name=str(data.get("target") or _speech_target().name))
             spec = _replayed(music_bed_replay.resolve(data.get("ex") or {}, target),
                              data.get("reply") if isinstance(data.get("reply"), dict) else None)
-        except Exception:  # noqa: BLE001 — never cost the replay
+        except Exception as _exc:  # noqa: BLE001 — never cost the replay
+            _failures.swallowed(_exc)
             spec = None
     if not spec:
         return _follow_replay(a)
@@ -4986,20 +5015,21 @@ def cmd_replay_track(a) -> int:
         try:
             from .sinks.speech import speech_stopped_since
             quick = bool(_REPLAY_CUT["cut"] or speech_stopped_since(began))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             quick = True
         if under:
             try:
                 sink.stop_under(target, quick=quick)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
         if stop is not None:
             try:
                 stop(quick=quick)
             except TypeError:
                 stop()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
         # How the replay's bed ended, for the log of music around speech.
         from . import speech_music
         speech_music.bed_ended(spec.get("log"), cut=quick)
@@ -5080,7 +5110,8 @@ def _follow_replay(a) -> int:
         Ordinary replies never do: they wait for the replay to end."""
         try:
             return token is not None and token.should_yield()
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             return False
 
     def _note_displaced() -> None:
@@ -5089,8 +5120,8 @@ def _follow_replay(a) -> int:
         try:
             from .intake.submit import note_displaced
             note_displaced()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
     def _step_aside() -> int:
         """Stop the replay for the speaker that barged in, or for End of
@@ -5101,8 +5132,8 @@ def _follow_replay(a) -> int:
         _REPLAY_CUT["cut"] = True
         try:
             ipc.command(_sock(), "stop", critical=True)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         return _finish()
 
     # A reply from the listener ends a replay too, at the close of the
@@ -5159,8 +5190,8 @@ def _follow_replay(a) -> int:
             from . import earcons
             from .sinks.speech import SinkSpeech
             earcons.play("cut", target, SinkSpeech(), wait=True)
-        except Exception:  # noqa: BLE001 — a tone must never cost the replay
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a tone must never cost the replay
+            _failures.swallowed(_exc)
 
     from .intake.submit import _nav_flag_path
     n_items = max(len(sentences), len(durations), 1)
@@ -5226,8 +5257,8 @@ def _follow_replay(a) -> int:
                 started_at=np.get("started_at") or time.time(),
                 target=np.get("target") or _speech_target().name,
                 extras=ex)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         return idx
 
     # Set on every way out (all of them come through _finish), so the clock
@@ -5241,14 +5272,14 @@ def _follow_replay(a) -> int:
             np = state.get_now_playing("speech")
             if np and _owns(np.get("extras") or {}):
                 state.clear_now_playing("speech")
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         # A replay ends like a reply: back to 1× if chosen (speech_speed.py).
         try:
             from . import speech_speed
             speech_speed.at_reply_end(_sock())
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         return 0
 
     then_id = getattr(a, "then_id", None)
@@ -5266,7 +5297,8 @@ def _follow_replay(a) -> int:
         if not then_found:
             try:
                 then_found.append(_next_to_resume(then_next, int(then_after)))
-            except Exception:  # noqa: BLE001 — nothing follows, then
+            except Exception as _exc:  # noqa: BLE001 — nothing follows, then
+                _failures.swallowed(_exc)
                 then_found.append(None)
         return then_found[0]
 
@@ -5287,8 +5319,8 @@ def _follow_replay(a) -> int:
         if token is not None and fd is None:
             try:
                 token.release()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             token = None
         try:
             subprocess.Popen([sys.executable, "-m", "agent_media_core.cli",
@@ -5303,8 +5335,8 @@ def _follow_replay(a) -> int:
             if token is not None:
                 try:
                     token.release()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _exc:  # noqa: BLE001
+                    _failures.swallowed(_exc)
                 token = None
             return 0
         if token is not None:
@@ -5425,8 +5457,8 @@ def _follow_replay(a) -> int:
                     started_at=row.get("started_at") or started,
                     target=row.get("target") or _speech_target().name,
                     extras=ex)
-            except Exception:  # noqa: BLE001 — a correction is never worth the replay
-                pass
+            except Exception as _exc:  # noqa: BLE001 — a correction is never worth the replay
+                _failures.swallowed(_exc)
 
         def _watch_player() -> None:
             target = _active_speech_target()
@@ -5561,8 +5593,8 @@ def _follow_replay(a) -> int:
         try:
             if not bool(ipc.get_property(_sock(), "idle-active")):
                 break
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         time.sleep(0.05)
 
     began = time.time()
@@ -5580,7 +5612,8 @@ def _follow_replay(a) -> int:
             return False
         try:
             eof = ipc.get_property(_sock(), "eof-reached")
-        except Exception:  # noqa: BLE001 — unavailable: not the phone's player
+        except Exception as _exc:  # noqa: BLE001 — unavailable: not the phone's player
+            _failures.swallowed(_exc)
             eof = None
         if isinstance(eof, bool):
             return eof
@@ -5623,7 +5656,8 @@ def _follow_replay(a) -> int:
             snap = ipc.get_properties(
                 _sock(), ["idle-active", "playlist-pos", "time-pos",
                           "pause", "speed", "mute"])
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             fail_streak += 1
             if fail_streak >= 5:
                 return _finish()
@@ -5645,8 +5679,8 @@ def _follow_replay(a) -> int:
                             and _heard_out(last_snap):
                         return _then()
                     return 0
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             continue
         last_snap = snap
         idx = _mirror(snap)
@@ -5948,8 +5982,8 @@ def cmd_say(a) -> int:
     if visual_enabled() and hint:
         try:
             spawn_visual(raw, text, hint=hint)
-        except Exception:  # noqa: BLE001 — accompaniment, never speech's problem
-            pass
+        except Exception as _exc:  # noqa: BLE001 — accompaniment, never speech's problem
+            _failures.swallowed(_exc)
     urgent = getattr(a, "urgent", False) or getattr(a, "supersede", False)
     metadata = {}
     if getattr(a, "alert", False):
@@ -6197,7 +6231,8 @@ def _music_hold_active() -> Optional[bool]:
     try:
         from .call_guard import Config, flag_present
         return bool(flag_present(Config()))
-    except Exception:  # noqa: BLE001 — call-guard is optional on a host
+    except Exception as _exc:  # noqa: BLE001 — call-guard is optional on a host
+        _failures.swallowed(_exc)
         return None
 
 
@@ -6245,7 +6280,8 @@ def _music_asked(media_id: str, live: str) -> tuple:
         if intent and intent.get("uri"):
             rows.append(intent)
         rows.extend(st.recent_history(sink="music", limit=25))
-    except Exception:  # noqa: BLE001 — a like is worth more than its prettiest uri
+    except Exception as _exc:  # noqa: BLE001 — a like is worth more than its prettiest uri
+        _failures.swallowed(_exc)
         return live, ""
     # The intent row is the most recent word on *which URI*, and carries no
     # title; the history rows carry the title but an older URI. So take the
@@ -6428,16 +6464,16 @@ def _music_live_backend(m: "SinkMusic"):
         try:
             if sas.loaded():
                 return sas
-        except Exception:  # noqa: BLE001 — app unreachable ⇒ not live
-            pass
+        except Exception as _exc:  # noqa: BLE001 — app unreachable ⇒ not live
+            _failures.swallowed(_exc)
     from .sinks.music_local import SinkMusicLocal, configured
     if configured():
         loc = SinkMusicLocal()
         try:
             if loc.loaded():
                 return loc
-        except Exception:  # noqa: BLE001 — bridge down ⇒ phone not live
-            pass
+        except Exception as _exc:  # noqa: BLE001 — bridge down ⇒ phone not live
+            _failures.swallowed(_exc)
     return m
 
 
@@ -6621,8 +6657,8 @@ def _note_music_where(where: str, uri: str) -> None:
     try:
         from . import audio_targets
         audio_targets.note_music_played(where, uri)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def cmd_speech_target(a) -> int:
@@ -6946,7 +6982,8 @@ def _music_playing_chapter(snap: Optional[dict]) -> Optional[dict]:
     try:
         from . import mix_songs
         return mix_songs.playing(snap)
-    except Exception:  # noqa: BLE001 — the whole clip, as before
+    except Exception as _exc:  # noqa: BLE001 — the whole clip, as before
+        _failures.swallowed(_exc)
         return None
 
 
@@ -7371,8 +7408,8 @@ def cmd_music(a) -> int:
             line, label, spd = _music_now_status(m, a.width,
                                                  hide_idle=not a.show_idle,
                                                  bar=not a.no_bar)
-        except Exception:  # noqa: BLE001 — popup must never see a traceback
-            pass
+        except Exception as _exc:  # noqa: BLE001 — popup must never see a traceback
+            _failures.swallowed(_exc)
         if a.action == "status":
             print(line)
         elif a.action == "now":
@@ -7609,8 +7646,8 @@ def _music_start_at(m, seconds: float, timeout_s: float = 12.0) -> bool:
             pos = b.position()
             if pos is not None and pos / 1000.0 >= seconds - 5:
                 return True
-        except Exception:  # noqa: BLE001 — not loaded yet; try again
-            pass
+        except Exception as _exc:  # noqa: BLE001 — not loaded yet; try again
+            _failures.swallowed(_exc)
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.5)
@@ -7627,7 +7664,8 @@ def _music_idle(backend) -> bool:
     """
     try:
         return not backend.now_playing_uri()
-    except Exception:  # noqa: BLE001 — see the docstring
+    except Exception as _exc:  # noqa: BLE001 — see the docstring
+        _failures.swallowed(_exc)
         return False
 
 
@@ -7648,7 +7686,8 @@ def _book_stage_status(width: int, bar: bool = True) -> Optional[str]:
     try:
         from .sinks.book import read_stage_status
         st = read_stage_status()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return None
     if not st or st.get("status") not in ("copying", "playing", "error"):
         return None
@@ -7834,7 +7873,8 @@ def _tmux_session_name() -> str:
         r = subprocess.run(["tmux", "display-message", "-p", "#S"],
                            capture_output=True, text=True, timeout=2)
         return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -8275,7 +8315,8 @@ def cmd_book(a) -> int:
         try:
             from .sinks.book import read_stage_status
             staged = read_stage_status()
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             staged = None
         if staged and staged.get("status") == "copying":
             total = int(staged.get("total") or 0)
@@ -8437,7 +8478,8 @@ def cmd_search(a) -> int:
     try:
         idx = int(proc.stdout.split("\t", 1)[0])
         selected = res["results"][idx]
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return 1
 
     print(f"Playing: {selected['title']}")
@@ -8497,7 +8539,8 @@ def _channel_is_playing(name: str) -> bool:
             b = SinkBook()
             t = Target(name="local")
             return (not b.idle(t)) and (not b.paused(t))
-    except Exception:  # noqa: BLE001 — the launcher must never see a traceback
+    except Exception as _exc:  # noqa: BLE001 — the launcher must never see a traceback
+        _failures.swallowed(_exc)
         return False
     return False
 
@@ -8864,6 +8907,7 @@ def _backup_facts() -> "dict[str, str]":
             out["backup_timer"] = str(sch["active"])
         return out
     except Exception as e:  # noqa: BLE001 — a check must never break selfcheck
+        _failures.swallowed(e)
         return {"backup_error": str(e)[:200]}
 
 
@@ -8878,6 +8922,7 @@ def _drift_facts(root: "Optional[Path]") -> "dict[str, str]":
         from . import service_drift
         return service_drift.facts(service_drift.scan(root))
     except Exception as e:  # noqa: BLE001 — a scan must never break selfcheck
+        _failures.swallowed(e)
         return {"drift_error": str(e)[:200]}
 
 
@@ -8889,6 +8934,7 @@ def _layout_facts() -> "dict[str, str]":
         from . import layout
         now = layout.current()
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return {"layout": "unknown", "layout_why": str(e)[:200]}
     return {"layout": now.name, "layout_why": f"{now.source}: {now.why}"}
 
@@ -9064,7 +9110,8 @@ def _ringer_facts() -> "dict[str, str]":
                     component="intake", limit=500,
                     since=time.time() - 86400)
                 if (r.get("extras") or {}).get("kind") == "alert-silenced"]
-    except Exception:  # noqa: BLE001 — a count, never a reason to fail a check
+    except Exception as _exc:  # noqa: BLE001 — a count, never a reason to fail a check
+        _failures.swallowed(_exc)
         held = []
     if held:
         facts["alerts_held_24h"] = str(len(held))
@@ -9098,7 +9145,8 @@ def _dictation_rate_facts() -> "dict[str, str]":
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{port}/state", timeout=5) as resp:
             state = json.loads(resp.read().decode())
-    except Exception:  # noqa: BLE001 — no companion here, or it is busy
+    except Exception as _exc:  # noqa: BLE001 — no companion here, or it is busy
+        _failures.swallowed(_exc)
         return {}
     if not isinstance(state, dict):
         return {}
@@ -10551,6 +10599,7 @@ def _scan_local() -> "list[str]":
         facts = selfcheck_facts()
         problems = health_problems(facts)
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         problems = [f"selfcheck failed: {e}"]
     print(" " + "; ".join(f"[{p}]" for p in problems) if problems else " ok")
     if facts.get("copies"):
@@ -10564,8 +10613,8 @@ def _scan_local() -> "list[str]":
         sf = server_health.facts()
         if sf:
             print(f"  {server_health.line(sf)}")
-    except Exception:  # noqa: BLE001 — a line of information, never a failed doctor
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a line of information, never a failed doctor
+        _failures.swallowed(_exc)
     return problems
 
 
@@ -10675,6 +10724,7 @@ def _fix_host(host: str) -> "tuple[bool, list[str]]":
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, "sh"],
             input=_remote_fix(), capture_output=True, text=True, timeout=300)
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return False, [f"unreachable while fixing: {e}"]
     lines = [ln.strip() for ln in (res.stdout or "").splitlines() if ln.strip()]
     ok = res.returncode == 0 and not any("FAILED" in ln for ln in lines)

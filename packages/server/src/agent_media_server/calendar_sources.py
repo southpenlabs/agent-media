@@ -43,6 +43,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ def _config() -> list[dict]:
     try:
         from agent_media_core import config
         got = config.load().get("calendar") or {}
-    except Exception:  # noqa: BLE001 — a bad config file means "nothing set"
+    except Exception as _exc:  # noqa: BLE001 — a bad config file means "nothing set"
+        _failures.swallowed(_exc)
         return []
     raw = got.get("sources") if isinstance(got, dict) else None
     return [s for s in raw if isinstance(s, dict)] if isinstance(raw, list) else []
@@ -153,7 +155,8 @@ def _load_parsed() -> None:
     try:
         with open(_cache_path(), "rb") as fh:
             got = pickle.load(fh)
-    except Exception:  # noqa: BLE001 — unreadable or from another icalendar: parse afresh
+    except Exception as _exc:  # noqa: BLE001 — unreadable or from another icalendar: parse afresh
+        _failures.swallowed(_exc)
         return
     if not isinstance(got, dict) or got.get("v") != _cache_version():
         return
@@ -176,7 +179,8 @@ def save_parsed(path: Path | None = None) -> None:
         with os.fdopen(fd, "wb") as fh:
             pickle.dump({"v": _cache_version(), "parsed": snap}, fh, protocol=pickle.HIGHEST_PROTOCOL)
         os.replace(tmp, path)
-    except Exception:  # noqa: BLE001 — not saved: parsed again after a restart
+    except Exception as _exc:  # noqa: BLE001 — not saved: parsed again after a restart
+        _failures.swallowed(_exc)
         with _LOCK:
             _disk["dirty"] = True
     finally:

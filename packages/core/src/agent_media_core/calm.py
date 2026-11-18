@@ -24,6 +24,7 @@ import os
 import re
 from datetime import datetime
 from typing import Optional
+from agent_media_core import failures as _failures
 
 LABEL = "Calm mode"
 HINT = ("Replies in a slower, softer voice over quiet music with no beat, which "
@@ -88,7 +89,8 @@ def active(when: Optional[datetime] = None) -> bool:
     """Calm now: switched on, or the evening switch and the evening. Never raises."""
     try:
         return on() or (evening_on() and in_evening(when))
-    except Exception:  # noqa: BLE001 — calm is a nicety, never a reply's cost
+    except Exception as _exc:  # noqa: BLE001 — calm is a nicety, never a reply's cost
+        _failures.swallowed(_exc)
         return False
 
 

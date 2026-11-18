@@ -78,6 +78,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 #: Short names that are not just the unit name less its prefix. `canvas` is
 #: a checkout's `agent-media-server` (the template, from 14 Nov 2026) or the
@@ -330,7 +331,8 @@ def speech_paused_long(now: float | None = None) -> bool:
             except (OSError, ValueError):
                 pass
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -344,7 +346,8 @@ def speech_waiting() -> int:
         from .intake.submit import speech_queue
 
         return len(speech_queue())
-    except Exception:  # noqa: BLE001 — unsure: not a reason to refuse
+    except Exception as _exc:  # noqa: BLE001 — unsure: not a reason to refuse
+        _failures.swallowed(_exc)
         return 0
 
 

@@ -59,6 +59,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -166,7 +167,8 @@ def collect(store, since: float, until: float,
         if session and title_of is not None:
             try:
                 thread = title_of(session) or ""
-            except Exception:  # noqa: BLE001 — a name, never a reason to fail
+            except Exception as _exc:  # noqa: BLE001 — a name, never a reason to fail
+                _failures.swallowed(_exc)
                 thread = ""
         if not thread and kind == "reply":
             thread = str(ex.get("source_tmux_session") or "")
@@ -295,8 +297,8 @@ def _tell() -> None:
     for fn in list(_listeners):
         try:
             fn()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
 
 def deliver(items: "list[dict]", why, since: float) -> Optional[dict]:
@@ -309,8 +311,8 @@ def deliver(items: "list[dict]", why, since: float) -> Optional[dict]:
         from . import jev
         if jev._mode() != "off" and jev._key():
             jev.catchup_worth(items, "speak")
-    except Exception:  # noqa: BLE001 — shadow only
-        pass
+    except Exception as _exc:  # noqa: BLE001 — shadow only
+        _failures.swallowed(_exc)
     text, how = compose(items, why)
     with _LOCK:
         _SEQ += 1

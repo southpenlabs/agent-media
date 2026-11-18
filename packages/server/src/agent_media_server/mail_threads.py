@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from agent_media_core import failures as _failures
 
 #: Another agent's mail, as hook_claude_code reads it for the mail tone; the
 #: session host's own notes are not mail.
@@ -105,6 +106,6 @@ def add_mail(rows: list[dict]) -> list[dict]:
             continue
         try:
             r["mail_from"] = mail_from(sid)
-        except Exception:  # noqa: BLE001 — a thread list never fails on this
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a thread list never fails on this
+            _failures.swallowed(_exc)
     return rows

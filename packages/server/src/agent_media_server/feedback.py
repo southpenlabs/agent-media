@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 DEFAULT_URL = "https://sasonica.com/feedback/v1"
 POLL_S = 900.0
@@ -163,7 +164,8 @@ def _version() -> str:
         from importlib.metadata import version
 
         return version("agent-media-server")
-    except Exception:  # noqa: BLE001 — a version is a nicety
+    except Exception as _exc:  # noqa: BLE001 — a version is a nicety
+        _failures.swallowed(_exc)
         return ""
 
 

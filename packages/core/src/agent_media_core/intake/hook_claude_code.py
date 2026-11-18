@@ -68,6 +68,7 @@ from ._env import load_env_file
 from . import reply_claims
 from ._text import strip_markdown, strip_shared_files, strip_system_blocks
 from .submit import submit_event
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -92,7 +93,8 @@ def _tmux(args: list[str], timeout: float = 2.0) -> str:
         r = subprocess.run(["tmux", *args],
                            capture_output=True, text=True, timeout=timeout)
         return (r.stdout or "").strip()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -173,12 +175,13 @@ def _thread_title(session: str) -> str:
     try:
         from agent_media_server.sessions import _headless_title
         return _headless_title(session, {})
-    except Exception:  # noqa: BLE001 — a name is a nicety; no server, no name
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety; no server, no name
+        _failures.swallowed(_exc)
     try:
         from ..session_feed import _asked
         return " ".join((_asked(session, []) or "").split())[:60]
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -222,8 +225,8 @@ def thread_voice(session: str, sess: str = "") -> Optional[str]:
             own = session_voice.voice_for(session)
             if own:
                 return own
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
     return voice_for_session(sess)
 
 
@@ -241,7 +244,8 @@ def _thread_on_screen(session: str) -> bool:
     try:
         from .. import watching
         return watching.is_open(session)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1126,7 +1130,8 @@ def _ask_kept_by_pretooluse(session: str) -> bool:
         from agent_media_core import pending_asks
 
         return bool(pending_asks.read(session))
-    except Exception:  # noqa: BLE001 — unknown: read it, as before
+    except Exception as _exc:  # noqa: BLE001 — unknown: read it, as before
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1203,7 +1208,8 @@ def _private(session: str) -> bool:
     try:
         from ..private import hidden
         return hidden(session)
-    except Exception:  # noqa: BLE001 — a broken check must not stop speech
+    except Exception as _exc:  # noqa: BLE001 — a broken check must not stop speech
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1266,8 +1272,8 @@ def _play_claimed(event: Event, state: StateStore) -> None:
                          event.metadata.get("session") or "",
                          hint=visual_hint,
                          key=event.metadata.get("dedup_key") or "")
-        except Exception:  # noqa: BLE001 — accompaniment, never playback's problem
-            pass
+        except Exception as _exc:  # noqa: BLE001 — accompaniment, never playback's problem
+            _failures.swallowed(_exc)
     # The follow-up (what the listener might say next) for the reply box in
     # the player app: one gateway call on its own thread, filed per session.
     followup_raw = event.metadata.pop("followup_raw", None)
@@ -1278,31 +1284,31 @@ def _play_claimed(event: Event, state: StateStore) -> None:
             from ._followup import save_actions
             save_actions(event.metadata.get("session") or "", followup_actions,
                          event.metadata.get("dedup_key") or "")
-        except Exception:  # noqa: BLE001 — a suggestion, never playback's problem
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a suggestion, never playback's problem
+            _failures.swallowed(_exc)
     if followup_replies:
         try:
             from ._followup import save_followup
             save_followup(event.metadata.get("session") or "", followup_replies[0],
                           event.metadata.get("dedup_key") or "",
                           replies=followup_replies, source="agent")
-        except Exception:  # noqa: BLE001 — a suggestion, never playback's problem
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a suggestion, never playback's problem
+            _failures.swallowed(_exc)
     elif followup_raw:
         try:
             from ._followup import spawn_followup
             spawn_followup(followup_raw, event.metadata.get("session") or "",
                            event.metadata.get("dedup_key") or "")
-        except Exception:  # noqa: BLE001 — a suggestion, never playback's problem
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a suggestion, never playback's problem
+            _failures.swallowed(_exc)
     if visual_raw and visual_reveal:
         # [[reveal:]]: speak up to the marker, hold until the canvas shows
         # the image (bounded — see wait_for_fresh_visual), then speak on.
         try:
             _play_reveal(event, visual_reveal, spawn_epoch, state)
             return
-        except Exception:  # noqa: BLE001 — fall back to the plain single play
-            pass
+        except Exception as _exc:  # noqa: BLE001 — fall back to the plain single play
+            _failures.swallowed(_exc)
     # Optional LLM spoken-summary rewrite (opt-in). Runs *here*, in the detached
     # child, so the network call never blocks the hook. Dedup already keyed off
     # the mechanically-stripped original above, keeping it deterministic; on any
@@ -1318,8 +1324,8 @@ def _play_claimed(event: Event, state: StateStore) -> None:
             spoken = summarize_for_speech(raw)
             if spoken:
                 object.__setattr__(event, "text", strip_markdown(spoken))
-        except Exception:  # noqa: BLE001 — detached; fall back to event.text
-            pass
+        except Exception as _exc:  # noqa: BLE001 — detached; fall back to event.text
+            _failures.swallowed(_exc)
     else:
         # Per-block describe (opt-in, no whole-reply summary): re-strip the raw
         # reply here in the detached child with describe=True, so un-readable
@@ -1332,8 +1338,8 @@ def _play_claimed(event: Event, state: StateStore) -> None:
                 described = strip_markdown(describe_raw, describe=True)
                 if described:
                     object.__setattr__(event, "text", described)
-            except Exception:  # noqa: BLE001 — detached; keep event.text
-                pass
+            except Exception as _exc:  # noqa: BLE001 — detached; keep event.text
+                _failures.swallowed(_exc)
     submit_event(event, state=state)
 
 
@@ -1960,7 +1966,8 @@ def main() -> int:
 
     try:
         raw = sys.stdin.read()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return 0
     if not raw.strip():
         return 0
@@ -1999,8 +2006,8 @@ def main() -> int:
             StateStore().log_error("hook-claude-code",
                                    f"{event_name} failed",
                                    extras={"detail": str(e)})
-        except Exception:
-            pass
+        except Exception as _exc:
+            _failures.swallowed(_exc)
     return 0
 
 

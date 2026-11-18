@@ -28,6 +28,7 @@ import time
 import urllib.parse
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 SEARCH = "https://itunes.apple.com/search"
 LOOKUP = "https://itunes.apple.com/lookup"
@@ -326,7 +327,8 @@ def _new_followed(now: float) -> list[dict]:
     for f in follows()[:FOLLOWED_MAX]:
         try:
             got = feed(f["feed"], now)
-        except Exception:  # noqa: BLE001 — that show left out
+        except Exception as _exc:  # noqa: BLE001 — that show left out
+            _failures.swallowed(_exc)
             continue
         for e in got["episodes"][:FOLLOWED_NEWEST]:
             out.append({**e, "show": f.get("title") or got["show"]["title"], "feed": f["feed"],
@@ -352,7 +354,8 @@ def listing(which: str, q: str = "", genre: str = "", page: int = 1, now: Option
         rows = search(q, now)
         try:
             episodes = search_episodes(q, now)[:10]
-        except Exception:  # noqa: BLE001 — the shows without episodes
+        except Exception as _exc:  # noqa: BLE001 — the shows without episodes
+            _failures.swallowed(_exc)
             episodes = []
     elif which == "author":
         rows = by_author(q, now)

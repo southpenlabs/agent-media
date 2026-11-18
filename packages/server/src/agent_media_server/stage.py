@@ -32,6 +32,7 @@ The screen hears its stage in the `follow` frame it already holds
 from __future__ import annotations
 
 from . import auth, devices
+from agent_media_core import failures as _failures
 
 MODES = ("off", "on", "auto")
 
@@ -55,15 +56,15 @@ def playing() -> dict:
         # app's Now playing and hpo's ducker leave both alone too).
         out["reply"] = bool(s.get("speaking") or s.get("paused")) \
             and not s.get("thinking") and not s.get("notif")
-    except Exception:  # noqa: BLE001 — a failed read is "nothing"
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a failed read is "nothing"
+        _failures.swallowed(_exc)
     try:
         from . import music
 
         now = music._now()[0]
         out["music"] = now.get("pos_ms") is not None and now.get("paused") is False
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return out
 
 

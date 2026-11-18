@@ -56,6 +56,7 @@ from .. import hits
 from .. import settings as _settings
 from .._paths import state_dir
 from ..capture import input_claim
+from agent_media_core import failures as _failures
 
 
 DEFAULT_PORT = 8675
@@ -105,8 +106,8 @@ def speech_playing() -> bool:
                     s.close()
                     return not bool(o.get("data"))
         s.close()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     # Fail open: never leave a remote video stuck paused if we can't tell.
     return False
 
@@ -186,6 +187,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("body must be an object")
         except Exception as e:  # noqa: BLE001
+            _failures.swallowed(e)
             self._json({"ok": False, "error": f"bad body: {e}"}, 400)
             return
 
@@ -317,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int,
                     default=int(os.environ.get("PORT") or DEFAULT_PORT))
     a = ap.parse_args(argv)
+    from .. import logs
+    logs.setup()
 
     bind = resolve_bind(a.bind)
     try:

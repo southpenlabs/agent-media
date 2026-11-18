@@ -18,6 +18,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
+from agent_media_core import failures as _failures
 
 
 class CalendarWriteError(RuntimeError):
@@ -196,7 +197,8 @@ def _span(ev) -> dict:
             end = start + ev.decoded("DURATION")
         else:
             end = None
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return {"start": "", "end": ""}
     return {"start": iso(start), "end": iso(end)}
 
@@ -219,7 +221,8 @@ def write(event: dict, calendar: str = "", etag: str = "", delete: bool = False,
         try:
             events = Calendar.from_ical(old).walk("VEVENT")
             owned = len(events) == 1 and str(events[0].get("UID")) == uid and str(events[0].get("X-SASONICA-MANAGED")) == "1"
-        except Exception:
+        except Exception as _exc:
+            _failures.swallowed(_exc)
             owned = False
         if not owned:
             raise CalendarWriteError("Refusing to modify an event not managed by Sasonica")
@@ -263,7 +266,8 @@ def write(event: dict, calendar: str = "", etag: str = "", delete: bool = False,
         result = subprocess.run(["vdirsyncer", "sync", pair], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, timeout=120)
         synced = result.returncode == 0
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         synced = False
     return {"uid": uid, "etag": new_etag, "created": status == 404,
             "deleted": delete, "verified": True, "local_sync_ok": synced}

@@ -110,6 +110,7 @@ import secrets
 import threading
 import time
 from collections import deque
+from agent_media_core import failures as _failures
 
 #: Longest a caller may wait, and the default (a fetch is a download).
 MAX_TIMEOUT_S = 900.0
@@ -218,7 +219,8 @@ def _submit(job: dict, timeout: float, on_progress=None) -> dict | None:
             try:
                 for ln in lines:
                     on_progress(ln)
-            except Exception:  # noqa: BLE001 — the caller has gone: nobody wants it now
+            except Exception as _exc:  # noqa: BLE001 — the caller has gone: nobody wants it now
+                _failures.swallowed(_exc)
                 on_progress = None
                 _COND.acquire()
                 _cancel_job(job, "the caller went away")

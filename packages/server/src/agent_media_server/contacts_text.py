@@ -26,6 +26,7 @@ The owner's book only: the bridges are the owner's.
 from __future__ import annotations
 
 import urllib.parse
+from agent_media_core import failures as _failures
 
 #: The services a chat is started on, by the bridge's appservice id, in the
 #: order they are offered: their name, and what they are started with —
@@ -101,7 +102,8 @@ def offered() -> bool:
 
     try:
         return contacts.is_owner() and bool(_bridges())
-    except Exception:  # noqa: BLE001 — no Text action, not no card
+    except Exception as _exc:  # noqa: BLE001 — no Text action, not no card
+        _failures.swallowed(_exc)
         return False
 
 

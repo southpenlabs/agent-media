@@ -17,6 +17,7 @@ import os
 from typing import Callable
 
 from . import auth, context, driver, git_state, recaps, send, sessions, transcript
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.threads")
 
@@ -392,7 +393,8 @@ def pictures_for_key(key: str) -> tuple[list, bool]:
         return [], False
     try:
         return pictures_for(key)
-    except Exception:  # noqa: BLE001 — a missing picture is not a fault
+    except Exception as _exc:  # noqa: BLE001 — a missing picture is not a fault
+        _failures.swallowed(_exc)
         return [], False
 
 
@@ -618,7 +620,8 @@ def reading_unread(session: str, now: float | None = None) -> bool:
     try:
         from agent_media_core.state import StateStore
         np = StateStore().get_now_playing("speech")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         np = None
     ex = (np or {}).get("extras") or {}
     if (np and ex.get("source_session") == session and not ex.get("live_pause")

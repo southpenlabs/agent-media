@@ -25,6 +25,7 @@ import os
 import time
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -252,8 +253,8 @@ def spotify_finish(code: str, state: str, now: Optional[float] = None) -> dict:
     me = {}
     try:
         me = _http(f"{SPOTIFY_API}/me", token=got["access_token"])
-    except Exception:  # noqa: BLE001 — the name is only for Settings
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the name is only for Settings
+        _failures.swallowed(_exc)
     d.pop("pending", None)
     d.update(refresh_token=got["refresh_token"], user=me.get("display_name") or me.get("id") or "",
              signed_in_at=now, scope=got.get("scope") or "")

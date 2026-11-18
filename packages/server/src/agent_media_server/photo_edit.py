@@ -67,6 +67,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from agent_media_core import model_usage
+from agent_media_core import failures as _failures
 
 MAX_BYTES = 15 * 1024 * 1024
 LONG_SIDE = 2048
@@ -254,7 +255,8 @@ def downscale(data: bytes, ctype: str, long_side: int = LONG_SIDE) -> tuple[byte
             return out.getvalue(), "image/png"
         im.convert("RGB").save(out, "JPEG", quality=90)
         return out.getvalue(), "image/jpeg"
-    except Exception:  # noqa: BLE001 — one Pillow cannot read goes as it came
+    except Exception as _exc:  # noqa: BLE001 — one Pillow cannot read goes as it came
+        _failures.swallowed(_exc)
         return data, ctype
 
 
@@ -408,7 +410,8 @@ def _private(session: str) -> bool:
 
     try:
         return hidden(session)
-    except Exception:  # noqa: BLE001 — unsure is private
+    except Exception as _exc:  # noqa: BLE001 — unsure is private
+        _failures.swallowed(_exc)
         return True
 
 

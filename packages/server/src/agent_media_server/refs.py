@@ -26,6 +26,7 @@ import re
 from agent_media_core import harnesses
 
 from . import sessions, transcript
+from agent_media_core import failures as _failures
 
 ROOM_TAIL = 40          # a room's messages carried under its chip
 
@@ -47,7 +48,8 @@ def _by_title(labels: list[str]) -> dict[str, str]:
     found: dict[str, list[str]] = {label.casefold(): [] for label in labels}
     try:
         rows = sessions.sessions_index()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return {}
     for row in rows:
         key = " ".join(str(row.get("title") or "").split()).casefold()

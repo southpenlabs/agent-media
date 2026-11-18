@@ -52,6 +52,7 @@ import time
 
 from . import auth
 from ._jsonmap import JsonMap
+from agent_media_core import failures as _failures
 
 #: The networks the companion bridges: id → the name a person knows.
 NETWORKS = {"meta": "Messenger", "instagram": "Instagram", "whatsapp": "WhatsApp",
@@ -156,7 +157,8 @@ def _device_names() -> dict[str, str]:
 
     try:
         return {str(d.get("id") or ""): str(d.get("name") or "") for d in devices.list_devices()}
-    except Exception:  # noqa: BLE001 — a row without its device's name, not no rows
+    except Exception as _exc:  # noqa: BLE001 — a row without its device's name, not no rows
+        _failures.swallowed(_exc)
         return {}
 
 
@@ -354,6 +356,6 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         # A chat gone from its phone's list for 30 days loses its Full copy.
         try:
             local_messages.prune()
-        except Exception:  # noqa: BLE001 — the list is saved; the next post prunes
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the list is saved; the next post prunes
+            _failures.swallowed(_exc)
     return True, {"chats": _answer(list(clean))}

@@ -74,6 +74,7 @@ import time
 from collections import deque
 from pathlib import Path
 from agent_media_core import settings as _settings
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.speech_frames")
 
@@ -367,8 +368,8 @@ def trace(event: str, hub: "_Hub", **kw) -> None:
         with _TRACE_LOCK:
             old = path.read_text().splitlines() if path.exists() else []
             path.write_text("\n".join((old + [line])[-300:]) + "\n")
-    except Exception:  # noqa: BLE001 — a trace is never worth a frame
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a trace is never worth a frame
+        _failures.swallowed(_exc)
 
 
 #: One per player on the phone: speech (6614's), music (6615's), the
@@ -901,8 +902,8 @@ def _dispatch(argv: list, ops: list[dict], hub: "_Hub") -> tuple[bool, object]:
                 if isinstance(sub, list) and sub and sub[0] != "am-claim":
                     try:
                         _dispatch(sub, ops, hub)
-                    except Exception:  # noqa: BLE001 — one bad command, not the reply
-                        pass
+                    except Exception as _exc:  # noqa: BLE001 — one bad command, not the reply
+                        _failures.swallowed(_exc)
         return True, held
     if verb == "client_name":
         return True, "sasonica"
@@ -968,7 +969,8 @@ class _Client:
         try:
             with self.hub.lock:
                 ok, data = _dispatch(cmd, ops, self.hub)
-        except Exception:  # noqa: BLE001 — one malformed command, not the connection
+        except Exception as _exc:  # noqa: BLE001 — one malformed command, not the connection
+            _failures.swallowed(_exc)
             ok, data = False, "invalid parameter"
         # The frame first: a caller that has its answer may count on the
         # phone being told already (MpvServer answers after the player acted).

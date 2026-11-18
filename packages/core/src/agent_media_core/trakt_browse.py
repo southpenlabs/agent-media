@@ -36,6 +36,7 @@ import urllib.parse
 from typing import Optional
 
 from . import trakt as T
+from agent_media_core import failures as _failures
 
 PAGE_TTL_S = 86400.0
 LISTS_TTL_S = 3600.0
@@ -91,8 +92,8 @@ def _posters(items: list[dict]) -> None:
     if tmdb.set_up() and items:
         try:
             tmdb.add_posters(items)
-        except Exception:  # noqa: BLE001 — the list without its pictures
-            pass
+        except Exception as _exc:  # noqa: BLE001 — the list without its pictures
+            _failures.swallowed(_exc)
 
 
 def _item(kind: str, o: dict) -> dict:
@@ -249,7 +250,8 @@ def _tmdb_trailer(kind: str, item: dict) -> Optional[str]:
         return None
     try:
         return tmdb.details(kind, int(tmdb_id)).get("trailer") or None
-    except Exception:  # noqa: BLE001 — Trakt's own then
+    except Exception as _exc:  # noqa: BLE001 — Trakt's own then
+        _failures.swallowed(_exc)
         return None
 
 
@@ -311,7 +313,8 @@ def _search_trailer(key: str, name: str, year, now: float) -> None:
     names it (a song that merely shares the name is not a trailer)."""
     try:
         rows = _youtube_search(" ".join(x for x in (name, str(year or ""), "official trailer") if x))
-    except Exception:  # noqa: BLE001 — asked again next time
+    except Exception as _exc:  # noqa: BLE001 — asked again next time
+        _failures.swallowed(_exc)
         return
 
     def fold(x) -> str:
@@ -389,7 +392,8 @@ def _open_in(kind: str, item: dict, season=None, episode=None) -> list[dict]:
     if tmdb.set_up() and tmdb_id is not None:
         try:
             where = tmdb.details(kind, int(tmdb_id)).get("where")
-        except Exception:  # noqa: BLE001 — the apps' keys alone then
+        except Exception as _exc:  # noqa: BLE001 — the apps' keys alone then
+            _failures.swallowed(_exc)
             where = None
     return watch_open.open_in(kind, item.get("ids") or {}, where, season, episode)
 
@@ -533,8 +537,8 @@ def _photos(rows: list[dict]) -> None:
         return
     try:
         tmdb.add_photos(rows)
-    except Exception:  # noqa: BLE001 — the people without their pictures
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the people without their pictures
+        _failures.swallowed(_exc)
 
 
 def _filmography(kind: str, got, now: float) -> dict:

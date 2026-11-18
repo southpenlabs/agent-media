@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import auth
+from agent_media_core import failures as _failures
 
 KINDS = ("tone", "answers", "message")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
@@ -218,7 +219,8 @@ def is_private(session: str) -> bool:
         from . import matrix
 
         return matrix.room(session) is not None
-    except Exception:  # noqa: BLE001 — unsure is private
+    except Exception as _exc:  # noqa: BLE001 — unsure is private
+        _failures.swallowed(_exc)
         return True
 
 

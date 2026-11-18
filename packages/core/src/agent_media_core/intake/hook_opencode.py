@@ -23,6 +23,7 @@ from __future__ import annotations
 import sys
 
 from ..types import Source
+from agent_media_core import failures as _failures
 
 
 def _seen_path(session: str):
@@ -249,8 +250,8 @@ def note(restart_only: bool = False) -> int:
             out = context.note_for(hook)
         if out:
             print(out)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return 0
 
 

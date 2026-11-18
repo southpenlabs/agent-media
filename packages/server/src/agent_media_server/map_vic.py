@@ -30,6 +30,7 @@ import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 PAGE = "https://www.vic.gov.au/distracted-driver-and-seatbelt-detection-camera-locations"
 SITE = "https://www.vic.gov.au"
@@ -163,7 +164,8 @@ def refresh(force: bool = False) -> dict:
         if hit is None or (hit.get("geom") is None and time.time() - hit.get("at", 0) > MISS_AGAIN_S):
             try:
                 hit = {"geom": _road_line(s["road"], s["suburb"]), "at": time.time()}
-            except Exception:  # noqa: BLE001 - asked again next run
+            except Exception as _exc:  # noqa: BLE001 - asked again next run
+                _failures.swallowed(_exc)
                 hit = None
             if hit is not None:
                 roads[key] = hit

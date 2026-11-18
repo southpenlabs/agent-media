@@ -28,6 +28,7 @@ import time
 from urllib.parse import quote, urlparse
 
 from . import auth
+from agent_media_core import failures as _failures
 
 CACHE_S = 24 * 3600
 KEEP = 500
@@ -89,7 +90,8 @@ def _embeddable(href: str) -> bool | None:
     None when it cannot tell (the fetch failed, or neither mark)."""
     try:
         _final, _ctype, page = _fetch(f"{PLUGIN}?href={quote(href, safe='')}&show_text=false", MOBILE_UA)
-    except Exception:  # noqa: BLE001 — unknown, not unplayable
+    except Exception as _exc:  # noqa: BLE001 — unknown, not unplayable
+        _failures.swallowed(_exc)
         return None
     if any(m in page for m in UNAVAILABLE):
         return False
@@ -107,7 +109,8 @@ def _facebook(url: str) -> dict:
     ua = addon.user_agent if addon else MOBILE_UA
     try:
         final, _ctype, page = _fetch(url, ua)
-    except Exception:  # noqa: BLE001 — a page we cannot read may still embed
+    except Exception as _exc:  # noqa: BLE001 — a page we cannot read may still embed
+        _failures.swallowed(_exc)
         final, page = url, ""
     canonical = _meta(page, "og:url") or final
     if kind_of(canonical) != "facebook" or _LOGIN.search(urlparse(canonical).path or ""):
@@ -128,7 +131,8 @@ def preview(url: str, now: float | None = None) -> dict:
             return hit[1]
     try:
         got = _youtube(url) if kind == "youtube" else _facebook(url)
-    except Exception:  # noqa: BLE001 — a card without a title, not no card
+    except Exception as _exc:  # noqa: BLE001 — a card without a title, not no card
+        _failures.swallowed(_exc)
         got = {"url": url, "title": "", "image": "", "site": "YouTube" if kind == "youtube" else "Facebook"}
         if kind == "facebook":
             got["embeddable"] = None

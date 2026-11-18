@@ -48,6 +48,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 DEFAULT_URLS = ("https://overpass-api.de/api/interpreter,"
                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter,"
@@ -127,6 +128,7 @@ def _fetch(layer: str, sq: tuple[int, int]) -> list[dict]:
                 got = json.loads(res.read().decode("utf-8") or "{}")
             return got.get("elements") or []
         except Exception as e:  # noqa: BLE001 - busy or away: the next one
+            _failures.swallowed(e)
             last = e
     raise last or RuntimeError("no Overpass server")
 
@@ -141,7 +143,8 @@ def _fill(layer: str, sq: tuple[int, int]) -> None:
     """Fetch one square and keep it; a failure leaves what was kept."""
     try:
         got = _features(layer, _fetch(layer, sq))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return
     _path(layer, sq).write_text(json.dumps({"at": time.time(), "features": got}))
 

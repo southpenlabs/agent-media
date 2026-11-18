@@ -112,6 +112,7 @@ import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.contacts")
 
@@ -2070,6 +2071,7 @@ def sync(full: bool = False) -> dict:
         try:
             done.append(_SYNCS[s](full))
         except Exception as e:  # noqa: BLE001 — one source down is not all of them
+            _failures.swallowed(e)
             errors[s] = str(e) or type(e).__name__
     return {"synced": done, "errors": errors}
 
@@ -3247,6 +3249,7 @@ def cmd_sync(a) -> int:
                 one = _SYNCS[which](bool(getattr(a, "full", False)))
             got = {"synced": [one], "errors": {}}
         except Exception as e:  # noqa: BLE001 — said, with its source
+            _failures.swallowed(e)
             got = {"synced": [], "errors": {which: str(e)}}
     else:
         got = sync(full=bool(getattr(a, "full", False)))
@@ -3366,6 +3369,7 @@ def seed(dry_run: bool = True, limit: int = 0) -> dict:
                 contacts_drupal.add_methods(uuid, c)
                 made.append({"contact": cid, "uuid": uuid, "name": c.get("name")})
             except Exception as e:  # noqa: BLE001 — one refused is said; the rest go on
+                _failures.swallowed(e)
                 errors.append({"contact": cid, "name": c.get("name"), "error": str(e)})
         if made:
             sync_drupal()

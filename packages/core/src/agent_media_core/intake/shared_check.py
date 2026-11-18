@@ -31,6 +31,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 _LINE = re.compile(r"^Shared file: (\S.*?)\s*$", re.MULTILINE)
 
@@ -77,7 +78,8 @@ def main() -> int:
         if "Shared file: " not in text:
             return 0
         missing = check(text)
-    except Exception:  # noqa: BLE001 - a chip is never worth a turn
+    except Exception as _exc:  # noqa: BLE001 - a chip is never worth a turn
+        _failures.swallowed(_exc)
         return 0
     if missing:
         print(json.dumps({"decision": "block", "reason": reason(missing)}))

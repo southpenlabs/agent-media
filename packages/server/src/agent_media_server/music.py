@@ -110,6 +110,7 @@ import threading
 import time
 
 from . import audio, auth
+from agent_media_core import failures as _failures
 
 #: `action` → the `media music` verb. `seek` and `seek-by` take a number.
 ACTIONS = {
@@ -251,7 +252,8 @@ def _chapters(now: dict) -> list[dict]:
             return []
         return [{"title": c["title"], "start_ms": int(c["start"] * 1000)}
                 for c in music_sasonica.chapters(path)]
-    except Exception:  # noqa: BLE001 — a list the tab can do without
+    except Exception as _exc:  # noqa: BLE001 — a list the tab can do without
+        _failures.swallowed(_exc)
         return []
 
 
@@ -331,7 +333,8 @@ def _who(now: dict) -> dict:
         if ch is None:
             music_channel.fill([vid])
         return {"artist": got.get("artist"), "song": got.get("song"), "album": got.get("album"), "channel": ch}
-    except Exception:  # noqa: BLE001 — the title alone will do
+    except Exception as _exc:  # noqa: BLE001 — the title alone will do
+        _failures.swallowed(_exc)
         return {"artist": None, "song": None, "album": None, "channel": None}
 
 
@@ -487,7 +490,8 @@ def _rotation_of(vid: str, ch: dict | None = None):
         if ch is not None:
             return music_rotation.level(ch["key"])
         return music_rotation.level(vid) if radio._ID.match(vid or "") else None
-    except Exception:  # noqa: BLE001 — a button state, never a failed read
+    except Exception as _exc:  # noqa: BLE001 — a button state, never a failed read
+        _failures.swallowed(_exc)
         return None
 
 
@@ -614,8 +618,8 @@ def _title_of(uri: str, given) -> str:
         for r in StateStore().recent_history(sink="music", limit=2000, requested=True):
             if (r.get("text") or "").strip() and _row_key(r.get("uri") or "") == key:
                 return r["text"].strip()
-    except Exception:  # noqa: BLE001 — a name is a nicety
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety
+        _failures.swallowed(_exc)
     return ""
 
 
@@ -719,8 +723,8 @@ def _verdict(now: dict, ch: dict | None = None, whole: bool = False) -> str | No
             return "like" if StateStore().is_liked("music", vid, whole=True) else None
         if StateStore().is_liked("music", vid, chapter=now.get("chapter") or ""):
             return "like"
-    except Exception:  # noqa: BLE001 — a button state, never a failed read
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a button state, never a failed read
+        _failures.swallowed(_exc)
     return None
 
 
@@ -764,7 +768,8 @@ def _bed_state(now: dict) -> dict:
 
         vid = fav._vid(now.get("uri") or "") or ""
         return {"suggested": bool(fav.suggested_key(vid))}
-    except Exception:  # noqa: BLE001 — a button state, never a failed read
+    except Exception as _exc:  # noqa: BLE001 — a button state, never a failed read
+        _failures.swallowed(_exc)
         return {"suggested": False}
 
 
@@ -874,7 +879,8 @@ def _move(uri: str, to: str, from_kind: str, pos_s: float, paused: bool) -> None
     while True:
         try:
             st = cli._music_status_json(SinkMusicRouter(SinkMusic()), where=_kind(to))
-        except Exception:  # noqa: BLE001 — keep asking until the deadline
+        except Exception as _exc:  # noqa: BLE001 — keep asking until the deadline
+            _failures.swallowed(_exc)
             st = {}
         if st.get("pos_ms") is not None and _kind(st.get("backend") or "") == _kind(to) \
                 and (not want or st.get("media_id") == want):
@@ -974,7 +980,8 @@ def _speaking() -> bool:
         from agent_media_core.cli import _speech_in_flight
 
         return bool(_speech_in_flight())
-    except Exception:  # noqa: BLE001 — not known: as if quiet
+    except Exception as _exc:  # noqa: BLE001 — not known: as if quiet
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1357,7 +1364,8 @@ def discover(bearer: str, which: str = "", page: str = "1", hide_played: bool = 
         try:
             now, _ = _now()
             vid = _row_vid(str(now.get("uri") or ""))
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             vid = ""
     try:
         got = music_discover.listing(which or "for_you", int(page or 1), hide_played, (genre or "").strip()[:60],
@@ -1421,6 +1429,7 @@ def brainz_play(body: dict, bearer: str) -> tuple[bool, dict]:
     except LookupError as e:
         return False, {"error": str(e), "status": 404}
     except Exception as e:  # noqa: BLE001
+        _failures.swallowed(e)
         return False, {"error": f"MusicBrainz didn't answer: {e}", "status": 502}
     start = body.get("from") or 1
     tracks = [t for t in got["tracks"] if isinstance(start, int) and t["n"] >= start]
@@ -1472,6 +1481,7 @@ def _spotify_play(body: dict) -> tuple[bool, dict]:
     except play_gate.PlayHeld:
         raise                      # control() answers it as held
     except Exception as e:  # noqa: BLE001 — Spotify unreachable
+        _failures.swallowed(e)
         return False, {"error": f"couldn't reach Spotify: {e}", "code": "spotify", "status": 502}
     return True, {"spotify": True, "device": r.get("device"), "title": a.get("title")}
 

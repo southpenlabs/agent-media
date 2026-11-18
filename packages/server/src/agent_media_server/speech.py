@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping
 from agent_media_core.state.records import extras_of
 
 from . import audio, auth, mic_state, sessions, threads
+from agent_media_core import failures as _failures
 
 #: What the app's speech player may do: the popup's listening keys — pause,
 #: the sentence and paragraph steps, older/newer turn and replay, speed,
@@ -290,6 +291,7 @@ def stop_speech() -> str:
         SinkSpeech().stop(_active_speech_target())
         return ""
     except Exception as e:  # noqa: BLE001 — reported, never raised into a route
+        _failures.swallowed(e)
         return str(e) or type(e).__name__
 
 
@@ -415,7 +417,8 @@ def _session_title(session: str) -> str:
         try:
             r = matrix.room(session)
             title = r.title() if r is not None else ""
-        except Exception:  # noqa: BLE001 — a name is a nicety; the bar still plays
+        except Exception as _exc:  # noqa: BLE001 — a name is a nicety; the bar still plays
+            _failures.swallowed(_exc)
             title = ""
     return title
 
@@ -657,7 +660,8 @@ def unheard_counts() -> dict[str, int]:
             # The rooms' own changes too: a reply of the owner's in a chat
             # with people ends its run (room_unheard) and writes no speech.
             sig = (*sig, _rooms_rev()) if sig else sig
-        except Exception:  # noqa: BLE001 — unknown: counted again
+        except Exception as _exc:  # noqa: BLE001 — unknown: counted again
+            _failures.swallowed(_exc)
             sig = ()
         at, counts = _UNHEARD_CACHE
         if (at is not None and sig and sig == _UNHEARD_SIG
@@ -700,7 +704,8 @@ def room_unheard(thread: str) -> list[int] | None:
 
     try:
         r = matrix.room(thread)
-    except Exception:  # noqa: BLE001 — not answerable: the rows' own count
+    except Exception as _exc:  # noqa: BLE001 — not answerable: the rows' own count
+        _failures.swallowed(_exc)
         return None
     if r is None:
         return None
@@ -711,7 +716,8 @@ def room_unheard(thread: str) -> list[int] | None:
         msgs = list(r.messages)
     try:
         rows = StateStore().matrix_speech(r.thread)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     ids: list[int] = []
     for m in reversed(msgs):
@@ -855,7 +861,8 @@ def speech_recent(bearer: str, limit=None) -> tuple[bool, dict]:
         if session not in titles:
             try:
                 titles[session] = _session_title(session)
-            except Exception:  # noqa: BLE001 — a name, never a reason to fail
+            except Exception as _exc:  # noqa: BLE001 — a name, never a reason to fail
+                _failures.swallowed(_exc)
                 titles[session] = ""
         title = titles[session] or str(ex.get("title") or ex.get("source_title") or "")
         heard_to = reply_position.heard_to_any(row, rows)

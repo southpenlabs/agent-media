@@ -41,6 +41,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -353,7 +354,8 @@ def _headless(session: str) -> bool:
     try:
         from . import seam
         return seam.owned_headless(session)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 

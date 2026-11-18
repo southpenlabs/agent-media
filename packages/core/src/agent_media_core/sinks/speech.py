@@ -21,6 +21,7 @@ from .. import audio_backend
 from ..render import device as device_voice
 from ..types import Target
 from . import _mpv_ipc as ipc
+from agent_media_core import failures as _failures
 
 
 log = logging.getLogger(__name__)
@@ -570,8 +571,8 @@ def mark_speech_stopped(sentence: Optional[int] = None, tick: bool = True) -> No
                          sentence=(sentence if sentence is not None
                                    else ex.get("current_sentence_idx")),
                          then_id=ex.get("then_id"))
-    except Exception:  # noqa: BLE001 — the stop matters more than the note
-        pass
+    except Exception as _exc:  # noqa: BLE001 — the stop matters more than the note
+        _failures.swallowed(_exc)
     try:
         p = _stopped_path()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -586,8 +587,8 @@ def mark_speech_stopped(sentence: Optional[int] = None, tick: bool = True) -> No
         try:
             from ..state import StateStore
             StateStore().set_stopped_at(rid, at)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
 
 
 def stopped_here(started_at: float) -> Optional[int]:
@@ -777,8 +778,8 @@ class SinkSpeech:
             try:
                 from ._miss_notify import record_miss
                 record_miss(target.name)
-            except Exception:  # noqa: BLE001 — alerting must not break playback
-                pass
+            except Exception as _exc:  # noqa: BLE001 — alerting must not break playback
+                _failures.swallowed(_exc)
             return False
 
     def play_playlist(self, uris: "list", target: Target = DEFAULT_TARGET,
@@ -1480,7 +1481,8 @@ def push_under_level(db: float) -> int:
     try:
         from ..audio_targets import speech_options
         names = [o["name"] for o in speech_options()]
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         names = [DEFAULT_TARGET.name]
     told, seen = 0, set()
     for name in names:

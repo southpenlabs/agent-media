@@ -192,6 +192,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from agent_media_core import failures as _failures
 
 if TYPE_CHECKING:
     from .session_records import SessionRecord
@@ -552,8 +553,8 @@ def _restart_label(w: dict) -> str:
                           if isinstance(r, dict) and r.get("session") == sid), "")
             if title:
                 return sessions.whole_title(sid, title)
-        except Exception:  # noqa: BLE001 — a name is never worth failing the view
-            pass
+        except Exception as _exc:  # noqa: BLE001 — a name is never worth failing the view
+            _failures.swallowed(_exc)
     return str(w.get("label") or "")
 
 
@@ -938,7 +939,8 @@ def _subagents_where(session: str) -> str:
 
         d = agents.subagents_dir(session)
         return f" Their transcripts are in {d}." if d is not None else ""
-    except Exception:  # noqa: BLE001 — a path is a nicety
+    except Exception as _exc:  # noqa: BLE001 — a path is a nicety
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -990,7 +992,8 @@ def _speech_level(session: str) -> str:
         from agent_media_core import speak_priority
 
         return speak_priority.level_of(session)
-    except Exception:  # noqa: BLE001 — a level is a default, never a failure
+    except Exception as _exc:  # noqa: BLE001 — a level is a default, never a failure
+        _failures.swallowed(_exc)
         return "normal"
 
 
@@ -1132,7 +1135,8 @@ def _oc_running_agents(session: str) -> list[dict]:
         from . import agents
 
         rows = agents.opencode_agents(session, live=True) or []
-    except Exception:  # noqa: BLE001 — a cut-off says less, never fails
+    except Exception as _exc:  # noqa: BLE001 — a cut-off says less, never fails
+        _failures.swallowed(_exc)
         return []
     return [{"id": r["id"], "type": "local_agent", "description": r.get("description") or ""}
             for r in rows if r.get("status") == "running"]
@@ -1331,8 +1335,8 @@ def _emit_quota_warning(w: dict) -> None:
             session=str(w.get("session") or ""),
             folder=str(w.get("cwd") or ""),
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _emit_quota_limit(agent: str, reset: float | None, text: str, *, session: str = "", cwd: str = "") -> None:
@@ -1358,8 +1362,8 @@ def _emit_quota_limit(agent: str, reset: float | None, text: str, *, session: st
             session=session,
             folder=cwd,
         )
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _clear_quota_alert(agent: str = "claude", title: str = "usage limit reset") -> None:
@@ -1370,8 +1374,8 @@ def _clear_quota_alert(agent: str = "claude", title: str = "usage limit reset") 
             "level": "ok",
             "title": f"{(agent or 'claude').capitalize()} {title}",
         })
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _clock(at: float) -> str:
@@ -1467,8 +1471,8 @@ def _oc_ask_pre(s: Session, rid: str, tool_input: dict) -> None:
             "tool_use_id": rid,
             "harness": "opencode",
         })
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _oc_ask_post(s: Session, rid: str, tool_input: dict, raw_answers: object) -> None:
@@ -1491,8 +1495,8 @@ def _oc_ask_post(s: Session, rid: str, tool_input: dict, raw_answers: object) ->
             "tool_response": {"answers": answers} if answers else {},
             "harness": "opencode",
         })
-    except Exception:
-        pass
+    except Exception as _exc:
+        _failures.swallowed(_exc)
 
 
 def _one_live_copy(session: str) -> None:
@@ -1506,7 +1510,8 @@ def _one_live_copy(session: str) -> None:
     try:
         from agent_media_core import live_copy
         h = live_copy.holder(session, count_sessiond=False)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return
     if h:
         raise Refused(f"session {session[:8]} is live in {live_copy.describe(h)}; "
@@ -1723,7 +1728,8 @@ class Supervisor:
             from agent_media_core.intake import context
 
             told = context.told_to_end(s.id, str(rec.get("id") or ""))
-        except Exception:  # noqa: BLE001 — a missing marker is "not told"
+        except Exception as _exc:  # noqa: BLE001 — a missing marker is "not told"
+            _failures.swallowed(_exc)
             told = False
         if not told:
             return
@@ -2092,7 +2098,8 @@ class Supervisor:
                             from . import agents
 
                             d = agents.subagents_dir(s.id)
-                        except Exception:  # noqa: BLE001 — a path is a nicety
+                        except Exception as _exc:  # noqa: BLE001 — a path is a nicety
+                            _failures.swallowed(_exc)
                             d = None
                     text = quota_note(cut, str(d) if d else "")
                 else:
@@ -3509,8 +3516,8 @@ class Supervisor:
                 try:
                     from agent_media_core.intake.submit import end_session_speech_cut
                     end_session_speech_cut(s.id)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _failures.swallowed(_exc)
                 s.agy_had_result = False
                 s.agy_inputs.append((uid, text))
                 s.agy_queue.append(uid)
@@ -4525,7 +4532,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--socket", default="", help="unix socket path (default: MEDIA_SESSIOND_SOCKET, "
                                                   "else $XDG_RUNTIME_DIR/agent-media/sessiond.sock)")
     a = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
+    from agent_media_core import logs
+    logs.setup(logging.INFO, '%(message)s')
     sup = Supervisor()
     sup.load()
     srv, _t = serve(Path(a.socket) if a.socket else None, sup)

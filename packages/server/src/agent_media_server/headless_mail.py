@@ -59,6 +59,7 @@ import json
 import os
 import sys
 import time
+from agent_media_core import failures as _failures
 
 #: Polling a card while `--wait` lasts.
 POLL_S = 2.0
@@ -86,8 +87,8 @@ def _title(view: dict) -> str:
         t = sessions._headless_title(sid, view)
         if t:
             return t
-    except Exception:  # noqa: BLE001 — a name is a nicety
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a name is a nicety
+        _failures.swallowed(_exc)
     t = " ".join(str(view.get("first_text") or "").split())
     return t if len(t) <= 60 else t[:59] + "…"
 
@@ -133,7 +134,8 @@ def desk_rows(known: set[str]) -> list[dict]:
         from agent_media_core import live_copy
         from agent_media_core import claude_sessions
         recs = claude_sessions.records()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return []
     out, seen = [], set(known)
     for rec in recs:
@@ -143,8 +145,8 @@ def desk_rows(known: set[str]) -> list[dict]:
         try:
             if live_copy._by_sessiond(rec):
                 continue
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
         seen.add(sid)
         where = "pane" if rec.get("pane") else "terminal"
         out.append({"session": sid, "live": True, "state": where, "cwd": rec.get("cwd") or "",
@@ -158,7 +160,8 @@ def desk_rows(known: set[str]) -> list[dict]:
     try:
         from agent_media_core import harnesses, procinfo
         others = harnesses.running()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         others = []
     for r in others:
         if not r.session or r.session in seen:
@@ -167,7 +170,8 @@ def desk_rows(known: set[str]) -> list[dict]:
             if procinfo.environ(r.pid).get("MEDIA_SESSIOND_SESSION"):
                 continue
             cwd = procinfo.cwd(r.pid)
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:  # noqa: BLE001
+            _failures.swallowed(_exc)
             cwd = ""
         seen.add(r.session)
         where = "pane" if r.pane else "terminal"
@@ -187,7 +191,8 @@ def mail_chat(view: dict) -> bool:
         from . import mail_threads
 
         return bool(mail_threads.mail_from(str(view.get("session") or "")))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 

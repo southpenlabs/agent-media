@@ -25,6 +25,7 @@ import threading
 import time
 
 from . import auth
+from agent_media_core import failures as _failures
 
 CHANNELS = ("speech", "music")
 
@@ -46,7 +47,8 @@ def _block(channel: str) -> dict:
 
     try:
         intent = StateStore().get_music_intent()
-    except Exception:  # noqa: BLE001 — no store is "not known", not an error
+    except Exception as _exc:  # noqa: BLE001 — no store is "not known", not an error
+        _failures.swallowed(_exc)
         intent = None
     return audio_devices.block(channel, audio_targets.music_block(intent))
 
@@ -125,5 +127,6 @@ def speech_target_now(live: bool) -> str | None:
             if name:
                 return str(name)
         return audio_targets.speech_default()
-    except Exception:  # noqa: BLE001 — the bar must answer without it
+    except Exception as _exc:  # noqa: BLE001 — the bar must answer without it
+        _failures.swallowed(_exc)
         return None

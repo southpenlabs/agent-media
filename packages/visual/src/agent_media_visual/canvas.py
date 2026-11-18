@@ -63,6 +63,7 @@ from agent_media_server import speech as _speech
 
 from . import state as _state
 from .state import spool_dir
+from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.visual.canvas")
 
@@ -480,7 +481,8 @@ def _qr(url: str) -> str:
         buf = io.StringIO()
         qr.print_ascii(out=buf, invert=True)   # invert → scannable on a dark terminal
         return buf.getvalue().rstrip("\n")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return "  (pip install qrcode for a scannable QR — or open the URL below)"
 
 
@@ -507,7 +509,8 @@ def _pair_host() -> str:
         from agent_media_core.setup import _tailnet_address
 
         ip = _tailnet_address()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         ip = ""
     if ip:
         return ip
@@ -529,7 +532,8 @@ def _tunnel_url() -> tuple[str, str]:
 
         url = tunnel.current_url()
         return (url, tunnel.lookup_url()) if url else ("", "")
-    except Exception:  # noqa: BLE001 — no tunnel, then
+    except Exception as _exc:  # noqa: BLE001 — no tunnel, then
+        _failures.swallowed(_exc)
         return "", ""
 
 
@@ -790,7 +794,8 @@ def _last_speaker() -> dict | None:
                                     or ex.get("session") or ""),
                         "tmux_session": ex.get("source_tmux_session") or ""}
         return None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -884,7 +889,8 @@ def _session_turns(session: str, limit: int = 12) -> list[str]:
     try:
         from agent_media_core import conversation
         path = conversation.transcript(session)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         path = None
     if path is None:
         return []
@@ -915,7 +921,8 @@ def _session_state(session: str) -> str:
     try:
         from agent_media_server import driver
         return str(driver.for_session(session).state(session).get("state") or "")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return ""
 
 
@@ -974,7 +981,8 @@ def _seam_owns(session: str) -> bool:
     try:
         from agent_media_core import seam
         return seam.owned_headless(session)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -999,8 +1007,8 @@ def _last_speaking_session() -> str:
                 continue
             if sid:
                 return str(sid)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     return ""
 
 
@@ -1081,7 +1089,8 @@ def _speech_extras() -> dict:
         from agent_media_core.state.store import StateStore
         np = StateStore().get_now_playing("speech")
         return (np or {}).get("extras") or {}
-    except Exception:  # noqa: BLE001 — subtitles are garnish, never a fault
+    except Exception as _exc:  # noqa: BLE001 — subtitles are garnish, never a fault
+        _failures.swallowed(_exc)
         return {}
 
 
@@ -1094,7 +1103,8 @@ def _sticky_speech_speed() -> Optional[float]:
     try:
         from agent_media_core.state.store import StateStore
         return StateStore().get_speech_speed()
-    except Exception:  # noqa: BLE001 — same garnish rule as the extras
+    except Exception as _exc:  # noqa: BLE001 — same garnish rule as the extras
+        _failures.swallowed(_exc)
         return None
 
 
@@ -1119,7 +1129,8 @@ def _speech_turn() -> dict:
         if rid:
             out["id"] = rid
         return out
-    except Exception:  # noqa: BLE001 — a bold that cannot resync is not a fault
+    except Exception as _exc:  # noqa: BLE001 — a bold that cannot resync is not a fault
+        _failures.swallowed(_exc)
         return {}
 
 
@@ -1129,7 +1140,8 @@ def _speech_queue() -> list:
     try:
         from agent_media_core.intake.submit import speech_queue
         return speech_queue()
-    except Exception:  # noqa: BLE001 — a missing badge is never a fault
+    except Exception as _exc:  # noqa: BLE001 — a missing badge is never a fault
+        _failures.swallowed(_exc)
         return []
 
 
@@ -1215,7 +1227,8 @@ def _origin_host() -> str | None:
             return None
         found = config.peer("origin")
         return found.host if found else None
-    except Exception:  # noqa: BLE001 — a surface renders what it got
+    except Exception as _exc:  # noqa: BLE001 — a surface renders what it got
+        _failures.swallowed(_exc)
         return None
 
 
@@ -1233,9 +1246,10 @@ def _origin_speech() -> dict | None:
         with urllib.request.urlopen(
                 f"http://{host}:{port}/speech", timeout=4) as r:
             data = json.loads(r.read().decode())
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
         # Keep serving the last good answer rather than blinking the band out
         # of existence on one dropped packet.
+        _failures.swallowed(_exc)
         return _ORIGIN_STATE["data"]
     data.pop("events", None)
     data.pop("local_audio", None)
@@ -1437,8 +1451,8 @@ def _local_audio_playing() -> bool:
                     s.close()
                     return not bool(o.get("data"))
         s.close()
-    except Exception:  # noqa: BLE001 — fail open, exactly like the ducker
-        pass
+    except Exception as _exc:  # noqa: BLE001 — fail open, exactly like the ducker
+        _failures.swallowed(_exc)
     return False
 
 
@@ -1451,7 +1465,8 @@ def _state_poller() -> None:
             continue
         try:
             st = speech_state()
-        except Exception:  # noqa: BLE001 — the poller must outlive any hiccup
+        except Exception as _exc:  # noqa: BLE001 — the poller must outlive any hiccup
+            _failures.swallowed(_exc)
             time.sleep(2)
             continue
         # Voice starting (fresh clip OR unpause) is a wake-worthy moment: stamp
@@ -1496,7 +1511,8 @@ def _probe_video(endpoint) -> dict | None:
         props = ipc.get_properties(
             endpoint, ["idle-active", "pause", "time-pos", "speed", "path"],
             timeout=1.5)
-    except Exception:  # noqa: BLE001 — down ⇒ no video, never a fault
+    except Exception as _exc:  # noqa: BLE001 — down ⇒ no video, never a fault
+        _failures.swallowed(_exc)
         return None
     if props.get("idle-active") is not False:
         return None
@@ -1552,8 +1568,8 @@ def _video_state() -> dict:
         from agent_media_core.sinks import music_local
         if music_local.configured():
             probes["music"] = _probe_video(music_local.endpoint())
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     pick = probes.get(sel)
     if pick is None:
         # Not on a video channel (or its player has nothing): only an
@@ -2443,6 +2459,8 @@ def main() -> None:
     # per-thread arenas kept 811 MB of freed memory on red2 (malloc_arenas).
     from agent_media_core import malloc_arenas
     malloc_arenas.cap()
+    from agent_media_core import logs
+    logs.setup()
     ap =argparse.ArgumentParser(description="agent-media visual canvas")
     ap.add_argument("--port", type=int,
                     default=int(os.environ.get("MEDIA_VISUAL_PORT") or DEFAULT_PORT))

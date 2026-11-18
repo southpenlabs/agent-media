@@ -59,6 +59,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterator, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -417,6 +418,7 @@ def play_now(hid: str = "", session: str = "") -> dict:
             with request(force=True):
                 spotify_remote.play(uri)
         except Exception as err:  # noqa: BLE001 — RemoteError and the like, said back
+            _failures.swallowed(err)
             return {"ok": False, "error": str(err), "played": e}
         return {"ok": True, "played": e}
     if kind == "book":

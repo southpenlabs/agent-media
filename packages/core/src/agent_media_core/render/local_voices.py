@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.request
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 #: Providers whose voices this module lists, in the picker's order.
 PROVIDERS = ("kokoro", "piper")
@@ -98,12 +99,13 @@ def _ask_kokoro(base: str) -> Optional[list[str]]:
         names = data.get("voices") if isinstance(data, dict) else data
         if isinstance(names, list):
             return [str(n) for n in names if isinstance(n, str)]
-    except Exception:  # noqa: BLE001 — an older server, or none
-        pass
+    except Exception as _exc:  # noqa: BLE001 — an older server, or none
+        _failures.swallowed(_exc)
     try:
         # The hand-made server before /voices: up means every voice.
         return list(KOKORO_VOICES) if _get_ok(f"{base}/health") else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -111,7 +113,8 @@ def _ask_piper(base: str) -> Optional[list[str]]:
     """Piper's GET /voices: the downloaded voices, keyed by name."""
     try:
         data = _get_json(f"{base}/voices")
-    except Exception:  # noqa: BLE001 — not running
+    except Exception as _exc:  # noqa: BLE001 — not running
+        _failures.swallowed(_exc)
         return None
     if isinstance(data, dict):
         return sorted(str(k) for k in data)
@@ -208,8 +211,8 @@ def _fetch_piper_catalog() -> dict:
         data = _get_json(f"{base_url('piper')}/all-voices")
         if isinstance(data, dict) and data:
             return data
-    except Exception:  # noqa: BLE001 — not running: ask Hugging Face
-        pass
+    except Exception as _exc:  # noqa: BLE001 — not running: ask Hugging Face
+        _failures.swallowed(_exc)
     req = urllib.request.Request(PIPER_CATALOG_URL, headers={"User-Agent": "agent-media"})
     with urllib.request.urlopen(req, timeout=10) as resp:
         data = json.loads(resp.read().decode("utf-8"))
@@ -242,7 +245,8 @@ def piper_catalog() -> dict:
     _piper_catalog_try = now
     try:
         raw = _fetch_piper_catalog()
-    except Exception:  # noqa: BLE001 — offline
+    except Exception as _exc:  # noqa: BLE001 — offline
+        _failures.swallowed(_exc)
         return stale
     fresh = {}
     for key, entry in raw.items():

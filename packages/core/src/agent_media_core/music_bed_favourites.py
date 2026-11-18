@@ -130,6 +130,7 @@ if TYPE_CHECKING:
     from .music_bed_records import BedTrack, Favourite, FavouritesIndex, TrackFeatures
 
 from .music_bed_tempo import bpm_of  # noqa: F401 — kept here for its callers
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -252,8 +253,8 @@ def listenbrainz_user() -> str:
         got = personal_prefs.get("listenbrainz.user")
         if got:
             return str(got).strip()
-    except Exception:  # noqa: BLE001 — no personal settings here
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no personal settings here
+        _failures.swallowed(_exc)
     return (os.environ.get("MEDIA_MUSIC_BED_FAVOURITES_LISTENBRAINZ_USER") or "").strip()
 
 
@@ -845,7 +846,8 @@ def _vid(uri: str) -> Optional[str]:
     try:
         from .sinks.music_fetch import watch_id
         return watch_id(uri.split("yt:", 1)[-1]) if uri else None
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
 
 
@@ -1753,7 +1755,8 @@ def chosen() -> bool:
         from . import music_bed
         parsed = music_bed.parse(music_bed.choice())
         return bool(parsed and parsed[0] == "favourites")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -1859,7 +1862,8 @@ def note(style: str = "auto", when: Optional[datetime] = None) -> str:
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "night"
     if cmd == "night":
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        from agent_media_core import logs
+        logs.setup(logging.INFO, '%(message)s')
         if not chosen():
             print("music-bed favourites: not the music bed's source; nothing to do "
                   "(MEDIA_MUSIC_BED_FAVOURITES_PREPARE=always prepares anyway)")

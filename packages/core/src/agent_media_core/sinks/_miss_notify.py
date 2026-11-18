@@ -25,6 +25,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 RETRY_S = 60
 GIVE_UP_S = 4 * 3600
@@ -92,8 +93,8 @@ def record_miss(target_name: str = "") -> None:
                  miss_host(target_name)],
                 start_new_session=True, stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
 
 
 def _try_notify(host: str, count: int, latest: int) -> bool:

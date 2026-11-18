@@ -57,6 +57,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -128,7 +129,8 @@ def _is_remote(name: str) -> bool:
         from .sinks.speech import _socket_for
         from .types import Target
         return str(_socket_for(Target(name=name))).startswith("tcp://")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return True
 
 

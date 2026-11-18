@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ._paths import state_dir
+from agent_media_core import failures as _failures
 
 NAME = "personal.json"
 SCOPE = "server"
@@ -420,7 +421,8 @@ def weather_now(timeout: float = 8.0, user: Optional[str] = None) -> Optional[di
     try:
         cur = (_http_json(f"{FORECAST}?{q}", timeout) or {}).get("current") or {}
         code = int(cur["weather_code"])
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return None
     return {"code": code, "label": WEATHER_WORDS.get(code, f"code {code}"),
             "temperature_c": cur.get("temperature_2m")}
@@ -541,7 +543,8 @@ def youtube_why() -> Optional[str]:
     try:
         from .sinks import music_local
         local = music_local.fetch_is_local()
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         local = False
     if local or (os.environ.get("MEDIA_PHONE_JOBS") or "").strip() == "1" \
             or (os.environ.get("MEDIA_MUSIC_LOCAL_SSH") or "").strip():
@@ -581,7 +584,8 @@ def _has_likes() -> bool:
     try:
         from .state import StateStore
         return bool(StateStore().list_likes(limit=1, channel="music"))
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return False
 
 
@@ -675,7 +679,8 @@ def status(user: Optional[str] = None) -> dict:
         else:
             streaming_why = ("Not set: name your yt-profile YouTube accounts, or enter your "
                              "Spotify app's client ID and sign in with Spotify.")
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         streaming_why = None
     why = {"weather": weather_why(user), "astro": astro_why(user), "accounts": listenbrainz_why(user),
            "streaming": streaming_why}
@@ -700,8 +705,8 @@ def status(user: Optional[str] = None) -> dict:
                                            "history and music playlists count toward Your favourites, "
                                            "instrumental. Read only. To add one, sign in on the server "
                                            "with yt-profile add <name>.")
-                except Exception:  # noqa: BLE001 — the typed field stands
-                    pass
+                except Exception as _exc:  # noqa: BLE001 — the typed field stands
+                    _failures.swallowed(_exc)
             rows.append(row)
         group = {"id": gid, "label": label, "fields": rows,
                  "available": why[gid] is None, "reason": why[gid]}
@@ -720,8 +725,8 @@ def status(user: Optional[str] = None) -> dict:
                                     "ready": bool(music_accounts.spotify_client_id()),
                                     "start": "/accounts/spotify/start",
                                     "signout": "/accounts/spotify/signout"}
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                _failures.swallowed(_exc)
             # This server as a Spotify speaker, where an add-on provides it
             # (personal_use "spotify-speaker"; David, 2 Nov 2026: "should we
             # put them both in the settings page with an explanation?").

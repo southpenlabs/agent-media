@@ -42,6 +42,7 @@ import threading
 import time
 
 from . import auth, contacts, sessions
+from agent_media_core import failures as _failures
 
 log = logging.getLogger(__name__)
 
@@ -230,8 +231,8 @@ def _link(r, uid: str, cid: str) -> dict:
         from . import contacts_writeback
 
         contacts_writeback.queue(cid)
-    except Exception:  # noqa: BLE001 — a write-back is never the link's failure
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a write-back is never the link's failure
+        _failures.swallowed(_exc)
     log.info("room-contact: room %s linked to %s", r.thread[:8], cid[:8])
     return {"id": cid, "name": name or ""}
 
@@ -261,7 +262,8 @@ def _google_account(wb, URI: str) -> str | None:
         return None
     try:
         signed = [a.get("email") or "" for a in contacts.google_accounts()]
-    except Exception:  # noqa: BLE001 — the phone's own count decides
+    except Exception as _exc:  # noqa: BLE001 — the phone's own count decides
+        _failures.swallowed(_exc)
         signed = []
     for email in signed:
         if email in counts:

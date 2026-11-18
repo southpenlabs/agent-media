@@ -36,6 +36,7 @@ import shutil
 import socket
 import time
 from pathlib import Path
+from agent_media_core import failures as _failures
 
 
 def _state() -> Path:
@@ -124,7 +125,8 @@ def _tailnet_here() -> str:
         from agent_media_core.setup import _tailnet_address
 
         return (_tailnet_address() or "").strip()
-    except Exception:
+    except Exception as _exc:
+        _failures.swallowed(_exc)
         return ""
 
 

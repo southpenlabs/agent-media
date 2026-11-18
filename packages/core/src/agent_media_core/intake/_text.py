@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from agent_media_core import failures as _failures
 
 
 #: Blocks the harness writes into a user prompt that the listener never said:
@@ -159,7 +160,8 @@ def _describe_code_or(body: str, placeholder: str, describe: bool) -> str:
     try:
         from ._summary import describe_code
         return describe_code(body) or placeholder
-    except Exception:  # noqa: BLE001 — never let describe break the pipeline
+    except Exception as _exc:  # noqa: BLE001 — never let describe break the pipeline
+        _failures.swallowed(_exc)
         return placeholder
 
 
@@ -176,7 +178,8 @@ def _describe_table_or(headers: "list[str]", rows: "list[list[str]]",
     try:
         from ._summary import describe_table
         return describe_table(_table_source(headers, rows)) or placeholder
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
         return placeholder
 
 
@@ -233,7 +236,8 @@ def suppress_code_blocks(text: str, describe: bool = False,
     try:
         from markdown_it import MarkdownIt
         tokens = MarkdownIt("commonmark").parse(text)
-    except Exception:  # noqa: BLE001 — any import/parse issue → regex fallback
+    except Exception as _exc:  # noqa: BLE001 — any import/parse issue → regex fallback
+        _failures.swallowed(_exc)
         return _regex_suppress_fences(text, describe, isolate)
 
     spans: list[tuple[int, int, str]] = []
@@ -358,7 +362,8 @@ def suppress_tables(text: str, describe: bool = False, isolate: bool = False) ->
         md = MarkdownIt("commonmark")
         md.enable("table")
         tokens = md.parse(text)
-    except Exception:  # noqa: BLE001 — any import/parse issue → regex fallback
+    except Exception as _exc:  # noqa: BLE001 — any import/parse issue → regex fallback
+        _failures.swallowed(_exc)
         return _regex_suppress_tables(text, describe, isolate)
 
     lines = text.split("\n")

@@ -98,6 +98,7 @@ import os
 import re
 import threading
 from datetime import datetime, timezone
+from agent_media_core import failures as _failures
 
 #: How many characters of a tool's input or result a part carries.
 SUMMARY_MAX = 300
@@ -248,7 +249,8 @@ def _title(name: str, inp: dict) -> str:
         from agent_media_core import activity
 
         return activity.describe(name, inp) or name
-    except Exception:  # noqa: BLE001 — a title is a nicety
+    except Exception as _exc:  # noqa: BLE001 — a title is a nicety
+        _failures.swallowed(_exc)
         return name
 
 
@@ -1471,8 +1473,8 @@ def _worker_doc(session: str) -> tuple[str, str]:
         if p.is_file():
             got = frozen.as_claude(str(p), session)
             return ("claude", got) if got else ("", "")
-    except Exception:  # noqa: BLE001 - no copy: read on as before
-        pass
+    except Exception as _exc:  # noqa: BLE001 - no copy: read on as before
+        _failures.swallowed(_exc)
     return "", ""
 
 

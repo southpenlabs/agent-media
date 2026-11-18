@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 from typing import Optional
+from agent_media_core import failures as _failures
 
 STYLE_TTL_S = 86400.0
 
@@ -39,7 +40,8 @@ def _rows(items: list[dict]) -> list[dict]:
     from . import practice_library as lib
     try:
         saved = {i["id"] for i in lib.items() if str(i.get("id") or "").startswith("yt:")}
-    except Exception:  # noqa: BLE001 — none marked, not no results
+    except Exception as _exc:  # noqa: BLE001 — none marked, not no results
+        _failures.swallowed(_exc)
         saved = set()
     out = []
     for i in items:

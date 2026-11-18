@@ -49,6 +49,7 @@ import time
 import sysconfig
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 
 # --- Hook wiring -----------------------------------------------------------
@@ -1796,7 +1797,8 @@ def _through_current(path: str) -> str:
         from . import release
 
         rel = Path(path).relative_to(release.releases_dir())
-    except Exception:  # noqa: BLE001 — not in a release
+    except Exception as _exc:  # noqa: BLE001 — not in a release
+        _failures.swallowed(_exc)
         return path
     if len(rel.parts) < 2:
         return path
@@ -2055,7 +2057,8 @@ def _row_hosts(args, *, check_only: bool):
     if check_only:
         try:
             have = automode_hosts.current(_load_json(path))
-        except Exception:                            # noqa: BLE001
+        except Exception as _exc:                            # noqa: BLE001
+            _failures.swallowed(_exc)
             have = ""
         return ("ok", str(path)) if have else ("absent", "opt-in: media-setup profile --only hosts")
     state, detail = automode_hosts.apply(path, add=getattr(args, "only", None) == "hosts",
@@ -2595,6 +2598,7 @@ def profile_status(args: argparse.Namespace) -> list[dict]:
         try:
             state, detail = fn(args, check_only=True)
         except Exception as e:                       # noqa: BLE001
+            _failures.swallowed(e)
             state, detail = "unknown", str(e)
         out.append({"name": name, "what": what, "kind": kind,
                     "state": state, "detail": detail})
@@ -2620,6 +2624,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
         except SystemExit:
             raise
         except Exception as e:                       # noqa: BLE001
+            _failures.swallowed(e)
             state, detail, = "failed", str(e)
         if state == "failed":
             failed += 1
@@ -2997,8 +3002,8 @@ def cmd_feed(args: argparse.Namespace) -> int:
     try:
         from .feed import episodes, feeds
         published = [(n, len(episodes(n))) for n in feeds()]
-    except Exception:  # noqa: BLE001 — a nudge, never the command's failure
-        pass
+    except Exception as _exc:  # noqa: BLE001 — a nudge, never the command's failure
+        _failures.swallowed(_exc)
     if published:
         print("\non the feed already: "
               + ", ".join(f"{n} ({c})" for n, c in published))

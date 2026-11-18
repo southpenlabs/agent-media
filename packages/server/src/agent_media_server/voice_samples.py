@@ -22,6 +22,7 @@ import time
 import wave
 from pathlib import Path
 from typing import Optional
+from agent_media_core import failures as _failures
 
 #: What each sample says, by language; English for any other.
 SENTENCES = {
@@ -90,8 +91,8 @@ def _duration_s(path: Path) -> Optional[float]:
     try:
         with wave.open(str(path), "rb") as w:
             return w.getnframes() / float(w.getframerate())
-    except Exception:  # noqa: BLE001 — not a WAV: ask ffprobe
-        pass
+    except Exception as _exc:  # noqa: BLE001 — not a WAV: ask ffprobe
+        _failures.swallowed(_exc)
     probe = shutil.which("ffprobe")
     if not probe:
         return None

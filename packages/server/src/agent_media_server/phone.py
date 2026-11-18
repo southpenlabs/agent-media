@@ -50,6 +50,7 @@ import time
 from pathlib import Path
 
 from . import auth, sessions
+from agent_media_core import failures as _failures
 
 #: What a phone can be asked for. Photo first (David, 1 Oct 2026); dnd and
 #: location follow.
@@ -181,8 +182,8 @@ def _title_of(session: str) -> str | None:
         for r in sessions.cached_states()[0]:
             if r.get("session") == session:
                 return str(r.get("title") or "") or None
-    except Exception:  # noqa: BLE001 — no title is not a reason to refuse
-        pass
+    except Exception as _exc:  # noqa: BLE001 — no title is not a reason to refuse
+        _failures.swallowed(_exc)
     return None
 
 
