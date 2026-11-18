@@ -10186,9 +10186,11 @@ the Content-Type (`audio/webm` → webm, `audio/ogg` → ogg, …; octet-stream 
 its first bytes). `language` (an ISO code) is a hint; anything else is
 dropped. Same bearer as `{path}` (a paired device), checked before the body
 is read. 400 for an empty body, 413 over 8 MiB, 503 with no speech-to-text
-set up, 502 when the service fails, each with `error` in plain words.
-Nothing is kept but the cached transcript. Any other Content-Type is the
-`{path}` form.
+set up, 402 `code: "paid_plan"` when only paid services are set up and the
+server does not pay for this device (§6.36a, Free or paid), 502 when the
+service fails, each with `error` in plain words. A device the server does
+not pay for is transcribed by the free services only. Nothing is kept but
+the cached transcript. Any other Content-Type is the `{path}` form.
 
 ### 6.36a Choosing the speech-to-text from Settings — gated (built 3 Nov 2026)
 
@@ -10232,6 +10234,36 @@ Kept on the host in `<state_dir>/stt.json`, mode 0600:
 `{"chosen": "auto"|<name>, "keys": {<name>: <key>}, "models": {<name>: <model>}}`.
 `python -m agent_media_core.transcribe` prints the service in use, the
 choice and where its key came from (`from`).
+
+**Free or paid** (built 19 Nov 2026; David, 18 Nov 2026, on the mic key a
+browser with no recogniser of its own lacks: "that can cost money if it's
+not installed locally", "it could be an option for a paid tier"). Pinned by
+`test_stt_cost.py`. `GET` and `POST` also answer, for the device asking:
+
+```json
+{"cost": "free", "free": true, "covered": false, "paid_for": "admins", "dictate": true}
+```
+
+- `cost`: what the service in use costs, `"free"` or `"paid"` (null with
+  none). Only `custom` can be free: its `MEDIA_STT_URL` on this machine or
+  the home network (loopback, a private, link-local or tailnet 100.64/10
+  address, a bare host name, `.local` `.lan` `.home` `.internal`
+  `.home.arpa` `.ts.net`). `MEDIA_STT_COST=free|paid` says so outright for
+  it. Every cloud service is paid.
+- `free`: whether any free service is set up (a local one auto passes over
+  for a paid one is still there for those the server does not pay for).
+- `covered`: whether this server pays for this device's paid transcription,
+  by `paid_for` (`MEDIA_STT_PAID_FOR`): `"admins"` (default: the owner's
+  own devices, and a device with no role), `"everyone"` or `"nobody"`. A
+  paid plan will take this setting's place.
+- `dictate`: whether this device can dictate through `POST /transcribe`:
+  a service is set up, and it is covered or a free one is there.
+
+The app shows the server-transcribed mic key (a browser with no
+SpeechRecognition, Firefox) when `dictate` is true; when it is false
+with `provider` set, it may show the key with a note that dictation here
+comes with a paid plan. Room voice notes (§6.37) are transcribed for the
+owner as before.
 
 ### 6.37 The words of a room's voice notes (built 29 Oct 2026)
 

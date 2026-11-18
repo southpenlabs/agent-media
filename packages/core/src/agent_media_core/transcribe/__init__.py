@@ -44,6 +44,16 @@ The clip goes as 16 kHz mono MP3 when ffmpeg is there (small, and a format
 every one of them takes), else as it is. A transcript is kept by the clip's
 SHA-256 under the cache dir, so the same clip is never paid for twice.
 
+Free or paid (David, 18 Nov 2026, on Firefox's mic key: "that can cost
+money if it's not installed locally", then "it could be an option for a
+paid tier"): a custom server on this machine or the home network (loopback,
+a private or tailnet address, a `.local`/`.lan`/`.home`/`.ts.net` name or a
+bare host name) is free; everything else is paid by the call. `MEDIA_STT_COST`
+= free|paid says so outright for the custom server (a LAN box behind a public
+name, or a paid gateway at home). `cost()` answers it, and `transcribe(...,
+free_only=True)` passes the paid ones over, for a caller the server does not
+pay for.
+
 `python -m agent_media_core.transcribe <file>` prints what is set up and
 the words.
 """
@@ -52,6 +62,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import shutil
@@ -61,6 +72,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 #: (name, kind, key variable, base URL, model)
 PROVIDERS = (
@@ -244,13 +256,53 @@ def _candidates() -> list[dict]:
     return out
 
 
+#: Names that stay on the home network (a bare name, no dots, counts too).
+_LOCAL_SUFFIXES = (".local", ".lan", ".home", ".internal", ".home.arpa", ".ts.net")
+
+
+def _on_this_network(base: str) -> bool:
+    """Whether `base` is this machine or the home network: loopback, a
+    private, link-local or tailnet (100.64/10) address, or a local name."""
+    host = (urlsplit(base).hostname or "").lower().rstrip(".")
+    if not host:
+        return False
+    if host == "localhost" or "." not in host or host.endswith(_LOCAL_SUFFIXES):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip in ipaddress.ip_network("100.64.0.0/10"))
+
+
+def cost(p: dict | None) -> str | None:
+    """"free" or "paid" for a service as provider() describes one, None for
+    none. Only a custom server can be free: on this machine or the home
+    network, or MEDIA_STT_COST=free."""
+    if p is None:
+        return None
+    if p["name"] != "custom":
+        return "paid"
+    said = os.environ.get("MEDIA_STT_COST", "").strip().lower()
+    if said in ("free", "paid"):
+        return said
+    return "free" if _on_this_network(p["base"]) else "paid"
+
+
+def free_provider() -> dict | None:
+    """The first service set up that costs nothing, or None."""
+    return next((p for p in _candidates() if cost(p) == "free"), None)
+
+
 def status() -> dict:
     """What `/settings` and the CLI say: in use and what else is set up, no keys."""
     p = provider()
     saved = _load()
     ready = [n for n, _k, var, _b, _m in PROVIDERS if _usable(n, var, saved)]
     return {"provider": p["name"] if p else None, "model": p["model"] if p else None,
-            "from": p["from"] if p else None, "chosen": saved["chosen"], "available": ready}
+            "from": p["from"] if p else None, "chosen": saved["chosen"], "available": ready,
+            "cost": cost(p), "free": free_provider() is not None}
 
 
 def choices() -> list[dict]:
@@ -336,12 +388,17 @@ def _cache_dir() -> Path:
     return Path(base) / "agent-media" / "stt"
 
 
-def transcribe(audio_path: str | os.PathLike, *, language: str = "") -> str:
+def transcribe(audio_path: str | os.PathLike, *, language: str = "",
+               free_only: bool = False) -> str:
     """The words in the clip at `audio_path`, by the service in use. Raises
-    SttError when none is set up, the clip is too big, or the service fails."""
+    SttError when none is set up, the clip is too big, or the service fails.
+    `free_only` tries only the services that cost nothing (cost())."""
     order = _candidates()
+    if free_only:
+        order = [p for p in order if cost(p) == "free"]
     if not order:
-        raise SttError("no speech-to-text is set up")
+        raise SttError("no free speech-to-text is set up" if free_only
+                       else "no speech-to-text is set up")
     path = Path(audio_path)
     if not path.is_file():
         raise SttError(f"no such clip: {path.name}")

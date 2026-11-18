@@ -11,6 +11,7 @@ import pytest
 from agent_media_core import transcribe as stt
 
 KEYS = ("MEDIA_STT", "MEDIA_STT_URL", "MEDIA_STT_KEY", "MEDIA_STT_PROVIDER", "MEDIA_STT_MODEL",
+        "MEDIA_STT_COST",
         "GROQ_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY",
         "GEMINI_API_KEY", "GOOGLE_API_KEY")
 
@@ -36,7 +37,7 @@ def clean(tmp_path, monkeypatch):
 def test_none_set_up():
     assert stt.provider() is None
     assert stt.status() == {"provider": None, "model": None, "from": None, "chosen": "auto",
-                            "available": []}
+                            "available": [], "cost": None, "free": False}
     with pytest.raises(stt.SttError):
         stt.transcribe(__file__)
 

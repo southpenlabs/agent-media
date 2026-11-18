@@ -17,7 +17,7 @@ from test_contract import AUTH, call, server, signed_in, typed  # noqa: F401
 
 KEYS = ("MEDIA_STT", "MEDIA_STT_URL", "MEDIA_STT_KEY", "MEDIA_STT_PROVIDER", "MEDIA_STT_MODEL",
         "GROQ_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY",
-        "GEMINI_API_KEY", "GOOGLE_API_KEY")
+        "GEMINI_API_KEY", "GOOGLE_API_KEY", "MEDIA_STT_COST", "MEDIA_STT_PAID_FOR")
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +42,8 @@ def _row(obj, name):
 
 def test_nothing_set_up(server, signed_in):
     obj = _get(server)
-    assert obj == {"ok": True, "provider": None, "chosen": "auto", "model": None, "choices": [
+    assert obj == {"ok": True, "provider": None, "cost": None, "free": False, "covered": True,
+                   "paid_for": "admins", "dictate": False, "chosen": "auto", "model": None, "choices": [
         {"name": "groq", "label": "Groq", "model": "whisper-large-v3-turbo",
          "has_key": False, "from": None},
         {"name": "openai", "label": "OpenAI", "model": "gpt-4o-mini-transcribe",

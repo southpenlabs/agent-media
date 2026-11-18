@@ -126,7 +126,9 @@ def session_transcribe_audio(rfile, length: int, ctype: str, bearer: str,
     the server transcribes each stretch). Nothing is kept but the cached
     transcript. 401/403 for a stranger (checked before the body is read),
     400 for an empty body, 413 over AUDIO_MAX, 503 with no speech-to-text
-    set up, 502 when the service fails."""
+    set up, 402 `paid_plan` when only paid services are set up and the server
+    does not pay for this caller (stt_settings.covered), 502 when the
+    service fails. A caller not covered is transcribed by the free ones only."""
     import tempfile
     import time
     from pathlib import Path
@@ -145,6 +147,15 @@ def session_transcribe_audio(rfile, length: int, ctype: str, bearer: str,
     p = transcribe.provider()
     if p is None:
         return False, {"error": "no speech-to-text is set up on this server", "status": 503}
+    from . import stt_settings
+
+    allowed, free_only = stt_settings.may_dictate(user)
+    if not allowed:
+        return False, {"status": 402, "code": "paid_plan",
+                       "error": "dictation here goes to a paid service, and this server "
+                                "does not pay for this device (MEDIA_STT_PAID_FOR)"}
+    if free_only:
+        p = transcribe.free_provider() or p
     data = rfile.read(length)
     if len(data) < length:
         return False, {"error": "the recording did not all arrive", "status": 400}
@@ -153,7 +164,8 @@ def session_transcribe_audio(rfile, length: int, ctype: str, bearer: str,
         clip = Path(tmp) / f"stretch.{_ext(ctype, data[:16])}"
         clip.write_bytes(data)
         try:
-            words = transcribe.transcribe(clip, language=language)
+            words = transcribe.transcribe(clip, language=language,
+                                          **({"free_only": True} if free_only else {}))
         except transcribe.SttError as e:
             return False, {"error": f"not transcribed: {e}", "status": 502}
     return True, {"text": words, "ms": int((time.monotonic() - t0) * 1000),
