@@ -19,8 +19,12 @@ import re
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 from . import auth, mailbox, panes, procmem, recaps
+
+if TYPE_CHECKING:
+    from .session_records import Host, State, StateRow
 
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -965,9 +969,10 @@ def _shared_build(key: str, build):
         b = _BUILDS.get(key)
         mine = not (b and b["gen"] == _GEN and b["err"] is None and (
             not b["done"].is_set() or time.monotonic() - b["at"] < TARGETS_REUSE_S))
-        if mine:
+        if mine or b is None:
             b = {"done": threading.Event(), "gen": _GEN, "at": 0.0, "out": None, "err": None}
             _BUILDS[key] = b
+            mine = True
     if not mine:
         b["done"].wait()
         if b["err"] is None and b["out"] is not None:
@@ -1064,7 +1069,7 @@ def _build_targets(history: str = "") -> dict:
             if isinstance(o, dict) and o.get("session"):
                 r["converted_from"] = {"session": o["session"], "agent": o.get("agent") or "",
                                        **({"host": o["host"]} if o.get("host") else {})}
-    out = {"sessions": rows, "places": where}
+    out: dict[str, Any] = {"sessions": rows, "places": where}
     mail = mailbox.by_project(
         [(r.get("project"), r.get("cwd")) for r in rows]
         + [(project_of(p["path"]), p["path"]) for p in where])
@@ -1235,7 +1240,7 @@ _STATE_NAMES = {"working": "working", "input": "waiting", "approval": "approval"
 _STATES_TTL_S = 3.0
 #: `(monotonic at, (rows, host))`. Anything with a zero time is stale and
 #: never unpacked, which is how tests reset it.
-_STATES_CACHE: tuple[float, object] = (0.0, [])
+_STATES_CACHE: tuple[float, Any] = (0.0, [])
 _STATES_LOCK = threading.Lock()
 
 
@@ -1260,10 +1265,10 @@ def activity_of(session: str, pane: str, *, with_draft: bool = False) -> dict:
 
         hl = driver.headless_state(session) if session else None
         if hl is not None:
-            out = {"state": hl["state"] if hl["live"] else None}
+            hout: dict[str, Any] = {"state": hl["state"] if hl["live"] else None}
             if with_draft:
-                out["draft"] = False
-            return out
+                hout["draft"] = False
+            return hout
     cls = panes.classify(panes.strip_ansi(_capture_pane(pane)), _agent_of_pane(pane)) \
         if pane else None
     out: dict = {"state": _STATE_NAMES.get(cls, "waiting") if cls else None}
@@ -1272,10 +1277,10 @@ def activity_of(session: str, pane: str, *, with_draft: bool = False) -> dict:
     return out
 
 
-def _live_states() -> list[dict]:
+def _live_states() -> list[StateRow]:
     from . import background
 
-    out = []
+    out: list[StateRow] = []
     live = live_sessions()
     # Memory per session: the agent process the sweep just found and all of
     # its descendants, in one pass over /proc for every session (procmem).
@@ -1286,11 +1291,11 @@ def _live_states() -> list[dict]:
     titles = _pane_titles() if live else {}
     for sid, pane in live.items():
         # An unrecognised screen has always been listed as waiting here.
-        state = activity_of(sid, pane)["state"] or "waiting"
+        state: State = activity_of(sid, pane)["state"] or "waiting"
         title = (_display_title(sid, titles[pane]) if pane in titles
                  else _live_title(sid))
-        row = {"session": sid,
-               "state": state, "mem_mb": mem.get(sid), "title": title}
+        row: StateRow = {"session": sid,
+                         "state": state, "mem_mb": mem.get(sid), "title": title}
         # A turn over with background agents still at work (§6.1).
         if state == "waiting":
             bg = background.of_session(sid)
@@ -1313,21 +1318,22 @@ def _live_states() -> list[dict]:
         hmem = procmem.tree_mem_mb({v["session"]: v.get("pid") for v in hl})
         for v in hl:
             sid = str(v["session"])
-            row = {"session": sid,
-                   "state": contract_state(v), "mem_mb": hmem.get(sid),
-                   "title": _headless_title(sid, v), "driver": "headless"}
+            cs = contract_state(v)  # a live row's: never "ended"
+            hrow: StateRow = {"session": sid,
+                              "state": "waiting" if cs == "ended" else cs, "mem_mb": hmem.get(sid),
+                              "title": _headless_title(sid, v), "driver": "headless"}
             if v.get("host"):
-                row["host"] = str(v["host"])    # runs on another host (roadmap 56)
+                hrow["host"] = str(v["host"])    # runs on another host (roadmap 56)
             # Its tasks sessiond still hears from, once the turn is over (§6.1).
-            if row["state"] == "waiting":
+            if hrow["state"] == "waiting":
                 bg = background.of_session(sid, tasks=v.get("task_list") or [])
                 if bg:
-                    row["background"] = bg
-            out.append(row)
+                    hrow["background"] = bg
+            out.append(hrow)
     return out
 
 
-def _host(rows: list[dict]) -> dict:
+def _host(rows: list[StateRow]) -> Host:
     """The envelope's `host` block: the machine's memory, and how much of it
     the listed sessions hold (the sum of the rows' known `mem_mb`), and
     whether it is thrashing (`memwatch.strained`)."""
@@ -1367,13 +1373,16 @@ def session_states(bearer: str) -> tuple[bool, dict]:
     return True, out
 
 
-def cached_states() -> tuple[list[dict], dict]:
+def cached_states() -> tuple[list[StateRow], Host]:
     """`(rows, host)` — the `/sessions/state` sweep, at most `_STATES_TTL_S`
     old. No auth: the caller's (`session_states`, the sessions stream)."""
     global _STATES_CACHE
     with _STATES_LOCK:
         at, cached = _STATES_CACHE
-        if time.monotonic() - at > _STATES_TTL_S:
+        # A zero time is never a sweep's (time.monotonic() counts from boot,
+        # so on a host up less than the TTL it would have passed for fresh,
+        # and `[]` been returned as the rows and the host).
+        if not at or time.monotonic() - at > _STATES_TTL_S:
             rows = _live_states()
             cached = (rows, _host(rows))
             _STATES_CACHE = (time.monotonic(), cached)
@@ -1718,7 +1727,8 @@ def _stored_rows(rows: list, seen: set[str], flags, pinned, marks,
     from . import rest
 
     cutoff = (time.time() - days * 86400) if days > 0 else 0.0
-    kept, counts = [], {}
+    kept: list[Any] = []
+    counts: dict[str, int] = {}
     for row in rows:
         if row.session in seen or row.at < cutoff:
             continue

@@ -38,6 +38,8 @@ packages = ["src/agent_media_server"]
 python_version = "3.11"
 files = [
     "src/agent_media_server/speech.py",
+    "src/agent_media_server/session_records.py",
+    "src/agent_media_server/sessions.py",
     "src/agent_media_server/mail_accounts.py",
     "src/agent_media_server/mail_remote.py",
 ]

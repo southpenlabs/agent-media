@@ -77,3 +77,35 @@ its parts, brought in one module at a time.
 2. Type checker in CI over those modules.
 3. Settings object, speech area first (the area the env leaks have hit).
 4. Speech row and session records; then the rest by area as touched.
+
+## Status (19 Nov 2026)
+
+Agreed and done, in order (David, 19 Nov 2026: "continue with the plan
+until it's completed"):
+
+1. **Music favourite records** — `music_bed_records.py` (1b988637). The
+   4b1324ad bug, put back, is now a type error.
+2. **Mail account records** — in `mail_accounts.py` (762e42f4).
+3. **The type checker in CI** — the `types` job runs mypy in
+   `packages/core` and `packages/server`, each `[tool.mypy]` listing its
+   checked files, with `check_untyped_defs` on and the server reading core
+   from source (2e699a22: before that every core type was `Any` there).
+4. **Settings, speech first** — `agent_media_core/settings.py`, every
+   `MEDIA_SPEECH_*` read in Python moved onto it (64ab1029);
+   `settings.use(speech=...)` for tests (AGENTS.md).
+5. **Speech history rows** — `state/records.py`, `extras_of` (2e699a22).
+6. **Sessions** — `session_records.py`: sessiond's record and
+   `/sessions/state`'s rows (this commit).
+
+Found on the way and fixed: `media doctor`'s undefined `log` on a failed
+ledger write; two speech routes that would have raised on a row whose
+extras did not parse; `cached_states()` returning `[]` for its rows and
+host on a host up less than its 3 s TTL.
+
+What stays open, by design (the proposal's "as touched"): the other areas'
+settings (music, phone, sessiond …), the rest of the records, and the
+module splits (item 4), each when a change is being made there anyway. To
+take an area on: add its group to `settings.py` or its records beside the
+module, add the files to `[tool.mypy] files`, and fix what mypy finds.
+`sessiond.py` itself (43 errors with `check_untyped_defs`) is not yet in
+the checked files; its `records()` is typed for its callers.

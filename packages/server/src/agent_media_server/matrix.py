@@ -32,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Collection
 
 from agent_media_core import matrix
 
@@ -1058,7 +1059,7 @@ def room(thread: str) -> Room | None:
     return r
 
 
-def rows(flags: set | frozenset = frozenset()) -> list[dict]:
+def rows(flags: Collection[str] = frozenset()) -> list[dict]:
     """`/targets` rows for the allowed rooms (§6.1): never live, never rested
     or pinned; the last message is the preview line."""
     from . import archive_wake, room_contact, room_delegate, you_wrote

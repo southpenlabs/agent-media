@@ -191,6 +191,10 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .session_records import SessionRecord
 
 log = logging.getLogger("agent-media.sessiond")
 
@@ -431,7 +435,7 @@ _RECORDS: dict[str, dict[str, tuple[tuple, dict | None]]] = {}
 _RECORDS_LOCK = threading.Lock()
 
 
-def records(root: Path | None = None) -> list[dict]:
+def records(root: Path | None = None) -> list[SessionRecord]:
     """Every session's record, by file name. Each dict is the caller's own,
     so a key may be set or removed; the lists and dicts inside one
     (`pending`, `task_list`, `last_result`…) are the kept parse's and are
@@ -451,7 +455,7 @@ def records(root: Path | None = None) -> list[dict]:
     except OSError:
         return []
     found.sort()
-    out = []
+    out: list[SessionRecord] = []
     with _RECORDS_LOCK:
         kept = _RECORDS.get(str(d), {})
         now: dict[str, tuple[tuple, dict | None]] = {}
@@ -467,7 +471,7 @@ def records(root: Path | None = None) -> list[dict]:
                 got = (key, rec)
             now[name] = got
             if got[1] is not None:
-                out.append(dict(got[1]))
+                out.append(cast("SessionRecord", dict(got[1])))
         _RECORDS[str(d)] = now
     return out
 

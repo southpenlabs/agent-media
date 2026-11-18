@@ -22,8 +22,12 @@ import json
 import socket
 import sys
 import time
+from typing import TYPE_CHECKING, Literal
 
 from . import HEADLESS, Caps
+
+if TYPE_CHECKING:
+    from ..session_records import State
 
 #: sessiond's refusal codes, as the routes' statuses.
 _STATUS = {"not_found": 404, "not_live": 404, "bad_cwd": 404, "busy": 503, "down": 503,
@@ -33,8 +37,8 @@ _STATUS = {"not_found": 404, "not_live": 404, "bad_cwd": 404, "busy": 503, "down
            "host_down": 503, "not_a_worker": 404, "live_elsewhere": 409}
 
 #: sessiond's states as the contract names them (§6.1 /sessions/state, §11).
-_CONTRACT_STATE = {"starting": "working", "working": "working", "waiting": "waiting",
-                   "approval": "approval"}
+_CONTRACT_STATE: dict[str, State] = {"starting": "working", "working": "working",
+                                       "waiting": "waiting", "approval": "approval"}
 
 #: A tool approval's numbered options, for a v0 client.
 _ALLOW, _DENY = 1, 2
@@ -132,7 +136,7 @@ def compose(text: str, quote: str = "") -> str:
     return f"{quoted}\n\n{text}"
 
 
-def contract_state(view: dict) -> str:
+def contract_state(view: dict) -> State | Literal["ended"]:
     if not view.get("live"):
         return "ended"
     return _CONTRACT_STATE.get(str(view.get("state") or ""), "waiting")
