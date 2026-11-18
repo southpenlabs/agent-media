@@ -50,6 +50,8 @@ protected without anyone remembering to list it. What is named out, and why:
 `search.db` (an index rebuilt from `state.db`), `app-dl/` and `app-update/`
 (CI builds), `fastembed/` (downloadable models), `cache/`,
 `follow-trace.log`, and every `*.lock`, `*-wal`, `*-shm` and `*.bak-*`.
+`uploads.log` (every file the app sent to `POST /upload`, kept or refused,
+90 days; `media uploads`) is carried: it is the record of what arrived.
 
 Not carried at all, deliberately: `~/.local/share/agent-media` — release
 artifacts and a clone of origin, which an install brings back.

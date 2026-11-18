@@ -77,34 +77,59 @@ def _free(folder: Path, name: str) -> Path:
 
 def save(body: BinaryIO, length: int, name: str, bearer: str,
          today: dt.date | None = None) -> tuple[bool, dict]:
-    """Write `length` bytes of `body` as `name` in today's folder."""
+    """Write `length` bytes of `body` as `name` in today's folder. Each call,
+    kept or refused, leaves a line in the upload log (upload_log.py)."""
+    from . import upload_log
+
+    def refused(status: int, why: str, **more) -> tuple[bool, dict]:
+        upload_log.record(more.pop("outcome", "refused"), bearer=bearer, status=status, why=why,
+                          name=name, size=length, **more)
+        return False, {"error": why, "status": status}
+
     user, err = auth.gate(bearer)
     if not user:
+        upload_log.record("refused", bearer=bearer, status=err.get("status", 401),
+                          why=str(err.get("error") or err.get("code") or "not a device"),
+                          name=name, size=length)
         return False, err
     if length <= 0:
-        return False, {"error": "nothing sent (Content-Length is required)", "status": 411}
+        return refused(411, "nothing sent (Content-Length is required)")
     if length > max_bytes():
-        return False, {"error": f"too large (the limit is {max_bytes() >> 20} MB)", "status": 413}
-    folder = root() / (today or dt.date.today()).isoformat()
-    folder.mkdir(parents=True, exist_ok=True)
-    final = _free(folder, safe_name(name))
-    part = folder / f".{final.name}.part"
+        return refused(413, f"too large (the limit is {max_bytes() >> 20} MB)")
+    import hashlib
+
+    digest = hashlib.sha256()
     left = length
+    reading = False      # where an OSError came from: the body (cut off) or the disk
+    part = None
     try:
+        folder = root() / (today or dt.date.today()).isoformat()
+        folder.mkdir(parents=True, exist_ok=True)
+        final = _free(folder, safe_name(name))
+        part = folder / f".{final.name}.part"
         with open(part, "wb") as out:
             while left > 0:
+                reading = True
                 chunk = body.read(min(CHUNK, left))
                 if not chunk:
                     break
+                reading = False
+                digest.update(chunk)
                 out.write(chunk)
                 left -= len(chunk)
+        reading = False
         if left:
+            reading = True
             raise OSError(f"the upload stopped {left} bytes short")
         final = _free(folder, final.name)
         os.replace(part, final)
     except OSError as e:
-        part.unlink(missing_ok=True)
-        return False, {"error": str(e), "status": 400}
+        if part is not None:
+            part.unlink(missing_ok=True)
+        return refused(400, str(e), outcome="cut_off" if reading else "failed",
+                       received=length - left, sha256=digest.hexdigest())
+    upload_log.record("saved", bearer=bearer, status=200, name=name, size=length,
+                      received=length, sha256=digest.hexdigest(), where=str(final))
     return True, {"path": str(final), "name": final.name, "size": length}
 
 

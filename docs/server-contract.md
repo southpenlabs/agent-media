@@ -6897,6 +6897,16 @@ Content-Length: 48213
   before a byte is read.
 - Refusals: 401/403 as `/reply` · 411 no `Content-Length` (or an empty file) ·
   413 over the limit · 400 a body that ended short (nothing is kept).
+- Every call, kept or refused (the 413 before the route included), leaves a
+  JSON line in `<state>/uploads.log` (18 Nov 2026): `at`, `ts`, `outcome`
+  (`saved` · `refused` · `cut_off`, the body ended short or the connection
+  dropped · `failed`, the disk said no), `status`, `why`, `device` `{id,
+  name}`, `ip`, `name` as sent, `size` (its Content-Length), `received`,
+  `sha256` of the bytes received (hashed as they streamed) and `path`. Never
+  the contents. Lines older than `MEDIA_UPLOAD_LOG_DAYS` (90) are dropped as
+  new ones come; a log that cannot be written never fails the upload. Read
+  with `media uploads [--days N] [--json]`. Code:
+  `agent_media_server/upload_log.py`.
 
 #### `GET /upload?path=<its path>` — the file back (29 Sep 2026)
 

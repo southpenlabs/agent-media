@@ -314,6 +314,17 @@ anywhere else the server renders it as the replay starts and keeps that file
 beside the other clips. If it cannot be voiced, the reply plays on its own.
 The `*-listener-*.mp3` clips made before then still play while they last.
 
+### A file I shared from the phone never arrived. Did the phone send it?
+
+`media uploads` (or `media uploads --days 14 --json`) lists every `POST
+/upload` the server saw since 18 Nov 2026, kept or refused: when, which
+device, the file's name and size, its sha256 and where it was written, or
+the HTTP code and why it was refused, or how far a body got before the
+connection dropped (`cut_off`). Kept as JSON lines in
+`$XDG_STATE_HOME/agent-media/uploads.log` for 90 days
+(`MEDIA_UPLOAD_LOG_DAYS`); never the file's contents. A share with no line
+there never reached the server: look on the phone.
+
 ### I changed `agent-media.env` and nothing changed.
 
 The env file only fills in variables that are **not already set**. Anything

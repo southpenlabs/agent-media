@@ -219,3 +219,106 @@ def test_a_link_needs_a_bearer_and_a_shared_file(server, video, tmp_path):
     outside = tmp_path / "elsewhere.mp4"
     outside.write_bytes(b"x")
     assert _post(server, "/upload/link", json.dumps({"path": str(outside)}).encode())[0] == 404
+
+
+# --- the upload log (upload_log.py; sasonica-app mail #994, 18 Nov 2026: a photo
+# shared on 11 Nov never arrived and nothing could say whether it was sent) ---
+
+def _logged():
+    from agent_media_server import upload_log
+
+    return upload_log.read()
+
+
+def test_a_kept_upload_is_logged_with_its_hash_and_place(shared, monkeypatch):
+    import hashlib
+
+    from agent_media_server import upload_log
+
+    monkeypatch.setattr(upload_log, "who", lambda bearer: {"id": "d1", "name": "Pixel"})
+    ok, got = uploads.save(io.BytesIO(b"photo bytes"), 11, "PXL_1.jpg", "good", today=DAY)
+    assert ok
+    (line,) = _logged()
+    assert line["outcome"] == "saved" and line["status"] == 200
+    assert line["device"] == {"id": "d1", "name": "Pixel"}
+    assert line["name"] == "PXL_1.jpg" and line["size"] == 11 and line["received"] == 11
+    assert line["sha256"] == hashlib.sha256(b"photo bytes").hexdigest()
+    assert line["path"] == got["path"]
+    assert "photo bytes" not in upload_log.path().read_text()
+
+
+def test_refusals_and_a_cut_off_body_are_logged(shared, monkeypatch):
+    import hashlib
+
+    assert not uploads.save(io.BytesIO(b"x"), 1, "a.jpg", "bad")[0]
+    assert not uploads.save(io.BytesIO(b""), 0, "b.jpg", "good")[0]
+    monkeypatch.setenv("MEDIA_UPLOAD_MAX_MB", "1")
+    assert not uploads.save(io.BytesIO(b""), (1 << 20) + 1, "c.jpg", "good")[0]
+    assert not uploads.save(io.BytesIO(b"abc"), 10, "d.jpg", "good", today=DAY)[0]
+    bad, empty, big, cut = _logged()
+    assert (bad["outcome"], bad["status"], bad["name"], bad["device"]) == ("refused", 401, "a.jpg", {})
+    assert (empty["status"], big["status"]) == (411, 413) and "too large" in big["why"]
+    assert cut["outcome"] == "cut_off" and cut["status"] == 400
+    assert cut["size"] == 10 and cut["received"] == 3 and "short" in cut["why"]
+    assert cut["sha256"] == hashlib.sha256(b"abc").hexdigest() and "path" not in cut
+
+
+def test_a_dropped_connection_is_cut_off(shared):
+    class Dropped(io.BytesIO):
+        def read(self, n=-1):
+            raise ConnectionResetError("reset by peer")
+
+    assert not uploads.save(Dropped(), 5, "e.jpg", "good", today=DAY)[0]
+    (line,) = _logged()
+    assert line["outcome"] == "cut_off" and line["received"] == 0
+
+
+def test_a_log_that_cannot_be_written_never_fails_the_upload(shared, monkeypatch):
+    from agent_media_server import upload_log
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(upload_log, "_append", boom)
+    ok, got = uploads.save(io.BytesIO(b"ok"), 2, "f.jpg", "good", today=DAY)
+    assert ok and got["size"] == 2
+
+
+def test_old_lines_are_dropped(shared, monkeypatch):
+    from agent_media_server import upload_log
+
+    now = 2_000_000_000.0
+    monkeypatch.setenv("MEDIA_UPLOAD_LOG_DAYS", "60")
+    upload_log.record("saved", name="old.jpg", ip="", now=now - 61 * 86400)
+    upload_log.record("saved", name="mid.jpg", ip="", now=now - 30 * 86400)
+    upload_log.record("saved", name="new.jpg", ip="", now=now)
+    assert [d["name"] for d in upload_log.read()] == ["mid.jpg", "new.jpg"]
+    assert [d["name"] for d in upload_log.read(days=7, now=now)] == ["new.jpg"]
+
+
+def test_the_route_logs_one_refused_before_the_handler(server, shared, monkeypatch):
+    monkeypatch.setenv("MEDIA_UPLOAD_MAX_MB", "1")
+    conn = http.client.HTTPConnection(*server, timeout=5)
+    conn.putrequest("POST", "/upload?name=huge.mov")
+    conn.putheader("Authorization", "Bearer good")
+    conn.putheader("Content-Length", str((1 << 20) + 1))
+    conn.endheaders()
+    assert conn.getresponse().status == 413
+    conn.close()
+    (line,) = _logged()
+    assert (line["outcome"], line["status"], line["name"]) == ("refused", 413, "huge.mov")
+    assert line["ip"] == "127.0.0.1"
+
+
+def test_media_uploads_reads_the_log(shared, capsys):
+    from agent_media_server import upload_log
+
+    uploads.save(io.BytesIO(b"hi"), 2, "g.jpg", "good", today=DAY)
+    uploads.save(io.BytesIO(b"x"), 1, "h.jpg", "bad")
+    assert upload_log.main([]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "saved" in out[0] and "g.jpg" in out[0] and "2B" in out[0]
+    assert "refused" in out[1] and "401" in out[1]
+    assert upload_log.main(["--json", "--days", "1"]) == 0
+    rows = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
+    assert [r["name"] for r in rows] == ["g.jpg", "h.jpg"]

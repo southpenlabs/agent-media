@@ -10191,6 +10191,15 @@ def cmd_backup(a) -> int:
     return mod.main(a.args or [])
 
 
+def cmd_uploads(a) -> int:
+    """`media uploads [--days N] [--json]`: every POST /upload, kept or
+    refused, from the upload log (agent_media_server.upload_log)."""
+    mod = _server_module("upload_log")
+    if mod is None:
+        return 1
+    return mod.main(a.args or [])
+
+
 def cmd_restore(a) -> int:
     """`media restore <id|path>`: a snapshot put back, here or onto another
     machine. A dry run until --apply (agent_media_server.backup)."""
@@ -11480,6 +11489,13 @@ def _build_parser() -> argparse.ArgumentParser:
     bk.add_argument("args", nargs=argparse.REMAINDER)
     bk.set_defaults(func=cmd_backup)
 
+    up = sub.add_parser(
+        "uploads", add_help=False,
+        help="files the app sent to POST /upload, kept or refused: [--days N] [--json] "
+             "(agent_media_server.upload_log)")
+    up.add_argument("args", nargs=argparse.REMAINDER)
+    up.set_defaults(func=cmd_uploads)
+
     rs = sub.add_parser(
         "restore", add_help=False,
         help="a backup put back, here or onto another machine; a dry run "
@@ -12468,6 +12484,8 @@ def main(argv=None) -> int:
         return cmd_contacts(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["session"]:
         return cmd_session(argparse.Namespace(args=list(argv[1:])))
+    if argv[:1] == ["uploads"]:
+        return cmd_uploads(argparse.Namespace(args=list(argv[1:])))
     parser = _build_parser()
     args = parser.parse_args(_music_opts_after_uri(_end_opts_before_time(argv), parser))
     from . import play_gate

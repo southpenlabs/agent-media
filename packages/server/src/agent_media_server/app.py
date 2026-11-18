@@ -5909,6 +5909,14 @@ class Handler(BodyDrain, BaseHTTPRequestHandler):
         except ValueError:
             clen = 0
         if clen > body_limit(self.path.split("?", 1)[0]):
+            if self.path.split("?", 1)[0] == "/upload":
+                # Refused here, before uploads.save: still a line in the upload log.
+                from . import upload_log
+
+                upload_log.record("refused", bearer=_bearer(self), status=413,
+                                  why=f"too large (the limit is {uploads.max_bytes() >> 20} MB)",
+                                  name=parse_qs(self.path.partition("?")[2]).get("name", [""])[0],
+                                  size=clen, ip=self.client_address[0] if self.client_address else "")
             _send(self, 413, b"request body too large\n", "text/plain")
             return
         if not dispatch(self, "POST", self.path.split("?", 1)[0]):
