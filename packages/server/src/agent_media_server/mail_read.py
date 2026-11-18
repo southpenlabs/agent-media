@@ -77,8 +77,10 @@ def _file(mid: str) -> str:
     raise NotFound("no such message")
 
 
-def _parse(mid: str) -> email.message.EmailMessage:
-    with open(_file(mid), "rb") as f:
+def _parse(mid: str, path: str = "") -> email.message.EmailMessage:
+    """The message, from `path` when the caller already has its file (the
+    Mail tab's thread, from notmuch's show), else as notmuch finds it."""
+    with open(path or _file(mid), "rb") as f:
         return email.parser.BytesParser(policy=email.policy.default).parse(f)
 
 
@@ -281,14 +283,14 @@ def _cid_map(msg, leaves: list) -> dict[str, str]:
     return out
 
 
-def message(mid: str, *, images: bool = False, fmt: str = "") -> dict:
+def message(mid: str, *, images: bool = False, fmt: str = "", path: str = "") -> dict:
     """`GET /mail/message`'s answer: the plain part when there is one, the
     HTML when there is no plain part or `fmt` is "html" and there is one
     (`formats` says which the message has). NotFound, RuntimeError
     (notmuch)."""
     from . import contacts_mail, timeline
 
-    msg = _parse(mid)
+    msg = _parse(mid, path)
     leaves = _leaves(msg)
     plain, rich = _bodies(msg)
     out: dict = {"id": mid,

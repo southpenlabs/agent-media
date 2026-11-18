@@ -9222,6 +9222,47 @@ is soon. 400 without `id` and a string `text`; 422 for no words, words over
 256 KB, or the refusals above; 502 with msmtp's last line when it fails
 (`"not sent: …"`).
 
+#### The Mail tab — `GET /mail/threads`, `GET /mail/threads/<id>`, `POST /mail/tag` — gated, owner only (18 Nov 2026)
+
+Step 4 of docs/proposals/2026-10-20-mail-in-sasonica.md (mail_list.py;
+David, 18 Nov 2026: a top-level Mail item, "it will be nice if the email
+list was similar to the chats list"). Same gate as reading one. An
+**account** is one of msmtp's (`GET /mail/reply`'s `accounts`), whose name
+is also its notmuch tag and maildir folder. Nothing is kept or logged.
+
+`GET /mail/threads[?folder=inbox&account=<name>&q=<notmuch query>&offset=0&limit=50&counts=0]`
+→ `{"ok", "folder", "account", "q", "offset", "more", "folders": [...],
+"threads": [row], "accounts": [{"name", "address", "unread"}]}`, newest
+first. `folder` is `inbox` (default), `unread`, `starred` (Gmail's star),
+`sent`, `spam` or `all` (everything but spam); deleted mail is never
+listed; spam only under `spam`. `q` is notmuch's own query language (`from:`,
+`subject:`, a word, `date:`…), ANDed with the folder, at most 500
+characters. `limit` is at most 100; `more` says another page follows
+(`offset` + `limit`). `accounts` (left out with `counts=0`) gives each
+account's unread inbox count, for the account switcher. A **row**:
+`{"id": <thread id>, "subject", "authors": [names], "from": {"name",
+"address"}, "mine", "contact": <contact id or null>, "preview", "date":
+<epoch s of its newest message in the folder>, "count", "matched", "unread",
+"starred", "attachment", "accounts": [names], "message": <that newest
+message's id>}`. `from`, `preview` and `message` are the thread's newest
+message within the folder (a reply of his own in Sent, the other person's in
+Inbox); `preview` is up to 160 characters of its words, quoted lines and
+the "On … wrote:" below them left out. 400 for an unknown folder or
+account, or a non-number offset or limit.
+
+`GET /mail/threads/<id>[?images=1]` → `{"ok", "id", "subject", "unread",
+"starred", "cut", "messages": [...]}`: oldest first, the newest 50 (`cut`
+when there were more), each as `GET /mail/message` answers it plus
+`unread`, `starred`, `spam` and `accounts`. Opening does not mark it read:
+the app posts that. 404 for an unknown thread.
+
+`POST /mail/tag {"thread": <id> | "id": <message id>, "add": [...],
+"remove": [...]}` → `{"ok", "changed", "add", "remove"}`. Only `unread`
+and `flagged` (starred): notmuch writes them as maildir flags and the next
+sync carries them to Gmail (read, and Gmail's star). Archive, delete and
+labels wait for step 5 (lieer). 400 for any other tag, nothing to change,
+or neither target.
+
 #### Speech level — `POST /contacts/<id>/level` — gated (20 Oct 2026)
 
 A person's speech level, on the same scale as a thread's (§6.4

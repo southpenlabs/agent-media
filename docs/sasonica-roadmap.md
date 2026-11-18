@@ -1787,7 +1787,11 @@ ahead.
     2026): an email opens in Sasonica's own reader (`GET /mail/message`,
     the card's newest mail). Step 2, replying, server side built 18 Nov
     2026 (`GET`/`POST /mail/reply` through msmtp, contract §6.25
-    "Replying to an email"); the app's Reply next. Also built (30 Oct
+    "Replying to an email"); the app's Reply built the same day
+    (sasonica-app 27857020). Step 4, the Mail tab, server side built 18 Nov
+    2026 (`GET /mail/threads`, `/mail/threads/<id>`, `POST /mail/tag`,
+    §6.25 "The Mail tab"; David: a top-level Mail item, its list like the
+    chats list); the app's tab next. Also built (30 Oct
     2026): the thread list's Show → Sent (threads you
     wrote in, latest first) and Waiting for reply (your message last,
     unanswered), built generic so mail threads join them like Gmail's Sent

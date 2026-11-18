@@ -5,7 +5,9 @@ and Outlook was not on the phone: "On second thought, I think I'd like to
 handle emails from Sasonica." He chose **both** places (mail in Messages,
 by person, *and* a Mail tab with the full inbox) and **Gmail now, Outlook
 next**. Status: **step 1 built (20 Oct 2026); step 2's server side built
-(18 Nov 2026: `/mail/reply`, mail_send.py), the app's Reply next.**
+(18 Nov 2026: `/mail/reply`, mail_send.py) and the app's Reply; step 4's
+server side built (18 Nov 2026: `/mail/threads`, mail_list.py), the app's
+Mail tab next.**
 Decisions at the end.
 
 ## Why

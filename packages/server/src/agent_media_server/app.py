@@ -319,6 +319,10 @@ except /pair, which is how a device gets its token):
   GET  /mail/reply?id=[&all=1][&from=] → who a reply would go to and from
   POST /mail/reply {"id", "text", "all"?, "from"?} → send it through msmtp
                   (mail_send.py)
+  GET  /mail/threads[?folder=&account=&q=&offset=&limit=] → the Mail tab's
+                  list, newest first, rows as the chats list's (mail_list.py)
+  GET  /mail/threads/<id>[?images=1] → a thread's messages
+  POST /mail/tag {"thread"|"id", "add", "remove"} → read/unread, starred
   GET  /contacts/<id>/timeline[?limit=] → their texts, calls, mail and
                   notes by day, from the CRM's daily rollups (timeline.py)
   POST /contacts/<id>/notes {"text"} → a note on them, today, kept in the CRM
@@ -469,7 +473,7 @@ CORS_PATHS = frozenset({
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
-    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply",
+    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
@@ -594,6 +598,7 @@ CONTACT_SAME = re.compile(r"/contacts/([0-9a-f-]{36})/(same|different)")
 # Their picture (contacts_photos.py, §6.25).
 CONTACT_PHOTO = re.compile(r"/contacts/([0-9a-f-]{36})/photo")
 # Their newest mail, read live from notmuch (contacts_mail.py, §6.25).
+MAIL_THREAD = re.compile(r"/mail/threads/([0-9a-f]{1,32})")
 CONTACT_MAIL = re.compile(r"/contacts/([0-9a-f-]{36})/mail")
 # A Matrix room's picture, or a member's (matrix.py, §6.1, 20 Oct 2026).
 ROOM_AVATAR = re.compile(r"/rooms/([0-9a-f-]{36})/avatar")
@@ -634,7 +639,7 @@ def cors_path(path: str) -> bool:
                                      for r in (THREAD_EVENTS, THREAD_RELEASE, THREAD_CLOSE, THREAD_AGENTS, AGENT_LOG,
                                                         AGENT_ACT, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
-                                                        CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL,
+                                                        CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL, MAIL_THREAD,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, ROOM_CONTACT, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
                                                         LOCAL_BACKUP, *BRIDGE_ROUTES))
@@ -1651,6 +1656,74 @@ def _mail_reply(h: BaseHTTPRequestHandler) -> None:
         _json(h, 200, {"ok": True, "sent": True, **got})
 
 
+def _mail_threads(h: BaseHTTPRequestHandler, query: str) -> None:
+    """`GET /mail/threads[?folder=&account=&q=&offset=&limit=&counts=0]`
+    (§6.25 "The Mail tab"): threads newest first, rows as the chats list's."""
+    from . import mail_list
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    q = parse_qs(query)
+    one = lambda k, d="": ((q.get(k) or [d])[0]).strip()  # noqa: E731
+    try:
+        got = mail_list.threads(folder=one("folder", "inbox") or "inbox",
+                                account=one("account"), q=one("q"),
+                                offset=int(one("offset", "0") or 0),
+                                limit=int(one("limit", "50") or 50),
+                                counts=one("counts", "1") != "0")
+    except ValueError:
+        _json(h, 400, {"ok": False, "error": "offset and limit are numbers"})
+    except mail_list.BadRequest as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+    except RuntimeError as e:
+        _json(h, 503, {"ok": False, "error": str(e)})
+    else:
+        _json_z(h, 200, {"ok": True, **got})
+
+
+def _mail_thread(h: BaseHTTPRequestHandler, tid: str, query: str) -> None:
+    """`GET /mail/threads/<id>[?images=1]` (§6.25): a thread's messages."""
+    from . import mail_list, mail_read
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    q = parse_qs(query)
+    try:
+        got = mail_list.thread(tid, images=(q.get("images") or [""])[0] == "1")
+    except mail_read.NotFound as e:
+        _json(h, 404, {"ok": False, "error": str(e)})
+    except (RuntimeError, OSError) as e:
+        _json(h, 503, {"ok": False, "error": str(e) if isinstance(e, RuntimeError)
+                       else "the thread could not be read"})
+    else:
+        _json_z(h, 200, {"ok": True, **got})
+
+
+def _mail_tag(h: BaseHTTPRequestHandler) -> None:
+    """`POST /mail/tag {"thread"|"id", "add", "remove"}` (§6.25): read or
+    unread, starred or not; carried to Gmail by the next sync."""
+    from . import mail_list
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    body = _read_json(h)
+    body = body if isinstance(body, dict) else {}
+    add, remove = body.get("add") or [], body.get("remove") or []
+    if not isinstance(add, list) or not isinstance(remove, list):
+        _json(h, 400, {"ok": False, "error": "add and remove are lists"})
+        return
+    try:
+        got = mail_list.tag(thread_id=str(body.get("thread") or ""),
+                            message_id=str(body.get("id") or ""),
+                            add=[str(x) for x in add], remove=[str(x) for x in remove])
+    except mail_list.BadRequest as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+    except RuntimeError as e:
+        _json(h, 503, {"ok": False, "error": str(e)})
+    else:
+        _json(h, 200, {"ok": True, **got})
+
+
 #: The most `/speech/say` reads at once, as `/org/say` caps a note.
 SAY_MAX = 6000
 
@@ -2350,6 +2423,10 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_attachment(h, query)
     elif path == "/mail/reply":
         _mail_reply_draft(h, query)
+    elif path == "/mail/threads":
+        _mail_threads(h, query)
+    elif MAIL_THREAD.fullmatch(path):
+        _mail_thread(h, MAIL_THREAD.fullmatch(path).group(1), query)
     elif ROOM_AVATAR.fullmatch(path):
         _room_avatar(h, ROOM_AVATAR.fullmatch(path).group(1), query)
     elif ROOM_MEDIA.fullmatch(path):
@@ -4051,6 +4128,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_say(h)
     elif path == "/mail/reply":
         _mail_reply(h)
+    elif path == "/mail/tag":
+        _mail_tag(h)
     elif path == "/speech/say":
         _speech_say(h)
     elif path == "/storage":
