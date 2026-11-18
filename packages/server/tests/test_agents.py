@@ -389,7 +389,10 @@ def test_the_snapshot_counts_agents_and_an_event_says_when_they_change(
     st = Stream(server, f"/threads/{SID}/events", AUTH)
     ev, snap = st.event()
     assert ev == "snapshot"
-    assert snap["agents"] == {"running": 0, "total": 0}
+    # Not counted in the first frame (a long chat's agents took a third of
+    # its first open, 18 Nov 2026): the first tick after sends them.
+    assert snap["agents"] is None
+    assert st.next("agents") == {"running": 0, "total": 0}
     # Where the thread is (§6.1): the transcript's cwd, and the series its
     # shelf folder is filed under.
     assert snap["cwd"] == "/w" and snap["project"] == "p-agent-media"

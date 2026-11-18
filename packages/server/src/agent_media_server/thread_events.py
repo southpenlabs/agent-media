@@ -209,9 +209,13 @@ def session_state(session: str) -> dict:
     return _state(st, True, pane, background.of_session(session) if st == "waiting" else None)
 
 
-def snapshot(session: str, limit: int | None = None) -> tuple[bool, dict]:
+def snapshot(session: str, limit: int | None = None,
+             agents_now: dict | None = None, count_agents: bool = True) -> tuple[bool, dict]:
     """The first frame: the log envelope (its newest `limit` messages,
-    `SNAPSHOT_LIMIT` by default) plus the session's state (§11)."""
+    `SNAPSHOT_LIMIT` by default) plus the session's state (§11). `agents`
+    is `agents_now` (what the watcher last counted, null when it has not
+    yet: its first tick sends them) unless `count_agents` asks it counted
+    here."""
     ok, env = threads.session_log(session, limit=limit or SNAPSHOT_LIMIT)
     if not ok:
         return False, env
@@ -231,7 +235,8 @@ def snapshot(session: str, limit: int | None = None) -> tuple[bool, dict]:
                 "live": st["session_live"], "pane": st["pane"],
                 "background": st["background"],
                 "resumable": sessions.session_exists(session),
-                "agents": agent_counts(session, st["session_live"]),
+                "agents": (agent_counts(session, st["session_live"]) if count_agents
+                           else agents_now),
                 "title": sessions.title_of(session, whole=True)})
     # Where the thread is, for the small line under its title (§6.1).
     sessions.add_projects([env])
@@ -323,7 +328,9 @@ class Watcher:
     def _run(self) -> None:
         stat = self._stat
         first = last = 0.0
-        next_full = time.monotonic() + self._interval()
+        # Soon when the first frame went without the agents' count.
+        next_full = time.monotonic() + (FAST_S if self._last.get("agents", 0) is None
+                                         else self._interval())
         seq = self._headless_seq()
         # While a burst of writes settles, look again after the debounce
         # rather than a whole poll: the wait is the debounce, not both.
@@ -408,8 +415,15 @@ class Watcher:
                               "actions": env.get("actions") or []},
                "state": st, "pending": {"pending": bool(env.get("pending"))},
                "recap": env.get("recap"), "context": env.get("context"),
-               "agents": agent_counts(self.session, st["session_live"]),
                "move": move_status(self.session)}
+        # The background agents' count: not in the baseline. Reading a long
+        # chat's agent transcripts the first time was over a third of its
+        # first open (0.6 s of 1.6 s, 18 Nov 2026), so the first frame says
+        # null and the first tick after counts them, sent as a change.
+        if emit or "agents" in self._last:
+            now["agents"] = agent_counts(self.session, st["session_live"])
+        else:
+            self._last["agents"] = None
         # The name, so an open thread's header follows a rename made
         # elsewhere: the auto-name after a first turn, `/rename` at the
         # terminal, another device. A live one is read off the cached sweep
@@ -951,7 +965,7 @@ def serve(h, session: str, *, limit: int | None = None, gzip: bool = False,
 
         # Subscribed first, then the snapshot: anything that changes while it
         # is built is queued behind it rather than lost.
-        ok, snap = snapshot(session, limit)
+        ok, snap = snapshot(session, limit, agents_now=w._last.get("agents"), count_agents=False)
         if not ok:
             return True
         send("snapshot", snap)
