@@ -191,6 +191,40 @@ def mark_rows_heard(ids: list[int]) -> tuple[bool, dict]:
     return True, {"marked": sorted(marked), "undo": bool(rows)}
 
 
+def mark_rows_unheard(ids: list[int]) -> tuple[bool, dict]:
+    """Hold a heard reply's Play to mark it unheard (David, 18 Nov 2026:
+    "let's have a hold on a heard play button of a reply mark it as
+    unheard"): each reply of `ids`, in every copy of it (`reply_position.
+    copies`), is held again and never heard — `extras.held`, no `heard`, no
+    resume point — so it gets the unheard ▶ back, counts in the thread's
+    unheard and is played by Play all unheard. Nothing is played or stopped.
+    False with a status when none of them is a spoken reply."""
+    from agent_media_core import reply_position
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    marked, found = [], 0
+    for rid in ids:
+        row = st.history_row(rid)
+        ex = (row or {}).get("extras")
+        if (not row or row.get("sink") != "speech" or row.get("source") == "listener"
+                or not isinstance(ex, dict) or ex.get("listener")):
+            continue
+        found += 1
+        wrote = False
+        for r in reply_position.copies(row, store=st):
+            cid = int(r["id"])
+            wrote = st.set_stopped_at(cid, None) | wrote
+            wrote = st.set_extra(cid, "heard", None) | wrote
+            if not (r.get("extras") or {}).get("held"):
+                wrote = st.set_extra(cid, "held", True) | wrote
+        if wrote:
+            marked.append(rid)
+    if not found:
+        return False, {"status": 404, "error": "no such spoken reply"}
+    return True, {"marked": sorted(marked)}
+
+
 #: How long the player's Mark heard can be undone (the app's notice shows less).
 MARK_UNDO_S = 120.0
 #: The last Mark heard: its row (a live reply's is found by `started_at`, written

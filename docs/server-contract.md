@@ -3735,6 +3735,15 @@ The speech bar.
   Play held; `marked` may be empty). Either is undone by `{"undo": true}`
   as above (`{"ok": true, "id", "ids"}`): each gets back its resume point
   and is unheard again. `GET /features` `mark_heard_ids` says it is here.
+- **A heard Play held marks it unheard** (18 Nov 2026, David: "let's have
+  a hold on a heard play button of a reply mark it as unheard"). `POST
+  /speech/heard {"ids": [...], "unheard": true}` → `{"ok": true, "marked":
+  [ids]}`: each spoken reply named, in every copy of it (same `dedup_key`
+  in the thread), gets `extras.held` and loses `heard` and `stopped_at`, so
+  it is unheard again (§6.2.2): the unheard ▶ comes back, it counts in the
+  thread's unheard and Play all unheard plays it. Nothing plays or stops; no
+  Undo (holding the unheard ▶ marks it heard again). 400 and 404 as above.
+  `GET /features` `mark_unheard_ids` says it is here.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it

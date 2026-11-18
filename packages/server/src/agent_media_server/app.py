@@ -4247,17 +4247,19 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             _json(h, 200, {"ok": True, **info})
             return True
         if "ids" in body:
-            # A Play key held (§6.5, 14 Nov 2026): those replies are heard, with an Undo.
+            # A Play key held (§6.5, 14 Nov 2026): those replies are heard, with an Undo;
+            # a heard one's held, with `unheard` (18 Nov 2026): unheard again.
             ids = body.get("ids")
             if (not isinstance(ids, list) or not 0 < len(ids) <= speech.MAX_MARK_IDS
                     or not all(isinstance(i, int) and not isinstance(i, bool) and i > 0 for i in ids)):
                 _json(h, 400, {"ok": False, "error": "ids must be history ids"})
                 return True
-            done, info = speech.mark_rows_heard(ids)
+            unheard = body.get("unheard") is True
+            done, info = (speech.mark_rows_unheard if unheard else speech.mark_rows_heard)(ids)
             if not done:
                 _json(h, info.pop("status", 404), {"ok": False, **info})
                 return True
-            print(f"speech/heard: ids {info.get('marked')}", file=sys.stderr)
+            print(f"speech/heard: ids {info.get('marked')}{' unheard' if unheard else ''}", file=sys.stderr)
             _json(h, 200, {"ok": True, **info})
             return True
         us = str(body.get("session") or "")

@@ -304,6 +304,34 @@ def test_a_held_play_marks_those_replies_heard_with_an_undo(server, shelf, signe
     assert res.status == 404
 
 
+def test_a_heard_plays_hold_marks_it_unheard(server, shelf, signed_in, voice, monkeypatch):
+    """`{ids, unheard: true}` (a heard reply's Play held, 18 Nov 2026): held
+    again, never heard and no resume point, in every copy; nothing plays."""
+    from agent_media_core.state import StateStore
+
+    st = StateStore()
+    ran: list = []
+    monkeypatch.setattr(speech, "_CTL", lambda action, arg, *a, **k: ran.append(action) or "")
+    live = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                          source="claude-code", text="spoken live",
+                          extras={"source_session": SID, "heard": True, "dedup_key": "k1"})
+    copy = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                          source="claude-code", text="spoken live",
+                          extras={"source_session": SID, "held": True, "heard": True, "dedup_key": "k1"})
+    cut = st.add_history(sink="speech", uri="/x.mp3", started_at=time.time(), target="sasonica",
+                         source="claude-code", text="stopped", extras={"source_session": SID})
+    st.set_stopped_at(cut, 3)
+    res, obj = call(server, "POST", "/speech/heard", {"ids": [live, cut], "unheard": True}, AUTH)
+    assert res.status == 200 and obj == {"ok": True, "marked": sorted([live, cut])}
+    for rid in (live, copy, cut):
+        ex = st.history_row(rid)["extras"]
+        assert ex["held"] is True and "heard" not in ex and "stopped_at" not in ex
+    assert ran == []
+    assert live in st.thread_unheard_ids(SID)
+    res, obj = call(server, "POST", "/speech/heard", {"ids": [999999], "unheard": True}, AUTH)
+    assert res.status == 404
+
+
 def test_the_lists_play_held_marks_the_threads_unheard_with_an_undo(server, shelf, signed_in, voice):
     """`{session, with_undo: true}` (the thread list's Play held): the
     thread's unheard replies, as Mark read does, and Undo brings them back."""
