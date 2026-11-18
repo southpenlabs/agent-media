@@ -547,3 +547,31 @@ def test_a_big_unnamed_group_is_titled_by_a_few_first_names(monkeypatch):
     assert r.title() == "Eve, Anna, Cara +2"
     r.members = {ME: "David", "@a:x": "Anna Bell", "@c:x": "Cara Day", "@d:x": "Dee Ess"}
     assert r.title() == "Anna Bell, Cara Day, Dee Ess"
+
+
+def test_a_chat_with_people_plays_every_unheard_since_yours(monkeypatch):
+    """Play all unheard in a chat with people: every message since the
+    owner's last that is held and never heard, stepping over one read out as
+    it came, and none from before the owner's reply (18 Nov 2026: "only
+    referred to one even though they were all unheard")."""
+    from agent_media_core.state import StateStore
+    from agent_media_server import speech
+
+    r, _ = _room([_ev(1, MEL, "before"), _ev(2, ME, "my reply"), _ev(3, MEL, "a"),
+                  _ev(4, SAM, "b"), _ev(5, MEL, "c"), _ev(6, MEL, "d")])
+    monkeypatch.setattr(matrix, "_ROOMS", {r.thread: r})
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    r.load()
+    st = StateStore()
+
+    def held(ev, heard=False):
+        return st.add_history(sink="speech", uri="/tmp/x.ogg", started_at=float(ev),
+                              source="matrix", text=f"m{ev}",
+                              extras={"session": r.thread, "source_session": r.thread,
+                                      "matrix_event": f"${ev}", "held": True,
+                                      "kind": None, **({"heard": True} if heard else {})})
+    held(1)                       # before the owner's reply: not in the run
+    a, _b, c, d = held(3), held(4, heard=True), held(5), held(6)
+    assert speech.room_unheard(r.thread) == [a, c, d]
+    assert speech.unheard_counts().get(r.thread) == 3
+    assert speech.room_unheard("6c73498c-02c1-4846-8350-a82006973571") is None

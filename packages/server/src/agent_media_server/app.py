@@ -4510,6 +4510,13 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         if action == "replay-unheard" and not session:
             _json(h, 400, {"ok": False, "error": "replay-unheard needs a session"})
             return True
+        if action == "replay-unheard":
+            # A chat with people: the first of its unheard messages since
+            # yours (speech.room_unheard), and the Play goes on through the
+            # rest from there, as its Play all unheard does (18 Nov 2026).
+            ids = speech.room_unheard(session)
+            if ids:
+                action, arg, session = "replay-id", str(ids[0]), ""
         out = (speech.run_ctl(action, arg, sentence, session, then=then)
                if then else speech.run_ctl(action, arg, sentence, session))
         print(f"speech/ctl: {action} -> {out.strip()[:120]!r}", file=sys.stderr)

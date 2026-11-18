@@ -260,3 +260,17 @@ def test_keep_reading_needs_a_thread(server, shelf, signed_in, replays):
     assert res.status == 400 and obj["error"] == "keep-reading needs a session"
     res, obj = call(server, "POST", "/speech/ctl", {"action": "keep-reading", "session": "../x"}, AUTH)
     assert res.status == 400 and replays == []
+
+
+def test_replay_unheard_in_a_chat_with_people_starts_at_the_first_since_yours(
+        server, shelf, signed_in, replays, monkeypatch):
+    """A room's Play (18 Nov 2026): the first of its unheard messages since
+    the owner's last, by id, and the chain goes on through the rest."""
+    from agent_media_server import speech
+
+    sid = "9bce6871-1164-43c7-bb6f-6064758ccae8"
+    monkeypatch.setattr(speech, "room_unheard", lambda s: [41, 43] if s == sid else None)
+    res, obj = call(server, "POST", "/speech/ctl",
+                    {"action": "replay-unheard", "session": sid}, AUTH)
+    assert res.status == 200 and obj["ok"] is True
+    assert replays == [["replay", "--id", "41"]]

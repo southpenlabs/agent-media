@@ -651,6 +651,9 @@ def unheard_counts() -> dict[str, int]:
     with _UNHEARD_LOCK:
         try:
             sig = StateStore().history_signature(sink="speech", limit=UNHEARD_ROWS)
+            # The rooms' own changes too: a reply of the owner's in a chat
+            # with people ends its run (room_unheard) and writes no speech.
+            sig = (*sig, _rooms_rev()) if sig else sig
         except Exception:  # noqa: BLE001 — unknown: counted again
             sig = ()
         at, counts = _UNHEARD_CACHE
@@ -668,6 +671,56 @@ def unheard_counts() -> dict[str, int]:
 #: Nov 2026: "a whole heap of unheard play buttons that have disappeared").
 #: 4,000 rows count in about 0.15 s, and the answer is kept while they stay the same.
 UNHEARD_ROWS = 4000
+
+
+def _rooms_rev() -> int:
+    """A number that moves with any change to a room this server holds."""
+    from . import matrix
+
+    return sum(int(getattr(r, "rev", 0) or 0) for r in list(matrix._ROOMS.values()))
+
+
+def room_unheard(thread: str) -> list[int] | None:
+    """A chat with people's unheard messages, as its Play all unheard reads
+    them: the speech rows (ids, oldest first) of the messages since the
+    owner's last one in the room that are held and never heard, stepping
+    over any heard or stopped part way. None when `thread` is not a room
+    this server holds.
+
+    Not the agent threads' rule (the run ends at a reply heard): in a chat
+    with people one message read out as it came cut the run to the one
+    after it, and the Play read just that (David, 18 Nov 2026: "only
+    referred to one even though they were all unheard"). The owner's own
+    messages are in the room, not in the speech history, so the speech rows
+    alone counted ones already answered."""
+    from . import matrix
+
+    try:
+        r = matrix.room(thread)
+    except Exception:  # noqa: BLE001 — not answerable: the rows' own count
+        return None
+    if r is None:
+        return None
+    from agent_media_core.state import StateStore
+    from agent_media_core.session_feed import _resume_of
+
+    with r.lock:
+        msgs = list(r.messages)
+    try:
+        rows = StateStore().matrix_speech(r.thread)
+    except Exception:  # noqa: BLE001
+        return None
+    ids: list[int] = []
+    for m in reversed(msgs):
+        if m.get("role") == "user":
+            break
+        row = rows.get(m.get("id"))
+        if not row:
+            continue
+        ex = row.get("extras") or {}
+        if ex.get("held") and not ex.get("heard") and not _resume_of(ex):
+            ids.append(int(row["id"]))
+    return ids[::-1]
 
 
 def _count_unheard() -> dict[str, int]:
@@ -725,6 +778,20 @@ def _count_unheard() -> dict[str, int]:
             secret[session] = hidden(session)
         if not secret[session]:
             counts[session] = counts.get(session, 0) + 1
+    # A chat with people by its own rule (room_unheard): every room with a
+    # held message unheard in the window, counted from the room.
+    for session in {str((r.get("extras") or {}).get("session") or "") for r in rows
+                    if isinstance(r.get("extras"), dict) and r["extras"].get("matrix_event")
+                    and r["extras"].get("held") and not r["extras"].get("heard")}:
+        if not session or secret.get(session) or (session not in secret and hidden(session)):
+            continue
+        ids = room_unheard(session)
+        if ids is None:
+            continue
+        if ids:
+            counts[session] = len(ids)
+        else:
+            counts.pop(session, None)
     return counts
 
 
