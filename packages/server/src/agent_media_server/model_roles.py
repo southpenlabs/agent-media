@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from agent_media_core import model_choice, model_usage
+from agent_media_core import settings as _settings
 
 #: The summary gateway's own default (intake/_summary.py DEFAULT_MODEL).
 SUMMARY_DEFAULT = model_choice.SUMMARY_DEFAULT
@@ -206,11 +207,11 @@ ROLES: tuple[Role, ...] = (
          suggestions=(Suggestion("gpt-4o-mini", "openai", "cheap"),
                       Suggestion("gemini-2.5-flash", "gemini-api", "cheap"),
                       Suggestion("qwen2.5:7b", "ollama", "free")),
-         on=_env_is_1("MEDIA_SPEECH_SUMMARY")),
+         on=lambda: _settings.speech().summary),
     Role("followups", "Follow-up questions", "fast", **_chat("followups"),
          suggestions=_SMALL_SUGGESTIONS, on=_env_on("MEDIA_FOLLOWUP", "1")),
     Role("describe", "Describing code and tables aloud", "fast, one sentence", **_chat("describe"),
-         suggestions=_SMALL_SUGGESTIONS, on=_env_is_1("MEDIA_SPEECH_DESCRIBE"),
+         suggestions=_SMALL_SUGGESTIONS, on=lambda: _settings.speech().describe,
          last=_describe_last),
     Role("canvas", "The canvas's drawings", "good at SVG", **_chat("canvas"),
          suggestions=(Suggestion("claude-sonnet-4-5", "anthropic", "costly"),

@@ -109,7 +109,8 @@ def _write(name: str, value: Optional[str]) -> None:
 
 def env_speech_default() -> str:
     """What the env file (or media-lane) says speech defaults to."""
-    return target_name(os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET") or "local")
+    from . import settings
+    return target_name(settings.speech().default_target or "local")
 
 
 def _host() -> str:

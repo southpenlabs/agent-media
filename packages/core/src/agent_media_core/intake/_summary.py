@@ -65,7 +65,8 @@ DEFAULT_PROMPT = (
 
 
 def summary_enabled() -> bool:
-    return os.environ.get("MEDIA_SPEECH_SUMMARY", "0") == "1"
+    from .. import settings
+    return settings.speech().summary
 
 
 def _int_env(name: str, default: int) -> int:
@@ -274,7 +275,8 @@ def _is_description(out: "str | None") -> bool:
 
 
 def describe_enabled() -> bool:
-    return (os.environ.get("MEDIA_SPEECH_DESCRIBE", "0") or "0").strip() == "1"
+    from .. import settings
+    return settings.speech().describe
 
 
 def _log_describe(kind: str, in_chars: int, secs: float, out: "str | None") -> None:

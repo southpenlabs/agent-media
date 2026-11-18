@@ -92,7 +92,10 @@ real players, phones and history. These have all happened.
   `MEDIA_*` and `RELAY_*` variable and set a throwaway `HOME`,
   `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME`. A helper must
   never default to constructing a real sink. When briefing a subagent on
-  speech code, say this and forbid "listening checks".
+  speech code, say this and forbid "listening checks". The MEDIA_SPEECH_*
+  settings are read through `agent_media_core.settings`; a test can give
+  them outright with `settings.use(speech=settings.Speech(...))`, and that
+  code then reads no environment (other areas still do).
 - **The conftest scrubbers are part of every playback route.**
   `packages/core/tests/conftest.py` has autouse fixtures that remove live
   routes by prefix (`MEDIA_PHONE_PLAYER_URL*`, `MEDIA_REMOTE_SAY_CMD*`,

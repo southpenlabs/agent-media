@@ -91,7 +91,8 @@ def apply_now() -> None:
 
     b = balance()
     try:
-        if os.environ.get(f"MEDIA_SPEECH_SOCKET_{TARGET.upper()}"):
+        from . import settings
+        if settings.speech().target(TARGET).socket:
             ipc.set_property(_socket_for(Target(name=TARGET)), "volume",
                              float(speech_level(b)))
     except (ipc.MpvIpcError, OSError):

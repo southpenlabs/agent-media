@@ -57,9 +57,10 @@ def _notifier_running() -> bool:
 
 
 def miss_host(target_name: str = "") -> str:
-    key = f"MEDIA_SPEECH_CLIP_SSH_{target_name.upper()}" if target_name else ""
-    return (os.environ.get("MEDIA_SPEECH_MISS_SSH")
-            or (os.environ.get(key, "") if key else "")
+    from .. import settings
+    speech = settings.speech()
+    return (speech.miss_ssh
+            or ((speech.target(target_name).clip_ssh or "") if target_name else "")
             or os.environ.get("MEDIA_MUSIC_LOCAL_SSH", "p8a"))
 
 

@@ -40,6 +40,7 @@ from ..types import Target
 from .music import SinkMusic
 from .music_local import SinkMusicLocal, configured as _local_configured
 from .music_sasonica import SinkMusicSasonica, configured as _sasonica_configured
+from .. import settings as _settings
 
 
 log = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ _SASONICA_TARGETS = {"sasonica"}
 def default_target() -> Target:
     """Default music target: music override, then speech/default device."""
     return Target(os.environ.get("MEDIA_MUSIC_DEFAULT_TARGET")
-                  or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET")
+                  or _settings.speech().default_target
                   or "local")
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Optional
 
@@ -148,20 +147,6 @@ def suppress_urls(text: str) -> str:
     return out
 
 
-def _int_env(name: str, default: int) -> int:
-    try:
-        return int((os.environ.get(name) or "").strip() or default)
-    except ValueError:
-        return default
-
-
-def _float_env(name: str, default: float) -> float:
-    try:
-        return float((os.environ.get(name) or "").strip() or default)
-    except ValueError:
-        return default
-
-
 def _describe_code_or(body: str, placeholder: str, describe: bool) -> str:
     """When ``describe`` is set, replace an un-readable code block with a
     one-sentence spoken description via the (local) summary model; otherwise —
@@ -203,13 +188,15 @@ def _code_reads_well(body: str) -> bool:
     always suppress."""
     text = (body or "").strip("\n")
     nonblank = [ln for ln in text.split("\n") if ln.strip()]
-    if not nonblank or len(nonblank) > _int_env("MEDIA_SPEECH_CODE_MAX_LINES", 2):
+    from .. import settings
+    speech = settings.speech()
+    if not nonblank or len(nonblank) > speech.code_max_lines:
         return False
     compact = text.strip()
     if not compact:
         return False
     symbols = sum(1 for c in compact if not (c.isalnum() or c.isspace() or c in "._,:-/'\""))
-    return symbols / len(compact) <= _float_env("MEDIA_SPEECH_CODE_MAX_SYMBOL_RATIO", 0.28)
+    return symbols / len(compact) <= speech.code_max_symbol_ratio
 
 
 def _code_placeholder(n_lines: int, lang: str = "") -> str:
@@ -300,9 +287,11 @@ def _table_reads_well(rows: "list[list[str]]") -> bool:
     prose instead of a placeholder. Tuned by MEDIA_SPEECH_TABLE_MAX_ROWS
     (default 2) and MEDIA_SPEECH_TABLE_MAX_CELL (default 40); set max rows to 0
     to always suppress."""
-    if not rows or len(rows) > _int_env("MEDIA_SPEECH_TABLE_MAX_ROWS", 2):
+    from .. import settings
+    speech = settings.speech()
+    if not rows or len(rows) > speech.table_max_rows:
         return False
-    max_cell = _int_env("MEDIA_SPEECH_TABLE_MAX_CELL", 40)
+    max_cell = speech.table_max_cell
     return all(
         len(c) <= max_cell and "http://" not in c and "https://" not in c
         for row in rows for c in row

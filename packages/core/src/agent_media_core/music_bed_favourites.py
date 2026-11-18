@@ -594,7 +594,9 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
         from . import music_rotation
         turned = music_rotation.load()
         weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
-                   * music_rotation.weight(e.get("song_key") or e.get("original_id") or "", turned)
+                   * music_rotation.weight(e.get("song_key") or e.get("original_id")
+                                          # a track handed in with only its video's id
+                                          or cast("Mapping[str, Any]", e).get("id") or "", turned)
                    for e in have]
         if topic and len(have) > 1:
             i = topic_choice(have, topic)

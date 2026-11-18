@@ -44,10 +44,8 @@ def _broker_default_volume() -> float:
     nominal 100). unduck restores to this so a duck cycle can't quietly pull
     speech below its intended level. Keep the two defaults in step: a mismatch
     means the first duck/unduck cycle silently re-levels the broker."""
-    try:
-        return float(os.environ.get("MEDIA_SPEECH_VOLUME", "130"))
-    except (TypeError, ValueError):
-        return 130.0
+    from .. import settings
+    return settings.speech().volume
 
 
 def _music_share(target: "Target | None") -> "float | None":
@@ -76,10 +74,8 @@ def _broker_max_volume() -> float:
     """The broker's --volume-max ceiling (MEDIA_SPEECH_VOLUME_MAX, default 200).
     Duck levels clamp to this rather than a bare 100 so they stay valid across
     the broker's amplified range."""
-    try:
-        return float(os.environ.get("MEDIA_SPEECH_VOLUME_MAX", "200"))
-    except (TypeError, ValueError):
-        return 200.0
+    from .. import settings
+    return settings.speech().volume_max
 
 
 def _claim_of(me: str, ttl: float, interrupt: bool = False) -> dict:
@@ -109,7 +105,8 @@ def _socket_for(target: Target) -> "str | Path":
     (Grade B: red5 drives the phone's sink-speech). A tcp:// override is
     returned as a raw string — `Path()` would collapse `tcp://` to `tcp:/`.
     """
-    override = os.environ.get(_env_key("MEDIA_SPEECH_SOCKET", target.name))
+    from .. import settings
+    override = settings.speech().target(target.name).socket
     if override:
         return override if override.startswith("tcp://") else Path(override)
     state = Path(os.environ.get("XDG_STATE_HOME",
@@ -464,8 +461,9 @@ def _clip_uri_for(uri: str, target: Target, prefer_url: bool = False) -> str:
                                         or device_voice.voice_for(target.name))
         except OSError:
             return uri
-    localdir = os.environ.get(_env_key("MEDIA_SPEECH_CLIP_LOCALDIR", target.name))
-    base = os.environ.get(_env_key("MEDIA_SPEECH_CLIP_BASEURL", target.name))
+    from .. import settings
+    own = settings.speech().target(target.name)
+    localdir, base = own.clip_localdir, own.clip_baseurl
     # prefer_url: the caller knows the localdir copy is unreliable (its
     # prefetch just failed), so a configured HTTP base beats a local path
     # that may not exist — a per-clip fetch is fragile, silence is worse.
@@ -473,7 +471,7 @@ def _clip_uri_for(uri: str, target: Target, prefer_url: bool = False) -> str:
         return localdir.rstrip("/") + "/" + Path(uri).name
     if base:
         # Signed: the base is the public route, whose clips need ?sig= (clip_sign.py).
-        if os.environ.get(_env_key("MEDIA_SPEECH_CLIP_SIGNED", target.name)) == "1":
+        if own.clip_signed:
             from .. import clip_sign
             return clip_sign.signed(base, Path(uri).name)
         return base.rstrip("/") + "/" + Path(uri).name
@@ -500,12 +498,14 @@ def _device_for(target: Target) -> Optional[str]:
     `device()` (as is on Linux; on Windows a description finds its
     `wasapi/` id). One for a tcp:// broker belongs to that host, not this one.
     """
-    override = os.environ.get(_env_key("MEDIA_SPEECH_DEVICE", target.name))
+    from .. import settings
+    speech = settings.speech()
+    override = speech.target(target.name).device
     if override is not None:
         return (None if override.lower() in ("", "auto", "default")
                 else _local_device(override, target))
     if target.name == "local":
-        dev = os.environ.get("MEDIA_SPEECH_LOCAL_DEVICE") or None
+        dev = speech.local_device or None
         return _local_device(dev, target) if dev else None
     if target.name == "rooms":
         dev = audio_backend.backend().named_sink_device(
@@ -700,12 +700,15 @@ class SinkSpeech:
         reached — e.g. ssh to the phone broken while the clip HTTP server is
         fine. Returns False on failure so callers can react too.
         """
-        localdir = os.environ.get(_env_key("MEDIA_SPEECH_CLIP_LOCALDIR", target.name))
+        from .. import settings
+        speech = settings.speech()
+        own = speech.target(target.name)
+        localdir = own.clip_localdir
         if not localdir or not paths:
             return True
         import shlex
         import subprocess
-        host = (os.environ.get(_env_key("MEDIA_SPEECH_CLIP_SSH", target.name))
+        host = (own.clip_ssh
                 or os.environ.get("MEDIA_MUSIC_LOCAL_SSH", "p8a"))
         ps = [Path(p) for p in paths]
         srcdir = str(ps[0].parent)
@@ -722,7 +725,7 @@ class SinkSpeech:
         try:
             rc = subprocess.run(
                 cmd, shell=True, executable="/bin/bash",
-                timeout=float(os.environ.get("MEDIA_SPEECH_PREFETCH_TIMEOUT", "30")),
+                timeout=speech.prefetch_timeout_s,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
             ).returncode
         except Exception as e:  # noqa: BLE001 — best-effort; play has its own fallback

@@ -53,6 +53,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from .. import hits
+from .. import settings as _settings
 from .._paths import state_dir
 from ..capture import input_claim
 
@@ -281,7 +282,7 @@ def resolve_bind(explicit: str | None = None) -> str:
     """
     for value in (explicit,
                   os.environ.get("BIND"),
-                  os.environ.get("MEDIA_SPEECH_STATE_BIND")):
+                  _settings.speech().state_bind):
         if value and value.strip():
             return value.strip()
 

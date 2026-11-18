@@ -52,6 +52,7 @@ from .route import (
 )
 from . import library, play_gate
 from . import youtube_addon as _youtube_addon
+from . import settings as _settings
 from .sinks import SinkBook, SinkMusic, SinkSpeech
 from .sinks.book import normalize_uri
 from .sinks.music_router import SinkMusicRouter
@@ -209,7 +210,7 @@ def _music_target(name: str = "") -> Target:
     """
     if not name:
         name = (os.environ.get("MEDIA_MUSIC_DEFAULT_TARGET")
-                or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET")
+                or _settings.speech().default_target
                 or "local")
     return Target(name=name or "local")
 
@@ -222,7 +223,7 @@ def _book_target(name: str = "") -> Target:
     """
     if not name:
         name = (os.environ.get("MEDIA_BOOK_DEFAULT_TARGET")
-                or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET")
+                or _settings.speech().default_target
                 or "local")
     return Target(name=name or "local")
 
@@ -1445,10 +1446,10 @@ def search(channel: str, query: str = "") -> dict:
         # Merge connected-device cache files. These are playable directly when
         # the book target follows speech to `phone`.
         target_name = Target(name=os.environ.get("MEDIA_BOOK_DEFAULT_TARGET")
-                             or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET") or "").name
+                             or _settings.speech().default_target or "").name
         if target_name:
             host = (os.environ.get(f"MEDIA_BOOK_CACHE_SSH_{target_name.upper().replace('-', '_')}")
-                    or os.environ.get(f"MEDIA_SPEECH_CLIP_SSH_{target_name.upper().replace('-', '_')}")
+                    or _settings.speech().target(target_name).clip_ssh
                     or os.environ.get("MEDIA_MUSIC_LOCAL_SSH") or "")
             remote_dirs = os.environ.get(
                 f"MEDIA_BOOK_CACHE_DIRS_{target_name.upper().replace('-', '_')}",

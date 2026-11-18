@@ -64,6 +64,7 @@ import os
 import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
+from . import settings as _settings
 
 log = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ def _speech_state(bind: str, port: int):
     # MEDIA_SPEECH_STATE_BIND (an address, or `tailnet`) asks for more, so
     # folding it in cannot quietly publish a port on a mesh.
     return speech_state.make_server(
-        resolve_bind(os.environ.get("MEDIA_SPEECH_STATE_BIND") or ""), port)
+        resolve_bind(_settings.speech().state_bind), port)
 
 
 def _share(bind: str, port: int):

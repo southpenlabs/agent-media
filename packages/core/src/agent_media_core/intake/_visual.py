@@ -73,7 +73,8 @@ def extract_visual_markers(raw: str) -> tuple[str, str, str | None, str | None]:
 
 
 def visual_enabled() -> bool:
-    return (os.environ.get("MEDIA_SPEECH_VISUAL", "0") or "0").strip() == "1"
+    from .. import settings
+    return settings.speech().visual
 
 
 def ambient_enabled() -> bool:

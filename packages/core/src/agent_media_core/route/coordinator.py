@@ -122,7 +122,7 @@ class Coordinator:
         if book_target.name in ("", "local"):
             book_target = Target(name=(
                 os.environ.get("MEDIA_BOOK_DEFAULT_TARGET")
-                or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET")
+                or _speech_default()
                 or book_target.name
                 or "local"))
         self.book_target = book_target
@@ -1329,3 +1329,8 @@ class Coordinator:
 
 __all__ = ["Coordinator", "InterruptionPolicy", "InterruptionStrategy",
            "DEFAULT_POLICY", "detect_content_type", "policy_for"]
+
+
+def _speech_default() -> str:
+    from .. import settings
+    return settings.speech().default_target

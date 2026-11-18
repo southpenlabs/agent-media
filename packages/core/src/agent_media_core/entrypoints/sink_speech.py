@@ -57,26 +57,26 @@ def mpv_argv(mpv: str, endpoint: str) -> list[str]:
     """The run script's mpv command line, from the same env keys."""
     from .. import audio_backend
 
-    env = os.environ
-    ao = env.get("MEDIA_SPEECH_AO") or audio_backend.backend().default_ao() or "auto"
-    loudnorm = env.get("MEDIA_SPEECH_LOUDNORM",
-                       "dynaudnorm=targetrms=0.95:maxgain=30:gausssize=15")
+    from .. import settings
+    speech = settings.speech()
+    ao = speech.ao or audio_backend.backend().default_ao() or "auto"
+    loudnorm = speech.loudnorm
     af = "scaletempo2" if ao in ("openal", "opensles") else ""
     if loudnorm:
         af = f"{af},{loudnorm}" if af else loudnorm
     return [mpv, "--idle=yes", f"--ao={ao}", "--force-window=no",
             "--no-terminal",
             f"--input-ipc-server={endpoint}",
-            f"--volume-max={env.get('MEDIA_SPEECH_VOLUME_MAX') or '200'}",
-            f"--volume={env.get('MEDIA_SPEECH_VOLUME') or '130'}",
+            f"--volume-max={speech.volume_max:g}",
+            f"--volume={speech.volume:g}",
             "--keep-open=no",
             "--gapless-audio=no", "--audio-stream-silence=no", "--ytdl=no",
             "--network-timeout=60",
             f"--af={af}",
-            f"--audio-pitch-correction={env.get('MEDIA_SPEECH_PITCH_CORRECTION') or 'yes'}",
-            f"--audio-samplerate={env.get('MEDIA_SPEECH_SAMPLERATE') or '48000'}",
-            f"--audio-format={env.get('MEDIA_SPEECH_FORMAT') or 's16'}",
-            f"--audio-channels={env.get('MEDIA_SPEECH_CHANNELS') or 'stereo'}"]
+            f"--audio-pitch-correction={speech.pitch_correction}",
+            f"--audio-samplerate={speech.samplerate}",
+            f"--audio-format={speech.audio_format}",
+            f"--audio-channels={speech.channels}"]
 
 
 def _say(msg: str) -> None:

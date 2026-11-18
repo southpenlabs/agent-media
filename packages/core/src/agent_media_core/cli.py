@@ -28,6 +28,7 @@ from typing import Optional
 
 from .render import device as device_voice
 from . import _lock as fcntl
+from . import settings as _settings
 from ._paths import state_dir
 from .sinks import _mpv_ipc as ipc
 from .sinks.music import SinkMusic
@@ -2478,7 +2479,7 @@ def _hold_owner(explicit: str | None) -> str | None:
     """
     if explicit:
         return explicit
-    env = os.environ.get("MEDIA_SPEECH_HOLD_OWNER", "").strip()
+    env = _settings.speech().hold_owner
     if env:
         return env
     # The conversation, by its session id, so a hold follows the chat and a
@@ -6695,7 +6696,7 @@ def _resolve_music_where(where: str) -> str:
         return "sasonica" if _sasonica_configured() else "phone"
     if where in ("", "default"):
         default_target = (os.environ.get("MEDIA_MUSIC_DEFAULT_TARGET")
-                          or os.environ.get("MEDIA_SPEECH_DEFAULT_TARGET")
+                          or _settings.speech().default_target
                           or "")
         default_target = target_name(default_target)
         if default_target == "sasonica":
@@ -10729,7 +10730,7 @@ def _write_ledger(hosts: "list[str]", skewed: "list[str]",
             print("\nall hosts up to date and healthy.")
             return 0
     except OSError as e:
-        log.error("doctor: failed to write ledger: %s", e)
+        print(f"doctor: failed to write ledger: {e}", file=sys.stderr)
         return 1
 
 

@@ -73,6 +73,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from agent_media_core import settings as _settings
 
 log = logging.getLogger("agent-media.server.speech_frames")
 
@@ -81,7 +82,7 @@ KEEP = 200
 REPLAY_S = 120.0
 #: How long a frame may go unacknowledged before a report that is still
 #: behind it is taken as the phone's word: it lost the frame.
-LOST_S = float(os.environ.get("MEDIA_SPEECH_FRAMES_LOST_S", "15"))
+LOST_S = _settings.speech().frames_lost_s
 #: Stored, not played: mpv's own metadata names (MpvServer.isStored).
 TITLE = "force-media-title"
 USER_DATA = "user-data/"

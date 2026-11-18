@@ -270,6 +270,11 @@ def find_voice(name: str, all_voices: Optional[list] = None) -> Optional[dict]:
     return None
 
 
+def _speech_target(target_name: str):
+    from .. import settings
+    return settings.speech().target(target_name)
+
+
 def _key(prefix: str, target_name: str) -> str:
     return f"{prefix}_{target_name.upper().replace('-', '_')}"
 
@@ -310,7 +315,8 @@ def set_override(target_name: str, mode: str, voice: Optional[str] = None) -> No
 
 
 def env_renders_on_device(target_name: str) -> bool:
-    return os.environ.get(_key("MEDIA_SPEECH_RENDER", target_name), "").strip().lower() == "device"
+    from .. import settings
+    return (settings.speech().target(target_name).render or "").strip().lower() == "device"
 
 
 def renders_on_device(target_name: str) -> bool:
@@ -324,14 +330,15 @@ def voice_for(target_name: str) -> Optional[str]:
     entry = override_for(target_name)
     if entry and entry.get("voice"):
         return entry["voice"]
-    return os.environ.get(_key("MEDIA_SPEECH_DEVICE_VOICE", target_name)) or None
+    from .. import settings
+    return settings.speech().target(target_name).device_voice or None
 
 
 def can_render(target_name: str) -> bool:
     """Whether `target_name`'s player can be handed words: Sasonica's can,
     and any target configured or switched to do so."""
     return (target_name == "sasonica"
-            or bool(os.environ.get(_key("MEDIA_SPEECH_RENDER", target_name)))
+            or bool(_speech_target(target_name).render)
             or override_for(target_name) is not None)
 
 
@@ -529,6 +536,7 @@ def tts_uri(path: "str | Path", voice: Optional[str] = None) -> str:
     if voice:
         uri += f"&voice={quote(voice, safe='')}"
         if voice.startswith("edge:"):
-            fallback = os.environ.get("MEDIA_SPEECH_DEVICE_FALLBACK_VOICE") or FALLBACK_VOICE
+            from .. import settings
+            fallback = settings.speech().device_fallback_voice or FALLBACK_VOICE
             uri += f"&fallback={quote(fallback, safe='')}"
     return uri

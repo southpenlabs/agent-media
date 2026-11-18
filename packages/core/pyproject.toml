@@ -94,6 +94,7 @@ files = [
     "src/agent_media_core/music_bed_grid.py",
     "src/agent_media_core/music_bed_vocal.py",
     "src/agent_media_core/music_bed_favourites.py",
+    "src/agent_media_core/settings.py",
 ]
 follow_imports = "silent"
 ignore_missing_imports = true

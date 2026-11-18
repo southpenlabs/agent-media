@@ -1091,9 +1091,11 @@ def _playout_delay_s(target_name: str) -> float:
     own local mpv has no such buffer — only the bridge hop and mpv start — so a
     per-target override wins: MEDIA_SPEECH_PLAYOUT_MS_<TARGET>.
     """
-    key = f"MEDIA_SPEECH_PLAYOUT_MS_{target_name.upper().replace('-', '_')}"
-    return float(os.environ.get(key)
-                 or os.environ.get("MEDIA_SNAPCAST_LATENCY_MS", "500")) / 1000.0
+    from .. import settings
+    ms = settings.speech().target(target_name).playout_ms
+    if ms is None:
+        ms = float(os.environ.get("MEDIA_SNAPCAST_LATENCY_MS", "500"))
+    return ms / 1000.0
 
 
 def _apportioned_offsets(sentences: list[str], total: float) -> list[float]:
@@ -1662,10 +1664,8 @@ def _speech_cut_path(session: str) -> Path:
 
 
 def _speech_cut_ttl_s() -> float:
-    try:
-        return float(os.environ.get("MEDIA_SPEECH_CUT_TTL_S", "1800"))
-    except ValueError:
-        return 1800.0
+    from .. import settings
+    return settings.speech().cut_ttl_s
 
 
 def _read_speech_cut(session: str) -> dict:
@@ -1898,10 +1898,8 @@ def set_speech_hold(seconds: float, owner: str | None = None) -> float:
     Without one it writes the original single marker, so an existing caller
     keeps working unchanged.
     """
-    try:
-        cap = float(os.environ.get("MEDIA_SPEECH_HOLD_MAX_S", "300"))
-    except ValueError:
-        cap = 300.0
+    from .. import settings
+    cap = settings.speech().hold_max_s
     until = time.time() + max(1.0, min(float(seconds), cap))
     path = _speech_hold_path() if owner is None else _owner_marker(owner)
     try:
@@ -2074,20 +2072,16 @@ def _pending_ttl_s() -> float:
     """How long a *pending* (announced-but-not-yet-rendered) waiter entry keeps
     holding its place in its session's queue. A render that takes longer than
     this is assumed broken, and the entry stops blocking its siblings."""
-    try:
-        return float(os.environ.get("MEDIA_SPEECH_PENDING_TTL_S", "120"))
-    except ValueError:
-        return 120.0
+    from .. import settings
+    return settings.speech().pending_ttl_s
 
 
 def _paused_hold_s() -> float:
     """How long a paused reply keeps the token while another session waits
     (MEDIA_SPEECH_PAUSED_HOLD_S); after that it steps aside and comes back
     paused. 0 or less: hold for as long as it stays paused, as before."""
-    try:
-        return float(os.environ.get("MEDIA_SPEECH_PAUSED_HOLD_S", "90"))
-    except ValueError:
-        return 90.0
+    from .. import settings
+    return settings.speech().paused_hold_s
 
 
 def _pid_alive(pid: int) -> bool:
@@ -2358,7 +2352,8 @@ class _SpeechPlaybackLock:
 
     @staticmethod
     def _disabled() -> bool:
-        return os.environ.get("MEDIA_SPEECH_SERIALIZE", "1").lower() in ("0", "false", "no")
+        from .. import settings
+        return not settings.speech().serialize
 
     def announce(self, priority: Priority = Priority.NORMAL, *,
                  session: str = "", seq: float = 0.0) -> None:
@@ -2494,7 +2489,8 @@ class _SpeechPlaybackLock:
         # bail and play unserialized — only a genuinely wedged/paused holder,
         # whose clip stops advancing, still times out after `timeout`. Without
         # this, two long replies tripped the flat 600s deadline and interleaved.
-        timeout = float(os.environ.get("MEDIA_SPEECH_LOCK_TIMEOUT_S", "600"))
+        from .. import settings
+        timeout = settings.speech().lock_timeout_s
         deadline = time.monotonic() + timeout
         last_sig = self._holder_progress_sig()
         # A deliberately-paused holder buys ONE extra grace window (so a queued
@@ -3466,7 +3462,8 @@ def _wait_and_claim_broker(sink: "SinkSpeech", target: Target, interrupt: bool =
     claim = getattr(sink, "claim_broker", None)
     if claim is None:
         return
-    timeout = float(os.environ.get("MEDIA_SPEECH_LOCK_TIMEOUT_S", "600"))
+    from .. import settings
+    timeout = settings.speech().lock_timeout_s
     deadline = time.monotonic() + timeout
     last_seen: Optional[float] = None
     while True:
@@ -3778,14 +3775,13 @@ def _gate_hold(target: Target, text: str = "") -> bool:
     An empty `text` asks without handing anything over (the streaming path's
     pre-check).
     """
-    cmd = os.environ.get("MEDIA_SPEECH_GATE_CMD", "").strip()
+    from .. import settings
+    speech = settings.speech()
+    cmd = speech.gate_cmd
     if not cmd:
         return False
     import shlex
-    try:
-        timeout = float(os.environ.get("MEDIA_SPEECH_GATE_TIMEOUT_S") or 40)
-    except ValueError:
-        timeout = 40.0
+    timeout = speech.gate_timeout_s
     try:
         r = subprocess.run(shlex.split(cmd) + [target.name], input=text,
                            text=True, capture_output=True, timeout=timeout,
@@ -3958,10 +3954,8 @@ def _duck_grace_s() -> float:
     enough that the phone's own render (seconds, measured) is not cut short by
     it; short enough that a silent renderer talks over at most this much music.
     """
-    try:
-        return max(0.0, float(os.environ.get("MEDIA_SPEECH_DUCK_GRACE_S", "3")))
-    except (TypeError, ValueError):
-        return 3.0
+    from .. import settings
+    return settings.speech().duck_grace_s
 
 
 def _submit_remote_say(text: str, cmd: str, coordinator: Coordinator,

@@ -95,10 +95,15 @@ def _socket_for(target: Target) -> "str | Path":
     phone-side mpv bridge by default.
     """
     override = (os.environ.get(_env_key("MEDIA_BOOK_SOCKET", target.name))
-                or os.environ.get(_env_key("MEDIA_SPEECH_SOCKET", target.name)))
+                or _speech_target(target).socket)
     if override:
         return override if override.startswith("tcp://") else Path(override)
     return _socket_path()
+
+
+def _speech_target(target: Target):
+    from .. import settings
+    return settings.speech().target(target.name)
 
 
 def _remote_book_cache_dir(target: Target) -> str:
@@ -110,7 +115,7 @@ def _remote_book_cache_dir(target: Target) -> str:
 
 def _remote_book_cache_ssh(target: Target) -> str:
     return (os.environ.get(_env_key("MEDIA_BOOK_CACHE_SSH", target.name))
-            or os.environ.get(_env_key("MEDIA_SPEECH_CLIP_SSH", target.name))
+            or _speech_target(target).clip_ssh
             or os.environ.get("MEDIA_MUSIC_LOCAL_SSH", ""))
 
 
@@ -377,7 +382,7 @@ def _device_for(target: Target) -> Optional[str]:
     names are the audio backend's (sinks/speech.py `_device_for`).
     """
     override = (os.environ.get(_env_key("MEDIA_BOOK_DEVICE", target.name))
-                or os.environ.get(_env_key("MEDIA_SPEECH_DEVICE", target.name)))
+                or _speech_target(target).device)
     if override is not None:
         return (None if override.lower() in ("", "auto", "default")
                 else _local_device(override, target))
