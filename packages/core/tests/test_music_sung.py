@@ -85,3 +85,22 @@ def test_unknown_ways_and_keys_are_refused(st):
         music_sung.engaged("k1", "dislike", store=st)
     with pytest.raises(ValueError):
         music_sung.started("", store=st)
+
+
+def test_rows_keyed_by_a_musical_key_are_named_again(st, monkeypatch):
+    # 15-18 Nov 2026 the phone reported an original's musical key as the
+    # song's key (agent mail #1044): blank rows in Sung out.
+    import json
+    from agent_media_core import music_bed_vocal
+    mk = str({"tonic": "Bb", "mode": "minor", "name": "Bb minor", "camelot": "3A", "r": 0.81})
+    monkeypatch.setattr(music_bed_vocal, "measured_keys", lambda: {mk: "k1"})
+    rows = [{"id": 2, "key": mk, "title": "", "artist": "", "video_id": "", "at": 200,
+             "session": None, "engaged": []},
+            {"id": 1, "key": "{'tonic': 'C'}", "title": "", "artist": "", "video_id": "", "at": 100,
+             "session": None, "engaged": []}]
+    (music_sung._path()).write_text(json.dumps(rows))
+    got = music_sung.load()
+    assert [(e["key"], e["title"], e["video_id"]) for e in got] == [("k1", "Angel", VID)]
+    music_sung.items()
+    kept = json.loads(music_sung._path().read_text())
+    assert [e["key"] for e in kept] == ["k1"]

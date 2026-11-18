@@ -231,12 +231,42 @@ def _index_path() -> Path:
     return state_dir() / "music-bed-vocal.json"
 
 
+#: The key-and-beat measure (music_bed_grid.keep), kept in an original's
+#: ``features`` as a favourite's is: an original's own ``key`` is its
+#: favourite's key, its identity.
+_MEASURE = ("key", "beats", "grid_v")
+
+
+def _repaired(d: dict) -> dict:
+    """Records written from 3bb83a28 (15 Nov 2026) until 18 Nov had the
+    measure on the record itself, its musical key over the favourite's key,
+    so the outro went out with no title and its card's Like and Keep
+    playing were refused (agent mail #1044). The measure moved into
+    ``features``, the identity put back (the index's own key is it)."""
+    for k, r in d.items():
+        if not isinstance(r, dict) or (r.get("key") == k and "grid_v" not in r):
+            continue
+        f = r.setdefault("features", {})
+        for x in _MEASURE:
+            if x in r and not (x == "key" and isinstance(r[x], str)):
+                f.setdefault(x, r.pop(x))
+        r["key"] = k
+    return d
+
+
 def load() -> dict:
     try:
         d = json.loads(_index_path().read_text())
-        return d if isinstance(d, dict) else {}
+        return _repaired(d) if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def measured_keys() -> dict[str, str]:
+    """`{str(an original's musical key): its favourite's key}`, for naming
+    the sung-out rows the bad records left behind (music_sung)."""
+    return {str(r["features"]["key"]): k for k, r in load().items()
+            if isinstance(r, dict) and isinstance((r.get("features") or {}).get("key"), dict)}
 
 
 def save(d: dict) -> None:
@@ -468,7 +498,7 @@ def due() -> bool:
         want = tunable("LUFS")
         return (any(e.get("key") not in have or have[e["key"]].get("lufs") != want
                     for e in fav.tracks(None, fav.load()) if e.get("original_id"))
-                or (any(music_bed_grid.needs(r) for r in have.values())
+                or (any(music_bed_grid.needs(r.get("features")) for r in have.values())
                     and music_bed_grid.python() is not None))
     except Exception:  # noqa: BLE001
         return False
@@ -519,7 +549,7 @@ def upkeep(limit: Optional[int] = None) -> int:
                   "made": time.time()}
         if sec:
             from . import music_bed_grid
-            music_bed_grid.keep(d[key], sec)
+            music_bed_grid.keep(d[key].setdefault("features", {}), sec)
         save(d)
         got += 1
         log.info("music-bed vocal: kept the original of %s (%d sections)",
@@ -534,7 +564,7 @@ def _grid_backfill(d: dict, limit: Optional[int] = None) -> int:
     four, 14 Nov 2026): a few a pass, sections measured again with them."""
     from . import music_bed_grid
     limit = music_bed_grid.per_pass() if limit is None else limit
-    todo = [k for k, r in d.items() if music_bed_grid.needs(r)]
+    todo = [k for k, r in d.items() if music_bed_grid.needs(r.get("features"))]
     if not todo or limit <= 0:
         return 0
     py = music_bed_grid.python()
@@ -552,7 +582,7 @@ def _grid_backfill(d: dict, limit: Optional[int] = None) -> int:
         if not path.is_file():
             continue
         sec = music_bed_grid.analyse(path, py)
-        music_bed_grid.keep(rec, sec)
+        music_bed_grid.keep(rec.setdefault("features", {}), sec)
         if sec.get("bounds") is not None and not rec.get("bounds"):
             rec["bounds"], rec["choruses"] = sec.get("bounds") or [], sec.get("choruses") or []
         n += 1

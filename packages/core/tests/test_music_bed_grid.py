@@ -177,7 +177,9 @@ def test_the_originals_kept_before_are_measured_a_few_a_pass(files, monkeypatch)
     idx = {"k1": {"key": "k1", "file": "a.mp3", "bounds": [], "choruses": []},
            "k2": {"key": "k2", "file": "b.mp3", "bounds": [5.0], "choruses": [[5.0, 9.0]]}}
     assert V._grid_backfill(idx, limit=1) == 1
-    assert idx["k1"]["key"] == KEY and idx["k1"]["grid_v"] == G.VERSION and idx["k1"]["bounds"] == [10.0]
+    # In features: the record's own key is its favourite's (agent mail #1044).
+    assert idx["k1"]["key"] == "k1" and idx["k1"]["features"]["key"] == KEY
+    assert idx["k1"]["features"]["grid_v"] == G.VERSION and idx["k1"]["bounds"] == [10.0]
     assert V._grid_backfill(idx, limit=5) == 1
     assert idx["k2"]["bounds"] == [5.0], "sections already measured stay"
     assert V._grid_backfill(idx) == 0

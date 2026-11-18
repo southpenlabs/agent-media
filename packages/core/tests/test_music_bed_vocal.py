@@ -339,3 +339,34 @@ def test_the_stop_hook_says_who_began_the_turn(tmp_path):
                                     user("<system-reminder>r</system-reminder>"),
                                     user("caveat", isMeta=True)))[0] == "owner"
     assert H.turn_opener(tmp_path / "missing.jsonl") == ("", None)
+
+
+def test_a_measured_original_keeps_its_favourites_key(tmp_path, monkeypatch):
+    # 3bb83a28 put the musical key over the record's own, so the outro went
+    # out unnamed and its card's Like was refused (agent mail #1044).
+    from agent_media_core import music_bed_grid
+    bed = _keep_original(tmp_path)
+    measure = {"key": {"tonic": "Bb", "mode": "minor", "name": "Bb minor", "camelot": "3A", "r": 0.81},
+               "beats": {"bpm": 92.0, "offset": 0.1, "confidence": 0.5}}
+    monkeypatch.setattr(music_bed_grid, "python", lambda: "py")
+    monkeypatch.setattr(music_bed_grid, "analyse", lambda path, py=None: dict(measure))
+    d = V.load()
+    V._grid_backfill(d)
+    V.save(d)
+    rec = V.load()["k1"]
+    assert rec["key"] == "k1" and rec["features"]["key"]["camelot"] == "3A"
+    assert not music_bed_grid.needs(rec["features"])
+    assert M.params("favourites", "auto", bed, long=True)["after"]["key"] == "k1"
+
+
+def test_records_written_with_the_measure_on_top_are_repaired(tmp_path):
+    bed = _keep_original(tmp_path)
+    d = V.load()
+    mk = {"tonic": "Bb", "mode": "minor", "name": "Bb minor", "camelot": "3A", "r": 0.81}
+    d["k1"].update({"key": mk, "beats": None, "grid_v": 1})
+    V.save(d)
+    rec = V.load()["k1"]
+    assert rec["key"] == "k1" and "grid_v" not in rec and "beats" not in rec
+    assert rec["features"] == {"key": mk, "beats": None, "grid_v": 1}
+    assert V.measured_keys() == {str(mk): "k1"}
+    assert M.params("favourites", "auto", bed, long=True)["after"]["key"] == "k1"

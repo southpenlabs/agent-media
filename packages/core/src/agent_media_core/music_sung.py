@@ -59,13 +59,49 @@ def _locked():
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def load() -> list[dict]:
-    """The sung-out songs, newest first."""
+def _raw() -> list[dict]:
     try:
         d = json.loads(_path().read_text())
     except (OSError, ValueError):
         return []
     return [e for e in d if isinstance(e, dict)] if isinstance(d, list) else []
+
+
+def load() -> list[dict]:
+    """The sung-out songs, newest first."""
+    return _named(_raw())
+
+
+def _bad(e: dict) -> bool:
+    return str(e.get("key") or "").startswith("{")
+
+
+def _named(rows: list[dict]) -> list[dict]:
+    """Rows whose `key` is an original's musical key rather than its
+    favourite's (15-18 Nov 2026, music_bed_vocal._repaired; agent mail
+    #1044) named again by that measure, which each original still holds;
+    one that matches none is dropped, having no title to show. The next
+    save keeps the repair."""
+    if not any(_bad(e) for e in rows):
+        return rows
+    try:
+        from . import music_bed_vocal
+
+        by_measure = music_bed_vocal.measured_keys()
+    except Exception:  # noqa: BLE001 — dropped rather than shown blank
+        by_measure = {}
+    out = []
+    for e in rows:
+        if _bad(e):
+            key = by_measure.get(str(e.get("key")))
+            if not key:
+                continue
+            known = _favourite(key)
+            e = {**e, "key": key, "title": e.get("title") or known["title"],
+                 "artist": e.get("artist") or known["artist"],
+                 "video_id": _vid_ok(e.get("video_id")) or known["video_id"]}
+        out.append(e)
+    return out
 
 
 def _save(rows: list[dict]) -> None:
@@ -191,6 +227,9 @@ def items(limit: int = 40) -> list[dict]:
     from .music_recent import _music_meta, art
 
     out = []
+    if any(_bad(e) for e in _raw()):
+        with _locked():         # the repair kept, so it is made once
+            _save(load())
     for e in load()[:limit]:
         vid = e.get("video_id") or ""
         name = label(e) or None

@@ -7323,7 +7323,7 @@ def _cmd_music_keys(a) -> int:
     for k, r in vocal.load().items():
         f = by_key.get(k) or {}
         rows.append({"kind": "original", "title": f.get("title") or k, "artist": f.get("artist") or "",
-                     **{x: r.get(x) for x in ("key", "beats", "grid_v")}})
+                     **{x: (r.get("features") or {}).get(x) for x in ("key", "beats", "grid_v")}})
     done = sum(1 for r in rows if not grid.needs(r))
     if getattr(a, "json", False):
         print(json.dumps({"measured": done, "tracks": len(rows), "python": grid.python(), "items": rows}))

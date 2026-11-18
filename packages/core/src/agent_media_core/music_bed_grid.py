@@ -15,8 +15,9 @@ Kept, for each track the background pass (music_bed.warm) looks after:
 
 - a favourite's instrumental and a library track: in its entry's
   ``features`` (with bpm, onsets, energy): ``key``, ``beats``, ``grid_v``;
-- an original the outro sings from (music_bed_vocal): on its record, the
-  same three, measured with its sections.
+- an original the outro sings from (music_bed_vocal): in its record's
+  ``features``, the same three, measured with its sections (never on the
+  record itself, whose ``key`` is its favourite's: agent mail #1044).
 
 ``key`` is ``{"tonic", "mode", "name", "camelot", "r"}`` and ``beats``
 ``{"bpm", "offset", "confidence"}`` (music_bed_sections.py says how), either
