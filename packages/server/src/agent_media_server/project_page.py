@@ -8,6 +8,9 @@ pushed or not pulled, and the last commit. The page's chats come from the
 thread list the app already holds and its documents from `GET /docs`, so
 this answers only what the app cannot know.
 
+`GET /project/forge?project=<name>` (19 Nov 2026) answers the open issues
+and pull requests of its repo's forge owner, the umbrella (forge.py).
+
 `GET /project/list` lists every project under the roots (and the folders of
 their own), for the menu's All projects.
 
@@ -23,20 +26,26 @@ import os
 
 from agent_media_core import layout
 
-from . import agent_workspaces, auth, doc_read, folder_grants, git_state
+from . import agent_workspaces, auth, doc_read, folder_grants, forge, git_state
 
 
 def _last_commit(cwd: str) -> dict | None:
-    out = git_state._git(cwd, "log", "-1", "--format=%h%x1f%at%x1f%s")
+    out = git_state._git(cwd, "log", "-1", "--format=%h%x1f%at%x1f%s%x1f%H")
     bits = (out or "").strip("\n").split("\x1f")
-    if len(bits) < 3:
+    if len(bits) < 4:
         return None
-    sha, at, subject = bits
+    sha, at, subject, full = bits
     try:
         when = int(at)
     except ValueError:
         when = 0
-    return {"sha": sha, "at": when, "subject": subject}
+    last: dict = {"sha": sha, "at": when, "subject": subject}
+    # Its checks on the forge (19 Nov 2026), left out when not known.
+    unpushed = git_state._unpushed(cwd)
+    ci = forge.commit_ci(cwd, full, unpushed is not None and full not in unpushed)
+    if ci is not forge._UNKNOWN:
+        last["ci"] = ci
+    return last
 
 
 def git_summary(cwd: str) -> dict | None:
@@ -75,6 +84,24 @@ def page(project: str, path: str, bearer: str) -> tuple[bool, dict]:
     if git is not None:
         out["git"] = git
     return True, out
+
+
+def forge_page(project: str, path: str, bearer: str) -> tuple[bool, dict]:
+    """`GET /project/forge?project=`: the open issues and pull requests of the
+    project's repo and the others of its owner (the umbrella), newest
+    activity first (forge.project_view). 404 when the project is not on a
+    forge with a backend."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    agent = agent_workspaces.find(project, path)
+    root = agent["path"] if agent else str(doc_read.project_dir(project, path) or "")
+    if not root or not folder_grants.may_bearer(bearer, root, "browse"):
+        return False, {"error": "no such project", "status": 404}
+    repo = forge.repo_for(root)
+    if repo is None:
+        return False, {"error": "no forge for this project", "status": 404}
+    return True, forge.project_view(repo)
 
 
 def listing(bearer: str) -> tuple[bool, dict]:

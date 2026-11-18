@@ -5550,6 +5550,22 @@ sit under no project root; `/project/info` answers for them by `project` or
 `path` with the same fields (David, 6 Nov 2026: the agents under their own
 Agents heading, not mixed in with the projects).
 
+**A project's forge** (19 Nov 2026, agent mail #1064 from sasonica-app;
+docs/proposals/2026-11-19-forgejo-workflow.md §3–4). `GET
+/project/forge?project=<name>` or `?path=<folder>` — gated, as
+`/project/info` → `{"ok", "repo": {"name" ("owner/name"), "web", "kind"},
+"umbrella": {"name", "web", "repos": [{"name", "web"}]} | null, "items":
+[{"kind": "issue" | "pr", "repo", "number", "title", "url", "author", "at"
+(epoch s, last activity), "labels": [names], "draft"? (a pull request),
+"ci"? (a pull request's head, as §6.49 without `checks`), "thread"}],
+"new_issue"}`: the open issues and pull requests of every repo of the
+project repo's owner on the forge (the umbrella: a Forgejo organisation or
+a user; `null` when the owner has no other repo), newest activity first, at
+most 50; `thread` the chat a `Thread:` line or an `/app/t/<id>` link in its
+body names, else null; `new_issue` the forge's New issue page for the repo.
+Kept 60 s. A forge that does not answer gives `items: []`. 404 when the
+project is not a repo on Forgejo, Gitea or GitHub (forge.py).
+
 `GET /search` answers a `docs` section too, on the first page only:
 `[{path, title, project, kind, snippet}]`, at most 8. These are documents
 under the projects folder holding every term (ripgrep, so `.gitignore` is
@@ -10519,6 +10535,30 @@ probably use this as my own little issue tracker/ticketing system too".
 - The rows (`/targets`, `/conversations`, `/dashboard` `recent`) carry
   `issue` (the object above, or null).
 - Kept in `<state_dir>/issues.json`.
+- **On the forge** (19 Nov 2026, agent mail #1064 from sasonica-app; David:
+  "somewhat automated"). `issue` gains `forge`: `{"repo" ("owner/name"),
+  "number", "url", "state": "open" | "closed", "pr"?: {"number", "url",
+  "state": "open" | "merged" | "closed", "draft"?, "ci"?}}`, the ticket's
+  issue on the forge of the repo its chat works in (Forgejo, Gitea or
+  GitHub), `pr` the newest pull request naming it (`fixes #N`, `closes
+  #N`, `resolves #N`, or the chat's `Thread:` line or `/app/t/<id>` link),
+  `ci` as in §6.49 without `checks`. `can_forge: true` when there is no
+  forge issue yet but there could be: the chat's folder is a repo on such a
+  forge and this host has a token to write there. A private thread has
+  neither. Rows read what is stored and never ask the forge.
+  - `POST /session/issue {"session", "state", "forge": true}` opens the
+    forge issue by hand (title: the chat's title; body: its first ask, its
+    recap, and `Thread: <public address>/app/t/<session>`), and tracks the
+    chat (as `state`, else as it was, else open). The same issue comes
+    back every time after, untracked and tracked again too
+    (`<state_dir>/forge-issues.json`). 403 for a private thread; 409 for a
+    Local chat, a folder not on such a forge, or no token for it; 502 when
+    the forge did not take it.
+  - **By itself**, in the session reaper's pass (every 15 minutes,
+    `issues.sweep`): a tracked-open chat whose repo has a commit with a
+    `Thread:` line naming it gets its forge issue (`MEDIA_FORGE_AUTO_ISSUE=0`
+    turns that off), and every forge issue's state and pull request are
+    read again. A merged pull request marks the ticket done.
 
 ### 6.45 Practice: meditations, yoga, any practice, recorded and written — gated (built 31 Oct 2026)
 
@@ -11007,6 +11047,19 @@ repositories too... including forgejo").
   - `links`: `{"branch", "compare"}`, the branch's page and the branch
     against the default one (`null` on the default branch, without an
     upstream, on an unknown forge, and `compare` always on sourcehut).
+  - **On the forge** (19 Nov 2026, agent mail #1064 from sasonica-app;
+    David: "somewhat automated"; `forge.py`): each pushed `history` commit
+    gets `ci`: `{"state": "pending" | "success" | "failure" | "error",
+    "url", "checks"?: [{"name", "state", "url"}]}`, its checks on the forge
+    (Forgejo's and Gitea's combined commit status, GitHub's commit statuses
+    and check runs together), `url` the run that decided the state (a
+    failing one first), or `null` when the forge has none for it. Left out
+    when not known: an unpushed commit, a forge with no backend (GitLab,
+    Bitbucket, sourcehut), or a forge that did not answer in time; the next
+    poll has it. A settled state is kept for good, pending for 30 s.
+    `needs_pr`: `true` when the default branch is protected on the forge or
+    this host's token for it cannot push there; `false` when not, or not
+    known.
   404 when the folder is not a git checkout.
 - `GET /session/git?session=<id>&path=<path>` → `{"ok", "path", "status",
   "diff", "binary", "truncated"}`: that file's unified diff against HEAD
@@ -11019,7 +11072,7 @@ repositories too... including forgejo").
   commit on HEAD's own history (a hex sha, 4 to 40 characters; a name is
   refused), its files as in `files` above (`status` one letter: `M`, `A`,
   `D`, `R`), against its first parent (a root commit against nothing). 404
-  for anything not on the branch.
+  for anything not on the branch. `ci` as in `history` (19 Nov 2026).
 - `GET /session/git?session=<id>&commit=<sha>&path=<path>` → as `&path=`,
   that file's diff in that commit; 404 when the commit did not change it.
 - `GET /session/git?session=<id>&tree=<folder>` (5 Nov 2026, the sheet's
@@ -12153,7 +12206,7 @@ Code: `agent_media_server/folder_grants.py`; pinned by
   outside is left out, or 404), `&download=1` and `POST
   /session/file/link` need `download`; `GET /doc/read` needs `open` (404
   "outside the folders this device may open"); `GET /docs` and `GET
-  /project/info` need `browse` on the project (404 as no such project);
+  /project/info` and `GET /project/forge` need `browse` on the project (404 as no such project);
   `GET /project/list` lists only those, and no agent folders; `GET
   /search`'s `docs` only those it may open. Uploads and doc roots outside
   a project are outside every grant. A signed link already made works

@@ -161,6 +161,15 @@ def _no_remote_say(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_forge_tokens(monkeypatch):
+    """The forge's tokens and switches (MEDIA_FORGE_TOKENS names token files,
+    MEDIA_FORGE_AUTO_ISSUE opens issues; the server's forge.py): by prefix, so
+    nothing a test runs reads a real token or writes to a real forge."""
+    for key in [k for k in os.environ if k.startswith("MEDIA_FORGE_")]:
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_mailbox(monkeypatch):
     """Same hazard as above, and it was live: the converse doorbell's mailbox.
 

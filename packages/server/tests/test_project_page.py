@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import subprocess
 
+from agent_media_server import forge
+
 from test_org import _call, server, tree  # noqa: F401  (fixtures)
 
 
@@ -96,3 +98,25 @@ def test_agent_rows_on_the_project_list(tree, server, tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_AGENT_WORKSPACES", str(tmp_path / "missing"))
     rows = _call(server, "GET", "/project/list")[1]["projects"]
     assert [r["kind"] for r in rows] == ["project"]
+
+
+def test_project_forge_route(tree, server, tmp_path, monkeypatch):
+    proj = tmp_path / "projects"
+    r = proj / "demo"
+    r.mkdir(parents=True)
+    _git(r, "init", "-q", "-b", "main")
+    (proj / "plain").mkdir()
+    monkeypatch.setenv("MEDIA_PROJECTS_DIR", str(proj))
+    monkeypatch.setenv("MEDIA_DOC_ROOTS", str(tmp_path / "nowhere"))
+    monkeypatch.setenv("MEDIA_PROJECT_DIRS", "")
+    monkeypatch.setenv("MEDIA_GIT_FORGES", "forge.example.com=forgejo")
+    monkeypatch.setattr(forge, "_open", lambda *a: (404, None))   # a forge with nothing to say
+    forge.forget()
+    assert _call(server, "GET", "/project/forge?project=p-demo")[0] == 404      # no remote yet
+    _git(r, "remote", "add", "origin", "https://forge.example.com/sasonica/demo.git")
+    forge.forget()
+    status, got = _call(server, "GET", "/project/forge?project=p-demo")
+    assert status == 200 and got["repo"]["name"] == "sasonica/demo" and got["items"] == []
+    assert got["umbrella"] is None
+    assert _call(server, "GET", "/project/forge?project=p-plain")[0] == 404
+    assert _call(server, "GET", "/project/forge?project=p-demo", bearer="bad")[0] == 401

@@ -104,6 +104,13 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
         got = (git_state.commit_diff(cwd, commit, path) if path else git_state.commit(cwd, commit))
         if got is None:
             return False, {"error": "not a commit on this branch, or a file it did not change", "status": 404}
+        if not path:
+            # Its checks on the forge, each listed (forge.py; left out when not known).
+            from . import forge
+
+            ci = forge.commit_ci(cwd, got.get("full", ""), got.get("pushed"))
+            if ci is not forge._UNKNOWN:
+                got["ci"] = ci
         return True, got
     if path:
         got = git_state.file_diff(cwd, path)
@@ -123,9 +130,11 @@ def git_changes(session: str, bearer: str, path: str = "", commit: str = "",
     got = git_state.changes(cwd)
     if got is None:
         return False, {"error": "this thread's folder is not a git checkout", "status": 404}
-    from . import git_who
+    from . import forge, git_who
 
     git_who.warm(cwd)
+    # Each pushed commit's checks and whether main takes PRs only (forge.py).
+    forge.add_to_changes(got)
     return True, got
 
 

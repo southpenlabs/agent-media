@@ -886,6 +886,14 @@ def run(mode: str | None = None, *, as_json: bool = False, write_log: bool = Tru
         lines += recap_quiet(now)
     except Exception as e:  # noqa: BLE001 — the reaper's own work is done
         print(f"reap: quiet recaps failed ({e})", file=sys.stderr)
+    # Tickets on the forge (issues.sweep): open, refresh, done on a merge.
+    try:
+        from . import issues
+
+        stamp = datetime.fromtimestamp(now).astimezone().isoformat(timespec='seconds')
+        lines += [f"{stamp} {ln}" for ln in issues.sweep()]
+    except Exception as e:  # noqa: BLE001 — the reaper's own work is done
+        print(f"reap: forge sweep failed ({e})", file=sys.stderr)
     # A voice-mode model switch whose loop went stale goes back here too
     # (voice_model.py): nothing else may come along to undo it.
     try:
