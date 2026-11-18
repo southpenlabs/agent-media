@@ -640,10 +640,50 @@ def reading_unread(session: str, now: float | None = None) -> bool:
         # The question is being read: its card comes up now.
         _unread_seen.pop(session, None)
         return False
+    # Not playing yet, but on its way: the question's read-out is still
+    # rendering or queued for the speaker. Without this the card came up the
+    # moment the agent asked, then went away for the lead prose once the
+    # voice caught up (David, 19 Nov 2026: "the card pops up then disappears
+    # for a while at the start"). Capped, so a render that never plays
+    # cannot keep it back.
+    if _speech_coming(session):
+        since = _coming_since.setdefault(session, now)
+        if now - since < COMING_MAX_S:
+            return True
+    else:
+        _coming_since.pop(session, None)
     seen = _unread_seen.get(session)
     if seen is not None and now - seen < UNREAD_GRACE_S:
         return True
     _unread_seen.pop(session, None)
+    return False
+
+
+#: The longest a question's card waits for its read-out to start playing.
+COMING_MAX_S = 20.0
+_coming_since: dict[str, float] = {}
+
+
+def _speech_coming(session: str) -> bool:
+    """True when a reply of this session is rendering or waiting for the
+    speaker (the playback lock's waiter registry: rank, seq, queue key,
+    pending, speaker, kind), its process alive."""
+    try:
+        from agent_media_core.intake.submit import _pid_alive, _speech_wait_dir
+        entries = list(_speech_wait_dir().iterdir())
+    except FileNotFoundError:
+        return False
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
+        return False
+    for f in entries:
+        try:
+            pid = int(f.name.split(".", 1)[0])
+            lines = f.read_text().splitlines()
+        except (OSError, ValueError):
+            continue
+        if len(lines) > 4 and lines[4].strip() == session and _pid_alive(pid):
+            return True
     return False
 
 
