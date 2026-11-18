@@ -952,8 +952,11 @@ def targets_changed() -> None:
 
 
 def _reset_builds_for_tests() -> None:
+    global _SAVED_AT
     with _BUILDS_LOCK:
         _BUILDS.clear()
+    _BUILT_HERE.clear()
+    _SAVED_AT = None
 
 
 def _shared_build(key: str, build):
@@ -1003,10 +1006,68 @@ def warm() -> None:
             from agent_media_core import _pass
 
             with _pass.held():
-                _shared_build("", lambda: _build_targets(""))
+                _shared_build("", lambda: _built_and_saved(""))
         except Exception:  # noqa: BLE001 — a warm-up that fails leaves the first ask to build
             pass
     threading.Thread(target=run, name="targets-warm", daemon=True).start()
+
+
+#: How old a saved `/targets` may be and still answer a fresh server (s),
+#: and how often a build is saved (s).
+TARGETS_SAVED_MAX_S = 900.0
+TARGETS_SAVE_EVERY_S = 30.0
+#: Set once this process has finished a build of the main list.
+_BUILT_HERE = threading.Event()
+_SAVED_AT: float | None = None
+
+
+def _saved_path() -> Path:
+    from agent_media_core._paths import state_dir
+
+    return state_dir() / "targets-last.json"
+
+
+def _built_and_saved(key: str) -> dict:
+    """`_build_targets(key)`, the main list's kept on disk now and then for
+    the next server to answer with while it builds its first (`_saved`)."""
+    global _SAVED_AT
+    out = _build_targets(key)
+    if key == "":
+        _BUILT_HERE.set()
+        now = time.monotonic()
+        if _SAVED_AT is None or now - _SAVED_AT >= TARGETS_SAVE_EVERY_S:
+            _SAVED_AT = now
+            try:
+                path = _saved_path()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    json.dump(out, f)
+                os.replace(tmp, path)
+            except (OSError, TypeError, ValueError):
+                pass  # not kept: the next server builds its own, as before
+    return out
+
+
+def _saved() -> dict | None:
+    """The main list as the last server kept it, while this one has built
+    none of its own yet and it is under TARGETS_SAVED_MAX_S old; else None.
+
+    A fresh server's first build takes 5–15 s (its caches empty), longer
+    than the app waits (5 s), and red2's server restarted 14 times on the
+    afternoon of 18 Nov 2026 as chats released their work: each time the
+    list timed out on the phone until a build had finished."""
+    if _BUILT_HERE.is_set():
+        return None
+    path = _saved_path()
+    try:
+        if time.time() - path.stat().st_mtime > TARGETS_SAVED_MAX_S:
+            return None
+        got = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return got if isinstance(got, dict) and isinstance(got.get("sessions"), list) else None
 
 
 def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
@@ -1021,7 +1082,16 @@ def targets(bearer: str, history: str = "") -> tuple[bool, dict]:
 
     def build() -> dict:
         with _pass.held():
-            return _build_targets(key)
+            return _built_and_saved(key)
+    if key == "":
+        saved = _saved()
+        if saved is not None:
+            # Answered at once from the last server's list, its own built
+            # behind (joining the warm-up's when that is under way); `stale`
+            # says so, for an app that wants to ask again shortly (§6.1).
+            threading.Thread(target=lambda: _shared_build(key, build),
+                             name="targets-first", daemon=True).start()
+            return True, _with_now({**saved, "stale": True})
     return True, _with_now(_shared_build(key, build))
 
 

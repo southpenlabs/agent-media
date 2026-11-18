@@ -488,6 +488,14 @@ Everything a message can be pointed at.
   and places ran in, each counted once, by the same rule as `mail`.
   Projects with none are left out; the key is **absent** when the mailbox
   can't be read, and from older servers. About 50 ms cold, 10 ms warm.
+- `stale` (19 Nov 2026; additive, top level, `true` only, absent otherwise):
+  this answer is the list a previous run of the server kept on disk (at
+  most 15 minutes old), given by a server just restarted while it builds
+  its own, which a first build can take 5–15 s to do: longer than the app
+  waits. Ask again shortly for the fresh one. Separately, a Matrix room
+  the server has not read yet since starting is listed as that kept list
+  had it (or left out when it had none) rather than read during the
+  request (§6.13).
 - `project_checkouts` (19 Nov 2026; always present, `{}` with none):
   `{project: {"of", "how": "worktree" | "clone", "branch"}}` for every
   listed project that is another checkout of one listed, keyed like the

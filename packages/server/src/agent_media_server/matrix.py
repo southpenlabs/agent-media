@@ -1070,50 +1070,112 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
                                        if t in _ROOMS else None))
     if woke:
         flags = set(flags) - set(woke)
-    out = []
+    out: list[dict] = []
+    kept: dict[str, dict] | None = None
     for r in list(_ROOMS.values()):
+        # A room not read yet is read on a thread, never in this one, and one
+        # being read (its lock held) is not waited on: each read is 3–5
+        # requests to the homeserver, 1.3 s apiece from red2, so a list that
+        # read them in turn after a restart took minutes and no new chat
+        # could be opened (19 Nov 2026). Meanwhile such a room is listed as
+        # the last list kept it (sessions._saved_path), or not at all.
         if not r.loaded:
-            r.load()
-        with r.lock:
-            last = r.messages[-1] if r.messages else None
-            text = ""
-            if last:
-                text = " ".join(p.get("text") or "" for p in last["parts"]).strip()
-                if last["role"] == "assistant":
-                    text = f"{last['sender']['name']}: {text}"
-            out.append({"session": r.thread, "title": r.title(), "live": False,
-                        "pane": None, "at": last["at"] if last else None,
-                        "recap": ({"text": text[:300], "at": last["at"], "source": "matrix"}
-                                  if last else None),
-                        "archived": r.thread in flags, "rested": None, "pinned": False,
-                        "harness": "matrix", "source": "matrix", "room": r.id,
-                        "network": r.network,
-                        "drivable": bool(owner_token()),
-                        # When the network is told it was read (§6.32).
-                        "read_receipts": read_receipts.mode_of(r.thread),
-                        "read_receipts_own": read_receipts.own(r.thread),
-                        # Read up to here, here or on another device (§6.35).
-                        "read_up_to": r.read_up_to()})
-            # When the listener last wrote here, and whether nobody has
-            # answered since: Show → Sent, Waiting for reply (you_wrote.py).
-            out[-1]["you_at"], out[-1]["last_from_you"] = you_wrote.of_chat(r.messages)
-            if r.avatar:
-                # The room's own picture (20 Oct 2026); a person's row shows
-                # the contact's first.
-                out[-1]["avatar"] = {"url": f"/rooms/{r.thread}/avatar",
-                                     "etag": _etag(r.avatar)}
-            contact = _contact_of(r)
-            if contact:
-                # The person the room is with (contacts.py): absent when none.
-                out[-1]["contact"] = contact
-            # The person's number and whether the room can be linked to
-            # someone (room_contact.py, §6.1): absent when not.
-            out[-1].update(room_contact.row_fields(r, contact))
-            delegate = room_delegate.view_of(r.thread)
-            if delegate is not None:
-                # Handed to an agent (room_delegate.py, §6.53): absent when not.
-                out[-1]["delegate"] = delegate
+            r.load() if ROWS_LOAD_INLINE else _load_soon(r)
+        if not r.loaded or not r.lock.acquire(timeout=ROW_WAIT_S):
+            if kept is None:
+                kept = _kept_rows()
+            row = kept.get(r.thread)
+            if row is not None:
+                out.append({**row, "archived": r.thread in flags})
+            continue
+        try:
+            with r.lock:
+                last = r.messages[-1] if r.messages else None
+                text = ""
+                if last:
+                    text = " ".join(p.get("text") or "" for p in last["parts"]).strip()
+                    if last["role"] == "assistant":
+                        text = f"{last['sender']['name']}: {text}"
+                out.append({"session": r.thread, "title": r.title(), "live": False,
+                            "pane": None, "at": last["at"] if last else None,
+                            "recap": ({"text": text[:300], "at": last["at"], "source": "matrix"}
+                                      if last else None),
+                            "archived": r.thread in flags, "rested": None, "pinned": False,
+                            "harness": "matrix", "source": "matrix", "room": r.id,
+                            "network": r.network,
+                            "drivable": bool(owner_token()),
+                            # When the network is told it was read (§6.32).
+                            "read_receipts": read_receipts.mode_of(r.thread),
+                            "read_receipts_own": read_receipts.own(r.thread),
+                            # Read up to here, here or on another device (§6.35).
+                            "read_up_to": r.read_up_to()})
+                # When the listener last wrote here, and whether nobody has
+                # answered since: Show → Sent, Waiting for reply (you_wrote.py).
+                out[-1]["you_at"], out[-1]["last_from_you"] = you_wrote.of_chat(r.messages)
+                if r.avatar:
+                    # The room's own picture (20 Oct 2026); a person's row shows
+                    # the contact's first.
+                    out[-1]["avatar"] = {"url": f"/rooms/{r.thread}/avatar",
+                                         "etag": _etag(r.avatar)}
+                contact = _contact_of(r)
+                if contact:
+                    # The person the room is with (contacts.py): absent when none.
+                    out[-1]["contact"] = contact
+                # The person's number and whether the room can be linked to
+                # someone (room_contact.py, §6.1): absent when not.
+                out[-1].update(room_contact.row_fields(r, contact))
+                delegate = room_delegate.view_of(r.thread)
+                if delegate is not None:
+                    # Handed to an agent (room_delegate.py, §6.53): absent when not.
+                    out[-1]["delegate"] = delegate
+        finally:
+            r.lock.release()
     return out
+
+
+#: Whether `rows` reads a room not read yet itself (the tests' conftest,
+#: so a fake homeserver's room is listed on the first ask) or on a thread.
+ROWS_LOAD_INLINE = False
+#: How long a list waits for a room another thread is reading (s).
+ROW_WAIT_S = 0.2
+#: How old the kept list may be to stand in for a room not read yet (s).
+KEPT_MAX_S = 86400.0
+_LOADING: set[str] = set()
+_LOADING_LOCK = threading.Lock()
+
+
+def _load_soon(r: Room) -> None:
+    """`r.load()` on a thread of its own, once at a time per room."""
+    with _LOADING_LOCK:
+        if r.id in _LOADING:
+            return
+        _LOADING.add(r.id)
+
+    def run() -> None:
+        try:
+            r.load()
+        finally:
+            with _LOADING_LOCK:
+                _LOADING.discard(r.id)
+    threading.Thread(target=run, name="matrix-room-load", daemon=True).start()
+
+
+def _kept_rows() -> dict[str, dict]:
+    """The Matrix rows of the list the server last kept on disk, by thread;
+    {} when there is none, it is over KEPT_MAX_S old or unreadable."""
+    import json
+
+    from . import sessions
+
+    try:
+        path = sessions._saved_path()
+        if time.time() - path.stat().st_mtime > KEPT_MAX_S:
+            return {}
+        rows = json.loads(path.read_text()).get("sessions") or []
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {str(x.get("session")): x for x in rows
+            if isinstance(x, dict) and x.get("harness") == "matrix" and x.get("session")}
 
 
 def _contact_of(r: Room) -> dict | None:

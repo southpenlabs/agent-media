@@ -435,6 +435,8 @@ def _targets_unshared(monkeypatch):
     from agent_media_server import sessions
 
     monkeypatch.setattr(sessions, "TARGETS_REUSE_S", 0.0)
+    # Nor is the list a server kept on disk answered with (sessions._saved).
+    monkeypatch.setattr(sessions, "TARGETS_SAVED_MAX_S", -1.0)
     sessions._reset_builds_for_tests()
     yield
     sessions._reset_builds_for_tests()
@@ -467,3 +469,12 @@ def _live_scan_not_shared(monkeypatch):
 
     monkeypatch.setattr(thread_events, "LIVE_REUSE_S", 0.0)
     monkeypatch.setattr(thread_events, "_LIVE", (None, {}))
+
+
+@pytest.fixture(autouse=True)
+def _matrix_rows_inline(monkeypatch):
+    """A test's rooms are read when listed, not on a thread behind
+    (matrix.ROWS_LOAD_INLINE); test_targets_shared tests the thread."""
+    from agent_media_server import matrix
+
+    monkeypatch.setattr(matrix, "ROWS_LOAD_INLINE", True)
