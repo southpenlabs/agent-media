@@ -176,6 +176,16 @@ def _body_field(body: str, key: str, width: str = "7,40") -> str:
     return m.group(1) if m else ""
 
 
+_BUILT = re.compile(r"^\s*built:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d))\s*$", re.M)
+
+
+def _built_at(body: str) -> str | None:
+    """The notes' `built: <ISO>` line, the moment CI stamped the build with
+    (sasonica-app b2d20f04 on), else None."""
+    m = _BUILT.search(body or "")
+    return m.group(1) if m else None
+
+
 def _body_sha256(body: str, asset: str) -> str:
     for line in (body or "").splitlines():
         parts = line.split()
@@ -187,7 +197,7 @@ def _body_sha256(body: str, asset: str) -> str:
 def _builds(raw: list, app: str = "sasonica") -> list[dict]:
     """Every build-<N> release with an APK of either flavor (bridges: its one
     APK, under "bridges"), newest first:
-    {versionCode, tag, commit, published, apks: {flavor: {name, size, sha256}},
+    {versionCode, tag, commit, published, built_at, apks: {flavor: {name, size, sha256}},
     web: {name, size, sha256, native} or None}. Sasonica's web bundle counts
     only with a `native:` line in the notes."""
     out = []
@@ -227,7 +237,8 @@ def _builds(raw: list, app: str = "sasonica") -> list[dict]:
         commit = _body_field(body, "commit") or (
             commitish if re.fullmatch(r"[0-9a-f]{40}", commitish) else sha7)
         out.append({"versionCode": n, "tag": m.group(0), "commit": commit,
-                    "published": str(r.get("published_at") or ""), "apks": apks,
+                    "published": str(r.get("published_at") or ""),
+                    "built_at": _built_at(body), "apks": apks,
                     "web": web})
     out.sort(key=lambda b: b["versionCode"], reverse=True)
     return out
@@ -267,6 +278,7 @@ def newest(flavor: str, current: int = 0, app: str = "sasonica") -> dict | None:
         if a:
             return {"versionCode": b["versionCode"], "commit": b["commit"],
                     "sha256": a["sha256"], "size": a["size"], "published": b["published"],
+                    "built_at": b.get("built_at"),
                     "url": _url(app, b["versionCode"], flavor)}
     return None
 
@@ -283,6 +295,7 @@ def newest_web(native: str, current: int = 0) -> dict | None:
         if w and w["native"] == native:
             return {"build": b["versionCode"], "commit": b["commit"], "sha256": w["sha256"],
                     "size": w["size"], "published": b["published"],
+                    "built_at": b.get("built_at"),
                     "url": f"/app/update/web?build={b['versionCode']}", "native": native}
     return None
 

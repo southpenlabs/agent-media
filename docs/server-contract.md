@@ -11193,7 +11193,7 @@ index.html). Code: `web_app.py` `_preview`, `agent_media_core/preview_link.py`.
 
 - `GET /app/update?flavor=<personal|release>&current=<versionCode>` →
   `{"ok": true, "versionCode": 1963, "commit": "<40-hex sha>", "sha256":
-  "<hex>", "size": 8632897, "published": "<iso>", "url":
+  "<hex>", "size": 8632897, "published": "<iso>", "built_at": "<iso>", "url":
   "/app/update/apk?build=1963&flavor=personal"}`, the newest build of that
   flavor; `{"ok": true, "versionCode": null}` when none is newer than
   `current` (absent: 0). 400 for a flavor not in the two or a `current`
@@ -11208,6 +11208,13 @@ index.html). Code: `web_app.py` `_preview`, `agent_media_core/preview_link.py`.
   - `sha256` is the asset's GitHub `digest`, else its line in the release
     notes' `sha256:` block. `commit` is the notes' `commit:` line, else the
     release's target commit. `size` is the asset's, in bytes.
+  - `built_at` (18 Nov 2026, sasonica-app mail #1021) is the notes' `built:
+    <ISO UTC>` line, the moment CI stamped the build with (its versionName
+    and the app's version label read the same one; sasonica-app b2d20f04
+    on), else `null`. `published` is when GitHub published the release,
+    some minutes later; the app names an offer by `built_at` when it has
+    one. The `web` offer and the bridges offer carry it the same way
+    (Bridges releases have no `built:` line yet, so theirs is `null`).
   - The list is read at most once per `MEDIA_APP_UPDATE_TTL` seconds (300);
     a failed read with an older list in hand answers from it.
   - The repo: `MEDIA_APP_UPDATE_REPO` (`owner/name`, default

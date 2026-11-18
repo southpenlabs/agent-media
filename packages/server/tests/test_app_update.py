@@ -37,7 +37,7 @@ RELEASES = [
     {"tag_name": "build-1964", "draft": True, "assets": [_asset("sasonica-personal-1964-aaaaaaa.apk", PERSONAL)]},
     {"tag_name": "build-1963", "published_at": "2026-11-07T09:33:48Z",
      "target_commitish": "de8e1e7" + "0" * 33,
-     "body": "versionCode: 1963\ncommit: de8e1e7" + "1" * 33 + "\n",
+     "body": "versionCode: 1963\ncommit: de8e1e7" + "1" * 33 + "\nbuilt: 2026-11-07T09:21:05Z\n",
      "assets": [_asset("sasonica-personal-1963-de8e1e7.apk", PERSONAL),
                 _asset("sasonica-web-1963-de8e1e7.tar.gz", b"web")]},
     {"tag_name": "build-1962", "published_at": "2026-11-07T09:28:10Z",
@@ -106,7 +106,7 @@ def test_the_newest_build_of_each_flavor(server, signed_in, gh):
     assert res.status == 200, obj
     assert obj == {"ok": True, "versionCode": 1963, "commit": "de8e1e7" + "1" * 33,
                    "sha256": _sha(PERSONAL), "size": len(PERSONAL),
-                   "published": "2026-11-07T09:33:48Z",
+                   "published": "2026-11-07T09:33:48Z", "built_at": "2026-11-07T09:21:05Z",
                    "url": "/app/update/apk?build=1963&flavor=personal"}
     # The release flavor's newest is the full build, its sha256 from the notes;
     # no debug asset is ever taken for it.
@@ -276,7 +276,7 @@ def test_the_bridges_listing(server, signed_in, gh):
     assert res.status == 200, obj
     assert obj == {"ok": True, "versionCode": 12, "commit": "0123abc" + "2" * 33,
                    "sha256": _sha(BRIDGES_APK), "size": len(BRIDGES_APK),
-                   "published": "2026-11-16T01:00:00Z",
+                   "published": "2026-11-16T01:00:00Z", "built_at": None,
                    "url": "/app/update/apk?app=bridges&build=12"}
     _, obj = call(server, "GET", "/app/update?app=bridges&current=12", headers=AUTH)
     assert obj == {"ok": True, "versionCode": None}
@@ -383,7 +383,7 @@ NATIVE_A, NATIVE_B = "0123456789ab", "ba9876543210"
 #: native line with the old web asset only.
 WEB_RELEASES = [
     {"tag_name": "build-2003", "published_at": "2026-11-17T13:00:00Z",
-     "body": f"commit: aaaa003{'3' * 33}\nnative: {NATIVE_A}\nsha256:\n"
+     "body": f"commit: aaaa003{'3' * 33}\nnative: {NATIVE_A}\nbuilt: 2026-11-17T12:51:30Z\nsha256:\n"
              f"    {_sha(WEB_A)}  sasonica-shellweb-2003-aaaa003.tar.gz\n",
      "assets": [_asset("sasonica-personal-2003-aaaa003.apk", PERSONAL),
                 _asset("sasonica-shellweb-2003-aaaa003.tar.gz", WEB_A, digest=False),
@@ -425,6 +425,7 @@ def test_the_web_offer(server, webgh):
     assert obj["versionCode"] == 2003
     assert obj["web"] == {"build": 2003, "commit": "aaaa003" + "3" * 33, "sha256": _sha(WEB_A),
                           "size": len(WEB_A), "published": "2026-11-17T13:00:00Z",
+                          "built_at": "2026-11-17T12:51:30Z",
                           "url": "/app/update/web?build=2003", "native": NATIVE_A}
     # Another shell gets its own; a web build already as new gets none.
     _, obj = call(server, "GET", f"/app/update?flavor=personal&native={NATIVE_B}")
@@ -494,3 +495,14 @@ def test_a_bundle_that_does_not_match_is_not_kept(server, webgh):
 def test_features_says_web(server, signed_in):
     _, obj = call(server, "GET", "/features", headers=AUTH)
     assert obj["app_update_web"] is True
+
+
+def test_built_at_from_the_notes():
+    """`built:` in the notes (sasonica-app b2d20f04 on) is the offer's
+    built_at; a release without one, or with a line that is not a time, is
+    None."""
+    f = app_update._built_at
+    assert f("versionCode: 2531\nbuilt: 2026-11-18T03:32:00Z\ncommit: abc\n") == "2026-11-18T03:32:00Z"
+    assert f("built: 2026-11-18T14:32:00+11:00") == "2026-11-18T14:32:00+11:00"
+    assert f("versionCode: 1\n") is None and f("") is None and f(None) is None
+    assert f("built: yesterday\n") is None and f("rebuilt: 2026-11-18T03:32:00Z") is None
