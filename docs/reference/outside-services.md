@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 58 rows.
+Sorted with what blocks a public release first. 59 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -99,6 +99,7 @@ Sorted with what blocks a public release first. 58 rows.
 | 56 | speedcameralocations.com.au reports | reported phone and seatbelt camera spots on the Map and in the camera alerts (`map_reports.py`, the add-on's `camera_reports`) | none | read through the owner's phone (§6.21 `fetch`; the site refuses cloud hosts), at most once a day | **Blocks** a public install: no licence to reuse the data; personal use only | **yes** (`camera-reports`) |
 | 57 | Valhalla (self-hosted, `pyvalhalla` on PyPI) with Geofabrik's Australia extract | directions: routes and spoken turns (maps proposal step 6; `MEDIA_ROUTER_URL`, `map_route.py`) | none | runs on the owner's server (red2), tiles built from the weekly OSM download | nothing beyond OpenStreetMap's credit (row 31); Valhalla is MIT | no |
 | 58 | Forge APIs: GitHub's REST API (api.github.com), and a self-hosted Forgejo or Gitea (`MEDIA_GIT_FORGES`), Codeberg, gitea.com | a commit's checks on the git line, whether main takes pull requests only, a ticket's issue and its pull request, a project's open issues and PRs (`forge.py`, `issues.py`; §6.49, §6.44, `/project/forge`) | the owner's own: a token file per host (`MEDIA_FORGE_TOKENS`), for github.com else the owner's `gh` login; none for reads of a public repo | reads cached (settled checks for good, the rest 30 s to 10 min); issues opened on the owner's own repos only, by hand or once a tracked chat commits (`MEDIA_FORGE_AUTO_ISSUE=0` to stop) | nothing for the owner's own forge; on GitHub the API terms ask for no excessive or abusive use, which the caching keeps to (unauthenticated: 60 requests an hour); an issue opened carries the chat's first ask and recap, so say so in the privacy policy | no |
+| 59 | Overpass (public instances), asked by the app itself | the Map's speed, red-light and average-speed cameras and the camera alerts with no server paired (`sasonica-app` `app/lib/localCameras.ts`, `LocalCameras.java`; 11 Nov 2026) | none (the phone's own address; the Android shell names itself in its User-Agent, a browser cannot) | overpass-api.de, then overpass.private.coffee; one request at a time, kept a day, a 30 s to 10 min back-off | **Needs work**: the Overpass usage policy (under 10,000 queries and 1 GB a day, "commercial use should use self-hosted or paid Overpass servers") is met per phone but not by a product's whole user base; ODbL credit "© OpenStreetMap contributors, ODbL" is shown beside the layer; off in countries that ban camera warnings (`public/camera-countries.json`) | no (a public build offers it; a personal build may show it where the country rule says no) |
 
 ## The services, one by one
 
@@ -763,6 +764,35 @@ hosted tier), every one of these becomes a reseller question.
   retired (`docs/decisions/2026-11-11-audiobookshelf-exit.md`).
 - **websites:** the Drupal behind cms.sasonica.com and the public site; its
   own mail, payment and sign-in providers belong in a list of its own.
+
+### 59. Overpass, asked by the app itself
+
+- **Used for:** with no server paired, the Map's speed, red-light and
+  average-speed cameras (no CCTV) and the camera alerts while moving fast
+  (`sasonica-app` `app/lib/localCameras.ts`,
+  `android/.../LocalCameras.java`, `CameraAlertsService.java`). The page
+  and the phone ask Overpass directly, the same query as `map_osm.py`
+  (row 12): the page a 0.1° square block at a time from zoom 11 in, the
+  phone a 25 km box at most every 15 km or hour; each kept a day on the
+  device and served stale when Overpass does not answer, one request at a
+  time, a back-off from 30 s to 10 min after a failure.
+- **Credential:** none. Requests come from each user's own address; the
+  Android shell sends `User-Agent: Sasonica camera alerts
+  (https://sasonica.com)`, a browser page cannot set one.
+- **Terms:** the Overpass usage policy as in row 12
+  (https://wiki.openstreetmap.org/wiki/Overpass_API, "Commercial use should
+  use self-hosted or paid Overpass servers"); private.coffee allows
+  commercial use and asks for a User-Agent. OSM data is ODbL: the layer
+  shows "© OpenStreetMap contributors, ODbL" and says it is not complete.
+- **Country rule:** none of this is offered where camera warnings are
+  banned (Switzerland, Germany, France: `sasonica-app`
+  `public/camera-countries.json`, by the mobile network's country, else a
+  coarse outline of the position). A personal build can show them anyway.
+- **Personal-use switch:** no.
+- **Production:** a public app with many users should point at an Overpass
+  server the project runs or pays for (one setting in each of the two
+  files), or serve a prepared camera file as the server's weekly extract
+  does.
 
 ## Before other people use this
 
