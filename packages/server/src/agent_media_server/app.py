@@ -553,7 +553,7 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
 CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
-MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit"})
+MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -5865,6 +5865,17 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # The host's own token too: an agent on this host reads the map (§6.50).
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers.layers(bearer, arg("thread"), host=host)
+    elif method == "GET" and path == "/map/route":
+        # Directions (map_route.py): Valhalla's route, compact, with words to speak.
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.route(arg("from"), arg("to"), arg("mode"), arg("lang"), bearer, host=host)
+    elif method == "GET" and path == "/map/search":
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.search(arg("q"), arg("near"), bearer, host=host)
     elif method == "GET" and path == "/map/speed_limit":
         # The limit of the road the device is on (map_limits.py).
         from . import map_layers

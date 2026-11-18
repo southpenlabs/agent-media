@@ -11105,6 +11105,19 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   URL through the phone (§6.21 `fetch`; the site refuses a cloud host) and
   keeps `camera-reports.json` in the state dir, doing nothing while it is
   under 20 h old, and keeping what it had when the phone does not answer.
+- **`GET /map/route?from=lat,lon&to=lat,lon[&mode=walk|drive|bike][&lang=en-AU]`**
+  (18 Nov 2026, maps proposal step 6; `map_route.py`): directions from a
+  Valhalla routing service (`MEDIA_ROUTER_URL`, the owner's own; Valhalla is
+  MIT). → `{mode, distance_m, duration_s, line: [[lon, lat], …], steps:
+  [{instruction, say_before, say_alert, say_after, street, distance_m,
+  time_s, type, at: [lon, lat], index}]}`: `say_before` is said as a turn
+  comes up, `say_alert` a little before it, `say_after` once on the new
+  road (Valhalla's own verbal instructions, in `lang`). 404 `no_router`
+  when none is set, 404 `no_route` when the service finds none, 400 for a
+  bad point or mode, 502 when it does not answer.
+- **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
+  address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
+  Nominatim), nearest first given `near`. 400 for no words.
 - **`GET /map/speed_limit?near=lat,lon[&heading=deg]`** (12 Nov 2026; David:
   "let's add speed limits"; `map_limits.py`) → `{kmh, road, distance_m}`,
   the limit of the road nearest the point within 30 m, a road running the

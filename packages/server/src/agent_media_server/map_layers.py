@@ -287,3 +287,19 @@ def speed_limit(near: str, heading: str, bearer: str, host: bool = False) -> tup
     except ValueError:
         hd = None
     return True, map_limits.nearest(lat, lon, hd)
+
+
+def route(frm: str, to: str, mode: str, lang: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/route` (map_route.py), behind the map's gate."""
+    from . import map_route
+
+    ok, err = _gate(bearer, host)
+    return map_route.route(frm, to, mode, lang) if ok else (False, err)
+
+
+def search(q: str, near: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/search` (map_route.py), behind the map's gate."""
+    from . import map_route
+
+    ok, err = _gate(bearer, host)
+    return map_route.search(q, near) if ok else (False, err)

@@ -413,3 +413,75 @@ def test_speed_limits_from_the_extract(server, tmp_path):
     got = call(server, "GET", "/map/speed_limit?near=-37.81002,144.9605&heading=270", headers=pixel)[1]
     assert got["kmh"] == 60 and got["road"] == "Collins Street" and got["distance_m"] < 5
     assert call(server, "GET", "/map/speed_limit?near=x", headers=pixel)[0].status == 400
+
+
+def _enc(points, f=1e6):
+    """Polyline6, as Valhalla writes a shape (points as (lat, lon))."""
+    out, plat, plon = [], 0, 0
+    for lat, lon in points:
+        for v in (round(lat * f) - plat, round(lon * f) - plon):
+            v = ~(v << 1) if v < 0 else v << 1
+            while v >= 0x20:
+                out.append(chr((0x20 | (v & 0x1F)) + 63))
+                v >>= 5
+            out.append(chr(v + 63))
+        plat, plon = round(lat * f), round(lon * f)
+    return "".join(out)
+
+
+def test_directions_from_the_routing_service(server, monkeypatch):
+    import http.server
+    import threading
+
+    from agent_media_server import map_route
+
+    asked = []
+    shape = _enc([(-37.8136, 144.9631), (-37.8100, 144.9631), (-37.8100, 144.9650)])
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            asked.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            body = json.dumps({"trip": {"summary": {"length": 0.6, "time": 420}, "legs": [{"shape": shape, "maneuvers": [
+                {"instruction": "Walk north on Swanston Street.", "verbal_pre_transition_instruction": "Walk north on Swanston Street.",
+                 "street_names": ["Swanston Street"], "length": 0.4, "time": 300, "type": 2, "begin_shape_index": 0},
+                {"instruction": "Turn right onto Collins Street.", "verbal_pre_transition_instruction": "Turn right onto Collins Street.",
+                 "verbal_transition_alert_instruction": "Turn right onto Collins Street.", "street_names": ["Collins Street"],
+                 "length": 0.2, "time": 120, "type": 10, "begin_shape_index": 1}]}]}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    pixel, _ = _device("Pixel 8a")
+    try:
+        assert call(server, "GET", "/map/route?from=-37.8136,144.9631&to=-37.81,144.965", headers=pixel)[1]["code"] == "no_router"
+        monkeypatch.setenv("MEDIA_ROUTER_URL", f"http://127.0.0.1:{srv.server_port}/")
+        res, got = call(server, "GET", "/map/route?from=-37.8136,144.9631&to=-37.81,144.965&mode=walk&lang=fr-FR", headers=pixel)
+        assert res.status == 200, got
+        assert asked[0]["costing"] == "pedestrian" and asked[0]["directions_options"]["language"] == "fr-FR"
+        assert got["distance_m"] == 600 and got["duration_s"] == 420
+        assert got["line"][0] == [144.9631, -37.8136] and got["line"][2] == [144.965, -37.81]
+        assert [s["say_before"] for s in got["steps"]] == ["Walk north on Swanston Street.", "Turn right onto Collins Street."]
+        assert got["steps"][1]["at"] == [144.9631, -37.81] and got["steps"][1]["distance_m"] == 200
+        assert call(server, "GET", "/map/route?from=x&to=-37.81,144.965", headers=pixel)[0].status == 400
+        assert call(server, "GET", "/map/route?from=-37.8,144.9&to=-37.81,144.965&mode=fly", headers=pixel)[0].status == 400
+    finally:
+        srv.shutdown()
+    assert map_route.decode_polyline(_enc([(1.5, -2.25)])) == [[-2.25, 1.5]]
+
+
+def test_the_maps_place_search(server, monkeypatch):
+    from agent_media_core import place_find
+
+    pixel, _ = _device("Pixel 8a")
+    monkeypatch.setattr(place_find, "find", lambda words, near=None, limit=5: [
+        {"name": "Brunetti", "address": "far", "lat": -37.70, "lon": 144.90, "kind": "cafe"},
+        {"name": "Brunetti", "address": "near", "lat": -37.80, "lon": 144.97, "kind": "cafe"}])
+    got = call(server, "GET", "/map/search?q=Brunetti&near=-37.80,144.96", headers=pixel)[1]
+    assert [p["address"] for p in got["places"]] == ["near", "far"]
+    assert call(server, "GET", "/map/search?q=", headers=pixel)[0].status == 400
