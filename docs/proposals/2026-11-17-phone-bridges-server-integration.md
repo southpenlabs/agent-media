@@ -367,6 +367,30 @@ him): it works with any homeserver and adds nothing powerful to the server.
   copy): the account filled in, a password and a recovery key box, passed
   to the companion and never kept; the status and Sign out. Not built.
 
+### Step 3, the copier — built (18 Nov 2026)
+
+sasonica-bridges 01e2e34 (`internal/e2ee/copier.go`, docs/api.md "The
+encrypted copy"): the companion follows its local store's event log and
+copies, within `history_days`, into the user's own account: the Local chats
+space, a sub-space per network and Trash; one encrypted room per chat;
+messages with per-message profiles and the original time; pictures and files
+as encrypted attachments; edits, replies, reactions (unencrypted, as clients
+send them, without who reacted); deletions to Trash, emptied after
+`trash_days`; a chat deleted on the phone moved to Trash and left after
+`trash_days`. Rooms carry the chat id HMAC'd with a key in the account's
+secret storage, never the id. Each Megolm session goes into the key backup.
+Signed in again, the device adopts its rooms and carries on from then.
+Tested against a real tuwunel, read back by a device restored from the key
+backup.
+
+Server (§6.61 Settings): `encrypted` choosable, with `history_days` and
+`trash_days` (30 and 30, ranges and plain-words explanations in
+`choosable`). App: pass `leaves_phone`, `history_days`, `trash_days` and
+`names` to `applySettings`, and the two numbers on the settings screen.
+
+Not yet: copying only on Wi-Fi; leaving the rooms when the copy is switched
+off; Sasonica's app reading the copy (crypto-wasm, David's "Sasonica too").
+
 ### What's risky
 
 - **Our device's keys.** A crypto store lost or a session not backed up

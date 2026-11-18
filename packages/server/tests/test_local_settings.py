@@ -40,10 +40,16 @@ def test_defaults_on_a_persons_own_server(server):
             got["network_exceptions"]) == ("settings", "server", True, {})
     assert got["hosted"] is False and got["defaults"]["names"] is True
     assert got["defaults"] == {"leaves_phone": "settings", "backup": "server",
-                               "apply_to_networks": True, "network_exceptions": {}, "names": True}
+                               "apply_to_networks": True, "network_exceptions": {}, "names": True,
+                               "history_days": 30, "trash_days": 30}
+    assert (got["history_days"], got["trash_days"]) == (30, 30)
     lp = {c["id"]: c for c in got["choosable"]["leaves_phone"]}
     assert lp["settings"]["available"] is True and "why" not in lp["settings"]
-    assert lp["encrypted"]["available"] is False and lp["encrypted"]["why"] == "not built yet"
+    assert lp["encrypted"]["available"] is True and "why" not in lp["encrypted"]
+    # The encrypted copy's numbers come with their ranges and plain words.
+    hd = got["choosable"]["history_days"]
+    assert (hd["min"], hd["max"]) == (1, 3650) and "hours" in hd["explain"]
+    assert got["choosable"]["trash_days"]["max"] == 365
     assert lp["full"]["available"] is True and "why" not in lp["full"]
     # Each step says, in plain words, what leaves and who can read it.
     assert "stay on the phone" in lp["settings"]["explain"]
@@ -86,10 +92,16 @@ def test_partial_change_is_kept_and_answered(server):
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
-def test_bad_changes_are_refused(server):
+def test_bad_changes_are_refused(server, monkeypatch):
     t = _paired(server)["token"]
-    st, got = post(server, t, {"leaves_phone": "encrypted"})
+    monkeypatch.setenv("MEDIA_HOSTED", "1")
+    st, got = post(server, t, {"leaves_phone": "full"})
     assert st == 400 and got["code"] == "not_available"
+    monkeypatch.delenv("MEDIA_HOSTED")
+    for field, v in (("history_days", 0), ("history_days", 3651), ("history_days", 1.5),
+                     ("history_days", True), ("trash_days", 366), ("trash_days", "30")):
+        st, got = post(server, t, {field: v})
+        assert st == 400 and got["field"] == field, (field, v)
     assert post(server, t, {"leaves_phone": "everything"})[0] == 400
     st, got = post(server, t, {"network_exceptions": {"telegram": True}})
     assert st == 400 and got["code"] == "unknown_network" and got["field"] == "telegram"
@@ -159,3 +171,12 @@ def test_matrix_account_unknown_without_an_owner_token(server, monkeypatch):
     monkeypatch.delenv("MEDIA_LOCAL_MATRIX_USER", raising=False)
     owner = _paired(server)
     assert get(server, owner["token"])[1]["matrix"] == {"user_id": None}
+
+
+def test_encrypted_copy_with_its_days(server):
+    t = _paired(server)["token"]
+    st, got = post(server, t, {"leaves_phone": "encrypted", "history_days": 365, "trash_days": 7})
+    assert st == 200, got
+    assert (got["leaves_phone"], got["history_days"], got["trash_days"]) == ("encrypted", 365, 7)
+    st, got = post(server, t, {"history_days": None})
+    assert (got["history_days"], got["trash_days"]) == (30, 7)

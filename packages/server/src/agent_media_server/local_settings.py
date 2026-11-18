@@ -38,10 +38,18 @@ BACKUP = ("server", "drive", "off")
 #: The steps of the dial built so far; the others are listed, not choosable.
 #: `full` is built (18 Nov 2026, local_messages.py), but on a hosted server
 #: only with MEDIA_LOCAL_FULL_ON_HOSTED=1 (`full_available`).
-AVAILABLE_LEAVES = frozenset({"settings", "full"})
+#: `encrypted` is built too (18 Nov 2026, the companion's copier,
+#: sasonica-bridges internal/e2ee): this server only keeps the choice.
+AVAILABLE_LEAVES = frozenset({"settings", "encrypted", "full"})
 NOT_BUILT = "not built yet"
 HOSTED_FULL = "not on a server South Pen Labs hosts"
-FIELDS = frozenset({"leaves_phone", "backup", "apply_to_networks", "network_exceptions"})
+FIELDS = frozenset({"leaves_phone", "backup", "apply_to_networks", "network_exceptions",
+                    "history_days", "trash_days"})
+#: The encrypted copy's two numbers (design step 6, David 18 Nov 2026: "last
+#: 30 days and the option for more with an explanation"; Trash "a setting").
+HISTORY_DAYS = (1, 3650)
+TRASH_DAYS = (1, 365)
+DEFAULT_DAYS = 30
 
 
 def hosted() -> bool:
@@ -91,7 +99,8 @@ def defaults() -> dict:
     from . import local_chats
 
     return {"leaves_phone": "settings", "backup": "server", "apply_to_networks": True,
-            "network_exceptions": {}, "names": local_chats.names_on()}
+            "network_exceptions": {}, "names": local_chats.names_on(),
+            "history_days": DEFAULT_DAYS, "trash_days": DEFAULT_DAYS}
 
 
 def _choosable() -> dict:
@@ -103,6 +112,14 @@ def _choosable() -> dict:
         steps.append({"id": k, "available": ok, "explain": _why(k),
                       **({} if ok else {"why": why_not})})
     return {"leaves_phone": steps,
+            "history_days": {"min": HISTORY_DAYS[0], "max": HISTORY_DAYS[1], "explain": (
+                "How far back the encrypted copy starts. 30 days copies in a few minutes. "
+                "More copies older messages too: each one is sent again from the phone, "
+                "a few a second, with its photos, so a year can take hours and a lot of "
+                "data, best on Wi-Fi and charging.")},
+            "trash_days": {"min": TRASH_DAYS[0], "max": TRASH_DAYS[1], "explain": (
+                "Deleted messages and chats wait in Trash this long, then are deleted "
+                "for good.")},
             "backup": [{"id": k, "available": True} for k in BACKUP],
             "networks": [{"id": k, "name": v} for k, v in NETWORKS.items()]}
 
@@ -157,7 +174,8 @@ def view() -> dict:
     """The settings as answered: each chosen value or its default."""
     held, dflt = _held(), defaults()
     exc = held.get("network_exceptions")
-    out = {k: held.get(k, dflt[k]) for k in ("leaves_phone", "backup", "apply_to_networks")}
+    out = {k: held.get(k, dflt[k]) for k in ("leaves_phone", "backup", "apply_to_networks",
+                                             "history_days", "trash_days")}
     out["network_exceptions"] = dict(exc) if isinstance(exc, dict) else {}
     out.update({"defaults": dflt, "hosted": hosted(), "choosable": _choosable(),
                 "updated": held.get("updated"), "by": held.get("by")})
@@ -224,6 +242,12 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         if v is not None and not isinstance(v, bool):
             return _bad("apply_to_networks is true or false")
         change["apply_to_networks"] = v
+    for field, (lo, hi) in (("history_days", HISTORY_DAYS), ("trash_days", TRASH_DAYS)):
+        if field in body:
+            v = body[field]
+            if v is not None and (not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi):
+                return _bad(f"{field} is a whole number of days, {lo} to {hi}", field=field)
+            change[field] = v
     exc = None
     if "network_exceptions" in body:
         exc = body["network_exceptions"]

@@ -12831,7 +12831,8 @@ them. **One per server**, not per account: Local chats are kept per server
 
 ```
 GET /local/settings → <settings>
-POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network_exceptions"?}
+POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network_exceptions"?,
+                      "history_days"?, "trash_days"?}
   → <settings>                                   // a partial change; null = back to the default
 
 <settings> = {"ok": true,
@@ -12839,10 +12840,14 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   "backup": "server" | "drive" | "off",
   "apply_to_networks": bool,
   "network_exceptions": {"<network>": bool},     // that network's own choice over the main switch
-  "defaults": {"leaves_phone", "backup", "apply_to_networks", "network_exceptions": {}, "names": bool},
+  "history_days": n, "trash_days": n,            // the encrypted copy's (default 30 and 30)
+  "defaults": {"leaves_phone", "backup", "apply_to_networks", "network_exceptions": {}, "names": bool,
+               "history_days": 30, "trash_days": 30},
   "hosted": bool,
   "choosable": {"leaves_phone": [{"id", "available": bool, "explain": "<what leaves, who reads it>",
                                    "why"?: "not built yet" | "not on a server South Pen Labs hosts"}…],
+                "history_days": {"min": 1, "max": 3650, "explain"},
+                "trash_days": {"min": 1, "max": 365, "explain"},
                 "backup": [{"id", "available": true}…],
                 "networks": [{"id", "name"}…]},
   "updated": <unix s> | null, "by": "<device id>" | null,
@@ -12858,9 +12863,18 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   `MEDIA_HOSTED` (default off; added 18 Nov 2026, the server had no such
   signal); `MEDIA_LOCAL_CHAT_NAMES`, when set, still decides names either
   way, and unset now follows `MEDIA_HOSTED`.
-- **The dial**: `settings` and `full` are choosable (`full` since 18 Nov
-  2026, Full copy below); `encrypted` is listed `available: false`, `why:
-  "not built yet"`. On a hosted server (`MEDIA_HOSTED`) `full` is
+- **The dial**: all three are choosable (`full` since 18 Nov 2026, Full
+  copy below; `encrypted` since 18 Nov 2026, the companion's copier:
+  sasonica-bridges `internal/e2ee`, its docs/api.md "The encrypted copy").
+  At `encrypted` this server keeps only the choice: the companion, a
+  device of the user's own Matrix account (`matrix` below), copies the
+  chats into encrypted rooms there, and `POST /local/messages` stays 409.
+  Sasonica passes `leaves_phone`, `history_days`, `trash_days` and
+  `defaults.names` to the companion with the chats' settings (AIDL v5
+  `applySettings`, fields added in v6). `history_days` (1 to 3650) is how far
+  back the copy starts, `trash_days` (1 to 365) how long its Trash keeps
+  deleted messages and chats; each `null` back to 30, anything else 400
+  with `field`. On a hosted server (`MEDIA_HOSTED`) `full` is
   `available: false`, `why: "not on a server South Pen Labs hosts"`, unless
   `MEDIA_LOCAL_FULL_ON_HOSTED=1`. Choosing a step not available is 400
   `code: "not_available"`, `field: "leaves_phone"`. Every step carries

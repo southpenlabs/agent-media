@@ -77,8 +77,11 @@ def words(m):
 def test_not_enabled_is_409_and_nothing_is_kept(server, phone):
     st, got = send(server, phone["token"], WA, [msg(1)])
     assert st == 409 and got["code"] == "not_enabled"
-    # Encrypted is not built: still not a step that takes messages.
-    assert dial(server, phone["token"], "encrypted")[0] == 400
+    # Encrypted copy goes to the user's own Matrix rooms, never here: the
+    # server still takes no readable messages.
+    assert dial(server, phone["token"], "encrypted")[0] == 200
+    st, got = send(server, phone["token"], WA, [msg(1)])
+    assert st == 409 and got["code"] == "not_enabled"
     assert not local_messages.db_path().exists()
     # The chat reads, empty, rather than 400 "not a session id".
     st, got = log(server, phone["token"], WA)
