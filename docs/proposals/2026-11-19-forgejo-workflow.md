@@ -37,8 +37,24 @@ in the one umbrella project"). Builds on roadmap item 55 and
 
 ## 2. The umbrella is a Forgejo organisation
 
-- One org (`sasonica`, or `southpenlabs` to match GitHub) owns the four
-  repos. What Forgejo gives an org, used as the umbrella:
+**The layout (agreed, David, 19 Nov 2026: "agreed").** The hierarchy is
+the Order of Ryer, then Vanta, then South Pen Labs Pty Ltd, then its
+brands (`~/spl/admin/legal/delegation-matrix.md`; Sasonica is a brand
+there by the `~/spl` README, not yet in the matrix). Forgejo orgs do not
+nest, so the tree is flattened:
+
+- `ryer`: private (members only); Ryer's own repos. Ryer is never named
+  outside the house, so it shows nowhere public, and the forge's address
+  is not a Ryer name.
+- `southpenlabs`: the company's repos (`spl`, `company-docs`, `websites`).
+- One org per brand: `sasonica` (agent-media, sasonica-app, sasonica-web,
+  sasonica-shell), `somahz`, `novelsonica`.
+- David's own account: personal tools (agent-memory, agent-mail,
+  dotfiles…).
+- Vanta gets no org until it has repos of its own.
+
+A brand org is the umbrella below. What Forgejo gives an org, used as the
+umbrella:
   - **Org-wide labels**: one label set (`bug`, `wish`, `app`, `server`,
     `phone`, `needs-repro`, `blocked`, `public`…) shared by every repo, so
     a filter means the same thing everywhere.
