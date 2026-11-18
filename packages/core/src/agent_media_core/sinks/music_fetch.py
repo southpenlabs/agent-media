@@ -29,7 +29,7 @@ import re
 import shlex
 import socket
 import subprocess
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from . import music_local
 

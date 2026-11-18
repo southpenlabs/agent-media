@@ -1014,7 +1014,7 @@ def gather(data: FavouritesIndex, now: Optional[float] = None) -> list[Favourite
         if song:
             add(song, r["plays"] + (LIKE_POINTS if r["loved"] else 0),
                 f"{r['via']}-loved" if r["loved"] else r["via"])
-    for k, s in suggested().items():
+    for s in suggested().values():
         if s.get("id"):
             add({**s, "dur": s.get("dur") or MIN_TRACK_S}, SUGGEST_POINTS, "suggested")
     # Distinctive tunes first (David, 1 Nov 2026): a song's count is moved

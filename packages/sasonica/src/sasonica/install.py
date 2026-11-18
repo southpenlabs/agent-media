@@ -319,7 +319,7 @@ def task_xml(arguments: str, user: str, description: str, signed_out: bool = Fal
     from xml.sax.saxutils import escape
 
     args, u, d = escape(arguments), escape(user), escape(description)
-    trigger = (f"""    <BootTrigger>
+    trigger = ("""    <BootTrigger>
       <Enabled>true</Enabled>
     </BootTrigger>""" if signed_out else f"""    <LogonTrigger>
       <Enabled>true</Enabled>

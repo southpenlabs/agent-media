@@ -45,7 +45,6 @@ from .route import (
     FOCUS_BOOK,
     FOCUS_MUSIC,
     apply_focus,
-    bed_strategy,
     coerce_content_type,
     detect_content_type,
     resolve,
@@ -53,7 +52,7 @@ from .route import (
 from . import library, play_gate
 from . import youtube_addon as _youtube_addon
 from . import settings as _settings
-from .sinks import SinkBook, SinkMusic, SinkSpeech
+from .sinks import SinkBook, SinkSpeech
 from .sinks.book import normalize_uri
 from .sinks.music_router import SinkMusicRouter
 from .state import StateStore

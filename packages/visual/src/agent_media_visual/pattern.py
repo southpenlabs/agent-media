@@ -59,7 +59,7 @@ import math
 import os
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
 from .generate import dark_mode
@@ -317,7 +317,7 @@ def _motif_network(rnd: random.Random, pal: Palette, prog: float) -> List[str]:
                       230 + row * 210 + rnd.uniform(-60, 60)))
     out = []
     for i, (x1, y1) in enumerate(nodes):
-        for j, (x2, y2) in enumerate(nodes[i + 1:], i + 1):
+        for _j, (x2, y2) in enumerate(nodes[i + 1:], i + 1):
             if math.hypot(x2 - x1, y2 - y1) < 400:
                 out.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" '
                            f'y2="{y2:.0f}" stroke="{pal.ink}" stroke-width="2" '

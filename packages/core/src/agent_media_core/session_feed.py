@@ -356,7 +356,6 @@ def title_for(session: str, ts: list[Turn]) -> str:
     named for the session, so there is one place to look and a hit in it is
     proof (`conversation.transcript`).
     """
-    from .conversation import transcript
 
     return _joined(workspace_for(session, ts), _asked(session, ts))
 

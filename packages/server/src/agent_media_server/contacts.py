@@ -912,7 +912,7 @@ def _rebuild_bridges(conn: sqlite3.Connection, recs: list, book: dict) -> None:
     # records): an entry named as a network's person, holding a number or
     # an address of exactly one contact here, says they are that contact.
     uploads: dict[str, dict[str, list]] = {}
-    for kind, sid, card, meta in recs:
+    for kind, _sid, card, meta in recs:
         if kind == "upload":
             c = json.loads(card)
             net = json.loads(meta).get("export") or ""
@@ -3344,7 +3344,7 @@ def seed(dry_run: bool = True, limit: int = 0) -> dict:
     try:
         if conn is not None:
             linked = {c for (c,) in conn.execute("SELECT contact FROM drupal_links")}
-            for cid, name, raw in conn.execute("SELECT id, name, card FROM contacts ORDER BY name"):
+            for cid, _name, raw in conn.execute("SELECT id, name, card FROM contacts ORDER BY name"):
                 c = json.loads(raw)
                 if cid in linked or any(x.get("kind") == "drupal" for x in c.get("sources") or []):
                     held += 1

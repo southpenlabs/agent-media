@@ -77,7 +77,9 @@ _RSYNC_RE = re.compile(r"^\s*[\d,.]+[KMGT]?\s+(\d{1,3})%\s")
 #: What the caller is downloading for, when the writer does not say
 #: (`context`): the radio's prefetch goes through the same phone fetch as a
 #: song put on, and only the caller knows which it is.
-_CONTEXT: contextvars.ContextVar[dict] = contextvars.ContextVar("agent_media_downloads", default={})
+# Never changed in place: context() sets a copy.
+_CONTEXT: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "agent_media_downloads", default={})  # noqa: B039
 
 
 def folder() -> Path:

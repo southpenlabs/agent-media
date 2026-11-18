@@ -1,0 +1,21 @@
+# ruff (MIT, astral-sh/ruff) as a bug finder, not a formatter: CI's "lint"
+# job runs `ruff check` over every package's sources
+# (docs/proposals/2026-11-19-design-principles.md).
+target-version = "py311"
+include = ["packages/*/src/**/*.py"]
+
+[lint]
+# Pyflakes (undefined and unused names), bugbear (likely bugs), and syntax.
+select = ["F", "B", "E9"]
+ignore = [
+    # A closure over a loop variable: every one of the 36 found was called in
+    # the same pass (a wait's predicate, an update applied at once), which is
+    # safe. A deferred one (a thread, a stored callback) is still a bug:
+    # bind the variable as a default argument.
+    "B023",
+    # zip() without strict=: the choice is the caller's, and strict=True
+    # would raise where these zip pairs of unequal lengths on purpose.
+    "B905",
+    # A call in an argument default: the ones here build frozen Targets.
+    "B008",
+]

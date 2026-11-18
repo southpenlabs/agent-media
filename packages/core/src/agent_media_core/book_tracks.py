@@ -493,7 +493,6 @@ def _live_turn(session: str) -> Optional[dict]:
     `at` the ended history row and the manifest turn will carry, so the line
     merges into one row as the turn progresses rather than doubling.
     """
-    import os as _os
     from .state.store import StateStore
 
     np = StateStore().get_now_playing("speech")

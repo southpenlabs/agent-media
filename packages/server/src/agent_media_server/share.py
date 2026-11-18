@@ -17,7 +17,6 @@ def share_from_app(text: str, channel: str, bearer: str) -> tuple[bool, dict]:
     listener's dispatch on a thread): the verdict comes back for the toast
     while the fetching happens behind it.
     """
-    import threading
 
     from agent_media_core import share as sharemod
     from agent_media_core.entrypoints import share_listener

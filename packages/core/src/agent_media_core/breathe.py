@@ -60,7 +60,7 @@ def rounds(pat: tuple, minutes: float) -> int:
 def cue_times(pat: tuple, n_rounds: int, cue_rounds: int) -> list[tuple[float, int]]:
     """(start in seconds after the lead-in, which cue) for the first rounds."""
     out, t = [], 0.0
-    for r in range(min(n_rounds, cue_rounds)):
+    for _ in range(min(n_rounds, cue_rounds)):
         for i, d in enumerate(pat):
             if d > 0:
                 out.append((t, i))

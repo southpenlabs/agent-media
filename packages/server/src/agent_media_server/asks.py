@@ -402,7 +402,7 @@ def normalise(questions: list[dict], answers) -> list[dict]:
             try:
                 i = int(a.get("question_index", 0))
             except (TypeError, ValueError):
-                raise Refused("question_index must be a number")
+                raise Refused("question_index must be a number") from None
             if not 0 <= i < len(questions):
                 raise Refused(f"no such question {i}")
             sel = a.get("selected") or []
@@ -411,7 +411,7 @@ def normalise(questions: list[dict], answers) -> list[dict]:
             try:
                 sel = [int(n) for n in sel]
             except (TypeError, ValueError):
-                raise Refused("selected holds option numbers")
+                raise Refused("selected holds option numbers") from None
             want[i] = {"selected": sel, "other": _norm(str(a.get("other_text") or ""))}
     elif isinstance(answers, dict):
         by_text = {_norm(q["question"]): i for i, q in enumerate(questions)}

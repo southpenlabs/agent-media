@@ -48,7 +48,7 @@ import sys
 import time
 import sysconfig
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 
 # --- Hook wiring -----------------------------------------------------------
@@ -172,7 +172,7 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
         try:
             shutil.copy2(str(path), str(backup))
         except OSError as e:
-            raise SystemExit(f"media-setup: backup to {backup} failed: {e}")
+            raise SystemExit(f"media-setup: backup to {backup} failed: {e}") from e
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(rendered)
     tmp.replace(path)
@@ -241,7 +241,6 @@ def cmd_migrate_env(args: argparse.Namespace) -> int:
               "agent-audio-relay.env)")
         return 0
 
-    any_changed = False
 
     for label, path in paths:
         if path.suffix == ".json" or label == "settings.json":
@@ -263,7 +262,6 @@ def cmd_migrate_env(args: argparse.Namespace) -> int:
                 tmp.write_text(json.dumps(data, indent=2) + "\n")
                 tmp.replace(path)
                 print(f"  {label}: wrote {path} (backup at {backup})")
-            any_changed = True
             continue
 
         # Shell-style env file: simple line-by-line `KEY=VALUE` or
@@ -308,7 +306,6 @@ def cmd_migrate_env(args: argparse.Namespace) -> int:
             tmp.write_text("".join(new_lines))
             tmp.replace(path)
             print(f"  {label}: wrote {path} (backup at {backup})")
-        any_changed = True
 
     if args.dry_run:
         print("\n(dry-run — no files written)")
@@ -1631,7 +1628,6 @@ def cmd_status(args: argparse.Namespace) -> int:
             groups = (data.get("hooks") or {}).get(event) or []
             cmds = [h.get("command") for g in groups for h in (g.get("hooks") or [])]
             print(f"hook {event}: {cmds or '(none)'}")
-    templates = service_templates_dir()
     names = service_template_names()
     backend = _service_backend(None)
     print(f"service backend: {backend}")
@@ -1770,7 +1766,7 @@ def _write_settings(path: Path, settings: dict, *, dry_run: bool) -> None:
         try:
             shutil.copy2(str(path), str(path) + ".bak")
         except OSError as e:
-            raise SystemExit(f"media-setup: backup of {path} failed: {e}")
+            raise SystemExit(f"media-setup: backup of {path} failed: {e}") from e
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(rendered)
     tmp.replace(path)
@@ -2616,7 +2612,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
     print(f"media-setup profile: wiring this machine ({where})"
           + (f", only {only}" if only else ""))
     failed = 0
-    for name, what, kind, fn in PROFILE_ROWS:
+    for name, what, _kind, fn in PROFILE_ROWS:
         if only and name != only:
             continue
         try:

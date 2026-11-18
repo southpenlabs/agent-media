@@ -1422,7 +1422,7 @@ def _contact_edit(h: BaseHTTPRequestHandler, cid: str) -> None:
     except contacts_edit.Conflict as e:
         _json(h, 409, {"ok": False, "error": "changed since you opened it",
                        "conflict": e.fields})
-    except contacts_android.Unreachable as e:
+    except contacts_android.Unreachable:
         _json(h, 503, {"ok": False, "error": "the phone cannot be reached"})
     except contacts_writeback.WriteError:
         _json(h, 502, {"ok": False, "error": "the phone refused the change"})
@@ -3272,7 +3272,6 @@ def _pair(h: BaseHTTPRequestHandler) -> None:
     429 before the code is even looked at. A failure never burns the code —
     see devices.py for why.
     """
-    import socket
 
     ip = h.client_address[0] if h.client_address else ""
     if devices.rate_limited(ip):
@@ -3552,7 +3551,6 @@ def _enrol(h: BaseHTTPRequestHandler) -> None:
     an ID token from a trusted issuer (oidc.py) for an account allowed here
     (MEDIA_OIDC_ALLOW). No credential otherwise; failures count against the
     source address like a wrong pairing code."""
-    import socket
 
     from . import oidc
 
@@ -3851,7 +3849,6 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
     device's (admin, member or guest; absent, an admin, as the desk's
     default); only an admin reaches here, so it can grant no more than it has.
     """
-    import socket
 
     user, err = auth.may_enrol(_bearer(h))
     if not user:

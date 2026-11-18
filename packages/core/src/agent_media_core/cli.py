@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from .render import device as device_voice
@@ -7341,7 +7342,6 @@ def _cmd_music_keys(a) -> int:
 
 
 def cmd_music(a) -> int:
-    from .route import coerce_content_type, detect_content_type
 
     if a.action == "log":
         # Reads the state store only: before any player is looked for.
@@ -7772,7 +7772,7 @@ def _parse_timecode(s: str) -> tuple[float, bool]:
         for p in parts:
             secs = secs * 60 + float(p)
     except ValueError:
-        raise ValueError(f"bad time: {s!r}")
+        raise ValueError(f"bad time: {s!r}") from None
     return sign * secs, relative
 
 
@@ -8612,7 +8612,6 @@ def _runit_service_states(root: "Optional[Path]") -> "list[tuple[str, str]]":
     grading.
     """
     import subprocess
-    from pathlib import Path
     svdir = _sv_dir()
     if svdir is None or root is None:
         return []
@@ -9135,7 +9134,6 @@ def _mic_detect_facts() -> "dict[str, str]":
     if it was typed.
     """
     import time as _time
-    from pathlib import Path
 
     try:
         from .call_guard import (advert_path, last_hold_path, last_hold_source,

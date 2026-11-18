@@ -642,7 +642,7 @@ def command(sock_path: str | Path, *args: Any, timeout: float = 5.0,
                 raise err
             return reply.get("data")
         except _Final as f:
-            raise f.err
+            raise f.err from None
         except (MpvIpcError, OSError) as e:
             last = e
             if attempt + 1 < attempts:

@@ -228,7 +228,6 @@ def _rooms_cached_path(vid: str) -> Optional[str]:
 
 
 def _phone_cached_path(vid: str) -> Optional[str]:
-    host = ssh_host()
     cache = shlex.quote(cache_dir())
     qvid = shlex.quote(vid)
     remote = (f"ls -1 \"$HOME\"/{cache}/{qvid}.* 2>/dev/null | "
@@ -253,7 +252,6 @@ def _rooms_reader(path: str) -> subprocess.Popen:
 
 def _copy_rooms_to_phone(rooms_path: str) -> Optional[str]:
     """Seed the phone cache from rooms cache; return the phone-side path."""
-    host = ssh_host()
     base = rooms_path.rsplit("/", 1)[-1]
     stem = base.rsplit(".", 1)[0]
     cache = shlex.quote(cache_dir())
@@ -292,7 +290,6 @@ def _copy_rooms_to_phone(rooms_path: str) -> Optional[str]:
 
 
 def _phone_title(vid: str) -> str:
-    host = ssh_host()
     remote = f"cat \"$HOME\"/{shlex.quote(cache_dir())}/{shlex.quote(vid)}.title 2>/dev/null"
     try:
         r = subprocess.run(phone_argv(remote),
@@ -376,12 +373,12 @@ class SinkMusicLocal:
         try:
             r = addon.phone_play(uri, replace)
         except subprocess.TimeoutExpired as e:
-            raise ipc.MpvIpcError(f"sink-music-local: phone fetch timed out: {e}")
+            raise ipc.MpvIpcError(f"sink-music-local: phone fetch timed out: {e}") from e
         except OSError as e:
             raise ipc.MpvIpcError(
                 f"sink-music-local: fetch on {host} failed: {e}"
                 if not is_self(host)
-                else f"sink-music-local: local fetch failed: {e}")
+                else f"sink-music-local: local fetch failed: {e}") from e
         if r.returncode != 0:
             raise ipc.MpvIpcError(
                 f"sink-music-local: phone fetch failed ({r.returncode}): "

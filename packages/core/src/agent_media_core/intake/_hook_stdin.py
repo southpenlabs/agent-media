@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from pathlib import Path
 
 from ..types import Event, Priority, Source
 from ._text import strip_markdown

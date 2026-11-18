@@ -89,7 +89,6 @@ def features(y):
 
 
 def blocks(f):
-    import numpy as np
     m = len(f) // BLOCK
     if m == 0:
         return f[:0]

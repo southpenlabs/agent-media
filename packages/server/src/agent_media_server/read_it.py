@@ -254,7 +254,7 @@ def _public(host: str) -> bool:
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
-        raise ReadError(f"could not find {host}", 502)
+        raise ReadError(f"could not find {host}", 502) from None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:        # loopback, private, link-local, the tailnet's 100.64/10
@@ -291,7 +291,7 @@ def _get(url: str, ua: str) -> tuple[str, str, str]:
                         break
                 return url, ctype, bytes(body).decode(r.encoding or "utf-8", errors="replace")
         except httpx.HTTPError as e:
-            raise ReadError(f"could not fetch it ({e.__class__.__name__})", 502)
+            raise ReadError(f"could not fetch it ({e.__class__.__name__})", 502) from e
     raise ReadError("too many redirects", 502)
 
 

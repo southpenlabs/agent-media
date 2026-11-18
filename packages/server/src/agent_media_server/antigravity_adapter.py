@@ -83,7 +83,6 @@ def hook(payload: dict) -> dict:
     stage = sys.argv[1] if len(sys.argv) > 1 else 'pre'
     if stage == 'pre':
         call_obj = payload.get('toolCall') or {}
-        name = str(call_obj.get('name') or '')
         tool, args = tool_input(call_obj)
         if tool != 'AskUserQuestion':
             from . import sessiond

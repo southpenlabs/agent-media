@@ -20,7 +20,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Optional
 
 from agent_media_core.types import Event, Priority, Source
 from agent_media_core.intake import strip_markdown

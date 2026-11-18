@@ -160,7 +160,6 @@ def _run_once(book: SinkBook, state: StateStore) -> None:
     sock = book._sock  # the resolved sink-book.sock path
     last_path, last_pos = _current(sock)
     log.info("attached to book socket %s", sock)
-    last_save = time.time()
     for evt in ipc.event_stream(sock, heartbeat=_SAVE_EVERY_S):
         if _stop:
             _save_pos(state, last_path, last_pos)
@@ -171,7 +170,6 @@ def _run_once(book: SinkBook, state: StateStore) -> None:
             if path:
                 last_path, last_pos = path, pos
             _save_pos(state, last_path, last_pos)
-            last_save = time.time()
             continue
         name = evt.get("event")
         if name in ("end-file", "start-file"):

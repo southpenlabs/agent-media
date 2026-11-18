@@ -19,7 +19,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from . import auth, mailbox, panes, procmem, recaps
 

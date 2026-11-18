@@ -140,12 +140,12 @@ def _days(stamp: dict, start: dt.date, end: dt.date) -> list[dt.date]:
         return [base] if start <= base <= end else []
     # Each repeat is counted from the base, so 31 Jan +1m is 28 Feb, then
     # 31 Mar. Days and weeks skip straight to the range.
-    k = 0
+    first = 0
     if unit in "dw":
         step = n * (7 if unit == "w" else 1)
-        k = max(0, ((start - base).days - length) // step)
+        first = max(0, ((start - base).days - length) // step)
     out = []
-    for k in range(k, k + 5000):
+    for k in range(first, first + 5000):
         day = _add(base, n * k, unit)
         if day > end:
             break

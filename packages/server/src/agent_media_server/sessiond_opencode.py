@@ -480,7 +480,7 @@ class Host:
                                         stderr=subprocess.STDOUT, text=True, bufsize=1,
                                         start_new_session=True)
             except OSError as e:
-                raise Refused(f"could not start opencode ({e})", "spawn_failed")
+                raise Refused(f"could not start opencode ({e})", "spawn_failed") from e
             self.proc, self.stopping, self.shared = proc, False, False
             self.base = f"http://127.0.0.1:{self.port}"
             threading.Thread(target=self._drain, args=(proc,), daemon=True,
@@ -642,7 +642,7 @@ class Host:
         try:
             status, out = self._call(method, path, body, directory=directory, timeout=timeout)
         except OSError as e:
-            raise Refused(f"opencode did not answer ({e})", "not_live")
+            raise Refused(f"opencode did not answer ({e})", "not_live") from e
         if status >= 400:
             msg = out.get("message") or out.get("error") if isinstance(out, dict) else out
             raise Refused(f"opencode refused it ({status}: {str(msg)[:200]})",

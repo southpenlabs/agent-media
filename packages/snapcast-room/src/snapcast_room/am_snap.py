@@ -94,7 +94,7 @@ def _rpc(server_url: str, method: str, params: dict[str, Any] | None = None) -> 
         with urllib.request.urlopen(req, timeout=5) as r:
             resp = json.loads(r.read().decode())
     except urllib.error.URLError as e:
-        raise SystemExit(f"am-snap: {server_url} unreachable: {e}")
+        raise SystemExit(f"am-snap: {server_url} unreachable: {e}") from e
     if "error" in resp:
         raise SystemExit(f"am-snap: rpc error: {resp['error']}")
     return resp.get("result")
@@ -128,7 +128,7 @@ def _find_client_anywhere(cfg: dict, room: str) -> tuple[str, str, dict]:
     else:
         target_server = None
         target_name = room
-    for server_name, server_url in cfg["servers"].items():
+    for _server_name, server_url in cfg["servers"].items():
         if target_server is not None and target_server != server_url:
             continue
         try:
@@ -179,7 +179,7 @@ def cmd_rooms(_args, cfg: dict) -> int:
     print(f"{'ROOM':<14} {'CHANNEL':<14} {'VOL':>3}  {'STATE'}")
     seen: set[str] = set()
     # First, anything aliased in cfg.rooms
-    for room_name, alias in cfg.get("rooms", {}).items():
+    for room_name, _alias in cfg.get("rooms", {}).items():
         try:
             surl, cid, c = _find_client_anywhere(cfg, room_name)
         except SystemExit:

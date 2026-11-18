@@ -1406,7 +1406,7 @@ def quota_note(cut: dict, subagents: str = "") -> str:
                 "Pick up where you left off"
                 + (f" (the last message in was: \u201c{last}\u201d)" if last else "") + ".")
     else:
-        note = (tag + (f"A background agent of yours was" if n == 1 else
+        note = (tag + ("A background agent of yours was" if n == 1 else
                        f"{n} background agents of yours were")
                 + f" stopped by the usage limit at {at}; it has reset.")
     if agents_cut:
@@ -2562,7 +2562,7 @@ class Supervisor:
                                     stderr=subprocess.PIPE, text=True, bufsize=1,
                                     start_new_session=True)
         except OSError as e:
-            raise Refused(f"could not start {os.path.basename(exe)} ({e})", "spawn_failed")
+            raise Refused(f"could not start {os.path.basename(exe)} ({e})", "spawn_failed") from e
         s.proc = proc
         s.closing = s.parking = False
         s.exit_code = None
@@ -2660,7 +2660,7 @@ class Supervisor:
                 proc.stdin.write(json.dumps(obj) + "\n")
                 proc.stdin.flush()
             except (BrokenPipeError, OSError, ValueError) as e:
-                raise Refused(f"session {s.id[:8]} stopped taking input ({e})", "not_live")
+                raise Refused(f"session {s.id[:8]} stopped taking input ({e})", "not_live") from e
 
     def _close_stdin(self, s: Session) -> None:
         proc = s.proc
@@ -4101,7 +4101,7 @@ class Supervisor:
             try:
                 srv.call("POST", f"/api/session/{session}/move", {"directory": cwd})
             except opencode_api.ApiError as e:
-                raise Refused(f"could not move it: {e}", "refused")
+                raise Refused(f"could not move it: {e}", "refused") from e
         else:
             exe = self.oc._program()
             why = opencode_move.move(session, cwd, program=exe, env=self._base_env(exe))

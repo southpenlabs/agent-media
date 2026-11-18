@@ -39,7 +39,6 @@ last reply is remembered here (`_CHOSEN`) until a reply carries it.
 from __future__ import annotations
 
 import logging
-import os
 import re
 import threading
 import time

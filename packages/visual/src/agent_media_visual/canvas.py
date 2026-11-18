@@ -51,7 +51,7 @@ import sys
 import threading
 import time
 from collections import deque
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs

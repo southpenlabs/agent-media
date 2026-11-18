@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Callable, Dict, Protocol, runtime_checkable
+from typing import Dict, Protocol, runtime_checkable
 
 from . import entitlements
 

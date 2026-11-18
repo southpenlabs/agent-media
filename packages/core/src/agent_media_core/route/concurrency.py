@@ -21,7 +21,7 @@ from ..sinks.book import SinkBook
 from ..sinks.music import SinkMusic
 from ..state import StateStore
 from ..types import ContentType, Target
-from .policy import InterruptionStrategy, policy_for
+from .policy import policy_for
 
 
 FOCUS_BOOK = "book"

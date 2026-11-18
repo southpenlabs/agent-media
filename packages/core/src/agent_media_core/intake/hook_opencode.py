@@ -230,7 +230,6 @@ def note(restart_only: bool = False) -> int:
         if not session:
             return 0
         _v2_place(session)
-        from .. import harnesses
         from . import context
 
         # A subagent's prompt is its parent's words, not the person's: it

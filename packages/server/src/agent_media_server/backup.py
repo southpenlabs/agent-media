@@ -1454,7 +1454,7 @@ def main(argv: list[str] | None = None) -> int:
                           f"{'written' if kept.get('ok') else 'FAILED'} to {kept.get('repo')}"
                           + (f" ({kept['error']})" if kept.get("error") else ""))
                 elif repo():
-                    print(f"  encrypted history: not written")
+                    print("  encrypted history: not written")
                 for w in res["warnings"]:
                     print(f"  ! {w}")
                 for g in res.get("pruned") or []:
@@ -1591,7 +1591,7 @@ def main(argv: list[str] | None = None) -> int:
                     "NO — snapshots are plain files "
                     f"({REPO_ENV} unset; `media backup init`)"))
                 sch = info["schedule"]
-                print(f"schedule:    " + (
+                print("schedule:    " + (
                     f"{sch['unit']} {sch['active'] or '?'}"
                     + (f", next {sch['next']}" if sch.get("next") else "")
                     if sch["installed"] else

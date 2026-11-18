@@ -145,7 +145,7 @@ def _new_turns(before_last: str | None, after: list[str]) -> list[str]:
     return after[-1:] if after else []   # scrolled off the window — best effort
 
 
-def _ensure_muted(pane: str, _cache: set = set()) -> None:
+def _ensure_muted(pane: str, _cache: set = set()) -> None:  # noqa: B006 — the default is the memo, kept across calls
     if _env("MEDIA_COMPLETIONS_MUTE", "1") != "1" or pane in _cache:
         return
     # "session:<id>": the conversation itself is muted (its speech level

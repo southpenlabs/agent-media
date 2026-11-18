@@ -48,7 +48,6 @@ import sys
 import threading
 import time
 import uuid
-from pathlib import Path
 
 from . import auth, panes, sessions
 

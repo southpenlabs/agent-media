@@ -11,7 +11,6 @@ import logging
 import os
 import re
 import socket
-import subprocess
 from contextlib import contextmanager
 from typing import Iterator, List, Optional
 

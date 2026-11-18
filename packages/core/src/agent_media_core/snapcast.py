@@ -69,7 +69,7 @@ def _rpc(method: str, params: Optional[dict] = None,
     try:
         s = socket.create_connection((host, port), timeout)
     except OSError as e:
-        raise SnapcastError(f"connect {host}:{port}: {e}")
+        raise SnapcastError(f"connect {host}:{port}: {e}") from e
     try:
         s.settimeout(timeout)
         s.sendall((json.dumps(req) + "\r\n").encode())
@@ -87,7 +87,7 @@ def _rpc(method: str, params: Optional[dict] = None,
             raise SnapcastError(f"{method}: {msg['error']}")
         return msg.get("result")
     except (OSError, ValueError) as e:
-        raise SnapcastError(f"{method}: {e}")
+        raise SnapcastError(f"{method}: {e}") from e
     finally:
         s.close()
 

@@ -533,7 +533,7 @@ def sync(only: str = "") -> dict:
         _record(a["name"], rc == 0, "" if rc == 0 else (err or f"mbsync exited {rc}"))
         results[a["name"]] = "ok" if rc == 0 else (err or f"mbsync exited {rc}")
     indexed = False
-    for attempt in range(3):
+    for _attempt in range(3):
         if timeline._notmuch(["new", "--quiet"], SYNC_TIMEOUT_S) is not None:
             indexed = True
             break

@@ -256,7 +256,6 @@ def _addr_parts(batch: list) -> dict[str, str]:
     even alone is left out of the answer (the caller counts it unreadable),
     so one bad MMS never stops the pass. Unreachable only when nothing at
     all came back for the batch."""
-    from . import contacts_android
 
     nonce = _nonce()
     ids = [str(m) for m, _, _ in batch]
