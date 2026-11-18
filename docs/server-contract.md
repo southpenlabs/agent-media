@@ -9029,8 +9029,10 @@ contacts" / "Link to someone" where Rename was; sasonica-app mail #1018).
   (`tel:+61…`). The bridges put a number there only with
   `bridge.phone_numbers_in_profile: true` and a homeserver that keeps extra
   profile fields, so without those a Google Messages or Signal room has
-  none. Profiles are read in the background and kept a day (a failure, an
-  hour): a row never waits on the homeserver, and the number shows from the
+  none (red5's Google Messages bridge has both on since 18 Nov 2026; a
+  person's number appears once the bridge next updates them). Profiles are
+  read in the background and kept a day (one with no number, or a failure,
+  an hour): a row never waits on the homeserver, and the number shows from the
   next list. Never David's own (`MEDIA_CONTACTS_SELF`); absent in a group
   or where two numbers are known. The app's call button is `tel:<phone>`.
 - `"link": true` — the room can be linked: the owner's book, a 1:1 room,

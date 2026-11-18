@@ -91,6 +91,15 @@ def test_the_number_from_the_ghosts_profile(rooms, monkeypatch):
     assert asked.count("/profile/%40gmessages_1.46%3Aryer.org") == 1
 
 
+def test_a_profile_with_no_number_yet_is_asked_again_within_the_hour(rooms, monkeypatch):
+    monkeypatch.setattr(matrix, "_get", lambda *a, **k: {"displayname": "Pat Doe"})
+    _room("!g:ryer.org", {"@gmessages_1.46:ryer.org": "Pat Doe"})
+    _row("!g:ryer.org")
+    _wait_profiles()
+    when, nums = room_contact._PROFILES["@gmessages_1.46:ryer.org"]
+    assert nums == frozenset() and 3000 < when - time.time() <= 3600
+
+
 def test_a_profile_that_cannot_be_read_waits_an_hour(rooms, monkeypatch):
     def down(*a, **k):
         raise OSError("down")

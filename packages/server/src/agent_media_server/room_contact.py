@@ -13,8 +13,8 @@ matches the room, "Add to contacts" / "Link to someone" in place of Rename.
   number there with `bridge.phone_numbers_in_profile: true` and a
   homeserver that keeps extra profile fields; without them a Google
   Messages or Signal room has no number here. Profiles are read in the
-  background and kept (a day; a failure an hour), so a row never waits on
-  the homeserver. Absent in a group or where no one number is known.
+  background and kept (a day; one with no number or a failure, an hour),
+  so a row never waits on the homeserver. Absent in a group or where no one number is known.
 * **`link: true`** on a row: the owner's book, a 1:1 room, no contact
   matched — the room can be linked.
 * **`POST /rooms/<session>/contact {"id"}`**: this room's other member is
@@ -109,7 +109,10 @@ def _work() -> None:
         with _LOCK:
             _QUEUED.discard(uid)
             if ok:
-                _PROFILES[uid] = (time.time() + PROFILE_TTL_S, nums)
+                # None yet is asked again within the hour: the bridge fills a
+                # ghost's profile when it next updates that person.
+                _PROFILES[uid] = (time.time() + (PROFILE_TTL_S if nums else PROFILE_RETRY_S),
+                                  nums)
             else:
                 old = _PROFILES.get(uid)
                 _PROFILES[uid] = (time.time() + PROFILE_RETRY_S, old[1] if old else frozenset())
