@@ -12828,6 +12828,7 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
                 "backup": [{"id", "available": true}…],
                 "networks": [{"id", "name"}…]},
   "updated": <unix s> | null, "by": "<device id>" | null,
+  "matrix"?: {"user_id": "@you:example.org" | null},  // GET, an admin's device only
   "purged"?: {"messages": n, "chats": n}}       // POST only, when it moved the dial off full
 ```
 
@@ -12861,6 +12862,14 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   Nothing is written on a refusal.
 - Stored in `<state_dir>/local-settings.json`, 0600, as only what was
   chosen (plus `updated`, `by`): a field never chosen follows the default.
+- **`matrix`** (18 Nov 2026, the encrypted copy's sign-in): on `GET`, to an
+  admin's device only, the Matrix account the phone signs into as a device
+  of the user's own (design step 6): `MEDIA_LOCAL_MATRIX_USER`, else the
+  owner's (`whoami` with `MATRIX_OWNER_TOKEN`, kept an hour), else null.
+  Only the id: the app asks the user for the password and the account's
+  recovery key and passes them to the companion (AIDL v6 `matrixSignIn`,
+  `matrixVerify`), which finds the homeserver from the id's server and
+  signs in itself; neither reaches this server.
 - `/features` `local_settings: true`.
 
 #### Full copy: the Local chats' messages, readable here (built 18 Nov 2026)

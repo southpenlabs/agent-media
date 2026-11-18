@@ -343,6 +343,30 @@ repo). Nothing touched red5's homeserver or David's account.
   both in step 6's day on p8a, or earlier against Element Web on the test
   server.
 
+### Step 2, signing the phone in — built (18 Nov 2026)
+
+tuwunel asks for the password before it issues a login token (user-
+interactive auth on `/login/get_token`), and the server holds no password,
+so the server cannot sign the phone in by itself. David chose **the password
+once, on the phone** (over an appservice on the homeserver able to act as
+him): it works with any homeserver and adds nothing powerful to the server.
+
+- **Companion** (sasonica-bridges 9d9b0b7, `internal/e2ee`, docs/api.md
+  "Matrix device", AIDL v6 `matrixStatus`, `matrixSignIn`, `matrixVerify`,
+  `matrixSignOut`): password sign-in (the homeserver from the id's
+  `.well-known`; the password used once), a crypto store of its own
+  (`matrix-crypto.db`, mautrix-go/goolm), verification with the recovery
+  key, the key backup's public key kept for step 3, sign-out removing the
+  device from the account. Neither file is in a backup bundle: a restore on
+  a new install signs in again as a new device and reads history from the
+  key backup. Tested against a real tuwunel (`SASONICA_TEST_TUWUNEL`).
+- **Server** (§6.61 Settings `matrix`): `GET /local/settings` tells an
+  admin's device the account to sign in as (the owner's `whoami`, or
+  `MEDIA_LOCAL_MATRIX_USER`), so the app can fill it in.
+- **App** (sasonica-app, Settings → Bridges, with the dial's Encrypted
+  copy): the account filled in, a password and a recovery key box, passed
+  to the companion and never kept; the status and Sign out. Not built.
+
 ### What's risky
 
 - **Our device's keys.** A crypto store lost or a session not backed up

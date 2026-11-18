@@ -112,6 +112,47 @@ def _held() -> dict:
     return got if isinstance(got, dict) else {}
 
 
+#: The owner's Matrix id, read once per this long (`matrix_user`).
+MATRIX_USER_TTL_S = 3600.0
+_MATRIX_USER: list = [None, 0.0]
+
+
+def matrix_user() -> str | None:
+    """The Matrix account the phone signs into for the encrypted copy (step
+    6: the user's own account, the companion a device of it): the owner's,
+    from `MEDIA_LOCAL_MATRIX_USER`, else asked of the homeserver with the
+    owner's token (`whoami`), kept an hour. None when this server has no
+    owner's Matrix account. Only the id: the phone finds the homeserver from
+    the id's server (.well-known) and signs in with the password itself."""
+    given = (os.environ.get("MEDIA_LOCAL_MATRIX_USER") or "").strip()
+    if given:
+        return given
+    if _MATRIX_USER[0] is not None and time.monotonic() - _MATRIX_USER[1] < MATRIX_USER_TTL_S:
+        return _MATRIX_USER[0] or None
+    from . import matrix
+
+    token = matrix.owner_token()
+    if not token:
+        return None
+    import json
+    import urllib.request
+
+    homeserver = (os.environ.get("MATRIX_HOMESERVER") or "").rstrip("/")
+    if not homeserver:
+        from agent_media_core import matrix as core_matrix
+
+        homeserver = core_matrix.DEFAULT_HOMESERVER.rstrip("/")
+    try:
+        req = urllib.request.Request(f"{homeserver}/_matrix/client/v3/account/whoami",
+                                     headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            user = str(json.loads(resp.read()).get("user_id") or "")
+    except Exception:  # noqa: BLE001 - the settings answer without it
+        return None
+    _MATRIX_USER[0], _MATRIX_USER[1] = user, time.monotonic()
+    return user or None
+
+
 def view() -> dict:
     """The settings as answered: each chosen value or its default."""
     held, dflt = _held(), defaults()
@@ -121,6 +162,15 @@ def view() -> dict:
     out.update({"defaults": dflt, "hosted": hosted(), "choosable": _choosable(),
                 "updated": held.get("updated"), "by": held.get("by")})
     return out
+
+
+def _matrix_view(bearer: str) -> dict:
+    """`matrix` in GET /local/settings, for the owner's devices only: the
+    account the encrypted copy signs the phone into."""
+    user, _err = auth.may_admin(bearer)
+    if not user:
+        return {}
+    return {"matrix": {"user_id": matrix_user()}}
 
 
 def _may(bearer: str) -> tuple[bool, dict]:
@@ -136,7 +186,7 @@ def _may(bearer: str) -> tuple[bool, dict]:
 def get(bearer: str) -> tuple[bool, dict]:
     """`GET /local/settings`: paired, not a guest."""
     ok, err = _may(bearer)
-    return (True, view()) if ok else (False, err)
+    return (True, {**view(), **_matrix_view(bearer)}) if ok else (False, err)
 
 
 def _bad(error: str, **extra) -> tuple[bool, dict]:

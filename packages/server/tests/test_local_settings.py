@@ -110,3 +110,52 @@ def test_guests_and_nobody_are_refused(server):
     assert res.status == 401
     res, _ = call(server, "POST", "/local/settings", {"backup": "off"})
     assert res.status == 401
+
+
+def test_matrix_account_for_the_encrypted_copy(server, monkeypatch):
+    """The owner's devices are told which Matrix account the phone signs
+    into for the encrypted copy (step 6); a member's are not."""
+    import http.server
+    import threading
+
+    seen = []
+
+    class Whoami(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            seen.append((self.path, self.headers.get("Authorization")))
+            body = b'{"user_id": "@owner:example.org", "device_id": "X"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    hs = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Whoami)
+    threading.Thread(target=hs.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(local_settings, "_MATRIX_USER", [None, 0.0])
+        monkeypatch.setenv("MATRIX_HOMESERVER", f"http://127.0.0.1:{hs.server_port}")
+        monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner-token")
+        owner, member = _paired(server), _paired(server, role="member", name="Tablet")
+        st, got = get(server, owner["token"])
+        assert st == 200 and got["matrix"] == {"user_id": "@owner:example.org"}
+        assert seen == [("/_matrix/client/v3/account/whoami", "Bearer owner-token")]
+        get(server, owner["token"])
+        assert len(seen) == 1                       # kept, not asked again
+        st, got = get(server, member["token"])
+        assert st == 200 and "matrix" not in got
+        monkeypatch.setenv("MEDIA_LOCAL_MATRIX_USER", "@chosen:example.org")
+        assert get(server, owner["token"])[1]["matrix"] == {"user_id": "@chosen:example.org"}
+    finally:
+        hs.shutdown()
+
+
+def test_matrix_account_unknown_without_an_owner_token(server, monkeypatch):
+    monkeypatch.setattr(local_settings, "_MATRIX_USER", [None, 0.0])
+    monkeypatch.delenv("MATRIX_OWNER_TOKEN", raising=False)
+    monkeypatch.delenv("MEDIA_LOCAL_MATRIX_USER", raising=False)
+    owner = _paired(server)
+    assert get(server, owner["token"])[1]["matrix"] == {"user_id": None}
