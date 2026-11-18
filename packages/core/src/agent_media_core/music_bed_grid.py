@@ -36,7 +36,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from .music_bed_records import Measure
 
 log = logging.getLogger(__name__)
 
@@ -92,12 +95,12 @@ def analyse(path: Path, py: Optional[str] = None) -> dict:
         return {}
 
 
-def needs(rec: Optional[dict]) -> bool:
+def needs(rec: Optional[Measure]) -> bool:
     """Whether a record (a track's features, an original's record) waits for this measure."""
     return (rec or {}).get("grid_v") != VERSION
 
 
-def keep(rec: dict, got: dict) -> None:
+def keep(rec: Measure, got: dict[str, Any]) -> None:
     """The key and grid of an analysis onto a record, marked with the version
     (a failed file too, so it is not measured again every pass)."""
     rec["key"] = got.get("key") if isinstance(got.get("key"), dict) else None
@@ -105,12 +108,12 @@ def keep(rec: dict, got: dict) -> None:
     rec["grid_v"] = VERSION
 
 
-def due(entries: Iterable[dict]) -> bool:
+def due(entries: Iterable[Any]) -> bool:
     """A bed track waits to be measured, and there is a Python to measure it with."""
     return any(needs(e.get("features")) for e in entries) and python() is not None
 
 
-def backfill(entries: list[dict], path_of: Callable[[dict], Path],
+def backfill(entries: Sequence[Any], path_of: Callable[[Any], Path],
              limit: Optional[int] = None) -> int:
     """Up to `limit` (per_pass) bed tracks measured into their ``features``;
     how many. A track whose file is gone is left for when it is back."""
@@ -136,12 +139,13 @@ def backfill(entries: list[dict], path_of: Callable[[dict], Path],
     return n
 
 
-def describe(rec: Optional[dict]) -> str:
+def describe(rec: Optional[Measure]) -> str:
     """"A minor (8A) · 92.0 BPM", or "" before it is measured."""
     rec = rec or {}
     if needs(rec):
         return ""
-    k, b = rec.get("key") or {}, rec.get("beats") or {}
+    k: Mapping[str, Any] = rec.get("key") or {}
+    b: Mapping[str, Any] = rec.get("beats") or {}
     parts = []
     if k.get("name"):
         parts.append(f"{k['name']} ({k.get('camelot', '?')})")

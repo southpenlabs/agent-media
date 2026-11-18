@@ -124,7 +124,10 @@ import unicodedata
 import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Optional, Sequence, cast
+
+if TYPE_CHECKING:
+    from .music_bed_records import BedTrack, Favourite, FavouritesIndex, TrackFeatures
 
 from .music_bed_tempo import bpm_of  # noqa: F401 — kept here for its callers
 
@@ -344,20 +347,20 @@ def _work_dir() -> Path:
     return state_dir() / "music-bed-favourites"
 
 
-def load() -> dict:
+def load() -> FavouritesIndex:
     try:
         data = json.loads(_index_path().read_text())
         if isinstance(data, dict):
             for k, v in (("favourites", []), ("tracks", []), ("state", {}),
                          ("nights", {}), ("lookups", {})):
                 data.setdefault(k, v)
-            return data
+            return cast("FavouritesIndex", data)
     except (OSError, ValueError):
         pass
     return {"favourites": [], "tracks": [], "state": {}, "nights": {}, "lookups": {}}
 
 
-def save(data: dict) -> None:
+def save(data: FavouritesIndex) -> None:
     p = _index_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f".{p.name}.{os.getpid()}")
@@ -365,11 +368,11 @@ def save(data: dict) -> None:
     os.replace(tmp, p)
 
 
-def _file(entry: dict) -> Path:
+def _file(entry: BedTrack) -> Path:
     return _dir() / entry["file"]
 
 
-def tracks(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
+def tracks(style: Optional[str] = None, data: Optional[FavouritesIndex] = None) -> list[BedTrack]:
     """The ready tracks (of `style`: official, separated; None or auto for
     both) whose files are there, never a disliked one."""
     data = load() if data is None else data
@@ -388,12 +391,12 @@ def tracks(style: Optional[str] = None, data: Optional[dict] = None) -> list[dic
     return out
 
 
-def counts(data: Optional[dict] = None) -> dict:
+def counts(data: Optional[FavouritesIndex] = None) -> dict:
     data = load() if data is None else data
     return {s: len(tracks(s, data)) for s in STYLES}
 
 
-def playable(style: Optional[str] = None, data: Optional[dict] = None) -> list[dict]:
+def playable(style: Optional[str] = None, data: Optional[FavouritesIndex] = None) -> list[BedTrack]:
     """The ready tracks (of `style`) the bed may play: the slow ones while
     slow is on (music_bed_tempo.is_slow), a well-known tune allowed to be
     slowish (slow_scale), and every one he suggested — he chose it for
@@ -421,7 +424,7 @@ def slowish_scale() -> float:
     return max(1.0, _num_env("MEDIA_MUSIC_BED_FAVOURITES_SLOWISH", DEFAULT_SLOWISH))
 
 
-def slowish(features: Optional[dict], scale: float = 1.0) -> bool:
+def slowish(features: Optional[Mapping[str, Any]], scale: float = 1.0) -> bool:
     """Slow enough for a favourite: slow by the rule (is_slow at `scale`),
     or slow at slowish_scale times it and quiet (SLOWISH_MAX_ENERGY)."""
     from .music_bed_tempo import is_slow
@@ -434,7 +437,7 @@ def slowish(features: Optional[dict], scale: float = 1.0) -> bool:
     return isinstance(energy, (int, float)) and energy <= SLOWISH_MAX_ENERGY
 
 
-def upkeep_due(data: Optional[dict] = None) -> bool:
+def upkeep_due(data: Optional[FavouritesIndex] = None) -> bool:
     """Whether a ready track waits to be measured or re-levelled."""
     from .music_bed_library import DEFAULT_LUFS, target_lufs
     from .music_bed_tempo import needs_measure
@@ -462,7 +465,7 @@ def upkeep() -> int:
     return n
 
 
-def _cache_bytes(data: dict) -> int:
+def _cache_bytes(data: FavouritesIndex) -> int:
     total = 0
     for e in tracks(None, data):
         try:
@@ -472,11 +475,11 @@ def _cache_bytes(data: dict) -> int:
     return total
 
 
-def cache_full(data: Optional[dict] = None) -> bool:
+def cache_full(data: Optional[FavouritesIndex] = None) -> bool:
     return _cache_bytes(load() if data is None else data) >= max_bytes()
 
 
-def credit(entry: dict) -> dict:
+def credit(entry: BedTrack) -> dict:
     """What the app shows: "Instrumental of <title>" by the artist, the
     method where a library track has its licence."""
     vid = entry.get("original_id") or ""
@@ -497,7 +500,7 @@ def credit(entry: dict) -> dict:
             "made": entry.get("made") or ""}
 
 
-def features_fit(entry: dict, axes: Optional[dict], late: bool = False) -> float:
+def features_fit(entry: BedTrack, axes: Optional[dict], late: bool = False) -> float:
     """How well a track's tempo and energy suit astrotunes' reading: a
     weight, higher is nearer; 1 for a track never measured or no reading.
     Late at night the wanted tempo and energy are held at 0.4 or under."""
@@ -558,7 +561,7 @@ def _mark_played(key: Optional[str]) -> None:
         pass
 
 
-def rested(have: list[dict]) -> list[dict]:
+def rested(have: list[BedTrack]) -> list[BedTrack]:
     """`have` without the last rest_count of them played, so a favourite
     does not come round again for a few readings."""
     n = rest_count(len(have))
@@ -591,7 +594,7 @@ def track_for(style: str = "auto", axes: Optional[dict] = None,
         from . import music_rotation
         turned = music_rotation.load()
         weights = [features_fit(e, axes, late) * pick_weight(e.get("key"), rated, mine)
-                   * music_rotation.weight(e.get("song_key") or e.get("original_id") or e.get("id") or "", turned)
+                   * music_rotation.weight(e.get("song_key") or e.get("original_id") or "", turned)
                    for e in have]
         if topic and len(have) > 1:
             i = topic_choice(have, topic)
@@ -670,7 +673,7 @@ def clean_original(artist: str, title: str) -> tuple[str, str]:
     return artist, title
 
 
-def is_instrumental_of(orig: dict, cand: dict, tol: Optional[float] = None) -> bool:
+def is_instrumental_of(orig: Mapping[str, Any], cand: dict, tol: Optional[float] = None) -> bool:
     """Whether search result `cand` ({title, artist, dur}) is confidently an
     official instrumental of `orig` ({title, artist, dur}): marked
     Instrumental, Karaoke or Backing track, never a cover or remix, the same
@@ -772,7 +775,8 @@ def _q(s: str) -> str:
 
 def _songs(raw: str) -> list[dict]:
     """Mopidy's listing as `{id, title, artist, dur}` for YouTube videos."""
-    rows, cur = [], None
+    rows: list[dict[str, Any]] = []
+    cur: Optional[dict[str, Any]] = None
     for line in raw.splitlines():
         k, _, v = line.partition(": ")
         if k == "file":
@@ -811,7 +815,7 @@ def search(query: str) -> list[dict]:
     return _songs(_mpd(f'search any "{_q(query)}"')[0])
 
 
-def lookup(vid: str, data: Optional[dict] = None) -> Optional[dict]:
+def lookup(vid: str, data: Optional[FavouritesIndex] = None) -> Optional[dict]:
     """A video's `{id, artist, title, dur}`, cleaned (clean_original), from
     `data`'s lookups or Mopidy."""
     if data is not None and vid in data["lookups"]:
@@ -918,15 +922,15 @@ def _from_listenbrainz(user: str) -> list[dict]:
     return out
 
 
-def gather(data: dict, now: Optional[float] = None) -> list[dict]:
+def gather(data: FavouritesIndex, now: Optional[float] = None) -> list[Favourite]:
     """His favourites, best first, named and with a video and its length:
     `[{key, artist, title, id, dur, score, from}]`. Kept in `data`."""
     now = time.time() if now is None else now
-    merged: dict[str, dict] = {}
+    merged: dict[str, Favourite] = {}
 
     gone = excluded()
 
-    def add(song: dict, score: float, where: str) -> None:
+    def add(song: Optional[Mapping[str, Any]], score: float, where: str) -> None:
         if not song or not song.get("title") or not song.get("artist"):
             return
         if not (MIN_TRACK_S <= int(song.get("dur") or 0) <= MAX_TRACK_S):
@@ -941,14 +945,16 @@ def gather(data: dict, now: Optional[float] = None) -> list[dict]:
                                "from": []}
             if song.get("song_key"):
                 # A song of a mix: just its chapter of the mix's video.
-                cur.update(start=song["start"], end=song["end"], song_key=song["song_key"])
+                cur["start"], cur["end"] = song["start"], song["end"]
+                cur["song_key"] = song["song_key"]
         cur["score"] += score
         if where not in cur["from"]:
             cur["from"].append(where)
 
     store = _from_store()
-    ranked = sorted(store.items(), key=lambda kv: -(kv[1]["likes"] * LIKE_POINTS + kv[1]["plays"]))
-    for vid, n in ranked[: max_favourites() * 3]:
+    by_count = sorted(store.items(), key=lambda kv: -(kv[1]["likes"] * LIKE_POINTS + kv[1]["plays"]))
+    song: Optional[Mapping[str, Any]]
+    for vid, n in by_count[: max_favourites() * 3]:
         song = lookup(vid, data)
         if n["likes"]:
             add(song, n["likes"] * LIKE_POINTS, "liked")
@@ -1069,7 +1075,7 @@ def suggested_key(vid: str) -> Optional[str]:
     return next((k for k, s in suggested().items() if s.get("id") == vid), None)
 
 
-def _resolve(what: str, data: dict) -> Optional[dict]:
+def _resolve(what: str, data: FavouritesIndex) -> Optional[dict]:
     """A song `{id, artist, title, dur}` for a yt: address, a YouTube link
     or video id, else "artist title" searched for (the first YouTube
     result, cleaned)."""
@@ -1109,7 +1115,7 @@ def suggest(what: str, now: Optional[float] = None) -> dict:
         gone.pop(key, None)
         gone.pop(f"id:{song['id']}", None)
         _write_json(_excluded_path(), gone)
-    fav = {"key": key, "artist": song["artist"], "title": song["title"], "id": song["id"],
+    fav: Favourite = {"key": key, "artist": song["artist"], "title": song["title"], "id": song["id"],
            "dur": int(song.get("dur") or 0), "score": SUGGEST_POINTS, "from": ["suggested"]}
     data["favourites"] = [fav] + [f for f in data["favourites"] if f.get("key") != key]
     # Looked for at the next pass, not in six hours; and tried again even
@@ -1166,7 +1172,7 @@ def renown_on() -> bool:
     return not _off("MEDIA_MUSIC_BED_FAVOURITES_RENOWN")
 
 
-def data_renown(data: Optional[dict] = None) -> dict:
+def data_renown(data: Optional[FavouritesIndex] = None) -> dict:
     return dict((load() if data is None else data).get("renown") or {})
 
 
@@ -1202,7 +1208,7 @@ def topic_timeout() -> float:
     return max(0.5, _num_env("MEDIA_MUSIC_BED_TOPIC_S", 2.5))
 
 
-def topic_choice(have: list[dict], text: str) -> Optional[int]:
+def topic_choice(have: list[BedTrack], text: str) -> Optional[int]:
     """The index in `have` of the track a fast model says suits `text`,
     or None (no answer in time, none fits, or anything failed)."""
     try:
@@ -1244,7 +1250,7 @@ def pick_weight(key: Optional[str], rated: dict, mine: dict) -> float:
     return 0.25 + 2.0 * (max(0.0, min(10.0, float(r))) / 10.0) ** 2
 
 
-def _rate(songs: list[dict]) -> dict:
+def _rate(songs: Sequence[Mapping[str, Any]]) -> dict:
     """`{index: score}` from a fast model for `songs` (1-based), {} when
     none answered or the answer could not be read."""
     from .intake import fast
@@ -1269,7 +1275,7 @@ def _rate(songs: list[dict]) -> dict:
     return out
 
 
-def rate_renown(data: dict, favs: list[dict]) -> int:
+def rate_renown(data: FavouritesIndex, favs: list[Favourite]) -> int:
     """Rate the unrated among `favs` (one ask, at most RENOWN_BATCH), kept
     in `data["renown"]` by key. How many were rated. Never raises."""
     if not renown_on():
@@ -1313,11 +1319,14 @@ def excluded() -> dict:
         return {}
 
 
-def _song(data: dict, key: str) -> Optional[dict]:
+def _song(data: FavouritesIndex, key: str) -> Optional[Favourite | BedTrack]:
     """A favourite by key: its ready track, else its entry in the list."""
-    for e in list(data["tracks"]) + list(data["favourites"]):
-        if e.get("key") == key:
-            return e
+    for t in data["tracks"]:
+        if t.get("key") == key:
+            return t
+    for f in data["favourites"]:
+        if f.get("key") == key:
+            return f
     return None
 
 
@@ -1337,7 +1346,8 @@ def verdict(key: str, which: str, now: Optional[float] = None) -> dict:
     if which not in VERDICTS:
         raise ValueError("verdict must be like or dislike")
     data = load()
-    song = _song(data, key) if isinstance(key, str) and key else None
+    # Either shape: a ready track (original_*) or a listed favourite (id, start, end).
+    song: Optional[Mapping[str, Any]] = _song(data, key) if isinstance(key, str) and key else None
     if song is None:
         raise ValueError(f"no favourite {key!r}")
     vid = song.get("original_id") or song.get("id") or ""
@@ -1454,11 +1464,11 @@ def banned(vid: str, gone: Optional[dict] = None) -> bool:
     return bool(vid) and f"id:{vid}" in (excluded() if gone is None else gone)
 
 
-def _has_track(data: dict, key: str) -> bool:
+def _has_track(data: FavouritesIndex, key: str) -> bool:
     return any(e.get("key") == key for e in tracks(None, data))
 
 
-def _state(data: dict, key: str) -> dict:
+def _state(data: FavouritesIndex, key: str) -> dict:
     return data["state"].setdefault(key, {})
 
 
@@ -1474,16 +1484,16 @@ def _normalise(src: Path, dst: Path) -> bool:
     return normalise(src, dst)
 
 
-def _measure(src: Path) -> dict:
+def _measure(src: Path) -> TrackFeatures:
     """A track's tempo, busyness and loudness, measured once as it is made
     (music_bed_tempo.measure): `{"bpm", "onsets", "lufs", "tempo",
     "energy"}`, or what ffmpeg could tell."""
     from . import music_bed_tempo
-    return music_bed_tempo.measure(src)
+    return cast("TrackFeatures", music_bed_tempo.measure(src))
 
 
-def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
-         karaoke: bool = False) -> Optional[dict]:
+def _add(data: FavouritesIndex, fav: Favourite, src: Path, method: str, inst_id: str = "",
+         karaoke: bool = False) -> Optional[BedTrack]:
     name = f"music-bed-fav-{fav['key']}.mp3"
     dst = _dir() / name
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -1491,7 +1501,7 @@ def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
     features = _measure(src)
     if not _normalise(src, dst):
         return None
-    entry = {"key": fav["key"], "file": name, "title": fav["title"], "artist": fav["artist"],
+    entry: BedTrack = {"key": fav["key"], "file": name, "title": fav["title"], "artist": fav["artist"],
              "method": method, "original_id": fav.get("id") or "", "instrumental_id": inst_id,
              "made": datetime.now().strftime("%Y-%m-%d"), "added": time.time(),
              "bytes": dst.stat().st_size, "features": features,
@@ -1500,14 +1510,14 @@ def _add(data: dict, fav: dict, src: Path, method: str, inst_id: str = "",
         entry["karaoke"] = True
     if fav.get("song_key"):
         # A song of a mix: the original is that chapter of the mix's video.
-        entry.update(original_start=fav.get("start"), original_end=fav.get("end"),
-                     song_key=fav["song_key"])
+        entry["original_start"], entry["original_end"] = fav.get("start"), fav.get("end")
+        entry["song_key"] = fav["song_key"]
     data["tracks"] = [e for e in data["tracks"] if e.get("key") != fav["key"]] + [entry]
     prune(data)
     return entry
 
 
-def prune(data: dict, cap: Optional[int] = None) -> dict:
+def prune(data: FavouritesIndex, cap: Optional[int] = None) -> FavouritesIndex:
     """Entries whose files are gone dropped, then the least recently played
     until the cache is under `cap` bytes."""
     cap = max_bytes() if cap is None else cap
@@ -1532,7 +1542,7 @@ def prune(data: dict, cap: Optional[int] = None) -> dict:
     return data
 
 
-def official(data: dict, now: Optional[float] = None,
+def official(data: FavouritesIndex, now: Optional[float] = None,
              fetches: int = OFFICIAL_FETCHES, searches: int = OFFICIAL_SEARCHES) -> int:
     """Look for official instrumentals of the favourites that have no bed
     yet; fetch and keep the confident ones. How many came."""
@@ -1631,7 +1641,7 @@ def _cut(src: Path, dst: Path, start=None, end=None) -> bool:
         return False
 
 
-def separate_one(fav: dict, local: Path) -> Optional[Path]:
+def separate_one(fav: Favourite, local: Path) -> Optional[Path]:
     """Demucs's no_vocals stem of `local` (in the work dir), or None."""
     exe = demucs_exe()
     if not exe:
@@ -1667,7 +1677,7 @@ def why_not_separate() -> Optional[str]:
     return None
 
 
-def separate(data: dict, when: Optional[datetime] = None, force_window: bool = False) -> int:
+def separate(data: FavouritesIndex, when: Optional[datetime] = None, force_window: bool = False) -> int:
     """Remove the vocals from favourites with no official instrumental, in
     the nightly window, under the guard, up to the night's cap. How many
     came."""
@@ -1745,7 +1755,7 @@ def chosen() -> bool:
         return False
 
 
-def _due(data: dict, key: str, gap: float, now: float) -> bool:
+def _due(data: FavouritesIndex, key: Literal["favourites_at", "pass_at"], gap: float, now: float) -> bool:
     """Whether `data[key]` (a time) is missing or at least `gap` ago."""
     try:
         return key not in data or now - float(data[key]) >= gap

@@ -47,7 +47,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ def measure(src: Path, loudness: bool = True) -> dict:
     return out
 
 
-def is_slow(features: Optional[dict], scale: float = 1.0) -> bool:
+def is_slow(features: Optional[Mapping[str, Any]], scale: float = 1.0) -> bool:
     """Whether a measured track counts as slow (the rule in the module's
     docstring): the BPM and the busyness both say so. `scale` widens the
     tempo and busyness limits (not the loudness one) for a track allowed to
@@ -208,11 +208,11 @@ def keep(entries: Iterable[dict]) -> list[dict]:
     return [e for e in entries if is_slow(e.get("features"))]
 
 
-def needs_measure(entry: dict) -> bool:
+def needs_measure(entry: Mapping[str, Any]) -> bool:
     return "onsets" not in (entry.get("features") or {})
 
 
-def backfill(entries: list[dict], path_of: Callable[[dict], Path], loudness: bool = False,
+def backfill(entries: Sequence[Any], path_of: Callable[[Any], Path], loudness: bool = False,
              limit: int = 12) -> int:
     """Measure (in place) up to `limit` entries never measured for onsets,
     keeping what was measured before (a favourite's raw loudness). Returns

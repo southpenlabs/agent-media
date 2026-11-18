@@ -69,7 +69,7 @@ import subprocess
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -543,7 +543,7 @@ def fetch(cand: dict) -> Optional[dict]:
     return entry
 
 
-def relevel(entries: list[dict], path_of, limit: int = UPKEEP_PER_PASS) -> int:
+def relevel(entries: Sequence[Any], path_of, limit: int = UPKEEP_PER_PASS) -> int:
     """Bring up to `limit` kept beds normalised to another level (before
     MEDIA_MUSIC_BED_GAIN_DB, -30) to `target_lufs`, from their own files,
     in place; the caller saves. How many."""

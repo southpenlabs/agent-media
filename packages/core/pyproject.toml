@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "mypy>=2.4,<3",
 ]
 # Library covers: the canvas draws SVG, Audiobookshelf stores raster. Optional
 # on purpose — without it a conversation simply keeps the default cover.
@@ -81,3 +82,19 @@ packages = ["src/agent_media_core"]
 # walk that opens one never returns. See that file.
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
+
+# The type checker (CI's "types (core)" job), over the modules whose records
+# are typed so far; the list grows a module at a time
+# (docs/proposals/2026-11-19-typed-records-and-settings.md). Everything else
+# is followed only for its signatures, never reported.
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "src/agent_media_core/music_bed_records.py",
+    "src/agent_media_core/music_bed_grid.py",
+    "src/agent_media_core/music_bed_vocal.py",
+    "src/agent_media_core/music_bed_favourites.py",
+]
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true

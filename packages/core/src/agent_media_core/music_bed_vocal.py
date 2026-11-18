@@ -53,7 +53,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, cast
+
+if TYPE_CHECKING:
+    from .music_bed_records import VocalIndex, VocalOriginal
 
 log = logging.getLogger(__name__)
 
@@ -237,7 +240,7 @@ def _index_path() -> Path:
 _MEASURE = ("key", "beats", "grid_v")
 
 
-def _repaired(d: dict) -> dict:
+def _repaired(d: dict[str, Any]) -> VocalIndex:
     """Records written from 3bb83a28 (15 Nov 2026) until 18 Nov had the
     measure on the record itself, its musical key over the favourite's key,
     so the outro went out with no title and its card's Like and Keep
@@ -251,10 +254,10 @@ def _repaired(d: dict) -> dict:
             if x in r and not (x == "key" and isinstance(r[x], str)):
                 f.setdefault(x, r.pop(x))
         r["key"] = k
-    return d
+    return cast("VocalIndex", d)
 
 
-def load() -> dict:
+def load() -> VocalIndex:
     try:
         d = json.loads(_index_path().read_text())
         return _repaired(d) if isinstance(d, dict) else {}
@@ -269,7 +272,7 @@ def measured_keys() -> dict[str, str]:
             if isinstance(r, dict) and isinstance((r.get("features") or {}).get("key"), dict)}
 
 
-def save(d: dict) -> None:
+def save(d: VocalIndex) -> None:
     p = _index_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f".{p.name}.{os.getpid()}")
@@ -282,11 +285,11 @@ def _dir() -> Path:
     return _audio_dir()
 
 
-def _file(rec: dict) -> Path:
+def _file(rec: VocalOriginal) -> Path:
     return _dir() / rec["file"]
 
 
-def record_for(bed_path) -> Optional[dict]:
+def record_for(bed_path) -> Optional[VocalOriginal]:
     """The kept original behind favourites bed file `bed_path`, if ready."""
     try:
         name = Path(bed_path).name
@@ -309,7 +312,7 @@ def after_for(bed_path) -> Optional[dict]:
     # The song as the phone shows it, with its controls (David, 31 Oct
     # 2026): like or dislike by `key` (POST /speech/music-bed/song), and
     # radio from `video_id`, the original's YouTube id ("" without one).
-    song: dict = {}
+    song: Mapping[str, Any] = {}
     try:
         from . import music_bed_favourites as fav
         song = next((e for e in fav.load()["tracks"] if e.get("key") == rec.get("key")), {})
@@ -417,7 +420,7 @@ def may_sing_in(metadata) -> bool:
         return True
     if by == "owner":
         try:
-            at = float(md.get("turn_at"))
+            at = float(md.get("turn_at"))  # type: ignore[arg-type]  # None: TypeError, caught
         except (TypeError, ValueError):
             return False
         return time.time() - at > in_tunable("IN_OWNER_S")
@@ -476,7 +479,7 @@ def normalise(src: Path, dst: Path, separated: bool, start=None, end=None) -> bo
         tmp.unlink(missing_ok=True)
 
 
-def _bytes(d: dict) -> int:
+def _bytes(d: VocalIndex) -> int:
     n = 0
     for rec in d.values():
         try:
@@ -542,7 +545,7 @@ def upkeep(limit: Optional[int] = None) -> int:
             log.info("music-bed vocal: normalising %s failed", key)
             continue
         sec = sections(dst)
-        d[key] = {"key": key, "file": name, "bed": e.get("file"), "lufs": want,
+        d[key] = {"key": key, "file": name, "bed": e.get("file") or "", "lufs": want,
                   "aligned": separated, "orig_s": float(sec.get("duration") or _seconds(dst)),
                   "inst_s": _seconds(fav._file(e)),
                   "bounds": sec.get("bounds") or [], "choruses": sec.get("choruses") or [],
@@ -559,7 +562,7 @@ def upkeep(limit: Optional[int] = None) -> int:
     return got
 
 
-def _grid_backfill(d: dict, limit: Optional[int] = None) -> int:
+def _grid_backfill(d: VocalIndex, limit: Optional[int] = None) -> int:
     """Originals kept before their key and beat grid were measured (step
     four, 14 Nov 2026): a few a pass, sections measured again with them."""
     from . import music_bed_grid

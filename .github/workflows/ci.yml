@@ -37,6 +37,29 @@ jobs:
         working-directory: packages/core
         run: pytest -q
 
+  types:
+    # mypy over the modules with typed records ([tool.mypy] in
+    # packages/core/pyproject.toml lists them; the list grows a module at a
+    # time: docs/proposals/2026-11-19-typed-records-and-settings.md).
+    name: types (core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install core + mypy
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/core[dev]"
+
+      - name: Check types
+        working-directory: packages/core
+        run: mypy
+
   server:
     # The app's API, split out of the canvas. `visual` is installed too: the
     # contract and CORS tests drive the canvas's handler, because that is what
