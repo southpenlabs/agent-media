@@ -3,7 +3,9 @@
 A place's mailbox follows agent-config's `agent-handoff` `mailbox_of`: in a
 git repo, the repo's name, a worktree counting as its main checkout; outside
 git, the folder's own name. Only **pending** mail counts — not yet claimed,
-not acknowledged. The shared `sam` mailbox is never a place's.
+not acknowledged, and a request rather than information: agent-mail's info
+mail (kind `info`, a done-report; agent-mail 403e708) is never pending, as
+its own inbox says. The shared `sam` mailbox is never a place's.
 
 The mailbox is agent-mail's SQLite file on this host (`AGENT_MAIL_DB`, else
 `$XDG_STATE_HOME/agent-mail/mail.sqlite3`), read with one query, read-only,
@@ -61,10 +63,13 @@ def _read() -> dict[str, int] | None:
     try:
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
         try:
+            # An older mailbox has no kind column: all its mail is a request.
+            kinds = any(r[1] == "kind" for r in con.execute("PRAGMA table_info(messages)"))
             rows = con.execute(
                 "SELECT recipient, count(*) FROM messages"
                 " WHERE acknowledged_at IS NULL AND claimed_session IS NULL"
-                " GROUP BY recipient").fetchall()
+                + (" AND kind IS NOT 'info'" if kinds else "")
+                + " GROUP BY recipient").fetchall()
         finally:
             con.close()
     except sqlite3.Error:

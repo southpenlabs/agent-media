@@ -48,6 +48,20 @@ def test_only_pending_mail_counts(mail, tmp_path):
     assert rows[0]["mail"] == 2
 
 
+def test_info_mail_is_never_pending(mail, tmp_path):
+    """agent-mail's info mail (a done-report) is not waiting for anyone."""
+    proj = tmp_path / "agent-media"
+    proj.mkdir()
+    mail("agent-media")
+    con = sqlite3.connect(tmp_path / "mail.sqlite3")
+    con.execute("ALTER TABLE messages ADD COLUMN kind TEXT")
+    con.execute("INSERT INTO messages (recipient, kind) VALUES ('agent-media', 'info')")
+    con.execute("INSERT INTO messages (recipient, kind) VALUES ('agent-media', 'action')")
+    con.commit()
+    rows = mailbox.with_mail([{"name": "agent-media", "path": str(proj)}])
+    assert rows[0]["mail"] == 2
+
+
 def test_a_place_with_no_mail_says_zero(mail, tmp_path):
     (tmp_path / "quiet").mkdir()
     assert mailbox.with_mail([{"path": str(tmp_path / "quiet")}])[0]["mail"] == 0
