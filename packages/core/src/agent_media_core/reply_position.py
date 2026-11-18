@@ -27,7 +27,7 @@ played again on the thread's open, and one heard half-way picks up there.
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 
 def heard_to(ex) -> Optional[int]:
@@ -54,7 +54,8 @@ def _extras(row) -> dict:
     return ex if isinstance(ex, dict) else {}
 
 
-def copies(row: dict, rows: Optional[Iterable[dict]] = None, store=None) -> list[dict]:
+def copies(row: Mapping[str, Any], rows: Optional[Iterable[Mapping[str, Any]]] = None,
+           store=None) -> list[Mapping[str, Any]]:
     """`row` and every other row of the same reply (its `dedup_key`, in the
     same thread) among `rows` (default: the recent speech history)."""
     ex = _extras(row)
@@ -83,7 +84,7 @@ def copies(row: dict, rows: Optional[Iterable[dict]] = None, store=None) -> list
     return out
 
 
-def heard_to_any(row: dict, rows: Optional[Iterable[dict]] = None,
+def heard_to_any(row: Mapping[str, Any], rows: Optional[Iterable[Mapping[str, Any]]] = None,
                  store=None) -> Optional[int]:
     """`heard_to` for the reply `row` is a copy of: None when any copy was
     heard to the end, else the furthest sentence any copy reached."""
@@ -96,7 +97,8 @@ def heard_to_any(row: dict, rows: Optional[Iterable[dict]] = None,
     return best
 
 
-def resume_from(row: dict, rows: Optional[Iterable[dict]] = None, store=None) -> int:
+def resume_from(row: Mapping[str, Any], rows: Optional[Iterable[Mapping[str, Any]]] = None,
+                store=None) -> int:
     """The sentence a play of `row` should start at to pick up where the
     listener left off: the furthest any copy was heard to, or 0 (the top)
     for one never heard — or heard to the end, since a play asked for then

@@ -37,9 +37,13 @@ packages = ["src/agent_media_server"]
 [tool.mypy]
 python_version = "3.11"
 files = [
+    "src/agent_media_server/speech.py",
     "src/agent_media_server/mail_accounts.py",
     "src/agent_media_server/mail_remote.py",
 ]
 follow_imports = "silent"
 ignore_missing_imports = true
 warn_unused_ignores = true
+check_untyped_defs = true
+# core is read from its source (it ships no py.typed), so its types reach here.
+mypy_path = "../core/src"

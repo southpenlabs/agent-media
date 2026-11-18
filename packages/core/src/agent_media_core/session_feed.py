@@ -51,7 +51,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from .render import device as device_voice
 from . import feed as feedmod
@@ -249,7 +249,7 @@ def _song_of(ex: dict) -> dict:
     return shown(ex.get("bed_song")) or {}
 
 
-def _resume_of(ex: dict) -> dict:
+def _resume_of(ex: Mapping[str, Any]) -> dict:
     """`extras.stopped_at` as the app wants it (Turn.resume), or {}."""
     stop = ex.get("stopped_at")
     if not isinstance(stop, dict):

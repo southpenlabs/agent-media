@@ -863,8 +863,8 @@ def _from_store() -> dict[str, dict]:
             v = _vid(r.get("media_id") or "") or _vid(r.get("uri") or "")
             if v:
                 out.setdefault(v, {"likes": 0, "plays": 0})["likes"] += 1
-        for r in st.recent_history(sink="music", limit=5000, requested=True):
-            v = _vid(r.get("uri") or "")
+        for h in st.recent_history(sink="music", limit=5000, requested=True):
+            v = _vid(h.get("uri") or "")
             if v:
                 out.setdefault(v, {"likes": 0, "plays": 0})["plays"] += 1
     except Exception as e:  # noqa: BLE001

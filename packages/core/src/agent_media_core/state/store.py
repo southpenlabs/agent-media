@@ -18,7 +18,10 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional, cast
+
+if TYPE_CHECKING:
+    from .records import HistoryRow, MatrixSpeech
 
 from .._paths import state_dir
 
@@ -772,7 +775,8 @@ class StateStore:
     def list_speech_music(self, limit: int = 50, kind: Optional[str] = None,
                           since: Optional[float] = None) -> list[dict]:
         """The log, newest first: of one `kind`, started at or after `since`."""
-        where, args = [], []
+        where: list[str] = []
+        args: list[object] = []
         if kind:
             where.append("kind = ?")
             args.append(kind)
@@ -1297,7 +1301,7 @@ class StateStore:
         "unheard" reads, and nothing else asks. Returns True if it wrote.
         """
         row = self.history_row(row_id)
-        ex = (row or {}).get("extras")
+        ex: Any = row["extras"] if row else None
         if not isinstance(ex, dict) or not ex.get("held") or ex.get("heard"):
             return False
         ex["heard"] = True
@@ -1355,7 +1359,7 @@ class StateStore:
         message resumes there. Never on a listener's own turn. True if it
         wrote."""
         row = self.history_row(row_id)
-        ex = (row or {}).get("extras")
+        ex: Any = row["extras"] if row else None
         if not isinstance(ex, dict) or ex.get("listener"):
             return False
         if sentence is None:
@@ -1376,7 +1380,7 @@ class StateStore:
         """Set one key of a history row's extras (None removes it). True if
         it wrote."""
         row = self.history_row(row_id)
-        ex = (row or {}).get("extras")
+        ex: Any = row["extras"] if row else None
         if not isinstance(ex, dict):
             return False
         if value is None:
@@ -1390,7 +1394,7 @@ class StateStore:
                         (json.dumps(ex), int(row_id)))
         return True
 
-    def matrix_speech(self, thread: str) -> dict[str, dict]:
+    def matrix_speech(self, thread: str) -> dict[str, MatrixSpeech]:
         """The speech of a Matrix room's messages (the Matrix intake writes
         `extras.session` = the room's thread, `extras.matrix_event`), newest
         row per event: `{event_id: {"id", "started_at", "extras"}}`."""
@@ -1400,7 +1404,7 @@ class StateStore:
                         "AND json_extract(extras, '$.matrix_event') IS NOT NULL "
                         "ORDER BY id", (thread,))
             rows = cur.fetchall()
-        out: dict[str, dict] = {}
+        out: dict[str, MatrixSpeech] = {}
         for rid, at, ex in rows:
             try:
                 extras = json.loads(ex)
@@ -1410,7 +1414,7 @@ class StateStore:
                                                     "extras": extras}
         return out
 
-    def history_row(self, row_id: int) -> Optional[dict]:
+    def history_row(self, row_id: int) -> Optional[HistoryRow]:
         """One history row by its id (extras parsed), or None."""
         with self._cursor() as cur:
             cur.execute("SELECT id, sink, uri, started_at, ended_at, target, source, "
@@ -1426,16 +1430,17 @@ class StateStore:
                 row["extras"] = json.loads(row["extras"])
             except (json.JSONDecodeError, TypeError):
                 pass
-        return row
+        return cast("HistoryRow", row)
 
     def recent_history(self, *, sink: Optional[str] = None,
-                       limit: int = 20, requested: bool = False) -> list[dict]:
+                       limit: int = 20, requested: bool = False) -> list[HistoryRow]:
         """Newest first. `requested` leaves out the rows a player wrote for
         a local file it loaded (a path or loopback URL), keeping the things
         someone asked for — so `limit` counts only those."""
         q = ("SELECT id, sink, uri, started_at, ended_at, target, source, "
              "content_type, text, extras FROM history")
-        where, args = [], ()
+        where: list[str] = []
+        args: tuple[object, ...] = ()
         if sink is not None:
             where.append("sink = ?")
             args = (sink,)
@@ -1452,7 +1457,7 @@ class StateStore:
             rows = cur.fetchall()
         cols = ["id", "sink", "uri", "started_at", "ended_at", "target",
                 "source", "content_type", "text", "extras"]
-        result = []
+        result: list[HistoryRow] = []
         for r in rows:
             row = dict(zip(cols, r))
             if row.get("extras"):
@@ -1460,7 +1465,7 @@ class StateStore:
                     row["extras"] = json.loads(row["extras"])
                 except (json.JSONDecodeError, TypeError):
                     pass
-            result.append(row)
+            result.append(cast("HistoryRow", row))
         return result
 
     def history_signature(self, *, sink: str, limit: int) -> tuple:
@@ -1661,7 +1666,8 @@ class StateStore:
         weeks. `media errors` and the MCP `errors` tool read this.
         """
         q = ("SELECT id, at, component, message, extras FROM errors")
-        clauses, args = [], []
+        clauses: list[str] = []
+        args: list[object] = []
         if component:
             clauses.append("component = ?")
             args.append(component)

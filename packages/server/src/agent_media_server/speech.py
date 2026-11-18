@@ -12,7 +12,9 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Callable
+from typing import Any, Callable, Mapping
+
+from agent_media_core.state.records import extras_of
 
 from . import audio, auth, mic_state, sessions, threads
 
@@ -167,12 +169,13 @@ def mark_rows_heard(ids: list[int]) -> tuple[bool, dict]:
     rows, sessions, found = [], set(), 0
     for rid in ids:
         row = st.history_row(rid)
-        ex = (row or {}).get("extras")
+        ex = row["extras"] if row else None
         if (not row or row.get("sink") != "speech" or row.get("source") == "listener"
                 or not isinstance(ex, dict) or ex.get("listener")):
             continue
         found += 1
-        stop = ex.get("stopped_at") if isinstance(ex.get("stopped_at"), dict) else {}
+        stop: Mapping[str, Any] = ex.get("stopped_at") or {}
+        stop = stop if isinstance(stop, dict) else {}
         sentence = stop.get("sentence") if isinstance(stop.get("sentence"), int) else None
         cleared = st.set_stopped_at(rid, None)
         heard = st.mark_heard(rid)
@@ -206,7 +209,7 @@ def mark_rows_unheard(ids: list[int]) -> tuple[bool, dict]:
     marked, found = [], 0
     for rid in ids:
         row = st.history_row(rid)
-        ex = (row or {}).get("extras")
+        ex = row["extras"] if row else None
         if (not row or row.get("sink") != "speech" or row.get("source") == "listener"
                 or not isinstance(ex, dict) or ex.get("listener")):
             continue
@@ -216,7 +219,7 @@ def mark_rows_unheard(ids: list[int]) -> tuple[bool, dict]:
             cid = int(r["id"])
             wrote = st.set_stopped_at(cid, None) | wrote
             wrote = st.set_extra(cid, "heard", None) | wrote
-            if not (r.get("extras") or {}).get("held"):
+            if not extras_of(r).get("held"):
                 wrote = st.set_extra(cid, "held", True) | wrote
         if wrote:
             marked.append(rid)
@@ -263,7 +266,7 @@ def undo_mark_heard() -> tuple[bool, dict]:
                 same = abs(float(r.get("started_at")) - float(mark["started_at"])) < 0.01
             except (TypeError, ValueError):
                 same = False
-            if same and not (r.get("extras") or {}).get("listener"):
+            if same and not extras_of(r).get("listener"):
                 rid = int(r["id"])
                 break
         if rid is None:
@@ -485,7 +488,7 @@ def speech_now(bearer: str, state: dict) -> tuple[bool, dict]:
            "speed": state.get("speed"), "muted": bool(state.get("muted"))}
     # Where that voice is (or the next one will be): the bar shows it, and
     # the picker behind it is /audio/targets.
-    out["target"] = state.get("target") or audio.speech_target_now(out["live"])
+    out["target"] = state.get("target") or audio.speech_target_now(speaking or paused)
     # A recorded reply played again (the bar's replay, ▶ on a bubble): what is
     # heard is that reply, under its own session, and not a new one.
     out["replay"] = bool(out["live"] and state.get("replay"))
@@ -605,7 +608,7 @@ RECENT_MAX = 50
 RECENT_TEXT = 140
 
 
-def _recent_kind(row: dict, ex: dict) -> str:
+def _recent_kind(row: Mapping[str, Any], ex: Mapping[str, Any]) -> str:
     """What a speech-history row is to Recent replies: "reply" (an agent's
     reply), "question" (an agent asking), "message" (someone's words in a
     chat room), else "" — the listener's own turns, alerts and
@@ -748,15 +751,15 @@ def _count_unheard() -> dict[str, int]:
     # scanning all 4,000 rows for each candidate took most of a second, on
     # every poll of the list (18 Nov 2026: Play keys "a little bit slow to
     # come up").
-    copies: dict[tuple[str, str], list[dict]] = {}
+    copies: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     for r in rows:
-        rx = r.get("extras") if isinstance(r.get("extras"), dict) else {}
+        rx = extras_of(r)
         k = rx.get("dedup_key")
         if k and not rx.get("listener"):
             s = str(rx.get("source_session") or rx.get("session") or "")
             copies.setdefault((s, str(k)), []).append(r)
     for row in rows:    # newest first
-        ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
+        ex = extras_of(row)
         session = str(ex.get("source_session") or ex.get("session") or "")
         if session in ended or not sessions._SESSION.fullmatch(session):
             continue
@@ -780,9 +783,9 @@ def _count_unheard() -> dict[str, int]:
             counts[session] = counts.get(session, 0) + 1
     # A chat with people by its own rule (room_unheard): every room with a
     # held message unheard in the window, counted from the room.
-    for session in {str((r.get("extras") or {}).get("session") or "") for r in rows
-                    if isinstance(r.get("extras"), dict) and r["extras"].get("matrix_event")
-                    and r["extras"].get("held") and not r["extras"].get("heard")}:
+    for session in {str(extras_of(r).get("session") or "") for r in rows
+                    if extras_of(r).get("matrix_event")
+                    and extras_of(r).get("held") and not extras_of(r).get("heard")}:
         if not session or secret.get(session) or (session not in secret and hidden(session)):
             continue
         ids = room_unheard(session)
@@ -830,7 +833,7 @@ def speech_recent(bearer: str, limit=None) -> tuple[bool, dict]:
     titles: dict[str, str] = {}
     secret: dict[str, bool] = {}
     for row in rows:    # newest first
-        ex = row.get("extras") if isinstance(row.get("extras"), dict) else {}
+        ex = extras_of(row)
         kind = _recent_kind(row, ex)
         if not kind:
             continue

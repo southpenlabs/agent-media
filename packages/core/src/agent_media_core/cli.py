@@ -24,7 +24,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from .render import device as device_voice
 from . import _lock as fcntl
@@ -3742,7 +3742,7 @@ def _question_to_play(question: dict) -> Optional[dict]:
                                             for c in clips]}}
 
 
-def replay_sentence_map(row: dict) -> list[str]:
+def replay_sentence_map(row: Mapping[str, Any]) -> list[str]:
     """The sentences a replay of this row can start at, in the order
     `replay --from-sentence N` counts them — or [] when it can only play from
     the top.
