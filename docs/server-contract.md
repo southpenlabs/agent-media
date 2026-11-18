@@ -3773,7 +3773,12 @@ The speech bar.
   it is unheard again (§6.2.2): the unheard ▶ comes back, it counts in the
   thread's unheard and Play all unheard plays it. Nothing plays or stops; no
   Undo (holding the unheard ▶ marks it heard again). 400 and 404 as above.
-  `GET /features` `mark_unheard_ids` says it is here.
+  `GET /features` `mark_unheard_ids` says it is here. `{"session",
+  "unheard": true}` (19 Nov 2026, a chat's menu Mark unheard) does it for
+  the chat's newest spoken reply (an agent's, or someone's message in a
+  chat with people), answering `{"ok": true, "marked": [id]}`, 404 `"no
+  spoken reply in this chat"`; the chat gets its Play key back when it ends
+  on that reply. `GET /features` `mark_thread_unheard`.
 - Who waits for whom: an ordinary reply never interrupts — not another
   session's reply, not its own session's earlier one, and not a replay. A
   replay interrupts an ordinary reply, which resumes after it (paused, if it
@@ -5958,6 +5963,7 @@ local look, never a network call:
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
+| `mark_thread_unheard` | always: `POST /speech/heard {"session", "unheard": true}` marks the chat's newest reply unheard (§6.5, 19 Nov 2026) |
 | `mark_all_heard` | always: `POST /speech/heard {"all": true}` marks every reply a thread list Play key stands for heard, with one Undo (§6.5, 19 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |
 | `local_chats` | always true (§6.61, 17 Nov 2026): `POST`/`GET /local/chats`, `local:<network>:<id>` ids taken by the flag routes, Local rows in `/targets` |

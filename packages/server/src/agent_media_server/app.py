@@ -4424,6 +4424,15 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not (sessions._SESSION.fullmatch(us) or local_chats.is_local(us)):
             _json(h, 400, {"ok": False, "error": "not a session id"})
             return True
+        if body.get("unheard") is True:
+            # A chat's menu Mark unheard (§6.5, 19 Nov 2026): its newest reply.
+            done, info = speech.mark_thread_unheard(us)
+            if not done:
+                _json(h, info.pop("status", 404), {"ok": False, **info})
+                return True
+            log.info(f"speech/heard: {us[:8]} unheard {info.get('marked')}")
+            _json(h, 200, {"ok": True, **info})
+            return True
         if body.get("with_undo") is True:
             # The thread list's Play held: its unheard replies, with an Undo.
             ids = StateStore().thread_unheard_ids(us)[-speech.MAX_MARK_IDS:]

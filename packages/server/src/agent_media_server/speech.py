@@ -229,6 +229,29 @@ def mark_rows_unheard(ids: list[int]) -> tuple[bool, dict]:
     return True, {"marked": sorted(marked)}
 
 
+def mark_thread_unheard(session: str, store=None) -> tuple[bool, dict]:
+    """A chat's menu Mark unheard (David, 19 Nov 2026: "Can marking a thread
+    unheard be done from the context menu?"): its newest reply (an agent's,
+    or someone's message in a chat with people) is unheard again, as a held
+    heard Play makes it (`mark_rows_unheard`), so the chat gets its Play key
+    back — when the chat ends on it: one you have answered since is not a
+    Play key's (the thread's own rule), though it is unheard again. 404 when
+    the chat has no spoken reply in the window."""
+    from agent_media_core.state import StateStore
+
+    st = store or StateStore()
+    for row in st.recent_history(sink="speech", limit=UNHEARD_ROWS):   # newest first
+        ex = extras_of(row)
+        if str(ex.get("source_session") or ex.get("session") or "") != session:
+            continue
+        if row.get("source") == "listener" or ex.get("listener") or not _recent_kind(row, ex):
+            continue
+        if not isinstance(row.get("id"), int):
+            continue
+        return mark_rows_unheard([int(row["id"])])
+    return False, {"status": 404, "error": "no spoken reply in this chat"}
+
+
 #: How long the player's Mark heard can be undone (the app's notice shows less).
 MARK_UNDO_S = 120.0
 #: The last Mark heard: its row (a live reply's is found by `started_at`, written

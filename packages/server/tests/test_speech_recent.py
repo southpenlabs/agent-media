@@ -176,3 +176,18 @@ def test_mark_all_heard_clears_every_play_key_with_one_undo(monkeypatch):
     ok, out = speech.mark_all_heard()
     assert ok
     assert speech.mark_all_heard() == (True, {"marked": [], "undo": False, "threads": 0})
+
+
+def test_a_chats_menu_marks_its_newest_reply_unheard(monkeypatch):
+    """Mark unheard from a chat's menu (19 Nov 2026): its newest reply is
+    held and unheard again, and the chat gets its Play key back."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 80
+    _add("Older, heard.", at=t, kind="stop", heard=True)
+    _add("You: and then?", at=t + 1, source="listener", listener=True)
+    newest = _add("Newest, heard.", at=t + 2, kind="stop", heard=True)
+    assert speech.unheard_counts() == {}
+    ok, out = speech.mark_thread_unheard(A)
+    assert ok and out["marked"] == [newest]
+    assert speech.unheard_counts() == {A: 1}
+    assert speech.mark_thread_unheard(B)[0] is False
