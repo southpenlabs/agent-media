@@ -4409,7 +4409,10 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                 _json(h, 400, {"ok": False, "error": "ids must be history ids"})
                 return True
             unheard = body.get("unheard") is True
-            done, info = (speech.mark_rows_unheard if unheard else speech.mark_rows_heard)(ids)
+            # `seen`: read on screen long enough (19 Nov 2026), marked without an Undo.
+            seen = body.get("seen") is True
+            done, info = (speech.mark_rows_unheard(ids) if unheard
+                          else speech.mark_rows_heard(ids, undo=not seen))
             if not done:
                 _json(h, info.pop("status", 404), {"ok": False, **info})
                 return True

@@ -191,3 +191,18 @@ def test_a_chats_menu_marks_its_newest_reply_unheard(monkeypatch):
     assert ok and out["marked"] == [newest]
     assert speech.unheard_counts() == {A: 1}
     assert speech.mark_thread_unheard(B)[0] is False
+
+
+def test_a_reply_read_on_screen_is_heard_and_the_last_undo_stands(monkeypatch):
+    """Seen as heard (19 Nov 2026): marked heard with no Undo of its own,
+    and the Undo of the last mark made by hand still undoes that one."""
+    monkeypatch.setattr(speech, "_UNHEARD_CACHE", (None, {}))
+    t = time.time() - 80
+    by_hand = _add("Marked by hand.", session=B, at=t, kind="stop", held=True)
+    read = _add("Read on screen.", at=t + 1, kind="stop", held=True)
+    assert speech.mark_rows_heard([by_hand])[1]["undo"] is True
+    ok, out = speech.mark_rows_heard([read], undo=False)
+    assert ok and out == {"marked": [read], "undo": False}
+    ok, info = speech.undo_mark_heard()
+    assert ok and info["id"] == by_hand
+    assert speech.unheard_counts() == {B: 1}

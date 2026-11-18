@@ -3773,7 +3773,11 @@ The speech bar.
   it is unheard again (§6.2.2): the unheard ▶ comes back, it counts in the
   thread's unheard and Play all unheard plays it. Nothing plays or stops; no
   Undo (holding the unheard ▶ marks it heard again). 400 and 404 as above.
-  `GET /features` `mark_unheard_ids` says it is here. `{"session",
+  `GET /features` `mark_unheard_ids` says it is here. `{"ids": [...],
+  "seen": true}` (19 Nov 2026) marks them heard as `{"ids"}` does but
+  leaves the last Undo as it was (`undo` false): the app's own mark for a
+  reply read on screen for about its reading time, with no notice; `GET
+  /features` `mark_heard_seen`. `{"session",
   "unheard": true}` (19 Nov 2026, a chat's menu Mark unheard) does it for
   the chat's newest spoken reply (an agent's, or someone's message in a
   chat with people), answering `{"ok": true, "marked": [id]}`, 404 `"no
@@ -5963,6 +5967,7 @@ local look, never a network call:
 | `up_next` | always: `/speech/now` carries `up_next`, `POST /speech/up-next` answers and a thread opened with `?after=1` queues its held reply behind the one heard (§6.5, §11, 8 Nov 2026) |
 | `mark_heard` | always: `POST /speech/heard` marks a thread's held replies heard; the app's Mark read calls it (§6.5, 8 Nov 2026) |
 | `mark_heard_now` | always: `POST /speech/heard {"now": true}` ends the reply being read and marks it heard; the player's Mark heard (§6.5, 9 Nov 2026) |
+| `mark_heard_seen` | always: `POST /speech/heard {"ids", "seen": true}` marks replies read on screen heard without an Undo (§6.5, 19 Nov 2026) |
 | `mark_thread_unheard` | always: `POST /speech/heard {"session", "unheard": true}` marks the chat's newest reply unheard (§6.5, 19 Nov 2026) |
 | `mark_all_heard` | always: `POST /speech/heard {"all": true}` marks every reply a thread list Play key stands for heard, with one Undo (§6.5, 19 Nov 2026) |
 | `mark_heard_ids` | always: `POST /speech/heard {"ids"}` / `{"session", "with_undo": true}` marks those replies heard, with an Undo; a Play key held (§6.5, 14 Nov 2026) |

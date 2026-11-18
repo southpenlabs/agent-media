@@ -153,7 +153,7 @@ def mark_now_heard() -> tuple[bool, dict]:
 MAX_MARK_IDS = 200
 
 
-def mark_rows_heard(ids: list[int]) -> tuple[bool, dict]:
+def mark_rows_heard(ids: list[int], undo: bool = True) -> tuple[bool, dict]:
     """Hold a Play to mark it heard (David, 14 Nov 2026: "holding on the
     resume button to mark it heard like the go-to end button does on the mini
     player ... same goes for other unheard play buttons"): each reply of
@@ -189,10 +189,12 @@ def mark_rows_heard(ids: list[int]) -> tuple[bool, dict]:
     for x in up_next.listing():
         if x.get("id") in marked:
             up_next.remove(str(x.get("session") or ""))
-    if rows:
+    # `undo` False: read on screen (the app's seen-as-heard, 19 Nov 2026),
+    # with no notice; the last mark made by hand keeps its Undo.
+    if rows and undo:
         with _MARK_LOCK:
             _LAST_MARK[0] = {"rows": rows, "at": time.time()}
-    return True, {"marked": sorted(marked), "undo": bool(rows)}
+    return True, {"marked": sorted(marked), "undo": bool(rows) and undo}
 
 
 def mark_rows_unheard(ids: list[int]) -> tuple[bool, dict]:
