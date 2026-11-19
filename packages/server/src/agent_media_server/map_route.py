@@ -46,6 +46,7 @@ TRANSIT_CHECK_S = 30 * 60
 # Valhalla's travel_type for a transit maneuver, as the app's kind.
 TRANSIT_KINDS = {"tram": "tram", "metro": "train", "rail": "train", "bus": "bus", "ferry": "ferry",
                  "cable_car": "cable_car", "gondola": "gondola", "funicular": "funicular"}
+_REF = re.compile(r"^[A-Z]{0,3}\d+[A-Z]?$")
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 _transit_seen: dict[str, tuple[float, bool]] = {}
 
@@ -97,7 +98,8 @@ def _ask(base: str, path: str, body: dict | None = None, timeout: float = TIMEOU
 
 def has_transit(base: str | None = None, clock: Callable[[], float] = time.monotonic) -> bool:
     """Whether this server's Valhalla has transit tiles: its verbose /status
-    (`has_transit_tiles`; the build turns allow_verbose on), asked at most once
+    (`has_transit_tiles`; the build turns allow_verbose on; it also maps the
+    tiles' extent, so it is not cheap), asked at most once
     per 30 min (a failed ask once a minute)."""
     base = router_url() if base is None else base
     if not base:
@@ -107,7 +109,8 @@ def has_transit(base: str | None = None, clock: Callable[[], float] = time.monot
     if seen and now < seen[0]:
         return seen[1]
     try:
-        got = bool(_ask(base, "/status?verbose=true", timeout=5).get("has_transit_tiles"))
+        # Verbose is asked in the body: Valhalla ignores ?verbose=true.
+        got = bool(_ask(base, "/status", {"verbose": True}, timeout=10).get("has_transit_tiles"))
         _transit_seen[base] = (now + TRANSIT_CHECK_S, got)
     except Exception as e:  # noqa: BLE001
         _failures.swallowed(e)
@@ -172,8 +175,10 @@ def _label(steps: list[dict]) -> str:
                          for t in lines)
     far: dict[str, int] = {}
     for s in steps:
-        if s.get("street"):
-            far[s["street"]] = far.get(s["street"], 0) + s["distance_m"]
+        # A road's name, not its route number: "55, Royal Parade" is Royal Parade.
+        names = [n for n in (s.get("street") or "").split(", ") if n and not _REF.match(n)]
+        if names:
+            far[names[0]] = far.get(names[0], 0) + s["distance_m"]
     return f"via {max(far, key=lambda k: far[k])}" if far else ""
 
 
@@ -234,6 +239,9 @@ def _times(trip: dict, out: dict, depart: _dt.datetime | None, arrive: _dt.datet
     else:
         return
     out["depart_at"], out["arrive_at"] = first, last
+    tz = next((loc.get("time_zone_name") for loc in locs if loc.get("time_zone_name")), None)
+    if tz:
+        out["time_zone"] = tz
 
 
 def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "", avoid: str = "",
@@ -315,7 +323,7 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "",
         routes.append(r)
     first = routes[0]
     out = {k: first[k] for k in ("mode", "distance_m", "duration_s", "line", "steps", "legs")}
-    for k in ("depart_at", "arrive_at"):
+    for k in ("depart_at", "arrive_at", "time_zone"):
         if k in first:
             out[k] = first[k]
     out["routes"] = routes

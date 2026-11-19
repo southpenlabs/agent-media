@@ -514,12 +514,12 @@ def test_route_planner_options_and_transit(server, monkeypatch):
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self):
-            status["asked"] += 1
-            self._send({"version": "3.9.3", "has_transit_tiles": status["has_transit_tiles"]})
-
         def do_POST(self):
             q = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/status":
+                status["asked"] += 1
+                transit = {"has_transit_tiles": status["has_transit_tiles"]} if q.get("verbose") else {}
+                return self._send({"version": "3.9.3", **transit})
             asked.append(q)
             if q.get("date_time", {}).get("value") == "2026-11-23T09:99":
                 return self._send({"error_code": 162, "error": "Date and time is invalid"}, 400)
@@ -532,11 +532,12 @@ def test_route_planner_options_and_transit(server, monkeypatch):
                      "transit_info": {"short_name": "19", "long_name": "North Coburg - Flinders Street Station",
                                       "headsign": "North Coburg", "operator_name": "Yarra Trams", "color": 7915563,
                                       "transit_stops": [
-                                          {"name": "Elizabeth St/Flinders St", "departure_date_time": "2026-11-23T08:34"},
+                                          {"name": "Elizabeth St/Flinders St", "departure_date_time": "2026-11-23T08:34+11:00"},
                                           {"name": "Stop 2"},
-                                          {"name": "Brunswick Rd/Sydney Rd", "arrival_date_time": "2026-11-23T08:52"}]}}])],
-                    t=1590, locs=[{"date_time": "2026-11-23T08:30"}, {"date_time": "2026-11-23T08:57"}])})
-            alt = [{"trip": trip([leg(walk, [{"instruction": "Drive.", "street_names": ["Lygon Street"],
+                                          {"name": "Brunswick Rd/Sydney Rd", "arrival_date_time": "2026-11-23T08:52+11:00"}]}}])],
+                    t=1590, locs=[{"date_time": "2026-11-23T08:30", "time_zone_name": "Australia/Melbourne"},
+                                  {"date_time": "2026-11-23T08:57"}])})
+            alt = [{"trip": trip([leg(walk, [{"instruction": "Drive.", "street_names": ["1", "Lygon Street"],
                                               "length": 3.0, "time": 400, "type": 1, "begin_shape_index": 0}])], t=700)}]
             legs = [leg(walk, [{"instruction": "Drive north.", "street_names": ["Sydney Road"], "length": 2.0,
                                 "time": 300, "type": 1, "begin_shape_index": 0}], km=2.0, t=300)
@@ -607,11 +608,12 @@ def test_route_planner_options_and_transit(server, monkeypatch):
         assert status["asked"] == n
         assert asked[-1]["costing"] == "multimodal" and asked[-1]["costing_options"] == {"pedestrian": {"use_ferry": 0}}
         assert got["mode"] == "transit" and got["depart_at"] == "2026-11-23T08:30" and got["arrive_at"] == "2026-11-23T08:57"
+        assert got["time_zone"] == "Australia/Melbourne"
         walk_step, tram = got["steps"]
         assert "transit" not in walk_step
         assert tram["transit"] == {"kind": "tram", "route_name": "19", "route_long_name": "North Coburg - Flinders Street Station",
-                                   "headsign": "North Coburg", "operator": "Yarra Trams", "departs": "2026-11-23T08:34",
-                                   "arrives": "2026-11-23T08:52", "stops": 2, "from_stop": "Elizabeth St/Flinders St",
+                                   "headsign": "North Coburg", "operator": "Yarra Trams", "departs": "2026-11-23T08:34+11:00",
+                                   "arrives": "2026-11-23T08:52+11:00", "stops": 2, "from_stop": "Elizabeth St/Flinders St",
                                    "to_stop": "Brunswick Rd/Sydney Rd", "color": "#78c82b"}
         assert got["routes"][0]["summary_label"] == "Tram 19"
     finally:

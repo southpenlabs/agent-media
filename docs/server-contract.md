@@ -11373,20 +11373,23 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   answer keeps the fields above for the chosen route and adds:
   - `routes: [route, …]`, the chosen route first, then the alternates; each
     `{mode, distance_m, duration_s, line, steps, legs, summary_label?,
-    has_toll, has_highway, has_ferry, depart_at?, arrive_at?}`.
+    has_toll, has_highway, has_ferry, depart_at?, arrive_at?, time_zone?}`.
     `summary_label` tells routes apart: the lines taken for transit
     ("Tram 19"), else the street it spends longest on ("via Sydney Road").
   - `legs: [{distance_m, duration_s}]`, one per stop-to-stop leg (each
     `via` point ends a leg), on the top level and on each route.
   - each step's `leg` (its leg index), and on a transit ride `transit:
     {kind: bus|tram|train|ferry|cable_car|gondola|funicular, route_name
-    (the short name, "86"), route_long_name, headsign, operator, departs,
-    arrives (local ISO, `YYYY-MM-DDTHH:MM`), stops (stops ridden),
+    (the short name: "86", or a train line's name, "Upfield"),
+    route_long_name, headsign, operator, departs, arrives (ISO with the
+    place's offset, as Valhalla gives them: `2026-11-20T08:34+11:00`),
+    stops (stops ridden),
     from_stop, to_stop, color? ("#rrggbb")}`; the walks to, between and
     from stops are ordinary steps.
-  - `depart_at` / `arrive_at` (local ISO) when `depart` or `arrive` was
-    given: Valhalla's own where it gives them, else the asked time plus or
-    minus the duration.
+  - `depart_at` / `arrive_at` (local ISO, `YYYY-MM-DDTHH:MM`) when
+    `depart` or `arrive` was given: Valhalla's own where it gives them, else
+    the asked time plus or minus the duration; and `time_zone` (the IANA
+    name, "Australia/Melbourne") when Valhalla knows it.
 
   `avoid` maps to Valhalla's costing options (`use_tolls`, `use_highways`,
   `use_ferry` 0: avoided where it can be, not forbidden); for walk, bike
@@ -11429,8 +11432,8 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - **`GET /map/route/modes`** (19 Nov 2026) → `{modes: ["walk", "drive",
   "bike", "transit"?], avoid: ["tolls", "highways", "ferries"], max_via: 8,
   max_alternates: 2}`: `transit` is listed only when this server's Valhalla
-  has transit tiles (its verbose `/status` `has_transit_tiles`, asked at
-  most every 30 min), so the app offers Transit only where it works. 404
+  has transit tiles (its verbose `/status` `has_transit_tiles`, asked with
+  `{"verbose": true}` at most every 30 min), so the app offers Transit only where it works. 404
   `no_router` when no routing service is set. The map's gate, as above.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
