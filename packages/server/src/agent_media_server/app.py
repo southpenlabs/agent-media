@@ -568,7 +568,8 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
-                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists"})
+                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists",
+                       "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6028,6 +6029,23 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_saved.listing(account)
             else:
                 ok, detail = map_saved.change(account, _read_json(h) or {})
+    elif method == "GET" and path == "/map/trip":
+        # A shared trip, for whoever has the link: public, the token is the credential (map_trips.py).
+        from . import map_trips
+
+        ok, detail = map_trips.public(arg("token"))
+    elif method == "POST" and path in ("/map/trips", "/map/trips/update", "/map/trips/end"):
+        # Sharing a trip while guiding (map_trips.py): started, moved on and ended by the device sharing it.
+        from . import auth as _auth, map_layers, map_trips
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            user, _ = (None, {}) if host else _auth.gate(bearer)
+            owner = "host" if host else f"device:{(user or {}).get('device') or ''}"
+            body = _read_json(h) or {}
+            fn = {"/map/trips": map_trips.start, "/map/trips/update": map_trips.update, "/map/trips/end": map_trips.end}[path]
+            ok, detail = fn(owner, body)
     elif method == "POST" and path == "/map/saved/lists":
         # A person's own lists of saved places (map_saved.py).
         from . import map_layers, map_saved

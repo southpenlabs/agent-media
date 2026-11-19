@@ -11427,6 +11427,20 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   true}` takes it off (→ `{deleted}`, 400 `builtin` for the three, 404
   `not_saved`); a place left in no list that is not Home or Work goes with
   it. At most 30 lists of one's own.
+- **Sharing a trip** (19 Nov 2026; David: the link "by default ends when
+  the trip ends but has an option for other" lengths, opened by "anyone
+  with the link"; `map_trips.py`, `/features` `map_trips`). `POST
+  /map/trips {to: {name, lat, lon}, until?, mode?, eta_at?, at?, left_m?}`
+  (signed in, the map's gate) → `{trip: {id, token, until, expires_at}}`;
+  `until` is `trip` (default: the link goes when the trip ends), `15m`
+  (fifteen minutes after it ends), `1h` (an hour after it starts) or
+  `stop` (only by hand); every link is gone a day after it starts. `POST
+  /map/trips/update {id, at, eta_at?, left_m?}` and `POST /map/trips/end
+  {id, arrived?, stop?}` from the same device (404 `no_trip` from any
+  other). **`GET /map/trip?token=`** is public, the token (24 random bytes)
+  its credential → `{to, state: going|arrived|ended, started_at, until,
+  at?, at_time?, eta_at?, left_m?, mode?}`, nothing else of the person;
+  404 `no_trip` once gone. The app's page for it is `/app/trip/<token>`.
 - **`GET /map/recent_places`** (19 Nov 2026; David: "maybe offer
   suggestions from recent chats") → `{places: [{name, lat, lon, session,
   chat, msg, at}]}`: the `[[map:]]` / `[[route:]]` points recent chats'
