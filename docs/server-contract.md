@@ -11404,6 +11404,17 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   With no parameters it still answers 400 when a router is set (the app's
   probe) and 404 `no_router` when none is. In `/features`:
   `map_route_options: true`.
+- **`GET /map/saved`, `POST /map/saved`** (19 Nov 2026; David: "let's
+  add work and home buttons") — a person's Home, Work and other saved
+  places, kept per account (the owner's for the host's token), so every
+  device of theirs and an agent see the same. `GET` → `{places: [{id, name,
+  lat, lon, address?, label?}]}`, Home first, then Work, then the rest.
+  `POST {id?, name, lat, lon, address?, label?}` sets one → `{place}`:
+  `id` is `home`, `work` or a slug of the person's own (made up as
+  `saved-…` when not given), `label` the words on its key ("Gym").
+  `POST {id, delete: true}` → `{deleted}` (404 `not_saved`). 400 with a
+  code: `bad_id`, `bad_point`, `bad_name`, `too_many` (50 at most). Behind
+  the map's gate. `/features` `map_saved`.
 - **`GET /map/recent_places`** (19 Nov 2026; David: "maybe offer
   suggestions from recent chats") → `{places: [{name, lat, lon, session,
   chat, msg, at}]}`: the `[[map:]]` / `[[route:]]` points recent chats'
