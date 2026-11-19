@@ -326,6 +326,7 @@ def _no_voice_list_fetch(monkeypatch, tmp_path):
     # Kokoro not installed would offer its every voice to download: none
     # here unless a test lists some.
     monkeypatch.setattr(local_voices, "KOKORO_VOICES", ())
+    monkeypatch.setattr(local_voices, "OFFER_TO_DOWNLOAD", ())
 
 
 @pytest.fixture(autouse=True)

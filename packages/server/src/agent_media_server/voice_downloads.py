@@ -22,8 +22,8 @@ from typing import Callable, Optional
 from agent_media_core import failures as _failures
 
 #: What a download may take on disk beyond its files: the engine's venv.
-VENV_BYTES = {"kokoro": 200_000_000, "piper": 120_000_000}
-NAMES = {"kokoro": "Kokoro", "piper": "Piper"}
+#: The slow engines' sizes (local_voices.SLOW_DOWNLOAD_BYTES) include theirs.
+VENV_BYTES = {"kokoro": 200_000_000, "piper": 120_000_000, "chatterbox": 0, "orpheus": 0}
 
 
 def _dir() -> Path:
@@ -117,11 +117,15 @@ def providers(voices: list) -> list[dict]:
     out = []
     for p in local_voices.PROVIDERS:
         have = local_voices.installed(p)
-        row = {"id": p, "name": NAMES[p], "kind": "local",
+        whole = {"kokoro": local_voices.KOKORO_DOWNLOAD_BYTES,
+                 **local_voices.SLOW_DOWNLOAD_BYTES}.get(p, 0)
+        row = {"id": p, "name": local_voices.NAMES[p], "kind": "local",
                "status": "ready" if have else "not installed",
-               "size_bytes": (0 if have is not None or p != "kokoro"
-                              else local_voices.KOKORO_DOWNLOAD_BYTES),
+               "size_bytes": 0 if have is not None else whole,
                "progress": None, "licence": local_voices.LICENCES[p]}
+        if p in local_voices.SLOW:
+            # Rendered whole before it plays (voice-picker step 6).
+            row["live"] = False
         state = provider_state(p)
         if state.get("status") == "downloading":
             row.update(status="downloading", progress=state.get("progress"))

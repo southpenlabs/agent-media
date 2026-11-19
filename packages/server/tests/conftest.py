@@ -334,6 +334,7 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     # Kokoro not installed would offer its every voice to download: none
     # here unless a test lists some.
     monkeypatch.setattr(local_voices, "KOKORO_VOICES", ())
+    monkeypatch.setattr(local_voices, "OFFER_TO_DOWNLOAD", ())
     # A voice download would start a systemd unit: never here.
     from agent_media_server import voice_downloads
 

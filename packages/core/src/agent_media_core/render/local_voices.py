@@ -20,17 +20,33 @@ import re
 import threading
 import time
 import urllib.request
+from pathlib import Path
 from typing import Callable, Optional
 from agent_media_core import failures as _failures
 
 #: Providers whose voices this module lists, in the picker's order.
-PROVIDERS = ("kokoro", "piper")
+PROVIDERS = ("kokoro", "piper", "chatterbox", "orpheus")
 #: Every provider prefix server_choice routes to an engine of that name.
-ENGINE_PREFIXES = ("kokoro", "piper", "openai", "qwen")
-NAMES = {"kokoro": "Kokoro", "piper": "Piper"}
+ENGINE_PREFIXES = ("kokoro", "piper", "chatterbox", "orpheus", "openai", "qwen")
+NAMES = {"kokoro": "Kokoro", "piper": "Piper", "chatterbox": "Chatterbox", "orpheus": "Orpheus"}
+
+#: The expressive engines too slow on a CPU to speak live (step 6 of the
+#: voice-picker proposal; David, 19 Nov 2026: "Build Chatterbox + Orpheus"):
+#: a reply in one is rendered whole before it plays, and each carries the
+#: real-time factor the TTS trial measured on red2 until one is measured here.
+SLOW = {"chatterbox": 3.5, "orpheus": 7.0}
+#: Their servers start on demand and unload when idle (engine-expressive), so
+#: a stopped one is still installed: its unit file says so.
+UNITS = {"chatterbox": "agent-media-chatterbox-tts.service",
+         "orpheus": "agent-media-orpheus-tts.service"}
+#: Orpheus's eight speakers (canopylabs/orpheus-3b-0.1-ft), American English.
+ORPHEUS_VOICES = {"tara": "Female", "leah": "Female", "jess": "Female", "leo": "Male",
+                  "dan": "Male", "mia": "Female", "zac": "Male", "zoe": "Female"}
 
 KOKORO_DEFAULT_URL = "http://127.0.0.1:8880"
 PIPER_DEFAULT_URL = "http://127.0.0.1:5000"
+CHATTERBOX_DEFAULT_URL = "http://127.0.0.1:8882"
+ORPHEUS_DEFAULT_URL = "http://127.0.0.1:8883"
 
 #: Kokoro v1.0's voices (kokoro-onnx's voices-v1.0.bin), for a server too
 #: old to answer GET /voices: one model holds them all.
@@ -76,11 +92,14 @@ _lock = threading.Lock()
 
 
 def base_url(provider: str) -> str:
-    if provider == "kokoro":
-        return (os.environ.get("MEDIA_KOKORO_BASE_URL") or KOKORO_DEFAULT_URL).rstrip("/")
-    if provider == "piper":
-        return (os.environ.get("MEDIA_PIPER_BASE_URL") or PIPER_DEFAULT_URL).rstrip("/")
-    raise ValueError(f"not a local provider: {provider!r}")
+    env, default = {"kokoro": ("MEDIA_KOKORO_BASE_URL", KOKORO_DEFAULT_URL),
+                    "piper": ("MEDIA_PIPER_BASE_URL", PIPER_DEFAULT_URL),
+                    "chatterbox": ("MEDIA_CHATTERBOX_BASE_URL", CHATTERBOX_DEFAULT_URL),
+                    "orpheus": ("MEDIA_ORPHEUS_BASE_URL", ORPHEUS_DEFAULT_URL)
+                    }.get(provider, ("", ""))
+    if not env:
+        raise ValueError(f"not a local provider: {provider!r}")
+    return (os.environ.get(env) or default).rstrip("/")
 
 
 def _get_json(url: str):
@@ -123,7 +142,45 @@ def _ask_piper(base: str) -> Optional[list[str]]:
     return None
 
 
-_ASK: dict[str, Callable[[str], Optional[list[str]]]] = {"kokoro": _ask_kokoro, "piper": _ask_piper}
+def _data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+
+
+def _unit_path(provider: str) -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "systemd" / "user" / UNITS[provider]
+
+
+def chatterbox_voices_dir() -> Path:
+    """Chatterbox's cloned voices: <name>.wav, with <name>.json beside it
+    for its locale and gender (media-setup voices chatterbox --clone)."""
+    return _data_home() / "agent-media" / "tts" / "chatterbox" / "voices"
+
+
+def _ask_slow(provider: str, base: str) -> Optional[list[str]]:
+    """A slow engine's voices: its server's GET /voices while it runs, else,
+    when its unit is installed, what it would serve — never starting it
+    (it loads gigabytes; the render client starts it when a voice is used)."""
+    try:
+        data = _get_json(f"{base}/voices")
+        names = data.get("voices") if isinstance(data, dict) else data
+        if isinstance(names, list):
+            return [str(n) for n in names if isinstance(n, str)]
+    except Exception:  # noqa: BLE001 — stopped (idle), or not installed
+        pass
+    if not _unit_path(provider).exists():
+        return None
+    if provider == "orpheus":
+        return list(ORPHEUS_VOICES)
+    clones = sorted(p.stem for p in chatterbox_voices_dir().glob("*.wav")) \
+        if chatterbox_voices_dir().is_dir() else []
+    return ["default"] + [c for c in clones if c != "default"]
+
+
+_ASK: dict[str, Callable[[str], Optional[list[str]]]] = {
+    "kokoro": _ask_kokoro, "piper": _ask_piper,
+    "chatterbox": lambda base: _ask_slow("chatterbox", base),
+    "orpheus": lambda base: _ask_slow("orpheus", base)}
 
 
 def installed(provider: str, *, fresh: bool = False) -> Optional[list[str]]:
@@ -134,7 +191,8 @@ def installed(provider: str, *, fresh: bool = False) -> Optional[list[str]]:
         hit = _cache.get(provider)
         if hit and not fresh and now - hit[0] < CACHE_S:
             return hit[1]
-    names = _ASK[provider](base_url(provider))
+    ask = _ASK.get(provider)
+    names = ask(base_url(provider)) if ask else None
     with _lock:
         _cache[provider] = (time.monotonic(), names)
     return names
@@ -175,7 +233,46 @@ def piper_voice(name: str) -> Optional[dict]:
             "where": ["server"], "provider": "piper", "installed": True}
 
 
-_MAKE = {"kokoro": kokoro_voice, "piper": piper_voice}
+def _slow(v: dict, provider: str) -> dict:
+    v.update(live=False, rtf=SLOW[provider])
+    return v
+
+
+def chatterbox_voice(name: str) -> Optional[dict]:
+    """Chatterbox's own voice ("default", American English), or a clone
+    named by its clip, with the locale and gender its sidecar gives."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name or ""):
+        return None
+    meta: dict = {}
+    if name != "default":
+        try:
+            meta = json.loads((chatterbox_voices_dir() / f"{name}.json").read_text())
+        except (OSError, ValueError):
+            meta = {}
+        meta = meta if isinstance(meta, dict) else {}
+    locale = str(meta.get("locale") or "en-US")
+    lang, _, country = locale.partition("-")
+    return _slow({"name": f"chatterbox:{name}",
+                  "label": "Chatterbox" if name == "default" else f"{_titled(name)} (clone)",
+                  "gender": str(meta.get("gender") or ""), "locale": locale,
+                  "language": _LANGUAGE_NAMES.get(lang, lang),
+                  "accent": _COUNTRY_NAMES.get(country, country),
+                  "where": ["server"], "provider": "chatterbox", "installed": True},
+                 "chatterbox")
+
+
+def orpheus_voice(name: str) -> Optional[dict]:
+    """One of Orpheus's eight speakers, American English."""
+    if name not in ORPHEUS_VOICES:
+        return None
+    return _slow({"name": f"orpheus:{name}", "label": name.capitalize(),
+                  "gender": ORPHEUS_VOICES[name], "locale": "en-US", "language": "English",
+                  "accent": "United States", "where": ["server"], "provider": "orpheus",
+                  "installed": True}, "orpheus")
+
+
+_MAKE = {"kokoro": kokoro_voice, "piper": piper_voice,
+         "chatterbox": chatterbox_voice, "orpheus": orpheus_voice}
 
 
 def voices() -> list[dict]:
@@ -194,12 +291,18 @@ def voices() -> list[dict]:
 #: Kokoro is one download for all its voices: the model and the voices file
 #: (setup_voices.KOKORO_FILES), about 354 MB.
 KOKORO_DOWNLOAD_BYTES = 325_532_387 + 28_214_398
+#: What the slow engines take: Chatterbox's weights and venv (torch), the
+#: Orpheus GGUF (Q8, 3.5 GB) with SNAC and its venv. As measured in the trial.
+SLOW_DOWNLOAD_BYTES = {"chatterbox": 1_700_000_000, "orpheus": 4_300_000_000}
+#: The slow engines offered for download while not here.
+OFFER_TO_DOWNLOAD = tuple(SLOW)
 #: Piper's catalog: every voice with its files and their sizes.
 PIPER_CATALOG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json"
 PIPER_CATALOG_NAME = "piper-voices.json"
 PIPER_CATALOG_TTL_S = 24 * 3600
 PIPER_CATALOG_RETRY_S = 600
-LICENCES = {"kokoro": "Apache-2.0", "piper": "per voice"}
+LICENCES = {"kokoro": "Apache-2.0", "piper": "per voice", "chatterbox": "MIT",
+            "orpheus": "Llama 3.2 Community License"}
 
 _piper_catalog_try = 0.0
 
@@ -285,6 +388,18 @@ def offered() -> list[dict]:
         if name not in have_piper:
             v.update(installed=False, size_bytes=int(catalog.get(name) or 0))
         out.append(v)
+    for provider in SLOW:
+        have_slow = installed(provider)
+        if have_slow is None and provider not in OFFER_TO_DOWNLOAD:
+            continue
+        names = have_slow if have_slow is not None else (
+            list(ORPHEUS_VOICES) if provider == "orpheus" else ["default"])
+        for name in names:
+            v = _MAKE[provider](name)
+            if v:
+                if have_slow is None:
+                    v.update(installed=False, size_bytes=SLOW_DOWNLOAD_BYTES[provider])
+                out.append(v)
     return out
 
 

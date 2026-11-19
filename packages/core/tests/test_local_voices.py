@@ -10,9 +10,11 @@ from agent_media_core.render import local_voices
 from agent_media_core.types import Target
 
 
-def _serve(monkeypatch, kokoro=None, piper=None):
+def _serve(monkeypatch, kokoro=None, piper=None, chatterbox=None, orpheus=None):
     monkeypatch.setattr(local_voices, "_ASK", {"kokoro": lambda base: kokoro,
-                                               "piper": lambda base: piper})
+                                               "piper": lambda base: piper,
+                                               "chatterbox": lambda base: chatterbox,
+                                               "orpheus": lambda base: orpheus})
     local_voices.clear_cache()
 
 
@@ -46,7 +48,9 @@ def test_an_answer_is_kept_a_while(monkeypatch):
         asked.append(base)
         return ["af_alloy"]
 
-    monkeypatch.setattr(local_voices, "_ASK", {"kokoro": kokoro, "piper": lambda b: None})
+    monkeypatch.setattr(local_voices, "_ASK", {"kokoro": kokoro, "piper": lambda b: None,
+                                               "chatterbox": lambda b: None,
+                                               "orpheus": lambda b: None})
     local_voices.clear_cache()
     local_voices.installed("kokoro")
     local_voices.installed("kokoro")
@@ -176,3 +180,64 @@ def test_a_panes_own_voice_does_not_beat_the_apps_choice(monkeypatch):
     device_voice.set_override("sasonica", "phone", None)
     engine, voice = submit._engine_and_voice(reply, Target(name="rooms"))
     assert voice == "en-GB-LibbyNeural"
+
+
+def test_the_slow_voices_are_listed_slow_and_found_without_starting_them(monkeypatch, tmp_path):
+    """Chatterbox and Orpheus (voice-picker step 6): their servers unload when
+    idle, so an installed unit means installed, and nothing is started to
+    find out; each voice says it is not live, with the trial's speed."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(local_voices, "_get_json",
+                        lambda url: (_ for _ in ()).throw(OSError("refused")))
+    assert local_voices._ask_slow("orpheus", "http://o") is None, "no unit: not installed"
+    units = tmp_path / "config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    (units / "agent-media-orpheus-tts.service").write_text("[Unit]\n")
+    (units / "agent-media-chatterbox-tts.service").write_text("[Unit]\n")
+    assert local_voices._ask_slow("orpheus", "http://o") == list(local_voices.ORPHEUS_VOICES)
+    clones = local_voices.chatterbox_voices_dir()
+    clones.mkdir(parents=True)
+    (clones / "natasha.wav").write_bytes(b"RIFF")
+    (clones / "natasha.json").write_text('{"locale": "en-AU", "gender": "Female"}')
+    assert local_voices._ask_slow("chatterbox", "http://c") == ["default", "natasha"]
+    natasha = local_voices.chatterbox_voice("natasha")
+    assert (natasha["name"], natasha["label"], natasha["locale"], natasha["accent"]) == (
+        "chatterbox:natasha", "Natasha (clone)", "en-AU", "Australia")
+    assert (natasha["live"], natasha["rtf"]) == (False, 3.5)
+    tara = local_voices.orpheus_voice("tara")
+    assert (tara["label"], tara["gender"], tara["live"], tara["rtf"]) == ("Tara", "Female", False, 7.0)
+    assert local_voices.orpheus_voice("nobody") is None
+    assert local_voices.split("orpheus:tara") == ("orpheus", "tara")
+
+
+def test_slow_voices_not_here_are_offered_at_their_size(monkeypatch):
+    _serve(monkeypatch)
+    monkeypatch.setattr(local_voices, "OFFER_TO_DOWNLOAD", ("chatterbox", "orpheus"))
+    monkeypatch.setattr(local_voices, "piper_catalog", lambda: {})
+    by = {v["name"]: v for v in local_voices.offered()}
+    assert by["orpheus:tara"]["installed"] is False
+    assert by["orpheus:tara"]["size_bytes"] == local_voices.SLOW_DOWNLOAD_BYTES["orpheus"]
+    assert by["chatterbox:default"]["size_bytes"] == local_voices.SLOW_DOWNLOAD_BYTES["chatterbox"]
+
+
+def test_a_slow_voice_renders_whole_and_never_says_a_thinking_line(monkeypatch):
+    from agent_media_core import session_voice
+    from agent_media_core.intake import submit
+    from agent_media_core.types import Event, Source
+
+    monkeypatch.setenv("MEDIA_RENDER_VOICE_EDGE", "en-AU-NatashaNeural")
+    monkeypatch.delenv("MEDIA_RENDER_ENGINE", raising=False)
+    monkeypatch.delenv("CLAUDE_TTS_ENGINE", raising=False)
+    monkeypatch.setattr(session_voice, "voice_for", lambda s: None)
+    sas = Target(name="sasonica")
+    device_voice.set_override("sasonica", "server", "orpheus:tara")
+    reply = Event(source=Source.CLAUDE_CODE, text="Hi.")
+    assert submit._engine_and_voice(reply, sas) == ("orpheus", "tara")
+    for md in ({"thinking": True}, {"ask": True}, {"alert": True}):
+        ev = Event(source=Source.CLAUDE_CODE, text="Hmm.", metadata=md)
+        assert submit._engine_and_voice(ev, sas) == ("edge", "en-AU-NatashaNeural"), md
+    assert submit._slow_engine("orpheus") and submit._slow_engine("chatterbox")
+    assert not submit._slow_engine("kokoro")
+    assert submit._render_workers(10, "orpheus") == 1
+    assert submit._ext_for("orpheus") == submit._ext_for("chatterbox") == "wav"

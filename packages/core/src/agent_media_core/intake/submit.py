@@ -122,7 +122,37 @@ def _resolve_engine(event: Event) -> str:
     return event.engine or _default_engine()
 
 
+def _slow_engine(engine: str) -> bool:
+    """An engine too slow to speak live here (Chatterbox, Orpheus): a reply
+    in it is rendered whole before it plays."""
+    from ..render import local_voices
+
+    return str(engine or "").split(":", 1)[0] in local_voices.SLOW
+
+
+def _only_worth_on_time(event: Event) -> bool:
+    """A thinking readout, a question being asked, or an alert: only worth
+    hearing on time, so never left to a slow voice (voice-picker proposal,
+    "Decided")."""
+    md = event.metadata or {}
+    return bool(md.get("thinking") or md.get("ask") or md.get("alert"))
+
+
 def _engine_and_voice(event: Event, target: Target) -> tuple[str, Optional[str]]:
+    """The engine and voice `event` renders in here (_chosen_engine_and_voice),
+    except that what must be heard on time is never said in a slow voice:
+    a thinking line, a question or an alert in a slow voice's place is said
+    in the configured engine's voice instead (Microsoft's on red2)."""
+    engine, voice = _chosen_engine_and_voice(event, target)
+    if _slow_engine(engine) and _only_worth_on_time(event) and not event.engine:
+        live = _default_engine()
+        if _slow_engine(live):
+            live = "edge"
+        return live, os.environ.get(f"MEDIA_RENDER_VOICE_{live.upper().replace('-', '_')}") or None
+    return engine, voice
+
+
+def _chosen_engine_and_voice(event: Event, target: Target) -> tuple[str, Optional[str]]:
     """The engine and voice a reply to `target` renders in here: the app's
     choice of a Microsoft voice for the server (render/device.py), unless
     the event names its own engine or voice, else the configured ones."""
@@ -196,8 +226,8 @@ def _resolve_voice(event: Event, engine: str) -> Optional[str]:
 
 
 def _ext_for(engine: str) -> str:
-    """qwen / realtime / kokoro / piper emit WAV, others MP3."""
-    return "wav" if engine in ("qwen", "realtime", "kokoro", "piper") else "mp3"
+    """qwen / realtime / kokoro / piper / chatterbox / orpheus emit WAV, others MP3."""
+    return "wav" if engine in ("qwen", "realtime", "kokoro", "piper", "chatterbox", "orpheus") else "mp3"
 
 
 def _norm_ws(s: str) -> str:
@@ -3370,7 +3400,7 @@ _STREAM_ARCHIVE_WAIT_S = 120.0
 #: 001, 007), so a reply that streams cannot start on its first sentence. They
 #: get one worker, so the renders go in reading order.
 #: MEDIA_RENDER_WORKERS_<ENGINE> overrides it for an engine.
-_SERIAL_ENGINES = frozenset({"kokoro"})
+_SERIAL_ENGINES = frozenset({"kokoro", "chatterbox", "orpheus"})
 
 
 def _engine_workers(engine: str) -> Optional[int]:
@@ -4719,7 +4749,12 @@ def _submit_event(event: Event,
     # A streamed reply always streams (unless muted, which waits for every
     # sentence and plays none): waiting for its slowest render would be
     # waiting for the model to finish.
-    stream = (_stream_clips(target) or arriving) and not muted
+    # A slow voice (Chatterbox, Orpheus) is rendered whole first: started on
+    # its first sentence it would stall after it, each next one taking
+    # several times its own length (David, 14 Nov 2026: "Choosable, with a
+    # delay"). Text still arriving keeps streaming: there is no whole yet.
+    stream = (((_stream_clips(target) and not _slow_engine(engine)) or arriving)
+              and not muted)
     clip_data: list[tuple[str, Path]] = []  # (sentence, clip_path)
     clip_para: list[int] = []               # paragraph index per surviving clip
     durations: list[float] = []

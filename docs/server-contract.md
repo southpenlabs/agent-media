@@ -3391,6 +3391,21 @@ Pinned by `packages/server/tests/test_reap.py`,
 `packages/server/tests/test_roles.py` and
 `packages/core/tests/test_local_voices.py`.
 
+**Slow voices** (19 Nov 2026, step 6; David: "Build Chatterbox + Orpheus"):
+`chatterbox:default` and clones (`chatterbox:natasha`, label `Natasha
+(clone)`, locale and gender from a sidecar beside its clip) and Orpheus's
+eight (`orpheus:tara` …, American English) carry `live: false` and an `rtf`
+(the trial's 3.5 and 7.0 until one is measured here). Their servers
+(engine-expressive, 127.0.0.1:8882 and :8883) load the model on first use
+and unload when idle, so an installed unit counts as installed and the
+catalog never starts one to find out; the render client starts it. A reply
+in a slow voice is rendered whole before it plays (one sentence at a time),
+however `MEDIA_STREAM_CLIPS` is set; text still arriving still streams. A
+thinking line, a question or an alert is never said in one: the configured
+engine's voice says it instead. Their providers say `live: false`; not
+installed, each is offered at its whole size (Chatterbox ~1.7 GB, Orpheus
+~4.3 GB; licences MIT and the Llama 3.2 Community License).
+
 `languages` groups them: `[{"code": "en", "name": "English", "accents":
 [{"locale": "en-AU", "name": "Australia", "voices": [<voice>]}]}]` —
 English first, then by name; Australia first within English, the rest by
