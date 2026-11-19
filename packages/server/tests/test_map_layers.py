@@ -485,3 +485,134 @@ def test_the_maps_place_search(server, monkeypatch):
     got = call(server, "GET", "/map/search?q=Brunetti&near=-37.80,144.96", headers=pixel)[1]
     assert [p["address"] for p in got["places"]] == ["near", "far"]
     assert call(server, "GET", "/map/search?q=", headers=pixel)[0].status == 400
+
+
+def test_route_planner_options_and_transit(server, monkeypatch):
+    """Google Maps' route planner options (David, 19 Nov 2026): avoid, alternates,
+    stops on the way, leave at / arrive by, and transit; a fake Valhalla."""
+    import http.server
+    import threading
+
+    from agent_media_server import map_route
+
+    monkeypatch.setattr(map_route, "_transit_seen", {})
+    asked, status = [], {"has_transit_tiles": False, "asked": 0}
+    walk = _enc([(-37.8183, 144.9671), (-37.8180, 144.9660)])
+    ride = _enc([(-37.8180, 144.9660), (-37.7670, 144.9610)])
+
+    def trip(legs, t=600, km=6.0, locs=None):
+        return {"summary": {"length": km, "time": t, "has_toll": False}, "legs": legs, "locations": locs or []}
+
+    def leg(shape, maneuvers, km=1.0, t=100):
+        return {"shape": shape, "summary": {"length": km, "time": t}, "maneuvers": maneuvers}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def _send(self, obj, code=200):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            status["asked"] += 1
+            self._send({"version": "3.9.3", "has_transit_tiles": status["has_transit_tiles"]})
+
+        def do_POST(self):
+            q = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            asked.append(q)
+            if q.get("date_time", {}).get("value") == "2026-11-23T09:99":
+                return self._send({"error_code": 162, "error": "Date and time is invalid"}, 400)
+            if q["costing"] == "multimodal":
+                return self._send({"trip": trip([leg(walk + ride[0:0], [
+                    {"instruction": "Walk west on Flinders Street.", "street_names": ["Flinders Street"],
+                     "length": 0.1, "time": 90, "type": 1, "begin_shape_index": 0, "travel_type": "foot"},
+                    {"instruction": "Take the tram toward North Coburg.", "type": 30, "length": 5.8, "time": 1500,
+                     "begin_shape_index": 1, "travel_mode": "transit", "travel_type": "tram",
+                     "transit_info": {"short_name": "19", "long_name": "North Coburg - Flinders Street Station",
+                                      "headsign": "North Coburg", "operator_name": "Yarra Trams", "color": 7915563,
+                                      "transit_stops": [
+                                          {"name": "Elizabeth St/Flinders St", "departure_date_time": "2026-11-23T08:34"},
+                                          {"name": "Stop 2"},
+                                          {"name": "Brunswick Rd/Sydney Rd", "arrival_date_time": "2026-11-23T08:52"}]}}])],
+                    t=1590, locs=[{"date_time": "2026-11-23T08:30"}, {"date_time": "2026-11-23T08:57"}])})
+            alt = [{"trip": trip([leg(walk, [{"instruction": "Drive.", "street_names": ["Lygon Street"],
+                                              "length": 3.0, "time": 400, "type": 1, "begin_shape_index": 0}])], t=700)}]
+            legs = [leg(walk, [{"instruction": "Drive north.", "street_names": ["Sydney Road"], "length": 2.0,
+                                "time": 300, "type": 1, "begin_shape_index": 0}], km=2.0, t=300)
+                    for _ in range(len(q["locations"]) - 1)]
+            dt = q.get("date_time") or {}
+            ends = [{"date_time": dt["value"]}, {}] if dt.get("type") == 1 else [{}, {"date_time": dt.get("value")}]
+            self._send({"trip": trip(legs, locs=ends),
+                        **({"alternates": alt[: q.get("alternates", 0)]} if q.get("alternates") else {})})
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    pixel, _ = _device("Pixel 8a")
+    get = lambda p: call(server, "GET", p, headers=pixel)  # noqa: E731
+    ab = "/map/route?from=-37.8183,144.9671&to=-37.767,144.961"
+    try:
+        assert get("/map/route/modes")[1]["code"] == "no_router"
+        monkeypatch.setenv("MEDIA_ROUTER_URL", f"http://127.0.0.1:{srv.server_port}")
+        # The app's probe: no parameters is a 400 once a router is set.
+        assert get("/map/route")[0].status == 400
+        got = get("/map/route/modes")[1]
+        assert {k: got[k] for k in ("modes", "avoid", "max_via", "max_alternates")} == {
+            "modes": ["walk", "drive", "bike"], "avoid": ["tolls", "highways", "ferries"], "max_via": 8, "max_alternates": 2}
+        assert get(ab + "&mode=transit")[1]["code"] == "no_transit"
+
+        # Avoid, and alternates: every route under routes, the first also on top.
+        res, got = get(ab + "&avoid=tolls,ferries&alternates=1")
+        assert res.status == 200, got
+        assert asked[-1]["costing_options"] == {"auto": {"use_tolls": 0, "use_ferry": 0}} and asked[-1]["alternates"] == 1
+        assert len(got["routes"]) == 2 and got["routes"][0]["duration_s"] == got["duration_s"] == 600
+        assert got["routes"][1]["summary_label"] == "via Lygon Street" and got["routes"][0]["summary_label"] == "via Sydney Road"
+        assert got["legs"] == [{"distance_m": 2000, "duration_s": 300}] and got["steps"][0]["leg"] == 0
+        assert "depart_at" not in got
+        get(ab + "&mode=walk&avoid=highways,ferries")
+        assert asked[-1]["costing_options"] == {"pedestrian": {"use_ferry": 0}}
+
+        # Stops on the way: break locations, a leg each, and no alternates asked.
+        got = get(ab + "&via=-37.80,144.96;-37.79,144.962&alternates=2&depart=2026-11-23T08:30")[1]
+        q = asked[-1]
+        assert [loc.get("type") for loc in q["locations"]] == [None, "break", "break", None] and "alternates" not in q
+        assert q["date_time"] == {"type": 1, "value": "2026-11-23T08:30"}
+        assert len(got["legs"]) == 3 and [s["leg"] for s in got["steps"]] == [0, 1, 2] and len(got["routes"]) == 1
+        assert got["depart_at"] == "2026-11-23T08:30" and got["arrive_at"] == "2026-11-23T08:40"
+        got = get(ab + "&arrive=2026-11-23T09:00")[1]
+        assert asked[-1]["date_time"] == {"type": 2, "value": "2026-11-23T09:00"}
+        assert got["arrive_at"] == "2026-11-23T09:00" and got["depart_at"] == "2026-11-23T08:50"
+
+        # Validation, each with a code.
+        for tail, code in (("&via=-37.8", "bad_via"), ("&via=" + ";".join(["-37.8,144.9"] * 9), "too_many_via"),
+                           ("&avoid=tolls,hills", "bad_avoid"), ("&alternates=3", "bad_alternates"),
+                           ("&alternates=x", "bad_alternates"), ("&depart=tomorrow", "bad_time"),
+                           ("&depart=2026-11-23T08:30&arrive=2026-11-23T09:00", "depart_and_arrive"),
+                           ("&mode=fly", "bad_mode"), ("&depart=2026-11-23T09:99", "bad_time")):
+            res, got = get(ab + tail)
+            assert (res.status, got.get("code")) == (400, code), (tail, got)
+        assert get("/map/route?from=x&to=-37.81,144.965")[1]["code"] == "bad_point"
+
+        # Transit, once the service has transit tiles (the check is kept 30 min).
+        status["has_transit_tiles"] = True
+        assert "transit" not in get("/map/route/modes")[1]["modes"]
+        monkeypatch.setattr(map_route, "_transit_seen", {})
+        assert get("/map/route/modes")[1]["modes"] == ["walk", "drive", "bike", "transit"]
+        n = status["asked"]
+        res, got = get(ab + "&mode=transit&depart=2026-11-23T08:30&avoid=ferries")
+        assert res.status == 200, got
+        assert status["asked"] == n
+        assert asked[-1]["costing"] == "multimodal" and asked[-1]["costing_options"] == {"pedestrian": {"use_ferry": 0}}
+        assert got["mode"] == "transit" and got["depart_at"] == "2026-11-23T08:30" and got["arrive_at"] == "2026-11-23T08:57"
+        walk_step, tram = got["steps"]
+        assert "transit" not in walk_step
+        assert tram["transit"] == {"kind": "tram", "route_name": "19", "route_long_name": "North Coburg - Flinders Street Station",
+                                   "headsign": "North Coburg", "operator": "Yarra Trams", "departs": "2026-11-23T08:34",
+                                   "arrives": "2026-11-23T08:52", "stops": 2, "from_stop": "Elizabeth St/Flinders St",
+                                   "to_stop": "Brunswick Rd/Sydney Rd", "color": "#78c82b"}
+        assert got["routes"][0]["summary_label"] == "Tram 19"
+    finally:
+        srv.shutdown()

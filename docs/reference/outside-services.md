@@ -102,6 +102,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 59 | Overpass (public instances), asked by the app itself | the Map's speed, red-light and average-speed cameras and the camera alerts with no server paired (`sasonica-app` `app/lib/localCameras.ts`, `LocalCameras.java`; 11 Nov 2026) | none (the phone's own address; the Android shell names itself in its User-Agent, a browser cannot) | overpass-api.de, then overpass.private.coffee; one request at a time, kept a day, a 30 s to 10 min back-off. Not yet the owner's own Overpass (row 12): asking it needs a server endpoint the app can reach, since it listens on loopback | **Needs work**: the Overpass usage policy (under 10,000 queries and 1 GB a day, "commercial use should use self-hosted or paid Overpass servers") is met per phone but not by a product's whole user base; ODbL credit "© OpenStreetMap contributors, ODbL" is shown beside the layer; off in countries that ban camera warnings (`public/camera-countries.json`) | no (a public build offers it; a personal build may show it where the country rule says no) |
 | 60 | Hugging Face (unsloth/orpheus-3b-0.1-ft-GGUF) | the Orpheus slow voice's model: `media-setup voices orpheus` (`setup_voices_expressive.py`) | none | fetched once on request (3.5 GB), checked against a pinned sha256; `--from` copies the file instead | **Needs work**: the Orpheus finetune is under the Llama 3.2 Community License (attribution, "Built with Llama" where offered, Meta's acceptable-use policy; a separate licence above 700 million monthly users): show it as the voice's `licence` in the picker. llama.cpp (MIT) runs as a separate program | **No, not gated** |
 | 61 | Hugging Face (ResembleAI/chatterbox, hubertsiuzdak/snac_24khz), and PyTorch's CPU wheel index | the Chatterbox and Orpheus slow voices: weights into the HF cache at their first render; torch at install (`media-setup voices chatterbox\|orpheus`) | none | fetched by the libraries themselves (`from_pretrained`) when the voice is first used; torch from download.pytorch.org/whl/cpu at install | nothing: Chatterbox and SNAC are MIT; Chatterbox's audio carries Resemble's Perth watermark (inaudible); keep the credits in NOTICE | **No, not gated** |
+| 62 | PTV's GTFS Schedule (Department of Transport and Planning, Victoria; data.ptv.vic.gov.au) | public transport directions: Valhalla's transit tiles for `GET /map/route?mode=transit` (19 Nov 2026) | none (an open download, a named client) | the owner's server (red2) downloads gtfs.zip (~285 MB) when it rebuilds its Valhalla tiles (`~/.local/share/valhalla/build-tiles.sh`, host config); the server only asks its own Valhalla | credit the Department of Transport and Planning beside transit directions (CC BY 4.0); timetables are a rolling 30 days, so rebuild weekly | no |
 
 ## The services, one by one
 
@@ -836,6 +837,32 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** fine for Chatterbox and SNAC. For Orpheus, show the
   Llama 3.2 Community License as the voice's `licence` in the picker and
   the "Built with Llama" credit where the voice is offered.
+
+### 62. PTV's GTFS Schedule
+
+- **Used for:** public transport in directions (`mode=transit`, §6.50;
+  David, 19 Nov 2026: "let's add the route planner options that Google maps
+  has"). Valhalla's `valhalla_ingest_transit` and `valhalla_convert_transit`
+  build transit tiles from it, and `GET /map/route/modes` lists Transit only
+  where the routing service has them. The server never asks PTV itself.
+- **Source:** the "GTFS Schedule" dataset on DataVic
+  (https://discover.data.vic.gov.au/dataset/gtfs-schedule), file
+  https://data.ptv.vic.gov.au/downloads/gtfs.zip: one `google_transit.zip`
+  per mode (1 regional train, 2 metropolitan train, 3 metropolitan tram, 4
+  metropolitan and town bus, 5 regional coach, 6 regional bus, 10
+  interstate, 11 SkyBus). "Updated on a weekly or as needed basis"; "The
+  data contains a rolling 30 days of data from the date of export".
+- **Terms:** published by the Department of Transport and Planning under
+  "Creative Commons Attribution 4.0 International"
+  (https://creativecommons.org/licenses/by/4.0/): any use, commercial
+  included, with credit, a link to the licence and a note of changes. The
+  credit to show beside transit directions: "Timetables: Department of
+  Transport and Planning, Victoria (CC BY 4.0)". GTFS Realtime (live
+  departures) is a separate dataset under the same licence, not used yet.
+- **Personal-use switch:** no; the licence allows any use with credit.
+- **Production:** each deployment downloads it itself when it builds its
+  tiles; nothing is redistributed. Other regions need their own operator's
+  GTFS and its terms.
 
 ## Before other people use this
 

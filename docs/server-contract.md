@@ -11364,6 +11364,52 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   road (Valhalla's own verbal instructions, in `lang`). 404 `no_router`
   when none is set, 404 `no_route` when the service finds none, 400 for a
   bad point or mode, 502 when it does not answer.
+
+  **Route planner options** (19 Nov 2026; David: "let's add the route
+  planner options that Google maps has"): `GET /map/route?from&to
+  [&via=lat,lon;lat,lon…][&mode=walk|drive|bike|transit]
+  [&avoid=tolls,highways,ferries][&alternates=0..2]
+  [&depart=YYYY-MM-DDTHH:MM | &arrive=YYYY-MM-DDTHH:MM][&lang]`. The
+  answer keeps the fields above for the chosen route and adds:
+  - `routes: [route, …]`, the chosen route first, then the alternates; each
+    `{mode, distance_m, duration_s, line, steps, legs, summary_label?,
+    has_toll, has_highway, has_ferry, depart_at?, arrive_at?}`.
+    `summary_label` tells routes apart: the lines taken for transit
+    ("Tram 19"), else the street it spends longest on ("via Sydney Road").
+  - `legs: [{distance_m, duration_s}]`, one per stop-to-stop leg (each
+    `via` point ends a leg), on the top level and on each route.
+  - each step's `leg` (its leg index), and on a transit ride `transit:
+    {kind: bus|tram|train|ferry|cable_car|gondola|funicular, route_name
+    (the short name, "86"), route_long_name, headsign, operator, departs,
+    arrives (local ISO, `YYYY-MM-DDTHH:MM`), stops (stops ridden),
+    from_stop, to_stop, color? ("#rrggbb")}`; the walks to, between and
+    from stops are ordinary steps.
+  - `depart_at` / `arrive_at` (local ISO) when `depart` or `arrive` was
+    given: Valhalla's own where it gives them, else the asked time plus or
+    minus the duration.
+
+  `avoid` maps to Valhalla's costing options (`use_tolls`, `use_highways`,
+  `use_ferry` 0: avoided where it can be, not forbidden); for walk, bike
+  and transit only `ferries` applies, the others are ignored. `alternates`
+  asks for up to two more routes; Valhalla gives them only between two
+  points with no time asked, so with `via`, `depart` or `arrive` there is
+  one route. `via` points are "break" locations, at most 8. `depart` is
+  leave at, `arrive` arrive by (local time at the place; Valhalla's
+  `date_time` type 1 and 2). `transit` is Valhalla's multimodal costing
+  over transit tiles built from the operator's GTFS (on red2, PTV's for
+  Victoria): 404 `no_transit` where the service has none. 400 with a
+  `code`: `bad_point`, `bad_mode`, `bad_via`, `too_many_via`, `bad_avoid`,
+  `bad_alternates`, `bad_time`, `depart_and_arrive` (both given),
+  `arrive_unsupported` (Valhalla does not do arrive by for that mode).
+  With no parameters it still answers 400 when a router is set (the app's
+  probe) and 404 `no_router` when none is. In `/features`:
+  `map_route_options: true`.
+- **`GET /map/route/modes`** (19 Nov 2026) → `{modes: ["walk", "drive",
+  "bike", "transit"?], avoid: ["tolls", "highways", "ferries"], max_via: 8,
+  max_alternates: 2}`: `transit` is listed only when this server's Valhalla
+  has transit tiles (its verbose `/status` `has_transit_tiles`, asked at
+  most every 30 min), so the app offers Transit only where it works. 404
+  `no_router` when no routing service is set. The map's gate, as above.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
   Nominatim), nearest first given `near`. 400 for no words.

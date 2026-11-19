@@ -289,12 +289,22 @@ def speed_limit(near: str, heading: str, bearer: str, host: bool = False) -> tup
     return True, map_limits.nearest(lat, lon, hd)
 
 
-def route(frm: str, to: str, mode: str, lang: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+def route(frm: str, to: str, mode: str, lang: str, bearer: str, host: bool = False, via: str = "",
+          avoid: str = "", alternates: str = "", depart: str = "", arrive: str = "") -> tuple[bool, dict]:
     """`GET /map/route` (map_route.py), behind the map's gate."""
     from . import map_route
 
     ok, err = _gate(bearer, host)
-    return map_route.route(frm, to, mode, lang) if ok else (False, err)
+    return map_route.route(frm, to, mode, lang, via=via, avoid=avoid, alternates=alternates,
+                           depart=depart, arrive=arrive) if ok else (False, err)
+
+
+def route_modes(bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/route/modes` (map_route.py): the modes and avoids routing offers here."""
+    from . import map_route
+
+    ok, err = _gate(bearer, host)
+    return map_route.modes() if ok else (False, err)
 
 
 def search(q: str, near: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
