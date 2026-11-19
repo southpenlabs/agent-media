@@ -568,7 +568,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
-                       "/map/places", "/map/places/kinds", "/map/route/modes"})
+                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6016,6 +6016,14 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers.places(arg("near"), arg("bbox"), arg("kind"), arg("radius_m"),
                                        arg("open_now"), arg("limit"), bearer, host=host)
+    elif method == "GET" and path == "/map/recent_places":
+        # The places recent chats' replies pinned, for the Map's "Where to?" (map_recent.py).
+        from . import map_layers, map_recent
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            ok, detail = map_recent.recent_places(arg("limit"))
     elif method == "GET" and path == "/map/places/kinds":
         from . import map_layers
 

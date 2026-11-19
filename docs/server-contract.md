@@ -11404,6 +11404,17 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   With no parameters it still answers 400 when a router is set (the app's
   probe) and 404 `no_router` when none is. In `/features`:
   `map_route_options: true`.
+- **`GET /map/recent_places`** (19 Nov 2026; David: "maybe offer
+  suggestions from recent chats") → `{places: [{name, lat, lon, session,
+  chat, msg, at}]}`: the `[[map:]]` / `[[route:]]` points recent chats'
+  replies pinned, newest first, one per place (one name within 50 m),
+  at most `limit` (1–20, default 8; else 400 `bad_limit`). Looks in the
+  newest 25 chats by their transcript's change time (from the thread
+  list's last build, never sealed, private or Matrix rooms), each one's
+  newest 400 messages; `chat` is its title, `msg` the message's id, `at`
+  its time. Behind the map's gate (a guest gets 403 `guest`). The app's
+  "Where to?" lists them under the device's own recent destinations.
+  `/features` `map_recent_places`.
 - **`GET /map/route/modes`** (19 Nov 2026) → `{modes: ["walk", "drive",
   "bike", "transit"?], avoid: ["tolls", "highways", "ferries"], max_via: 8,
   max_alternates: 2}`: `transit` is listed only when this server's Valhalla
