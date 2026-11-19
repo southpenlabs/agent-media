@@ -11427,6 +11427,16 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   true}` takes it off (→ `{deleted}`, 400 `builtin` for the three, 404
   `not_saved`); a place left in no list that is not Home or Work goes with
   it. At most 30 lists of one's own.
+- **Pictures over the map** (19 Nov 2026; David: "Can we get an overlay
+  with the Hot Springs map"; `map_overlays.py`). An overlay is
+  `state_dir()/map-overlays/<id>.json` `{name, image, coordinates: [[lon,
+  lat] ×4] (top-left, top-right, bottom-right, bottom-left), opacity?,
+  credit?}` with its picture beside it; each is a `GET /map/layers` layer
+  `{id: "overlay:<id>", kind: "image", default_on: false, image:
+  {coordinates, opacity, credit?}}` with no features, and `GET
+  /map/overlay?id=<id>` → `{id, data_url}` (404 `no_overlay`), behind the
+  map's gate. The first is Peninsula Hot Springs' facility map
+  (outside-services row 63).
 - **Sharing a trip** (19 Nov 2026; David: the link "by default ends when
   the trip ends but has an option for other" lengths, opened by "anyone
   with the link"; `map_trips.py`, `/features` `map_trips`). `POST

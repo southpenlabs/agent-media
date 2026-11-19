@@ -127,6 +127,11 @@ def _all() -> list[dict]:
 
     for lay in map_reports.layers():
         out.append({"layer": lay, "features": map_reports.read})
+    # Pictures laid over the map, a venue's own map lined up with the streets (map_overlays.py).
+    from . import map_overlays
+
+    for lay in map_overlays.layers():
+        out.append({"layer": lay, "features": lambda _bbox: []})
     seen = {i["layer"]["id"] for i in out}
     for item in _addons():
         if item["layer"]["id"] not in seen:
