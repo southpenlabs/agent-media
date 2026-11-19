@@ -210,3 +210,17 @@ def test_a_hand_made_kokoro_unit_on_the_port_stops_it_before_the_unit(env, capsy
     assert not any("enable" in c for c in env.calls)
     assert "systemctl --user disable --now kokoro-tts.service" in capsys.readouterr().out
     assert (env.root / "kokoro" / "models" / "kokoro-v1.0.onnx").exists()   # kept for the rerun
+
+
+def test_the_users_own_bins_go_on_path(monkeypatch, tmp_path):
+    """A download from the app runs with the system's PATH only: uv, in
+    ~/.local/bin, is put on it."""
+    from agent_media_core import setup_voices
+
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    monkeypatch.setattr(setup_voices.Path, "home", lambda: tmp_path)
+    env = {"PATH": "/usr/bin:/bin"}
+    setup_voices._user_bins_on_path(env)
+    assert env["PATH"] == f"{tmp_path}/.local/bin:/usr/bin:/bin"
+    setup_voices._user_bins_on_path(env)
+    assert env["PATH"].count(".local/bin") == 1

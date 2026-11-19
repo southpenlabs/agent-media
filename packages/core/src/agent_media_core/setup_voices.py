@@ -570,8 +570,22 @@ def remove(engine: str, *, purge: bool, dry_run: bool) -> int:
     return 0
 
 
+def _user_bins_on_path(env: dict | None = None) -> None:
+    """Put the user's own bin folders (where uv installs itself) on PATH: a
+    download started from the app runs as a systemd unit whose PATH has
+    only the system's, and then uv, which Chatterbox needs for its own
+    Python, is not found (19 Nov 2026, red2)."""
+    env = os.environ if env is None else env
+    have = env.get("PATH", "").split(os.pathsep)
+    extra = [str(Path.home() / d) for d in (".local/bin", ".cargo/bin")
+             if str(Path.home() / d) not in have and (Path.home() / d).is_dir()]
+    if extra:
+        env["PATH"] = os.pathsep.join([*extra, *[p for p in have if p]])
+
+
 def cmd_voices(args: argparse.Namespace) -> int:
     dry = bool(args.dry_run)
+    _user_bins_on_path()
     if args.remove:
         if args.specs:
             _say("media-setup voices: --remove takes no voices")
