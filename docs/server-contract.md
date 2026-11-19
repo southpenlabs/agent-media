@@ -11437,6 +11437,15 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   /map/overlay?id=<id>` → `{id, data_url}` (404 `no_overlay`), behind the
   map's gate. The first is Peninsula Hot Springs' facility map
   (outside-services row 63).
+- **Aerial photos** (19 Nov 2026; David: "Is it possible to get an arial
+  view photo overlay?"; `map_tiles.py`). While `MEDIA_MAP_AERIAL_KEY` (the
+  owner's ArcGIS Location Platform key) is set, `GET /map/layers` lists
+  `{id: "aerial", name: "Aerial photo", kind: "tiles", default_on: false,
+  tiles: {url: "/map/tiles/aerial/{z}/{x}/{y}", max_zoom: 19, credit}}`,
+  and **`GET /map/tiles/aerial/{z}/{x}/{y}`** (bearer, the map's gate)
+  answers the image, asked of Esri World Imagery with the key, which never
+  leaves the server; kept in memory a day (1500 at most); 404 `no_tile`
+  without a key or out of range, 502 when Esri cannot be reached.
 - **Sharing a trip** (19 Nov 2026; David: the link "by default ends when
   the trip ends but has an option for other" lengths, opened by "anyone
   with the link"; `map_trips.py`, `/features` `map_trips`). `POST

@@ -132,6 +132,11 @@ def _all() -> list[dict]:
 
     for lay in map_overlays.layers():
         out.append({"layer": lay, "features": lambda _bbox: []})
+    # Aerial photos, while the owner's key is set (map_tiles.py).
+    from . import map_tiles
+
+    for lay in map_tiles.layers():
+        out.append({"layer": lay, "features": lambda _bbox: []})
     seen = {i["layer"]["id"] for i in out}
     for item in _addons():
         if item["layer"]["id"] not in seen:

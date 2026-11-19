@@ -649,6 +649,10 @@ BRIDGE_SETUP = re.compile(r"/bridges/([A-Za-z0-9_.-]+)/setup")
 BRIDGE_ROUTES = (BRIDGE_ICON, BRIDGE_AVATAR, BRIDGE_LOGIN, BRIDGE_PROC, BRIDGE_PROC_ACT, BRIDGE_LOGOUT, BRIDGE_SETUP)
 
 
+#: An aerial photo tile, through this server (map_tiles.py).
+MAP_TILE = re.compile(r"/map/tiles/aerial/(\d{1,2})/(\d{1,7})/(\d{1,7})")
+
+
 def cors_path(path: str) -> bool:
     """Whether `path` is an app route a browser on another origin may reach
     (any method): `CORS_PATHS`, a thread's event stream, or its agents."""
@@ -659,7 +663,7 @@ def cors_path(path: str) -> bool:
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL, MAIL_THREAD,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, ROOM_CONTACT, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
-                                                        LOCAL_BACKUP, *BRIDGE_ROUTES))
+                                                        LOCAL_BACKUP, MAP_TILE, *BRIDGE_ROUTES))
 
 
 # Long enough that a chat page's polling is not preceded by a preflight every
@@ -735,6 +739,30 @@ def register(*, speech_state: Callable[[], dict] | None = None,
 
 
 # --- the envelope -----------------------------------------------------------------
+
+def _map_tile(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """An aerial photo tile, asked of Esri with the owner's key (map_tiles.py), behind the map's gate."""
+    from . import map_layers, map_tiles
+
+    host = _TOKEN_OK is not None and _TOKEN_OK(h)
+    ok, detail = map_layers._gate(_bearer(h), host)
+    if not ok:
+        _json(h, detail.pop("status", 401), {"ok": False, **detail})
+        return True
+    z, x, y = (int(v) for v in MAP_TILE.fullmatch(path).groups())  # type: ignore[union-attr]
+    status, body, ctype = map_tiles.tile(z, x, y)
+    if status != 200:
+        _json(h, 404 if status == 404 else 502, {"ok": False, "code": "no_tile", "error": f"no tile ({status})"})
+        return True
+    h.send_response(200)
+    h.send_header("Content-Type", ctype)
+    h.send_header("Content-Length", str(len(body)))
+    h.send_header("Cache-Control", "private, max-age=86400")
+    _cors(h)
+    h.end_headers()
+    h.wfile.write(body)
+    return True
+
 
 def _cors(h: BaseHTTPRequestHandler) -> None:
     """Allow a browser on another origin, on the bearer-authed routes only.
@@ -1029,6 +1057,8 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return (path == web_app.PREFIX or path.startswith(web_app.PREFIX + "/")) and web_app.serve(h, path)
     if method == "GET" and path in APP_UPDATE_PATHS:
         return _app_update(h, path)
+    if method == "GET" and MAP_TILE.fullmatch(path):
+        return _map_tile(h, path)
     if method == "GET":
         # The web app's own files (web_app.py, roadmap 21): no credential,
         # and nothing else under /app is an API route.
