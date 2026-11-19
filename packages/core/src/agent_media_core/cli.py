@@ -11309,7 +11309,9 @@ def _build_parser() -> argparse.ArgumentParser:
     psub = s.add_subparsers(dest="place_cmd", required=True)
     t = psub.add_parser("find", help="the best matches, each as `name @ lat,lon` to copy "
                                       "into [[map: …]]")
-    t.add_argument("words", nargs="+", help="what to find: a name, an address, \"cafe Carlton\"")
+    t.add_argument("words", nargs="+", help="what to find: a name, an address, \"cafe Carlton\"; "
+                                            "with --near, a kind (\"open pharmacy\", \"fuel\") "
+                                            "is the nearest of that kind")
     t.add_argument("--near", default="", help="lean towards `phone` (its shared location) "
                                              "or `lat,lon`")
     t.add_argument("--limit", type=int, default=5)
@@ -12490,8 +12492,12 @@ def cmd_place_find(a) -> int:
         print(f"place find: no point for --near {a.near}"
               + (" (the phone is not sharing its location)" if a.near == "phone" else ""),
               file=sys.stderr)
+    # Words naming a kind ("open pharmacy", "fuel") near a point: the
+    # server's places search (GET /map/places), else the geocoder.
+    rows = place_find.find_kind(words, near, limit=a.limit) if near else None
     try:
-        rows = place_find.find(words, near=near, limit=a.limit)
+        if rows is None:
+            rows = place_find.find(words, near=near, limit=a.limit)
     except Exception as e:  # noqa: BLE001 - the geocoder is out of reach
         print(f"place find: the geocoder did not answer: {e}", file=sys.stderr)
         return 1

@@ -303,3 +303,20 @@ def search(q: str, near: str, bearer: str, host: bool = False) -> tuple[bool, di
 
     ok, err = _gate(bearer, host)
     return map_route.search(q, near) if ok else (False, err)
+
+
+def places(near: str, bbox: str, kind: str, radius_m: str, open_now: str, limit: str,
+           bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/places` (map_places.py), behind the map's gate."""
+    from . import map_places
+
+    ok, err = _gate(bearer, host)
+    return map_places.places(near, bbox, kind, radius_m, open_now, limit) if ok else (False, err)
+
+
+def place_kinds(bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/places/kinds`: the kinds `/map/places` takes, for the app's chips."""
+    from . import map_places
+
+    ok, err = _gate(bearer, host)
+    return (True, {"kinds": map_places.kinds()}) if ok else (False, err)

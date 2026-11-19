@@ -390,6 +390,10 @@ except /pair, which is how a device gets its token):
                   GET /device/location (host token) → {location: … | null}
   GET  /map/layers → the Map page's layers; GET /map/layer?id=&bbox=w,s,e,n
                   → one as GeoJSON (map_layers.py, §6.50; not a guest)
+  GET  /map/places?near=lat,lon[&radius_m]|bbox=w,s,e,n&kind=[&open_now=1]
+                  [&limit] → places of a kind from OpenStreetMap, nearest
+                  first, with open_now (map_places.py, §6.50); GET
+                  /map/places/kinds → the kinds it takes
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -563,7 +567,8 @@ ORG_PATHS = frozenset({"/org", "/org/view", "/org/read", "/org/search",
 CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
-MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search"})
+MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
+                       "/map/places", "/map/places/kinds"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -5996,6 +6001,18 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
 
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers.search(arg("q"), arg("near"), bearer, host=host)
+    elif method == "GET" and path == "/map/places":
+        # Places near a point or in a box, by kind (map_places.py, Overpass).
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.places(arg("near"), arg("bbox"), arg("kind"), arg("radius_m"),
+                                       arg("open_now"), arg("limit"), bearer, host=host)
+    elif method == "GET" and path == "/map/places/kinds":
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.place_kinds(bearer, host=host)
     elif method == "GET" and path == "/map/speed_limit":
         # The limit of the road the device is on (map_limits.py).
         from . import map_layers

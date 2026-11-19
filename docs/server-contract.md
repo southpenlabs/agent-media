@@ -11367,6 +11367,41 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
   Nominatim), nearest first given `near`. 400 for no words.
+- **`GET /map/places?near=lat,lon[&radius_m=1500] | bbox=w,s,e,n
+  &kind=<kind>[,<kind>][&open_now=1][&limit=20]`** (19 Nov 2026; David:
+  "Build the places endpoint"; `map_places.py`, tests in
+  `test_map_places.py`): places of a kind from OpenStreetMap, asked of
+  Overpass through the cameras' client (`MEDIA_OVERPASS_URL`, tried in
+  order). → `{at, kinds, near?: [lat, lon], radius_m?, bbox?, places:
+  [{id ("node/1", "way/2"), kind, name, lat, lon, distance_m? (with
+  near), address?, opening_hours? (OSM's own string), open_now (true,
+  false, or null when there are no hours, they cannot be read or they say
+  unknown), changes_at? (when open_now next flips, ISO in the place's own
+  time), phone?, website?, tags (a few useful ones: brand, operator,
+  cuisine, wheelchair, fee, socket:*, fuel:* …)}], source, as_of? (the OSM
+  data's time), cached, narrowed?, truncated?, open_now?, hours_unknown?}`, nearest
+  first (from the box's centre for `bbox`), at most `limit` (1–100). A
+  way or relation is placed at its centre. `kind` is from a fixed list,
+  `GET /map/places/kinds` → `{kinds: [{id, name, aliases}]}`: pharmacy,
+  cafe, restaurant, fast_food, fuel, ev_charger, toilets, drinking_water,
+  supermarket, convenience, atm, parking, hospital, bakery, bar, pub,
+  playground, viewpoint, bus_stop, tram_stop, train_station; an alias or
+  plural names one too ("chemist", "petrol", "loo", "lookout"). The client
+  never sends Overpass text. `open_now=1` keeps only places open now
+  (`hours_unknown`: how many with unknown hours were passed over). Hours
+  are read with opening-hours-py (the full OSM syntax) in the place's own
+  timezone with its country's public holidays, both from its position.
+  `radius_m` is capped at 50 000; a box's sides at 0.5°. An answer is kept
+  5 minutes by its kinds and its circle's centre rounded to 3 decimals (or
+  the box rounded outwards), so a moving phone asks again only every
+  ~100 m; distances and `open_now` are worked out afresh. When Overpass
+  cuts an answer at 1000 elements, the circle is asked again at a quarter
+  the radius, up to three times (`narrowed: true`, `radius_m` the smaller
+  one; `truncated: true` if the last is still cut). 400 with
+  `code` `no_kind`, `unknown_kind` (with `kinds`), `no_area`,
+  `near_or_bbox`, `bad_near`, `bad_bbox`, `too_big`, `bad_radius`,
+  `bad_limit`; 502 `overpass` when every Overpass fails; the map's gate (a
+  guest 403). In `/features`: `map_places: true`.
 - **`GET /map/speed_limit?near=lat,lon[&heading=deg]`** (12 Nov 2026; David:
   "let's add speed limits"; `map_limits.py`) → `{kmh, road, distance_m}`,
   the limit of the road nearest the point within 30 m, a road running the
@@ -11391,6 +11426,11 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   (core `place_find.py`): an agent's coordinates for the marker, from a
   Nominatim geocoder (`MEDIA_GEOCODER_URL`, default
   nominatim.openstreetmap.org), each match printed as `name @ lat,lon`.
+  With `--near`, words naming a kind (`open pharmacy`, `fuel`, `toilets`;
+  fillers like "nearest" dropped, "open" asks `open_now=1`) are asked of
+  `GET /map/places` instead (within 5 km, the host's token), each printed
+  with its address, distance, open or closed and hours; words naming no
+  kind, or a server out of reach, fall back to the geocoder.
 
 ### 6.51 Related threads from the org-roam graph — gated (built 7 Nov 2026)
 

@@ -38,3 +38,32 @@ def test_near_point():
     assert place_find.near_point("-37.8,144.96") == (-37.8, 144.96)
     assert place_find.near_point("200,1") is None
     assert place_find.near_point("") is None
+
+
+def test_find_kind_asks_the_servers_places_search():
+    asked = []
+
+    def call(method, path):
+        asked.append(path)
+        if "kind=brunetti" in path:
+            return 400, {"code": "unknown_kind"}
+        return 200, {"places": [{"name": "Near Chemist", "kind": "pharmacy", "lat": -37.814,
+                                 "lon": 144.9635, "distance_m": 52, "open_now": True,
+                                 "address": "12 Swanston Street", "opening_hours": "Mo-Fr 09:00-17:00"}]}
+
+    rows = place_find.find_kind("nearest open pharmacy", (-37.8136, 144.9631), limit=3, call=call)
+    assert asked[-1].startswith("/map/places?near=-37.8136%2C144.9631&kind=pharmacy")
+    assert "open_now=1" in asked[-1] and "limit=3" in asked[-1]
+    (r,) = rows
+    assert r["name"] == "Near Chemist" and r["open_now"] is True and r["distance_m"] == 52
+    assert r["address"] == "12 Swanston Street · 52 m · open · Mo-Fr 09:00-17:00"
+    assert place_find.marker_part(r) == "Near Chemist @ -37.814,144.9635"
+    # Words naming no kind, or no server: None, and the geocoder is asked instead.
+    assert place_find.find_kind("Brunetti", (-37.8, 144.9), call=call) is None
+    assert "open_now" not in asked[-1]
+
+    def away(method, path):
+        raise OSError("refused")
+
+    assert place_find.find_kind("fuel", (-37.8, 144.9), call=away) is None
+    assert place_find.find_kind("the nearest", (-37.8, 144.9), call=call) is None
