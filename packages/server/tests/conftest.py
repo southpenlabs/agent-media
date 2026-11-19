@@ -39,6 +39,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
         raise RuntimeError("a test asked the real Overpass server")
 
     monkeypatch.setattr(map_osm, "_fetch", _no_overpass)
+
+    def _no_overpass_query(query, timeout=None):
+        raise RuntimeError("a test asked the real Overpass server")
+
+    # Nor the places search (map_places.py), which asks through overpass().
+    monkeypatch.setattr(map_osm, "overpass", _no_overpass_query)
+    from agent_media_server import map_places
+
+    map_places.forget()
     # The forges (forge.py): no test asks a real one or reads gh's login.
     # One that wants an answer patches forge._open (and _gh_token) itself.
     from agent_media_server import forge

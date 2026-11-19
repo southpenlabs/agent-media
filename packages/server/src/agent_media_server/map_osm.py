@@ -112,11 +112,11 @@ def _cache_dir() -> Path:
     return d
 
 
-def _fetch(layer: str, sq: tuple[int, int]) -> list[dict]:
-    """The square's elements from the first Overpass server that answers."""
-    s, w = sq[0] * SQUARE, sq[1] * SQUARE
-    body = urllib.parse.urlencode({"data": _query(layer, round(s, 4), round(w, 4),
-                                                  round(s + SQUARE, 4), round(w + SQUARE, 4))}).encode()
+def overpass(query: str, timeout: float = TIMEOUT_S) -> dict:
+    """Overpass's JSON answer to `query` from the first server in
+    `MEDIA_OVERPASS_URL` that answers (the camera squares and the places
+    search, map_places.py); raises the last failure when none does."""
+    body = urllib.parse.urlencode({"data": query}).encode()
     urls = [u.strip() for u in (os.environ.get("MEDIA_OVERPASS_URL") or DEFAULT_URLS).split(",") if u.strip()]
     last: Exception | None = None
     for url in urls:
@@ -124,13 +124,22 @@ def _fetch(layer: str, sq: tuple[int, int]) -> list[dict]:
                                      headers={"User-Agent": USER_AGENT,
                                               "Content-Type": "application/x-www-form-urlencoded"})
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as res:
+            with urllib.request.urlopen(req, timeout=timeout) as res:
                 got = json.loads(res.read().decode("utf-8") or "{}")
-            return got.get("elements") or []
+            if not isinstance(got, dict):
+                raise ValueError("Overpass answered something other than an object")
+            return got
         except Exception as e:  # noqa: BLE001 - busy or away: the next one
             _failures.swallowed(e)
             last = e
     raise last or RuntimeError("no Overpass server")
+
+
+def _fetch(layer: str, sq: tuple[int, int]) -> list[dict]:
+    """The square's elements from the first Overpass server that answers."""
+    s, w = sq[0] * SQUARE, sq[1] * SQUARE
+    got = overpass(_query(layer, round(s, 4), round(w, 4), round(s + SQUARE, 4), round(w + SQUARE, 4)))
+    return got.get("elements") or []
 
 
 def _path(layer: str, sq: tuple[int, int]) -> Path:

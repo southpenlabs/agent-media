@@ -52,7 +52,7 @@ Sorted with what blocks a public release first. 59 rows.
 | 9 | Anthropic OAuth usage endpoint | the `/usage` card | the host's own Claude login | an undocumented endpoint | **Needs work**: gate it or drop it for public installs | **No, not gated** |
 | 10 | Coding agents' subscriptions (Claude Code, Codex, Gemini, Grok, pi, opencode, Hermes, Antigravity) | the chats themselves | each user's own login or API key | each user's own account | check current terms of each on driving a subscription login from another program, and on a host serving several people | no |
 | 11 | Nominatim (public) | `media place find`; Victoria's camera roads | none (named client) | public instance, 1 request a second | **Needs work**: the limit is summed over all users of an app; ship with a geocoder setting per install (exists) and plan a hosted or paid one | no |
-| 12 | Overpass (public instances) | camera layers on the Map | none (named client) | public instances by default; the owner's server (red2) runs its own Overpass for Australia (upstream osm-3s, AGPL, a separate program; Geofabrik's extract, its daily changes applied) on loopback, first in `MEDIA_OVERPASS_URL` with a public one after (19 Nov 2026) | **Needs work**: "commercial use should use self-hosted or paid Overpass servers"; the weekly-extract path already avoids it, and a self-hosted Overpass meets it | no |
+| 12 | Overpass (public instances) | camera layers on the Map; the places search (`GET /map/places`, 19 Nov 2026) | none (named client) | public instances by default; the owner's server (red2) runs its own Overpass for Australia (upstream osm-3s, AGPL, a separate program; Geofabrik's extract, its daily changes applied) on loopback, first in `MEDIA_OVERPASS_URL` with a public one after (19 Nov 2026) | **Needs work**: "commercial use should use self-hosted or paid Overpass servers"; the weekly-extract path already avoids it, and a self-hosted Overpass meets it | no |
 | 13 | Cloudflare quick tunnel | a stranger's install reachable from the phone | none | `trycloudflare.com`, no account | **Needs work**: check current terms for quick tunnels in a product and for audio through a tunnel; named tunnels on the user's own account are the alternative | no |
 | 14 | Messaging bridges (Messenger, Instagram, Google Messages, Teams) | other networks in Messages | the user's own sign-in cookies | unofficial clients; add-on | Not in the product. Official business APIs if ever sold (see the legal proposal) | **yes** |
 | 15 | Facebook and Instagram stories, Facebook previews, signed-in reading | stories row, link cards, friends-only video | the app's stored sign-ins | reframing their sites | Not in the product | **yes** |
@@ -369,7 +369,10 @@ Sorted with what blocks a public release first. 59 rows.
 
 - **Used for:** speed and surveillance cameras on the Map
   (`packages/server/src/agent_media_server/map_osm.py:52`,
-  `MEDIA_OVERPASS_URL`: overpass-api.de, then two mirrors).
+  `MEDIA_OVERPASS_URL`: overpass-api.de, then two mirrors), and the places
+  search (`GET /map/places`, `map_places.py`, 19 Nov 2026: one query per
+  kind and ~100 m of movement, kept 5 minutes), which, unlike the cameras,
+  has no extract path and always asks Overpass.
 - **Terms:** under 10,000 queries and 1 GB a day, counted over all of an
   app's users; "Commercial use should use self-hosted or paid Overpass
   servers" (https://wiki.openstreetmap.org/wiki/Overpass_API). The
@@ -385,7 +388,8 @@ Sorted with what blocks a public release first. 59 rows.
   change files, listening on loopback only; that install's
   `MEDIA_OVERPASS_URL` names it first and a public server after. While
   `MEDIA_MAP_OSM_EXTRACT` is set the camera layers read the extract and ask
-  no Overpass at all. Phones' own queries (row 59) do not reach it yet.
+  no Overpass at all; the places search asks it. Phones' own camera
+  queries (row 59) do not reach it yet.
 
 ### 13. Cloudflare tunnels
 
