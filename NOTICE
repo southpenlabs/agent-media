@@ -27,6 +27,19 @@ The local Kokoro voice (`media-setup voices kokoro`) is installed into its
 own venv, not bundled: kokoro-onnx (MIT, thewh1teagle/kokoro-onnx) and the
 Kokoro-82M model (Apache-2.0, hexgrad), fetched from the kokoro-onnx release.
 
+The slow local voices (`media-setup voices chatterbox|orpheus`,
+packages/engine-expressive) are each installed into their own venv, not
+bundled, and their code is never imported by agent-media:
+  Chatterbox    MIT (Resemble AI, resemble-ai/chatterbox), chatterbox-tts
+                from PyPI, its weights (ResembleAI/chatterbox) from Hugging
+                Face; its audio carries Resemble's Perth watermark
+  Orpheus 3B    Llama 3.2 Community License (canopylabs/orpheus-3b-0.1-ft,
+                a Llama 3.2 finetune; "Built with Llama"), the Q8_0 GGUF
+                from Hugging Face (unsloth/orpheus-3b-0.1-ft-GGUF)
+  SNAC          MIT (hubertsiuzdak/snac), the decoder Orpheus speaks through
+  llama.cpp     MIT (ggml-org/llama.cpp), llama-server run as a separate
+                program
+
 This matters if the Android companion in `android/` ever *bundles* libmpv
 rather than talking to a separately-installed mpv over TCP, as it does today:
 linking libmpv would make the app a derivative work of a GPL program, and the

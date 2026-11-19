@@ -37,7 +37,7 @@ Ollama or a LiteLLM gateway, Termux. Their licences are in `NOTICE` and
 
 ## Summary
 
-Sorted with what blocks a public release first. 59 rows.
+Sorted with what blocks a public release first. 61 rows.
 
 | # | Service | Used for | Credential | Mode today | Needs for production | Personal use only? |
 |---|---|---|---|---|---|---|
@@ -100,6 +100,8 @@ Sorted with what blocks a public release first. 59 rows.
 | 57 | Valhalla (self-hosted, `pyvalhalla` on PyPI) with Geofabrik's Australia extract | directions: routes and spoken turns (maps proposal step 6; `MEDIA_ROUTER_URL`, `map_route.py`) | none | runs on the owner's server (red2), tiles built from the weekly OSM download | nothing beyond OpenStreetMap's credit (row 31); Valhalla is MIT | no |
 | 58 | Forge APIs: GitHub's REST API (api.github.com), and a self-hosted Forgejo or Gitea (`MEDIA_GIT_FORGES`), Codeberg, gitea.com | a commit's checks on the git line, whether main takes pull requests only, a ticket's issue and its pull request, a project's open issues and PRs (`forge.py`, `issues.py`; §6.49, §6.44, `/project/forge`) | the owner's own: a token file per host (`MEDIA_FORGE_TOKENS`), for github.com else the owner's `gh` login; none for reads of a public repo | reads cached (settled checks for good, the rest 30 s to 10 min); issues opened on the owner's own repos only, by hand or once a tracked chat commits (`MEDIA_FORGE_AUTO_ISSUE=0` to stop) | nothing for the owner's own forge; on GitHub the API terms ask for no excessive or abusive use, which the caching keeps to (unauthenticated: 60 requests an hour); an issue opened carries the chat's first ask and recap, so say so in the privacy policy | no |
 | 59 | Overpass (public instances), asked by the app itself | the Map's speed, red-light and average-speed cameras and the camera alerts with no server paired (`sasonica-app` `app/lib/localCameras.ts`, `LocalCameras.java`; 11 Nov 2026) | none (the phone's own address; the Android shell names itself in its User-Agent, a browser cannot) | overpass-api.de, then overpass.private.coffee; one request at a time, kept a day, a 30 s to 10 min back-off. Not yet the owner's own Overpass (row 12): asking it needs a server endpoint the app can reach, since it listens on loopback | **Needs work**: the Overpass usage policy (under 10,000 queries and 1 GB a day, "commercial use should use self-hosted or paid Overpass servers") is met per phone but not by a product's whole user base; ODbL credit "© OpenStreetMap contributors, ODbL" is shown beside the layer; off in countries that ban camera warnings (`public/camera-countries.json`) | no (a public build offers it; a personal build may show it where the country rule says no) |
+| 60 | Hugging Face (unsloth/orpheus-3b-0.1-ft-GGUF) | the Orpheus slow voice's model: `media-setup voices orpheus` (`setup_voices_expressive.py`) | none | fetched once on request (3.5 GB), checked against a pinned sha256; `--from` copies the file instead | **Needs work**: the Orpheus finetune is under the Llama 3.2 Community License (attribution, "Built with Llama" where offered, Meta's acceptable-use policy; a separate licence above 700 million monthly users): show it as the voice's `licence` in the picker. llama.cpp (MIT) runs as a separate program | **No, not gated** |
+| 61 | Hugging Face (ResembleAI/chatterbox, hubertsiuzdak/snac_24khz), and PyTorch's CPU wheel index | the Chatterbox and Orpheus slow voices: weights into the HF cache at their first render; torch at install (`media-setup voices chatterbox\|orpheus`) | none | fetched by the libraries themselves (`from_pretrained`) when the voice is first used; torch from download.pytorch.org/whl/cpu at install | nothing: Chatterbox and SNAC are MIT; Chatterbox's audio carries Resemble's Perth watermark (inaudible); keep the credits in NOTICE | **No, not gated** |
 
 ## The services, one by one
 
@@ -800,6 +802,36 @@ hosted tier), every one of these becomes a reseller question.
   server the project runs or pays for (one setting in each of the two
   files), or serve a prepared camera file as the server's weekly extract
   does.
+
+### 60 and 61. Slow voices' downloads
+
+- **Used for:** the slow, expressive local voices (voice picker proposal
+  step 6, `packages/engine-expressive`): `media-setup voices chatterbox`
+  and `media-setup voices orpheus`
+  (`packages/core/src/agent_media_core/setup_voices_expressive.py`).
+  Nothing is fetched unless one of them is installed.
+- **Orpheus (60):** `orpheus-3b-0.1-ft-Q8_0.gguf` (3,516,431,616 bytes)
+  from https://huggingface.co/unsloth/orpheus-3b-0.1-ft-GGUF, checked
+  against the sha256 pinned in `setup_voices_expressive.ORPHEUS_PIN` (the
+  same as the copy red2 ran in the TTS trial, and Hugging Face's own LFS
+  hash). The repository is labelled Apache-2.0, but the model it
+  quantizes (canopylabs/orpheus-3b-0.1-ft) is a Llama 3.2 finetune and
+  carries the Llama 3.2 Community License
+  (https://www.llama.com/llama3_2/license/): commercial use is allowed with
+  attribution ("Built with Llama"), under Meta's acceptable-use policy,
+  with a separate licence needed above 700 million monthly users. We do
+  not redistribute it: each install downloads it itself.
+- **Chatterbox and SNAC (61):** `ChatterboxTTS.from_pretrained` fetches
+  ResembleAI/chatterbox (~3 GB) and `SNAC.from_pretrained` fetches
+  hubertsiuzdak/snac_24khz (~80 MB) into the Hugging Face cache at the
+  first render, no account. Both MIT. Chatterbox embeds Resemble's Perth
+  watermark in what it says. torch comes from PyTorch's CPU wheel index
+  (https://download.pytorch.org/whl/cpu) at install, the rest from PyPI.
+- **Personal-use switch:** no. The models are openly licensed for
+  commercial use and fetched by the install that uses them.
+- **Production:** fine for Chatterbox and SNAC. For Orpheus, show the
+  Llama 3.2 Community License as the voice's `licence` in the picker and
+  the "Built with Llama" credit where the voice is offered.
 
 ## Before other people use this
 

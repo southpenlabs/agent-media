@@ -2,7 +2,13 @@
 
   media-setup voices kokoro[:<voice>] [--from DIR] [--fallback] [--dry-run]
   media-setup voices piper:<voice>[,<voice>…] [--from DIR] [--fallback] [--dry-run]
-  media-setup voices --remove kokoro|piper [--purge] [--dry-run]
+  media-setup voices chatterbox[:<voice>] [--clone NAME=AUDIO] [--from DIR] [--dry-run]
+  media-setup voices orpheus[:<voice>] [--llama-server PATH] [--from DIR] [--dry-run]
+  media-setup voices --remove kokoro|piper|chatterbox|orpheus [--purge] [--dry-run]
+
+Chatterbox and Orpheus, the slow expressive voices, are installed by
+setup_voices_expressive.py: their units are written but started only when a
+reply in one of their voices needs them.
 
 Each engine gets its own venv and data under
 `~/.local/share/agent-media/tts/<engine>` and a systemd user unit bound to
@@ -68,7 +74,13 @@ PIPER_VOICE_BYTES = 140_000_000
 KOKORO_SERVER_DEPS = ["kokoro-onnx>=0.6.1,<0.7", "numpy"]
 PIPER_SPEC = "piper-tts[http]>=1.3,<2"
 UNITS = {"kokoro": "agent-media-kokoro-tts.service",
-         "piper": "agent-media-piper-tts.service"}
+         "piper": "agent-media-piper-tts.service",
+         # The slow voices (setup_voices_expressive.py): written, not enabled;
+         # their render client starts them on demand.
+         "chatterbox": "agent-media-chatterbox-tts.service",
+         "orpheus": "agent-media-orpheus-tts.service"}
+#: Engines whose server runs only while used (no --fallback, no enable).
+ON_DEMAND = ("chatterbox", "orpheus")
 ENGINES = tuple(UNITS)
 #: The hand-made unit red2 and red5 ran before this (same port).
 LEGACY_KOKORO_UNIT = "kokoro-tts.service"
@@ -95,6 +107,9 @@ def parse_spec(text: str) -> Spec:
                              "kokoro:<voice>")
         if not _KOKORO_VOICE.match(voices[0]):
             raise ValueError(f"{voices[0]!r} is not a Kokoro voice name (like af_heart, bf_emma)")
+    elif engine in ON_DEMAND:
+        from . import setup_voices_expressive as _slow
+        voices = _slow.parse_voices(engine, voices)
     elif engine == "piper":
         if not voices:
             raise ValueError("piper needs a voice: piper:<voice>[,<voice>…] "
@@ -104,7 +119,7 @@ def parse_spec(text: str) -> Spec:
             raise ValueError(f"not a Piper voice name: {', '.join(bad)} "
                              "(like en_GB-cori-high, en_US-amy-medium)")
     else:
-        raise ValueError(f"unknown engine {engine!r}: kokoro or piper")
+        raise ValueError(f"unknown engine {engine!r}: kokoro, piper, chatterbox or orpheus")
     return Spec(engine, voices)
 
 
@@ -526,7 +541,10 @@ def remove(engine: str, *, purge: bool, dry_run: bool) -> int:
     unit = UNITS[engine]
     path = _setup.systemd_user_dir() / unit
     if path.exists():
-        _run(["systemctl", "--user", "disable", "--now", unit], dry_run=dry_run)
+        if engine in ON_DEMAND:   # never enabled: stopped if it is running
+            _run(["systemctl", "--user", "stop", unit], dry_run=dry_run)
+        else:
+            _run(["systemctl", "--user", "disable", "--now", unit], dry_run=dry_run)
         _say(f"  removing {path}")
         if not dry_run:
             path.unlink()
@@ -537,12 +555,18 @@ def remove(engine: str, *, purge: bool, dry_run: bool) -> int:
     if drop_env_value(env, "MEDIA_RENDER_FALLBACK_ENGINE", engine, dry_run=dry_run):
         _say(f"  MEDIA_RENDER_FALLBACK_ENGINE={engine} removed from {env}: the fallback is edge again")
     root = engine_dir(engine)
+    what = "the engine, its models" + (" and its clones" if engine == "chatterbox" else "")
     if purge and root.exists():
-        _say(f"  removing {root} (the engine and its models)")
+        _say(f"  removing {root} ({what})")
         if not dry_run:
             shutil.rmtree(root)
     elif root.exists():
-        _say(f"  kept {root} (--purge removes the engine and its models)")
+        _say(f"  kept {root} (--purge removes {what})")
+    if engine in ON_DEMAND:
+        from . import setup_voices_expressive as _slow
+        repo = _slow.HF_REPOS[engine]
+        _say(f"  the {repo} weights stay in the Hugging Face cache ({_slow.hf_cache_dir()}): "
+             f"`hf cache delete` takes them away")
     return 0
 
 
@@ -554,13 +578,32 @@ def cmd_voices(args: argparse.Namespace) -> int:
             return 2
         return remove(args.remove, purge=args.purge, dry_run=dry)
     if not args.specs:
-        _say("media-setup voices: name an engine: kokoro[:<voice>] or piper:<voice>[,<voice>]"
-             " (or --remove kokoro|piper)")
+        _say("media-setup voices: name an engine: kokoro[:<voice>], piper:<voice>[,<voice>],"
+             " chatterbox[:<voice>] or orpheus[:<voice>] (or --remove <engine>)")
         return 2
+    from . import setup_voices_expressive as _slow
     try:
         specs = [parse_spec(s) for s in args.specs]
+        clones = [_slow.parse_clone(c) for c in (args.clone or [])]
     except ValueError as e:
         _say(f"media-setup voices: {e}")
+        return 2
+    engines = {s.engine for s in specs}
+    if (clones or args.locale or args.gender) and engines != {"chatterbox"}:
+        _say("media-setup voices: --clone, --locale and --gender are for chatterbox alone")
+        return 2
+    if (args.locale or args.gender) and not clones:
+        _say("media-setup voices: --locale and --gender describe a --clone")
+        return 2
+    if args.locale and not _slow._LOCALE.match(args.locale):
+        _say(f"media-setup voices: --locale {args.locale!r}: like en-AU")
+        return 2
+    if args.llama_server and engines != {"orpheus"}:
+        _say("media-setup voices: --llama-server is for orpheus alone")
+        return 2
+    if args.fallback and engines & set(ON_DEMAND):
+        _say("media-setup voices: a slow voice cannot be the render fallback (a fallback "
+             "must be quick: it stands in when a sentence failed)")
         return 2
     if not _systemd_user_ok():
         msg = ("media-setup voices: needs systemd --user, which this machine has not; "
@@ -576,7 +619,14 @@ def cmd_voices(args: argparse.Namespace) -> int:
         return 2
     rc = 0
     for spec in specs:
-        if spec.engine == "kokoro":
+        if spec.engine == "chatterbox":
+            rc = _slow.install_chatterbox(spec.voices[0], from_dir=from_dir, clones=clones,
+                                          locale=args.locale, gender=args.gender,
+                                          dry_run=dry) or rc
+        elif spec.engine == "orpheus":
+            rc = _slow.install_orpheus(spec.voices[0], from_dir=from_dir,
+                                       llama_server=args.llama_server, dry_run=dry) or rc
+        elif spec.engine == "kokoro":
             rc = install_kokoro(spec.voices[0], from_dir=from_dir, fallback=args.fallback,
                                 dry_run=dry) or rc
         else:
@@ -588,15 +638,26 @@ def cmd_voices(args: argparse.Namespace) -> int:
 def add_parser(sub) -> None:
     sp = sub.add_parser(
         "voices",
-        help="install local voice engines (Kokoro, Piper) as user services",
-        description=__doc__.split("\n\n")[0] + " kokoro[:<voice>] (default af_alloy) or "
-                    "piper:<voice>[,<voice>]; each its own venv under "
+        help="install local voice engines (Kokoro, Piper, Chatterbox, Orpheus) as user services",
+        description=__doc__.split("\n\n")[0] + " kokoro[:<voice>] (default af_alloy), "
+                    "piper:<voice>[,<voice>], chatterbox[:<voice>] (default, or a clone) or "
+                    "orpheus[:<voice>] (default tara); each its own venv under "
                     "~/.local/share/agent-media/tts and a systemd user unit on 127.0.0.1.")
     sp.add_argument("specs", nargs="*", metavar="ENGINE[:VOICE]",
-                    help="kokoro, kokoro:bf_emma, piper:en_GB-cori-high,en_US-amy-medium")
+                    help="kokoro, kokoro:bf_emma, piper:en_GB-cori-high,en_US-amy-medium, "
+                         "chatterbox, chatterbox:natasha, orpheus:leah")
+    sp.add_argument("--clone", action="append", metavar="NAME=AUDIO",
+                    help="chatterbox: make a voice NAME cloned from AUDIO (converted to a 24 kHz "
+                         "mono WAV in tts/chatterbox/voices; ffmpeg). Repeatable")
+    sp.add_argument("--locale", help="with --clone: the clone's accent, like en-AU")
+    sp.add_argument("--gender", choices=["Female", "Male"], help="with --clone")
+    sp.add_argument("--llama-server", metavar="PATH",
+                    help="orpheus: the llama-server binary (else found under "
+                         "~/.local/share/llama.cpp or on PATH); run CPU only")
     sp.add_argument("--from", dest="from_dir", metavar="DIR",
                     help="copy the model or voice files from DIR instead of downloading "
-                         "(Kokoro's only when their sha256 matches)")
+                         "(Kokoro's and Orpheus's only when their sha256 matches; for "
+                         "chatterbox, every audio clip in DIR becomes a clone named by its stem)")
     sp.add_argument("--fallback", action="store_true",
                     help="make it the render fallback (MEDIA_RENDER_FALLBACK_ENGINE and "
                          "MEDIA_RENDER_VOICE_<ENGINE> in agent-media.env)")

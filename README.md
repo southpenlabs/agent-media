@@ -139,6 +139,7 @@ entry-point group and selected with `MEDIA_RENDER_ENGINE=<name>`:
 
 | package | engine | notes |
 |---|---|---|
+| [`engine-expressive/`](./packages/engine-expressive/) | `chatterbox`, `orpheus` | the slow, expressive local voices, each over HTTP to its own server (in the package), started on demand and stopped when idle; offline |
 | [`engine-kokoro/`](./packages/engine-kokoro/) | `kokoro` | Kokoro over HTTP to `kokoro-tts-server` (in the package); offline |
 | [`engine-openai/`](./packages/engine-openai/) | `openai` | OpenAI TTS; shells out to a Python with the `openai` lib |
 | [`engine-piper/`](./packages/engine-piper/) | `piper` | Piper over HTTP to its own server (GPL, kept out of process); offline |
@@ -153,7 +154,14 @@ media-setup voices kokoro:bf_emma --fallback        # ~355 MB, sha256-pinned
 media-setup voices piper:en_GB-cori-high,en_US-amy-medium
 media-setup voices kokoro --from ~/models           # copy files already here
 media-setup voices --remove piper [--purge]
+media-setup voices chatterbox --clone natasha=~/natasha.mp3 --locale en-AU --gender Female
+media-setup voices orpheus:tara --from ~/tts-trial/orpheus/models  # 3.5 GB, sha256-pinned
 ```
+
+Chatterbox and Orpheus are slow (4-7x slower than speech on a CPU): their
+units are written but not enabled, the render engine starts one when a reply
+in its voice needs it, and it exits after ten idle minutes. Orpheus's
+llama-server runs CPU only.
 
 `--fallback` makes the engine the render fallback when edge fails
 (`MEDIA_RENDER_FALLBACK_ENGINE`, `MEDIA_RENDER_VOICE_<ENGINE>`); `--dry-run`

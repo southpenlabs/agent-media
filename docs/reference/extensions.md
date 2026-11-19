@@ -17,7 +17,8 @@ A render engine turns text into an audio file. Core ships exactly one built-in
 Everything else is an installable plugin, including the ones maintained in this
 repo: `openai` (`agent-media-engine-openai`), `qwen`
 (`agent-media-engine-qwen`), `realtime` (`agent-media-engine-realtime`),
-`kokoro` (`agent-media-engine-kokoro`), and `piper` (`agent-media-engine-piper`).
+`kokoro` (`agent-media-engine-kokoro`), `piper` (`agent-media-engine-piper`),
+and `chatterbox` and `orpheus` (`agent-media-engine-expressive`).
 Anyone can add more the same way.
 
 **The contract** is one callable:
