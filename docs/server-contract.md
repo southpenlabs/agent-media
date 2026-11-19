@@ -11418,6 +11418,15 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `POST {id, delete: true}` → `{deleted}` (404 `not_saved`). 400 with a
   code: `bad_id`, `bad_point`, `bad_name`, `too_many` (50 at most). Behind
   the map's gate. `/features` `map_saved`.
+  **Lists** (19 Nov 2026, `map_saved_lists`): `GET` also answers `lists:
+  [{id, name, builtin?}]` — `starred`, `favourites`, `want` (Want to go)
+  always, first, then the person's own — and a place carries `lists: [id…]`,
+  set with `POST {…, lists}` (400 `bad_list` for one not theirs; left out,
+  the lists it was in stay). `POST /map/saved/lists {id?, name}` makes or
+  renames one of their own (→ `{list}`, `list-…` made up), `{id, delete:
+  true}` takes it off (→ `{deleted}`, 400 `builtin` for the three, 404
+  `not_saved`); a place left in no list that is not Home or Work goes with
+  it. At most 30 lists of one's own.
 - **`GET /map/recent_places`** (19 Nov 2026; David: "maybe offer
   suggestions from recent chats") → `{places: [{name, lat, lon, session,
   chat, msg, at}]}`: the `[[map:]]` / `[[route:]]` points recent chats'

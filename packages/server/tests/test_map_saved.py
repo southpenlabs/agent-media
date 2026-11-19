@@ -44,3 +44,34 @@ def test_bad_bodies_guest_and_no_bearer(server, monkeypatch, tmp_path):
     assert devices.set_role(dev_id, "guest")
     assert call(server, "GET", "/map/saved", headers=hdrs)[0].status == 403
     assert call(server, "GET", "/map/saved")[0].status == 401
+
+
+def test_lists_star_a_place_make_rename_and_drop_a_list(server, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    pixel, _ = _device("Pixel 8a")
+    got = call(server, "GET", "/map/saved", headers=pixel)[1]
+    assert [x["id"] for x in got["lists"]] == ["starred", "favourites", "want"]
+    # Starred and in Want to go.
+    res, obj = call(server, "POST", "/map/saved", {"name": "Brunetti", "lat": -37.79, "lon": 144.96,
+                                                   "lists": ["starred", "want", "starred"]}, headers=pixel)
+    assert res.status == 200 and obj["place"]["lists"] == ["starred", "want"]
+    cafe = obj["place"]["id"]
+    res, obj = call(server, "POST", "/map/saved", {"name": "x", "lat": 1, "lon": 1, "lists": ["nope"]}, headers=pixel)
+    assert res.status == 400 and obj["code"] == "bad_list"
+    # A list of one's own, renamed; Home put in it keeps Home when the list goes.
+    lst = call(server, "POST", "/map/saved/lists", {"name": "Date night"}, headers=pixel)[1]["list"]
+    assert lst["id"].startswith("list-")
+    assert call(server, "POST", "/map/saved/lists", {"id": lst["id"], "name": "Dates"}, headers=pixel)[1]["list"]["name"] == "Dates"
+    call(server, "POST", "/map/saved", {"id": "home", "name": "Home", "lat": -37.8, "lon": 144.9, "lists": [lst["id"]]}, headers=pixel)
+    call(server, "POST", "/map/saved", {"name": "Bar", "lat": -37.81, "lon": 144.97, "lists": [lst["id"]]}, headers=pixel)
+    got = call(server, "GET", "/map/saved", headers=pixel)[1]
+    assert got["lists"][-1] == {"id": lst["id"], "name": "Dates"} and len(got["lists"]) == 4
+    # Moved without saying lists: still starred.
+    call(server, "POST", "/map/saved", {"id": cafe, "name": "Brunetti", "lat": -37.7901, "lon": 144.96}, headers=pixel)
+    assert call(server, "POST", "/map/saved/lists", {"id": "starred", "delete": True}, headers=pixel)[1]["code"] == "builtin"
+    assert call(server, "POST", "/map/saved/lists", {"id": lst["id"], "delete": True}, headers=pixel)[1]["deleted"] == lst["id"]
+    got = call(server, "GET", "/map/saved", headers=pixel)[1]
+    names = {p["name"]: p for p in got["places"]}
+    assert set(names) == {"Home", "Brunetti"} and "lists" not in names["Home"]
+    assert names["Brunetti"]["lists"] == ["starred", "want"]
+    assert call(server, "POST", "/map/saved/lists", {"id": lst["id"], "delete": True}, headers=pixel)[0].status == 404

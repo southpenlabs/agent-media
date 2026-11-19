@@ -11,11 +11,20 @@ or one of the person's own (a short slug, `saved-…` made up when not given);
 `label` the key's words for one of their own ("Gym"). The host's own token
 reads the owner's.
 
-`GET /map/saved` → `{places: [...]}`, Home first, then Work, then the rest
-as saved. `POST /map/saved {id?, name, lat, lon, address?, label?}` sets one
-(→ `{place}`); `{id, delete: true}` takes one off (→ `{deleted: id}`, 404
-when it was not there). 400 with a code: `bad_point`, `bad_name`, `bad_id`,
-`too_many` (at most `MAX` saved).
+`GET /map/saved` → `{places: [...], lists: [...]}`, Home first, then Work,
+then the rest as saved. `POST /map/saved {id?, name, lat, lon, address?,
+label?, lists?}` sets one (→ `{place}`); `{id, delete: true}` takes one off
+(→ `{deleted: id}`, 404 when it was not there). 400 with a code:
+`bad_point`, `bad_name`, `bad_id`, `bad_list`, `too_many` (at most `MAX`).
+
+Lists (David, 19 Nov 2026: saved lists and stars, as Google Maps has them):
+a place's `lists` names the lists it is in. Three are always there —
+`starred`, `favourites`, `want` (Want to go) — and a person makes more:
+`POST /map/saved/lists {id?, name}` makes or renames one (→ `{list}`),
+`{id, delete: true}` takes it off (→ `{deleted}`; the built-in three
+cannot be, 400 `builtin`), and a place left in no list that is neither Home
+nor Work goes with it. `lists` in the answer: `[{id, name, builtin?}]`, the
+built-in three first. Kept beside the places, under `lists:<account>`.
 """
 from __future__ import annotations
 
@@ -54,6 +63,18 @@ def _save(book: dict[str, list[dict]], path: Path | None = None) -> None:
     os.replace(tmp, p)
 
 
+#: The lists everyone has, first, by id: their English names (the app shows its own words).
+BUILTIN = [{"id": "starred", "name": "Starred", "builtin": True},
+           {"id": "favourites", "name": "Favourites", "builtin": True},
+           {"id": "want", "name": "Want to go", "builtin": True}]
+#: Lists of a person's own, at most.
+MAX_LISTS = 30
+
+
+def _lists_of(book: dict, account: str) -> list[dict]:
+    return [*BUILTIN, *(book.get(f"lists:{account}") or [])]
+
+
 def _order(places: list[dict]) -> list[dict]:
     rank = {"home": 0, "work": 1}
     return sorted(places, key=lambda p: rank.get(p.get("id", ""), 2))
@@ -70,7 +91,8 @@ def account_of(bearer: str, host: bool = False) -> str:
 
 
 def listing(account: str, path: Path | None = None) -> tuple[bool, dict]:
-    return True, {"places": _order(list(_load(path).get(account) or []))}
+    book = _load(path)
+    return True, {"places": _order(list(book.get(account) or [])), "lists": _lists_of(book, account)}
 
 
 def change(account: str, body: dict, path: Path | None = None) -> tuple[bool, dict]:
@@ -102,9 +124,61 @@ def change(account: str, body: dict, path: Path | None = None) -> tuple[bool, di
             v = str(body.get(k) or "").strip()[:200]
             if v:
                 place[k] = v
+        if body.get("lists") is not None:
+            want = body.get("lists")
+            known = {x["id"] for x in _lists_of(book, account)}
+            if not isinstance(want, list) or any(str(x) not in known for x in want):
+                return False, {"status": 400, "code": "bad_list", "error": "lists names lists you have"}
+            if want:
+                place["lists"] = list(dict.fromkeys(str(x) for x in want))
+        else:
+            # Moved or renamed without saying: the lists it was in stay.
+            was = next((p for p in mine if p.get("id") == pid), None)
+            if was and was.get("lists"):
+                place["lists"] = was["lists"]
         others = [p for p in mine if p.get("id") != pid]
         if len(others) >= MAX:
             return False, {"status": 400, "code": "too_many", "error": f"at most {MAX} saved places"}
         book[account] = _order([*others, place])
         _save(book, path)
         return True, {"place": place}
+
+
+def change_list(account: str, body: dict, path: Path | None = None) -> tuple[bool, dict]:
+    """`POST /map/saved/lists`: make, rename or take off a list of one's own."""
+    lid = str(body.get("id") or "").strip().lower()
+    if lid and not _ID.fullmatch(lid):
+        return False, {"status": 400, "code": "bad_id", "error": "id is a short slug"}
+    if any(b["id"] == lid for b in BUILTIN):
+        return False, {"status": 400, "code": "builtin", "error": "the built-in lists stay"}
+    with _LOCK:
+        book = _load(path)
+        key = f"lists:{account}"
+        own = list(book.get(key) or [])
+        if body.get("delete"):
+            left = [x for x in own if x.get("id") != lid]
+            if not lid or len(left) == len(own):
+                return False, {"status": 404, "code": "not_saved", "error": "no such list"}
+            book[key] = left
+            kept = []
+            for p in book.get(account) or []:
+                lists = [x for x in p.get("lists") or [] if x != lid]
+                if lists or p.get("id") in ("home", "work"):
+                    q = {k: v for k, v in p.items() if k != "lists"}
+                    if lists:
+                        q["lists"] = lists
+                    kept.append(q)
+            book[account] = kept
+            _save(book, path)
+            return True, {"deleted": lid}
+        name = str(body.get("name") or "").strip()[:80]
+        if not name:
+            return False, {"status": 400, "code": "bad_name", "error": "a list has a name"}
+        lid = lid or f"list-{secrets.token_hex(4)}"
+        others = [x for x in own if x.get("id") != lid]
+        if len(others) >= MAX_LISTS:
+            return False, {"status": 400, "code": "too_many", "error": f"at most {MAX_LISTS} lists"}
+        lst = {"id": lid, "name": name}
+        book[key] = [*others, lst] if len(others) == len(own) else [lst if x.get("id") == lid else x for x in own]
+        _save(book, path)
+        return True, {"list": lst}
