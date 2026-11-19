@@ -162,6 +162,16 @@ contract §6.25 "Mail accounts"):
 - **Open source:** isync's mbsync, msmtp and notmuch, run as programs
   (NOTICE); found nothing better to reuse for the account page itself.
 
+## Archive and delete over IMAP (David, 19 Nov 2026)
+
+"Yeah, let's do it", to doing step 5 over IMAP rather than lieer: one way
+for every provider (lieer is Gmail's API only and would need a Google
+client), no Google sign-in. Archive is a MOVE out of INBOX (Gmail: to All
+Mail), delete a MOVE to Trash, both undoable, the provider first and the
+local copy after (mail_move.py, contract §6.25 "Archive and delete").
+Labels are left for later. This replaces the October choice of lieer
+below.
+
 ## Decided (David, 20 Oct 2026)
 
 - **Archived mail:** asked of Gmail when needed (its API), nothing extra

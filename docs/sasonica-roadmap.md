@@ -1798,7 +1798,11 @@ ahead.
     minutes, and older mail is searched at the provider (`/settings/mail`,
     `/mail/remote/search`, §6.25); the app's page next. red2's 15 hand-made
     accounts are listed, read only; taking them over is on David's Org
-    agenda for 9 Dec 2026. Also built (30 Oct
+    agenda for 9 Dec 2026. Archive and delete, server side built 19 Nov
+    2026, over IMAP for every provider rather than lieer (`POST
+    /mail/move`, the provider first, then here; a Trash folder and undo;
+    §6.25 "Archive and delete"); the app's swipe and buttons next. Also
+    built (30 Oct
     2026): the thread list's Show → Sent (threads you
     wrote in, latest first) and Waiting for reply (your message last,
     unanswered), built generic so mail threads join them like Gmail's Sent

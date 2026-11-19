@@ -180,7 +180,7 @@ def test_folders_accounts_search_and_paging(nm):
     page = mail_list.threads(folder="all", limit=1, offset=1)
     assert [t["id"] for t in page["threads"]] == ["a1"] and page["more"] is False
     with pytest.raises(mail_list.BadRequest):
-        mail_list.threads(folder="trash")
+        mail_list.threads(folder="burn")
     with pytest.raises(mail_list.BadRequest):
         mail_list.threads(account="nobody")
     assert "accounts" not in mail_list.threads(counts=False)

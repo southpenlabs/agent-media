@@ -325,6 +325,8 @@ except /pair, which is how a device gets its token):
   POST /mail/tag {"thread"|"id", "add", "remove"} → read/unread, starred
   GET  /mail/remote/search?q=[&account=] → older mail at the provider (mail_remote.py)
   POST /mail/remote/fetch {"account", "folder", "uid"} → copy one here: {id}
+  POST /mail/move {"thread"|"id", "to": "archive"|"trash"|"inbox"} → at the
+                  provider first, then here (mail_move.py)
   GET  /settings/mail → the mail accounts, the tools, the presets
   POST /settings/mail {"action": "add"|"remove"|"sync", …} → (mail_accounts.py)
   GET  /contacts/<id>/timeline[?limit=] → their texts, calls, mail and
@@ -481,7 +483,7 @@ CORS_PATHS = frozenset({
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
-    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch",
+    "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
@@ -1774,6 +1776,27 @@ def _mail_remote_fetch(h: BaseHTTPRequestHandler) -> None:
                        else "could not store the message"})
     else:
         _json(h, 200, {"ok": True, **got})
+
+
+def _mail_move(h: BaseHTTPRequestHandler) -> None:
+    """`POST /mail/move {"thread"|"id", "to"}` (§6.25 "Archive and
+    delete"): archive, trash or back to the inbox, at the provider first."""
+    from . import mail_move
+
+    if not _mail_gate(h, _bearer(h)):
+        return
+    body = _read_json(h)
+    body = body if isinstance(body, dict) else {}
+    try:
+        got = mail_move.move(thread_id=str(body.get("thread") or ""),
+                             message_id=str(body.get("id") or ""), to=str(body.get("to") or ""))
+    except mail_move.Refused as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+    except RuntimeError as e:
+        _json(h, 503, {"ok": False, "error": str(e)})
+    else:
+        status = 502 if got["errors"] and not got["moved"] else 200
+        _json(h, status, {"ok": status == 200, **got})
 
 
 #: The most `/speech/say` reads at once, as `/org/say` caps a note.
@@ -4187,6 +4210,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _mail_tag(h)
     elif path == "/mail/remote/fetch":
         _mail_remote_fetch(h)
+    elif path == "/mail/move":
+        _mail_move(h)
     elif path == "/speech/say":
         _speech_say(h)
     elif path == "/storage":

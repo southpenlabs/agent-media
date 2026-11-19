@@ -42,9 +42,11 @@ FOLDERS = {
     "sent": "tag:sent",
     "spam": "tag:spam",
     "all": "not tag:spam",
+    # Deleted from Sasonica (mail_move.py), restorable with to=inbox.
+    "trash": "tag:deleted",
 }
-#: What `POST /mail/tag` may change: only what round-trips to Gmail today
-#: (archive and labels wait for step 5's lieer).
+#: What `POST /mail/tag` may change: read and starred, which round-trip as
+#: maildir flags. Archive and delete are `POST /mail/move` (mail_move.py).
 TAGS = {"unread", "flagged"}
 
 _THREAD_ID = re.compile(r"[0-9a-f]{1,32}")
@@ -108,7 +110,7 @@ def _unread_counts(names: list[str]) -> dict[str, int]:
 def _query(folder: str, account: str, q: str, names: set[str]) -> str:
     if folder not in FOLDERS:
         raise BadRequest(f"folder is one of {', '.join(FOLDERS)}")
-    parts = [f"({FOLDERS[folder]})", "not tag:deleted"]
+    parts = [f"({FOLDERS[folder]})"] + ([] if folder == "trash" else ["not tag:deleted"])
     if account:
         if account not in names:
             raise BadRequest("no such account")

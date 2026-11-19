@@ -9312,8 +9312,9 @@ is also its notmuch tag and maildir folder. Nothing is kept or logged.
 → `{"ok", "folder", "account", "q", "offset", "more", "folders": [...],
 "threads": [row], "accounts": [{"name", "address", "unread"}]}`, newest
 first. `folder` is `inbox` (default), `unread`, `starred` (Gmail's star),
-`sent`, `spam` or `all` (everything but spam); deleted mail is never
-listed; spam only under `spam`. `q` is notmuch's own query language (`from:`,
+`sent`, `spam`, `all` (everything but spam) or `trash` (deleted from
+Sasonica, `POST /mail/move`); deleted mail is listed only under `trash`,
+spam only under `spam`. `q` is notmuch's own query language (`from:`,
 `subject:`, a word, `date:`…), ANDed with the folder, at most 500
 characters. `GET /features` `mail` says this server can list mail for the
 asking device (notmuch has mail here and its book is the owner's); the app
@@ -9339,8 +9340,8 @@ the app posts that. 404 for an unknown thread.
 `POST /mail/tag {"thread": <id> | "id": <message id>, "add": [...],
 "remove": [...]}` → `{"ok", "changed", "add", "remove"}`. Only `unread`
 and `flagged` (starred): notmuch writes them as maildir flags and the next
-sync carries them to Gmail (read, and Gmail's star). Archive, delete and
-labels wait for step 5 (lieer). 400 for any other tag, nothing to change,
+sync carries them to Gmail (read, and Gmail's star). Archive and delete are
+`POST /mail/move`; labels are not offered yet. 400 for any other tag, nothing to change,
 or neither target.
 
 #### Mail accounts — `GET` / `POST /settings/mail` — the owner's admin (18 Nov 2026)
@@ -9415,6 +9416,37 @@ indexed and tagged with its account (not inbox, not unread); `id` is its
 notmuch id for `GET /mail/message`, and it threads and replies as any other
 mail from then on. `fetched` false when it was here already. 422 for an
 unknown account, folder or uid.
+
+#### Archive and delete — `POST /mail/move` — gated, owner only (19 Nov 2026)
+
+Step 5 of docs/proposals/2026-10-20-mail-in-sasonica.md, over IMAP rather
+than lieer, so it works for every provider (mail_move.py; David, 19 Nov
+2026: "Yeah, let's do it"). Same gate as reading one.
+
+`POST /mail/move {"thread": <id> | "id": <message id>, "to": "archive" |
+"trash" | "inbox"}` → `{"ok", "to", "moved": n, "errors": {account: why}}`.
+- **archive**: the thread's inbox mail moves out of INBOX at the provider,
+  to its \All folder for Gmail (All Mail: Gmail's archive) or its \Archive
+  folder elsewhere (422-like `errors` entry when it has none); tagged
+  `-inbox +archived` here.
+- **trash**: to the provider's \Trash folder (Gmail's Bin), from INBOX or
+  the archive; tagged `+deleted -inbox -unread` here. Mail deleted from
+  Sasonica is the Mail tab's `trash` folder (`GET /mail/threads?folder=trash`)
+  and appears in no other.
+- **inbox**: the undo of either, for mail moved from Sasonica only (tagged
+  `archived` or `deleted`; a thread's own sent mail is never pulled in):
+  from Trash, or from the archive (Gmail: a COPY from All Mail, which adds
+  the Inbox label back).
+
+The provider is changed first and the local copy only once it accepted (a
+host's sync may run `Expunge Both`, which would delete at the provider a
+message that only vanished here). Locally the file moves to the account's
+own `Archive/` or `Trash/` maildir, which no sync touches, so the thread
+stays readable. IMAP MOVE when the server has it (capabilities asked after
+login); else COPY, \Deleted and UID EXPUNGE of just those messages; a
+server with neither MOVE nor UIDPLUS is left untouched. An account that
+fails is in `errors` beside the others; 502 when nothing moved and an
+account failed, 400 for an unknown `to` or thread.
 
 #### Speech level — `POST /contacts/<id>/level` — gated (20 Oct 2026)
 
