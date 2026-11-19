@@ -254,7 +254,8 @@ Sorted with what blocks a public release first. 61 rows.
 
 - **Used for:** reading the owner's Google contacts into the book
   (`packages/server/src/agent_media_server/contacts.py:118`, scope
-  `contacts.readonly` plus `openid email`).
+  `contacts.readonly` plus `openid email`; `media contacts login --write` asks
+  for `contacts` instead, so labels can be made and changed).
 - **Credential:** an OAuth client of the owner's own Google Cloud project
   (`MEDIA_GOOGLE_OAUTH_CLIENT`, `contacts.py:1210`).
 - **Mode today:** per install, unverified. To confirm which publishing

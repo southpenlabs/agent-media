@@ -121,6 +121,10 @@ SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
 #: not a sensitive scope, so it adds nothing to Google's review), so a book
 #: can say whose Google it reads.
 LOGIN_SCOPE = "openid email " + SCOPE
+#: The same, able to change the book too (labels, who is in them): asked for
+#: only by `login --write` (David, 20 Nov 2026, to make a label from a chat).
+#: Reading needs nothing more: `contacts` covers `contacts.readonly`.
+WRITE_SCOPE = "https://www.googleapis.com/auth/contacts"
 PEOPLE = "https://people.googleapis.com/v1"
 PERSON_FIELDS = ("names,phoneNumbers,emailAddresses,addresses,biographies,metadata,memberships,"
                  "photos")
@@ -1286,10 +1290,12 @@ def pkce() -> tuple[str, str]:
     return verifier, challenge.decode().rstrip("=")
 
 
-def consent_url(client: dict, redirect_uri: str, state: str, challenge: str) -> str:
+def consent_url(client: dict, redirect_uri: str, state: str, challenge: str,
+                write: bool = False) -> str:
     return client["auth_uri"] + "?" + urllib.parse.urlencode({
         "client_id": client["client_id"], "redirect_uri": redirect_uri,
-        "response_type": "code", "scope": LOGIN_SCOPE, "state": state,
+        "response_type": "code",
+        "scope": "openid email " + WRITE_SCOPE if write else LOGIN_SCOPE, "state": state,
         "code_challenge": challenge, "code_challenge_method": "S256",
         # A refresh token, every time: a second login must get one too.
         "access_type": "offline", "prompt": "consent"})
@@ -2886,7 +2892,7 @@ class Login:
     """One sign-in: the consent URL, a loopback listener for the redirect,
     and `finish` for whichever answer comes first."""
 
-    def __init__(self, client: dict, port: int = 0) -> None:
+    def __init__(self, client: dict, port: int = 0, write: bool = False) -> None:
         self.client = client
         self.state = secrets.token_urlsafe(24)
         self.verifier, challenge = pkce()
@@ -2914,7 +2920,7 @@ class Login:
 
         self.server = HTTPServer(("127.0.0.1", port), Hit)
         self.redirect_uri = f"http://127.0.0.1:{self.server.server_address[1]}"
-        self.url = consent_url(client, self.redirect_uri, self.state, challenge)
+        self.url = consent_url(client, self.redirect_uri, self.state, challenge, write)
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.2},
                          name="contacts-login", daemon=True).start()
 
@@ -2944,7 +2950,7 @@ def cmd_login(a) -> int:
         port = int(a.port or os.environ.get("MEDIA_CONTACTS_OAUTH_PORT") or 0)
     except ValueError:
         port = 0
-    login = Login(client, port)
+    login = Login(client, port, write=bool(getattr(a, "write", False)))
     try:
         print("Open this address and sign in to Google (any device):\n")
         print(login.url + "\n")
@@ -3415,6 +3421,8 @@ def main(argv: list[str] | None = None) -> int:
                                     "enrolled here").set_defaults(fn=cmd_accounts)
     p = sub.add_parser("login", help="sign in to Google (works from a phone)")
     p.add_argument("--port", type=int, default=0, help="loopback port (default: any free one)")
+    p.add_argument("--write", action="store_true",
+                   help="ask to change contacts too (labels), not only read them")
     p.set_defaults(fn=cmd_login)
     sub.add_parser("status", help="what is read, and when it last was").set_defaults(fn=cmd_status)
     p = sub.add_parser("sync", help="sync now")

@@ -256,7 +256,7 @@ def test_the_cli_login_writes_the_named_book(google, monkeypatch, capsys):
     seen = {}
 
     class FakeLogin:
-        def __init__(self, client, port=0):
+        def __init__(self, client, port=0, write=False):
             self.redirect_uri, self.url = "http://127.0.0.1:1", "https://consent"
             import queue
             self.answers = queue.Queue()
@@ -277,3 +277,12 @@ def test_the_cli_login_writes_the_named_book(google, monkeypatch, capsys):
         tok = contacts.load_token()
         assert tok["refresh_token"] == "rt-cli" and tok["email"] == "kat@gmail.test"
     assert contacts.load_token() is None       # not the owner's
+
+
+def test_login_write_asks_to_change_the_book_and_plain_login_only_reads():
+    client = {"auth_uri": "https://accounts.example/auth", "client_id": "cid"}
+    scope = lambda **kw: urllib.parse.parse_qs(urllib.parse.urlsplit(
+        contacts.consent_url(client, "http://127.0.0.1:1", "st", "ch", **kw)).query)["scope"][0].split()
+    assert contacts.SCOPE in scope() and contacts.WRITE_SCOPE not in scope()
+    assert contacts.WRITE_SCOPE in scope(write=True) and contacts.SCOPE not in scope(write=True)
+    assert "email" in scope(write=True)
