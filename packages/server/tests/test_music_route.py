@@ -46,7 +46,7 @@ def test_now_is_the_status_and_the_picker(server, signed_in, audio_host, player,
     monkeypatch.delenv("MEDIA_RADIO_YOUTUBE", raising=False)
     res, obj = call(server, "GET", "/music", headers=AUTH)
     assert res.status == 200, obj
-    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "rotation", "downloads", "mood", "mix_song"}
+    assert keys(obj) == {"ok", "now", "art", "chapters", "where", "radio", "bed", "verdict", "rotation", "downloads", "mood", "radio_filters", "radio_filters_note", "mix_song"}
     assert obj["bed"] == {"suggested": False} and obj["verdict"] is None
     assert obj["downloads"] == []
     assert obj["radio"] == {"on": False, "seed": None, "next": [], "available": False}
@@ -688,6 +688,29 @@ def test_the_listening_mood_is_read_and_set(server, signed_in, audio_host, playe
     res, obj = call(server, "POST", "/music", {"action": "mood", "mood": "gloomy"}, headers=AUTH)
     assert res.status == 400 and "mood must be one of" in obj["error"]
     assert music_mood.current() == "chill"
+
+
+def test_the_radio_filters_are_read_and_switched(server, signed_in, audio_host, player, monkeypatch):
+    """The radio filters (David, 20 Nov 2026: "acoustic versions only"): in
+    every answer, switched by `{"action": "radio_filter", "id", "on"}`, 400
+    for an unknown id or an `on` that is not a bool."""
+    from agent_media_core import radio_filters
+
+    told: list = []
+    monkeypatch.setattr(radio_filters, "_follow", lambda fid, on, playing: told.append((fid, on, playing())))
+    _, obj = call(server, "GET", "/music", headers=AUTH)
+    assert [f["id"] for f in obj["radio_filters"]] == ["acoustic", "instrumental", "no_live", "no_remix", "no_cover"]
+    assert all(keys(f) == {"id", "name", "on"} and not f["on"] for f in obj["radio_filters"])
+    assert obj["radio_filters_note"] == ""
+    res, obj = call(server, "POST", "/music", {"action": "radio_filter", "id": "acoustic", "on": True}, headers=AUTH)
+    assert res.status == 200, obj
+    assert [f["id"] for f in obj["radio_filters"] if f["on"]] == ["acoustic"]
+    assert told == [("acoustic", True, True)] and player == []
+    res, obj = call(server, "POST", "/music", {"action": "radio_filter", "id": "loud", "on": True}, headers=AUTH)
+    assert res.status == 400 and "id must be one of" in obj["error"]
+    res, obj = call(server, "POST", "/music", {"action": "radio_filter", "id": "no_live", "on": "yes"}, headers=AUTH)
+    assert res.status == 400
+    assert radio_filters.on() == ["acoustic"]
 
 
 # The song card (David, 11 Nov 2026: "Can we add the like, dislike, sing it

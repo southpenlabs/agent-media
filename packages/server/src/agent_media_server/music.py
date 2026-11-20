@@ -77,6 +77,14 @@ upbeat, sleep, party. `{"action": "mood", "mood": id}` sets it (400 for
 another id): a DJ station drops its songs to come and picks again, a Mix
 station or music playing without one becomes the DJ's.
 
+`radio_filters` is the radio's filters (agent_media_core.radio_filters;
+David, 20 Nov 2026): `[{"id", "name", "on"}, …]`, acoustic, instrumental,
+no_live, no_remix, no_cover; `radio_filters_note` says why a station
+relaxed them ("" else). `{"action": "radio_filter", "id", "on": bool}`
+switches one (400 for another id or a non-bool): a DJ station picks again,
+a wanting one (acoustic, instrumental) hands a Mix station, or music
+playing, to the DJ.
+
 `{"action": "song", "id"}` plays the song the music bed played under reply
 `id` (its history row's `bed_song`, agent_media_core.music_bed_song): the
 reply's ⋯ "Play the song". The answer's `song` says what and `when` ("now",
@@ -136,6 +144,8 @@ ACTIONS = {
     "bed": "bed",
     # The listening mood (agent_media_core.music_mood): `mood` one of its ids.
     "mood": "mood",
+    # A radio filter on or off (agent_media_core.radio_filters): `id`, `on`.
+    "radio_filter": "radio_filter",
     # A song's rotation, a step up or down (agent_media_core.music_rotation).
     "rotation": "rotation",
     # A start the play gate held (agent_media_core.play_gate): played now on
@@ -351,6 +361,7 @@ def _answer() -> dict:
         out["move"] = move
     out["bed"] = _bed_state(now)
     out["mood"] = _mood_state()
+    out["radio_filters"], out["radio_filters_note"] = _filters_state(out["radio"])
     ch = _playing_chapter(now)
     out["verdict"] = _verdict(now, ch)
     out["rotation"] = _rotation_of(now.get("media_id") or "", ch)
@@ -1512,6 +1523,8 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         # Not a play: a station it starts is fed by the loop, which keeps
         # to the play gate itself.
         return _mood_control(body)
+    if action == "radio_filter":
+        return _filter_control(body)
     if action in ("like", "unlike", "dislike", "undislike") and "uri" in body:
         # A song's ♥ or 👎 by its uri: nothing plays, so no play gate.
         return _vote_by_uri(action, body)
@@ -1561,6 +1574,47 @@ def _mood_control(body: dict) -> tuple[bool, dict]:
 
     try:
         music_mood.set_mood(mood, playing=playing)
+    except OSError as e:
+        return False, {"error": f"could not save it ({e})", "status": 500}
+    _reset_cache()
+    loop.wake()
+    return True, _answer()
+
+
+def _filters_state(radio: dict | None) -> tuple[list, str]:
+    """GET /music `radio_filters` (every filter, `on` each) and
+    `radio_filters_note` (why a station relaxed them, else "")."""
+    try:
+        from agent_media_core import radio_filters
+
+        r = radio or {}
+        note = (r.get("filters_note") or "") if r.get("on") else ""
+        return radio_filters.shown(), note
+    except Exception as e:  # noqa: BLE001 — the tab can do without it
+        print(f"music: radio filters failed: {e}", file=sys.stderr)
+        return [], ""
+
+
+def _filter_control(body: dict) -> tuple[bool, dict]:
+    """`{"action": "radio_filter", "id", "on"}`: switch a radio filter
+    (radio_filters.set_filter: a DJ station picks again, a wanting filter
+    hands a Mix station or music playing to the DJ)."""
+    from agent_media_core import radio_filters
+
+    from . import radio as loop
+
+    fid = body.get("id")
+    if not isinstance(fid, str) or fid.strip().lower() not in radio_filters.BY_ID:
+        return False, {"error": f"id must be one of {', '.join(radio_filters.IDS)}", "status": 400}
+    if not isinstance(body.get("on"), bool):
+        return False, {"error": "on must be true or false", "status": 400}
+
+    def playing() -> bool:
+        now, _ = _now()
+        return bool(now.get("uri") or now.get("media_id") or now.get("title")) and not now.get("paused")
+
+    try:
+        radio_filters.set_filter(fid, body["on"], playing=playing)
     except OSError as e:
         return False, {"error": f"could not save it ({e})", "status": 500}
     _reset_cache()

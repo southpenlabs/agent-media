@@ -3944,6 +3944,51 @@ state-gc) or a prune is asked for (`media music log --prune 90d`; the same
 command without `--prune` prints the log). `GET /features`
 `speech_music_log` says the server has this.
 
+#### `GET` / `POST /speech/music/next` — gated (like `GET /speech/music/log`) (20 Nov 2026)
+
+What the next long reply will have around it, for the full players' Up
+next (`music_bed_next.py`; David, 20 Nov 2026: "up next ... also for
+backing music and outros"). The first ask picks the bed ahead and holds
+it; the next reply's bed is that pick, so the row tells the truth, and the
+ask after picks again.
+
+```json
+{"ok": true,
+ "bed": {"title": "Instrumental of Paradise City", "artist": "Guns N' Roses",
+         "source": "favourites", "style": "auto", "track_key": "1c0e9a2b7d44",
+         "why": "Your favourites; dusk — by the hour (17–21)",
+         "art": "https://i.ytimg.com/vi/T0ZmErXkbxE/hqdefault.jpg"},
+ "sing_out": {"title": "Paradise City", "artist": "Guns N' Roses",
+              "source": "favourites", "style": "auto", "track_key": "1c0e9a2b7d44",
+              "why": "the original, after a long reply",
+              "art": "https://i.ytimg.com/vi/T0ZmErXkbxE/hqdefault.jpg"},
+ "sing_in": null, "reason": null, "picked_at": 1795170000.0}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `bed` | the music under the next long reply: `title` ("Instrumental of …" for a favourite, the mood's name for generated music), `artist` (`""` when none), `source` (`favourites`, `library`, `stream`, `generated`), `style`, `why` (a short line: the source, and Auto's reason or calm mode), `track_key` (as in the log, §6.5 `GET /speech/music/log`), `art` (a picture URL, absent when none); `null` when there is none |
+| `sing_out` | the original the bed hands over to after a long reply (Settings → Music "Outro music after long replies"): the same fields, `title` the original's; `null` when the bed is not a favourite with its original kept, the switch is off, or calm mode is on |
+| `sing_in` | the original's few seconds ahead of the first word (its switch on); played unless the reply answers a message just sent, so it is "if"; `null` as `sing_out` |
+| `reason` | why `bed` is `null`: `off` (no bed chosen in Settings), `none_ready` (nothing to play yet); `null` when there is a bed |
+| `picked_at` | epoch seconds the held pick was made (absent with no bed) |
+
+A held pick is let go and chosen again when Settings' choice or the
+moment changes (Auto's mood, calm mode), its file goes, or it is three
+hours old. Only a reply's bed takes it (a person's message, a question and
+an alert keep their own generated beds), and only when nothing else is
+playing; a reply under someone's music still has none, and the pick waits
+for the next. Once a pick is held, Match the music to the topic no longer
+weighs that reply's words: the list said what would play.
+
+`POST /speech/music/next {"kind": "bed" | "sing_out" | "sing_in",
+"action": "skip"}` picks the bed again, away from the track held (a
+favourite just picked rests, so another comes up), and answers as the GET
+does. `sing_out`'s and `sing_in`'s skip are the bed's: the outro is the
+bed's song. A skip is not a dislike and nothing is logged. 400 for another
+`action` or `kind`. `GET /features` `speech_music_next` says the server
+has this.
+
 #### `GET` / `POST /storage` — gated; setting is an admin's (14 Nov 2026)
 
 How long this server keeps what it prunes, for the app's Settings →
@@ -4600,6 +4645,38 @@ music's Auto. A DJ station drops its songs to come and picks again at once
 (the song playing plays on); a Mix station, or music playing with no
 station, becomes a DJ station; with nothing playing it is only stored. Also
 `media music mood [<id>]`.
+
+**Radio filters** (20 Nov 2026; `agent_media_core.radio_filters`; David:
+"Can we set parameters for radio?... like acoustic versions only"). Every
+answer carries `"radio_filters": [{"id", "name", "on"}, …]` in the order
+`acoustic` (Acoustic only), `instrumental` (Instrumental only), `no_live`
+(No live recordings), `no_remix` (No remixes), `no_cover` (No covers), all
+off at first, any number on; and `"radio_filters_note"`: why the station on
+relaxed them, e.g. "Few acoustic versions found; playing the closest
+picks.", else "". The ids and names are the server's: draw what comes.
+`{"action": "radio_filter", "id", "on": true|false}` switches one and
+answers the usual state (400 for another id, or `on` not a bool).
+Server-wide, like the mood.
+
+- Each filter on is a rule the DJ is told every pick keeps; a wanted
+  version is named in its line ("Artist - Song (Acoustic)") so the search
+  finds that take.
+- Every song a station takes is checked by its title: no_live, no_remix
+  and no_cover drop a title that says live (in brackets, or "live at/in/…"),
+  remix/edit/sped-up/slowed, or cover/karaoke (the song's own name aside:
+  "Live Forever" is not live); acoustic needs acoustic, unplugged, stripped
+  or piano version in the title (an unplugged take passes no_live then).
+  Instrumental is the DJ's alone: most instrumentals do not say so.
+- When a batch of picks had songs, none got past acoustic or instrumental,
+  and the station has nothing left to play, the batch is taken with only
+  the leaving-out filters checked, and `radio_filters_note` says so until a
+  batch gets through.
+- Switching one: a DJ station drops its songs to come and picks again; a
+  Mix station, or music playing with no station, becomes a DJ station when
+  acoustic or instrumental is turned on (a Mix cannot keep to them); a
+  leaving-out filter on a Mix station drops the songs to come that break
+  it. With nothing playing it is only stored. Also `media music filter
+  [<id>=on|off]`. `/features` `radio_filters`.
 
 `{"action": "bed", "uri"?, "off"?}` (1 Nov 2026) suggests what is playing
 (or `uri`) for the music under long readings (§6.4's "your favourites,
@@ -5995,8 +6072,10 @@ local look, never a network call:
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
 | `music_search` | always: `GET /music/recent` takes `q`, searched on the server over the whole history (§6.9a "Searching the whole history", 9 Nov 2026) |
 | `music_channel` | always: music rows and `GET /music`'s `now` carry `channel`, and `GET /music/channel` answers a channel's page (§6.9a "A row's channel", 9 Nov 2026) |
+| `radio_filters` | always: `GET /music` carries `radio_filters` and `radio_filters_note`, and `POST /music {"action": "radio_filter", "id", "on"}` switches one (§6.9 "Radio filters", 20 Nov 2026) |
 | `music_sung` | always: songs sung out after long replies are kept — `POST /speech/music-bed/song` takes `{"event": "started"}` and `{"verdict": "kept"}`, and `GET /music/recent` has `list=sung` ("Outros", formerly "Sung out") (8 Nov 2026) |
 | `speech_music_log` | always: the music around a reply is logged with how it ended — `POST /speech/music-bed/song` takes `event` `ended`, `stopped`, `skipped` and `volume`, with `kind`, `pos_s` and `log_id`, and `GET /speech/music/log` reads the log (§6.5, 14 Nov 2026); the app sends the new reports only then |
+| `speech_music_next` | always: `GET /speech/music/next` says what the next long reply will have around it (`bed`, `sing_out`, `sing_in`), picked ahead and then played, and `POST /speech/music/next {"kind", "action": "skip"}` picks again (§6.5, 20 Nov 2026); the app shows those Up next rows only then |
 | `storage` | always: `GET`/`POST /storage` (§6.5, 14 Nov 2026) — how long rendered clips, the music log and play history are kept, and the scheduled jobs' last runs, for Settings → Storage |
 | `device_log` | always: `POST /device/log` takes a paired device's own log lines (the app's updater: `source: "update"`), the newest 200 per device, read by an admin with `GET /device/log` (§6.21i, 15 Nov 2026); the app sends its lines only then |
 | `music_voted` | always: `GET /music/voted?uri=` (14 Nov 2026) — one song's card state (liked, disliked, bed_suggested, rotation) read without changing it |
@@ -9962,6 +10041,14 @@ asks for it.
 - `?ready=1`: fetch the whole now and answer `{"ok", "size", "type"}`. A
   tap on a video, voice note or file asks this first, so the card can say
   it is downloading.
+- `?progress=1` (20 Nov 2026): how far that fetch has got, for the card's
+  progress bar, polled about once a second while `?ready=1` is open. It
+  never starts a fetch.
+  `{"ok": true, "state": "idle"|"fetching"|"ready"|"failed", "got", "size", "percent"}`.
+  `got` is the bytes so far. `size` is the homeserver's `Content-Length` once
+  it answers, the event's size before that, else `null`. `percent` is 0–100
+  (99 at most while fetching, 100 when ready), `null` with no size. `failed`
+  holds for the ten minutes a failure is not retried.
 - No query: the whole of it, with `Range` (206/416, as `GET /upload`).
   `Content-Type` is the event's mimetype for a picture, video or sound,
   else `application/octet-stream`.

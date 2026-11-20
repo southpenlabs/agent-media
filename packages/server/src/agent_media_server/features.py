@@ -49,6 +49,10 @@ never a network call, so the app can ask on every start.
             (speech_music.py, 14 Nov 2026): POST /speech/music-bed/song takes
             `event` ended, stopped, skipped and volume, `kind`, `pos_s` and
             `log_id`, and GET /speech/music/log reads it; always true here
+  speech_music_next  GET|POST /speech/music/next (music_bed_next.py, 20 Nov
+            2026): the next long reply's bed, outro and sing-in, picked
+            ahead and then played; POST {"kind", "action": "skip"} picks
+            again; always true here
   music_voted  GET /music/voted?uri= (music.py, 14 Nov 2026): one song's
             card state (liked, disliked, bed_suggested, rotation) read
             without changing it; always true here
@@ -75,6 +79,9 @@ never a network call, so the app can ask on every start.
   music_channel  music rows and GET /music `now` carry `channel` (the
             uploader, music_channel.py, 9 Nov 2026) and GET /music/channel
             answers a channel's page; always true here
+  radio_filters  GET /music `radio_filters` and `radio_filters_note`, POST /music
+            {"action": "radio_filter", "id", "on"} (radio_filters.py, 20 Nov
+            2026): acoustic only, no live, no remixes …; always true here
   room_delegate  a chat with people can be handed to an agent (room_delegate.py,
             §6.53, 8 Nov 2026): /room/delegate, `delegate` on a room's log
             and /targets row, agent chips; true where there are agent
@@ -302,7 +309,7 @@ def _agents() -> bool:
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "mail_accounts": _mail_accounts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
-          "personal": lambda: True, "default_agent": lambda: True, "services": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "local_settings": lambda: True, "local_full": lambda: True, "mute": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "app_update_web": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "stt_cost": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "mark_unheard_ids": lambda: True, "mark_all_heard": lambda: True, "mark_thread_unheard": lambda: True, "mark_heard_seen": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "map_places": lambda: True, "map_route_options": lambda: True, "map_recent_places": lambda: True, "map_saved": lambda: True, "map_saved_lists": lambda: True, "map_trips": lambda: True, "weather": _personal("weather"),
+          "personal": lambda: True, "default_agent": lambda: True, "services": lambda: True, "prompts_view": lambda: True, "models_view": lambda: True, "models_choose": lambda: True, "models_usage": lambda: True, "local_chats": lambda: True, "local_backup": lambda: True, "local_settings": lambda: True, "local_full": lambda: True, "mute": lambda: True, "folder_grants": lambda: True, "files_browse": lambda: True, "convert": lambda: bool(_convert_targets()), "app_update": lambda: True, "app_update_bridges": lambda: True, "app_update_web": lambda: True, "tidy_draft": lambda: True, "stt": lambda: True, "stt_cost": lambda: True, "follow": lambda: True, "stage": lambda: True, "speech_recent": lambda: True, "up_next": lambda: True, "mark_heard": lambda: True, "mark_heard_now": lambda: True, "mark_heard_ids": lambda: True, "mark_unheard_ids": lambda: True, "mark_all_heard": lambda: True, "mark_thread_unheard": lambda: True, "mark_heard_seen": lambda: True, "quote_part": lambda: True, "music_sung": lambda: True, "speech_music_log": lambda: True, "speech_music_next": lambda: True, "storage": lambda: True, "device_log": lambda: True, "music_voted": lambda: True, "music_chapters": lambda: True, "mix_songs": lambda: True, "music_search": lambda: True, "music_channel": lambda: True, "radio_filters": lambda: True, "room_delegate": _room_delegate, "map": lambda: True, "map_places": lambda: True, "map_route_options": lambda: True, "map_recent_places": lambda: True, "map_saved": lambda: True, "map_saved_lists": lambda: True, "map_trips": lambda: True, "weather": _personal("weather"),
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,

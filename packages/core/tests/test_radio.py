@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_media_core import radio
+from agent_media_core import radio, radio_dj, radio_filters
 
 
 def _song(i: int, channel: str = "Kenny Rogers") -> dict:
@@ -828,3 +828,102 @@ def test_the_djs_brief_names_a_chosen_mood(station, mood_env, monkeypatch):
     assert b["mood"]["id"] == "chill" and "90 BPM" in b["mood"]["means"]
     assert "driving" in b["mood"]["means"]
     assert "chosen mood, it overrides" in radio_dj.SYSTEM
+
+
+# ---- the radio filters (radio_filters; David, 20 Nov 2026) ----------------------
+
+@pytest.fixture()
+def filters_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))   # the same as `station`'s
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("MEDIA_MUSIC_MOOD", raising=False)
+    from agent_media_core import downloads
+
+    monkeypatch.setattr(downloads, "cancel", lambda prefix: None)
+
+
+def _s(title, q=""):
+    return {"id": "x", "title": title, **({"q": q} if q else {})}
+
+
+def test_all_off_by_default_and_kept_when_set(filters_env):
+    assert [f["id"] for f in radio_filters.shown()] == ["acoustic", "instrumental", "no_live", "no_remix", "no_cover"]
+    assert not any(f["on"] for f in radio_filters.shown())
+    out = radio_filters.set_filter("no_live", True, playing=lambda: False)
+    assert out["changed"] and out["station"] is None
+    assert radio_filters.on() == ["no_live"]
+    assert radio_filters.set_filter("no_live", True, playing=lambda: False)["changed"] is False
+    with pytest.raises(ValueError):
+        radio_filters.set_filter("loud", True)
+
+
+@pytest.mark.parametrize("title,q,ok", [
+    ("Oasis - Wonderwall (Live at Knebworth)", "", False),
+    ("Oasis - Live Forever (Official Video)", "Oasis - Live Forever", True),
+    ("Oasis - Live Forever", "", True),          # no bracket, no "live at": the song's name
+    ("Adele - Hello [Live]", "", False),
+    ("Adele - Hello (Official Audio)", "", True),
+])
+def test_no_live_by_the_title(title, q, ok, filters_env):
+    assert radio_filters.allows(_s(title, q), ["no_live"]) is ok
+
+
+def test_no_remix_and_no_cover(filters_env):
+    assert not radio_filters.allows(_s("Song (Kygo Remix)"), ["no_remix"])
+    assert not radio_filters.allows(_s("Song (slowed + reverb)"), ["no_remix"])
+    assert not radio_filters.allows(_s("Song - Cover by Someone"), ["no_cover"])
+    assert radio_filters.allows(_s("Bruce Springsteen - Cover Me", "Bruce Springsteen - Cover Me"), ["no_cover"])
+
+
+def test_acoustic_needs_the_title_to_say_so_and_unplugged_counts_under_no_live(filters_env):
+    assert radio_filters.allows(_s("Song (Acoustic)"), ["acoustic"])
+    assert not radio_filters.allows(_s("Song (Official Video)"), ["acoustic"])
+    assert radio_filters.allows(_s("Nirvana - All Apologies (MTV Unplugged)"), ["acoustic", "no_live"])
+    assert radio_filters.allows(_s("Song (Official Video)"), ["acoustic"], wanting_too=False)
+
+
+def test_the_dj_is_told_the_rules(dj, filters_env):
+    radio_filters.set_filter("acoustic", True, playing=lambda: False)
+    st = radio._blank()
+    import json
+    b = json.loads(radio_dj.brief(st))
+    assert b["rules"] and "Acoustic" in b["rules"][0]
+    assert "rules" in radio_dj.SYSTEM
+
+
+def test_a_filter_change_makes_a_dj_station_pick_again(dj, filters_env):
+    (player, sent, _, _), asked = dj
+    radio.start_dj("sasonica")
+    radio.tick()
+    radio.tick()
+    out = radio_filters.set_filter("no_remix", True, playing=lambda: True)
+    assert out["station"] == "repicked" and radio.read()["queue"] == []
+
+
+def test_a_wanting_filter_hands_a_mix_station_to_the_dj(station, filters_env):
+    radio.start(SEED["id"], "sasonica", playing=True)
+    assert radio_filters.set_filter("acoustic", True, playing=lambda: True)["station"] == "started"
+    assert radio.read()["kind"] == "dj"
+
+
+def test_a_leaving_out_filter_prunes_a_mix_stations_songs_to_come(station, monkeypatch, filters_env):
+    radio.start(SEED["id"], "sasonica", playing=True)
+    with radio._station() as st:
+        st["queue"][0]["title"] = "Song 1 (Live in Paris)"
+    n = len(radio.read()["queue"])
+    assert radio_filters.set_filter("no_live", True, playing=lambda: True)["station"] == "pruned"
+    q = radio.read()["queue"]
+    assert len(q) == n - 1 and radio.read()["kind"] == "mix"
+
+
+def test_a_starving_station_relaxes_and_says_so(dj, filters_env):
+    (player, sent, _, _), asked = dj
+    radio_filters.set_filter("acoustic", True, playing=lambda: False)
+    radio.start_dj("sasonica")
+    radio.tick()                   # the fake DJ's picks never say acoustic
+    snap = radio.snapshot()
+    assert snap["filters_note"].startswith("Few acoustic versions found")
+    assert radio.read()["current"] is not None
+    with radio._station() as st:   # a batch that gets through clears it
+        radio._merge(st, [{"id": "acous000001", "title": "A (Acoustic)", "channel": "A"}])
+    assert radio.snapshot()["filters_note"] == ""

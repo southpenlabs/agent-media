@@ -7288,6 +7288,40 @@ def _cmd_music_mood(a) -> int:
     return 0
 
 
+def _cmd_music_filter(a) -> int:
+    """`media music filter [<id>=on|off]`: the radio's filters
+    (radio_filters), read or one switched — as POST /music switches it: a DJ
+    station picks again, a wanting one hands a Mix station to the DJ."""
+    from . import radio_filters
+
+    want = (a.uri or "").strip()
+    if want:
+        fid, _, val = want.partition("=")
+        if val.lower() not in ("on", "off"):
+            print("media music filter: give <id>=on or <id>=off", file=sys.stderr)
+            return 2
+        try:
+            out = radio_filters.set_filter(fid, val.lower() == "on")
+        except ValueError as e:
+            print(f"media music filter: {e}", file=sys.stderr)
+            return 2
+        if getattr(a, "json", False):
+            print(json.dumps(out))
+            return 0
+        said = {"repicked": "; the DJ is picking again", "started": "; the DJ's station takes over",
+                "pruned": "; songs to come that broke it are dropped"}.get(out["station"] or "", "")
+        state = "on" if out["on"] else "off"
+        print(f"{out['id']}: {state}{said}" if out["changed"] else f"{out['id']}: {state} (unchanged)")
+        return 0
+    shown = radio_filters.shown()
+    if getattr(a, "json", False):
+        print(json.dumps(shown))
+        return 0
+    for f in shown:
+        print(f"{'*' if f['on'] else ' '} {f['id']:<13} {f['name']}")
+    return 0
+
+
 def _music_log_line(r: dict) -> str:
     """One row of the log of music around speech, for a terminal."""
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(r.get("started_at") or 0)))
@@ -7444,6 +7478,8 @@ def cmd_music(a) -> int:
         return _cmd_music_held(a)
     if a.action == "mood":
         return _cmd_music_mood(a)
+    if a.action == "filter":
+        return _cmd_music_filter(a)
     if a.action == "play":
         return _cmd_music_play(m, a)
     # Everything below is transport — route to the live backend so the keys
@@ -11401,7 +11437,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "seek", "volume", "speed", "bookmark",
                             "bookmarks", "like", "likes",
                             "chapters", "chapter", "radio", "dislike",
-                            "bed", "bed-off", "bed-list", "held", "mood", "log", "keys"))
+                            "bed", "bed-off", "bed-list", "held", "mood", "filter", "log", "keys"))
     s.add_argument("uri", nargs="?",
                    help="for 'play': Mopidy URI (e.g. yt:https://...); "
                         "for 'seek': time H:MM:SS (absolute) or +90/-5:00 "
@@ -11415,7 +11451,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "prev to step one inside a mix; for 'bed' / "
                         "'bed-off': a yt: address, link or \"artist title\" "
                         "(default: what is playing); for 'mood': auto, "
-                        "chill, focus, upbeat, sleep or party (none: show it)")
+                        "chill, focus, upbeat, sleep or party (none: show it); "
+                        "for 'filter': <id>=on|off, e.g. acoustic=on (none: "
+                        "list the radio filters)")
     s.add_argument("--lines", action="store_true",
                    help="for 'chapters': print display<TAB>number rows "
                         "for an external picker")

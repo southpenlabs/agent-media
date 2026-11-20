@@ -22,6 +22,10 @@ upbeat, sleep or party is named first in the brief with what it means
 (tempo, beat, energy, vocals), and the SYSTEM prompt says it overrides the
 moment's reading; auto leaves the brief as it was.
 
+**The radio filters** (radio_filters.py; David, 20 Nov 2026): each one on
+is a line of the brief's `rules`, which the SYSTEM prompt says every pick
+keeps, a wanted version (acoustic, instrumental) named in the line.
+
 **The model** is the follow-up's (MEDIA_FOLLOWUP_MODEL, a small hosted one)
 through the summary gateway, unless MEDIA_RADIO_DJ_MODEL names another. It
 answers with song lines, "Artist - Title", and one NOTE: line on the mood,
@@ -65,6 +69,9 @@ SYSTEM = (
     "beat, energy, vocals), and the time, the weather and the reading only "
     "shade the picks within it. A song that fits the hour but not the mood "
     "is wrong. The NOTE then names the mood.\n\n"
+    "When the brief lists rules, every song must keep to all of them, over "
+    "the mood and the moment; a rule asking for a version (acoustic, "
+    "instrumental) is named in the line so a search finds that take.\n\n"
     "Reply with exactly {n} lines, each 'Artist - Song title', nothing else "
     "on them, then one last line 'NOTE: ' and one short sentence on the mood "
     "you are going for."
@@ -178,6 +185,12 @@ def brief(st: dict) -> str:
         out["play_more_often"] = music_rotation.titled(1, turned)
     if music_rotation.titled(-1, turned):
         out["play_less_often"] = music_rotation.titled(-1, turned)
+    from . import radio_filters
+
+    rules = radio_filters.dj_rules()
+    if rules:
+        # The radio filters (radio_filters): rules every pick keeps.
+        out = {"rules": rules, **out}
     from . import music_mood
 
     chosen = music_mood.dj_means()

@@ -114,7 +114,7 @@ def _blank() -> dict:
             "queue": [], "sent": [], "played": [], "banned": [],
             "strikes": {}, "ready": [], "fetching": None, "current": None, "mixed": [],
             "at": None, "tries": {}, "kind": "mix", "note": "", "fresh": False,
-            "refilled": 0.0, "songs_played": [], "sought": None}
+            "refilled": 0.0, "songs_played": [], "sought": None, "filters_note": ""}
     # queue: songs to come, in order; sent: queued in the player; played: ids
     # heard; ready: queue ids already in the phone's cache; fetching: the
     # song downloading now; strikes: 👎 per channel; mixed: ids whose Mix
@@ -124,7 +124,8 @@ def _blank() -> dict:
     # the DJ's word on the mood; fresh: a DJ station whose first song is
     # still to be picked and put on; refilled: when the DJ was last asked;
     # songs_played: the keys of the songs of mixes (bounded items) heard;
-    # sought: the bounded item last put at its start, so it is put there once.
+    # sought: the bounded item last put at its start, so it is put there once;
+    # filters_note: why the radio filters were relaxed (radio_filters), or "".
 
 
 @contextlib.contextmanager
@@ -300,6 +301,7 @@ def _merge(st: dict, songs: list[dict]) -> int:
     # that often (kept 1.6^level of the time).
     from . import music_rotation
 
+    songs = _filtered(st, songs)
     turned = music_rotation.load()
     songs = sorted(songs, key=lambda s: -music_rotation.level(s.get("song_key") or s.get("id") or "", turned))
     added = 0
@@ -326,6 +328,46 @@ def _merge(st: dict, songs: list[dict]) -> int:
             names.add(name)
         added += 1
     return added
+
+
+def _filtered(st: dict, songs: list[dict]) -> list[dict]:
+    """The songs the radio filters on let through (radio_filters.allows).
+    A batch none of which gets past a wanting filter, on a station with
+    nothing left to play, is taken with only the leaving-out filters
+    checked, and `filters_note` says so; a batch that gets through clears it."""
+    from . import radio_filters
+
+    ids = radio_filters.on()
+    if not ids:
+        st["filters_note"] = ""
+        return songs
+    kept = [s for s in songs if radio_filters.allows(s, ids)]
+    if kept:
+        st["filters_note"] = ""
+    elif songs and not st["queue"] and radio_filters.wanting(ids):
+        kept = [s for s in songs if radio_filters.allows(s, ids, wanting_too=False)]
+        if kept:
+            st["filters_note"] = radio_filters.starved_note(ids)
+            log.info("radio: filters relaxed: %s", st["filters_note"])
+    return kept
+
+
+def prune() -> bool:
+    """The songs to come that the radio filters on would not take, dropped
+    (radio_filters: a leaving-out filter turned on under a Mix station).
+    What is queued in the player plays. False when none went."""
+    from . import radio_filters
+
+    ids = radio_filters.on()
+    with _station() as st:
+        if not st["on"] or not ids:
+            return False
+        keep = [s for s in st["queue"] if radio_filters.allows(s, ids, wanting_too=False)]
+        gone = len(st["queue"]) - len(keep)
+        st["queue"] = keep
+        left = {s["id"] for s in keep}
+        st["ready"] = [v for v in st["ready"] if v in left]
+    return gone > 0
 
 
 # ---- the player (radio_io: one seam, so a player can be swapped) ----------------
@@ -1159,6 +1201,7 @@ def snapshot() -> dict:
     snap = {"on": True, "seed": {"id": seed.get("id"), "title": seed.get("title") or ""},
             "current": _row(song) if song else None,
             "kind": st.get("kind") or "mix", "note": st.get("note") or "",
+            "filters_note": st.get("filters_note") or "",
             "available": available(),
             "next": rows[:_SHOWN], "more": max(0, len(rows) - _SHOWN)}
     if st.get("where") == "handoff" and radio_io.handoff_on():
