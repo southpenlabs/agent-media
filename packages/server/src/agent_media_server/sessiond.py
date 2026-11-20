@@ -52,7 +52,10 @@ What it does per session:
   final status) or the process exits; one unheard of for
   `MEDIA_SESSIOND_TASK_STALE_S` (default 3600) no longer counts, so a lost
   notification cannot pin a session. Idle counts from the last event, which
-  a task's progress is too. The record shows `tasks`, how many count. At most `MEDIA_SESSIOND_MAX`
+  a task's progress is too. The record shows `tasks`, how many count. An
+  opencode 2 chat's tasks are its child sessions still running (2.3 runs
+  every subagent in the background, and the child's report wakes the chat
+  for a turn of its own; `Host.running_children`). At most `MEDIA_SESSIOND_MAX`
   run at once (unset or `auto`: sized to the host, `auto_max_live()`; 3 on a
   7.6 GB, 4-core host), and fewer when the host is short of memory: below
   `MEDIA_SESSIOND_MIN_FREE_MB` available (default 1024) there is no room for
@@ -3258,15 +3261,23 @@ class Supervisor:
         """Park every session idle past `MEDIA_SESSIOND_IDLE`. Never one that
         is working, waiting on an approval, holding queued messages, or with a
         task in flight (a background subagent: its turn is over, its work is
-        not), and idle counts from its last event or task, whichever is later."""
+        not), and idle counts from its last event or task, whichever is later.
+        An opencode 2 chat's tasks are its child sessions still running
+        (`Host.running_children`, asked of the server outside the lock)."""
         now = now or time.time()
         parked = []
+
+        def idle(s: Session) -> bool:
+            return (s.running and s.state == "waiting" and not s.pending and not s.queued
+                    and now - s.idle_since() >= idle_s())
+
+        with self.lock:
+            oc_idle = [s.id for s in self.sessions.values() if s.agent == "opencode" and idle(s)]
+        kids = self.oc.running_children(oc_idle) if oc_idle else {}
         with self.lock:
             for s in list(self.sessions.values()):
-                if (s.running and s.state == "waiting"
-                        and not s.pending and not s.queued
-                        and now - s.idle_since() >= idle_s()):
-                    n = s.active_tasks(now)
+                if idle(s):
+                    n = kids.get(s.id, 0) if s.agent == "opencode" else s.active_tasks(now)
                     if n:
                         if n != s.park_held:
                             log.info("sessiond: %s not parked: %d background task%s",

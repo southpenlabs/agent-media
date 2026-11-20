@@ -13,6 +13,11 @@ docs/proposals/opencode-v2.md): everything under `/api/`, answers wrapped in
   ask         a form with one single-choice field (a question)
   slow        running until interrupted
   fail        the turn fails (a provider error)
+  spawn       starts a background subagent (a child session, as 2.3's
+              `subagent` tool does) and ends the turn at once; the child
+              runs until `POST /fake/finish/<child id>`, then reports to
+              its parent's inbox as a synthetic `<subagent>` message, which
+              wakes the parent for a turn of its own
   anything    running, then succeeded
 
 `/global/health` answers too (2.3.0's does). Every request is appended to
@@ -40,6 +45,7 @@ SESSIONS: dict[str, dict] = {}
 PENDING: dict[str, dict] = {}       # request or form id → {kind, sid, obj, done}
 ACTIVE: set[str] = set()
 STOP: dict[str, threading.Event] = {}
+CHILDREN: dict[str, threading.Event] = {}  # running child id → its finish
 
 
 def emit(etype: str, data: dict) -> None:
@@ -84,6 +90,12 @@ def run_prompt(sid: str, text: str) -> None:
             outcome = "interrupted"
     elif text.strip() == "fail":
         outcome = "failed"
+    elif text.strip() == "spawn":
+        kid = "ses_" + uuid.uuid4().hex[:26]
+        SESSIONS[kid] = {"directory": SESSIONS.get(sid, {}).get("directory", ""),
+                         "parentID": sid}
+        CHILDREN[kid] = threading.Event()
+        threading.Thread(target=run_child, args=(sid, kid), daemon=True).start()
     else:
         time.sleep(0.05)
     ACTIVE.discard(sid)
@@ -94,6 +106,27 @@ def run_prompt(sid: str, text: str) -> None:
         emit("session.execution.interrupted", {"sessionID": sid, "reason": "user"})
     else:
         emit("session.execution.succeeded", {"sessionID": sid})
+
+
+def run_child(parent: str, kid: str) -> None:
+    """A background subagent: its own execution, then its report into the
+    parent's inbox, which wakes the parent (2.3's CEe and session.synthetic
+    with resume)."""
+    ACTIVE.add(kid)
+    emit("session.execution.started", {"sessionID": kid})
+    CHILDREN[kid].wait(30)
+    ACTIVE.discard(kid)
+    emit("session.execution.succeeded", {"sessionID": kid})
+    emit("session.synthetic", {"sessionID": parent, "description": "Count",
+                               "text": f'<subagent sessionID="{kid}" state="completed" '
+                                       'description="Count"> </subagent>',
+                               "metadata": {"source": "subagent", "childID": kid}})
+    ACTIVE.add(parent)
+    emit("session.execution.started", {"sessionID": parent})
+    emit("session.text.delta", {"sessionID": parent, "delta": "y"})
+    time.sleep(0.3)
+    ACTIVE.discard(parent)
+    emit("session.execution.succeeded", {"sessionID": parent})
 
 
 def session_info(sid: str) -> dict:
@@ -137,6 +170,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         directory = q.get("location[directory]", "")
         if parts == ["global", "health"]:
             return self._send(200, {"healthy": True})
+        if method == "POST" and parts[:2] == ["fake", "finish"] and len(parts) == 3:
+            ev = CHILDREN.pop(parts[2], None)
+            if ev is None:
+                return self._send(404, {"message": "no such child"})
+            ev.set()
+            return self._send(204)
         if parts[:1] != ["api"]:
             return self._send(404, {"message": "not found"})
         parts = parts[1:]

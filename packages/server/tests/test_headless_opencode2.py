@@ -314,3 +314,38 @@ def test_the_gateway_key_opencodes_config_names_is_given_to_its_server(tmp_path,
     assert oc.config_env({"LITELLM_MASTER_KEY": "mine"})["LITELLM_MASTER_KEY"] == "mine"
     (cfg / "opencode.json").write_text('{"model": "opencode/big-pickle"}')
     assert "LITELLM_MASTER_KEY" not in oc.config_env({"PATH": "/usr/bin"})
+
+
+def running_child(h) -> str:
+    """The fake's one running child session (not a chat of ours)."""
+    def find():
+        active = oc._data(h.sup.oc.call("GET", "/api/session/active")) or {}
+        return next((k for k in active if k not in h.sup.sessions), "")
+    return wait_for(find)
+
+
+def test_a_v2_subagent_reporting_after_the_turn_wakes_the_chat_and_holds_parking(host):
+    """opencode 2.3 runs every subagent in the background: the turn that
+    started it ends at once, and the child's report lands later in the
+    parent's inbox and wakes it for a turn of its own (#63382). That turn
+    is a turn like any: working, then waiting, so the phone's "New reply"
+    (session_events, working → waiting) fires for it. While the child runs
+    the chat is not idle, so it is not parked: a parked chat's late turn
+    went unheard."""
+    sid = start(host, "spawn")
+    wait_for(lambda: state(host, sid) == "waiting")
+    kid = running_child(host)
+    idles = sum(1 for e in host.sup.events(sid)["events"] if e.get("type") == "session.idle")
+    # Long past the idle limit, with the child still at work: kept.
+    assert host.sup.park_idle(time.time() + 10 * sessiond.idle_s()) == []
+    assert host.sup.get(sid)["live"]
+    host.sup.oc.call("POST", f"/fake/finish/{kid}")
+    wait_for(lambda: state(host, sid) == "working")
+    wait_for(lambda: state(host, sid) == "waiting")
+    evs = host.sup.events(sid)["events"]
+    assert sum(1 for e in evs if e.get("type") == "session.idle") == idles + 1
+    assert host.sup.get(sid)["last_result"]["subtype"] == "success"
+    # The child's own turn is not the chat's.
+    assert not any((e.get("properties") or {}).get("sessionID") == kid for e in evs)
+    # Its child done, the chat parks as any idle one does.
+    assert host.sup.park_idle(time.time() + 10 * sessiond.idle_s()) == [sid]

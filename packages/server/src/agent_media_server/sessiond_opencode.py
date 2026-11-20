@@ -847,6 +847,30 @@ class Host:
             return ""
         return str(info.get("parentID") or "")
 
+    def running_children(self, sids) -> dict[str, int]:
+        """v2: `{session id: subagents running}` for those of `sids` with
+        any. opencode 2.3 runs every subagent in the background (#63382),
+        so a chat whose turn has ended can still have work under way, and
+        its child's report wakes it later. Read off the server's active
+        sessions (a child's parent asked of each); {} on v1 (its subagents
+        run inside the turn), with no server, or when it does not answer."""
+        want = set(sids)
+        if not (self.v2 and self.up and want):
+            return {}
+        try:
+            active = _data(self.call("GET", "/api/session/active", timeout=10)) or {}
+        except Exception as _exc:  # noqa: BLE001 — unknown is none: parking goes on
+            _failures.swallowed(_exc)
+            return {}
+        out: dict[str, int] = {}
+        for k in active if isinstance(active, dict) else []:
+            if k in want:
+                continue
+            parent = self.parent_of(str(k))
+            if parent in want:
+                out[parent] = out.get(parent, 0) + 1
+        return out
+
     def move(self, sid: str, cwd: str) -> None:
         """v2: the session's folder becomes `cwd` (v1 needs export and
         import, core opencode_move.py)."""
