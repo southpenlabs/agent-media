@@ -635,8 +635,11 @@ class Room:
         if kind == "audio" and "org.matrix.msc3245.voice" in content:
             kind = "voice"
         thumb = info.get("thumbnail_url") if _mxc(info.get("thumbnail_url")) else ""
+        size = info.get("size")
         self.media[ev_id] = {"mxc": content["url"], "mimetype": str(info.get("mimetype") or ""),
-                             **({"thumb_mxc": thumb} if thumb else {})}
+                             **({"thumb_mxc": thumb} if thumb else {}),
+                             # The total for a fetch's progress until the homeserver says.
+                             **({"size": size} if isinstance(size, int) and size > 0 else {})}
         url = f"/rooms/{self.thread}/media/{_q(ev_id)}"
         part = {"type": "media", "kind": kind, "url": url, "name": name[:200],
                 # What it is in words, where a part's text is read (the

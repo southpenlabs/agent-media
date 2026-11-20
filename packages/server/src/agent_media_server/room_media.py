@@ -13,6 +13,9 @@ and its bytes come through here, from the homeserver, only when asked for:
   file asks this first, so the card can say it is downloading; the bridge
   fetches it from the network then (WhatsApp's and Telegram's media are
   fetched on demand), which is the "prioritise".
+* `GET /rooms/<thread>/media/<event id>?progress=1` — how far that fetch
+  has got, read while `?ready=1` is open (`progress()`); never starts one.
+  For the card's progress bar (sasonica-app, 20 Nov 2026).
 * `GET /rooms/<thread>/media/<event id>` — the whole of it, with `Range`,
   so a video seeks. Fetched first if it has not been.
 
@@ -45,6 +48,9 @@ TIMEOUT_S = 120.0
 CHUNK = 256 * 1024
 
 _LOCKS: dict[str, threading.Lock] = {}
+#: Whole-file fetches running now, by file name: {"got": bytes so far,
+#: "size": the homeserver's Content-Length, else the event's size, else None}.
+_FETCHING: dict[str, dict] = {}
 _LOCKS_LOCK = threading.Lock()
 
 
@@ -96,7 +102,13 @@ def _download(mxc: str, dest: Path) -> None:
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {t}"} if t else {})
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             got = 0
+            seen = _FETCHING.get(dest.name)
             with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp, os.fdopen(fd, "wb") as f:
+                if seen is not None:
+                    seen["got"] = 0
+                    length = _length(getattr(resp, "headers", None))
+                    if length:
+                        seen["size"] = length
                 while True:
                     chunk = resp.read(CHUNK)
                     if not chunk:
@@ -105,6 +117,8 @@ def _download(mxc: str, dest: Path) -> None:
                     if got > MAX_BYTES:
                         raise ValueError("too large")
                     f.write(chunk)
+                    if seen is not None:
+                        seen["got"] = got
             os.replace(tmp, dest)
             return
         except (urllib.error.URLError, OSError, ValueError) as e:
@@ -114,6 +128,46 @@ def _download(mxc: str, dest: Path) -> None:
             except OSError:
                 pass
     raise last
+
+
+def _length(headers) -> int | None:
+    try:
+        n = int((headers.get("Content-Length") if headers is not None else None) or 0)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _event_size(info: dict) -> int | None:
+    n = info.get("size")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else None
+
+
+def progress(info: dict) -> dict:
+    """How far the whole of a media part has been fetched, without fetching:
+    `{"state": "idle"|"fetching"|"ready"|"failed", "got", "size", "percent"}`.
+    `size` is the homeserver's length once it answers, the event's size
+    before that, else None (and `percent` None with it)."""
+    d = media_dir()
+    name = _name(info["mxc"], False)
+    running = _FETCHING.get(name)
+    if running is not None:
+        got, size = int(running.get("got") or 0), running.get("size")
+        state = "fetching"
+    else:
+        try:
+            size = (d / name).stat().st_size
+            got, state = size, "ready"
+        except OSError:
+            got, size = 0, _event_size(info)
+            state = "failed" if _failed_lately(d, name) else "idle"
+    if state == "ready":
+        pct: int | None = 100
+    elif size:
+        pct = max(0, min(99 if state == "fetching" else 100, got * 100 // size))
+    else:
+        pct = None
+    return {"state": state, "got": got, "size": size, "percent": pct}
 
 
 def _prune(d: Path) -> None:
@@ -168,7 +222,11 @@ def fetch(info: dict, *, thumb: bool) -> Path | None:
                 with os.fdopen(fd, "wb") as f:
                     f.write(got[0] if got else data)
             else:
-                _download(mxc, path)
+                _FETCHING[name] = {"got": 0, "size": _event_size(info)}
+                try:
+                    _download(mxc, path)
+                finally:
+                    _FETCHING.pop(name, None)
         except (urllib.error.URLError, OSError, ValueError) as e:
             log.info("room media %s unread: %s", "thumbnail" if thumb else "file", e)
             fd = os.open(d / f"{name}.none", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

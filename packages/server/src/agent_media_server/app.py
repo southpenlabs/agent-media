@@ -1400,7 +1400,8 @@ def _room_media(h: BaseHTTPRequestHandler, thread: str, ev_id: str, query: str) 
     room's photo, video, voice note or file, fetched from the homeserver when
     first asked for; the owner's, gated as the room's picture is, with
     `?access_token=` for an <img> or <video>. `ready=1` fetches the whole and
-    answers `{"ok", "size", "type"}`; else the bytes, with `Range`."""
+    answers `{"ok", "size", "type"}`; `progress=1` says how far that fetch
+    has got, starting none; else the bytes, with `Range`."""
     from . import matrix as mx, room_media
 
     bearer = _bearer(h)
@@ -1419,6 +1420,9 @@ def _room_media(h: BaseHTTPRequestHandler, thread: str, ev_id: str, query: str) 
             info = dict(r.media.get(ev_id) or {}) or None
     if info is None:
         _json(h, 404, {"ok": False, "error": "no such media in this room"})
+        return
+    if (q.get("progress") or [""])[0] == "1":
+        _json(h, 200, {"ok": True, **room_media.progress(info)})
         return
     thumb = (q.get("thumb") or [""])[0] == "1"
     path = room_media.fetch(info, thumb=thumb)

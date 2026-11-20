@@ -213,3 +213,60 @@ def test_a_placeholder_edited_into_the_file_or_a_failure_is_shown_as_edited():
     assert msgs["$w2"]["parts"] == [{"type": "text", "text": "Failed to transfer attachment b"}]
     assert msgs["$s1"]["parts"][0]["kind"] == "image" and "$e1" not in msgs
     assert r.media["$w1"]["mxc"] == "mxc://ryer.org/a" and r.media["$s1"]["mxc"] == "mxc://ryer.org/st"
+
+
+def test_progress_is_read_without_fetching(server, dl, monkeypatch):
+    """`?progress=1` (sasonica-app, 20 Nov 2026): idle, fetching with the
+    bytes so far against the homeserver's length, ready, failed; never a
+    fetch of its own."""
+    import io
+    import json
+
+    r = _room()
+    code, _ = devices.mint_code("desk")
+    tok = devices.redeem(code, "desk")["token"]
+    A = {"Authorization": f"Bearer {tok}"}
+    base = f"/rooms/{r.thread}/media"
+
+    def prog(ev):
+        res, body = _get(server, f"{base}/{ev}?progress=1", A)
+        assert res.status == 200
+        return json.loads(body)
+
+    assert _get(server, f"{base}/%24m2?progress=1")[0].status in (401, 403)
+    assert prog("%24m2") == {"ok": True, "state": "idle", "got": 0, "size": 2_000_000, "percent": 0}
+    assert dl.got == []
+    # While the real downloader runs, each chunk is counted against Content-Length.
+    monkeypatch.setenv("MATRIX_OWNER_TOKEN", "owner")
+    monkeypatch.setattr(room_media, "CHUNK", 10)
+    mid = []
+
+    class Resp(io.BytesIO):
+        headers = {"Content-Length": "40"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n=-1):
+            mid.append(prog("%24m2"))
+            return super().read(n)
+
+    monkeypatch.setattr(room_media, "_download", _real_download)
+    monkeypatch.setattr(room_media.urllib.request, "urlopen", lambda req, timeout=None: Resp(b"z" * 40))
+    res, body = _get(server, f"{base}/%24m2?ready=1", A)
+    assert res.status == 200 and json.loads(body)["size"] == 40
+    assert [m["got"] for m in mid] == [0, 10, 20, 30, 40]
+    assert all(m["state"] == "fetching" and m["size"] == 40 for m in mid)
+    assert mid[2]["percent"] == 50 and mid[-1]["percent"] == 99
+    assert prog("%24m2") == {"ok": True, "state": "ready", "got": 40, "size": 40, "percent": 100}
+    # One that could not be had: failed, until it is tried again.
+    monkeypatch.setattr(room_media, "_download", dl)
+    assert _get(server, f"{base}/%24m3?ready=1", A)[0].status == 502
+    assert prog("%24m3")["state"] == "failed"
+    assert room_media._FETCHING == {}
+
+
+_real_download = room_media._download
