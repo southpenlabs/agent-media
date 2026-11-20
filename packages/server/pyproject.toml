@@ -17,7 +17,7 @@ requires-python = ">=3.11"
 # opening-hours-py (MIT OR Apache-2.0; a Rust wheel, abi3, glibc and musl,
 # x86_64 and arm) reads OSM opening_hours for /map/places (map_places.py).
 # vobject (Apache-2.0): the CardDAV source's vCards (contacts_carddav.py).
-dependencies = ["agent-media-core", "httpx>=0.27", "icalendar>=6", "websockets>=15,<17",
+dependencies = ["agent-media-core", "httpx>=0.27", "icalendar>=6", "websockets>=15,<18",
                 "opening-hours-py>=2.1", "vobject>=0.9.9"]
 
 [project.optional-dependencies]
