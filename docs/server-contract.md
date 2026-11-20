@@ -9742,7 +9742,13 @@ every route below answers:
   (or `complete`, or the error) is there. A QR that changes is a new step
   (a new `txn_id`).
 - `status: "failed"` carries `error`, the bridge's message (e.g. a wrong
-  password); the process is over and a new sign-in starts again.
+  password); the process is over and a new sign-in starts again. Where the
+  bridge's words leave the owner stuck, `error` is the server's own, by the
+  bridge's errcode (20 Nov 2026, `bridges.FAILURE_WORDS`): Telegram's
+  `SIGN_UP_NOT_SUPPORTED` (a number with no account; the bridge cannot make
+  one) says to create it in the Telegram app, with
+  `https://telegram.org/apps`; `LOGIN_EMAIL_REQUIRED` says to choose QR Code
+  instead. The app turns URLs in `error` into links.
 
 `POST /bridges/<id>/login {"flow"}` — starts `flow` (one of the bridge's
 `flows[].id`); answers the process. 404 for no such bridge, 400 for no
