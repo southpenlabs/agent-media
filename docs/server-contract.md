@@ -13160,6 +13160,75 @@ POST /devices/rules {"id", "rules": {<rule>: value | null}}            auth.may_
   the new routes and ignores `kind`.
 
 
+### 6.59a Limits a paired device can carry — expiry, only some chats, no speakers, only at home, forget when unused (built 20 Nov 2026)
+
+Five limits, each optional, set per device from Devices (David, 20 Nov
+2026: "Great ideas, let's implement all of them"; agent mail #1106/#1107
+from sasonica-app). Enforced on the server, in front of every app route
+(`agent_media_server/device_limits.py`, `devices.py`); pinned by
+`test_device_limits.py`. The app shows each control only where its field or
+rule is in the answer, so an older server shows none.
+
+```
+GET  /devices          rows gain "expires_at": <epoch s> | null and "scope": {"projects": [ids]} | null;
+                       top level gains "scope_choices": [{"id", "name"}]     (the projects, then
+                       {"id": "people", "name": "Chats with people"})
+POST /devices/expiry {"id", "at": <epoch s> | null}                         auth.may_enrol
+  → {"ok", "id", "devices"}     400 bad_expiry (past, or not a number), 404 no_such_device
+POST /devices/scope {"id", "projects": [ids] | null}                        auth.may_enrol
+  → {"ok", "id", "devices"}     400 bad_scope (an id not in scope_choices, or []: null is
+                                everything), 409 own_scope, 404 no_such_device
+POST /devices/code {…, "expires_at"?: <epoch s>}   → the answer gains "expires_at"; 400 bad_expiry
+POST /pair/approve {…, "expires_at"?: <epoch s>}   400 bad_expiry
+```
+
+- **Three more rules** in the §6.59 table (so `GET /device/rules`, the rows'
+  `rules` and `POST /devices/rules` carry them):
+
+  | rule | phone | tablet | tv | computer | choices |
+  |---|---|---|---|---|---|
+  | `speakers` "Plays on the speakers" | true | true | true | true | true, false |
+  | `home_network_only` "Only at home" | false | false | false | false | true, false |
+  | `forget_unused` "Forget it when unused" | `90d` | `30d` | `30d` | `30d` | 30d, 90d, never |
+
+- **`speakers: false`**: nothing the device asks may sound anywhere but on
+  itself — 403 `no_speakers` for `POST /audio/target` to any target but
+  `device:<its own id>`, and for the music actions that start or move
+  playback (`play`, `add`, `radio`, `resume`, `toggle`, `next`, `prev`,
+  `mood`; `/music/radio`, `POST /music/brainz`) and the speech bar's verbs
+  that play a reply again (`toggle`, `prev`, `replay`, `replay-unheard`,
+  `replay-id`, `again`, `goto-sentence`; `POST /speech/say`) unless that
+  channel is going to the device's own player. Pause, stop, volume and
+  votes always work.
+- **`home_network_only: true`**: a request that does not come straight from
+  the home network is 403 `off_network`. Home is a private LAN address
+  (`MEDIA_HOME_NETWORKS`, comma-separated CIDRs, says otherwise) with no
+  proxy header (`X-Forwarded-For`, `CF-Connecting-IP`, `X-Real-IP`,
+  `Forwarded`); loopback (the tunnel and the relay arrive that way) and the
+  tailnet are not home. `GET /device/rules` and `/features` still answer, so
+  the app can say why.
+- **`forget_unused`**: a device unseen for that long is revoked, as by
+  `POST /devices/revoke`, and logged. Idle time counts from when this rule
+  first ran on the server at the earliest, so nothing was forgotten the
+  moment it shipped. Another server's tokens (jobs workers, search and
+  reply peers) are never forgotten this way.
+- **Expiry**: when `expires_at` passes the device is revoked, and every
+  request with its token (not only the first: several go at once on a
+  reload) is 401 `{"code": "device_expired"}` for 30 days, so the app can
+  say "This device's access ran out" rather than just pairing again. A
+  token revoked by hand stays a plain 401.
+- **Only some chats** (`scope`): the thread lists (`/conversations`,
+  `/targets` `sessions`, `/sessions/state`, the `sessions` frames,
+  `/dashboard`) leave out threads outside the scope, and any route that
+  names a thread outside it (`?session=`, `?thread=`, `/threads/<id>/…`, or
+  `session`/`thread` in a JSON body) answers 404 `no_such_session`, as for a
+  thread that does not exist. A thread's scope id is its project, or
+  `people` for a chat with people (a Matrix or bridged room, a Local chat).
+  A device may not limit itself (409 `own_scope`), so the admin phone
+  cannot lock itself out.
+- `/features` has `device_limits: true`. `/devices/expiry` and
+  `/devices/scope` are in `CORS_PATHS`.
+
 ### 6.60 Which model each feature uses, choosing it, and its usage — gated; not for guests (built 17 Nov 2026)
 
 Settings → Models (David, 16 Nov 2026: "do we need a list of model and

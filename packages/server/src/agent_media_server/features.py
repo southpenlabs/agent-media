@@ -161,6 +161,11 @@ never a network call, so the app can ask on every start.
             /devices, POST /devices/kind and /devices/rules, `kind` on POST
             /device/app and /pair/request; private threads withheld where
             the rules say so
+  device_limits  limits a paired device can carry (device_limits.py, §6.59a,
+            20 Nov 2026): rules speakers, home_network_only, forget_unused;
+            `expires_at` and `scope` on GET /devices rows, `scope_choices`;
+            POST /devices/expiry and /devices/scope; `expires_at` on POST
+            /devices/code and /pair/approve; 401 device_expired
   practice_upload  POST /practice {"action": "add", "upload"} (practice.py,
             §6.45, 20 Nov 2026): a file POST /upload kept moved into the
             Practice folder; always true here
@@ -314,7 +319,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "m
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
           "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True,
-          "practice_upload": lambda: True}
+          "practice_upload": lambda: True, "device_limits": lambda: True}
 
 
 def detect() -> dict[str, bool]:

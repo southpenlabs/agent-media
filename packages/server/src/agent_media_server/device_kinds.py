@@ -63,6 +63,17 @@ RULES: list[dict] = [
     {"id": "private_threads", "label": "Private threads shown",
      "choices": [True, False],
      "kinds": {"phone": True, "tablet": True, "tv": False, "computer": True}},
+    # Device limits (David, 20 Nov 2026: "let's implement all of them";
+    # device_limits.py, enforced on the server).
+    {"id": "speakers", "label": "Plays on the speakers",
+     "choices": [True, False],
+     "kinds": {"phone": True, "tablet": True, "tv": True, "computer": True}},
+    {"id": "home_network_only", "label": "Only at home",
+     "choices": [True, False],
+     "kinds": {"phone": False, "tablet": False, "tv": False, "computer": False}},
+    {"id": "forget_unused", "label": "Forget it when unused",
+     "choices": ["30d", "90d", "never"],
+     "kinds": {"phone": "90d", "tablet": "30d", "tv": "30d", "computer": "30d"}},
 ]
 
 _BY_ID = {r["id"]: r for r in RULES}
@@ -163,13 +174,27 @@ def _row_hidden(row: dict) -> bool:
 
 def filter_rows(rows: list, device: dict | None) -> list:
     """`rows` (thread rows, each with `session`) without the private and
-    sealed ones when this device may not be sent them."""
-    if shows_private(device) or not isinstance(rows, list):
+    sealed ones when this device may not be sent them, and without the
+    threads outside its scope when it has one (device_limits.py)."""
+    if not isinstance(rows, list):
+        return rows
+    from . import device_limits
+
+    if device_limits.scope_of(device) is not None:
+        rows = device_limits.filter_scope(rows, device)
+    if shows_private(device):
         return rows
     from agent_media_core import _pass
 
     with _pass.held():
         return [r for r in rows if not (isinstance(r, dict) and _row_hidden(r))]
+
+
+def filters_anything(device: dict | None) -> bool:
+    """Whether `filter_rows` can leave anything out for this device."""
+    from . import device_limits
+
+    return not shows_private(device) or device_limits.scope_of(device) is not None
 
 
 def filter_for(bearer: str, rows: list) -> list:

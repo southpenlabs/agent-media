@@ -171,7 +171,8 @@ def pending() -> list[dict]:
     return [public(r) for r in reqs if r.get("status") == "pending"]
 
 
-def decide(rid: str, *, allow: bool, role: str = "", name: str = "", by: str = "") -> tuple[str, dict]:
+def decide(rid: str, *, allow: bool, role: str = "", name: str = "", by: str = "",
+           expires_at: float | None = None) -> tuple[str, dict]:
     """The phone's answer. `("ok", request)`, or `("unknown"|"answered"|"lapsed",
     {})`. `role` is admin, member or guest (default the kind's
     `suggested_role`, else member); `name` is what
@@ -198,6 +199,9 @@ def decide(rid: str, *, allow: bool, role: str = "", name: str = "", by: str = "
             given = " ".join((name or "").split())[:80]
             if given:
                 req["name"] = given
+            if expires_at is not None:
+                # "For tonight" from the start (device limits, §6.59a).
+                req["expires_at"] = round(float(expires_at), 3)
         _save(reqs)
     return "ok", public(req)
 
@@ -225,7 +229,8 @@ def wait(rid: str, secret: str, ip: str = "") -> tuple[str, dict]:
     # The ordinary pairing code, minted and redeemed at once, so the device
     # row is made exactly as `POST /pair` makes it (an admin is never given
     # the enrol bit this way: managing devices is granted at the desk).
-    code, _ = devices.mint_code(req.get("name") or "device", role=req.get("role") or DEFAULT_ROLE)
+    code, _ = devices.mint_code(req.get("name") or "device", role=req.get("role") or DEFAULT_ROLE,
+                                expires_at=req.get("expires_at"))
     got = devices.redeem(code, req.get("name") or "device", ip)
     if not got:
         return "unknown", {}

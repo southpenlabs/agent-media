@@ -276,6 +276,17 @@ def lookup(token: str, ip: str = "") -> dict | None:
         if hit is None:
             return None
         now = time.time()
+        if _past(hit.get("expires_at"), now):
+            # Its time ran out (device limits): forgotten now, and its token
+            # answers `device_expired` from here on (`expired`).
+            expire(str(hit.get("id") or ""))
+            return None
+        if _idle_too_long(hit, now):
+            # Unseen longer than its `forget_unused` rule allows: forgotten,
+            # whether the sweep or its own return gets there first.
+            _forget_unused(hit, now)
+            return None
+        _sweep_unused(now)
         if now - float(hit.get("last_seen") or 0) >= SEEN_EVERY_S:
             try:
                 with _locked():
@@ -309,20 +320,218 @@ def list_devices() -> list[dict]:
                  "role": role_of(d), "enrol": may_enrol(d), "stage": stage_mode(d),
                  "kind": device_kinds.kind_of(d), "kind_set_by": d.get("kind_set_by") or None,
                  "rules": device_kinds.rules_for(d),
+                 "expires_at": expires_of(d), "scope": scope_field(d),
                  **({"ceiling": ceiling_of(d)} if ceiling_of(d) else {})}
                 for d in _load()]
 
 
-def revoke(device_id: str) -> bool:
+def revoke(device_id: str, *, expired: bool = False) -> bool:
     """Forget a device. Its token answers 401 on its next request (it is then
-    simply unknown)."""
+    simply unknown) — or, `expired`, 401 `device_expired` on every request
+    for as long as the marker is kept (`EXPIRED_KEEP_S`)."""
     with _locked():
         rows = _load(fresh=True)
         keep = [d for d in rows if d.get("id") != device_id]
         if len(keep) == len(rows):
             return False
+        if expired:
+            gone = next(d for d in rows if d.get("id") == device_id)
+            _mark_expired(str(gone.get("sha256") or ""))
         _save(keep)
         return True
+
+
+# --- device limits: expiry, forgotten when unused, scope ---------------------------
+#
+# David, 20 Nov 2026: "Great ideas, let's implement all of them" (agent mail
+# #1106/#1107 from sasonica-app). Kept on the row: `expires_at` (epoch s, or
+# absent for never) and `scope` ({"projects": [ids]}, or absent for
+# everything). Enforced in device_limits.py; the expiry here, at lookup.
+
+#: How long an expired device's token keeps answering `device_expired`
+#: rather than a plain 401 (#1107: on every request, not once; 30 days).
+EXPIRED_KEEP_S = 30 * 86400
+
+#: The forget-when-unused sweep runs at most this often per process.
+SWEEP_EVERY_S = 600.0
+_SWEPT: list[float | None] = [None]
+
+_UNUSED_S = {"30d": 30 * 86400, "90d": 90 * 86400}
+
+
+def _past(at, now: float | None = None) -> bool:
+    try:
+        return at is not None and float(at) <= (time.time() if now is None else now)
+    except (TypeError, ValueError):
+        return False
+
+
+def expires_of(device: dict | None) -> float | None:
+    at = (device or {}).get("expires_at")
+    return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
+
+
+def scope_field(device: dict | None) -> dict | None:
+    """The row's `scope` as served: {"projects": [ids]}, or None (everything)."""
+    got = (device or {}).get("scope")
+    if isinstance(got, dict) and isinstance(got.get("projects"), list) and got["projects"]:
+        return {"projects": [str(p) for p in got["projects"]]}
+    return None
+
+
+def _expired_path() -> Path:
+    return _dir() / "devices-expired.json"
+
+
+def _mark_expired(sha: str) -> None:
+    if not sha:
+        return
+    now = time.time()
+    data = {k: v for k, v in _read(_expired_path(), {}).items()
+            if isinstance(v, (int, float)) and now - float(v) < EXPIRED_KEEP_S}
+    data[sha] = round(now, 3)
+    _write(_expired_path(), data)
+
+
+def expired(token: str) -> bool:
+    """Whether this bearer is a device whose time ran out (within
+    `EXPIRED_KEEP_S`): its every request is 401 `device_expired`."""
+    token = (token or "").strip()
+    if not token:
+        return False
+    at = _read(_expired_path(), {}).get(_hash(token))
+    return isinstance(at, (int, float)) and time.time() - float(at) < EXPIRED_KEEP_S
+
+
+def expire(device_id: str) -> bool:
+    """Forget a device whose `expires_at` has passed, keeping the marker."""
+    import logging
+
+    if revoke(device_id, expired=True):
+        logging.getLogger(__name__).warning(f"devices: {device_id}'s access ran out; revoked")
+        return True
+    return False
+
+
+def set_expiry(device_id: str, at: float | None) -> bool:
+    """When a device's access runs out (`POST /devices/expiry`): epoch
+    seconds, or None for never. False for an unknown id; ValueError for a
+    time already past or not a number."""
+    if at is not None:
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            raise ValueError("at must be epoch seconds or null")
+        if _past(at):
+            raise ValueError("that time has already passed")
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        new = {k: v for k, v in hit.items() if k != "expires_at"}
+        if at is not None:
+            new["expires_at"] = round(float(at), 3)
+        if new != hit:
+            _save([new if d is hit else d for d in rows])
+        return True
+
+
+def set_scope(device_id: str, projects: list[str] | None) -> bool:
+    """Which chats a device sees (`POST /devices/scope`): project ids (and
+    "people"), or None for everything. The caller checks the ids. False for
+    an unknown id."""
+    with _locked():
+        rows = _load(fresh=True)
+        hit = next((d for d in rows if d.get("id") == device_id), None)
+        if hit is None:
+            return False
+        new = {k: v for k, v in hit.items() if k != "scope"}
+        if projects:
+            new["scope"] = {"projects": list(dict.fromkeys(str(p) for p in projects))}
+        if new != hit:
+            _save([new if d is hit else d for d in rows])
+        return True
+
+
+def _limits_since(now: float) -> float:
+    """When the forget-when-unused rule first ran here: idle time counts from
+    then at the earliest, so a device last seen long ago is not forgotten the
+    moment this ships."""
+    p = _dir() / "devices-limits-since"
+    try:
+        return float(p.read_text().strip())
+    except (OSError, ValueError):
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"{now:.3f}\n")
+        except OSError:
+            pass
+        return now
+
+
+def unused_for(device: dict) -> float | None:
+    """How long a device may go unseen before it is forgotten (its
+    `forget_unused` rule), or None for never. Peers and jobs workers are
+    another server's, not a person's device: never."""
+    from . import device_kinds
+
+    if is_jobs_worker(device) or is_search_peer(device) or is_reply_peer(device):
+        return None
+    rule = device_kinds.rules_for(device).get("forget_unused") or {}
+    s = _UNUSED_S.get(str(rule.get("value") or ""))
+    return float(s) if s else None
+
+
+def sweep(now: float | None = None) -> list[str]:
+    """Forget every device past its expiry (kept as expired) or unseen for
+    longer than its `forget_unused` rule allows (as `POST /devices/revoke`
+    does). The ids forgotten."""
+    now = time.time() if now is None else now
+    since = _limits_since(now)
+    gone: list[str] = []
+    with _LOCK:
+        rows = list(_load(fresh=True))
+    for d in rows:
+        did = str(d.get("id") or "")
+        if _past(d.get("expires_at"), now):
+            if expire(did):
+                gone.append(did)
+            continue
+        if _idle_too_long(d, now, since) and _forget_unused(d, now):
+            gone.append(did)
+    return gone
+
+
+def _idle_too_long(d: dict, now: float, since: float | None = None) -> bool:
+    limit = unused_for(d)
+    seen = float(d.get("last_seen") or d.get("created") or 0)
+    if limit is None or now - seen < limit:
+        return False
+    return now - max(seen, _limits_since(now) if since is None else since) >= limit
+
+
+def _forget_unused(d: dict, now: float) -> bool:
+    import logging
+
+    did = str(d.get("id") or "")
+    seen = float(d.get("last_seen") or d.get("created") or 0)
+    if not revoke(did):
+        return False
+    logging.getLogger(__name__).warning(
+        f"devices: {did} ({d.get('name')!r}) unused for {int((now - seen) // 86400)} days; revoked")
+    return True
+
+
+def _sweep_unused(now: float) -> None:
+    last = _SWEPT[0]
+    if last is not None and now - last < SWEEP_EVERY_S:
+        return
+    _SWEPT[0] = now
+    try:
+        sweep(now)
+    except OSError as e:
+        from agent_media_core import failures
+
+        failures.swallowed(e)
 
 
 def set_enrol(device_id: str, on: bool = True) -> bool:
@@ -713,7 +922,8 @@ def is_session_worker(device: dict | None) -> bool:
 
 def mint_code(name: str, enrol: bool = False, jobs: bool = False,
               role: str = "", sessions: bool = False,
-              search: bool = False, reply: bool = False) -> tuple[str, float]:
+              search: bool = False, reply: bool = False,
+              expires_at: float | None = None) -> tuple[str, float]:
     """A fresh pairing code for a device called `name`: `(code, expires)`.
 
     Several may be outstanding at once (pairing a phone and a tablet in the
@@ -753,6 +963,10 @@ def mint_code(name: str, enrol: bool = False, jobs: bool = False,
             codes[code]["reply"] = True
         if role:
             codes[code]["role"] = role
+        if expires_at is not None:
+            # When the device's access will run out (device limits): "for
+            # tonight", from the start.
+            codes[code]["device_expires_at"] = round(float(expires_at), 3)
         _write(codes_path(), codes)
     return code, expires
 
@@ -818,6 +1032,8 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
             row["reply"] = True
         if entry.get("role") in ROLES:
             row["role"] = entry["role"]
+        if isinstance(entry.get("device_expires_at"), (int, float)):
+            row["expires_at"] = entry["device_expires_at"]
         _save(list(_load(fresh=True)) + [row])
     return {"token": token, "device_id": row["id"], "name": name,
             "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row),
@@ -921,6 +1137,7 @@ def _reset_for_tests() -> None:
         _FAILS.clear()
         _CACHE = (None, [])
         _DEPTH[0] = 0
+        _SWEPT[0] = None
 
 
 # --- the CLI ----------------------------------------------------------------------

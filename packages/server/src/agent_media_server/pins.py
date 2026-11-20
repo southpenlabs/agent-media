@@ -510,6 +510,31 @@ def speech_music_log(bearer: str, limit=None, kind=None, since=None) -> tuple[bo
     return True, {"items": rows}
 
 
+def speech_music_next(bearer: str, kind=None, action=None, post: bool = False) -> tuple[bool, dict]:
+    """`GET /speech/music/next` and `POST /speech/music/next {"kind",
+    "action": "skip"}` (music_bed_next; David, 20 Nov 2026, Up next for
+    backing music and outros): what the next long reply will have around
+    it — `bed`, `sing_out`, `sing_in`, each a row or null, and `reason`
+    when the bed is null — picked ahead and then played. A skip picks the
+    bed again (sing_out's and sing_in's are the bed's). Gated like
+    `GET /speech/music/log`."""
+    from agent_media_core import music_bed_next
+
+    if post:
+        if action != "skip":
+            return False, {"status": 400, "error": "action must be skip"}
+        if kind not in music_bed_next.KINDS:
+            return False, {"status": 400, "error": "kind must be " + ", ".join(music_bed_next.KINDS)}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    try:
+        return True, (music_bed_next.skip(kind) if post else music_bed_next.peek())
+    except Exception as e:  # noqa: BLE001 — nothing ahead, not a 500
+        print(f"speech/music/next: {e}", file=sys.stderr)
+        return True, {"bed": None, "sing_out": None, "sing_in": None, "reason": "none_ready"}
+
+
 def speech_voice(bearer: str, mode=None, voice=None) -> tuple[bool, dict]:
     """`GET /speech/voice` and `POST /speech/voice {"mode", "voice"?}`: whether
     the current speech target's replies are rendered on the phone, by

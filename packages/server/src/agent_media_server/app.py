@@ -470,7 +470,7 @@ CORS_PATHS = frozenset({
     "/session/retract", "/session/react", "/session/branch", "/session/convert", "/session/read", "/session/mark", "/session/edit", "/session/unsend", "/session/forward", "/transcribe", "/session/group", "/session/leave", "/session/move", "/session/move/cancel", "/session/settings", "/session/git",
     "/session/paths", "/session/file", "/session/file/link", "/files", "/files/read", "/files/link", "/actions/tasks", "/actions/run", "/patterns", "/patterns/run",
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
-    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
+    "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/music/next", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
@@ -498,7 +498,8 @@ CORS_PATHS = frozenset({
 # Device management spends the caller's bearer, like the other app routes.
 # Both successful answers and refusals must be readable by Capacitor's webview.
 DEVICE_PATHS = frozenset({"/devices", "/devices/code", "/devices/revoke", "/devices/role", "/devices/rename",
-                          "/devices/kind", "/devices/rules", "/device/rules"})
+                          "/devices/kind", "/devices/rules", "/device/rules",
+                          "/devices/expiry", "/devices/scope"})
 CORS_PATHS = CORS_PATHS | DEVICE_PATHS
 
 # Where the audio goes (audio.py). Its own set, joined here, so the block
@@ -950,6 +951,36 @@ def dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     auth.set_client_ip(h.client_address[0] if h.client_address else "")
     # And whose it is, for whose address book a contact join reads (§6.25).
     auth.set_request_bearer(_bearer(h))
+    # The device's limits first (device_limits.py, §6.59a): expired, off
+    # the home network, the speakers, a thread outside its scope.
+    from . import device_limits
+
+    bearer = _bearer(h)
+    held = False
+    body = None
+    if bearer and method != "OPTIONS":
+        dev = auth._device(bearer)
+        if device_limits.needs_body(dev, method, path) and "json" in (
+                h.headers.get("Content-Type") or "application/json").lower():
+            body = _read_json(h)
+            h._flag_body = {} if body is None else body   # read once: the route gets it
+            held = True
+        refused = device_limits.check(bearer, method, path,
+                                      h.client_address[0] if h.client_address else "",
+                                      h.headers, parse_qs(h.path.partition("?")[2]), body)
+        if refused:
+            _json(h, refused.pop("status"), {"ok": False, **refused})
+            if held:
+                h._flag_body = None
+            return True
+    try:
+        return _dispatch(h, method, path)
+    finally:
+        if held:
+            h._flag_body = None
+
+
+def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     if method == "POST" and path not in GUEST_POSTS and auth.is_guest(_bearer(h)):
         # A guest reads and listens (roles proposal): every other POST is a
         # change, refused here whatever the route's own gate would say.
@@ -2783,8 +2814,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             from . import stage
 
             # `stage_live`: whether each shows Now playing now (§6.21h).
+            from . import device_limits
+
+            # `scope_choices`: what a device may be limited to (§6.59a).
             _json(h, 200, {"ok": True, "devices": stage.with_live(devices.list_devices()),
-                           "self": user.get("device")})
+                           "self": user.get("device"), "scope_choices": device_limits.choices()})
     elif path == "/sessions/state":
         ok, detail = sessions.session_states(_bearer(h))
         if ok:
@@ -2961,6 +2995,11 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = pins.speech_music_log(_bearer(h), (q.get("limit") or [None])[0],
                                            (q.get("kind") or [None])[0],
                                            (q.get("since") or [None])[0])
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/speech/music/next":
+        # What the next long reply will have around it, picked ahead
+        # (music_bed_next.py).
+        ok, detail = pins.speech_music_next(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/speech/stt":
         # Which speech-to-text this host uses for dictation (stt_settings.py).
@@ -3828,9 +3867,13 @@ def _pair_decide(h: BaseHTTPRequestHandler, allow: bool) -> None:
     if role and role not in devices.ROLES:
         _json(h, 400, {"ok": False, "code": "bad_role", "error": "role must be admin, member or guest"})
         return
+    until, bad = _expires_arg(body.get("expires_at")) if allow else (None, "")
+    if bad:
+        _json(h, 400, {"ok": False, "code": "bad_expiry", "error": bad})
+        return
     status, got = pair_requests.decide(str(body.get("id") or ""), allow=allow, role=role,
                                        name=str(body.get("name") or "") if allow else "",
-                                       by=str(user.get("device") or ""))
+                                       by=str(user.get("device") or ""), expires_at=until)
     if status != "ok":
         code, msg = {"unknown": (404, "no such request"),
                      "answered": (409, "that request has already been answered"),
@@ -3930,7 +3973,12 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
         _json(h, 400, {"ok": False, "code": "bad_role",
                        "error": "role must be admin, member or guest"})
         return
-    code, expires = devices.mint_code(name, enrol=bool(body.get("enrol")), role=role)
+    until, bad = _expires_arg(body.get("expires_at"))
+    if bad:
+        _json(h, 400, {"ok": False, "code": "bad_expiry", "error": bad})
+        return
+    code, expires = devices.mint_code(name, enrol=bool(body.get("enrol")), role=role,
+                                      expires_at=until)
     # The links go to the device being paired, so the public address.
     base = _public_base(h)
     host, _, port = base.partition("://")[2].partition(":")
@@ -3941,7 +3989,7 @@ def _devices_code(h: BaseHTTPRequestHandler) -> None:
     log.info(f"devices: {user.get('device')} minted a code for {name!r}")
     _json(h, 200, {"ok": True, "code": code, "expires": round(expires, 3),
                    "name": name, "enrol": bool(body.get("enrol")) and role in ("", "admin"),
-                   "role": role or "admin",
+                   "role": role or "admin", "expires_at": until,
                    "links": {"app": app_link, "browser": browser_link},
                    "server": {"name": _server_name(), "base": base}})
 
@@ -4147,6 +4195,78 @@ def _devices_rules(h: BaseHTTPRequestHandler) -> None:
     _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
 
 
+def _expires_arg(raw) -> tuple[float | None, str]:
+    """`expires_at` from a body: `(epoch s or None, "")`, or `(None, why)`
+    for one that is not a number or already past (§6.59a)."""
+    import time
+
+    if raw is None:
+        return None, ""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None, "expires_at must be epoch seconds or null"
+    if float(raw) <= time.time():
+        return None, "that time has already passed"
+    return float(raw), ""
+
+
+def _devices_expiry(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/expiry {"id", "at": epoch s | null}` — when a device's
+    access runs out, or never (§6.59a). Gated like a role."""
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    if "at" not in body:
+        _json(h, 400, {"ok": False, "code": "bad_expiry",
+                       "error": 'expected {"id", "at": epoch seconds or null}'})
+        return
+    try:
+        found = devices.set_expiry(device_id, body.get("at"))
+    except ValueError as e:
+        _json(h, 400, {"ok": False, "code": "bad_expiry", "error": str(e)})
+        return
+    if not found:
+        _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
+        return
+    log.info(f"devices: {user.get('device')} set {device_id} to expire at {body.get('at')}")
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
+def _devices_scope(h: BaseHTTPRequestHandler) -> None:
+    """`POST /devices/scope {"id", "projects": [ids] | null}` — which chats a
+    device sees (§6.59a): ids from `GET /devices` `scope_choices`, or null
+    for everything. 400 `bad_scope` for an unknown id or an empty list, 409
+    `own_scope` for the asking device itself."""
+    from . import device_limits
+
+    user, err = auth.may_enrol(_bearer(h))
+    if not user:
+        _json(h, err.get("status", 401),
+              {"ok": False, "code": err.get("code"), "error": err.get("error", "not allowed")})
+        return
+    body = _read_json(h) or {}
+    device_id = str(body.get("id") or "").strip()
+    projects = body.get("projects", "missing")
+    known = {c["id"] for c in device_limits.choices()}
+    if projects is not None and (not isinstance(projects, list) or not projects
+                                 or not all(isinstance(p, str) and p in known for p in projects)):
+        _json(h, 400, {"ok": False, "code": "bad_scope",
+                       "error": 'expected {"id", "projects": [ids from scope_choices] or null}'})
+        return
+    if device_id == user.get("device") and projects is not None:
+        _json(h, 409, {"ok": False, "code": "own_scope",
+                       "error": "a device cannot limit its own chats"})
+        return
+    if not devices.set_scope(device_id, projects):
+        _json(h, 404, {"ok": False, "code": "no_such_device", "error": "no device with that id"})
+        return
+    log.info(f"devices: {user.get('device')} set {device_id}'s scope to {projects or 'everything'}")
+    _json(h, 200, {"ok": True, "id": device_id, "devices": devices.list_devices()})
+
+
 def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
     """The POST routes, a flag route's change checked against its clock
     first: latest wins (flag_clock.py, David, 18 Nov 2026)."""
@@ -4213,6 +4333,10 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_kind(h)
     elif path == "/devices/rules":
         _devices_rules(h)
+    elif path == "/devices/expiry":
+        _devices_expiry(h)
+    elif path == "/devices/scope":
+        _devices_scope(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
     elif path == "/contacts/import":
@@ -5440,6 +5564,12 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                                 level=body.get("level"),
                                                 delta=body.get("delta"),
                                                 log_id=body.get("log_id"))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/speech/music/next":
+        # Skip what the next long reply would have: pick again (music_bed_next.py).
+        body = _read_json(h) or {}
+        ok, detail = pins.speech_music_next(_bearer(h), kind=body.get("kind"),
+                                            action=body.get("action"), post=True)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/speech/voice/download":
         # A voice this server does not have yet, fetched (voice_downloads.py).

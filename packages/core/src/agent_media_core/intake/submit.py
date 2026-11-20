@@ -5448,6 +5448,7 @@ def _submit_event(event: Event,
             # A reply's source (generated, his streaming music, the online
             # library) is Settings'; `choose` falls back to generated.
             bed_plan = None
+            _bed_ahead = False
             # Whether his own music goes on ducked under this reading
             # (_music_ducked_under): None until asked. Ducked music is the
             # backing, so no under tone over it (David, 8 Nov 2026); a long
@@ -5494,9 +5495,16 @@ def _submit_event(event: Event,
                         except Exception as _exc:  # noqa: BLE001
                             _failures.swallowed(_exc)
                             _other, _ducked = None, False
-                    bed_plan = music_bed.choose(
-                        _bed_pick, _other, target,
-                        topic=None if _private(event) else text)
+                    # The pick shown ahead as Up next (music_bed_next): a
+                    # reply's bed plays what the list said.
+                    if _other is False and _bed_kind == "reply":
+                        from .. import music_bed_next
+                        bed_plan = music_bed_next.take(_bed_pick, target)
+                        _bed_ahead = bed_plan is not None
+                    if bed_plan is None:
+                        bed_plan = music_bed.choose(
+                            _bed_pick, _other, target,
+                            topic=None if _private(event) else text)
             if bed_plan is not None:
                 from .. import music_bed
                 from .. import music_bed_vocal
@@ -5530,9 +5538,10 @@ def _submit_event(event: Event,
                     bed_log = speech_music.bed_started(
                         bed_plan, bed_rec, music_bed.last_mix(),
                         session=None if _private(event) else source_session,
-                        why={"topic": True} if (bed_plan.source == "favourites"
-                                                and not _private(event)
-                                                and music_bed.topic_on()) else None,
+                        why={"ahead": True} if _bed_ahead
+                        else {"topic": True} if (bed_plan.source == "favourites"
+                                                 and not _private(event)
+                                                 and music_bed.topic_on()) else None,
                         store=state)
                 if not bed_tone and bed_stop is None and (reply_tone or people_tone):
                     if _ducked is None:

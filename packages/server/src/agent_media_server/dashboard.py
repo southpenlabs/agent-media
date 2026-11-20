@@ -628,9 +628,10 @@ def dashboard(bearer: str) -> tuple[bool, dict]:
     out = build(bearer)
     from . import device_kinds
 
-    # No private threads to a device whose rules say so (§6.59).
+    # No private threads to a device whose rules say so (§6.59), nor any
+    # outside its scope (device_limits.py).
     dev = device_kinds.device_for(bearer)
-    if not device_kinds.shows_private(dev):
+    if device_kinds.filters_anything(dev):
         out = {**out, **{k: device_kinds.filter_rows(out.get(k), dev)
                          for k in ("needs_you", "working", "recent", "replies") if k in out}}
     return True, out
