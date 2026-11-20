@@ -43,6 +43,10 @@ thread sounds like a gap"). This is the way in, through sessiond's own
   with it, as `--persona` if given. `--mail` as for `send`: a mail chat or a
   new one, never a person's. A card up is never answered: the wake is
   refused `pending` and the order waits for the next one.
+* `rename` gives a chat a new title the way the app's rename does
+  (threads.rename_session): kept on the shelf, and `/rename` typed into a
+  live one (agent-mail, 20 Nov 2026: a mailbox chat is otherwise titled by
+  its brief, its first message).
 
 Nothing here records the words as David's turn (send._record_turn): they
 are another session's, marked by the `[From …]` the caller puts on them.
@@ -468,7 +472,39 @@ def _parser() -> argparse.ArgumentParser:
                     help="by folder, only a mail chat (one begun by another agent's mail "
                          "that no person has written in), never a person's chat")
     sd.add_argument("--json", action="store_true")
+    rn = sub.add_parser("rename", help="give a chat a new title: the app's shelf and the "
+                                       "agent both take it (a parked one at its next resume)")
+    rn.add_argument("target", help="a session id (8+ characters) or a folder (its live session)")
+    rn.add_argument("title", nargs="+", help="the new title")
+    rn.add_argument("--json", action="store_true")
     return ap
+
+
+def _rename_cmd(a, views: list[dict]) -> int:
+    """`media session rename <session> <title>`: what the app's rename does
+    (threads.rename_session), for an agent naming a chat it started."""
+    from . import threads
+
+    def fail(rc: int, msg: str) -> int:
+        print(json.dumps({"ok": False, "error": msg}) if a.json
+              else f"media session rename: {msg}", file=sys.stdout if a.json else sys.stderr)
+        return rc
+
+    title = " ".join(" ".join(a.title).split())
+    if not title:
+        return fail(RC_USAGE, "no title")
+    view, why = find(a.target, views)
+    if view is None:
+        return fail(RC_NONE, why)
+    ok, out = threads.rename_session(str(view["session"]), title)
+    if not ok:
+        return fail(RC_FAILED, str(out.get("error") or "not renamed"))
+    if a.json:
+        print(json.dumps({"ok": True, **out}))
+    else:
+        print(f"renamed {out['session']}: {out['title']}"
+              + (f" (the agent was not told: {out['why']})" if out.get("why") else ""))
+    return 0
 
 
 def _default_agent_cmd(a) -> int:
@@ -533,6 +569,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "convert":
         return _convert_cmd(a)
     views, up = rows()
+    if a.cmd == "rename":
+        return _rename_cmd(a, views)
     if a.cmd == "hosts":
         r = _call("hosts", timeout=60.0)
         if not r.get("ok"):

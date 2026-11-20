@@ -326,8 +326,6 @@ def rename_conversation(session: str, title: str, bearer: str,
     terminal and the shelf call it the same thing. `auto` with no title asks
     the gateway to name it from what was said (`auto_title`).
     """
-    from agent_media_core import book_tracks
-
     user, err = auth.gate(bearer)
     if not user:
         return False, err
@@ -356,6 +354,15 @@ def rename_conversation(session: str, title: str, bearer: str,
             return False, {"error": f"could not think of a name ({why})" if why
                            else "could not think of a name", "why": why or None,
                            "status": 502}
+    return rename_session(session, title)
+
+
+def rename_session(session: str, title: str) -> tuple[bool, dict]:
+    """Name a thread `title` and tell its agent: `rename_conversation` after
+    the gate (and `media session rename`, which has no bearer)."""
+    from agent_media_core import book_tracks
+
+    title = " ".join((title or "").split())
     if not title:
         return False, {"error": "no title", "status": 400}
     named = book_tracks.rename(session, title)

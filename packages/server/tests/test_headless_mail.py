@@ -419,3 +419,17 @@ def test_wake_mail_starts_a_mail_chat_beside_a_persons(host, capsys, monkeypatch
     rc, d = run(capsys, "wake", str(host.work), "--mail", "reply:", "a letter")
     assert rc == 0 and d["woke"] == "started" and d["session"] != davids
     assert not any("a letter" in (r or "") for r in results(host, davids))
+
+
+def test_rename_titles_the_chat_and_tells_the_live_agent(host, capsys):
+    from agent_media_core import book_tracks
+
+    sid = start(host, "reply: hi")
+    wait_for(lambda: state(host, sid) == "waiting")
+    rc, d = run(capsys, "rename", sid[:8], "agent-media", "mailbox")
+    assert rc == 0 and d["ok"] and d["session"] == sid and d["title"] == "agent-media mailbox"
+    assert book_tracks._read_manifest(sid)["title"] == "agent-media mailbox"
+    wait_for(lambda: "Session renamed to: agent-media mailbox" in results(host, sid))
+    rc, d = run(capsys, "rename", "deadbeef00", "x")
+    assert rc == hm.RC_NONE and not d["ok"]
+    assert hm.main(["rename", sid, " "]) == hm.RC_USAGE
