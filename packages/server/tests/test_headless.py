@@ -1790,3 +1790,37 @@ def test_the_session_cap_is_sized_to_the_host_unless_set(monkeypatch):
         assert sessiond.max_live() == 3
     monkeypatch.setenv("MEDIA_SESSIOND_MAX", "6")
     assert sessiond.max_live() == 6
+
+
+def test_background_names_each_task_and_a_stop_ends_one(app_host, server, signed_in, typed):
+    # Plan 2026-11-16 item 1: the thread lists what runs in the background
+    # by name, a background Bash as well as an agent, and Stop ends one.
+    from agent_media_server import agent_actions, thread_events
+
+    sid = start(app_host, "agent: a1b2c3 Write the docs")
+    wait_for(lambda: state(app_host, sid) == "waiting")
+    ok, _ = driver.headless_driver().send(sid, "bash: bxyz01 npm run build", "bash: bxyz01 npm run build")
+    assert ok
+    wait_for(lambda: len(app_host.sup.sessions[sid].tasks) == 2 and state(app_host, sid) == "waiting")
+    bg = thread_events.session_state(sid)["background"]
+    assert (bg["agents"], bg["commands"]) == (1, 1), bg
+    assert [(i["id"], i["kind"], i["description"]) for i in bg["items"]] == [
+        ("a1b2c3", "agent", "Write the docs"), ("bxyz01", "command", "npm run build")]
+    assert all(isinstance(i["started"], float) for i in bg["items"])
+
+    st, body = req(server, "POST", f"/threads/{sid}/tasks/bxyz01/stop", headers=AUTH)
+    assert st == 200 and body["stopped"] is True and body["via"] == "stop_task", body
+    assert body["task"]["kind"] == "command"
+    bg = thread_events.session_state(sid)["background"]
+    assert [i["id"] for i in bg["items"]] == ["a1b2c3"] and bg["commands"] == 0
+    # Gone now: not one of the thread's tasks.
+    st, body = req(server, "POST", f"/threads/{sid}/tasks/bxyz01/stop", headers=AUTH)
+    assert st == 404, body
+
+    # A task that ignores the stop is reported, not taken for stopped.
+    ok, _ = driver.headless_driver().send(sid, "bash: keep01 tail -f log", "bash: keep01 tail -f log")
+    wait_for(lambda: "keep01" in app_host.sup.sessions[sid].tasks)
+    ok, body = agent_actions.task_stop(sid, "keep01", AUTH["Authorization"].split()[-1],
+                                       wait_s=0.3, sleep=lambda s: time.sleep(0.05))
+    assert not ok and body["status"] == 409 and body["asked"] is True, body
+    assert "still running" in body["error"] and body["task"]["id"] == "keep01"

@@ -647,7 +647,8 @@ class Session:
         #: `task_progress`, `task_updated`). A session with one is not idle.
         self.tasks: dict[str, float] = {}
         #: What each task is (its `task_started`): task_id → {"description",
-        #: "type"}, so a restart can say what it cut off.
+        #: "type", "background", "started"}, so a restart can say what it cut
+        #: off and the thread can name it (background.items, §6.1).
         self.task_info: dict[str, dict] = {}
         #: Messages held while a restart is pending (`Supervisor.draining`),
         #: each `{"uuid", "text", "at", "keep_pending"}`; delivered after it.
@@ -2735,6 +2736,7 @@ class Supervisor:
                     s.task_info[key] = {"description": str(obj.get("description") or "")[:200],
                                         "type": str(obj.get("task_type") or ""),
                                         "background": bool(obj.get("is_backgrounded")),
+                                        "started": round(now, 3),
                                         **({"tool_use_id": tid} if tid else {})}
             elif t == "system" and sub in ("task_progress", "task_updated"):
                 key = _task_key(obj)

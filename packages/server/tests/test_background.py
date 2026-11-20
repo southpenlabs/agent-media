@@ -1,7 +1,7 @@
 """Background work in a thread whose turn is over (background.py, §6.1).
 
 `/sessions/state` rows and the thread's `state` carry `background:
-{"agents", "commands"}` while a `waiting` thread still has work running:
+{"agents", "commands", "items"}` while a `waiting` thread still has work running:
 a pane thread's running subagents (its transcript), a headless thread's
 sessiond tasks. `state` itself stays `waiting`. No real session is read: the
 transcripts are synthetic (test_agents.Thread, under the conftest's
@@ -38,13 +38,34 @@ def _row(sid=SID):
     return next(r for r in sessions._live_states() if r["session"] == sid)
 
 
+def _counts(bg):
+    return bg and {k: bg[k] for k in ("agents", "commands")}
+
+
 def test_tasks_are_agents_or_commands_by_their_kind():
     assert background.of_tasks([]) is None and background.of_tasks(None) is None
-    assert background.of_tasks([{"id": "a", "type": "local_agent"},
-                                {"id": "b", "type": "local_bash"},
-                                {"id": "c", "type": "local_agent"},
-                                {"id": "d", "type": ""}]) == {"agents": 3, "commands": 1}
-    assert background.of_tasks([{"id": "b", "type": "local_bash"}]) == {"agents": 0, "commands": 1}
+    assert _counts(background.of_tasks([{"id": "a", "type": "local_agent"},
+                                        {"id": "b", "type": "local_bash"},
+                                        {"id": "c", "type": "local_agent"},
+                                        {"id": "d", "type": ""}])) == {"agents": 3, "commands": 1}
+    assert _counts(background.of_tasks([{"id": "b", "type": "local_bash"}])) == \
+        {"agents": 0, "commands": 1}
+
+
+def test_items_name_each_task_oldest_first():
+    # Plan 2026-11-16 item 1: what each one is, for the strip and its Stop.
+    bg = background.of_tasks([{"id": "b", "type": "local_bash", "description": "npm  test",
+                               "started": 20.0},
+                              {"id": "a", "type": "local_agent", "description": "Docs",
+                               "started": 10.0},
+                              {"id": "", "type": "local_agent"},
+                              {"id": "c", "type": "local_agent"}])
+    assert bg["agents"] == 3 and bg["items"] == [
+        {"id": "a", "kind": "agent", "description": "Docs", "started": 10.0},
+        {"id": "b", "kind": "command", "description": "npm test", "started": 20.0},
+        {"id": "c", "kind": "agent", "description": "", "started": None}]
+    many = background.of_tasks([{"id": f"t{i}", "type": "local_bash"} for i in range(30)])
+    assert many["commands"] == 30 and len(many["items"]) == background.ITEMS_MAX
 
 
 def test_a_pane_thread_waiting_on_a_running_subagent_says_so(th, pane):
@@ -57,9 +78,11 @@ def test_a_pane_thread_waiting_on_a_running_subagent_says_so(th, pane):
     row = _row()
     # The turn is over: still `waiting`, so a reply notice fires as ever.
     assert row["state"] == "waiting"
-    assert row["background"] == {"agents": 1, "commands": 0}
+    assert _counts(row["background"]) == {"agents": 1, "commands": 0}
+    assert [(i["id"], i["kind"], i["description"]) for i in row["background"]["items"]] == \
+        [("a0000000101", "agent", "Map the clients")]
     st = thread_events.session_state(SID)
-    assert st["state"] == "waiting" and st["background"] == {"agents": 1, "commands": 0}
+    assert st["state"] == "waiting" and _counts(st["background"]) == {"agents": 1, "commands": 0}
     # While a turn runs the flag is not there: working says it all.
     pane["now"] = "working"
     assert "background" not in _row()
@@ -112,9 +135,10 @@ def test_a_headless_thread_counts_sessiond_tasks(monkeypatch):
     monkeypatch.setattr(sessions, "live_sessions", lambda: {})
     row = _row(sid)
     assert row["state"] == "waiting" and row["driver"] == "headless"
-    assert row["background"] == {"agents": 2, "commands": 1}
+    assert _counts(row["background"]) == {"agents": 2, "commands": 1}
+    assert [i["id"] for i in row["background"]["items"]] == ["t1", "t2", "t3"]
     st = thread_events.session_state(sid)
-    assert st["state"] == "waiting" and st["background"] == {"agents": 2, "commands": 1}
+    assert st["state"] == "waiting" and _counts(st["background"]) == {"agents": 2, "commands": 1}
     # A turn under way: no flag.
     fake.v["state"] = "working"
     assert "background" not in _row(sid)

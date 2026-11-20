@@ -18,11 +18,27 @@ Oct 2026, roadmap item 17). How depends on who holds the session:
 The agent must be one of the thread's rows (`agents.agents`), and for a
 stop, running: `stop_task` answers success for an id it has never heard of,
 so the check is here.
+
+`POST /threads/{session}/tasks/{id}/stop` stops any item of the thread's
+`background` (§6.1, background.py): a background Bash as well as an agent
+(plan 2026-11-16 item 1). Headless, the id must be one sessiond still hears
+from; after `stop_task` it waits a few seconds for the task's end to come
+in, and says so when it does not (409, `asked: true`), since a stop the CLI
+answers is not a stop that took.
 """
 
 from __future__ import annotations
 
-from . import agents, auth, driver, sessions
+import re
+import time
+
+from . import agents, auth, background, driver, sessions
+
+#: A sessiond task id: an agent's, a background Bash's, a tool call's.
+TASK_ID = re.compile(r"[0-9A-Za-z_-]{1,80}")
+
+#: How long a task stop waits for the task's end to come in.
+STOP_WAIT_S = 5.0
 
 #: How long a message to an agent may be.
 TEXT_MAX = 4000
@@ -114,3 +130,53 @@ def agent_message(session: str, agent_id: str, text: str, bearer: str) -> tuple[
     # A finished agent is fine: SendMessage resumes it from its transcript.
     ok, r = _relay(driver.for_session(session), session, message_words(row, text))
     return ok, ({"session": session, "agent": row, **r} if ok else r)
+
+
+def _task_row(view: dict, task_id: str) -> dict | None:
+    return next((t for t in view.get("task_list") or []
+                 if isinstance(t, dict) and str(t.get("id") or "") == task_id), None)
+
+
+def task_stop(session: str, task_id: str, bearer: str, *,
+              wait_s: float = STOP_WAIT_S, sleep=time.sleep, clock=time.monotonic) -> tuple[bool, dict]:
+    """Stop one item of the thread's `background` (§6.1, §6.12a). Answers
+    `{"session", "task": <item>, "via": "stop_task", "stopped": true}`, or
+    409 `asked: true` when the task is still running `wait_s` after the ask.
+    An agent sessiond does not list (a pane's, an opencode subagent) goes the
+    agents route (`agent_stop`)."""
+    if not sessions._SESSION.fullmatch(session or ""):
+        return False, {"error": "not a session id", "status": 400}
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    if not TASK_ID.fullmatch(task_id or ""):
+        return False, {"error": "no such task", "status": 404}
+    drv = driver.for_session(session)
+    row = _task_row(drv.view(session), task_id) if drv.kind == driver.HEADLESS else None
+    if row is None:
+        if agents.AGENT_ID.fullmatch(task_id) and any(
+                r["id"] == task_id for r in agents.agents(session) or []):
+            ok, r = agent_stop(session, task_id, bearer)
+            if ok:
+                r["task"] = background._item(task_id, "agent", r["agent"].get("description"),
+                                             r["agent"].get("started_at"))
+                r["stopped"] = r.get("via") == "stop_task"
+            return ok, r
+        return False, {"error": "no such task (it may have finished)", "status": 404}
+    item = background._item(task_id, background.kind_of(row), row.get("description"),
+                            row.get("started"))
+    ok, r = drv.stop_task(session, task_id)
+    if not ok:
+        return False, r
+    if not r.get("stopped"):
+        return False, {"error": f"not stopped ({r.get('why') or 'no answer'})",
+                       "status": 409, "task": item}
+    end = clock() + wait_s
+    while True:
+        if _task_row(drv.view(session), task_id) is None:
+            return True, {"session": session, "task": item, "via": "stop_task", "stopped": True}
+        if clock() >= end:
+            break
+        sleep(0.25)
+    return False, {"error": f"asked it to stop, but it is still running after {wait_s:g} s",
+                   "status": 409, "asked": True, "task": item}

@@ -319,7 +319,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "m
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
           "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True,
-          "practice_upload": lambda: True, "device_limits": lambda: True}
+          "practice_upload": lambda: True, "device_limits": lambda: True, "task_stop": lambda: True}
 
 
 def detect() -> dict[str, bool]:

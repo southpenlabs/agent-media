@@ -22,6 +22,12 @@ is chosen by the user message's words:
                    runs kills it (`task_updated` killed, `task_notification`
                    stopped, before the receipt), as 2.1.308 does, unless the
                    host's `initialize` declared `perTaskStopAffordance`
+  bash: ID WORDS   start a background command (task ID, `local_bash`,
+                   described WORDS) that runs until the session ends
+
+A `stop_task` for a running agent or command ends it (`task_updated`
+killed, `task_notification` stopped), as Claude Code does — unless its id
+starts with "keep", a task that ignores the stop.
 
 While `$FAKE_CLAUDE_LIMIT_FILE` exists every turn is refused by the usage
 limit (a rejected `rate_limit_event` with the file's reset, the synthetic
@@ -199,6 +205,13 @@ class Fake:
                     f.write(json.dumps({"stop_task": req.get("task_id")}) + "\n")
             emit({"type": "control_response",
                   "response": {"subtype": "success", "request_id": rid, "response": {}}})
+            tid = str(req.get("task_id") or "")
+            if tid in self.agents and not tid.startswith("keep"):
+                emit({"type": "system", "subtype": "task_updated", "task_id": tid,
+                      "patch": {"status": "killed"}})
+                emit({"type": "system", "subtype": "task_notification", "task_id": tid,
+                      "tool_use_id": "toolu_" + tid, "status": "stopped",
+                      "summary": self.agents.pop(tid)})
         elif sub == "background_tasks":
             if os.environ.get("FAKE_CLAUDE_LOG"):
                 with open(os.environ["FAKE_CLAUDE_LOG"] + ".tasks", "a") as f:
@@ -332,6 +345,14 @@ class Fake:
                       "task_type": "local_agent", "is_backgrounded": True})
                 self.assistant([{"type": "text", "text": f"launched {aid}"}], stop="end_turn")
                 self.result(f"launched {aid}")
+            elif text.startswith("bash:"):
+                bid, _, desc = text[5:].strip().partition(" ")
+                self.agents[bid] = desc
+                emit({"type": "system", "subtype": "task_started", "task_id": bid,
+                      "tool_use_id": "toolu_" + bid, "description": desc,
+                      "task_type": "local_bash", "is_backgrounded": True})
+                self.assistant([{"type": "text", "text": f"running {bid}"}], stop="end_turn")
+                self.result(f"running {bid}")
             elif text.startswith("slow:"):
                 self.slow_turn(float(text[5:].strip() or 1), msg)
                 return

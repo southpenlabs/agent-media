@@ -11,7 +11,7 @@ sends only what changed:
     suggestion  {"text", "replies", "actions"}
     state       {"state": "working" | "waiting" | "approval" | "ended",
                  "session_live": bool, "live": bool (deprecated alias), "pane",
-                 "background": {"agents", "commands"} | null — work still
+                 "background": {"agents", "commands", "items"} | null — work still
                  running once the turn is over (background.py, §6.1)}
     pending     {"pending": bool} — a reply is in and no answer has landed
     recap       the latest recap, or null

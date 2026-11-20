@@ -128,6 +128,9 @@ except /pair, which is how a device gets its token):
                   (stop_task headless, else asked of the main agent)
   POST /threads/{session}/agents/{id}/message {"text"} → the main agent
                   passes it on with SendMessage (agent_actions.py, §6.12a)
+  POST /threads/{session}/tasks/{id}/stop → stop one item of the thread's
+                  `background` (a background Bash or an agent), and say
+                  when the stop did not take (agent_actions.task_stop)
   POST /session/archive {"session", "archived": true|false} → file the
                   thread under Archived, or take it back out (a flag this
                   server keeps; see archive.py). Ends nothing
@@ -606,6 +609,8 @@ THREAD_AGENTS = re.compile(r"/threads/([^/]+)/agents")
 AGENT_LOG = re.compile(r"/threads/([^/]+)/agents/([^/]+)/log")
 # Stopping one, or sending it a message (§6.12a, agent_actions.py).
 AGENT_ACT = re.compile(r"/threads/([^/]+)/agents/([^/]+)/(stop|message)")
+# Stopping any item of a thread's `background`, a command too (§6.12a).
+TASK_STOP = re.compile(r"/threads/([^/]+)/tasks/([^/]+)/stop")
 # One contact's card (contacts.py, §6.25).
 CONTACT = re.compile(r"/contacts/([0-9a-f-]{36})")
 # Their timeline, and a note on it (timeline.py, §6.25a).
@@ -659,7 +664,7 @@ def cors_path(path: str) -> bool:
     (any method): `CORS_PATHS`, a thread's event stream, or its agents."""
     return path in CORS_PATHS or any(r.fullmatch(path)
                                      for r in (THREAD_EVENTS, THREAD_RELEASE, THREAD_CLOSE, THREAD_AGENTS, AGENT_LOG,
-                                                        AGENT_ACT, CONTACT,
+                                                        AGENT_ACT, TASK_STOP, CONTACT,
                                                         CONTACT_TIMELINE, CONTACT_NOTES,
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL, MAIL_THREAD,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, ROOM_CONTACT, PRACTICE_FILE,
@@ -5126,6 +5131,16 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                                                      str(body.get("text") or ""), _bearer(h))
         log.info(f"agents: {act} {agent_id[:12]} in {session[:8]} → "
               f"{detail.get('via') if ok else detail.get('error')}")
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif TASK_STOP.fullmatch(path):
+        # Stop one item of the thread's `background` strip — a background
+        # Bash or an agent (§6.12a, agent_actions.task_stop).
+        from . import agent_actions
+
+        m = TASK_STOP.fullmatch(path)
+        ok, detail = agent_actions.task_stop(m.group(1), m.group(2), _bearer(h))
+        log.info(f"tasks: stop {m.group(2)[:12]} in {m.group(1)[:8]} → "
+                 f"{'stopped' if ok else detail.get('error')}")
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/retract":
         # Tapping your own latest message in the app, then Cancel or Edit

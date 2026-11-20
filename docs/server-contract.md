@@ -722,6 +722,16 @@ What each live session is doing.
   background Bash cannot be seen from the server). The same test a move
   waits on (`why_waiting: "agents"`, §6.15). Code:
   `agent_media_server/background.py`; older servers leave it out.
+  Since 20 Nov 2026 it also carries `items`, what each one is, oldest
+  first and at most 12: `[{"id", "kind": "agent"|"command", "description",
+  "started"}]` (`started` epoch seconds, null when not known — a task begun
+  under a sessiond from before this). A headless row lists sessiond's tasks
+  (a background Bash by its own description, e.g. "npm run build"), a pane
+  row its running subagents; a count can exceed the list (a record too old
+  to name its tasks). Each `id` is what `POST
+  /threads/{session}/tasks/{id}/stop` takes (§6.12a), so the thread can
+  show a strip of them above the composer with a Stop on each (plan
+  2026-11-16 item 1); older servers send counts only.
 - Only live sessions are listed. Absent means not live.
 - `restart_pending` (4 Nov 2026; additive, top level, only while there is
   one): the same object as `/targets`' (§6.1), so the app's 5-second poll
@@ -6091,6 +6101,7 @@ local look, never a network call:
 | `agents` | this server runs agent chats: its session host is here (the socket, or TCP); `MEDIA_AGENTS=0/1` says so outright (16 Nov 2026). False on a server for people's chats only (Matrix and bridges); the app draws its strip pill as a chat server then, not an agent one |
 | `device_kinds` | always true (§6.59, 16 Nov 2026): devices report their kind (`POST /device/app {"kind"}`), `GET /device/rules` and `GET /devices` rows carry `kind` and `rules`, the owner sets them with `POST /devices/kind` and `POST /devices/rules`, and private threads are withheld from a device whose rules say so |
 | `practice_upload` | always true (§6.45, 20 Nov 2026): `POST /practice {"action": "add", "upload"}` moves a file `POST /upload` kept into the Practice folder |
+| `task_stop` | always true (§6.12a, 20 Nov 2026): `background.items` names each background task (§6.1) and `POST /threads/{session}/tasks/{id}/stop` stops one, a background command too, saying when the stop did not take |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -6244,6 +6255,29 @@ keys. The words show in the thread and wait behind a running turn
 transcript. `text` is whitespace-collapsed, 1–4000 characters (else 400).
 409 when the thread is not running, or is stopped on a question (the words
 would be typed into its dialog).
+
+#### `POST /threads/{session}/tasks/{id}/stop` (20 Nov 2026)
+
+Stop one item of the thread's `background` (§6.1 `items`) — a background
+Bash as well as an agent; the agents route above has no row for a command.
+Code: `agent_actions.task_stop`; pinned by `test_headless.py`
+(`test_background_names_each_task_and_a_stop_ends_one`).
+
+- **Headless**: `id` must be one of the tasks sessiond still hears from
+  (else 404 `"no such task (it may have finished)"`). The `stop_task`
+  control request goes in, then the server waits up to 5 s for the task's
+  end (`task_updated` killed or its notification) to come in:
+  `{"ok": true, "session", "task": <item>, "via": "stop_task", "stopped":
+  true}`. **A stop that does not take is said**: 409 `{"ok": false,
+  "error": "asked it to stop, but it is still running after 5 s", "asked":
+  true, "task"}` — the CLI answers `stop_task` for any id, so its answer is
+  not the proof. 409 `"not stopped (not live)"` when the session has ended.
+- **An agent sessiond does not list** (a pane thread's, an opencode
+  subagent) goes the agents route above, answered with its `agent` row plus
+  `task` and `stopped` (true for `via: "stop_task"`; false for `via:
+  "message"`, where the main agent was only asked).
+- A pane thread's background commands cannot be seen (§6.1), so cannot be
+  stopped: 404.
 ### 6.13 The session list as a stream — gated (built 22 Sep 2026)
 
 #### `GET /sessions/events[?ping=<s>][&alerts=<n>][&rooms=<n>][&mic=1][&phone=<kinds>]` — gated (`auth.may_control_speech`, like `/sessions/state`)
@@ -13837,13 +13871,13 @@ increasing `id`, and `retry: 2000` first.
 
 | Event | Data | When |
 | --- | --- | --- |
-| `snapshot` | `{"ok": true}`, the `/conversation/log?session=` envelope — `messages` (the newest **30**, or `?limit=`), `older`, `lines` (deprecated; only those of the page, below), `pending`, `working`, `approval`, `suggestion`, `recap` — plus `{"state", "session_live": bool, "live": bool (deprecated alias of `session_live`), "pane", "resumable"}`, and (22 Sep 2026) `"agents": {"running", "total"}` (§6.12; since 18 Nov 2026 `null` on the first connection to a thread nobody had open — the first re-read after sends the `agents` event — and what the server last counted on a later one), `"project"`, `"cwd"` (§6.1), and (19 Oct 2026) `"move_pending"?`, `"move_failed"?` (§6.15, only when there is one), `"title"` (the name `/targets` would give it, `""` when none), (20 Oct 2026) `"background"` (`{"agents", "commands"}` or null, §6.1 `/sessions/state`'s, on a `waiting` thread only), and `"restart_pending"?` (§6.1, a headless thread's, only while a restart of the session host is waiting), and (20 Oct 2026) `"quota"?` (§6.1, `{"resets_at", "state"}`, only while the thread waits for the usage limit's reset) | first frame on every connection |
+| `snapshot` | `{"ok": true}`, the `/conversation/log?session=` envelope — `messages` (the newest **30**, or `?limit=`), `older`, `lines` (deprecated; only those of the page, below), `pending`, `working`, `approval`, `suggestion`, `recap` — plus `{"state", "session_live": bool, "live": bool (deprecated alias of `session_live`), "pane", "resumable"}`, and (22 Sep 2026) `"agents": {"running", "total"}` (§6.12; since 18 Nov 2026 `null` on the first connection to a thread nobody had open — the first re-read after sends the `agents` event — and what the server last counted on a later one), `"project"`, `"cwd"` (§6.1), and (19 Oct 2026) `"move_pending"?`, `"move_failed"?` (§6.15, only when there is one), `"title"` (the name `/targets` would give it, `""` when none), (20 Oct 2026) `"background"` (`{"agents", "commands", "items"}` or null, §6.1 `/sessions/state`'s, on a `waiting` thread only), and `"restart_pending"?` (§6.1, a headless thread's, only while a restart of the session host is waiting), and (20 Oct 2026) `"quota"?` (§6.1, `{"resets_at", "state"}`, only while the thread waits for the usage limit's reset) | first frame on every connection |
 | `message` | `{"op": "append" \| "replace", "message": <message>}` (§6.2.2) | a message appears, or one (matched by `id`) changes: grows a part, a tool finishes, its turn ends, it gains or loses `spoken` |
 | `live` | `{"id", "at", "sentences", "sentence", "offsets", "elapsed", "server_time", "delay", "paused"}` — the message being spoken, by `id` — or `null` when nothing is | a new reply starts, the sentence changes, pause or resume, or the clock jumps (more than 1 s from where it should be: a skip) — **not** at 1 Hz; the client runs the clock between frames |
 | `working` | the `working` object, or `null` | a step starts, or the turn ends |
 | `approval` | the `approval` object, or `null` | a dialog appears, changes or goes |
 | `suggestion` | `{"text": "…"}` | the ghost or follow-up arrives or clears |
-| `state` | `{"state": "working" \| "waiting" \| "approval" \| "ended", "session_live": bool, "live": bool (deprecated alias), "pane", "background": {"agents", "commands"} \| null}` — `background` (20 Oct 2026): work still running once the turn is over, as on §6.1's `/sessions/state` rows; null unless `waiting` | the session changes state, or its background counts change; `ended` when its pane goes |
+| `state` | `{"state": "working" \| "waiting" \| "approval" \| "ended", "session_live": bool, "live": bool (deprecated alias), "pane", "background": {"agents", "commands", "items"} \| null}` — `background` (20 Oct 2026): work still running once the turn is over, as on §6.1's `/sessions/state` rows; null unless `waiting` | the session changes state, or its background counts change; `ended` when its pane goes |
 | `pending` | `{"pending": bool}` | it changes — the log's rule: a live session whose last message is the listener's, the turn working (a step running, or a headless session `working`), or the last line the listener's. Set from the transcript as soon as a prompt lands; cleared by the 1 s / 3 s re-read |
 | `recap` | `{"text", "at", "source"}` or `null` | a newer recap is written |
 | `context` | `{"used", "window"}` or `null` (7 Oct 2026) | a reply changes it (checked on the 1 s / 3 s re-read) |
