@@ -161,6 +161,15 @@ def _title_from_name(p: Path) -> str:
     return re.sub(r"[_]+", " ", t).strip() or p.name
 
 
+def file_id(p: Path) -> str:
+    """The list's id for a file in the folder (as `_files` gives it)."""
+    return _hid("file", str(p))
+
+
+def title_from_name(p: Path) -> str:
+    return _title_from_name(p)
+
+
 def _files() -> list[dict]:
     root = folder()
     if not root.is_dir():
@@ -169,7 +178,7 @@ def _files() -> list[dict]:
     for p in sorted(root.rglob("*")):
         ext = p.suffix.lower()
         if p.is_file() and (ext in AUDIO_EXTS or ext in VIDEO_TYPES) and not p.name.startswith("."):
-            it = {"id": _hid("file", str(p)), "title": _title_from_name(p),
+            it = {"id": file_id(p), "title": _title_from_name(p),
                   "source": "file", "added": p.stat().st_mtime, "_uri": str(p)}
             if ext in VIDEO_TYPES:
                 it["video"] = "file"

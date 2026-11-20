@@ -202,3 +202,57 @@ def test_a_bad_style_or_id_is_refused(server, shelf, signed_in):
     for bad in ([], ["a", "b", "c", "d"], ["x" * 41], "Yoga"):
         assert call(server, "POST", "/practice", {"action": "style", "id": iid, "path": bad}, AUTH)[0].status == 400
     assert call(server, "POST", "/practice", {"action": "style", "id": "yt:nope", "path": ["Sound"]}, AUTH)[0].status == 404
+
+
+# ---- a file from the phone (POST /upload, then add it) ---------------------------
+
+@pytest.fixture
+def uploaded(tmp_path, monkeypatch):
+    up = tmp_path / "shared"
+    day = up / "2026-11-20"
+    day.mkdir(parents=True)
+    monkeypatch.setenv("MEDIA_UPLOAD_DIR", str(up))
+    (day / "VID_2026.mp4").write_bytes(b"video")
+    (day / "notes.pdf").write_bytes(b"%PDF")
+    return day
+
+
+def test_an_upload_moves_into_the_folder(server, shelf, signed_in, uploaded, _folder):
+    res, obj = call(server, "POST", "/practice",
+                    {"action": "add", "upload": str(uploaded / "VID_2026.mp4"),
+                     "title": "Morning yoga"}, AUTH)
+    assert res.status == 200, obj
+    assert obj["added"] == "file" and obj["title"] == "Morning yoga"
+    assert not (uploaded / "VID_2026.mp4").exists()
+    assert (_folder / "Morning yoga.mp4").read_bytes() == b"video"
+    row = next(i for i in obj["items"] if i["id"] == obj["id"])
+    assert row["source"] == "file" and row["video"] == "file"
+
+
+def test_an_upload_never_lands_over_another(server, shelf, signed_in, uploaded, _folder):
+    (_folder / "VID_2026.mp4").write_bytes(b"older")
+    res, obj = call(server, "POST", "/practice",
+                    {"action": "add", "upload": str(uploaded / "VID_2026.mp4")}, AUTH)
+    assert res.status == 200, obj
+    assert (_folder / "VID_2026.mp4").read_bytes() == b"older"
+    assert (_folder / "VID_2026-2.mp4").read_bytes() == b"video"
+
+
+def test_an_upload_add_refuses_what_it_should(server, shelf, signed_in, uploaded, _folder):
+    def add(path):
+        return call(server, "POST", "/practice", {"action": "add", "upload": path}, AUTH)
+
+    res, obj = add(str(_folder / "Yoga_Nidra [abcdefghijk].mp3"))
+    assert res.status == 400 and obj["error"] == "not an upload"
+    res, obj = add(str(uploaded / ".." / ".." / "Practice" / "x.mp4"))
+    assert res.status == 400 and obj["error"] == "not an upload"
+    res, obj = add(str(uploaded / "notes.pdf"))
+    assert res.status == 400 and obj["error"] == "not a video or audio file"
+    assert (uploaded / "notes.pdf").exists()
+    res, obj = add(str(uploaded / "gone.mp4"))
+    assert res.status == 404
+
+
+def test_features_offers_practice_upload(server, shelf, signed_in):
+    res, obj = call(server, "GET", "/features", None, AUTH)
+    assert res.status == 200 and obj["practice_upload"] is True

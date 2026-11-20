@@ -6011,6 +6011,7 @@ local look, never a network call:
 | `photo_edit` | an image model can be reached for AI edits to a picture before it is sent (§6.58, 16 Nov 2026): one of `MEDIA_IMAGE_EDIT_MODELS` has a route here (the default, Gemini through cli-proxy-api, needs its key and personal use, `google-image-signin`). The attachment preview offers Edit only then |
 | `agents` | this server runs agent chats: its session host is here (the socket, or TCP); `MEDIA_AGENTS=0/1` says so outright (16 Nov 2026). False on a server for people's chats only (Matrix and bridges); the app draws its strip pill as a chat server then, not an agent one |
 | `device_kinds` | always true (§6.59, 16 Nov 2026): devices report their kind (`POST /device/app {"kind"}`), `GET /device/rules` and `GET /devices` rows carry `kind` and `rules`, the owner sets them with `POST /devices/kind` and `POST /devices/rules`, and private threads are withheld from a device whose rules say so |
+| `practice_upload` | always true (§6.45, 20 Nov 2026): `POST /practice {"action": "add", "upload"}` moves a file `POST /upload` kept into the Practice folder |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
 | `listenbrainz` | a ListenBrainz username is set (signed in, or a public name) |
@@ -10868,6 +10869,15 @@ names the first time they are read.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
+- `POST /practice {"action": "add", "upload", "title"?}` (20 Nov 2026,
+  `/features` `practice_upload`) → the list, plus `{"added": "file", "id",
+  "title"}`: a file from the phone. `upload` is the `path` `POST /upload`
+  returned; the file is moved from the upload folder into the Practice
+  folder, renamed to `title` when given (made safe as `/upload` does, its
+  extension kept), never over another file (`name-2.mp4`). The new item is a
+  `file` row (`video: "file"` for mp4/m4v/webm/mov). 400 `not an upload` for
+  a path outside MEDIA_UPLOAD_DIR, 400 `not a video or audio file` for other
+  kinds (the upload stays), 404 when the upload is gone.
 - `POST /practice {"action": "remove", "id"}` → the list: a link
   (`yt:<id>`), a single saved episode (`ep:<hash>`, source `podcast` with
   its `show`; saved by `practice_library.add_episode`), a written one (`made:<hash>`, its audio deleted) or a feed

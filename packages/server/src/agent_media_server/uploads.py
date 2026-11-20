@@ -61,7 +61,7 @@ def safe_name(name: str) -> str:
     return name
 
 
-def _free(folder: Path, name: str) -> Path:
+def free(folder: Path, name: str) -> Path:
     p = folder / name
     if not p.exists():
         return p
@@ -150,7 +150,7 @@ def save(body: BinaryIO, length: int, name: str, bearer: str,
     try:
         folder = root() / (today or dt.date.today()).isoformat()
         folder.mkdir(parents=True, exist_ok=True)
-        final = _free(folder, safe_name(name))
+        final = free(folder, safe_name(name))
         part = folder / f".{final.name}.part"
         with open(part, "wb") as out:
             while left > 0:
@@ -173,7 +173,7 @@ def save(body: BinaryIO, length: int, name: str, bearer: str,
                               received=length, sha256=digest.hexdigest(), where=str(same))
             return True, {"path": str(same), "name": same.name, "size": length,
                           "duplicate": True}
-        final = _free(folder, final.name)
+        final = free(folder, final.name)
         os.replace(part, final)
     except OSError as e:
         if part is not None:

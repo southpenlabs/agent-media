@@ -154,6 +154,9 @@ never a network call, so the app can ask on every start.
             /devices, POST /devices/kind and /devices/rules, `kind` on POST
             /device/app and /pair/request; private threads withheld where
             the rules say so
+  practice_upload  POST /practice {"action": "add", "upload"} (practice.py,
+            §6.45, 20 Nov 2026): a file POST /upload kept moved into the
+            Practice folder; always true here
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -303,7 +306,8 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "m
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
-          "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True}
+          "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True,
+          "practice_upload": lambda: True}
 
 
 def detect() -> dict[str, bool]:

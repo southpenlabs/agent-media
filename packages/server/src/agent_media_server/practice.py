@@ -14,6 +14,7 @@ agent wrote.
                        "folder"}
   POST /practice {"action": "play", "id", "target"?, "resume"?, "at"?}
                  {"action": "add", "url", "title"?}
+                 {"action": "add", "upload", "title"?}   (a file POST /upload kept → the folder)
                  {"action": "remove", "id"}   (yt:<id>, made:<hash>, or a feed's url)
                  {"action": "share", "id", "to", "note"?}   (to a Matrix id, shares.py)
                  {"action": "watch", "id"} → {"youtube_id", "video"?} | {"video": signed link}
@@ -208,6 +209,12 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
         if not lib.unkeep(str(body.get("id") or "")):
             return False, {"error": "nothing kept under that id", "status": 404}
         return True, {"id": body.get("id"), "kept": None}
+    if action == "add" and body.get("upload"):
+        ok, got = add_upload(str(body["upload"]), str(body.get("title") or ""))
+        if not ok:
+            return False, got
+        ok, detail = listing(bearer)
+        return ok, {**detail, **got}
     if action == "add":
         try:
             got = lib.add(str(body.get("url") or ""), title=str(body.get("title") or ""))
@@ -233,6 +240,43 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return False, {"error": "nothing saved under that id", "status": 404}
         return listing(bearer)
     return False, {"error": "action must be play, watch, keep, unkeep, add, remove, share, style, breathe or sleep"}
+
+
+def add_upload(path: str, title: str = "") -> tuple[bool, dict]:
+    """Move a file `POST /upload` kept into the Practice folder (sasonica-app
+    #1109, David 20 Nov 2026: "Build the upload button"). `title`, when given,
+    is its new name (made safe as /upload does, the upload's extension kept);
+    never over another file (`name-2.mp4`). The caller is already gated."""
+    import os
+    import shutil
+    from pathlib import Path
+
+    from agent_media_core import practice_library as lib
+    from . import uploads
+
+    try:
+        top = uploads.root().resolve()
+        src = Path(os.path.expanduser(path)).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False, {"error": "not an upload"}
+    if "\x00" in path or not src.is_relative_to(top) or src == top or src.name.startswith("."):
+        return False, {"error": "not an upload"}
+    if not src.is_file():
+        return False, {"error": "that upload is not there", "status": 404}
+    ext = src.suffix.lower()
+    if ext not in lib.AUDIO_EXTS and ext not in lib.VIDEO_TYPES:
+        return False, {"error": "not a video or audio file"}
+    name = uploads.safe_name(title) if title.strip() else src.name
+    if Path(name).suffix.lower() != ext:
+        name += src.suffix
+    dest_dir = lib.folder()
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = uploads.free(dest_dir, name)
+        shutil.move(str(src), str(dest))
+    except OSError as e:
+        return False, {"error": f"could not move it into the Practice folder: {e}", "status": 500}
+    return True, {"added": "file", "id": lib.file_id(dest), "title": lib.title_from_name(dest)}
 
 
 def teacher(name: str, bearer: str) -> tuple[bool, dict]:
