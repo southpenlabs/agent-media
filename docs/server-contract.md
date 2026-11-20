@@ -732,6 +732,9 @@ What each live session is doing.
   /threads/{session}/tasks/{id}/stop` takes (§6.12a), so the thread can
   show a strip of them above the composer with a Stop on each (plan
   2026-11-16 item 1); older servers send counts only.
+- `asked_at` (20 Nov 2026): on an `approval` row, when its card was asked
+  (epoch seconds, the approval's own `asked_at` above), so the thread row
+  can say "waiting 2 h"; absent on other rows and from older servers.
 - Only live sessions are listed. Absent means not live.
 - `restart_pending` (4 Nov 2026; additive, top level, only while there is
   one): the same object as `/targets`' (§6.1), so the app's 5-second poll
@@ -1125,6 +1128,15 @@ all draw the same numbered list. The fields:
 - `partial` is true when the list scrolled and some numbers are missing.
 - `question` is `""` when the top of the dialog is off screen. The numbers
   still answer it.
+- `asked_at` (20 Nov 2026): when the card was asked, epoch seconds, so the
+  card can say how long it has waited ("waiting 2 h"). Every form carries
+  it. A pane's question the PreToolUse hook kept (`source: "hook"`) is dated
+  by the hook, which holds across a server restart; anything else read off
+  a pane is dated from when this server first saw that card (by its
+  `tool_use_id`, else its `key`; a screen-only question of several tabs
+  restarts its clock on each tab). A headless approval's is the request's
+  own `at`. A card lost to a restart and asked again on resume is a new
+  card with a new time. Older servers leave it out.
 
 Answer with `POST /session/answer`.
 

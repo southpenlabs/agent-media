@@ -341,7 +341,7 @@ def approval_of(entry: dict) -> dict:
            "blocked_path": req.get("blocked_path"),
            "tool_use_id": req.get("tool_use_id") or "",
            "suggestions": req.get("permission_suggestions") or [],
-           "at": entry.get("at"), "partial": False,
+           "at": entry.get("at"), "asked_at": entry.get("at"), "partial": False,
            "key": hashlib.sha1(rid.encode()).hexdigest()[:12],
            "agent": "antigravity" if entry.get("antigravity") else "opencode" if entry.get("oc") else "claude"}
     if req.get("subtype") == "elicitation":

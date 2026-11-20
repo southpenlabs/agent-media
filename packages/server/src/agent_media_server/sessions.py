@@ -637,19 +637,20 @@ def approval_for(pane: str, agent: str = "claude", session: str = "") -> dict | 
         return None
     cap = panes.strip_ansi(_capture_pane(pane))
     if panes.classify(cap, agent) != "approval":
+        _ASKED_SEEN.pop(session or pane, None)
         return None
     if agent == "claude":
         from . import asks
 
         q = asks.approval(cap, session, agent)
         if q is not None:
-            return q
+            return _stamp_asked_at(q, session, pane)
     if agent == "codex":
         from . import codex_asks
 
         q = codex_asks.approval(cap, session)
         if q is not None:
-            return q
+            return _stamp_asked_at(q, session, pane)
     dialog = parse_dialog(cap)
     if not dialog or not dialog["options"]:
         return None
@@ -659,6 +660,42 @@ def approval_for(pane: str, agent: str = "claude", session: str = "") -> dict | 
     # follows what was on screen when it was read.
     dialog["key"] = hashlib.sha1(seed.encode()).hexdigest()[:12]
     dialog["agent"] = agent
+    return _stamp_asked_at(dialog, session, pane)
+
+
+#: session (or pane) → `(identity, first seen)`: when a pane's card was first
+#: read, for `asked_at` where the hook kept no time. Dropped when the pane is
+#: read with no card up.
+_ASKED_SEEN: dict[str, tuple[str, float]] = {}
+
+
+def _stamp_asked_at(dialog: dict, session: str, pane: str, now: float | None = None) -> dict:
+    """Give a pane's `approval` its `asked_at` (epoch seconds), so a card can
+    say how long it has waited (contract §6.2).
+
+    A question the PreToolUse hook kept (`source: "hook"`) was asked when the
+    hook kept it (`pending_asks`' `at`), which survives a server restart.
+    Anything else read off the screen is dated from when this server first
+    saw that card (by its tool call, else its `key`): close enough, as the
+    app polls a waiting thread."""
+    now = time.time() if now is None else now
+    slot = session or pane
+    ident = str(dialog.get("tool_use_id") or "") or str(dialog.get("key") or "")
+    at: float | None = None
+    if dialog.get("source") == "hook" and session:
+        try:
+            from agent_media_core import pending_asks
+
+            kept = pending_asks.read(session) or {}
+            if str(kept.get("tool_use_id") or "") == str(dialog.get("tool_use_id") or ""):
+                at = float(kept.get("at") or 0) or None
+        except Exception as _exc:  # noqa: BLE001 - an unreadable copy: dated by sight
+            _failures.swallowed(_exc)
+    if at is None:
+        seen = _ASKED_SEEN.get(slot)
+        at = seen[1] if seen and seen[0] == ident else now
+    _ASKED_SEEN[slot] = (ident, at)
+    dialog["asked_at"] = round(at, 3)
     return dialog
 
 
@@ -1377,6 +1414,11 @@ def _live_states() -> list[StateRow]:
                  else _live_title(sid))
         row: StateRow = {"session": sid,
                          "state": state, "mem_mb": mem.get(sid), "title": title}
+        if state == "approval":
+            # How long its card has waited, for the thread row (§6.2).
+            ap = approval_for(pane, _agent_of_pane(pane), sid)
+            if ap and ap.get("asked_at"):
+                row["asked_at"] = ap["asked_at"]
         # A turn over with background agents still at work (§6.1).
         if state == "waiting":
             bg = background.of_session(sid)
@@ -1405,6 +1447,9 @@ def _live_states() -> list[StateRow]:
                               "title": _headless_title(sid, v), "driver": "headless"}
             if v.get("host"):
                 hrow["host"] = str(v["host"])    # runs on another host (roadmap 56)
+            pend = v.get("pending") or []
+            if hrow["state"] == "approval" and pend and isinstance(pend[0], dict) and pend[0].get("at"):
+                hrow["asked_at"] = round(float(pend[0]["at"]), 3)   # its card's age (§6.2)
             # Its tasks sessiond still hears from, once the turn is over (§6.1).
             if hrow["state"] == "waiting":
                 bg = background.of_session(sid, tasks=v.get("task_list") or [])

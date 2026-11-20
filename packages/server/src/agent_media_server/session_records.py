@@ -28,6 +28,7 @@ class StateRow(_StateRowBase, total=False):
     background: dict[str, int]  # {"agents", "commands"}: a waiting row's work still running
     driver: Literal["headless"]
     host: str                 # a headless session run on another host
+    asked_at: float           # an approval row's card: when it was asked (epoch s)
 
 
 class Host(TypedDict, total=False):
