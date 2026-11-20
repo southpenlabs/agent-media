@@ -103,7 +103,8 @@ def _num(v) -> float | None:
 
 
 def start(owner: str, body: dict, path: Path | None = None, now: float | None = None) -> tuple[bool, dict]:
-    now = time.time() if now is None else now
+    # Rounded once, as it is kept: a time kept rounded up must not outlive now (agent-media 1205a0a1's flake).
+    now = round(time.time() if now is None else now, 3)
     to = body.get("to") if isinstance(body.get("to"), dict) else {}
     dest = _point(to)
     if not dest:
@@ -144,7 +145,8 @@ def _mine(trips: dict, owner: str, tid: str) -> dict | None:
 
 
 def update(owner: str, body: dict, path: Path | None = None, now: float | None = None) -> tuple[bool, dict]:
-    now = time.time() if now is None else now
+    # Rounded once, as it is kept: a time kept rounded up must not outlive now (agent-media 1205a0a1's flake).
+    now = round(time.time() if now is None else now, 3)
     with _LOCK:
         trips = _load(path)
         t = _mine(trips, owner, str(body.get("id") or ""))
@@ -156,7 +158,8 @@ def update(owner: str, body: dict, path: Path | None = None, now: float | None =
 
 
 def end(owner: str, body: dict, path: Path | None = None, now: float | None = None) -> tuple[bool, dict]:
-    now = time.time() if now is None else now
+    # Rounded once, as it is kept: a time kept rounded up must not outlive now (agent-media 1205a0a1's flake).
+    now = round(time.time() if now is None else now, 3)
     with _LOCK:
         trips = _load(path)
         t = _mine(trips, owner, str(body.get("id") or ""))
@@ -174,7 +177,8 @@ def end(owner: str, body: dict, path: Path | None = None, now: float | None = No
 
 def public(token: str, path: Path | None = None, now: float | None = None) -> tuple[bool, dict]:
     """`GET /map/trip?token=`: what the person with the link sees."""
-    now = time.time() if now is None else now
+    # Rounded once, as it is kept: a time kept rounded up must not outlive now (agent-media 1205a0a1's flake).
+    now = round(time.time() if now is None else now, 3)
     if not token:
         return _bad("no_trip", "no such shared trip", 404)
     for t in _load(path).values():

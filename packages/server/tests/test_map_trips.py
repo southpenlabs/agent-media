@@ -65,3 +65,11 @@ def test_how_long_a_link_lasts(tmp_path):
     # Whatever until says, gone a day after it started.
     tall = started("stop")
     assert seen(tall, 1000.0 + map_trips.MAX_S - 1)[0] and not seen(tall, 1000.0 + map_trips.MAX_S + 1)[0]
+
+
+def test_a_trip_ended_at_a_time_that_rounds_up_is_gone_at_once(tmp_path):
+    p = tmp_path / "trips.json"
+    t = map_trips.start("d", {"to": TO}, path=p, now=1000.0)[1]["trip"]
+    ok, obj = map_trips.end("d", {"id": t["id"], "arrived": True}, path=p, now=2000.0006)
+    assert ok and obj["gone"] is True
+    assert not map_trips.public(t["token"], path=p, now=2000.0006)[0]
