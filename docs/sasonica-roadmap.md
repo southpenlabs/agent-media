@@ -1851,8 +1851,14 @@ ahead.
     Service and One row per person (on by default), Sort's Name A–Z and By
     service or agent; ☰ offers neither Threads nor Messages, and People and
     the bridge banner's sign-in go back to Chats; `/messages` kept likewise.
-    Next: saved views (a tag or a person as a view), then the Threads and
-    Messages modes' code removed and their suites moved onto Chats.
+    **Saved views implemented 20 Nov 2026:** Chats' Views sheet names the
+    current spaces, tag, filters, search and sort; reopen, replace or remove
+    a view. Personal to this device; a storage failure is shown. App commit
+    `a7ed693f`: typecheck, build, eight Chats checks and five saved-view
+    checks pass (including 390/320 px layouts). Not deployed. Next:
+    dedicated person views, linked information
+    and alternative layouts; remove the old Threads and Messages modes'
+    code and move their suites onto Chats.
 39. **Background music under long readings** (David, 26 Oct 2026: "maybe
     we could even use dynamically selected music in the background"; "are
     there libraries of different genres we could have selectable in

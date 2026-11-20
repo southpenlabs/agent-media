@@ -5,9 +5,10 @@ different organisation and productivity methods, including GTD, kanban and
 Zettelkasten. Clarification: **not just organising work, but organising
 threads of information and communication.**
 
-Status: direction requested; design proposal only, not implemented. The
-view catalogue and implementation sequence below are proposals, not settled
-requirements.
+Status: unified Chats, tags and spaces built 25–30 Oct 2026 (roadmap 38
+and 41). Saved views implemented 20 Nov 2026; validation and release status
+are recorded in the roadmap. The broader view catalogue below remains a
+proposal, not settled requirements.
 
 ## Purpose
 
@@ -101,6 +102,32 @@ link back to the message or conversation it came from.
    existing Org data rather than creating duplicate tasks.
 5. Expand the view catalogue and add review/digest tools after trying the
    shared model with real information and communication patterns.
+
+## Saved views: first delivery, 20 Nov 2026
+
+Chats' **Views** button saves the current spaces, tag, people/agent kind,
+Show filters, server, service, search text, sort and person folding under
+a name. Opening that name restores the choices against the current chats;
+it does not save a snapshot of messages. A view can be replaced with the
+current choices or removed. Duplicate names are refused. Saved filters
+use the same validation and defaults as the live Chats controls.
+
+These views are personal to this device, stored with its existing Chats
+preferences, up to 50 named views. If storage fails the sheet says changes
+will be lost on reload, while keeping them usable for the current page.
+There is no new shared organisation state or server configuration. Account
+sync, a dedicated person filter, board layouts and links between knowledge
+notes are later work. A name in the search box is still a text search, not
+a durable person identity.
+
+Open-source check: reviewed maintained
+[TanStack Table's filtering support](https://tanstack.com/table/v8/docs/guide/column-filtering)
+([MIT](https://github.com/TanStack/table/blob/main/LICENSE)). It provides
+table filtering state, whereas Chats already has its own filtering and
+sorting. This delivery reuses Chats' React controls, validation and storage
+and adds named presets; introducing a table engine would replace working
+list behaviour without supplying the missing preset UI. No dependency or
+upstream workaround is needed.
 
 ## Design questions to settle before implementation
 
