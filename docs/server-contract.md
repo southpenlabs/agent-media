@@ -8354,10 +8354,29 @@ merged into the book:
   with exactly one phone contact they are one person, and **Google wins**:
   each field is Google's when Google has one, the phone's otherwise.
 
-`MEDIA_CONTACTS_SOURCES` (comma separated) picks the sources;
-`MEDIA_CONTACTS=0` leaves the background sync off. `… contacts status`
-says what is read and when it last was; `… contacts sync [--source
-android|google]` syncs now.
+- **`carddav`, optional** (20 Nov 2026,
+  docs/proposals/2026-11-20-contacts-carddav.md): a CardDAV address book
+  (the owner's Radicale), only once `MEDIA_CARDDAV_URL` (the collection),
+  `MEDIA_CARDDAV_USER` and `MEDIA_CARDDAV_PASSWORD_FILE` are set. Read
+  with an RFC 6578 `sync-collection` and its sync token, members fetched by
+  `addressbook-multiget` only when their etag moved; vCards parsed with
+  vobject. Group cards (`X-ADDRESSBOOKSERVER-KIND:group`, members
+  `urn:uuid:<UID>`) are the labels. **It is the book**: where it holds a
+  person its card wins over Google's (which wins over the phone's, which
+  wins over the CRM's), and its fields, labels and notes are the card's
+  even where it has none. A Google person it was imported from
+  (`X-GOOGLE-RESOURCE`) is the same person, and the person keeps the
+  contact id they had before (kept once per card), so levels, overrides,
+  Drupal links, timelines and tags carry over; someone new gets an id made
+  from `carddav:<UID>`. Its `IMPP:xmpp:` gateway addresses fold into
+  `old_addresses` as Google's gateway emails do; its inline `PHOTO` is the
+  card's picture, first of all sources.
+
+`MEDIA_CONTACTS_SOURCES` (comma separated) picks the sources (unset:
+every one set up, `carddav` first); `MEDIA_CONTACTS=0` leaves the
+background sync off. `… contacts status` says what is read and when it
+last was; `… contacts sync [--source carddav|android|google|…] [--full]`
+syncs now.
 
 **Whose book** (18 Oct 2026; proposal, "Where contacts live": one address
 book per person, several per server). Every route here and in §6.25a, and
@@ -8465,7 +8484,9 @@ hold (and for any path that is not a uuid, as an unknown route).
   is in, oldest sign-in first. `account` is the account's id (`GET
   /contacts/google`), `email` its address (`""` when the sign-in predates
   the `email` scope); an added account's `id` is `<account id>:people/c123`
-  (below, "Several accounts").
+  (below, "Several accounts"). `carddav`: `{"kind": "carddav", "id":
+  "<vCard UID>", "href": "/david/contacts/<UID>.vcf", "etag"}`, first
+  whenever present.
 - **`updated`**: when the card last changed here (epoch s).
 - **`crm`**: the person in the Drupal CRM and the fields only it has
   (below, "The CRM"), or `null`.
@@ -9119,6 +9140,23 @@ the server routes GET and POST.)
   moments. Nothing to change: `done: []`. **400** a field that cannot be
   edited or a bad shape; **403** not editable here; **404** no such
   contact; **503** the phone cannot be reached; **502** it refused.
+
+**A person in the CardDAV book** (20 Nov 2026): the same route, body and
+answers, but the write is a CardDAV one and the phone is not asked. A card
+with a `carddav` source is `"edit": true` while the CardDAV book is set up
+(whatever `MEDIA_CONTACTS_WRITEBACK` says), and its `phone_edit` is null.
+The edit syncs the book's changes, checks `base` against that fresh card,
+GETs the vCard, changes only the lines the fields name (everything else,
+`X-GOOGLE-*` included, kept), and PUTs it with `If-Match` of the etag the
+check saw; a **412** syncs and checks again (at most three times), so a
+field changed elsewhere meanwhile is the same **409**. `labels` add the
+person to, or take them off, the group cards' member lists, each written
+with its own etag (a group changed meanwhile is read again and the one
+member changed on top); a label with no group card is made as a new one,
+so `skipped` is always `[]`. Gateway addresses folded into
+`old_addresses` stay on the card. **503** `{"error": "the address book
+cannot be reached"}` (no answer, a refused sign-in, a server error),
+**502** "the address book refused the change".
 
 **Google's own editor** (30 Oct 2026). An editable card also carries
 `"phone_edit"`, the person's lookup key in the phone's address book (else

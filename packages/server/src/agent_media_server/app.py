@@ -1485,8 +1485,10 @@ def _contact_edit(h: BaseHTTPRequestHandler, cid: str) -> None:
     """`POST /contacts/<id>/edit {"base": {…}, "set": {…}}` (§6.25): the
     card's edit, written back to Google through the phone; gated as the card
     is, the owner's book only. 409 with both values when a field changed
-    since the app showed it; 503 when the phone cannot be reached."""
-    from . import contacts_android, contacts_edit, contacts_writeback
+    since the app showed it; 503 when the phone cannot be reached. A person
+    in the CardDAV book is written there instead (contacts_edit.edit_carddav):
+    503 when the address book cannot be reached, 502 when it refuses."""
+    from . import contacts_android, contacts_carddav, contacts_edit, contacts_writeback
 
     user, err = auth.gate(_bearer(h))
     if not user:
@@ -1504,6 +1506,10 @@ def _contact_edit(h: BaseHTTPRequestHandler, cid: str) -> None:
         _json(h, 503, {"ok": False, "error": "the phone cannot be reached"})
     except contacts_writeback.WriteError:
         _json(h, 502, {"ok": False, "error": "the phone refused the change"})
+    except contacts_carddav.Refused:
+        _json(h, 502, {"ok": False, "error": "the address book refused the change"})
+    except contacts_carddav.Error:
+        _json(h, 503, {"ok": False, "error": "the address book cannot be reached"})
     except ValueError as e:
         _json(h, 400, {"ok": False, "error": str(e)})
     else:

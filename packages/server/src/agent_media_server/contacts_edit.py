@@ -27,6 +27,18 @@ stays read-only.
   Google now holds within moments.
 * The owner's book only, and only a person with a Google entry on the phone
   (`editable`); off with `MEDIA_CONTACTS_WRITEBACK=0`, as the Join's links.
+
+**The CardDAV book** (docs/proposals/2026-11-20-contacts-carddav.md, step
+2). A person the CardDAV book holds (a `carddav` source, while
+`MEDIA_CARDDAV_URL` is set) is edited there instead, the same body and
+answers: the book is synced (its changes only), the conflict check runs on
+the fresh card, then the card is fetched, changed (vobject, every line it
+does not touch kept as it was) and PUT with `If-Match` of the etag the
+check saw; a 412 syncs and checks again (twice at most), so a field
+changed elsewhere is the same 409. Labels are the group cards: the person
+is added to or taken off each one's members, each written with its own
+etag, and a label with no group card yet is made as a new one. The phone
+is not asked, and `MEDIA_CONTACTS_WRITEBACK` does not apply.
 """
 
 from __future__ import annotations
@@ -37,7 +49,11 @@ import shlex
 import threading
 import urllib.parse
 
-from . import contacts, contacts_android, contacts_writeback as wb
+from typing import Any
+
+from agent_media_core import failures as _failures
+
+from . import contacts, contacts_android, contacts_carddav as cd, contacts_writeback as wb
 
 URI = contacts_android.URI
 NAME = "vnd.android.cursor.item/name"
@@ -77,9 +93,21 @@ class NotEditable(Exception):
     pass
 
 
+def carddav_source(card: dict) -> dict | None:
+    """The card's CardDAV record, while the book's CardDAV is set: then an
+    edit goes there."""
+    if not cd.configured():
+        return None
+    return next((s for s in card.get("sources") or []
+                 if s.get("kind") == "carddav" and s.get("href")), None)
+
+
 def editable(card: dict) -> bool:
-    """Whether a card can be edited here: the owner's book, write-back on,
-    and a Google entry on the phone behind it."""
+    """Whether a card can be edited here: a person in the CardDAV book, or,
+    in the owner's book with write-back on, a Google entry on the phone
+    behind it."""
+    if carddav_source(card) is not None:
+        return True
     return contacts.is_owner() and wb.enabled() and bool(wb._raw_ids(card))
 
 
@@ -105,8 +133,8 @@ def phone_lookup(card: dict) -> str:
     its own editor on `content://com.android.contacts/contacts/lookup/<key>`
     (David, 30 Oct 2026: "even if it linked to the Google contacts app would
     be quite handy"). "" where the card cannot be edited here."""
-    if not editable(card):
-        return ""
+    if not editable(card) or carddav_source(card) is not None:
+        return ""        # the CardDAV book is the card: Google's editor would not show
     for s in card.get("sources") or []:
         if s.get("kind") == "android" and wb.GOOGLE in (s.get("accounts") or []) and s.get("id"):
             return str(s["id"])
@@ -456,20 +484,12 @@ def edit(cid: str, body: dict) -> dict:
     if unknown:
         raise ValueError(f"cannot edit {', '.join(sorted(unknown))}")
     base = body.get("base") if isinstance(body.get("base"), dict) else {}
-    conn = contacts._connect(create=False)
-    if conn is None:
-        raise NotEditable("no such contact")
-    try:
-        row = conn.execute("SELECT card, name FROM contacts WHERE id=?", (cid,)).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        raise NotEditable("no such contact")
-    card = json.loads(row[0])
-    card.setdefault("name", row[1])
+    card = _load(cid)
     if not editable(card):
         raise NotEditable("only a person with a Google entry on the phone can be edited here")
     want = {f: _clean(f, v) for f, v in body["set"].items()}
+    if carddav_source(card) is not None:
+        return edit_carddav(cid, base, want)
     clash = {}
     for f in want:
         if f in base and not _same(f, base[f], _now(card, f)):
@@ -485,6 +505,244 @@ def edit(cid: str, body: dict) -> dict:
     got = _write(raws, card, want)
     _later(_reread, contacts.account())
     return {"ok": True, **got}
+
+
+def _load(cid: str) -> dict:
+    conn = contacts._connect(create=False)
+    if conn is None:
+        raise NotEditable("no such contact")
+    try:
+        row = conn.execute("SELECT card, name FROM contacts WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise NotEditable("no such contact")
+    card = json.loads(row[0])
+    card.setdefault("name", row[1])
+    return card
+
+
+# --- the CardDAV book -----------------------------------------------------------
+
+#: How often a write that met a newer card (412) syncs and tries again.
+TRIES = 3
+
+
+def edit_carddav(cid: str, base: dict, want: dict, cfg: cd.Config | None = None,
+                 http: cd.Http | None = None) -> dict:
+    """`edit` for a person in the CardDAV book (`want` already cleaned).
+    Raises Conflict, NotEditable, cd.Unreachable or cd.Refused."""
+    cfg = cfg or cd.config()
+    if cfg is None:
+        raise NotEditable("the address book is not set up")
+    client = cd.Client(cfg, http)
+    card: dict = {}
+    for _ in range(TRIES):
+        cd.sync(cfg=cfg, http=http)
+        card = _load(cid)
+        src = next((s for s in card.get("sources") or [] if s.get("kind") == "carddav"), None)
+        if src is None:
+            raise NotEditable("no longer in the address book")
+        clash = {f: {"yours": base[f], "theirs": _now(card, f)} for f in want
+                 if f in base and not _same(f, base[f], _now(card, f))}
+        if clash:
+            raise Conflict(clash)
+        todo = {f: v for f, v in want.items() if not _same(f, v, _now(card, f))}
+        if not todo:
+            return {"ok": True, "done": [], "skipped": []}
+        fields = {f: v for f, v in todo.items() if f != "labels"}
+        if fields:
+            got = client.fetch(src["href"])
+            if got is None:
+                raise NotEditable("no longer in the address book")
+            try:
+                client.put(src["href"], apply(got[1], fields), src.get("etag") or got[0])
+            except cd.Changed:
+                continue                     # changed since the sync: look again
+        if "labels" in todo:
+            _set_labels(client, src["id"], card, todo["labels"])
+        try:
+            cd.sync(cfg=cfg, http=http)
+        except cd.Error as e:                # the next sync loop reads it anyway
+            _failures.swallowed(e)
+        return {"ok": True, "done": [f for f in FIELDS if f in todo], "skipped": []}
+    raise Conflict({f: {"yours": base.get(f, want[f]), "theirs": _now(card, f)} for f in want})
+
+
+def _split_name(name: str) -> tuple[str, str]:
+    """`(given, family)`: the last word the family name, as the phone splits."""
+    words = name.split()
+    if len(words) < 2:
+        return name.strip(), ""
+    return " ".join(words[:-1]), words[-1]
+
+
+def _set_types(prop: Any, kind: str, label: str | None) -> None:
+    prop.params["TYPE"] = cd.types_for(kind, label)
+
+
+#: The card's typed lists to their vCard properties (addresses are pairs).
+_PROPS = {"phones": "tel", "emails": "email", "websites": "url"}
+
+
+def apply(text: str, want: dict) -> str:
+    """A person's vCard with `want` (cleaned fields, no labels) applied;
+    every line it does not change is kept."""
+    import vobject
+
+    vc = cd.parse(text)
+
+    def drop(name: str) -> None:
+        for p in list(vc.contents.get(name, [])):
+            vc.remove(p)
+
+    if want.get("name"):
+        drop("fn")
+        vc.add("fn").value = want["name"]
+        given, family = _split_name(want["name"])
+        old = vc.contents.get("n", [])
+        was = old[0].value if old else vobject.vcard.Name()
+        drop("n")
+        vc.add("n").value = vobject.vcard.Name(
+            family=family, given=given, additional=getattr(was, "additional", ""),
+            prefix=getattr(was, "prefix", ""), suffix=getattr(was, "suffix", ""))
+    for field, name in _PROPS.items():
+        if field not in want:
+            continue
+        wanted = {_key(field, x["value"]): x for x in want[field]}
+        have: dict[str, list] = {}
+        for p in vc.contents.get(name, []):
+            have.setdefault(_key(field, cd._value(p).strip()), []).append(p)
+        for k, ps in have.items():
+            if k in wanted:
+                x = wanted[k]
+                if x.get("type") is not None and                         cd.label_of(ps[0], field).casefold() != x["type"].casefold():
+                    for p in ps:
+                        _set_types(p, field, x["type"])
+                continue
+            for p in ps:
+                # An old chat gateway's address is not on the card: kept.
+                if not (field == "emails" and contacts.is_gateway(cd._value(p))):
+                    vc.remove(p)
+        for k, x in wanted.items():
+            if k not in have:
+                p = vc.add(name)
+                p.value = x["value"]
+                _set_types(p, field, x.get("type"))
+    if "addresses" in want:
+        wanted = {_key("addresses", x["value"]): x for x in want["addresses"]}
+        seen = set()
+        for adr, lab in cd.address_pairs(vc):
+            k = _key("addresses", cd.formatted(adr, lab))
+            if k in wanted and k not in seen:
+                seen.add(k)
+                x = wanted[k]
+                one = adr if adr is not None else lab
+                if x.get("type") is not None and                         cd.label_of(one, "addresses").casefold() != x["type"].casefold():
+                    for p in (adr, lab):
+                        if p is not None:
+                            _set_types(p, "addresses", x["type"])
+                continue
+            for p in (adr, lab):
+                if p is not None:
+                    vc.remove(p)
+        for k, x in wanted.items():
+            if k not in seen:
+                a = vc.add("adr")
+                a.value = vobject.vcard.Address(street=x["value"])
+                _set_types(a, "addresses", x.get("type"))
+                lab = vc.add("label")
+                lab.value = x["value"]
+                _set_types(lab, "addresses", x.get("type"))
+    if "organization" in want:
+        o = want["organization"]
+        orgs, titles = vc.contents.get("org", []), vc.contents.get("title", [])
+        if orgs:
+            if o["company"]:
+                rest = orgs[0].value[1:] if isinstance(orgs[0].value, list) else []
+                orgs[0].value = [o["company"], *rest]
+            else:
+                vc.remove(orgs[0])
+        elif o["company"]:
+            vc.add("org").value = [o["company"]]
+        if titles:
+            if o["title"]:
+                titles[0].value = o["title"]
+            else:
+                vc.remove(titles[0])
+        elif o["title"]:
+            vc.add("title").value = o["title"]
+    if "birthday" in want:
+        drop("bday")
+        b = want["birthday"]
+        if b.startswith("--"):
+            p = vc.add("bday")
+            p.value = "1604" + b[1:]
+            p.params["X-APPLE-OMIT-YEAR"] = ["1604"]
+        elif b:
+            vc.add("bday").value = b
+    if "notes" in want:
+        drop("note")
+        if want["notes"]:
+            vc.add("note").value = want["notes"]
+    drop("rev")
+    vc.add("rev").value = cd.rev()
+    return vc.serialize()
+
+
+def _groups_now() -> dict[str, dict]:
+    """The book's group cards by folded name: `{name, uid, href, members}`
+    (Google's hidden ones, starred, left out)."""
+    conn = contacts._connect(create=False)
+    out: dict[str, dict] = {}
+    if conn is None:
+        return out
+    try:
+        for sid, card, meta in conn.execute(
+                "SELECT sid, card, meta FROM records WHERE kind=?", (cd.GROUP_KIND,)):
+            g, m = json.loads(card), json.loads(meta)
+            if g.get("name") and (m.get("resource") or "") not in contacts._GOOGLE_HIDDEN:
+                out.setdefault(contacts.fold(g["name"]), {**g, "uid": sid, "href": m["href"]})
+    finally:
+        conn.close()
+    return out
+
+
+def _set_labels(client: cd.Client, uid: str, card: dict, labels: list[str]) -> None:
+    """The person on exactly the group cards `labels` names (of those the
+    card shows: a hidden one is left alone), a missing one made."""
+    groups = _groups_now()
+    want = {contacts.fold(x): x for x in labels}
+    shown = {contacts.fold(x) for x in _now(card, "labels")}
+    for k, label in want.items():
+        g = groups.get(k)
+        if g is None:
+            gid = cd.new_uid()
+            client.put(client.href(f"{gid}.vcf"), cd.group_text(gid, label, [uid]), create=True)
+        elif uid not in (g.get("members") or []):
+            _member(client, g["href"], uid, True)
+    for k, g in groups.items():
+        if k not in want and k in shown and uid in (g.get("members") or []):
+            _member(client, g["href"], uid, False)
+
+
+def _member(client: cd.Client, href: str, uid: str, on: bool) -> None:
+    """Add `uid` to (or take it off) a group card's members, over whatever
+    version is there now: a change by someone else in between (412) is
+    read again and the one member changed on top of it."""
+    for _ in range(TRIES):
+        got = client.fetch(href)
+        if got is None:
+            return
+        new = cd.set_member(got[1], uid, on)
+        if new is None:
+            return
+        try:
+            client.put(href, new, got[0])
+            return
+        except cd.Changed:
+            continue
+    raise cd.Refused("a label's card kept changing")
 
 
 def _later(fn, *args) -> None:

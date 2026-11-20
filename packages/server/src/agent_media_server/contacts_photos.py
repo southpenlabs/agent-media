@@ -64,7 +64,7 @@ from agent_media_core import failures as _failures
 log = logging.getLogger("agent-media.server.contacts_photos")
 
 #: Which source's picture a card shows, best first.
-KIND_ORDER = ("google", "bridges", "found")
+KIND_ORDER = ("carddav", "google", "bridges", "found")
 #: The longest side kept, in px.
 SIZE = 256
 #: The largest picture taken from a source.
@@ -157,6 +157,29 @@ def _keep(data: bytes) -> tuple[str, str] | None:
             f.write(out)
         os.replace(tmp, path)
     return name, ctype
+
+
+def keep_inline(data: bytes) -> tuple[str, str, str] | None:
+    """A picture a source carries inline (a CardDAV card's `PHOTO`), kept
+    now: `(file, type, ref)`, `ref` a hash of the source's bytes; None when
+    it is not an image. One bigger than `SIZE` keeps its larger copy too
+    (`photos/large/<file>`), so `?size=large` needs no fetch."""
+    got = _keep(data)
+    if got is None:
+        return None
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as im:
+            bigger = max(im.size) > SIZE
+    except Exception as _exc:  # noqa: BLE001 — no Pillow, or unreadable: the thumbnail serves
+        _failures.swallowed(_exc)
+        bigger = False
+    if bigger and not (photos_dir() / "large" / got[0]).is_file():
+        big = thumbnail(data, LARGE, LARGE_MAX_BYTES)
+        if big is not None:
+            _write(photos_dir() / "large", got[0], big[0])
+    return got[0], got[1], hashlib.sha256(data).hexdigest()[:16]
 
 
 def _http(url: str, headers: dict | None = None, max_bytes: int = MAX_BYTES) -> bytes:
@@ -265,7 +288,13 @@ def _wanted(conn, owner: bool) -> list[tuple[str, str, str]]:
     last seen (it is read again when due)."""
     out = []
     for kind, sid, meta in conn.execute(
-            "SELECT kind, sid, meta FROM records WHERE kind IN ('google', 'bridges')"):
+            "SELECT kind, sid, meta FROM records WHERE kind IN ('google', 'bridges', 'carddav')"):
+        if kind == "carddav":
+            # Kept by the CardDAV sync itself (contacts_carddav.py): alive,
+            # never fetched here.
+            if json.loads(meta or "{}").get("photo"):
+                out.append((kind, sid, json.loads(meta)["photo"]))
+            continue
         if kind == "bridges" and not owner:
             continue
         m = json.loads(meta or "{}")
@@ -304,6 +333,8 @@ def refresh(budget: int | None = None, now: float | None = None,
     for kind, sid, ref in want:
         alive.add((kind, sid))
         row = have.get((kind, sid))
+        if kind == "carddav":
+            continue
         if kind == "google":
             if not ref:
                 if row is None or row["ref"] or row["file"]:
@@ -477,7 +508,7 @@ def _large(kind: str, ref: str, thumb: str) -> tuple[bytes, str, str, float] | N
             return None
     except OSError:
         return None
-    if not ref:
+    if not ref or kind == "carddav":     # an inline picture: its larger copy is kept at sync
         return None
     try:
         if kind == "google":

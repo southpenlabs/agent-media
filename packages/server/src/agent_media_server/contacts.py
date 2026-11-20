@@ -80,6 +80,14 @@ read-only card is `GET /contacts/<id>` (`card`).
   Android) and, for a book signed in to Google, its `contactGroups`, as
   `labels` on each person; `GET /contacts?label=` and `GET
   /contacts/labels`.
+* **CardDAV** (contacts_carddav.py; docs/proposals/2026-11-20-contacts-carddav.md):
+  `carddav`, optional and only once `MEDIA_CARDDAV_URL` is set, an
+  address book on David's own server (Radicale), read with a sync token.
+  It is the book: its card wins over Google's, Google's over the phone's,
+  the phone's over the CRM's, and its fields, labels (its group cards) and
+  notes are the card's even where empty (`_over`). A person keeps the
+  contact id they had (`_rebuild_carddav`, `carddav_ids`), and an edit of
+  someone it holds is written to it (contacts_edit.py).
 
 Contacts are personal data: they stay on this host, and nothing here sends
 them anywhere but back to a signed-in device.
@@ -148,7 +156,7 @@ LIMIT_MAX = 5000
 #: How long a login waits for the code before giving up.
 LOGIN_WAIT_S = 900.0
 #: The sources, in the order they merge.
-KINDS = ("android", "google", "bridges", "import", "drupal")
+KINDS = ("carddav", "android", "google", "bridges", "import", "drupal")
 #: The sources whose people are only names and handles (a bridge's ghost,
 #: an export's friend): they join by number, address, handle or a kept
 #: Join, and a same name is only "Same person?".
@@ -499,6 +507,8 @@ CREATE TABLE IF NOT EXISTS aliases (
 CREATE TABLE IF NOT EXISTS found (
   sid TEXT PRIMARY KEY, contact TEXT NOT NULL, network TEXT NOT NULL,
   card TEXT NOT NULL, meta TEXT NOT NULL, at REAL);
+CREATE TABLE IF NOT EXISTS carddav_ids (
+  uid TEXT PRIMARY KEY, contact TEXT NOT NULL, at REAL);
 CREATE TABLE IF NOT EXISTS person_level (
   contact TEXT PRIMARY KEY, level TEXT NOT NULL, at REAL);
 CREATE TABLE IF NOT EXISTS photo_src (
@@ -512,9 +522,10 @@ CREATE TABLE IF NOT EXISTS photo_src (
 #: pictures fetched (`photo_src`, contacts_photos.py), costly to fetch again,
 #: and who David picked from a search on a network (`found`, contacts_find.py),
 #: and each person's speech level (`person_level`, contacts_level.py; `notify`
-#: is its forerunner, kept until moved into it).
+#: is its forerunner, kept until moved into it), and the contact id each
+#: CardDAV card was given (`carddav_ids`, `_rebuild_carddav`).
 _KEPT = {"overrides", "drupal_links", "merges", "aliases", "photo_src", "found",
-         "person_level", "notify"}
+         "person_level", "notify", "carddav_ids"}
 #: Bump when the cards are made differently from the same records: the
 #: next sync rebuilds them (records kept, nothing read again).
 CARDS_VERSION = "google-accounts-1"
@@ -582,6 +593,9 @@ def _source(kind: str, sid: str, meta: dict) -> dict:
                 "accounts": meta.get("accounts") or [], "version": meta.get("version") or 0}
     if kind == "drupal":
         return {"kind": "drupal", "id": sid, "changed": meta.get("changed") or ""}
+    if kind == "carddav":
+        return {"kind": "carddav", "id": sid, "href": meta.get("href") or "",
+                "etag": meta.get("etag") or ""}
     if kind == "bridges":
         return {"kind": "bridges", "id": sid, "network": meta.get("network") or "",
                 "network_name": meta.get("network_name") or ""}
@@ -737,10 +751,31 @@ def _merge(google: dict, phone: dict) -> dict:
 def _merged(entry: dict) -> dict:
     """A contact's card from its phone card and its Google cards (oldest
     sign-in first): each Google account wins over those after it and over
-    the phone, field by field (`_merge`)."""
+    the phone, field by field (`_merge`). A CardDAV card (`top`) is the
+    book itself and wins over all of them (`_over`)."""
     out = entry.get("base")
     for g in reversed(entry["google"]):
         out = g if out is None else _merge(g, out)
+    top = entry.get("top")
+    if top is not None:
+        out = top if out is None else _over(top, out)
+    return out
+
+
+def _over(top: dict, other: dict) -> dict:
+    """A CardDAV card over the rest: its fields, labels, notes and birthday
+    are the card's even where it has none (an edit that empties one must
+    not bring Google's back); only its name falls back, and the others'
+    handles stay."""
+    out = _merge(top, other)
+    for f in _FIELDS:
+        out[f] = list(top.get(f) or [])
+    out["notes"] = top.get("notes") or ""
+    for k in ("birthday", "labels"):
+        if top.get(k):
+            out[k] = top[k]
+        else:
+            out.pop(k, None)
     return out
 
 
@@ -767,6 +802,8 @@ def _rebuild(conn: sqlite3.Connection) -> None:
             by_phone.setdefault(p, set()).add(cid)
         for e in emails:
             by_email.setdefault(e, set()).add(cid)
+    parts: dict[str, dict] = {}           # contact -> {base, google: [cards], top}
+    by_resource = _rebuild_carddav(conn, recs, book, by_phone, by_email, parts)
     accts = google_accounts()
     order = {a["id"]: i for i, a in enumerate(accts)}
     addr = {a["id"]: a["email"] for a in accts}
@@ -777,7 +814,6 @@ def _rebuild(conn: sqlite3.Connection) -> None:
     g_phone: dict[str, dict[str, set]] = {}
     g_email: dict[str, dict[str, set]] = {}
     held: dict[str, set] = {}             # contact -> the accounts it holds
-    parts: dict[str, dict] = {}           # contact -> {base, google: [cards]}
 
     def look(main: dict, per: dict, keys: set, aid: str) -> set:
         hits: set = set()
@@ -792,7 +828,11 @@ def _rebuild(conn: sqlite3.Connection) -> None:
         c = json.loads(card)
         m = json.loads(meta)
         phones, emails = _keys(c)
-        hits = look(by_phone, g_phone, phones, aid)
+        # The CardDAV card imported from this very Google person, else by
+        # number, else by address.
+        hits = {by_resource[sid]} if sid in by_resource else set()
+        if not hits:
+            hits = look(by_phone, g_phone, phones, aid)
         if not hits:
             hits = look(by_email, g_email, emails, aid)
         hits = {h for h in hits if aid not in held.get(h, set())}
@@ -803,7 +843,7 @@ def _rebuild(conn: sqlite3.Connection) -> None:
             part = parts.setdefault(cid, {"base": book[cid]["card"], "google": []})
             part["google"].append(c)
             srcs = book[cid]["sources"]
-            n = sum(1 for s in srcs if s["kind"] == "google")
+            n = sum(1 for s in srcs if s["kind"] in ("carddav", "google"))
             book[cid] = {"card": _merged(part), "sources": srcs[:n] + [src] + srcs[n:]}
         else:
             cid = contact_id("google", sid)
@@ -835,6 +875,99 @@ def _rebuild(conn: sqlite3.Connection) -> None:
                          [(cid, e) for e in sorted(emails)])
     _set_meta(conn, "cards", CARDS_VERSION)
     _bump(conn)
+
+
+def _rebuild_carddav(conn: sqlite3.Connection, recs: list, book: dict, by_phone: dict,
+                     by_email: dict, parts: dict) -> dict[str, str]:
+    """The CardDAV book's people (contacts_carddav.py) into `book`, first of
+    the sources: each takes in the one phone contact sharing its number
+    (else its address), and its labels are the group cards that list it.
+    Its contact id is kept in `carddav_ids` the first time it is seen: the
+    id the person already had — the contact holding the Google person the
+    card was imported from (`X-GOOGLE-RESOURCE`), else the phone contact it
+    takes in — so cards, overrides, levels, Drupal links, timelines and tags
+    carry over; a new person's is made from `carddav:<UID>`. Answers the
+    first Google account's resource names to their contacts, for Google's
+    records to join."""
+    people = [(sid, json.loads(card), json.loads(meta))
+              for kind, sid, card, meta in recs if kind == "carddav"]
+    if not people:
+        return {}
+    labels: dict[str, dict[str, str]] = {}
+    for kind, _sid, card, meta in recs:
+        if kind != "carddav-group":
+            continue
+        g = json.loads(card)
+        if not g.get("name") or (json.loads(meta).get("resource") or "") in _GOOGLE_HIDDEN:
+            continue
+        for u in g.get("members") or []:
+            labels.setdefault(u, {})[fold(g["name"])] = g["name"]
+    phone_cids = {cid for cid, e in book.items() if e["sources"][0]["kind"] == "android"}
+    pins = dict(conn.execute("SELECT uid, contact FROM carddav_ids"))
+    pinned = set(pins.values())
+    old: dict[str, str] | None = None
+    taken: set[str] = set()
+    out: dict[str, str] = {}
+    now = time.time()
+    for sid, c, m in people:
+        c = dict(c)
+        c["emails"] = list(c.get("emails") or []) + [
+            {"value": a, "type": "Old chat"} for a in c.pop("old_chat", None) or []]
+        mine = labels.get(sid)
+        if mine:
+            c["labels"] = sorted(mine.values(), key=fold)
+        phones, emails = _keys(c)
+        hits: set = set()
+        for p in phones:
+            hits |= by_phone.get(p, set())
+        hits &= phone_cids - taken
+        if not hits:
+            for e in emails:
+                hits |= by_email.get(e, set())
+            hits &= phone_cids - taken
+        res = m.get("resource") or ""
+        cid = pins.get(sid)
+        if cid is None:
+            if res:
+                if old is None:
+                    old = {}
+                    for ocid, raw in conn.execute("SELECT id, card FROM contacts"):
+                        for s in json.loads(raw).get("sources") or []:
+                            if s.get("kind") == "google" and ":" not in (s.get("id") or ""):
+                                old.setdefault(s["id"], ocid)
+                cid = old.get(res)
+            if cid is None and len(hits) == 1:
+                cid = next(iter(hits))
+            if cid is None or cid in pinned:
+                cid = contact_id("carddav", sid)
+            conn.execute("INSERT OR REPLACE INTO carddav_ids (uid, contact, at) VALUES (?, ?, ?)",
+                         (sid, cid, now))
+            pins[sid] = cid
+            pinned.add(cid)
+        if cid in book and cid not in phone_cids:
+            cid = contact_id("carddav", sid)      # held already (a stale pin): its own
+        absorb = cid if cid in phone_cids and cid not in taken else (
+            next(iter(hits)) if len(hits) == 1 else None)
+        srcs = [_source("carddav", sid, m)]
+        base = None
+        if absorb is not None:
+            entry = book.pop(absorb)
+            base = entry["card"]
+            srcs += entry["sources"]
+            taken.add(absorb)
+            for idx in (by_phone, by_email):
+                for k in list(idx):
+                    if absorb in idx[k]:
+                        idx[k] = idx[k] - {absorb}
+        parts[cid] = {"base": base, "google": [], "top": c}
+        book[cid] = {"card": _merged(parts[cid]), "sources": srcs}
+        for p in phones:
+            by_phone.setdefault(p, set()).add(cid)
+        for e in emails:
+            by_email.setdefault(e, set()).add(cid)
+        if res:
+            out[res] = cid
+    return out
 
 
 def refold() -> bool:
@@ -2045,17 +2178,20 @@ def sources() -> list[str]:
     separated; another account's `contacts.json` `sources`), else the phone
     when this host has the adb tool (the owner's book only), Google only
     when signed in, the bridged networks when this host reads bridges as
-    the owner (`MATRIX_OWNER_BRIDGES`; the owner's book only), and the CRM
-    only when its connection is set."""
-    from . import contacts_android, contacts_drupal, matrix
+    the owner (`MATRIX_OWNER_BRIDGES`; the owner's book only), the CRM
+    only when its connection is set, and the CardDAV book only when its
+    collection is (`MEDIA_CARDDAV_URL`)."""
+    from . import contacts_android, contacts_carddav, contacts_drupal, matrix
 
     raw = (setting("MEDIA_CONTACTS_SOURCES", "sources") or "").strip()
     if raw:
         want = [s.strip() for s in raw.split(",") if s.strip()]
     else:
-        want = ["android", "google", "bridges", "drupal"]
+        want = ["carddav", "android", "google", "bridges", "drupal"]
     out = []
     for s in want:
+        if s == "carddav" and contacts_carddav.configured():
+            out.append(s)
         # The phone over adb is this host's, so the owner's: never another
         # account's book.
         if s == "android" and is_owner() and contacts_android.available():
@@ -2082,7 +2218,15 @@ def sync(full: bool = False) -> dict:
     return {"synced": done, "errors": errors}
 
 
-_SYNCS = {"android": lambda full: sync_android(), "google": lambda full: sync_google(full=full),
+def sync_carddav(full: bool = False) -> dict:
+    """The CardDAV book's changes (contacts_carddav.py)."""
+    from . import contacts_carddav
+
+    return contacts_carddav.sync(full=full)
+
+
+_SYNCS = {"carddav": lambda full: sync_carddav(full=full),
+          "android": lambda full: sync_android(), "google": lambda full: sync_google(full=full),
           "bridges": lambda full: sync_bridges(), "drupal": lambda full: sync_drupal()}
 
 
@@ -3178,6 +3322,7 @@ def status() -> dict:
                              "failed_at": float(failed) if failed else None,
                              "last_error": _meta(conn, f"{kind}_last_error")}
             per.setdefault("google", {})["sync_token"] = bool(_meta(conn, "google_sync_token"))
+            per.setdefault("carddav", {})["sync_token"] = bool(_meta(conn, "carddav_sync_token"))
         counts = _google_counts(conn)
         gaccts = [{**_account_state(a, conn, counts), "token": str(token_path(a["id"])),
                    "sync_token": bool(conn is not None and _meta(conn, _gk(a["id"], "sync_token")))}
@@ -3188,6 +3333,8 @@ def status() -> dict:
     tok = load_token()
     return {"account": account() or "owner", "store": str(db_path()), "contacts": count,
             "sources": sources(),
+            "carddav": {"url": setting("MEDIA_CARDDAV_URL", "carddav_url") or None,
+                        **per.get("carddav", {})},
             "android": {"command": " ".join(contacts_android.command()),
                         "available": contacts_android.available(), **per.get("android", {})},
             "google": {"client": str(client_path()) if not os.environ.get("MEDIA_GOOGLE_OAUTH_CLIENT")
@@ -3428,7 +3575,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("sync", help="sync now")
     p.add_argument("--source", choices=[k for k in KINDS if k in _SYNCS], default="",
                    help="only this one (default: every source this host reads)")
-    p.add_argument("--full", action="store_true", help="Google: everything, not the changes")
+    p.add_argument("--full", action="store_true",
+                   help="Google, CardDAV: everything, not the changes")
     p.set_defaults(fn=cmd_sync)
     p = sub.add_parser("import", help="people and past conversations from a data export: "
                                       "Facebook or Instagram (.zip or JSON), Google Takeout's "

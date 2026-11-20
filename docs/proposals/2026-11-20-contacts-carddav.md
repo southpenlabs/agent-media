@@ -1,6 +1,15 @@
 # Contacts on CardDAV: Radicale as the book, Sasonica edits it
 
-20 Nov 2026. Status: proposal. Follows docs/proposals/2026-10-17-contacts.md.
+20 Nov 2026. Status: steps 1 and 2 built (20 Nov 2026); 3 to 5 proposed.
+Follows docs/proposals/2026-10-17-contacts.md.
+
+As built: a person's contact id is not re-made from `carddav:<UID>` but
+kept as it was (the contact holding the Google person the card came from,
+else the phone contact it takes in), pinned once per card in
+`carddav_ids`: contact ids also key timeline.db and people-tags.json, so
+keeping them needs no rewrite anywhere. Only a person new to the book gets
+the `carddav:<UID>` id. Google's system "My Contacts" is not a group card,
+so it is no longer a label on CardDAV people.
 
 ## Why
 
