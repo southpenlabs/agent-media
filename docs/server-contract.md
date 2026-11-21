@@ -11773,7 +11773,11 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   read. TomTom (`MEDIA_TOMTOM_API_KEY`): Search API fuzzy search within
   150 m with `openingHours=nextSevenDays`, a day with no range closed.
   Each is skipped without its key or `{found: false,
-  reason: no_key | no_match | no_hours | failed | google_month_spent}`. A
+  reason: no_key | no_match | no_hours | failed | google_month_spent |
+  month_spent}`. HERE, TomTom and Foursquare are counted per calendar
+  month in `place-hours-usage.json` and not asked past
+  `MEDIA_<HERE|TOMTOM|FOURSQUARE>_MONTHLY_MAX` (1,000, 2,000 and 300;
+  0 turns one off), as Google is past its own ceiling. A
   match is a like name within 150 m. Google (`MEDIA_GOOGLE_PLACES_KEY`): a
   Text Search asking only for id, displayName and location finds the
   place, its place ID is kept (allowed indefinitely), and Place Details

@@ -237,3 +237,24 @@ def test_free_sources_without_keys_are_skipped(monkeypatch):
         assert "hereapi" not in url and "tomtom" not in url
         return {"results": [BLUE_FIN]}
     assert map_hours.place_hours("Blue Fin", "-38.3611", "144.7784", fetch=fetch, now=THU_10)[1]["source"] == "foursquare"
+
+
+def test_each_free_source_stops_at_its_monthly_ceiling(monkeypatch):
+    monkeypatch.setenv("MEDIA_HERE_API_KEY", "here-test")
+    monkeypatch.setenv("MEDIA_HERE_MONTHLY_MAX", "2")
+    monkeypatch.setenv("MEDIA_FOURSQUARE_MONTHLY_MAX", "0")
+    asked = []
+
+    def fetch(url, headers):
+        asked.append(url.split("?")[0])
+        return {"items": [HERE_ITEM]} if url.startswith(map_hours.HERE) else {"results": [BLUE_FIN]}
+    for lat in ("-38.361177", "-38.361178"):
+        assert map_hours.place_hours("Blue Fin", lat, "144.778438", fetch=fetch, now=THU_10)[1]["source"] == "here"
+    assert map_hours.usage("here", THU_10) == 2
+    # The third place: HERE's month is spent and Foursquare's ceiling is 0, so nothing is asked.
+    got = map_hours.place_hours("Blue Fin", "-38.361179", "144.778438", fetch=fetch, now=THU_10)[1]
+    assert got == {"found": False, "reason": "month_spent"} and len(asked) == 2
+    # A new month starts again.
+    import datetime as dt
+    dec = THU_10 + dt.timedelta(days=15)
+    assert map_hours.place_hours("Blue Fin", "-38.361179", "144.778438", fetch=fetch, now=dec)[1]["source"] == "here"

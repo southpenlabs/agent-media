@@ -166,6 +166,44 @@ def google_usage(now=None) -> int:
     return int(u.get("calls") or 0) if u.get("month") == _month(now) else 0
 
 
+#: Calls a month at most to each of the others, inside their free tiers:
+#: TomTom's Search API gives 2,500 free a month (docs.tomtom.com/pricing);
+#: HERE's free allowance is not confirmed, so 1,000 to be safe; Foursquare
+#: bills every hours call, so a small ceiling. `MEDIA_<NAME>_MONTHLY_MAX`
+#: sets one, 0 turns that source off. Found hours are kept for good, so
+#: each place costs one call however often its card opens.
+MONTHLY_MAX = {"here": 1000, "tomtom": 2000, "foursquare": 300}
+USAGE_FILE = "place-hours-usage.json"
+
+
+def monthly_max(service: str) -> int:
+    try:
+        return int(os.environ.get(f"MEDIA_{service.upper()}_MONTHLY_MAX") or MONTHLY_MAX[service])
+    except ValueError:
+        return MONTHLY_MAX[service]
+
+
+def usage(service: str, now=None) -> int:
+    """Calls made to `service` ("here", "tomtom", "foursquare") this calendar month."""
+    u = _read(USAGE_FILE)
+    calls = u.get("calls") if u.get("month") == _month(now) and isinstance(u.get("calls"), dict) else {}
+    return int(calls.get(service) or 0)
+
+
+def _spend(service: str, now=None) -> bool:
+    """Count one call to `service`; False (and nothing counted) when this
+    month's ceiling is reached, so the call is not made."""
+    with _lock:
+        m = _month(now)
+        u = _read(USAGE_FILE)
+        calls = u.get("calls") if u.get("month") == m and isinstance(u.get("calls"), dict) else {}
+        n = int(calls.get(service) or 0)
+        if n >= monthly_max(service):
+            return False
+        _write(USAGE_FILE, {"month": m, "calls": {**calls, service: n + 1}})
+        return True
+
+
 def _google_spent(now=None) -> None:
     with _lock:
         m = _month(now)
@@ -356,8 +394,8 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
     elif (g := _cached(key, now_s)) is None:
         g = _google(name, la, lo, gfetch, now)
         # Then HERE's and TomTom's free tiers, then Foursquare (billed per card).
-        for other in (lambda: _here(name, la, lo, fetch), lambda: _tomtom(name, la, lo, fetch),
-                      lambda: _foursquare(name, la, lo, fetch)):
+        for other in (lambda: _here(name, la, lo, fetch, now), lambda: _tomtom(name, la, lo, fetch, now),
+                      lambda: _foursquare(name, la, lo, fetch, now)):
             if g.get("found"):
                 break
             f = other()
@@ -380,10 +418,13 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
     return True, g
 
 
-def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None,
+                now=None) -> dict:
     """Foursquare's hours, or `{found: False, reason}`."""
     if not _key():
         return {"found": False, "reason": "no_key"}
+    if not _spend("foursquare", now):
+        return {"found": False, "reason": "month_spent"}
     try:
         got = _ask({"ll": f"{la:.6f},{lo:.6f}", "query": name, "radius": NEAR_M, "limit": 5,
                     "fields": "fsq_place_id,name,latitude,longitude,hours,website"}, fetch)
@@ -476,12 +517,15 @@ def osm_hours_here(opening: list) -> str:
     return osm_hours(regular)
 
 
-def _here(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+def _here(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None,
+          now=None) -> dict:
     """HERE's hours (Geocoding & Search v7 Discover), or `{found: False, reason}`.
     Off unless `MEDIA_HERE_API_KEY` is set."""
     key = (os.environ.get("MEDIA_HERE_API_KEY") or "").strip()
     if not key:
         return {"found": False, "reason": "no_key"}
+    if not _spend("here", now):
+        return {"found": False, "reason": "month_spent"}
     q = {"at": f"{la:.6f},{lo:.6f}", "q": name, "limit": 5, "apiKey": key}
     try:
         got = _get(f"{HERE}?{urllib.parse.urlencode(q)}", fetch)
@@ -532,12 +576,15 @@ def osm_hours_tomtom(hours: dict) -> str:
     return osm_hours(regular)
 
 
-def _tomtom(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+def _tomtom(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None,
+            now=None) -> dict:
     """TomTom's hours (Search API, fuzzy search near the point), or `{found:
     False, reason}`. Off unless `MEDIA_TOMTOM_API_KEY` is set."""
     key = (os.environ.get("MEDIA_TOMTOM_API_KEY") or "").strip()
     if not key:
         return {"found": False, "reason": "no_key"}
+    if not _spend("tomtom", now):
+        return {"found": False, "reason": "month_spent"}
     q = {"key": key, "lat": f"{la:.6f}", "lon": f"{lo:.6f}", "radius": NEAR_M, "limit": 5,
          "openingHours": "nextSevenDays"}
     try:
