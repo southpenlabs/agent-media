@@ -575,3 +575,39 @@ def test_a_chat_with_people_plays_every_unheard_since_yours(monkeypatch):
     assert speech.room_unheard(r.thread) == [a, c, d]
     assert speech.unheard_counts().get(r.thread) == 3
     assert speech.room_unheard("6c73498c-02c1-4846-8350-a82006973571") is None
+
+
+def test_a_row_names_the_bridge_login_it_comes_through(one_room, monkeypatch):
+    # sasonica-app mail #1140: one Messenger login hidden, the other kept.
+    one_room.load()
+    one_room.channel = ("@metabot:ryer.org", "100042", "conv-1")
+    monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {"100042": "david@example.com"})
+    monkeypatch.setattr(matrix, "_ACCOUNTS_AT", 0.0)
+    monkeypatch.setattr(matrix, "ACCOUNTS_TTL_S", float("inf"))
+    (row,) = matrix.rows(set())
+    assert row["network"] == {"id": "gmessages", "name": "Google Messages",
+                              "account": {"id": "100042", "name": "david@example.com"}}
+    assert one_room.info()["network"]["account"]["id"] == "100042"
+    # A login not (yet) named: the id alone; no receiver: no account.
+    monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {})
+    (row,) = matrix.rows(set())
+    assert row["network"]["account"] == {"id": "100042"}
+    one_room.channel = ("@metabot:ryer.org", "", "conv-1")
+    (row,) = matrix.rows(set())
+    assert "account" not in row["network"]
+
+
+def test_login_names_come_from_the_bridges_listing(monkeypatch):
+    monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {})
+    matrix._refresh_accounts(lambda: [
+        {"id": "meta", "logins": [{"id": "1", "name": "David J"},
+                                  {"id": "2", "name": "", "profile": {"phone": "+61400"}},
+                                  {"id": "3", "name": "", "profile": {}}]},
+        {"id": "gm", "reachable": False, "logins": []}])
+    assert matrix._ACCOUNT_NAMES == {"1": "David J", "2": "+61400"}
+
+    def boom():
+        raise OSError("bridge down")
+    matrix._refresh_accounts(boom)          # kept as it was
+    assert matrix._ACCOUNT_NAMES == {"1": "David J", "2": "+61400"}
+    assert matrix.with_account(None, ("b", "1", "c"), {}) is None

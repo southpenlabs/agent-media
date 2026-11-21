@@ -314,3 +314,29 @@ def test_listing_says_which_chats_the_asking_device_bridges(server, phone):
     mine = {c["id"]: c["mine"] for c in got["chats"]}
     assert mine[WA] is True and mine["local:meta:100777"] is False
     assert got["device"]
+
+
+def test_a_chat_names_the_bridge_login_it_comes_through(server, phone, shelf, monkeypatch):
+    # sasonica-app mail #1140: account {id, name?}, echoed as network.account.
+    t = phone["token"]
+    st, got = post(server, t, {"network": "meta", "chats": [
+        {"id": "100012345", "kind": "person", "account": {"id": "555", "name": "David J"}},
+        {"id": "100012346", "kind": "person", "account": {"id": "556"}},
+        {"id": "100012347", "kind": "person"}]})
+    assert st == 200, got
+    chats = listed(server, t)
+    assert chats["local:meta:100012345"]["network"]["account"] == {"id": "555", "name": "David J"}
+    assert chats["local:meta:100012346"]["network"]["account"] == {"id": "556"}
+    assert "account" not in chats["local:meta:100012347"]["network"]
+    res, obj = call(server, "GET", "/targets", headers=_auth(t))
+    row = next(r for r in obj["sessions"] if r["session"] == "local:meta:100012345")
+    assert row["network"] == {"id": "meta", "name": "Messenger",
+                              "account": {"id": "555", "name": "David J"}}
+    # Names not kept: the id stays, the name goes.
+    monkeypatch.setenv("MEDIA_LOCAL_CHAT_NAMES", "off")
+    assert listed(server, t)["local:meta:100012345"]["network"]["account"] == {"id": "555"}
+    for bad in ({"id": ""}, {"id": 5}, {"name": "x"}, "555", {"id": "555", "secret": 1},
+                {"id": "555", "name": 3}):
+        st, got = post(server, t, {"network": "meta", "chats": [
+            {"id": "100012345", "kind": "person", "account": bad}]})
+        assert st == 400, (bad, got)

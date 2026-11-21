@@ -543,7 +543,15 @@ Everything a message can be pointed at.
   `"drivable": false`, and `"network"` — the service a bridge carries the
   room for, `{"id", "name"}` from its `m.bridge` state with the variants
   folded (`gmessages-sms`, "Google Messages (SMS)" → `gmessages`, "Google
-  Messages"), or null (11 Oct 2026; the app's Messages tab chips). `session` is a uuid made from the room id (stable,
+  Messages"), or null (11 Oct 2026; the app's Messages tab chips).
+  `network.account` (21 Nov 2026, sasonica-app mail #1140: hide one of two
+  Messenger logins): the bridge login the room comes through, `{"id",
+  "name"?}` — `id` the room's `m.bridge` `channel["fi.mau.receiver"]`
+  (stable per login), `name` the login's as `GET /bridges` lists it
+  (§6.26: its `name`, else the profile's email, phone or user name), asked
+  for in the background every 5 min, so absent until first answered or
+  with no bridges add-on. No `account` for a room with no receiver (an
+  older bridge); the room's `room` envelope on the log carries it too. `session` is a uuid made from the room id (stable,
   so every session route takes it); `title` the room's name, else its other
   members; `recap` the last message, `{"text": "<name>: <words>", "at",
   "source": "matrix"}`; never live, rested or pinned. `/conversation/log`
@@ -13480,14 +13488,15 @@ portal id.
 
 ```
 POST /local/chats {"network", "chats": [{"id": "<network chat id>", "name"?, "kind": "person"|"group",
-                                         "updated"?: <unix s>}…], "full"?: bool}
+                                         "updated"?: <unix s>, "account"?: {"id", "name"?}}…],
+                 "full"?: bool}
   → {"ok": true, "chats": [<chat>…]}          // the chats sent, in order
 GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // every record, gone ones too
   Each chat also carries `mine` (the asking device is the one that bridges
   it) and the answer `device` (the asking device's id), so a phone hands its
   companion only its own chats' settings (18 Nov 2026, sasonica-app mail #884).
 
-<chat> = {"id": "local:<network>:<id>", "network": {"id", "name"}, "kind",
+<chat> = {"id": "local:<network>:<id>", "network": {"id", "name", "account"?: {"id", "name"?}}, "kind",
           "name"?,                            // only where names are kept (below)
           "device": "<device id>", "device_name": "<its name>" | null,
           "updated": <unix s> | null, "last_seen": <unix s>, "gone": <unix s> | null,
@@ -13504,6 +13513,13 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
   the whole of that network on that device, so its other chats there get
   `gone` (another device's and another network's are left alone); a gone
   chat sent again comes back, its settings with it.
+- **`account`** (21 Nov 2026, sasonica-app mail #1140): the bridge login
+  the chat comes through (the companion's `receiver`, and the login's
+  name), so another device can hide one account's chats. Echoed as
+  `network.account` here and on the chat's `/targets` row, as on a Matrix
+  row (§6.1); `name` only where names are kept. Optional: a chat sent
+  without it keeps the one it had. 400 when it is not `{id, name?}` with
+  an id like a chat id's.
 - **Never content**: any field not named above, in the body or a chat, is
   400 `code: "field_not_accepted"`, `field` naming it (text, previews,
   senders). 400 for a network not in the list, a bad id, kind or time; at

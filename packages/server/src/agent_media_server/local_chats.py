@@ -62,7 +62,7 @@ _NET_ID = r"[A-Za-z0-9][A-Za-z0-9._@+=-]{0,127}"
 NET_ID = re.compile(_NET_ID)
 ID = re.compile(r"local:(" + "|".join(NETWORKS) + r"):(" + _NET_ID + r")")
 #: What one chat in `POST /local/chats` may say, and nothing else.
-CHAT_FIELDS = frozenset({"id", "name", "kind", "updated"})
+CHAT_FIELDS = frozenset({"id", "name", "kind", "updated", "account"})
 BODY_FIELDS = frozenset({"network", "chats", "full", "device"})
 MAX_CHATS = 5000
 MAX_NAME = 200
@@ -165,7 +165,12 @@ def _device_names() -> dict[str, str]:
 def _view(session: str, rec: dict, dev_names: dict[str, str], names: bool) -> dict:
     """A record as answered: the id, and what is kept of it."""
     net = str(rec.get("network") or "")
-    out = {"id": session, "network": {"id": net, "name": NETWORKS.get(net, net)},
+    network: dict = {"id": net, "name": NETWORKS.get(net, net)}
+    acct = rec.get("account") if isinstance(rec.get("account"), dict) else None
+    if acct and acct.get("id"):
+        network["account"] = {"id": acct["id"],
+                              **({"name": acct["name"]} if names and acct.get("name") else {})}
+    out = {"id": session, "network": network,
            "kind": rec.get("kind") or "person", "device": rec.get("device") or None,
            "device_name": dev_names.get(str(rec.get("device") or "")) or None,
            "updated": rec.get("updated"), "last_seen": rec.get("last_seen"),
@@ -322,7 +327,22 @@ def post(body, bearer: str) -> tuple[bool, dict]:
         name = c.get("name")
         if name is not None and not isinstance(name, str):
             return _bad(f"chats[{i}].name is text")
-        row = {"network": network, "kind": kind}
+        account = c.get("account")
+        if account is not None:
+            # The bridge login the chat comes through (sasonica-app mail
+            # #1140): `{id, name?}`, echoed as `network.account`.
+            aid = account.get("id") if isinstance(account, dict) else None
+            aname = account.get("name") if isinstance(account, dict) else None
+            if (not isinstance(aid, str) or not NET_ID.fullmatch(aid)
+                    or set(account) - {"id", "name"}
+                    or (aname is not None and not isinstance(aname, str))):
+                return _bad(f"chats[{i}].account is {{id, name?}}: id 1-128 letters, digits "
+                            "and . _ @ + = -, name text")
+        row: dict = {"network": network, "kind": kind}
+        if account is not None:
+            row["account"] = {"id": account["id"]}
+            if names and account.get("name") and _clean_name(account["name"]):
+                row["account"]["name"] = _clean_name(account["name"])
         if updated is not None:
             row["updated"] = round(float(updated), 3)
         if names and name and _clean_name(name):
@@ -337,6 +357,8 @@ def post(body, bearer: str) -> tuple[bool, dict]:
                    "device": device, "last_seen": now}
             if not names:
                 rec.pop("name", None)
+                if isinstance(rec.get("account"), dict):
+                    rec["account"] = {"id": rec["account"].get("id")}
             rows[sid] = rec
         if full:
             for sid, rec in rows.items():

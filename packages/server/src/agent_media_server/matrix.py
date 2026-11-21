@@ -34,6 +34,7 @@ import urllib.request
 import uuid
 from collections.abc import Collection
 
+from agent_media_core import failures as _failures
 from agent_media_core import matrix
 
 from . import read_receipts, replies, voice_notes
@@ -849,7 +850,7 @@ class Room:
         others = [m for m in out if m["id"] not in me]
         return {"id": self.id, "name": self.title(), "members": out,
                 "group": len(others) > 1, "named": bool(self.name),
-                "network": self.network}
+                "network": with_account(self.network, self.channel)}
 
     def rename_group(self, name: str) -> tuple[bool, dict]:
         """The room's name as the owner (§6.41), which the bridge makes the
@@ -1016,6 +1017,69 @@ def _channel(state: list) -> tuple | None:
     return None
 
 
+#: Bridge logins' names, by login id (`_account_names`), and when they were
+#: last asked for (None: never).
+_ACCOUNT_NAMES: dict[str, str] = {}
+_ACCOUNTS_AT: float | None = None
+_ACCOUNTS_LOCK = threading.Lock()
+ACCOUNTS_TTL_S = 300.0
+
+
+def _login_name(login: dict) -> str:
+    """What a bridge login is called: its remote name, else the profile's
+    email, phone or user name."""
+    p = login.get("profile")
+    prof = p if isinstance(p, dict) else {}
+    for v in (login.get("name"), prof.get("email"), prof.get("phone"),
+              prof.get("username"), prof.get("name")):
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _refresh_accounts(listing) -> None:
+    global _ACCOUNT_NAMES
+    try:
+        names: dict[str, str] = {}
+        for b in listing() or []:
+            for lg in (b.get("logins") or []) if isinstance(b, dict) else []:
+                if isinstance(lg, dict) and lg.get("id") and _login_name(lg):
+                    names.setdefault(str(lg["id"]), _login_name(lg))
+        _ACCOUNT_NAMES = names
+    except Exception as _exc:  # noqa: BLE001 — rows name the account by id alone
+        _failures.swallowed(_exc)
+
+
+def _account_names(clock=time.monotonic) -> dict[str, str]:
+    """Bridge login id → its name, from the bridges add-on's listing (§6.26),
+    asked for in the background at most every ACCOUNTS_TTL_S: a row never
+    waits on a bridge. Empty with no add-on, or until first answered."""
+    global _ACCOUNTS_AT
+    with _ACCOUNTS_LOCK:
+        now = clock()
+        if _ACCOUNTS_AT is None or now - _ACCOUNTS_AT >= ACCOUNTS_TTL_S:
+            _ACCOUNTS_AT = now
+            from . import bridge_addon
+            b = bridge_addon.bridges()
+            if b is not None:
+                threading.Thread(target=_refresh_accounts, args=(b.listing,),
+                                 name="matrix-accounts", daemon=True).start()
+    return _ACCOUNT_NAMES
+
+
+def with_account(network: dict | None, channel: tuple | None,
+                 names: dict[str, str] | None = None) -> dict | None:
+    """A room's `network` naming the bridge login it comes through
+    (sasonica-app mail #1140): `account: {id, name?}`, the id the `m.bridge`
+    receiver (`_channel`), the name the login's (`_account_names`). The
+    network as it is when the room has no receiver."""
+    receiver = channel[1] if channel else ""
+    if not network or not receiver:
+        return network
+    name = (names if names is not None else _account_names()).get(receiver)
+    return {**network, "account": {"id": receiver, **({"name": name} if name else {})}}
+
+
 _ROOMS: dict[str, Room] = {}       # by thread id
 #: Portals a bridge closed (its "Deleting portal" leave of the owner), by
 #: `_channel`: room ids, the last closed first. A room for the same
@@ -1105,7 +1169,7 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
                                       if last else None),
                             "archived": r.thread in flags, "rested": None, "pinned": False,
                             "harness": "matrix", "source": "matrix", "room": r.id,
-                            "network": r.network,
+                            "network": with_account(r.network, r.channel),
                             "drivable": bool(owner_token()),
                             # When the network is told it was read (§6.32).
                             "read_receipts": read_receipts.mode_of(r.thread),
