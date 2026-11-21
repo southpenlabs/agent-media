@@ -6208,7 +6208,7 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
 
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers.places(arg("near"), arg("bbox"), arg("kind"), arg("radius_m"),
-                                       arg("open_now"), arg("limit"), bearer, host=host)
+                                       arg("open_now"), arg("limit"), bearer, host=host, along=arg("along"))
     elif path == "/map/saved":
         # A person's Home, Work and other saved places (map_saved.py).
         from . import map_layers, map_saved

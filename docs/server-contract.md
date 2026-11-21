@@ -11689,6 +11689,7 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
   Nominatim), nearest first given `near`. 400 for no words.
 - **`GET /map/places?near=lat,lon[&radius_m=1500] | bbox=w,s,e,n
+  | along=lat,lon;lat,lon;…[&radius_m=500]
   &kind=<kind>[,<kind>][&open_now=1][&limit=20]`** (19 Nov 2026; David:
   "Build the places endpoint"; `map_places.py`, tests in
   `test_map_places.py`): places of a kind from OpenStreetMap, asked of
@@ -11701,7 +11702,14 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   time), phone?, website?, tags (a few useful ones: brand, operator,
   cuisine, wheelchair, fee, socket:*, fuel:* …)}], source, as_of? (the OSM
   data's time), cached, narrowed?, truncated?, open_now?, hours_unknown?}`, nearest
-  first (from the box's centre for `bbox`), at most `limit` (1–100). A
+  first (from the box's centre for `bbox`), at most `limit` (1–100).
+  `along` (21 Nov 2026; David: "add search along route") is the route
+  ahead as up to 200 points, at most 150 km long: places within
+  `radius_m` (500 by default, at most 3000) of the line, in the order the
+  route reaches them, each with `ahead_m` (how far along the route),
+  `off_route_m` (how far off it) and `distance_m` (the two added); the
+  answer has `along_points` and `radius_m`. 400 `bad_along`, `too_long`;
+  `near_or_bbox` when more than one of near, bbox and along is given. A
   way or relation is placed at its centre. `kind` is from a fixed list,
   `GET /map/places/kinds` → `{kinds: [{id, name, aliases}]}`: pharmacy,
   cafe, restaurant, fast_food, fuel, ev_charger, toilets, drinking_water,

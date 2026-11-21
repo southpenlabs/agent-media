@@ -3,7 +3,10 @@
 pharmacy, fuel near me, a café on this walk, EV chargers, toilets, water.
 
 `GET /map/places?near=lat,lon[&radius_m=1500] | bbox=w,s,e,n
-&kind=<kind>[,<kind>][&open_now=1][&limit=20]` (§6.50). The client names
+| along=lat,lon;lat,lon;…[&radius_m=500]
+&kind=<kind>[,<kind>][&open_now=1][&limit=20]` (§6.50). `along` is a
+route ahead (David, 21 Nov 2026: "add search along route"): places within
+`radius_m` of the line, in the order the route reaches them. The client names
 kinds from the fixed list below and never sends Overpass text: each kind is
 one or more tag filters here, and the query is built from them. A kind may
 also be named by an alias ("chemist", "petrol", "loo"), so an agent's words
@@ -89,6 +92,12 @@ ROUND = 3
 ROUND_PAD_M = 120
 TIMEOUT_S = 20
 SOURCE = map_osm.SOURCE
+#: A route searched along: at most this many points, this long, and this
+#: far either side of it (500 m unless asked).
+ALONG_MAX_POINTS = 200
+ALONG_MAX_M = 150_000
+ALONG_DEFAULT_RADIUS_M = 500
+ALONG_MAX_RADIUS_M = 3000
 
 #: Tags passed on as `tags`: these keys, and any starting with a prefix here.
 TAG_KEYS = frozenset({"brand", "operator", "cuisine", "wheelchair", "fee", "access", "capacity",
@@ -268,12 +277,56 @@ def forget() -> None:
         _kept.clear()
 
 
+def _parse_along(along: str) -> list[tuple[float, float]] | None:
+    """`lat,lon;lat,lon;…` → the points, rounded to ROUND (the cache key and
+    the query), repeats dropped; None when unreadable, too few or too many."""
+    pts: list[tuple[float, float]] = []
+    for part in (along or "").split(";"):
+        if not part.strip():
+            continue
+        pt = _parse_near(part)
+        if pt is None:
+            return None
+        r = (round(pt[0], ROUND), round(pt[1], ROUND))
+        if not pts or pts[-1] != r:
+            pts.append(r)
+    if not 1 <= len(pts) <= ALONG_MAX_POINTS:
+        return None
+    return pts
+
+
+def _along_line(pts: list[tuple[float, float]], lat: float, lon: float) -> tuple[float, float]:
+    """How far along the line its nearest point to (lat, lon) is, and how
+    far off it (lat, lon) is, in metres (flat within each segment)."""
+    if len(pts) == 1:
+        return 0.0, _distance_m(pts[0][0], pts[0][1], lat, lon)
+    best = (math.inf, 0.0)  # (off, along)
+    gone = 0.0
+    for (a_lat, a_lon), (b_lat, b_lon) in zip(pts, pts[1:]):
+        kx = math.cos(math.radians((a_lat + b_lat) / 2)) * 111_320.0
+        ky = 110_540.0
+        bx, by = (b_lon - a_lon) * kx, (b_lat - a_lat) * ky
+        px, py = (lon - a_lon) * kx, (lat - a_lat) * ky
+        seg2 = bx * bx + by * by
+        f = 0.0 if seg2 == 0 else max(0.0, min(1.0, (px * bx + py * by) / seg2))
+        off = math.hypot(px - f * bx, py - f * by)
+        seg = math.sqrt(seg2)
+        if off < best[0]:
+            best = (off, gone + f * seg)
+        gone += seg
+    return best[1], best[0]
+
+
+def _line_m(pts: list[tuple[float, float]]) -> float:
+    return sum(_distance_m(a[0], a[1], b[0], b[1]) for a, b in zip(pts, pts[1:]))
+
+
 def _bad(code: str, error: str, **more) -> tuple[bool, dict]:
     return False, {"status": 400, "code": code, "error": error, **more}
 
 
 def places(near: str = "", bbox: str = "", kind: str = "", radius_m: str = "", open_now: str = "",
-           limit: str = "", *, clock: Callable[[], float] = time.time,
+           limit: str = "", *, along: str = "", clock: Callable[[], float] = time.time,
            fetch: Callable[[str], dict] | None = None,
            now: dt.datetime | None = None) -> tuple[bool, dict]:
     """`GET /map/places` behind the map's gate (map_layers.places): `(ok, answer)`."""
@@ -294,12 +347,13 @@ def places(near: str = "", bbox: str = "", kind: str = "", radius_m: str = "", o
         return _bad("bad_limit", "limit is a number")
     lim = max(1, min(lim, MAX_LIMIT))
     want_open = str(open_now or "").lower() in ("1", "true", "yes")
-    if near and bbox:
-        return _bad("near_or_bbox", "give near or bbox, not both")
+    if sum(bool(x) for x in (near, bbox, along)) > 1:
+        return _bad("near_or_bbox", "give one of near, bbox or along")
     t = clock()
     answer: dict = {"kinds": kind_ids}
     centre: tuple[float, float]
     radius: float | None = None
+    line: list[tuple[float, float]] | None = None
     try:
         if near:
             pt = _parse_near(near)
@@ -330,6 +384,27 @@ def places(near: str = "", bbox: str = "", kind: str = "", radius_m: str = "", o
                 radius = min(radius, float(ask_r - ROUND_PAD_M))
                 answer["narrowed"] = True
             answer.update(near=[pt[0], pt[1]], radius_m=round(radius))
+        elif along:
+            line = _parse_along(along)
+            if line is None:
+                return _bad("bad_along", f"along is lat,lon;lat,lon;… with 1 to {ALONG_MAX_POINTS} points")
+            if _line_m(line) > ALONG_MAX_M:
+                return _bad("too_long", f"a route searched along is at most {ALONG_MAX_M // 1000} km")
+            try:
+                radius = float(radius_m) if radius_m else float(ALONG_DEFAULT_RADIUS_M)
+            except ValueError:
+                return _bad("bad_radius", "radius_m is a number of metres")
+            if not math.isfinite(radius) or radius <= 0:
+                return _bad("bad_radius", "radius_m is a number of metres")
+            radius = min(radius, float(ALONG_MAX_RADIUS_M))
+            ask_r = int(math.ceil(radius)) + ROUND_PAD_M
+            coords = ",".join(f"{a},{b}" for a, b in line)
+            q = _query(kind_ids, f"(around:{ask_r},{coords})")
+            elements, as_of, cached = _fetched(("along", tuple(kind_ids), tuple(line), ask_r), q, clock, fetch)
+            if len(elements) >= OUT_MAX:
+                answer["truncated"] = True
+            centre = line[0]
+            answer.update(along_points=len(line), radius_m=round(radius))
         elif bbox:
             box = _parse_bbox(bbox)
             if box is None:
@@ -346,7 +421,7 @@ def places(near: str = "", bbox: str = "", kind: str = "", radius_m: str = "", o
             centre = ((s + n) / 2, (w + e) / 2)
             answer["bbox"] = [w, s, e, n]
         else:
-            return _bad("no_area", "give near=lat,lon or bbox=w,s,e,n")
+            return _bad("no_area", "give near=lat,lon, bbox=w,s,e,n or along=lat,lon;…")
     except Exception as e:  # noqa: BLE001 - every Overpass server failed
         _failures.swallowed(e)
         return False, {"status": 502, "code": "overpass", "error": "no Overpass server answered"}
@@ -357,7 +432,15 @@ def places(near: str = "", bbox: str = "", kind: str = "", radius_m: str = "", o
         if p is None or p["id"] in seen:
             continue
         d = _distance_m(centre[0], centre[1], p["lat"], p["lon"])
-        if radius is not None:
+        if line is not None:
+            ahead, off = _along_line(line, p["lat"], p["lon"])
+            if off > radius:
+                continue
+            # In the order the route reaches them; the way there is roughly the route, then off it.
+            d = ahead
+            p["ahead_m"], p["off_route_m"] = round(ahead), round(off)
+            p["distance_m"] = round(ahead + off)
+        elif radius is not None:
             if d > radius:
                 continue
             p["distance_m"] = round(d)

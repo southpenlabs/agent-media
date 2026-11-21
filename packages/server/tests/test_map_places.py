@@ -136,6 +136,32 @@ def test_a_box_and_a_limit(overpass):
     assert '(-37.82,144.96,-37.81,144.97)' in overpass[0]
 
 
+def test_along_a_route_in_the_order_it_reaches_them(overpass):
+    # David, 21 Nov 2026: "add search along route". North up Swanston Street from the south.
+    route = "-37.8200,144.9660;-37.8150,144.9645;-37.8100,144.9630"
+    ok, got = map_places.places(along=route, kind="pharmacy", now=THU_10)
+    assert ok, got
+    assert got["radius_m"] == 500 and got["along_points"] == 3
+    names = [p["name"] for p in got["places"]]
+    assert names == ["Far Chemist", "No Hours", "Brandy", "Near Chemist"]
+    far, near = got["places"][0], got["places"][-1]
+    assert far["ahead_m"] < near["ahead_m"]
+    assert all(p["off_route_m"] <= 500 for p in got["places"])
+    assert near["distance_m"] == near["ahead_m"] + near["off_route_m"]
+    # Overpass is asked around the line itself, its points rounded.
+    (q,) = overpass
+    assert "(around:620,-37.82,144.966,-37.815,144.964,-37.81,144.963)" in q
+
+
+def test_along_refuses_what_it_cannot_search(overpass):
+    assert map_places.places(along="nonsense", kind="pharmacy")[1]["code"] == "bad_along"
+    many = ";".join(f"{-37.0 - i * 0.001:.3f},144.96" for i in range(map_places.ALONG_MAX_POINTS + 1))
+    assert map_places.places(along=many, kind="pharmacy")[1]["code"] == "bad_along"
+    assert map_places.places(along="-37.81,144.96;-36.0,144.96", kind="pharmacy")[1]["code"] == "too_long"
+    assert map_places.places(along="-37.81,144.96", near="-37.81,144.96", kind="pharmacy")[1]["code"] == "near_or_bbox"
+    assert overpass == []
+
+
 def test_answers_are_kept_a_few_minutes(overpass):
     clock = [1000.0]
     a = map_places.places(near="-37.8136,144.9631", kind="pharmacy", clock=lambda: clock[0])[1]
