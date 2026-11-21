@@ -72,8 +72,7 @@ single taps are both play/pause gets the fallback.
 The server knows the earbuds; the app stays generic
 (`docs/decisions/2026-09-21-app-stays-generic.md`).
 
-- **App -> server**: on connect, `POST /device/audio` `{name, address_oui,
-  kind: a2dp|ble|sco}` (no full address leaves the phone).
+- **App -> server**: on connect, `POST /device/earbuds` `{name, oui}` (no full address leaves the phone).
 - **Server -> app**: `GET /device/earbuds` answers the known profile:
   `{model, label, keys: {play, next, previous, volume}, scheme:
   pair|one_at_a_time, guidance: [text...], setup_url}` where `guidance` is
@@ -112,7 +111,7 @@ part waits until a supported pair is in use.
 1. App: answer mode on the media session (play/next/previous) and the
    volume watch, with read-back and Undo; the pair and one-at-a-time
    schemes. Anko profile hard-coded as the first test.
-2. Server: `POST /device/audio`, `GET /device/earbuds`, `earbuds.json`
+2. Server: `POST /device/earbuds`, `GET /device/earbuds`, `earbuds.json`
    with Anko measured and common brands' defaults marked unverified;
    contract section.
 3. App: "Teach me your earbuds", posting learned profiles.

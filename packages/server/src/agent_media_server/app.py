@@ -596,6 +596,10 @@ ALERT_PATHS = frozenset({"/alerts", "/alerts/ack", "/alerts/action", "/alerts/di
                          "/alerts/digest"})
 CORS_PATHS = CORS_PATHS | ALERT_PATHS
 
+# Which earbuds are on and how to answer with them (earbuds.py, §6.63).
+EARBUD_PATHS = frozenset({"/device/earbuds", "/device/earbuds/learn"})
+CORS_PATHS = CORS_PATHS | EARBUD_PATHS
+
 # Can David be spoken to now (core free.py, §6.22). The same arrangement.
 FREE_PATHS = frozenset({"/device/state", "/free", "/catchup"})
 CORS_PATHS = CORS_PATHS | FREE_PATHS
@@ -3145,6 +3149,15 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = device_log.get(_bearer(h), (q.get("device") or [""])[0],
                                     (q.get("source") or [""])[0])
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/device/earbuds":
+        # The earbuds this device has on and their profile (earbuds.py, §6.63).
+        from . import earbuds
+
+        dev = auth.device_id(_bearer(h))
+        if not dev:
+            _json(h, 401, {"ok": False, "error": "a paired device only"})
+        else:
+            _json(h, 200, {"ok": True, **earbuds.current(dev)})
     elif path == "/device/rules":
         # What this device is and what its kind brings, each rule with its
         # source (device_kinds.py, §6.59). Any paired device, guests too.
@@ -4999,6 +5012,20 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             servers_report.report_soon(dev)
         _json(h, 200 if got is not None else 404, {"ok": got is not None, "app": got or {},
                                                    **({"kind": kind} if got is not None else {})})
+    elif path in ("/device/earbuds", "/device/earbuds/learn"):
+        # Earbuds connected, or what a pair's taps were seen to send
+        # (earbuds.py, §6.63).
+        from . import earbuds
+
+        dev = auth.device_id(_bearer(h))
+        if not dev:
+            _json(h, 401, {"ok": False, "error": "a paired device only"})
+            return True
+        if path == "/device/earbuds":
+            ok, detail = earbuds.report(dev, _read_json(h))
+        else:
+            ok, detail = earbuds.learn(_read_json(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/view":
         # What this device shows now, the chat list or a thread: a device
         # mirroring it shows the same (follow.py, §6.21g).

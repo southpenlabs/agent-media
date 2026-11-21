@@ -1,0 +1,108 @@
+"""Earbuds: which pair is on, what its taps send, how to answer with them
+(earbuds.py, server-contract.md §6.63)."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from agent_media_server import earbuds
+from test_contract import call, server, typed  # noqa: F401 — fixtures
+from test_mic import _device
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path, monkeypatch):
+    for k in list(os.environ):
+        if k.startswith(("MEDIA_", "RELAY_")):
+            monkeypatch.delenv(k, raising=False)
+    for d in ("HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(d, str(tmp_path / d.lower()))
+    monkeypatch.setenv("AMUX_AUTH_TOKEN", "hosttok")
+
+
+@pytest.fixture()
+def pixel():
+    return _device("Pixel 8a")
+
+
+def test_anko_as_measured_answers_left_then_right_with_double_tap_for_more():
+    p = earbuds.profile_for("anko43641765")
+    assert p["source"] == "shipped" and p["verified"] and p["model"] == "anko-tws"
+    assert p["scheme"] == "pair"
+    assert p["answer"] == {"first": {"gesture": "left_tap", "signal": "play"},
+                           "second": {"gesture": "right_tap", "signal": "volume_up"},
+                           "more": {"gesture": "double_tap", "signal": "next"}}
+    assert p["guidance"][0] == ("Your Anko earbuds: tap the left bud for the first answer, "
+                                "tap the right bud for the second, double tap for more.")
+    assert p["guidance"][1] == "Triple tap is the phone's voice assistant, not mine."
+
+
+def test_a_brand_without_measured_taps_is_learned_and_names_its_app():
+    p = earbuds.profile_for("Galaxy Buds2 Pro")
+    assert p["source"] == "shipped" and not p["verified"]
+    assert p["scheme"] == "learn" and p["answer"] == {}
+    assert p["app"] == "Galaxy Wearable"
+    assert "tap test" in p["guidance"][0] and "Galaxy Wearable" in p["guidance"][-1]
+
+
+def test_unknown_earbuds_are_learned():
+    p = earbuds.profile_for("Mystery Buds X")
+    assert p["source"] == "unknown" and p["scheme"] == "learn" and "app" not in p
+
+
+def test_one_play_key_reads_options_one_at_a_time():
+    a = earbuds.answer_map({"tap": "play_pause", "double_tap": "next"})
+    assert earbuds.scheme_of(a) == "one_at_a_time"
+
+
+def test_report_learn_and_read_back_over_http(server, pixel):
+    hdrs, _ = pixel
+    res, got = call(server, "GET", "/device/earbuds", None, hdrs)
+    assert res.status == 200 and got == {"ok": True, "earbuds": None}, got
+
+    res, got = call(server, "POST", "/device/earbuds",
+                    {"name": "Mystery Buds X", "oui": "aa-bb-cc"}, hdrs)
+    assert res.status == 200 and got["ok"], got
+    assert got["earbuds"]["name"] == "Mystery Buds X" and got["earbuds"]["oui"] == "AA:BB:CC"
+    assert got["profile"]["scheme"] == "learn"
+
+    res, got = call(server, "POST", "/device/earbuds/learn",
+                    {"name": "Mystery Buds X",
+                     "gestures": {"tap": "play_pause", "right_tap": "volume_down",
+                                  "hold": "launch_rockets"}}, hdrs)
+    assert res.status == 200 and got["ok"], got
+    assert got["profile"]["source"] == "learned"
+    assert got["profile"]["gestures"] == {"tap": "play_pause", "right_tap": "volume_down"}
+    assert got["profile"]["scheme"] == "pair"
+
+    res, got = call(server, "GET", "/device/earbuds", None, hdrs)
+    assert got["profile"]["source"] == "learned" and got["profile"]["scheme"] == "pair"
+
+    res, got = call(server, "POST", "/device/earbuds", {"connected": False}, hdrs)
+    assert got == {"ok": True, "earbuds": None}
+    res, got = call(server, "GET", "/device/earbuds", None, hdrs)
+    assert got["earbuds"] is None
+
+
+def test_a_whole_address_is_not_kept(server, pixel):
+    hdrs, _ = pixel
+    res, got = call(server, "POST", "/device/earbuds",
+                    {"name": "anko43641765", "oui": "11:22:33:44:55:66"}, hdrs)
+    assert got["earbuds"]["oui"] == ""
+
+
+@pytest.mark.parametrize("body", [{"gestures": {"tap": "play"}}, {"name": "X"},
+                                  {"name": "X", "gestures": {"wiggle": "play"}}])
+def test_learn_without_name_or_gestures_is_400(server, pixel, body):
+    hdrs, _ = pixel
+    res, got = call(server, "POST", "/device/earbuds/learn", body, hdrs)
+    assert res.status == 400 and not got["ok"], got
+
+
+def test_unpaired_is_401(server):
+    res, _ = call(server, "GET", "/device/earbuds", None, {})
+    assert res.status == 401
+    res, _ = call(server, "POST", "/device/earbuds", {"name": "x"}, {})
+    assert res.status == 401

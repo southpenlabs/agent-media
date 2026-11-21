@@ -14190,6 +14190,39 @@ server and the servers it has peer links with. `POST` is `auth.may_admin`;
 this server's own address is stored as null; 400 `code: "service"` or
 `"server"`. Stored in `<state>/services.json`. Code: `services.py`.
 
+### 6.63 Earbuds: which pair is on, what its taps send, how to answer with them — gated (22 Nov 2026)
+
+David, 22 Nov 2026: "I'd like to answer questions with taps on my earbuds
+whenever possible... guidance based on the brand of earbuds being used";
+docs/proposals/2026-11-22-answer-by-earbud-taps.md. Any paired device.
+
+- `POST /device/earbuds {name, oui?}`: these earbuds connected. `name` is
+  the Bluetooth name (`AudioDeviceInfo.getProductName()`); `oui` only the
+  maker's half of the address (`AA:BB:CC`), never the whole of it.
+  `{connected: false}` or no `name`: none are on. → `{ok, earbuds: {name,
+  oui, at} | null, profile}`.
+- `GET /device/earbuds` → the same for what this device has on now.
+- `POST /device/earbuds/learn {name, gestures: {gesture: signal}}`: what
+  each gesture was seen to send (the app's tap test). Replaces an earlier
+  one for that name; learned beats shipped. 400 without either. →
+  `{ok, profile}`.
+
+`profile`: `{model, label, source: "learned"|"shipped"|"unknown",
+verified, gestures, answer, scheme, guidance: [sentence...], app?}`.
+Gestures: `left_tap`, `right_tap`, `tap` (either side), `double_tap`,
+`triple_tap`, `hold`. Signals: `play`, `pause`, `play_pause`,
+`headsethook`, `next`, `previous`, `volume_up`, `volume_down`,
+`assistant` (the phone's, never the app's), `none`. `answer`: `first` (a
+play key), `second` (a volume step, which the app puts back), `more`
+(next), `back` (previous), each `{gesture, signal}`. `scheme`: `pair`
+(first and second), `one_at_a_time` (first only: options read singly, the
+play key on the one wanted), `learn` (nothing known: offer the tap test).
+`guidance` is said once when a model first connects; `app` names the
+maker's app for remapping taps. The shipped table is verified only for
+Anko (`anko<digits>`); the other brands carry their app and are learned.
+Stored in `<state>/earbuds.json` (learned, by name) and
+`earbuds-devices.json` (per device). Code: `earbuds.py`.
+
 ---
 
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
