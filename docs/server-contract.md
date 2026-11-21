@@ -11686,8 +11686,13 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `{"verbose": true}` at most every 30 min), so the app offers Transit only where it works. 404
   `no_router` when no routing service is set. The map's gate, as above.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
-  address, lat, lon, kind}]}`, the Map's search box (core `place_find`,
-  Nominatim), nearest first given `near`. 400 for no words.
+  address, lat, lon, kind, distance_m? (given near), opening_hours?,
+  open_now?, changes_at?}]}`, the Map's search box (core `place_find`,
+  Nominatim), nearest first given `near`. The hours are OSM's own string,
+  asked of Nominatim with `extratags=1`, and `open_now`/`changes_at` read
+  from them as `/map/places` does, where a place has them (21 Nov 2026;
+  David: "No opening hours? What about cafes and restaurants?"). 400 for
+  no words.
 - **`GET /map/places?near=lat,lon[&radius_m=1500] | bbox=w,s,e,n
   | along=lat,lon;lat,lon;…[&radius_m=500]
   &kind=<kind>[,<kind>][&open_now=1][&limit=20]`** (19 Nov 2026; David:

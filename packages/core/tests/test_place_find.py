@@ -21,13 +21,20 @@ def test_find_reads_nominatim_and_leans_near(monkeypatch):
     def fake(req, timeout=0):
         seen["url"], seen["ua"] = req.full_url, req.get_header("User-agent")
         return _Res(json.dumps([{"name": "Brunetti", "display_name": "Brunetti, Carlton", "lat": "-37.79809",
-                                 "lon": "144.968718", "type": "cafe"}, {"lat": "x"}]).encode())
+                                 "lon": "144.968718", "type": "cafe", "extratags": {"opening_hours": "Mo-Su 06:00-23:00"}},
+                                {"name": "Lygon Street", "display_name": "Lygon Street, Carlton", "lat": "-37.80",
+                                 "lon": "144.967", "type": "secondary", "extratags": {}},
+                                {"lat": "x"}]).encode())
 
     monkeypatch.setenv("MEDIA_GEOCODER_URL", "https://geo.example/")
     monkeypatch.setattr(place_find.urllib.request, "urlopen", fake)
     rows = place_find.find("Brunetti", near=(-37.8, 144.96), limit=3)
+    # The hours where OSM has them (extratags), none for a road.
     assert rows == [{"name": "Brunetti", "address": "Brunetti, Carlton", "lat": -37.79809,
-                     "lon": 144.968718, "kind": "cafe"}]
+                     "lon": 144.968718, "kind": "cafe", "opening_hours": "Mo-Su 06:00-23:00"},
+                    {"name": "Lygon Street", "address": "Lygon Street, Carlton", "lat": -37.8,
+                     "lon": 144.967, "kind": "secondary"}]
+    assert "extratags=1" in seen["url"]
     assert seen["url"].startswith("https://geo.example/search?q=Brunetti")
     assert "viewbox=144.76" in seen["url"] and "limit=3" in seen["url"]
     assert seen["ua"].startswith("agent-media")

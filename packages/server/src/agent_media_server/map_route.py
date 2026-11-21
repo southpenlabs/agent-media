@@ -348,4 +348,14 @@ def search(q: str, near: str = "") -> tuple[bool, dict]:
             kx = math.cos(math.radians(pt[0])) * 111_320.0
             return math.hypot((r["lon"] - pt[1]) * kx, (r["lat"] - pt[0]) * 110_540.0)
         rows.sort(key=dist)
+        for r in rows:
+            r["distance_m"] = round(dist(r))
+    # Open or not, and until when, as /map/places has it (map_places.open_state).
+    from . import map_places
+
+    for r in rows:
+        if r.get("opening_hours"):
+            r["open_now"], changes = map_places.open_state(r["opening_hours"], r["lat"], r["lon"])
+            if changes:
+                r["changes_at"] = changes
     return True, {"places": rows}

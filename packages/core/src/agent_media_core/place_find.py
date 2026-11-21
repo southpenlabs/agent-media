@@ -56,9 +56,12 @@ def near_point(near: str) -> tuple[float, float] | None:
 
 
 def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) -> list[dict]:
-    """The best matches, best first: `{"name", "address", "lat", "lon", "kind"}`."""
+    """The best matches, best first: `{"name", "address", "lat", "lon", "kind",
+    "opening_hours"?}` — the hours OSM's own string, where the place has them
+    (Nominatim's extratags; David, 21 Nov 2026: "No opening hours? What about
+    cafes and restaurants?")."""
     q = {"q": words, "format": "jsonv2", "limit": str(max(1, min(limit, 10))),
-         "addressdetails": "0"}
+         "addressdetails": "0", "extratags": "1"}
     if near:
         lat, lon = near
         q["viewbox"] = f"{lon - NEAR_SPAN},{lat + NEAR_SPAN},{lon + NEAR_SPAN},{lat - NEAR_SPAN}"
@@ -74,8 +77,12 @@ def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) ->
             continue
         address = str(r.get("display_name") or "")
         name = str(r.get("name") or "") or address.split(",")[0].strip()
-        out.append({"name": name, "address": address, "lat": lat, "lon": lon,
-                    "kind": str(r.get("type") or r.get("category") or "")})
+        row = {"name": name, "address": address, "lat": lat, "lon": lon,
+               "kind": str(r.get("type") or r.get("category") or "")}
+        hours = (r.get("extratags") or {}).get("opening_hours") if isinstance(r.get("extratags"), dict) else None
+        if hours:
+            row["opening_hours"] = str(hours)
+        out.append(row)
     return out
 
 
