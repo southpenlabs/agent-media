@@ -11761,10 +11761,18 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   we do one and two?"; `map_hours.py`, tests in `test_map_hours.py`): a
   place's hours from Google, then Foursquare, for a card OpenStreetMap
   has none for (Google added 22 Nov 2026: "Can we also get data from
-  Google on a free tier?"). → `{found: true, source: "google" |
-  "foursquare", opening_hours (OSM's syntax, built from the source's
+  Google on a free tier?"); HERE then TomTom between Google and
+  Foursquare, 22 Nov 2026: "Add HERE and TomTom"). → `{found: true,
+  source: "google" | "here" | "tomtom" | "foursquare" | "website", credit
+  (the name to show beside the hours: "Google Maps", "HERE", "TomTom",
+  "Foursquare"; the app shows "Hours from {credit}" and needs no list of
+  sources), opening_hours (OSM's syntax, built from the source's
   periods), display (the source's own words), open_now, changes_at?, link
-  (the place's Google Maps or Foursquare page)}` or `{found: false,
+  (the place's page at the source)}`. HERE (`MEDIA_HERE_API_KEY`):
+  Geocoding & Search v7 Discover at the point, `openingHours[].structured`
+  read. TomTom (`MEDIA_TOMTOM_API_KEY`): Search API fuzzy search within
+  150 m with `openingHours=nextSevenDays`, a day with no range closed.
+  Each is skipped without its key or `{found: false,
   reason: no_key | no_match | no_hours | failed | google_month_spent}`. A
   match is a like name within 150 m. Google (`MEDIA_GOOGLE_PLACES_KEY`): a
   Text Search asking only for id, displayName and location finds the

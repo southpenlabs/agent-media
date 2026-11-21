@@ -1,6 +1,8 @@
 """A place's opening hours when OpenStreetMap has none: the business's own
 website's (schema.org, map_check.website_answer; 22 Nov 2026), then Google's,
-then Foursquare's (David, 21 Nov 2026: "how does Google maps get blue fin
+then HERE's and TomTom's free tiers (`MEDIA_HERE_API_KEY`,
+`MEDIA_TOMTOM_API_KEY`; David, 22 Nov 2026: "Add HERE and TomTom"), then
+Foursquare's (David, 21 Nov 2026: "how does Google maps get blue fin
 opening hours?" … "Can we do one and two?" — two being a Foursquare
 fallback; 22 Nov: "Can we also get data from Google on a free tier?").
 
@@ -18,7 +20,8 @@ stored. The app credits "Google Maps" and links the place's page.
 
 `GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>` (§6.50), asked by
 the Map when a place's card opens with no hours of OSM's own. →
-`{found: true, source: "foursquare", opening_hours (as OSM writes them),
+`{found: true, source: "foursquare", credit (the name to show:
+"Google Maps", "HERE", "TomTom", "Foursquare"), opening_hours (as OSM writes them),
 display (Foursquare's own words), open_now, changes_at?, link}` or
 `{found: false, reason}` (`no_key`, `no_match`, `no_hours`, `failed`).
 
@@ -238,7 +241,7 @@ def _google(name: str, la: float, lo: float, gfetch: GFetch | None, now) -> dict
     oh = osm_hours_google(hours)
     if not oh:
         return {"found": False, "reason": "no_hours"}
-    out = {"found": True, "source": "google", "opening_hours": oh,
+    out = {"found": True, "source": "google", "credit": "Google Maps", "opening_hours": oh,
            "display": "; ".join(str(x) for x in hours.get("weekdayDescriptions") or []),
            "link": str(d.get("googleMapsUri") or f"https://www.google.com/maps/place/?q=place_id:{pid}")}
     if isinstance(d.get("websiteUri"), str) and d["websiteUri"].startswith(("http://", "https://")):
@@ -352,8 +355,12 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
         _keep(key, dict(w), now_s)
     elif (g := _cached(key, now_s)) is None:
         g = _google(name, la, lo, gfetch, now)
-        if not g.get("found"):
-            f = _foursquare(name, la, lo, fetch)
+        # Then HERE's and TomTom's free tiers, then Foursquare (billed per card).
+        for other in (lambda: _here(name, la, lo, fetch), lambda: _tomtom(name, la, lo, fetch),
+                      lambda: _foursquare(name, la, lo, fetch)):
+            if g.get("found"):
+                break
+            f = other()
             if f.get("found") or g.get("reason") == "no_key":
                 g = f
         _keep(key, {k: v for k, v in g.items() if k not in ("open_now", "changes_at")}, now_s)
@@ -409,13 +416,149 @@ def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], di
     oh = osm_hours(hours.get("regular") or [])
     if not oh:
         return {"found": False, "reason": "no_hours"}
-    out = {"found": True, "source": "foursquare", "opening_hours": oh,
+    out = {"found": True, "source": "foursquare", "credit": "Foursquare", "opening_hours": oh,
            "display": str(hours.get("display") or ""),
            "link": f"https://foursquare.com/v/{urllib.parse.quote(fid)}" if fid else "https://foursquare.com"}
     if isinstance(hours.get("open_now"), bool):
         out["open_now_given"] = hours["open_now"]
     if isinstance(best.get("website"), str) and best["website"].startswith(("http://", "https://")):
         out["website"] = best["website"][:500]
+    return out
+
+
+HERE = "https://discover.search.hereapi.com/v1/discover"
+TOMTOM = "https://api.tomtom.com/search/2/search"
+#: HERE's and TomTom's day codes as OSM's day numbers (1 = Monday).
+_BYDAY = {"MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6, "SU": 7}
+
+
+def _get(url: str, fetch: Callable[[str, dict], dict] | None) -> dict:
+    headers = {"Accept": "application/json"}
+    if fetch:
+        return fetch(url, headers)
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TIMEOUT_S) as res:
+        return json.loads(res.read().decode("utf-8") or "{}")
+
+
+def _pick(name: str, la: float, lo: float, rows: list, where: Callable[[dict], tuple]) -> dict | None:
+    """The first row near the point (NEAR_M) with a like name; `where(row)` →
+    (name, lat, lon)."""
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rn, rl, ro = where(r)
+        if isinstance(rl, (int, float)) and isinstance(ro, (int, float)) and _distance_m(la, lo, rl, ro) > NEAR_M:
+            continue
+        if _alike(name, str(rn or "")):
+            return r
+    return None
+
+
+def osm_hours_here(opening: list) -> str:
+    """HERE's `openingHours[].structured` (`{start: "T073000", duration:
+    "PT14H30M", recurrence: "FREQ:DAILY;BYDAY:MO,TU"}`) as OSM writes hours."""
+    regular = []
+    for oh in opening or []:
+        for st in (oh or {}).get("structured") or [] if isinstance(oh, dict) else []:
+            if not isinstance(st, dict):
+                continue
+            m = re.fullmatch(r"T(\d{2})(\d{2})(\d{2})?", str(st.get("start") or ""))
+            d = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?", str(st.get("duration") or ""))
+            days = re.search(r"BYDAY:([A-Z,]+)", str(st.get("recurrence") or ""))
+            if not m or not d or not days:
+                continue
+            start = int(m.group(1)) * 60 + int(m.group(2))
+            end = start + int(d.group(1) or 0) * 60 + int(d.group(2) or 0)
+            close = "2400" if end == 24 * 60 else f"{(end // 60) % 24:02d}{end % 60:02d}"
+            for code in days.group(1).split(","):
+                if code in _BYDAY:
+                    regular.append({"day": _BYDAY[code], "open": f"{start // 60:02d}{start % 60:02d}", "close": close})
+    return osm_hours(regular)
+
+
+def _here(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+    """HERE's hours (Geocoding & Search v7 Discover), or `{found: False, reason}`.
+    Off unless `MEDIA_HERE_API_KEY` is set."""
+    key = (os.environ.get("MEDIA_HERE_API_KEY") or "").strip()
+    if not key:
+        return {"found": False, "reason": "no_key"}
+    q = {"at": f"{la:.6f},{lo:.6f}", "q": name, "limit": 5, "apiKey": key}
+    try:
+        got = _get(f"{HERE}?{urllib.parse.urlencode(q)}", fetch)
+    except Exception as e:  # noqa: BLE001 - HERE down, a bad key, over quota
+        _failures.swallowed(e)
+        return {"found": False, "reason": "failed"}
+    best = _pick(name, la, lo, got.get("items") or [],
+                 lambda r: (r.get("title"), (r.get("position") or {}).get("lat"), (r.get("position") or {}).get("lng")))
+    if best is None:
+        return {"found": False, "reason": "no_match"}
+    opening = [o for o in best.get("openingHours") or [] if isinstance(o, dict)]
+    oh = osm_hours_here(opening)
+    if not oh:
+        return {"found": False, "reason": "no_hours"}
+    pos = best.get("position") or {}
+    out = {"found": True, "source": "here", "credit": "HERE", "opening_hours": oh,
+           "display": "; ".join(str(t) for o in opening for t in o.get("text") or []),
+           "link": f"https://wego.here.com/?map={pos.get('lat', la)},{pos.get('lng', lo)},18"}
+    if isinstance(opening[0].get("isOpen"), bool):
+        out["open_now_given"] = opening[0]["isOpen"]
+    for c in best.get("contacts") or []:
+        for w in (c or {}).get("www") or [] if isinstance(c, dict) else []:
+            v = (w or {}).get("value") if isinstance(w, dict) else None
+            if isinstance(v, str) and v.startswith(("http://", "https://")) and "website" not in out:
+                out["website"] = v[:500]
+    return out
+
+
+def osm_hours_tomtom(hours: dict) -> str:
+    """TomTom's `poi.openingHours` (mode nextSevenDays: `timeRanges` of
+    `{startTime, endTime: {date, hour, minute}}`) as OSM writes hours; a day
+    with no range is closed."""
+    import datetime as _dt
+
+    regular = []
+    for tr in (hours or {}).get("timeRanges") or []:
+        if not isinstance(tr, dict):
+            continue
+        a, b = tr.get("startTime") or {}, tr.get("endTime") or {}
+        try:
+            da = _dt.date.fromisoformat(str(a.get("date")))
+            db = _dt.date.fromisoformat(str(b.get("date") or a.get("date")))
+            ah, am, bh, bm = int(a.get("hour") or 0), int(a.get("minute") or 0), int(b.get("hour") or 0), int(b.get("minute") or 0)
+        except (TypeError, ValueError):
+            continue
+        close = "2400" if db > da and (bh, bm) == (0, 0) else f"{bh:02d}{bm:02d}"
+        regular.append({"day": da.isoweekday(), "open": f"{ah:02d}{am:02d}", "close": close})
+    return osm_hours(regular)
+
+
+def _tomtom(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+    """TomTom's hours (Search API, fuzzy search near the point), or `{found:
+    False, reason}`. Off unless `MEDIA_TOMTOM_API_KEY` is set."""
+    key = (os.environ.get("MEDIA_TOMTOM_API_KEY") or "").strip()
+    if not key:
+        return {"found": False, "reason": "no_key"}
+    q = {"key": key, "lat": f"{la:.6f}", "lon": f"{lo:.6f}", "radius": NEAR_M, "limit": 5,
+         "openingHours": "nextSevenDays"}
+    try:
+        got = _get(f"{TOMTOM}/{urllib.parse.quote(name, safe='')}.json?{urllib.parse.urlencode(q)}", fetch)
+    except Exception as e:  # noqa: BLE001 - TomTom down, a bad key, over quota
+        _failures.swallowed(e)
+        return {"found": False, "reason": "failed"}
+    best = _pick(name, la, lo, got.get("results") or [],
+                 lambda r: ((r.get("poi") or {}).get("name"), (r.get("position") or {}).get("lat"),
+                            (r.get("position") or {}).get("lon")))
+    if best is None:
+        return {"found": False, "reason": "no_match"}
+    poi = best.get("poi") or {}
+    oh = osm_hours_tomtom(poi.get("openingHours") if isinstance(poi.get("openingHours"), dict) else {})
+    if not oh:
+        return {"found": False, "reason": "no_hours"}
+    out = {"found": True, "source": "tomtom", "credit": "TomTom", "opening_hours": oh, "display": "",
+           "link": "https://www.tomtom.com/"}
+    if isinstance(poi.get("url"), str) and poi["url"]:
+        u = poi["url"] if poi["url"].startswith(("http://", "https://")) else f"https://{poi['url']}"
+        out["website"] = u[:500]
     return out
 
 

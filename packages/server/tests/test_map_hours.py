@@ -21,6 +21,8 @@ def fresh(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_FOURSQUARE_KEY", "fsq-test")
     monkeypatch.delenv("MEDIA_GOOGLE_PLACES_KEY", raising=False)
     monkeypatch.delenv("MEDIA_GOOGLE_PLACES_MONTHLY_MAX", raising=False)
+    monkeypatch.delenv("MEDIA_HERE_API_KEY", raising=False)
+    monkeypatch.delenv("MEDIA_TOMTOM_API_KEY", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     # Each test here asks afresh; test_hours_are_kept_a_week turns the cache on.
     monkeypatch.setattr(map_hours, "CACHE_S", 0)
@@ -171,3 +173,67 @@ def test_hours_are_kept_and_a_miss_a_day(monkeypatch):
     assert len(asked) == 3
     map_hours.place_hours("Nowhere Cafe", "-38.30", "144.70", fetch=nothing, now=THU_10 + dt.timedelta(days=2))
     assert len(asked) == 4
+
+
+HERE_ITEM = {"title": "Blue Fin", "position": {"lat": -38.36118, "lng": 144.77844},
+             "contacts": [{"www": [{"value": "https://bluefin.example"}]}],
+             "openingHours": [{"text": ["Mon-Fri: 07:00 - 15:00", "Sat: 18:00 - 02:00"], "isOpen": True,
+                               "structured": [{"start": "T070000", "duration": "PT08H00M",
+                                               "recurrence": "FREQ:DAILY;BYDAY:MO,TU,WE,TH,FR"},
+                                              {"start": "T180000", "duration": "PT08H00M",
+                                               "recurrence": "FREQ:DAILY;BYDAY:SA"}]}]}
+
+
+def _no_fsq(url, headers):
+    if "foursquare" in url:
+        raise AssertionError("Foursquare asked after a free source found hours")
+    return {}
+
+
+def test_here_after_google_before_foursquare(monkeypatch):
+    monkeypatch.setenv("MEDIA_HERE_API_KEY", "here-test")
+    asked = []
+
+    def fetch(url, headers):
+        asked.append(url)
+        if url.startswith(map_hours.HERE):
+            return {"items": [HERE_ITEM]}
+        return _no_fsq(url, headers)
+    ok, got = map_hours.place_hours("Blue Fin", "-38.361177", "144.778438", fetch=fetch, now=THU_10)
+    assert ok and got["source"] == "here" and got["credit"] == "HERE"
+    assert got["opening_hours"] == "Mo-Fr 07:00-15:00; Sa 18:00-02:00"
+    assert got["website"] == "https://bluefin.example" and got["open_now"] is True
+    assert "apiKey=here-test" in asked[0] and "at=-38.361177%2C144.778438" in asked[0]
+
+
+def test_tomtom_when_here_has_none(monkeypatch):
+    monkeypatch.setenv("MEDIA_HERE_API_KEY", "here-test")
+    monkeypatch.setenv("MEDIA_TOMTOM_API_KEY", "tt-test")
+
+    def day(d, a, b, nd=None, bm=0):
+        return {"startTime": {"date": d, "hour": a, "minute": 0},
+                "endTime": {"date": nd or d, "hour": b, "minute": bm}}
+    poi = {"poi": {"name": "Blue Fin Cafe", "url": "bluefin.example",
+                   "openingHours": {"mode": "nextSevenDays", "timeRanges": [
+                       day("2026-11-19", 7, 15), day("2026-11-20", 7, 15),
+                       day("2026-11-21", 8, 0, nd="2026-11-22"), day("2026-11-23", 7, 15, bm=30)]}},
+           "position": {"lat": -38.36118, "lon": 144.77844}}
+
+    def fetch(url, headers):
+        if url.startswith(map_hours.HERE):
+            return {"items": [{**HERE_ITEM, "openingHours": []}]}
+        if url.startswith(map_hours.TOMTOM):
+            assert "/Blue%20Fin.json?" in url and "openingHours=nextSevenDays" in url
+            return {"results": [poi]}
+        return _no_fsq(url, headers)
+    ok, got = map_hours.place_hours("Blue Fin", "-38.361177", "144.778438", fetch=fetch, now=THU_10)
+    assert got["source"] == "tomtom" and got["credit"] == "TomTom"
+    assert got["opening_hours"] == "Mo 07:00-15:30; Th,Fr 07:00-15:00; Sa 08:00-24:00"
+    assert got["website"] == "https://bluefin.example"
+
+
+def test_free_sources_without_keys_are_skipped(monkeypatch):
+    def fetch(url, headers):
+        assert "hereapi" not in url and "tomtom" not in url
+        return {"results": [BLUE_FIN]}
+    assert map_hours.place_hours("Blue Fin", "-38.3611", "144.7784", fetch=fetch, now=THU_10)[1]["source"] == "foursquare"
