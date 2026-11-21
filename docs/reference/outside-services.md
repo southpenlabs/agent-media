@@ -111,6 +111,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 68 | OpenStreetMap editing API (openstreetmap.org, OAuth 2) | adding a place's opening hours from the Map's card (`/map/osm/*`, osm_edit.py; 21 Nov 2026) | the owner's own OSM account, signed in from the app (PKCE, a public client registered as `MEDIA_OSM_CLIENT_ID`; the token 0600 in the state dir) | one changeset per edit, asked before each one in the app | **Fine for a person's own edits** (ODbL; the OSMF's API usage policy asks for a named client, `created_by=Sasonica`, and no bulk or automated edits — each edit here is one a person typed and confirmed); a public build needs each user's own OSM sign-in, never the owner's | yes (an owner's own account) |
 | 69 | Google Places API (New) | a place's opening hours when OpenStreetMap has none, before Foursquare, asked as its card opens (`GET /map/place_hours`, map_hours.py; 22 Nov 2026) | the owner's API key, `MEDIA_GOOGLE_PLACES_KEY` (off without one; a Cloud billing account is needed for a key) | Text Search with only id, name and location (finding the place), then Place Details Enterprise for regularOpeningHours: 1,000 free a month since March 2025, then $20 per 1,000; counted per month and stopped at `MEDIA_GOOGLE_PLACES_MONTHLY_MAX` (900), with a daily quota set in the Cloud console as a hard ceiling | **Unsettled**: the policies page asks for the Google Maps logo or the words "Google Maps" and a link to the place (the app credits "Hours from Google Maps" with googleMapsUri); place IDs are stored (allowed indefinitely) and, since 22 Nov 2026, the hours too, for good (`place-hours-cache.json`; David: "Cache everywhere for a week", then "indefinitely", told it goes against the terms, which allow storing place IDs only), so a public build must turn that cache off; whether Places content may be shown in an app whose map is not Google's is not answered there, so the Service Specific Terms must be read before a public build uses it | yes (until the terms are read) |
 | 70 | Businesses' own websites | a place's opening hours, phone, menu, booking page and the like, read from the schema.org structured data (JSON-LD or microdata) of the site OSM, the app, Google or Foursquare names for it, for the Map's card (before Google is asked) and the check-hours list (`map_check.py`, `site_read.py`; 22 Nov 2026) | none | one page (and one obvious hours or contact page for the list) at most once a week per place; an honest User-Agent naming agent-media, robots.txt obeyed, 4–8 s timeouts, 2 MB at most, public addresses only | **Fine**: a business's own published facts are an allowed source for OpenStreetMap (its copyright guidance forbids Google's and Foursquare's, so their hours never go there); what is read is proposed and sent to OSM only when the owner confirms it in the app, under his own account (row 68); ratings read there are shown on the card only, never sent anywhere | no |
+| 71 | name-suggestion-index (NSI, via jsDelivr) and Wikidata's API (wbgetentities) | everyday names for shops in place search: "woolies" to Woolworths (`place_nicknames.py`, kept in `place-nicknames.json`, rebuilt monthly; 22 Nov 2026) | none (named client) | NSI BSD-3, Wikidata CC0; Wikidata asks for a User-Agent and a modest rate (about 35 calls a month) | nothing | no |
 
 ## The services, one by one
 
@@ -889,6 +890,23 @@ hosted tier), every one of these becomes a reseller question.
 - **Terms:** following a link the user shared, once, as a browser would;
   no Google Maps content is stored or shown (the app draws its own map).
 - **Personal-use switch:** no.
+
+### 71. name-suggestion-index and Wikidata (place nicknames)
+
+- **Used for:** putting an everyday name back to a brand's own before a
+  place search (`place_nicknames.py`, read by `place_find.expand`): NSI's
+  `nsi.min.json` (12 MB, from cdn.jsdelivr.net) for the brands sold in
+  `MEDIA_PLACE_COUNTRIES` and worldwide, then Wikidata's English aliases
+  for their items, 50 to a call. Once a month in the background, a day's
+  wait after a failure; `MEDIA_PLACE_NICKNAMES=0` turns it off. No search
+  words, account or location leave the server.
+- **Terms:** NSI is BSD-3-Clause; Wikidata's data is CC0 and its API asks
+  for a descriptive User-Agent and no parallel flooding
+  (https://www.mediawiki.org/wiki/API:Etiquette).
+- **Personal-use switch:** no.
+- A search that still finds nothing is reworded once by the install's own
+  fast model (`place_find.reword`, `MEDIA_PLACE_REWORD=0` for none): the
+  search words go to that model's gateway (row for the gateway's models).
 
 ## Before other people use this
 

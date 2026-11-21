@@ -21,10 +21,14 @@ geocoder.
 
 Nominatim matches names only as they are written in OpenStreetMap, so the
 everyday names Google understands ("woolies", "maccas") are put back to the
-shop's own name first (`NICKNAMES`), and a search near a point asks inside
-the box around it before anywhere at all: the viewbox only leans, and an
-exact "Woolies" in England beats every Woolworths nearby (David, 22 Nov
-2026: "when you search for woolies it doesn't find Woolworths").
+shop's own name first (`NICKNAMES`, then the brand nicknames kept from
+NSI and Wikidata, place_nicknames.py), and a search near a point asks
+inside the box around it before anywhere at all: the viewbox only leans,
+and an exact "Woolies" in England beats every Woolworths nearby (David, 22
+Nov 2026: "when you search for woolies it doesn't find Woolworths"). A
+search that finds nothing anywhere is reworded once by a fast model
+(`reword`, MEDIA_PLACE_REWORD=0 for none) and asked again: what Google's
+own search does with "bunnos".
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from typing import Callable
+
+from . import failures
 
 DEFAULT_URL = "https://nominatim.openstreetmap.org"
 USER_AGENT = "agent-media place find (https://github.com/southpenlabs/agent-media)"
@@ -58,12 +65,68 @@ _NICK_RE = re.compile(r"(?<![\w'-])(" + "|".join(
     re.escape(k) for k in sorted(NICKNAMES, key=len, reverse=True)) + r")(?![\w'-])", re.IGNORECASE)
 #: Seconds between two asks of the public Nominatim (its policy: one a second).
 PUBLIC_GAP_S = 1.0
+#: Seconds a model has to reword a search that found nothing.
+REWORD_TIMEOUT_S = 8
 
 
-def expand(words: str) -> str:
+def expand(words: str, table: dict[str, str] | None = None) -> str:
     """`words` with any everyday name put back to the shop's own: "woolies
-    rosebud" -> "Woolworths rosebud"."""
-    return _NICK_RE.sub(lambda m: NICKNAMES[m.group(1).lower()], words)
+    rosebud" -> "Woolworths rosebud". The list above first, then the brand
+    nicknames from open data (place_nicknames: NSI and Wikidata)."""
+    out = _NICK_RE.sub(lambda m: NICKNAMES[m.group(1).lower()], words)
+    if out != words:
+        return out
+    from . import place_nicknames
+
+    if table is None:
+        place_nicknames.refresh_if_stale()
+        table = place_nicknames.table()
+    if not table:
+        return words
+    toks = words.split()
+    norm = [place_nicknames.norm(t) for t in toks]
+    res, i = [], 0
+    while i < len(toks):
+        for n in range(min(4, len(toks) - i), 0, -1):
+            key = " ".join(w for w in norm[i:i + n] if w)
+            if key and key in table:
+                res.append(table[key])
+                i += n
+                break
+        else:
+            res.append(toks[i])
+            i += 1
+    return " ".join(res)
+
+
+#: What a model is asked when a search finds nothing at all.
+REWORD_PROMPT = (
+    "You turn what a person typed into a map search into the name the place "
+    "would have on OpenStreetMap: a shop's or chain's proper name for a "
+    "nickname or abbreviation (\"maccas\" -> \"McDonald's\"), a landmark's "
+    "proper name, spelling fixed. Keep any suburb or street they gave. Reply "
+    "with the search words only, or NONE when you cannot improve them."
+)
+
+
+def reword(words: str, ask: Callable[[str, str], str | None] | None = None) -> str:
+    """A model's better search words for a search that found nothing, or ""."""
+    if os.environ.get("MEDIA_PLACE_REWORD", "1").strip() == "0":
+        return ""
+    if ask is None:
+        from .intake import fast
+
+        def ask(system: str, user: str) -> str | None:
+            return fast.chat(system, user, REWORD_TIMEOUT_S, purpose_env="MEDIA_PLACE_REWORD_MODEL")
+    try:
+        got = ask(REWORD_PROMPT, words) or ""
+    except Exception as e:  # noqa: BLE001 - no model: the search found nothing
+        failures.swallowed(e)
+        return ""
+    line = " ".join((got.strip().splitlines() or [""])[0].split()).strip("\"'`*")
+    if not line or line.upper() == "NONE" or len(line) > 120 or line.lower() == words.lower():
+        return ""
+    return line
 
 
 def _base() -> str:
@@ -87,7 +150,8 @@ def near_point(near: str) -> tuple[float, float] | None:
     return (lat, lon) if -90 <= lat <= 90 and -180 <= lon <= 180 else None
 
 
-def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) -> list[dict]:
+def find(words: str, near: tuple[float, float] | None = None, limit: int = 5,
+         ask: Callable[[str, str], str | None] | None = None) -> list[dict]:
     """The best matches, best first: `{"name", "address", "lat", "lon", "kind",
     "opening_hours"?}` — the hours OSM's own string, where the place has them
     (Nominatim's extratags; David, 21 Nov 2026: "No opening hours? What about
@@ -99,6 +163,16 @@ def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) ->
     gap = PUBLIC_GAP_S if _base() == DEFAULT_URL else 0.0
     for i, (w, bounded) in enumerate(tries):
         if i and gap:
+            time.sleep(gap)
+        out = _ask(w, near, limit, bounded)
+        if out:
+            return out
+    # Nothing anywhere: a model's rewording ("bunnos" -> "Bunnings"), asked once.
+    better = reword(words, ask)
+    if not better:
+        return []
+    for w, bounded in ([(better, True), (better, False)] if near else [(better, False)]):
+        if gap:
             time.sleep(gap)
         out = _ask(w, near, limit, bounded)
         if out:

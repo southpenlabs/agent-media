@@ -114,3 +114,37 @@ def test_find_asks_near_first_then_anywhere_then_the_words_as_said(monkeypatch):
     # No point and no nickname: one ask.
     asked.clear()
     assert place_find.find("Brunetti") == [] and asked == [("Brunetti", False)]
+
+
+def test_expand_uses_the_open_data_table():
+    t = {"mickey ds": "McDonald's", "greater union": "Event Cinemas"}
+    assert place_find.expand("Mickey D's Rosebud", table=t) == "McDonald's Rosebud"
+    assert place_find.expand("mickey ds", table=t) == "McDonald's"
+    assert place_find.expand("greater union city", table=t) == "Event Cinemas city"
+    assert place_find.expand("home", table=t) == "home"
+    # The list in place_find comes first.
+    assert place_find.expand("woolies", table={"woolies": "Other"}) == "Woolworths"
+
+
+def test_a_search_that_finds_nothing_is_reworded_once(monkeypatch):
+    asked = []
+
+    def fake(req, timeout=0):
+        from urllib.parse import parse_qs, urlparse
+
+        q = parse_qs(urlparse(req.full_url).query)["q"][0]
+        asked.append(q)
+        hit = [{"name": "Bunnings", "display_name": "Bunnings, Rosebud", "lat": "-38.36", "lon": "144.9"}]
+        return _Res(json.dumps(hit if q == "Bunnings Rosebud" else []).encode())
+
+    monkeypatch.setenv("MEDIA_GEOCODER_URL", "https://geo.example/")
+    monkeypatch.setenv("MEDIA_PLACE_REWORD", "1")
+    monkeypatch.setattr(place_find.urllib.request, "urlopen", fake)
+    rows = place_find.find("bunnoz rosebud", ask=lambda system, user: "Bunnings Rosebud")
+    assert [r["name"] for r in rows] == ["Bunnings"]
+    assert asked == ["bunnoz rosebud", "Bunnings Rosebud"]
+    # NONE, or the same words, asks nothing more.
+    asked.clear()
+    assert place_find.find("zzz", ask=lambda s, u: "NONE") == [] and asked == ["zzz"]
+    asked.clear()
+    assert place_find.find("zzz", ask=lambda s, u: "ZZZ") == [] and asked == ["zzz"]

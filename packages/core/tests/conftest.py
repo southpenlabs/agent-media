@@ -613,3 +613,15 @@ def _no_search_peers(monkeypatch):
     with (history_search.ask_peers): a test must never reach a real one.
     test_history_search_peers turns it back on against fakes."""
     monkeypatch.setenv("MEDIA_FIND_PEERS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_place_nicknames(monkeypatch):
+    """A place search never reads this machine's kept nickname table, builds
+    one from NSI and Wikidata, or asks a model to reword (place_find,
+    place_nicknames). A test that wants them passes its own table or `ask`."""
+    from agent_media_core import place_nicknames
+
+    monkeypatch.setattr(place_nicknames, "table", lambda path=None: {})
+    monkeypatch.setattr(place_nicknames, "refresh_if_stale", lambda path=None: None)
+    monkeypatch.setenv("MEDIA_PLACE_REWORD", "0")
