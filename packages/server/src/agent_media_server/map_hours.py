@@ -37,8 +37,9 @@ Off unless `MEDIA_FOURSQUARE_KEY` holds a Service Key.
 Cached (David, 22 Nov 2026: "let's cache opening hours", choosing "Cache
 everywhere for a week" when told it goes against both services' terms):
 each answer is kept in `state_dir()/place-hours-cache.json` by name and
-point (rounded to about 10 m), found hours for CACHE_S (a week), "no
-match" and "no hours" for MISS_S (a day), a failure or a missing key never.
+point (rounded to about 10 m), found hours for good (David, 22 Nov: "I
+think we should cache them indefinitely"; CACHE_S None), "no match" and
+"no hours" for MISS_S (a day), a failure or a missing key never.
 Whether a place is open now is worked out again from the kept hours on each
 read. Google's terms allow storing place IDs only, and Foursquare's only
 `fsq_place_id`, so a public release must turn this off (outside-services
@@ -67,8 +68,8 @@ DAYS = {1: "Mo", 2: "Tu", 3: "We", 4: "Th", 5: "Fr", 6: "Sa", 7: "Su"}
 
 _ids: dict[tuple, str] = {}
 _lock = threading.Lock()
-#: How long kept hours are used before asking again; a miss for a day.
-CACHE_S = 7 * 86400
+#: How long kept hours are used before asking again (None: for good); a miss for a day.
+CACHE_S: float | None = None
 MISS_S = 86400
 CACHE_FILE = "place-hours-cache.json"
 
@@ -82,6 +83,8 @@ def _cached(key: str, now_s: float) -> dict | None:
     if not isinstance(hit, dict) or not isinstance(hit.get("answer"), dict):
         return None
     keep = CACHE_S if hit["answer"].get("found") else MISS_S
+    if keep is None:
+        return dict(hit["answer"])
     return dict(hit["answer"]) if now_s - float(hit.get("at") or 0) < keep else None
 
 
@@ -90,8 +93,13 @@ def _keep(key: str, answer: dict, now_s: float) -> None:
         return
     with _lock:
         d = _read(CACHE_FILE)
-        d = {k: v for k, v in d.items()
-             if isinstance(v, dict) and now_s - float(v.get("at") or 0) < CACHE_S}
+        # A miss past its day goes; found hours stay as long as CACHE_S says.
+        def live(v) -> bool:
+            if not isinstance(v, dict):
+                return False
+            keep = CACHE_S if (v.get("answer") or {}).get("found") else MISS_S
+            return keep is None or now_s - float(v.get("at") or 0) < keep
+        d = {k: v for k, v in d.items() if live(v)}
         d[key] = {"at": now_s, "answer": answer}
         _write(CACHE_FILE, d)
 

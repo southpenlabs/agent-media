@@ -140,8 +140,8 @@ def test_google_periods_as_osm_writes_them():
     assert map_hours.osm_hours_google({}) == ""
 
 
-def test_hours_are_kept_a_week_and_a_miss_a_day(monkeypatch):
-    """David, 22 Nov 2026: "let's cache opening hours" (everywhere, a week)."""
+def test_hours_are_kept_and_a_miss_a_day(monkeypatch):
+    """David, 22 Nov 2026: "let's cache opening hours"; a week, then "indefinitely"."""
     import datetime as dt
 
     monkeypatch.setattr(map_hours, "CACHE_S", 7 * 86400)
@@ -158,9 +158,12 @@ def test_hours_are_kept_a_week_and_a_miss_a_day(monkeypatch):
     later = THU_10 + dt.timedelta(hours=3)
     ok, got = map_hours.place_hours("Blue Fin Blairgowrie", "-38.361180", "144.778440", fetch=fetch, now=later)
     assert got["cached"] is True and got["open_now"] is True and len(asked) == 1
-    # Past a week: asked again.
+    # Past a week with a week's cache: asked again; kept for good (the default): not.
     map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=fetch, now=THU_10 + dt.timedelta(days=8))
     assert len(asked) == 2
+    monkeypatch.setattr(map_hours, "CACHE_S", None)
+    got = map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=fetch, now=THU_10 + dt.timedelta(days=400))[1]
+    assert got["cached"] is True and len(asked) == 2
     # A miss is kept a day; a failure is not kept.
     nothing = lambda u, h: (asked.append(u), {"results": []})[1]
     assert map_hours.place_hours("Nowhere Cafe", "-38.30", "144.70", fetch=nothing, now=THU_10)[1]["reason"] == "no_match"
