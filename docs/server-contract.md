@@ -11579,6 +11579,19 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   when none is set, 404 `no_route` when the service finds none, 400 for a
   bad point or mode, 502 when it does not answer.
 
+  **Lane guidance** (22 Nov 2026, maps step 7 item 4). Driving, a step
+  whose turn has OpenStreetMap `turn:lanes` carries `lanes: [{dirs,
+  valid, active}]`, the lanes left to right; `dirs` of `left`,
+  `slight_left`, `sharp_left`, `through`, `right`, `slight_right`,
+  `sharp_right`, `uturn`, `none`; `valid` a lane that makes the turn,
+  `active` the one suggested. Valhalla 3.9 keeps lanes on its edges but
+  gives them only in its OSRM form, so the server asks for the same route
+  in that form as well and reads each step's lanes from it (the lanes at
+  the turn, else the last before it, kept only when a lane to use goes
+  the turn's way); a failed second ask only means no lanes. Absent on a
+  step with none, on walking, cycling and transit, and from an older
+  server.
+
   **Route planner options** (19 Nov 2026; David: "let's add the route
   planner options that Google maps has"): `GET /map/route?from&to
   [&via=lat,lon;lat,lon…][&mode=walk|drive|bike|transit]
@@ -11705,6 +11718,39 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   its credential → `{to, state: going|arrived|ended, started_at, until,
   at?, at_time?, eta_at?, left_m?, mode?}`, nothing else of the person;
   404 `no_trip` once gone. The app's page for it is `/app/trip/<token>`.
+
+  **Told in a chat** (22 Nov 2026; maps step 7 item 3, step 10's "a
+  heads-up as you near; ends when you arrive"). `POST /map/trips` also
+  takes `name` (whose trip, shown on the page), `tz` (an IANA zone for
+  the times said in a chat) and `line` (the route ahead, `[[lon, lat],
+  …]`, thinned to 400 points; `/map/trips/update` takes it too), and
+  answers `url` beside the token: the server's public address (§6.47
+  MEDIA_PUBLIC_URL) `/trip/<token>`, which answers 302 to
+  `/app/trip/<token>` with no bearer. **`POST /map/trips/send {id,
+  thread}`** (the same device) sends that link to a Matrix room as the
+  owner, through the room's own send path ("David is on the way to
+  Brunetti, arriving about 3:40 pm. Follow along: <url>"; the name is
+  `name`, else the owner's display name in that room, else the words are
+  in the first person) → `{sent, text, url}`; 404 `no_trip` / `no_room`,
+  409 `no_public_address`, `not_sent` with the homeserver's status. From
+  then on that room is told once when the ETA comes within five minutes
+  ("David is about 4 minutes from Brunetti.") and when the trip ends
+  arrived ("David has arrived at Brunetti."); a Stop says nothing more.
+  A trip that ends with the trip (`until` `trip` or `15m`) is also gone
+  an hour after its last `eta_at`, so a phone that stops sending never
+  leaves a live link. `GET /map/trip` now also has `name`, `line` and
+  `expires_at`.
+
+  *What the link shows, and to whom.* Anyone holding the link (the token
+  is the only credential; it is never in a list, and the page and its
+  short link carry `X-Robots-Tag: noindex, nofollow` and `Referrer-Policy:
+  no-referrer`) sees the name given, the destination's name and point,
+  the phone's last position and when it was sent, the ETA, the distance
+  left, the mode and the route ahead — nothing else of the person, their
+  history or their other trips. It stops when the trip does: on arrival,
+  on Stop, by the person's choice of how long, an hour after the ETA, and
+  at most a day after it started; after that the page says the trip is no
+  longer shared and the JSON is 404.
 - **`GET /map/recent_places`** (19 Nov 2026; David: "maybe offer
   suggestions from recent chats") → `{places: [{name, lat, lon, session,
   chat, msg, at}]}`: the `[[map:]]` / `[[route:]]` points recent chats'

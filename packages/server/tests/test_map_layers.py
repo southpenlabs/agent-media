@@ -618,3 +618,70 @@ def test_route_planner_options_and_transit(server, monkeypatch):
         assert got["routes"][0]["summary_label"] == "Tram 19"
     finally:
         srv.shutdown()
+
+
+def test_lane_guidance_from_the_routes_osrm_form(server, monkeypatch):
+    """Driving: each step's lanes (§6.50 "Lane guidance"), read from the same route
+    asked again in Valhalla's OSRM form, since 3.9's own JSON leaves them out."""
+    import http.server
+    import threading
+
+    asked = []
+    shape = _enc([(-37.8183, 144.9671), (-37.8175, 144.9674), (-37.8170, 144.9650)])
+    native = {"trip": {"summary": {"length": 0.5, "time": 90}, "legs": [{"shape": shape, "maneuvers": [
+        {"instruction": "Drive north on Swanston Street.", "length": 0.1, "time": 30, "type": 3, "begin_shape_index": 0},
+        {"instruction": "Turn left onto Flinders Street.", "length": 0.4, "time": 60, "type": 15, "begin_shape_index": 1},
+        {"instruction": "You have arrived.", "length": 0, "time": 0, "type": 4, "begin_shape_index": 2}]}]}}
+
+    def lanes(*spec):
+        return [{"indications": d, "valid": v, "active": a} for d, v, a in spec]
+
+    osrm = {"routes": [{"legs": [{"steps": [
+        # Straight on at a crossing before the turn: not the turn's lanes.
+        {"maneuver": {"type": "depart"}, "intersections": [{}, {"lanes": lanes((["straight"], True, True), (["right"], False, False))}]},
+        {"maneuver": {"type": "turn", "modifier": "left"}, "intersections": [
+            {"lanes": lanes((["left"], True, True), (["left", "straight"], True, False), (["straight"], False, False),
+                            (["slight right"], False, False))}]},
+        {"maneuver": {"type": "arrive"}, "intersections": [{}]}]}]}]}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            q = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            asked.append(q)
+            body = json.dumps(osrm if q.get("format") == "osrm" else native).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    pixel, _ = _device("Pixel 8a")
+    try:
+        monkeypatch.setenv("MEDIA_ROUTER_URL", f"http://127.0.0.1:{srv.server_port}")
+        res, got = call(server, "GET", "/map/route?from=-37.8183,144.9671&to=-37.817,144.965&mode=drive", headers=pixel)
+        assert res.status == 200, got
+        assert [q.get("format") for q in asked] == [None, "osrm"]
+        assert asked[1]["locations"] == asked[0]["locations"] and asked[1]["costing"] == "auto"
+        steps = got["steps"]
+        assert "lanes" not in steps[0] and "lanes" not in steps[2]
+        assert steps[1]["lanes"] == [
+            {"dirs": ["left"], "valid": True, "active": True},
+            {"dirs": ["left", "through"], "valid": True, "active": False},
+            {"dirs": ["through"], "valid": False, "active": False},
+            {"dirs": ["slight_right"], "valid": False, "active": False}]
+        assert got["routes"][0]["steps"][1]["lanes"] == steps[1]["lanes"]
+        # Walking asks once and has none.
+        asked.clear()
+        res, got = call(server, "GET", "/map/route?from=-37.8183,144.9671&to=-37.817,144.965&mode=walk", headers=pixel)
+        assert len(asked) == 1 and not any("lanes" in s for s in got["steps"])
+        # The lane ask failing leaves the route as it was.
+        osrm.clear()
+        osrm["routes"] = "nonsense"
+        res, got = call(server, "GET", "/map/route?from=-37.8183,144.9671&to=-37.817,144.965&mode=drive", headers=pixel)
+        assert res.status == 200 and len(got["steps"]) == 3 and not any("lanes" in s for s in got["steps"])
+    finally:
+        srv.shutdown()

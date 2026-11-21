@@ -205,6 +205,11 @@ def _bundle_file(h: BaseHTTPRequestHandler, root: Path, rel: str) -> None:
         # A hashed chunk the bundle does not have (an old page after an
         # update), or a path that climbed out of the bundle.
         _send(h, 404, b"not found\n", {"Content-Type": "text/plain", "Cache-Control": "no-store"})
+    elif rel == "trip" or rel.startswith("trip/"):
+        # A shared trip's page (map_trips.py): open to anyone with the link, so
+        # never indexed, and its token never sent on as a referrer.
+        _file(h, root / "index.html", "no-cache", {"X-Robots-Tag": "noindex, nofollow",
+                                                  "Referrer-Policy": "no-referrer"})
     else:
         _file(h, root / "index.html", "no-cache")
 

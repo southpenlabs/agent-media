@@ -586,7 +586,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
                        "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things",
                        "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
-                       "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
+                       "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
@@ -671,6 +671,8 @@ BRIDGE_ROUTES = (BRIDGE_ICON, BRIDGE_AVATAR, BRIDGE_LOGIN, BRIDGE_PROC, BRIDGE_P
 
 #: An aerial photo tile, through this server (map_tiles.py).
 MAP_TILE = re.compile(r"/map/tiles/aerial/(\d{1,2})/(\d{1,7})/(\d{1,7})")
+#: A shared trip's short link (map_trips.link): the token is URL-safe base64.
+TRIP_LINK = re.compile(r"/trip/[A-Za-z0-9_-]{16,64}")
 
 
 def cors_path(path: str) -> bool:
@@ -1120,6 +1122,12 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # and nothing else under /app is an API route.
         if path == web_app.PREFIX or path.startswith(web_app.PREFIX + "/"):
             return web_app.serve(h, path)
+        # A shared trip's short link (map_trips.link): on to the app's page for it, no credential.
+        if TRIP_LINK.fullmatch(path):
+            web_app._send(h, 302, b"", {"Location": f"{web_app.PREFIX}/trip/{path.rsplit('/', 1)[1]}",
+                                        "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow",
+                                        "Referrer-Policy": "no-referrer"})
+            return True
         # Android's check that /app/t/<session> links are the app's (app_links.py).
         if path == app_links.PATH:
             return app_links.serve(h)
@@ -6314,7 +6322,7 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import map_trips
 
         ok, detail = map_trips.public(arg("token"))
-    elif method == "POST" and path in ("/map/trips", "/map/trips/update", "/map/trips/end"):
+    elif method == "POST" and path in ("/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send"):
         # Sharing a trip while guiding (map_trips.py): started, moved on and ended by the device sharing it.
         from . import auth as _auth, map_layers, map_trips
 
@@ -6324,7 +6332,8 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
             user, _ = (None, {}) if host else _auth.gate(bearer)
             owner = "host" if host else f"device:{(user or {}).get('device') or ''}"
             body = _read_json(h) or {}
-            fn = {"/map/trips": map_trips.start, "/map/trips/update": map_trips.update, "/map/trips/end": map_trips.end}[path]
+            fn = {"/map/trips": map_trips.start, "/map/trips/update": map_trips.update, "/map/trips/end": map_trips.end,
+                  "/map/trips/send": map_trips.send}[path]
             ok, detail = fn(owner, body)
     elif method == "POST" and path == "/map/saved/lists":
         # A person's own lists of saved places (map_saved.py).

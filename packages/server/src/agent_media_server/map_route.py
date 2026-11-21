@@ -18,6 +18,18 @@ arrive by (Valhalla's `date_time`), and public transport (costing
 `no_transit` where the service has none). The top level keeps the first
 route's fields as before; `routes` has every route, chosen first.
 
+Lane guidance (maps step 7 item 4; David, 22 Nov 2026): driving, each step
+whose turn has OSM `turn:lanes` carries `lanes: [{dirs, valid, active}]`,
+left to right, `dirs` of left, slight_left, sharp_left, through, right,
+slight_right, sharp_right, uturn, none; `valid` a lane that makes the turn,
+`active` the one Valhalla suggests. Valhalla 3.9's own JSON leaves lanes out
+of its maneuvers (they are kept on the edges and given only in its OSRM
+form), so the same route is asked again with `format: osrm` and each
+step's lanes read from it: the lanes at the turn (the OSRM step's first
+intersection), else the last lanes before it. The OSRM form has a step per
+maneuver; a leg whose counts differ gets none, and a failed ask only means
+no lanes.
+
 `GET /map/route/modes` lists the modes and avoids this server can do, Transit
 only when its Valhalla has transit tiles (its verbose /status, kept 30 min).
 
@@ -47,6 +59,10 @@ TRANSIT_CHECK_S = 30 * 60
 TRANSIT_KINDS = {"tram": "tram", "metro": "train", "rail": "train", "bus": "bus", "ferry": "ferry",
                  "cable_car": "cable_car", "gondola": "gondola", "funicular": "funicular"}
 _REF = re.compile(r"^[A-Z]{0,3}\d+[A-Z]?$")
+# OSRM's lane indications, as the app's words.
+LANE_DIRS = {"straight": "through", "left": "left", "slight left": "slight_left", "sharp left": "sharp_left",
+             "right": "right", "slight right": "slight_right", "sharp right": "sharp_right",
+             "uturn": "uturn", "none": "none"}
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 _transit_seen: dict[str, tuple[float, bool]] = {}
 
@@ -180,6 +196,61 @@ def _label(steps: list[dict]) -> str:
         if names:
             far[names[0]] = far.get(names[0], 0) + s["distance_m"]
     return f"via {max(far, key=lambda k: far[k])}" if far else ""
+
+
+def _lanes_of(lanes) -> list[dict] | None:
+    out = []
+    for ln in lanes or []:
+        if not isinstance(ln, dict):
+            return None
+        dirs = [LANE_DIRS.get(str(d), "none") for d in ln.get("indications") or []] or ["none"]
+        out.append({"dirs": dirs, "valid": bool(ln.get("valid")), "active": bool(ln.get("active"))})
+    # A lane list that says nothing (no lane to take) is no guidance.
+    return out if len(out) > 1 and any(x["valid"] for x in out) else None
+
+
+def _fits(lanes: list[dict] | None, modifier) -> list[dict] | None:
+    """Lanes kept only when a lane to use goes the turn's way: lanes read at a
+    crossing before the turn, where the way is straight on, would mislead."""
+    if not lanes or not modifier:
+        return lanes
+    m = str(modifier)
+    side = "left" if "left" in m else "right" if "right" in m else "uturn" if m == "uturn" else "through"
+    ok = any(ln["valid"] and any(side in d or (side == "uturn" and d == "left") for d in ln["dirs"]) for ln in lanes)
+    return lanes if ok else None
+
+
+def osrm_lanes(osrm_route: dict) -> list[list[list[dict] | None]]:
+    """Per leg, per step: the lanes for the step's turn, or None."""
+    legs = []
+    for leg in osrm_route.get("legs") or []:
+        steps = leg.get("steps") or []
+        per: list[list[dict] | None] = []
+        before: list[dict] | None = None
+        for st in steps:
+            inter = st.get("intersections") or []
+            at = _lanes_of(inter[0].get("lanes")) if inter and inter[0].get("lanes") else None
+            per.append(_fits(at or before, (st.get("maneuver") or {}).get("modifier")))
+            before = None
+            for it in inter[1:]:
+                got = _lanes_of(it.get("lanes")) if it.get("lanes") else None
+                if got:
+                    before = got
+        legs.append(per)
+    return legs
+
+
+def _add_lanes(r: dict, lanes: list[list[list[dict] | None]]) -> None:
+    """Each step its leg's lanes, where the leg's step count matches."""
+    by_leg: dict[int, list[dict]] = {}
+    for st in r["steps"]:
+        by_leg.setdefault(st.get("leg", 0), []).append(st)
+    for li, steps in by_leg.items():
+        if li >= len(lanes) or len(lanes[li]) != len(steps):
+            continue
+        for st, ln in zip(steps, lanes[li]):
+            if ln:
+                st["lanes"] = ln
 
 
 def _trip(trip: dict, mode: str) -> dict:
@@ -316,10 +387,18 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "",
         _failures.swallowed(e)
         return False, {"status": 502, "error": f"the routing service did not answer: {e.__class__.__name__}"}
     trips = [got.get("trip") or {}] + [(x or {}).get("trip") or {} for x in got.get("alternates") or []]
+    lanes: list = []
+    if costing == "auto":
+        try:
+            lanes = [osrm_lanes(x) for x in (_ask(base, "/route", {**q, "format": "osrm"}).get("routes") or [])]
+        except Exception as e:  # noqa: BLE001 - the route stands without its lanes
+            _failures.swallowed(e)
     routes = []
-    for t in trips:
+    for i, t in enumerate(trips):
         r = _trip(t, mode)
         _times(t, r, when_d, when_a)
+        if i < len(lanes):
+            _add_lanes(r, lanes[i])
         routes.append(r)
     first = routes[0]
     out = {k: first[k] for k in ("mode", "distance_m", "duration_s", "line", "steps", "legs")}
