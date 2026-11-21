@@ -154,9 +154,9 @@ EXCLUDE: dict[str, str] = {
     "fastembed": "embedding models, re-downloadable",
     "cache": "a cache, by name and by nature",
     "follow-trace.log": "a trace log, not state",
-    # "Keep where I've been" (location_history.py): kept on this server only
-    # (maps proposal, decided 6 Nov 2026), so never copied to another machine.
-    "location.db": "location history, which stays on this server only",
+    # location.db ("Keep where I've been") IS backed up (David, 22 Nov 2026:
+    # "Back it up", so it survives a move or a disk failure), with the rest of
+    # the state, encrypted as every backup is.
     "*.lock": "a lock file; meaningless once the process is gone",
     "*-wal": "a write-ahead log; the dump is checkpointed instead",
     "*-shm": "SQLite shared memory",

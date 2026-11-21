@@ -11988,8 +11988,8 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 
   **Privacy.** Kept on the person's own server only, in its own file,
   `state_dir()/location.db` (SQLite, 0600, `secure_delete` on), per
-  account. Never in the long-term memory store, never in `media backup`
-  (backup.EXCLUDE: a server move leaves it behind), never sent to a model
+  account. Never in the long-term memory store, in `media backup`, encrypted
+  like all of it (David, 22 Nov 2026: "Back it up"), never sent to a model
   provider, never logged with coordinates. The one thing that leaves the
   server is a reverse lookup: one visit's centre, with no account or
   device, to the geocoder. An agent reads the history only through `media
