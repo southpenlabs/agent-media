@@ -34,6 +34,7 @@ def fake(monkeypatch, tmp_path):
 
 def test_place_list_move_and_remove(server, fake):
     pixel, pid = _device("Pixel 8a")
+    assert devices.set_kind(pid, "phone")
     got = call(server, "GET", "/map/things", headers=pixel)[1]
     assert got["things"] == []
     unplaced = {(u["kind"], u["id"]): u["name"] for u in got["unplaced"]}
@@ -110,6 +111,18 @@ def test_an_unpaired_device_leaves_the_map(server, fake):
     assert [t["id"] for t in call(server, "GET", "/map/things", headers=pixel)[1]["things"]] == [tab_id]
     assert devices.revoke(tab_id)
     assert call(server, "GET", "/map/things", headers=pixel)[1]["things"] == []
+
+
+def test_a_device_of_no_kind_is_not_offered_but_may_be_placed(server, fake):
+    pixel, pid = _device("Pixel 8a")
+    _jobs, jobs_id = _device("red2 jobs")
+    rows = map_things._devices("")
+    assert next(r for r in rows if r["id"] == jobs_id).get("hidden") is True
+    got = call(server, "GET", "/map/things", headers=pixel)[1]
+    assert jobs_id not in {u["id"] for u in got["unplaced"]}
+    assert call(server, "POST", "/map/things", {"kind": "device", "id": jobs_id, "lat": 1, "lon": 1},
+                headers=pixel)[0].status == 200
+    assert jobs_id in {t["id"] for t in call(server, "GET", "/map/things", headers=pixel)[1]["things"]}
 
 
 def test_the_owners_things_are_shared_by_their_devices(server, fake):

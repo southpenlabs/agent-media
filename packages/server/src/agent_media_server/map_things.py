@@ -5,7 +5,8 @@ docs/proposals/2026-11-06-maps.md).
 A thing is one the server already knows, by the id it already uses:
 
 - `device`: a paired device (`GET /devices`), `d_…`; a person sees their own
-  account's devices (auth.device_account), the owner the owner's.
+  account's devices (auth.device_account), the owner the owner's. One of no
+  kind (device_kinds: a jobs worker, an agent's token) is not in `unplaced`.
 - `room`: a house speaker on the music stream (core music_rooms, Snapcast
   client ids), the rooms of the Media tab's picker.
 - `speaker`: an audio target that is a place of its own (core audio_targets'
@@ -94,7 +95,8 @@ def _devices(account: str) -> list[dict]:
         state: dict = {"online": d["id"] in connected or bool(seen and now - seen < ONLINE_S)}
         if seen:
             state["last_seen"] = round(seen)
-        out.append({"id": d["id"], "name": d.get("name") or d["id"], "state": state})
+        out.append({"id": d["id"], "name": d.get("name") or d["id"], "state": state,
+                    **({"hidden": True} if not d.get("kind") else {})})
     return out
 
 
@@ -167,8 +169,9 @@ def listing(account: str, path: Path | None = None, sources: Sources | None = No
             item["state"] = live["state"]
         things.append(item)
     where = {(t["kind"], t["id"]) for t in placed}
+    # A device of no kind (a jobs worker, an agent's token) is not offered; placed by its id, it shows.
     unplaced = [{"kind": k, "id": r["id"], "name": r["name"]}
-                for k in KINDS for r in kn.get(k) or [] if (k, r["id"]) not in where]
+                for k in KINDS for r in kn.get(k) or [] if (k, r["id"]) not in where and not r.get("hidden")]
     out: dict = {"things": things, "unplaced": unplaced}
     if kn.get("room") is None:
         out["rooms_unreachable"] = True

@@ -11646,7 +11646,8 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   speakers placed on the map by hand, kept per account like saved places
   (the owner's for the host's token). A thing is one the server already
   knows, by its id: `device` a paired device (`d_…`, the person's own
-  account's), `room` a house speaker on the music stream (the Media tab's
+  account's; one of no kind, a jobs worker or an agent's token, is not
+  offered in `unplaced`), `room` a house speaker on the music stream (the Media tab's
   rooms, Snapcast client ids), `speaker` an audio target that is a place
   (`phone`, `local`, …; not `auto`, `sasonica`, `rooms` or `device:…`).
   `GET` → `{things: [{kind, id, name, lat, lon, label?, state?}], unplaced:
