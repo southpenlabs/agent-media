@@ -136,6 +136,12 @@ def test_a_box_and_a_limit(overpass):
     assert '(-37.82,144.96,-37.81,144.97)' in overpass[0]
 
 
+def test_parks_are_a_kind(overpass):
+    assert map_places.kind_of("parks") == "park"
+    map_places.places(near="-37.8136,144.9631", kind="park", now=THU_10)
+    assert '["leisure"="park"](around:' in overpass[0]
+
+
 def test_along_a_route_in_the_order_it_reaches_them(overpass):
     # David, 21 Nov 2026: "add search along route". North up Swanston Street from the south.
     route = "-37.8200,144.9660;-37.8150,144.9645;-37.8100,144.9630"

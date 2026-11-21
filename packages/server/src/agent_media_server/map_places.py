@@ -65,6 +65,8 @@ KINDS: dict[str, dict] = {
     "bar": {"name": "Bar", "filters": ['["amenity"="bar"]'], "aliases": []},
     "pub": {"name": "Pub", "filters": ['["amenity"="pub"]'], "aliases": ["hotel pub"]},
     "playground": {"name": "Playground", "filters": ['["leisure"="playground"]'], "aliases": []},
+    # David, 21 Nov 2026: "let's replace the pharmacies pill with parks".
+    "park": {"name": "Park", "filters": ['["leisure"="park"]'], "aliases": ["parks", "reserve", "gardens"]},
     "viewpoint": {"name": "Lookout", "filters": ['["tourism"="viewpoint"]'], "aliases": ["lookout"]},
     "bus_stop": {"name": "Bus stop", "filters": ['["highway"="bus_stop"]'], "aliases": ["bus"]},
     "tram_stop": {"name": "Tram stop", "filters": ['["railway"="tram_stop"]'], "aliases": ["tram"]},

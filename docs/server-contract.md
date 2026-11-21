@@ -11714,7 +11714,7 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `GET /map/places/kinds` → `{kinds: [{id, name, aliases}]}`: pharmacy,
   cafe, restaurant, fast_food, fuel, ev_charger, toilets, drinking_water,
   supermarket, convenience, atm, parking, hospital, bakery, bar, pub,
-  playground, viewpoint, bus_stop, tram_stop, train_station; an alias or
+  playground, park, viewpoint, bus_stop, tram_stop, train_station; an alias or
   plural names one too ("chemist", "petrol", "loo", "lookout"). The client
   never sends Overpass text. `open_now=1` keeps only places open now
   (`hours_unknown`: how many with unknown hours were passed over). Hours
