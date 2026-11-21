@@ -11370,6 +11370,13 @@ def _build_parser() -> argparse.ArgumentParser:
     t = psub.add_parser("things", help="the devices, rooms and speakers on the Map, and the ones not placed")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_things)
+    s = sub.add_parser("location", help="where the user has been, from \"Keep where I've been\" "
+                                         "(location_where; maps proposal step 5)")
+    lsub = s.add_subparsers(dest="location_cmd", required=True)
+    t = lsub.add_parser("where-was-i", help="in words: a place (\"Southland\") or a day "
+                                             "(\"yesterday\", \"Tuesday\", \"18 Nov\")")
+    t.add_argument("question", nargs="*", help="a place or a day; none is today")
+    t.set_defaults(func=cmd_location_where)
     s = sub.add_parser("tune", help="songs of the listener's own near some words "
                                      "(tune_related; the reply's tune is reply_tune)")
     tsub = s.add_subparsers(dest="tune_cmd", required=True)
@@ -12564,6 +12571,13 @@ def cmd_place_find(a) -> int:
         return 1
     for r in rows:
         print(f"{place_find.marker_part(r)}    ({r['address']})")
+    return 0
+
+
+def cmd_location_where(a) -> int:
+    from . import location_where
+
+    print(location_where.answer(" ".join(a.question or [])))
     return 0
 
 

@@ -474,6 +474,27 @@ def _is_prompt_clip(row: dict) -> bool:
 
 
 @mcp.tool()
+def location_history(question: str) -> dict:
+    """Where David has been, from his phone's "Keep where I've been" history
+    (off unless he turned it on), answered in a sentence or two.
+
+    `question` is a place ("Southland", "when was I last at Bunnings") or a
+    day ("today", "yesterday", "Tuesday", "18 Nov", "2026-11-18"). A place
+    gives his latest visits there with day and times; a day gives where he
+    was, in order, and how far he moved. Only the answer comes back, never
+    the points: the history stays on his server.
+
+    Use it only when David asks about where he has been or when he was
+    somewhere, never on your own initiative and never to track him.
+
+    Returns {"answer": "<words>"}.
+    """
+    from . import location_where
+
+    return {"answer": location_where.answer(question)}
+
+
+@mcp.tool()
 def search_history(query: str, limit: int = 10, sort: str = "newest",
                    tools: bool = False, session: str = "",
                    memory: bool = False, ask: bool = False) -> dict:

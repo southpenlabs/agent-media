@@ -396,6 +396,11 @@ except /pair, which is how a device gets its token):
   GET  /map/things → where the person's devices, rooms and speakers are, and
                   the ones not placed; POST /map/things {kind, id, lat, lon,
                   label?} | {kind, id, delete: true} (map_things.py, §6.50)
+  POST /device/location/history {points: [{lat, lon, accuracy_m?, at}]} → a
+                  paired phone's "Keep where I've been" batch (location_history.py)
+  GET  /map/history?day= | /map/history/visits?q=&from=&to= | GET/POST
+                  /map/history/settings {keep_days} | POST /map/history/forget
+                  {day | all} → where the person has been (location_history.py, §6.50)
   GET  /map/places?near=lat,lon[&radius_m]|bbox=w,s,e,n&kind=[&open_now=1]
                   [&limit] → places of a kind from OpenStreetMap, nearest
                   first, with open_now (map_places.py, §6.50); GET
@@ -499,7 +504,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -580,6 +585,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
                        "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things",
+                       "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
@@ -5051,6 +5057,19 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
             except Exception as e:  # noqa: BLE001 - the fix is kept either way
                 _failures.swallowed(e)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/location/history":
+        # "Keep where I've been": a batch of the phone's thinned fixes (location_history.py).
+        from . import location_history
+
+        user, err = auth.gate(_bearer(h))
+        dev_id = auth.device_id(_bearer(h))
+        if not user or not dev_id:
+            ok, detail = False, err or {"status": 401, "error": "a paired device only"}
+        elif auth.is_guest(_bearer(h)):
+            ok, detail = False, {"status": 403, "code": "guest", "error": "a guest device keeps no history here"}
+        else:
+            ok, detail = location_history.add(auth.account_key(user), dev_id, _read_json(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/phone/ask", "/phone/answer", "/phone/cancel"):
         # The phone as an agent's eyes and hands (server-contract.md §6.21,
         # phone.py; David, 1 Oct 2026): an agent on this host asks — the
@@ -6256,6 +6275,26 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_things.listing(account)
             else:
                 ok, detail = map_things.change(account, _read_json(h) or {})
+    elif path.startswith("/map/history"):
+        # Where the person has been: "Keep where I've been" (location_history.py, step 5).
+        # The owner's devices (not a guest) and the host's own token; GETs read, POSTs change.
+        from . import location_history as lh, map_layers, map_saved
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if path == "/map/history" and method == "GET":
+                ok, detail = lh.day(account, arg("day"))
+            elif path == "/map/history/visits" and method == "GET":
+                ok, detail = lh.visits(account, arg("q"), arg("from"), arg("to"), arg("limit"))
+            elif path == "/map/history/settings":
+                ok, detail = (lh.get_settings(account) if method == "GET"
+                              else lh.set_settings(account, _read_json(h) or {}))
+            elif path == "/map/history/forget" and method == "POST":
+                ok, detail = lh.forget(account, _read_json(h) or {})
+            else:
+                ok, detail = False, {"status": 405, "error": "method not allowed"}
     elif method == "GET" and path == "/map/overlay":
         # A picture laid over the map, as a data: URL (map_overlays.py).
         from . import map_layers, map_overlays

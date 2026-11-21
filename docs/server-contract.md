@@ -11946,6 +11946,58 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `GET /map/places` instead (within 5 km, the host's token), each printed
   with its address, distance, open or closed and hours; words naming no
   kind, or a server out of reach, fall back to the geocoder.
+- **Location history: `POST /device/location/history`, `GET /map/history`,
+  `GET /map/history/visits`, `GET|POST /map/history/settings`, `POST
+  /map/history/forget`** (22 Nov 2026, maps proposal step 5;
+  `location_history.py`) — the phone's "Keep where I've been", off by
+  default and a switch of its own beside "Share my location in the
+  background". The phone thins its fixes (one after ~50 m of movement, or
+  every 5 minutes while still) and posts them in batches: `POST
+  /device/location/history {points: [{lat, lon, accuracy_m?, at}]}` (`at`
+  epoch seconds, milliseconds accepted; at most 500; a point more than 8
+  days old or past the keep is dropped) → `{kept: n}`; a paired device only
+  (401 otherwise, the host's token included), not a guest (403 `guest`);
+  400 `bad_points`, 413 `too_many`. A "Rough location only" phone sends its
+  points rounded. Stays are grouped into visits: points within 100 m of
+  their running centre for 5 minutes or more. A visit's `place` is, in
+  order: the person's saved place or placed thing within 150 m (matched when
+  read, `place_from: "saved" | "thing"`), else a reverse lookup's name
+  (Nominatim through `MEDIA_GEOCODER_URL`, at most one per new visit and one
+  a second, cached per account; `place_from: "lookup"`;
+  `MEDIA_LOCATION_NAMES=0` turns lookups off), else `null`. The reads and
+  settings take the map's gate (a paired device, not a guest; 403 `guest`)
+  or the host's own token (the owner's history, for `media location
+  where-was-i`):
+  - `GET /map/history?day=YYYY-MM-DD` (this server's local day) → `{day,
+    points: [{lat, lon, at, device}], visits: [{lat, lon, from, to, minutes,
+    place, place_from?, device, ongoing?}], distance_m}`. `points` are
+    thinned for drawing (a point within 15 m of the last dropped; at most
+    2000 per device), in time order per device; `distance_m` sums the
+    unthinned points, leaving out any less accurate than 150 m. 400
+    `bad_day`.
+  - `GET /map/history/visits?q=<place words>&from=&to=&limit=` → `{visits}`
+    newest first, those whose place holds every word (`from`/`to`
+    YYYY-MM-DD, `limit` 1–200, default 20): "when was I last at …".
+  - `GET /map/history/settings` → `{keep_days: 30 | 90 | 365 | null,
+    choices, kept: {points, first}}` (`null` is forever; 90 unless chosen);
+    `POST {keep_days}` → the same (400 `bad_keep`). Anything older than the
+    keep is never read back, and is deleted on the first access each day.
+  - `POST /map/history/forget {day: "YYYY-MM-DD"}` (that day's points and
+    the visits touching it) | `{all: true}` (every point, visit and cached
+    name; the file vacuumed) → `{forgot: n}`. 400 `bad_day`.
+
+  **Privacy.** Kept on the person's own server only, in its own file,
+  `state_dir()/location.db` (SQLite, 0600, `secure_delete` on), per
+  account. Never in the long-term memory store, never in `media backup`
+  (backup.EXCLUDE: a server move leaves it behind), never sent to a model
+  provider, never logged with coordinates. The one thing that leaves the
+  server is a reverse lookup: one visit's centre, with no account or
+  device, to the geocoder. An agent reads the history only through `media
+  location where-was-i "<place or day>"` or the MCP tool
+  `location_history(question)` (core `location_where.py`), which answer in
+  words ("You were last at Southland on Tuesday 18 Nov, 1:40 to 3:15 pm"),
+  so only the answer enters the chat; the agent notes say to use it only
+  when the user asks where they have been.
 
 ### 6.51 Related threads from the org-roam graph — gated (built 7 Nov 2026)
 

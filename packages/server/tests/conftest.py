@@ -61,6 +61,12 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     from agent_media_server import osm_edit as _osm_edit
 
     monkeypatch.setattr(_osm_edit, "_http", lambda *a, **k: _no_site("openstreetmap.org"))
+    # Location history's place names (location_history.py): no reverse
+    # lookup from a test, no naming thread. A test passes its own lookup.
+    from agent_media_server import location_history as _lh
+
+    monkeypatch.setattr(_lh, "BACKGROUND", False)
+    monkeypatch.setattr(_lh, "reverse", lambda *a, **k: _no_site("nominatim (reverse)"))
     # The forges (forge.py): no test asks a real one or reads gh's login.
     # One that wants an answer patches forge._open (and _gh_token) itself.
     from agent_media_server import forge

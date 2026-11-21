@@ -365,8 +365,12 @@ Sorted with what blocks a public release first. 61 rows.
 ### 11. Nominatim
 
 - **Used for:** `media place find` (`place_find.py:26`,
-  `MEDIA_GEOCODER_URL`) and the roads of Victoria's camera sites
-  (`map_vic.py:36`).
+  `MEDIA_GEOCODER_URL`), the roads of Victoria's camera sites
+  (`map_vic.py:36`), and naming a location-history visit
+  (`location_history.py` `reverse`: one reverse lookup per new visit, the
+  visit's centre only, no account or device, cached; `MEDIA_LOCATION_NAMES=0`
+  turns it off, so a person who keeps history but wants nothing to leave the
+  server can). Not gated by the personal-use switch.
 - **Terms** (https://operations.osmfoundation.org/policies/nominatim/): "an
   absolute maximum of 1 request per second"; a User-Agent naming the
   application; "the usage limits above apply per website/application: the
