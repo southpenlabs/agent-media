@@ -18,12 +18,21 @@ the server's places search instead (`GET /map/places`, OpenStreetMap through
 Overpass, §6.50): the nearest of that kind, with whether each is open now.
 Words that name no kind, or a server out of reach, fall back to the
 geocoder.
+
+Nominatim matches names only as they are written in OpenStreetMap, so the
+everyday names Google understands ("woolies", "maccas") are put back to the
+shop's own name first (`NICKNAMES`), and a search near a point asks inside
+the box around it before anywhere at all: the viewbox only leans, and an
+exact "Woolies" in England beats every Woolworths nearby (David, 22 Nov
+2026: "when you search for woolies it doesn't find Woolworths").
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -32,6 +41,29 @@ USER_AGENT = "agent-media place find (https://github.com/southpenlabs/agent-medi
 TIMEOUT_S = 10
 #: Half the side of the box a search leans towards, in degrees (about 20 km).
 NEAR_SPAN = 0.2
+
+
+#: Everyday names for shops and places, put back to the name OpenStreetMap
+#: has before the search. Lower case; matched as whole words.
+NICKNAMES = {
+    "woolies": "Woolworths", "woollies": "Woolworths", "woolys": "Woolworths",
+    "maccas": "McDonald's", "macca's": "McDonald's", "macker's": "McDonald's",
+    "hungry jacks": "Hungry Jack's", "dan murphys": "Dan Murphy's",
+    "dan murphy": "Dan Murphy's", "danny murphys": "Dan Murphy's",
+    "bunnos": "Bunnings", "chemmy": "Chemist Warehouse", "jb hifi": "JB Hi-Fi",
+    "bottle o": "The Bottle-O", "bottle-o": "The Bottle-O",
+    "spotty": "Spotlight", "the g": "Melbourne Cricket Ground",
+}
+_NICK_RE = re.compile(r"(?<![\w'-])(" + "|".join(
+    re.escape(k) for k in sorted(NICKNAMES, key=len, reverse=True)) + r")(?![\w'-])", re.IGNORECASE)
+#: Seconds between two asks of the public Nominatim (its policy: one a second).
+PUBLIC_GAP_S = 1.0
+
+
+def expand(words: str) -> str:
+    """`words` with any everyday name put back to the shop's own: "woolies
+    rosebud" -> "Woolworths rosebud"."""
+    return _NICK_RE.sub(lambda m: NICKNAMES[m.group(1).lower()], words)
 
 
 def _base() -> str:
@@ -60,11 +92,28 @@ def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) ->
     "opening_hours"?}` — the hours OSM's own string, where the place has them
     (Nominatim's extratags; David, 21 Nov 2026: "No opening hours? What about
     cafes and restaurants?")."""
+    expanded = expand(words)
+    tries = [(expanded, True), (expanded, False)] if near else [(expanded, False)]
+    if expanded != words:  # a place really called "Woolies", when no Woolworths was found
+        tries.append((words, False))
+    gap = PUBLIC_GAP_S if _base() == DEFAULT_URL else 0.0
+    for i, (w, bounded) in enumerate(tries):
+        if i and gap:
+            time.sleep(gap)
+        out = _ask(w, near, limit, bounded)
+        if out:
+            return out
+    return []
+
+
+def _ask(words: str, near: tuple[float, float] | None, limit: int, bounded: bool) -> list[dict]:
     q = {"q": words, "format": "jsonv2", "limit": str(max(1, min(limit, 10))),
          "addressdetails": "0", "extratags": "1"}
     if near:
         lat, lon = near
         q["viewbox"] = f"{lon - NEAR_SPAN},{lat + NEAR_SPAN},{lon + NEAR_SPAN},{lat - NEAR_SPAN}"
+        if bounded:
+            q["bounded"] = "1"
     req = urllib.request.Request(f"{_base()}/search?{urllib.parse.urlencode(q)}",
                                  headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT_S) as res:

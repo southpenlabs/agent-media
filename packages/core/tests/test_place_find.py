@@ -74,3 +74,43 @@ def test_find_kind_asks_the_servers_places_search():
 
     assert place_find.find_kind("fuel", (-37.8, 144.9), call=away) is None
     assert place_find.find_kind("the nearest", (-37.8, 144.9), call=call) is None
+
+
+def test_expand_puts_nicknames_back():
+    assert place_find.expand("woolies rosebud") == "Woolworths rosebud"
+    assert place_find.expand("Maccas near me") == "McDonald's near me"
+    assert place_find.expand("dan murphys") == "Dan Murphy's"
+    assert place_find.expand("woolieston") == "woolieston"
+    assert place_find.expand("Brunetti") == "Brunetti"
+
+
+def test_find_asks_near_first_then_anywhere_then_the_words_as_said(monkeypatch):
+    asked = []
+    answers = {}
+
+    def fake(req, timeout=0):
+        from urllib.parse import parse_qs, urlparse
+
+        q = {k: v[0] for k, v in parse_qs(urlparse(req.full_url).query).items()}
+        asked.append((q["q"], q.get("bounded") == "1"))
+        return _Res(json.dumps(answers.get((q["q"], q.get("bounded") == "1"), [])).encode())
+
+    monkeypatch.setenv("MEDIA_GEOCODER_URL", "https://geo.example/")
+    monkeypatch.setattr(place_find.urllib.request, "urlopen", fake)
+    store = {"name": "Woolworths", "display_name": "Woolworths, Rosebud", "lat": "-38.356", "lon": "144.907"}
+    answers[("Woolworths", True)] = [store]
+    rows = place_find.find("woolies", near=(-38.36, 144.9))
+    assert [r["name"] for r in rows] == ["Woolworths"] and asked == [("Woolworths", True)]
+
+    # Nothing nearby: anywhere, then the words as said ("Old Woolies").
+    asked.clear()
+    answers.clear()
+    answers[("woolies", False)] = [{"name": "Old Woolies", "display_name": "Old Woolies, Darwin",
+                                    "lat": "-12.46", "lon": "130.84"}]
+    rows = place_find.find("woolies", near=(-38.36, 144.9))
+    assert [r["name"] for r in rows] == ["Old Woolies"]
+    assert asked == [("Woolworths", True), ("Woolworths", False), ("woolies", False)]
+
+    # No point and no nickname: one ask.
+    asked.clear()
+    assert place_find.find("Brunetti") == [] and asked == [("Brunetti", False)]
