@@ -20,7 +20,7 @@ dependencies = [
     "winrt-runtime~=3.2; sys_platform == 'win32'",
     "winrt-Windows.Foundation~=3.2; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections~=3.2; sys_platform == 'win32'",
-    "winrt-Windows.Media.Control~=3.2; sys_platform == 'win32'",
+    "winrt-Windows.Media.Control>=3.2,<11.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
