@@ -393,6 +393,9 @@ except /pair, which is how a device gets its token):
                   GET /device/location (host token) → {location: … | null}
   GET  /map/layers → the Map page's layers; GET /map/layer?id=&bbox=w,s,e,n
                   → one as GeoJSON (map_layers.py, §6.50; not a guest)
+  GET  /map/things → where the person's devices, rooms and speakers are, and
+                  the ones not placed; POST /map/things {kind, id, lat, lon,
+                  label?} | {kind, id, delete: true} (map_things.py, §6.50)
   GET  /map/places?near=lat,lon[&radius_m]|bbox=w,s,e,n&kind=[&open_now=1]
                   [&limit] → places of a kind from OpenStreetMap, nearest
                   first, with open_now (map_places.py, §6.50); GET
@@ -576,7 +579,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
-                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists",
+                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
@@ -6241,6 +6244,18 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_saved.listing(account)
             else:
                 ok, detail = map_saved.change(account, _read_json(h) or {})
+    elif path == "/map/things" and method in ("GET", "POST"):
+        # Where a person's devices, rooms and speakers are (map_things.py, step 4).
+        from . import map_layers, map_saved, map_things
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if method == "GET":
+                ok, detail = map_things.listing(account)
+            else:
+                ok, detail = map_things.change(account, _read_json(h) or {})
     elif method == "GET" and path == "/map/overlay":
         # A picture laid over the map, as a data: URL (map_overlays.py).
         from . import map_layers, map_overlays

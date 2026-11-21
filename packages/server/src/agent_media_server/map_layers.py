@@ -6,7 +6,8 @@ answers one as a GeoJSON FeatureCollection. The app draws what it is sent
 and knows nothing of where a layer comes from (the app stays generic).
 
 Built in: `phone`, the phone's shared location (§6.21b), the freshest fix
-per phone with its accuracy and age; and `thread:<session>`, the places a
+per phone with its accuracy and age; `things`, "Your things", where the
+person's devices, rooms and speakers were placed (map_things.py, step 4); and `thread:<session>`, the places a
 chat's replies pinned with `[[map:]]` / `[[route:]]` (maps proposal step 2),
 listed by `GET /map/layers?thread=<session>` and read like any other. More layers come from add-ons through
 the `agent_media.map_layers` entry point: each names a callable returning
@@ -97,6 +98,23 @@ def _thread_layer(session: str) -> dict:
             "features": lambda _bbox: thread_places(session)}
 
 
+_THINGS = {"id": "things", "name": "Your things", "kind": "points", "icon": "things",
+           "default_on": True, "refresh_s": 60, "private": True}
+
+
+def _things_layer(account: str) -> dict:
+    """Where a person's devices, rooms and speakers are (map_things.py, step 4)."""
+    from . import map_things
+
+    return {"layer": _THINGS, "features": lambda _bbox: map_things.features(account)}
+
+
+def _account(bearer: str, host: bool) -> str:
+    from . import map_saved
+
+    return map_saved.account_of(bearer, host)
+
+
 def _addons() -> list[dict]:
     found = []
     for ep in entry_points(group=ENTRY_GROUP):
@@ -184,7 +202,8 @@ def layers(bearer: str, thread: str = "", host: bool = False) -> tuple[bool, dic
     ok, err = _gate(bearer, host)
     if not ok:
         return False, err
-    items = _all()
+    all_ = _all()
+    items = [*all_[:1], _things_layer(_account(bearer, host)), *all_[1:]]
     if thread:
         sid = _thread_id(f"thread:{thread}")
         if not sid:
@@ -199,6 +218,7 @@ def layer(layer_id: str, bbox_raw: str, bearer: str, host: bool = False) -> tupl
         return False, err
     sid = _thread_id(layer_id)
     item = (_thread_layer(sid) if sid else
+            _things_layer(_account(bearer, host)) if layer_id == _THINGS["id"] else
             next((i for i in _all() if i["layer"]["id"] == layer_id), None))
     if item is None:
         return False, {"status": 404, "error": "no such layer"}

@@ -11641,6 +11641,36 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   true}` takes it off (→ `{deleted}`, 400 `builtin` for the three, 404
   `not_saved`); a place left in no list that is not Home or Work goes with
   it. At most 30 lists of one's own.
+- **`GET /map/things`, `POST /map/things`** (22 Nov 2026, maps proposal
+  step 4, "Where things are"; `map_things.py`) — David's devices, rooms and
+  speakers placed on the map by hand, kept per account like saved places
+  (the owner's for the host's token). A thing is one the server already
+  knows, by its id: `device` a paired device (`d_…`, the person's own
+  account's), `room` a house speaker on the music stream (the Media tab's
+  rooms, Snapcast client ids), `speaker` an audio target that is a place
+  (`phone`, `local`, …; not `auto`, `sasonica`, `rooms` or `device:…`).
+  `GET` → `{things: [{kind, id, name, lat, lon, label?, state?}], unplaced:
+  [{kind, id, name}], rooms_unreachable?}`: `name` is the server's name for
+  it now (the one kept from placing while its source cannot be asked),
+  `label` the person's own ("Kitchen speaker"); `state` where cheap — a
+  device `{online, last_seen?}` (listening now or seen in 5 min), a room
+  `{connected, on, volume, playing}`, a speaker `{speech, music}` (the voice
+  or the music goes there now). A device no longer paired is left out.
+  `POST {kind, id, lat, lon, label?}` places or moves one → `{thing}` (its
+  label kept when not sent); `POST {kind, id, delete: true}` → `{deleted:
+  {kind, id}}` (404 `not_placed`). 400 `bad_kind`, `bad_point`,
+  `too_many` (200); 404 `unknown` for an id the server does not know; 503
+  `rooms_unreachable` placing a room not placed before while the Snapcast
+  server is down. The built-in layer `{id: "things", name: "Your things",
+  kind: "points", icon: "things", default_on: true, refresh_s: 60,
+  private: true}`, second in `GET /map/layers`: a Point per placed thing,
+  `properties` `{title (label, else name), name, kind, thing (its id),
+  icon: device|room|speaker, label?, state?, detail?}`. A room's music
+  controls are the Media tab's (`POST /music {action: "room", id, on?,
+  volume?}`, §6.9a). An agent places one with `media place thing <kind>
+  <name-or-id> --here | lat,lon [--label …] | --remove` (the phone's shared
+  location, §6.21b); `media place things` lists them. Behind the map's
+  gate. `/features` `map_things`.
 - **Pictures over the map** (19 Nov 2026; David: "Can we get an overlay
   with the Hot Springs map"; `map_overlays.py`). An overlay is
   `state_dir()/map-overlays/<id>.json` `{name, image, coordinates: [[lon,

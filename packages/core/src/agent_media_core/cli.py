@@ -11358,6 +11358,18 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("url", nargs="+", help="the link, or words with one in them")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_link)
+    t = psub.add_parser("thing", help="put a device, room or speaker on the Map, found by name "
+                                       "(\"the kitchen speaker is here\": place thing room kitchen --here)")
+    t.add_argument("kind", choices=["device", "room", "speaker", "any"])
+    t.add_argument("name", nargs="+", help="its name, id or the label it was placed with")
+    t.add_argument("--here", action="store_true", help="at the phone's shared location")
+    t.add_argument("--at", default="", help="lat,lon")
+    t.add_argument("--label", default=None, help="what to call it on the map (\"Kitchen speaker\")")
+    t.add_argument("--remove", action="store_true", help="take it off the map")
+    t.set_defaults(func=cmd_place_thing)
+    t = psub.add_parser("things", help="the devices, rooms and speakers on the Map, and the ones not placed")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_things)
     s = sub.add_parser("tune", help="songs of the listener's own near some words "
                                      "(tune_related; the reply's tune is reply_tune)")
     tsub = s.add_subparsers(dest="tune_cmd", required=True)
@@ -12579,6 +12591,100 @@ def cmd_place_link(a) -> int:
     return 0
 
 
+_LATLON = re.compile(r"-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?")
+
+
+def _place_point_opt(argv: list[str]) -> list[str]:
+    """`media place thing room kitchen -37.8,144.96`: a southern point starts
+    with "-", which argparse takes for an option; it becomes `--at=…`."""
+    if argv[:2] != ["place", "thing"]:
+        return argv
+    return [f"--at={t}" if _LATLON.fullmatch(t) else t for t in argv]
+
+
+def cmd_place_thing(a) -> int:
+    from . import place_find, place_things
+    from .phone_ask import _call
+
+    words = list(a.name)
+    at = a.at
+    # `media place thing room kitchen -37.8,144.9`: a trailing lat,lon is the point.
+    if not at and len(words) > 1 and place_things.point(words[-1]):
+        at = words.pop()
+    if a.remove + a.here + bool(at) != 1:
+        print("place thing: say --here, a lat,lon, or --remove", file=sys.stderr)
+        return 2
+    try:
+        code, got = _call("GET", "/map/things")
+    except (OSError, ValueError) as e:
+        print(f"place thing: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place thing: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    hits = place_things.match(got, "" if a.kind == "any" else a.kind, " ".join(words))
+    if not hits:
+        known = ", ".join(f"{r['kind']} {r.get('label') or r['name']} ({r['id']})"
+                          for r in [*got.get("things", []), *got.get("unplaced", [])]
+                          if a.kind in ("any", r["kind"]))
+        print(f"place thing: no {a.kind if a.kind != 'any' else 'thing'} called {' '.join(words)!r}"
+              + (f"; known: {known}" if known else "")
+              + (" (the rooms cannot be asked just now)" if got.get("rooms_unreachable") else ""),
+              file=sys.stderr)
+        return 1
+    if len(hits) > 1:
+        print("place thing: which one? " + "; ".join(f"{r['kind']} {r['name']} ({r['id']})" for r in hits),
+              file=sys.stderr)
+        return 1
+    hit = hits[0]
+    body: dict = {"kind": hit["kind"], "id": hit["id"]}
+    if a.remove:
+        body["delete"] = True
+    else:
+        where = place_find.near_point("phone") if a.here else place_things.point(at)
+        if where is None:
+            print("place thing: " + ("the phone is not sharing its location" if a.here
+                                     else f"{at!r} is not lat,lon"), file=sys.stderr)
+            return 1
+        body.update(lat=where[0], lon=where[1])
+        if a.label is not None:
+            body["label"] = a.label
+    code, out = _call("POST", "/map/things", body)
+    if code != 200:
+        print(f"place thing: {out.get('error') or code}", file=sys.stderr)
+        return 1
+    name = hit.get("label") or hit["name"]
+    if a.remove:
+        print(f"{name} taken off the map")
+    else:
+        t = out["thing"]
+        print(f"{t.get('label') or name} placed @ {t['lat']},{t['lon']}")
+    return 0
+
+
+def cmd_place_things(a) -> int:
+    from .phone_ask import _call
+
+    try:
+        code, got = _call("GET", "/map/things")
+    except (OSError, ValueError) as e:
+        print(f"place things: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place things: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(got, ensure_ascii=False, indent=1))
+        return 0
+    for t in got.get("things") or []:
+        print(f"{t['kind']:8} {t.get('label') or t['name']} @ {t['lat']},{t['lon']}    ({t['id']})")
+    for u in got.get("unplaced") or []:
+        print(f"{u['kind']:8} {u['name']} - not placed    ({u['id']})")
+    if got.get("rooms_unreachable"):
+        print("(the rooms cannot be asked just now)")
+    return 0
+
+
 def cmd_tune_index(a) -> int:
     from . import tune_related
 
@@ -12626,7 +12732,7 @@ def main(argv=None) -> int:
     if argv[:1] == ["uploads"]:
         return cmd_uploads(argparse.Namespace(args=list(argv[1:])))
     parser = _build_parser()
-    args = parser.parse_args(_music_opts_after_uri(_end_opts_before_time(argv), parser))
+    args = parser.parse_args(_place_point_opt(_music_opts_after_uri(_end_opts_before_time(argv), parser)))
     from . import play_gate
     if getattr(args, "in_treatment", False):
         # `--in-treatment`: this play goes through the play gate on purpose.
