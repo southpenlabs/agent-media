@@ -106,6 +106,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 63 | Peninsula Hot Springs' facility map (peninsulahotsprings.com, "MAIN Facility Map 2025" PDF) | a picture laid over the Map at the venue (`map_overlays.py`, layer `overlay:phs`, off until switched on; 19 Nov 2026) | none | fetched once by hand, cropped to the map and fitted to OpenStreetMap; the file lives in the owner's server's state folder and is shown only to its signed-in devices | **Needs work**: their artwork, no licence stated beside it; fine for the owner's own use, not to ship to others without Peninsula Hot Springs' leave | yes: the owner's own copy, not part of any install |
 | 64 | Esri World Imagery (ArcGIS Location Platform basemap tiles, ibasemaps-api.arcgis.com) | the Map's "Aerial photo" layer (`map_tiles.py`, `GET /map/tiles/aerial/{z}/{x}/{y}`; 19 Nov 2026) | the owner's ArcGIS Location Platform API key, `MEDIA_MAP_AERIAL_KEY`; it stays on the server, which asks Esri and hands the tiles on | free tier (2 million basemap tiles a month at the time); tiles held in memory a day, never written to disk; credit "Powered by Esri · Esri, Maxar, Earthstar Geographics, and the GIS User Community" shown | **Needs work**: per-person keys or a paid plan before others use it; check Esri's terms on caching and on serving tiles through a proxy for an app with other users. Victoria's Vicmap Basemaps aerial was looked at first: a licensed service with an annual fee | no |
 | 65 | A CardDAV address book (RFC 6352; the owner's Radicale on red2 today, any CardDAV server, e.g. Fastmail, iCloud, Nextcloud) | the contacts book's `carddav` source and the card's edits (`contacts_carddav.py`, `contacts_edit.edit_carddav`; 20 Nov 2026, docs/proposals/2026-11-20-contacts-carddav.md) | the book owner's own CardDAV account: `MEDIA_CARDDAV_URL`, `MEDIA_CARDDAV_USER`, `MEDIA_CARDDAV_PASSWORD_FILE` (HTTP Basic over HTTPS; the password stays on the server) | off until the URL is set; a sync-collection every contacts interval, PUTs only on an edit from the card | **Fine** for a server the owner runs (Radicale is GPLv3, run as its own process, never imported; vobject, Apache-2.0, parses the cards). A hosted provider's own terms apply to its account (check each: app passwords, rate limits) | no |
+| 66 | Google Maps short links (maps.app.goo.gl, goo.gl/maps) | reading a map link shared to the app (`GET /map/link`, `media place link`; core `maps_link.py`): the short link's redirect only | none | a HEAD request per shared link, its Location read; no page fetched, no Google API | nothing: a link the user shared is followed once, as a browser would | no |
 
 ## The services, one by one
 
@@ -867,6 +868,19 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** each deployment downloads it itself when it builds its
   tiles; nothing is redistributed. Other regions need their own operator's
   GTFS and its terms.
+
+### 66. Google Maps short links
+
+- **Used for:** a route or a place shared from Google Maps to the app
+  (`GET /map/link`, `media place link`; David, 21 Nov 2026: "I'd like to be
+  able to share directions and locations to sasonica"). A
+  `maps.app.goo.gl` link is followed with HEAD requests, only to Google's
+  own hosts, and the long link's own text is read for the places; no page
+  and no Google API is asked. Stops named without a point go to the
+  geocoder (row 11).
+- **Terms:** following a link the user shared, once, as a browser would;
+  no Google Maps content is stored or shown (the app draws its own map).
+- **Personal-use switch:** no.
 
 ## Before other people use this
 

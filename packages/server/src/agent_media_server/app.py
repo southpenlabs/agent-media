@@ -397,6 +397,8 @@ except /pair, which is how a device gets its token):
                   [&limit] → places of a kind from OpenStreetMap, nearest
                   first, with open_now (map_places.py, §6.50); GET
                   /map/places/kinds → the kinds it takes
+  GET  /map/link?url= → a shared map link (Google, Apple, OSM, geo:) read
+                  into {kind: route|place, points, mode?} (core maps_link.py, §6.50)
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -574,7 +576,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
                        "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
-                       "/map/overlay"})
+                       "/map/overlay", "/map/link"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6229,6 +6231,12 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         ok, detail = map_layers._gate(bearer, host)
         if ok:
             ok, detail = map_overlays.picture(arg("id"))
+    elif method == "GET" and path == "/map/link":
+        # A map link shared to the app, read into places (core maps_link.py).
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.link(arg("url"), bearer, host=host)
     elif method == "GET" and path == "/map/trip":
         # A shared trip, for whoever has the link: public, the token is the credential (map_trips.py).
         from . import map_trips

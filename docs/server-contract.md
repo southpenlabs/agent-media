@@ -11731,6 +11731,24 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `near_or_bbox`, `bad_near`, `bad_bbox`, `too_big`, `bad_radius`,
   `bad_limit`; 502 `overpass` when every Overpass fails; the map's gate (a
   guest 403). In `/features`: `map_places: true`.
+- **`GET /map/link?url=<link>`** (21 Nov 2026; David: "I'd like to be able
+  to share directions and locations to sasonica"; core `maps_link.py`,
+  tests in `test_maps_link.py` and `test_map_link.py`): a map link shared
+  to the app, read into places. Takes Google Maps (the
+  `maps.app.goo.gl` short link, whose redirect alone is read, from
+  Google's hosts only; `/maps/dir/…`, `/maps/place/…`, `/maps/search/…`,
+  `@lat,lon`, `?q=`, `?daddr=`, `api=1`), Apple Maps, OpenStreetMap and
+  `geo:` URIs; words with a link in them are fine (Google's share puts
+  "Shared route" first). → `{kind: "route"|"place", points: [{name, lat?,
+  lon?, here?, address?, unplaced?}], mode?: drive|walk|bike|transit,
+  url}`. A route's first point with `here: true` is "where I am" (with
+  the sender's point at the time when the link had one): the app routes
+  from where it is. A stop with a name and no point is looked up with the
+  geocoder (`place_find`) near the stops already placed; `unplaced: true`
+  when it is not found. 400 `no_url`, `not_a_place`; 502 `unreachable`
+  (the short link could not be followed); the map's gate. The CLI's
+  `media place link <url> [--json]` prints the same, with the
+  `[[route: …]]` or `[[map: …]]` marker for it.
 - **`GET /map/speed_limit?near=lat,lon[&heading=deg]`** (12 Nov 2026; David:
   "let's add speed limits"; `map_limits.py`) → `{kmh, road, distance_m}`,
   the limit of the road nearest the point within 30 m, a road running the

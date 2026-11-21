@@ -334,6 +334,24 @@ def places(near: str, bbox: str, kind: str, radius_m: str, open_now: str, limit:
     return map_places.places(near, bbox, kind, radius_m, open_now, limit, along=along) if ok else (False, err)
 
 
+def link(url: str, bearer: str, host: bool = False, read=None) -> tuple[bool, dict]:
+    """`GET /map/link?url=`: a shared map link's places (core maps_link.py), behind the map's gate."""
+    from agent_media_core import failures, maps_link
+
+    ok, err = _gate(bearer, host)
+    if not ok:
+        return False, err
+    if not (url or "").strip():
+        return False, {"status": 400, "code": "no_url", "error": "say which link"}
+    try:
+        return True, (read or maps_link.read)(url)
+    except maps_link.LinkError as e:
+        return False, {"status": 400, "code": "not_a_place", "error": str(e)}
+    except Exception as e:  # noqa: BLE001 - the short link's host out of reach
+        failures.swallowed(e)
+        return False, {"status": 502, "code": "unreachable", "error": f"the link could not be followed: {e.__class__.__name__}"}
+
+
 def place_kinds(bearer: str, host: bool = False) -> tuple[bool, dict]:
     """`GET /map/places/kinds`: the kinds `/map/places` takes, for the app's chips."""
     from . import map_places

@@ -11353,6 +11353,11 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--limit", type=int, default=5)
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_find)
+    t = psub.add_parser("link", help="a shared map link (Google, Apple, OSM, geo:) as its "
+                                      "places, and the [[route:]] or [[map:]] marker for them")
+    t.add_argument("url", nargs="+", help="the link, or words with one in them")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_link)
     s = sub.add_parser("tune", help="songs of the listener's own near some words "
                                      "(tune_related; the reply's tune is reply_tune)")
     tsub = s.add_subparsers(dest="tune_cmd", required=True)
@@ -12547,6 +12552,30 @@ def cmd_place_find(a) -> int:
         return 1
     for r in rows:
         print(f"{place_find.marker_part(r)}    ({r['address']})")
+    return 0
+
+
+def cmd_place_link(a) -> int:
+    from . import maps_link
+
+    try:
+        info = maps_link.read(" ".join(a.url))
+    except maps_link.LinkError as e:
+        print(f"place link: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001 - the short link's host out of reach
+        print(f"place link: the link could not be followed: {e}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(info, ensure_ascii=False, indent=1))
+        return 0
+    for s in info["points"]:
+        name = s.get("name") or ("where they were (start)" if s.get("here") else "")
+        where = f"{s['lat']},{s['lon']}" if "lat" in s else "not found"
+        print(f"{name} @ {where}" + (f"    ({s['address']})" if s.get("address") else ""))
+    if info.get("mode"):
+        print(f"mode: {info['mode']}")
+    print(maps_link.marker(info))
     return 0
 
 
