@@ -11704,6 +11704,49 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   answers the image, asked of Esri World Imagery with the key, which never
   leaves the server; kept in memory a day (1500 at most); 404 `no_tile`
   without a key or out of range, 502 when Esri cannot be reached.
+- **Live traffic** (22 Nov 2026, maps step 7 item 4; `map_traffic.py`).
+  While `MEDIA_TOMTOM_API_KEY` is set, `GET /map/layers` lists `{id:
+  "traffic", name: "Traffic", kind: "flow", default_on: false, bbox: true,
+  min_zoom: 9, refresh_s: 180, source: "Traffic © TomTom"}` (kind `flow`: lines
+  in each feature's own `colour`, drawn under the map's names and a route,
+  its points the ones worth counting), read like the camera layers (`GET
+  /map/layer?id=traffic&bbox=w,s,e,n`, again every `refresh_s`): each road's flow
+  a LineString with `{level: free|slow|jam|closed, ratio, colour, road?,
+  traffic: true}` (`ratio` now / free-flow speed: free from 0.75, slow from
+  0.45, jam under; `colour` Google's green, amber, red, dark red), a closure's
+  own stretch a line with `closure: true`, and each incident a Point with
+  `{title, detail, incident: crash|road_closed|roadworks|lane_closed|…,
+  colour, delay_s?, magnitude?, count?}` (queues show in the flow, not as
+  pins). The collection carries `zoom`, `credit`, and `zoom_in` (too wide),
+  `partial` (a tile not had) or `month_spent`. **`GET /map/traffic?bbox=`**
+  gives the same as `{flow: [...], incidents: [...], zoom, credit, at}`;
+  404 `no_traffic` without the key. The server reads TomTom's flow and
+  incident vector tiles (about two across the box, at most 12 of each),
+  kept three minutes. **Routes in traffic:** `GET /map/route` for a drive
+  now (not with depart or arrive; `traffic=0` asks without) gives each way
+  TomTom could time `traffic: {duration_s, delay_s, no_traffic_s?, credit}`
+  (TomTom's Routing API asked to follow that very line, so the road is
+  Valhalla's and the time TomTom's), the top level the first's, and puts the
+  ways fastest in traffic first. **`POST /map/traffic/eta {line: [[lon, lat],
+  …]}`** (2 to 2000 points; the map's gate) → `{traffic: {duration_s,
+  delay_s, no_traffic_s?, credit} | null}`, for what is left of a route being
+  guided (the app's "Faster route available"), kept two minutes per line.
+  Each stops at a monthly ceiling inside TomTom's free tiers, counted in
+  `traffic-usage.json`: `MEDIA_TOMTOM_TRAFFIC_MONTHLY_MAX` tiles (150,000;
+  200,000 free) and `MEDIA_TOMTOM_ROUTING_MONTHLY_MAX` routes (15,000; 20,000
+  free), 0 for off (outside-services row 74).
+- **Offline maps** (22 Nov 2026, maps step 7 item 4; `map_offline.py`).
+  **`GET /map/offline`** (the map's gate) → `{areas: [{id: "victoria", name,
+  version, source, built_at, bounds: [w, s, e, n], max_zoom, credit, bytes,
+  files: [{name, bytes, kind: tiles|assets, path}]}]}`, `{areas: []}` until
+  the server has built one: `victoria.pmtiles` (Protomaps' basemap of
+  Victoria, PMTiles v3, zoom 0–14, about 230 MB) and `victoria-assets.zip`
+  (`fonts/<stack>/<range>.pbf`, `sprites/light|dark[@2x].json|png` for the
+  Protomaps style). **`GET /map/offline/<area>/<file>`** (bearer) hands a
+  file the listing names over, `Range` answered 206 so a download resumes;
+  404 `no_file` for any other. `python -m agent_media_server.map_offline
+  build` (monthly on the owner's server) extracts the area from the newest
+  Protomaps planet build by range requests (outside-services row 75).
 - **Sharing a trip** (19 Nov 2026; David: the link "by default ends when
   the trip ends but has an option for other" lengths, opened by "anyone
   with the link"; `map_trips.py`, `/features` `map_trips`). `POST

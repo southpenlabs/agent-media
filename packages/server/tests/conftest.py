@@ -97,6 +97,18 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(map_vic, "_get", _no_vic)
     monkeypatch.setattr(map_vic, "_road_line", _no_vic)
     monkeypatch.setattr(map_vic, "_cache", lambda: tmp_path / "vic-roads.json")
+    # Live traffic (TomTom) and the offline map's Protomaps build are never
+    # asked by a test: one that wants an answer passes its own fetch.
+    from agent_media_server import map_offline, map_traffic
+
+    def _no_outside(*a, **k):
+        raise RuntimeError("a test reached TomTom or Protomaps")
+
+    monkeypatch.setattr(map_traffic, "_get", _no_outside)
+    monkeypatch.setattr(map_traffic, "_post", _no_outside)
+    monkeypatch.setattr(map_offline, "_http_range", _no_outside)
+    monkeypatch.setattr(map_offline, "_get", _no_outside)
+    map_traffic._reset_for_tests()
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

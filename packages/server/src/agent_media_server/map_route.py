@@ -18,6 +18,11 @@ arrive by (Valhalla's `date_time`), and public transport (costing
 `no_transit` where the service has none). The top level keeps the first
 route's fields as before; `routes` has every route, chosen first.
 
+Live traffic (maps step 7 item 4, map_traffic.py): a driving route asked
+for now (not leave at / arrive by) carries `traffic: {duration_s, delay_s,
+no_traffic_s, credit}` on each way TomTom could time, and the ways are put
+fastest-in-traffic first; `traffic=0` asks without.
+
 Lane guidance (maps step 7 item 4; David, 22 Nov 2026): driving, each step
 whose turn has OSM `turn:lanes` carries `lanes: [{dirs, valid, active}]`,
 left to right, `dirs` of left, slight_left, sharp_left, through, right,
@@ -316,7 +321,8 @@ def _times(trip: dict, out: dict, depart: _dt.datetime | None, arrive: _dt.datet
 
 
 def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "", avoid: str = "",
-          alternates: str = "", depart: str = "", arrive: str = "", base: str | None = None) -> tuple[bool, dict]:
+          alternates: str = "", depart: str = "", arrive: str = "", base: str | None = None,
+          traffic: str = "") -> tuple[bool, dict]:
     base = router_url() if base is None else base
     if not base:
         return False, {"status": 404, "code": "no_router", "error": "no routing service on this server"}
@@ -400,9 +406,14 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "",
         if i < len(lanes):
             _add_lanes(r, lanes[i])
         routes.append(r)
+    if costing == "auto" and not (when_d or when_a) and traffic != "0":
+        # Live traffic (map_traffic.py): each way's time in today's traffic, the fastest first.
+        from . import map_traffic
+
+        routes = map_traffic.annotate(routes)
     first = routes[0]
     out = {k: first[k] for k in ("mode", "distance_m", "duration_s", "line", "steps", "legs")}
-    for k in ("depart_at", "arrive_at", "time_zone"):
+    for k in ("depart_at", "arrive_at", "time_zone", "traffic"):
         if k in first:
             out[k] = first[k]
     out["routes"] = routes

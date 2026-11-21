@@ -588,7 +588,8 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
-                       "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
+                       "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours",
+                       "/map/traffic", "/map/traffic/eta", "/map/offline"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -675,6 +676,8 @@ BRIDGE_ROUTES = (BRIDGE_ICON, BRIDGE_AVATAR, BRIDGE_LOGIN, BRIDGE_PROC, BRIDGE_P
 
 #: An aerial photo tile, through this server (map_tiles.py).
 MAP_TILE = re.compile(r"/map/tiles/aerial/(\d{1,2})/(\d{1,7})/(\d{1,7})")
+#: An offline map's file, for the phone to keep (map_offline.py).
+MAP_OFFLINE_FILE = re.compile(r"/map/offline/([a-z0-9-]{1,40})/([A-Za-z0-9._-]{1,80})")
 #: A shared trip's short link (map_trips.link): the token is URL-safe base64.
 TRIP_LINK = re.compile(r"/trip/[A-Za-z0-9_-]{16,64}")
 
@@ -689,7 +692,7 @@ def cors_path(path: str) -> bool:
                                                         CONTACT_SAME, CONTACT_PHOTO, CONTACT_MAIL, MAIL_THREAD,
                                                         CONTACT_FIND, ROOM_AVATAR, ROOM_MEDIA, ROOM_CONTACT, PRACTICE_FILE,
                                                         CONTACT_EDIT, CONTACT_REREAD, CONTACT_LEVEL, CONTACT_TEXT,
-                                                        LOCAL_BACKUP, MAP_TILE, *BRIDGE_ROUTES))
+                                                        LOCAL_BACKUP, MAP_TILE, MAP_OFFLINE_FILE, *BRIDGE_ROUTES))
 
 
 # Long enough that a chat page's polling is not preceded by a preflight every
@@ -787,6 +790,26 @@ def _map_tile(h: BaseHTTPRequestHandler, path: str) -> bool:
     _cors(h)
     h.end_headers()
     h.wfile.write(body)
+    return True
+
+
+def _map_offline_file(h: BaseHTTPRequestHandler, path: str) -> bool:
+    """An offline map's tiles or fonts (map_offline.py), a byte range at a time when asked, behind the map's gate."""
+    from . import map_layers, map_offline
+
+    host = _TOKEN_OK is not None and _TOKEN_OK(h)
+    ok, detail = map_layers._gate(_bearer(h), host)
+    if not ok:
+        _json(h, detail.pop("status", 401), {"ok": False, **detail})
+        return True
+    area, name = MAP_OFFLINE_FILE.fullmatch(path).groups()  # type: ignore[union-attr]
+    p = map_offline.file_for(area, name)
+    if p is None:
+        _json(h, 404, {"ok": False, "code": "no_file", "error": "no such offline map file"})
+        return True
+    ctype = "application/zip" if name.endswith(".zip") else "application/vnd.pmtiles"
+    # A new build is a new version in the listing; a day's keeping is plenty.
+    _send_file(h, p, p.stat().st_size, ctype, {"Cache-Control": "private, max-age=86400"})
     return True
 
 
@@ -1121,6 +1144,8 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return _app_update(h, path)
     if method == "GET" and MAP_TILE.fullmatch(path):
         return _map_tile(h, path)
+    if method == "GET" and MAP_OFFLINE_FILE.fullmatch(path):
+        return _map_offline_file(h, path)
     if method == "GET":
         # The web app's own files (web_app.py, roadmap 21): no credential,
         # and nothing else under /app is an API route.
@@ -6267,7 +6292,27 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers.route(arg("from"), arg("to"), arg("mode"), arg("lang"), bearer, host=host,
                                       via=arg("via"), avoid=arg("avoid"), alternates=arg("alternates"),
-                                      depart=arg("depart"), arrive=arg("arrive"))
+                                      depart=arg("depart"), arrive=arg("arrive"), traffic=arg("traffic"))
+    elif method == "GET" and path == "/map/traffic":
+        # Live traffic for the box on screen: flow lines and incidents (map_traffic.py).
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.traffic(arg("bbox"), bearer, host=host)
+    elif method == "GET" and path == "/map/offline":
+        # The offline maps there are to download (map_offline.py).
+        from . import map_layers, map_offline
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            detail = map_offline.listing()
+    elif method == "POST" and path == "/map/traffic/eta":
+        # The time along what is left of a route being guided, in today's traffic (map_traffic.py).
+        from . import map_layers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers.traffic_eta(_read_json(h) or {}, bearer, host=host)
     elif method == "GET" and path == "/map/route/modes":
         # What the route planner offers here: Transit only on transit tiles (map_route.py).
         from . import map_layers

@@ -150,6 +150,11 @@ def _all() -> list[dict]:
 
     for lay in map_overlays.layers():
         out.append({"layer": lay, "features": lambda _bbox: []})
+    # Live traffic, while the owner's TomTom key is set (map_traffic.py).
+    from . import map_traffic
+
+    for lay in map_traffic.layers():
+        out.append({"layer": lay, "features": map_traffic.read})
     # Aerial photos, while the owner's key is set (map_tiles.py).
     from . import map_tiles
 
@@ -320,13 +325,59 @@ def speed_limit(near: str, heading: str, bearer: str, host: bool = False) -> tup
 
 
 def route(frm: str, to: str, mode: str, lang: str, bearer: str, host: bool = False, via: str = "",
-          avoid: str = "", alternates: str = "", depart: str = "", arrive: str = "") -> tuple[bool, dict]:
+          avoid: str = "", alternates: str = "", depart: str = "", arrive: str = "",
+          traffic: str = "") -> tuple[bool, dict]:
     """`GET /map/route` (map_route.py), behind the map's gate."""
     from . import map_route
 
     ok, err = _gate(bearer, host)
     return map_route.route(frm, to, mode, lang, via=via, avoid=avoid, alternates=alternates,
-                           depart=depart, arrive=arrive) if ok else (False, err)
+                           depart=depart, arrive=arrive, traffic=traffic) if ok else (False, err)
+
+
+def traffic(bbox_raw: str, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`GET /map/traffic?bbox=w,s,e,n` (map_traffic.py): the traffic layer for
+    the box, `flow` lines and `incidents` points apart; 404 `no_traffic`
+    without the owner's key."""
+    from . import map_traffic
+
+    ok, err = _gate(bearer, host)
+    if not ok:
+        return False, err
+    if not map_traffic.enabled():
+        return False, {"status": 404, "code": "no_traffic", "error": "no live traffic on this server"}
+    bbox = _bbox(bbox_raw)
+    if bbox is None:
+        return _bad_bbox()
+    feats, extra = map_traffic.read(bbox)
+    return True, {**extra, "at": round(time.time(), 3),
+                  "flow": [f for f in feats if f["geometry"]["type"] == "LineString"],
+                  "incidents": [f for f in feats if f["geometry"]["type"] == "Point"]}
+
+
+def _bad_bbox() -> tuple[bool, dict]:
+    return False, {"status": 400, "error": "bbox is w,s,e,n"}
+
+
+def traffic_eta(body: dict, bearer: str, host: bool = False) -> tuple[bool, dict]:
+    """`POST /map/traffic/eta {line: [[lon, lat], …]}` (map_traffic.py): the
+    time along a car's way in today's traffic, for what is left of a route
+    being guided; `{traffic: null}` when it could not be had (off, the month's
+    ceiling reached, the provider away)."""
+    from . import map_traffic
+
+    ok, err = _gate(bearer, host)
+    if not ok:
+        return False, err
+    line = body.get("line") if isinstance(body, dict) else None
+    if not isinstance(line, list) or len(line) < 2 or len(line) > 2000:
+        return False, {"status": 400, "error": "line is [[lon, lat], …], 2 to 2000 points"}
+    try:
+        pts = [[float(p[0]), float(p[1])] for p in line]
+    except (TypeError, ValueError, IndexError):
+        return False, {"status": 400, "error": "line is [[lon, lat], …]"}
+    t = map_traffic.eta(pts)
+    return True, {"traffic": {**t, "credit": map_traffic.CREDIT} if t else None}
 
 
 def route_modes(bearer: str, host: bool = False) -> tuple[bool, dict]:
