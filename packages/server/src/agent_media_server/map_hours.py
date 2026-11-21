@@ -33,6 +33,16 @@ never stored; only which Foursquare place a name and point matched is kept
 Foursquare beside the hours (visual-crediting policy).
 
 Off unless `MEDIA_FOURSQUARE_KEY` holds a Service Key.
+
+Cached (David, 22 Nov 2026: "let's cache opening hours", choosing "Cache
+everywhere for a week" when told it goes against both services' terms):
+each answer is kept in `state_dir()/place-hours-cache.json` by name and
+point (rounded to about 10 m), found hours for CACHE_S (a week), "no
+match" and "no hours" for MISS_S (a day), a failure or a missing key never.
+Whether a place is open now is worked out again from the kept hours on each
+read. Google's terms allow storing place IDs only, and Foursquare's only
+`fsq_place_id`, so a public release must turn this off (outside-services
+rows for Google Places and Foursquare say so).
 """
 from __future__ import annotations
 
@@ -57,6 +67,33 @@ DAYS = {1: "Mo", 2: "Tu", 3: "We", 4: "Th", 5: "Fr", 6: "Sa", 7: "Su"}
 
 _ids: dict[tuple, str] = {}
 _lock = threading.Lock()
+#: How long kept hours are used before asking again; a miss for a day.
+CACHE_S = 7 * 86400
+MISS_S = 86400
+CACHE_FILE = "place-hours-cache.json"
+
+
+def _cache_key(name: str, la: float, lo: float) -> str:
+    return f"{name.lower()}|{la:.4f}|{lo:.4f}"
+
+
+def _cached(key: str, now_s: float) -> dict | None:
+    hit = _read(CACHE_FILE).get(key)
+    if not isinstance(hit, dict) or not isinstance(hit.get("answer"), dict):
+        return None
+    keep = CACHE_S if hit["answer"].get("found") else MISS_S
+    return dict(hit["answer"]) if now_s - float(hit.get("at") or 0) < keep else None
+
+
+def _keep(key: str, answer: dict, now_s: float) -> None:
+    if not answer.get("found") and answer.get("reason") not in ("no_match", "no_hours"):
+        return
+    with _lock:
+        d = _read(CACHE_FILE)
+        d = {k: v for k, v in d.items()
+             if isinstance(v, dict) and now_s - float(v.get("at") or 0) < CACHE_S}
+        d[key] = {"at": now_s, "answer": answer}
+        _write(CACHE_FILE, d)
 
 GOOGLE = "https://places.googleapis.com/v1"
 #: Enterprise calls a month at most: the free 1,000 with room to spare.
@@ -276,11 +313,20 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
     name = " ".join((name or "").split())[:120]
     if not name or not (-90 <= la <= 90 and -180 <= lo <= 180):
         return False, {"status": 400, "code": "bad_place", "error": "give a name, lat and lon"}
-    g = _google(name, la, lo, gfetch, now)
-    if not g.get("found"):
-        f = _foursquare(name, la, lo, fetch)
-        if f.get("found") or g.get("reason") == "no_key":
-            g = f
+    import time as _time
+
+    now_s = now.timestamp() if hasattr(now, "timestamp") else (float(now) if isinstance(now, (int, float)) else _time.time())
+    key = _cache_key(name, la, lo)
+    g = _cached(key, now_s)
+    if g is None:
+        g = _google(name, la, lo, gfetch, now)
+        if not g.get("found"):
+            f = _foursquare(name, la, lo, fetch)
+            if f.get("found") or g.get("reason") == "no_key":
+                g = f
+        _keep(key, {k: v for k, v in g.items() if k not in ("open_now", "changes_at")}, now_s)
+    else:
+        g["cached"] = True
     if not g.get("found"):
         return True, g
     from . import map_places
@@ -342,3 +388,7 @@ def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], di
 def forget() -> None:
     with _lock:
         _ids.clear()
+        try:
+            _state(CACHE_FILE).unlink(missing_ok=True)
+        except OSError as e:
+            _failures.swallowed(e)

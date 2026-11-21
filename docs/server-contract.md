@@ -11720,6 +11720,12 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   matched `fsq_place_id` is kept (its terms). Hours are never stored; the
   app shows "Hours from Google Maps" or "Hours from Foursquare" with the
   link. 400 `bad_point`, `bad_place`.
+  Kept (22 Nov 2026; David: "let's cache opening hours"): each answer by
+  name and point (to about 10 m) in `place-hours-cache.json`, found hours a
+  week, `no_match`/`no_hours` a day, a failure or `no_key` never; a kept
+  answer says `cached: true`, and `open_now`/`changes_at` are worked out
+  again from its hours on each read. Against both providers' terms (see
+  outside-services rows 67 and 69): a public build must turn it off.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,

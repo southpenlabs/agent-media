@@ -22,6 +22,9 @@ def fresh(monkeypatch, tmp_path):
     monkeypatch.delenv("MEDIA_GOOGLE_PLACES_KEY", raising=False)
     monkeypatch.delenv("MEDIA_GOOGLE_PLACES_MONTHLY_MAX", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    # Each test here asks afresh; test_hours_are_kept_a_week turns the cache on.
+    monkeypatch.setattr(map_hours, "CACHE_S", 0)
+    monkeypatch.setattr(map_hours, "MISS_S", 0)
     map_hours.forget()
 
 
@@ -135,3 +138,33 @@ def test_google_periods_as_osm_writes_them():
     assert map_hours.osm_hours_google(sun_first) == "Mo-Th 07:00-15:00; Fr 07:00-15:00,18:00-24:00; Su 09:00-13:00"
     assert map_hours.osm_hours_google({"periods": [{"open": {"day": 0, "hour": 0, "minute": 0}}]}) == "24/7"
     assert map_hours.osm_hours_google({}) == ""
+
+
+def test_hours_are_kept_a_week_and_a_miss_a_day(monkeypatch):
+    """David, 22 Nov 2026: "let's cache opening hours" (everywhere, a week)."""
+    import datetime as dt
+
+    monkeypatch.setattr(map_hours, "CACHE_S", 7 * 86400)
+    monkeypatch.setattr(map_hours, "MISS_S", 86400)
+    asked = []
+
+    def fetch(url, headers):
+        asked.append(url)
+        return {"results": [BLUE_FIN]}
+
+    ok, got = map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=fetch, now=THU_10)
+    assert got["found"] and "cached" not in got and len(asked) == 1
+    # The same place within a week: kept, not asked; open now worked out again.
+    later = THU_10 + dt.timedelta(hours=3)
+    ok, got = map_hours.place_hours("Blue Fin Blairgowrie", "-38.361180", "144.778440", fetch=fetch, now=later)
+    assert got["cached"] is True and got["open_now"] is True and len(asked) == 1
+    # Past a week: asked again.
+    map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=fetch, now=THU_10 + dt.timedelta(days=8))
+    assert len(asked) == 2
+    # A miss is kept a day; a failure is not kept.
+    nothing = lambda u, h: (asked.append(u), {"results": []})[1]
+    assert map_hours.place_hours("Nowhere Cafe", "-38.30", "144.70", fetch=nothing, now=THU_10)[1]["reason"] == "no_match"
+    map_hours.place_hours("Nowhere Cafe", "-38.30", "144.70", fetch=nothing, now=THU_10 + dt.timedelta(hours=2))
+    assert len(asked) == 3
+    map_hours.place_hours("Nowhere Cafe", "-38.30", "144.70", fetch=nothing, now=THU_10 + dt.timedelta(days=2))
+    assert len(asked) == 4
