@@ -11703,14 +11703,23 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>`** (21 Nov
   2026; David: "how does Google maps get blue fin opening hours?" … "Can
   we do one and two?"; `map_hours.py`, tests in `test_map_hours.py`): a
-  place's hours from Foursquare, for a card OpenStreetMap has none for. →
-  `{found: true, source: "foursquare", opening_hours (OSM's syntax, built
-  from Foursquare's regular hours), display (Foursquare's words), open_now,
-  changes_at?, link (its Foursquare page)}` or `{found: false, reason:
-  no_key | no_match | no_hours | failed}`. A match is a like name within
-  150 m. Off without `MEDIA_FOURSQUARE_KEY`. Nothing but the matched
-  `fsq_place_id` is kept (Foursquare's terms); the app shows "Hours from
-  Foursquare" with the link. 400 `bad_point`, `bad_place`.
+  place's hours from Google, then Foursquare, for a card OpenStreetMap
+  has none for (Google added 22 Nov 2026: "Can we also get data from
+  Google on a free tier?"). → `{found: true, source: "google" |
+  "foursquare", opening_hours (OSM's syntax, built from the source's
+  periods), display (the source's own words), open_now, changes_at?, link
+  (the place's Google Maps or Foursquare page)}` or `{found: false,
+  reason: no_key | no_match | no_hours | failed | google_month_spent}`. A
+  match is a like name within 150 m. Google (`MEDIA_GOOGLE_PLACES_KEY`): a
+  Text Search asking only for id, displayName and location finds the
+  place, its place ID is kept (allowed indefinitely), and Place Details
+  with regularOpeningHours,googleMapsUri gives the hours, the one
+  Enterprise call, counted per month and stopped at
+  `MEDIA_GOOGLE_PLACES_MONTHLY_MAX` (900; 1,000 are free), after which
+  Foursquare is asked. Foursquare (`MEDIA_FOURSQUARE_KEY`): nothing but the
+  matched `fsq_place_id` is kept (its terms). Hours are never stored; the
+  app shows "Hours from Google Maps" or "Hours from Foursquare" with the
+  link. 400 `bad_point`, `bad_place`.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,
