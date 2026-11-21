@@ -18,7 +18,7 @@ dependencies = [
     # Windows only: the system media transport controls, through which
     # audio_backend/_windows.py pauses other players for speech (~1.5 MB).
     "winrt-runtime~=3.2; sys_platform == 'win32'",
-    "winrt-Windows.Foundation~=3.2; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=3.2,<11.0; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections~=3.2; sys_platform == 'win32'",
     "winrt-Windows.Media.Control~=3.2; sys_platform == 'win32'",
 ]
