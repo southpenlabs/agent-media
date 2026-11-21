@@ -86,6 +86,14 @@ INCIDENTS = _tile({
         (1, [(3000, 3000)], {"icon_category_0": 6, "description_0": "Stationary traffic", "poi_type": "start_poi"})],
     "Traffic incident flow": [
         (2, [(0, 4000), (4000, 4000)], {"icon_category_0": 8, "description_0": "Closed"})]})
+CLUSTER = _tile({"Traffic incident POI": [
+    (1, [(2000, 2000)], {"icon_category": 13, "description": "Cluster", "cluster_size": 3, "poi_type": "standalone_poi"})]})
+
+
+def test_a_cluster_says_how_many():
+    (f,) = map_traffic._incidents(12, 3699, 2514, CLUSTER)
+    p = f["properties"]
+    assert p["incident"] == "several" and p["count"] == 3 and p["detail"].startswith("3 together")
 
 
 def test_a_tile_is_read():

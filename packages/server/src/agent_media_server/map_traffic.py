@@ -435,6 +435,9 @@ def _incidents(z: int, x: int, y: int, body: bytes) -> list[dict]:
                 words = str(p.get("description") or p.get("description_0") or "")
                 detail = " · ".join(x for x in (words, f"{round(delay / 60)} min delay" if delay and delay >= 60 else "",
                                                 f"until {p['end_date'][:16].replace('T', ' ')}" if p.get("end_date") else "") if x)
+                if p.get("cluster_size"):
+                    # Incidents too close to draw apart at this zoom: how many, not TomTom's "Cluster".
+                    detail = f"{int(p['cluster_size'])} together; zoom in to see each"
                 props = {"title": INCIDENT_TITLES[kind], "detail": detail, "incident": kind,
                          "colour": INCIDENT_COLOURS.get(kind, "#5f6368")}
                 if delay is not None:
