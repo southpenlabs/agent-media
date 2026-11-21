@@ -1,6 +1,19 @@
-"""A place's opening hours when OpenStreetMap has none: Foursquare's
-(David, 21 Nov 2026: "how does Google maps get blue fin opening hours?" …
-"Can we do one and two?" — two being a Foursquare fallback).
+"""A place's opening hours when OpenStreetMap has none: Google's, then
+Foursquare's (David, 21 Nov 2026: "how does Google maps get blue fin
+opening hours?" … "Can we do one and two?" — two being a Foursquare
+fallback; 22 Nov: "Can we also get data from Google on a free tier?").
+
+Google Places API (New), first when `MEDIA_GOOGLE_PLACES_KEY` is set: a
+Text Search with only `places.id,places.displayName,places.location` in the
+field mask finds the place (no Enterprise field, so not the dear call),
+its place ID is kept (Google lets place IDs be stored indefinitely: in
+memory and `state_dir()/google-place-ids.json`), and Place Details with
+`regularOpeningHours,googleMapsUri` gives the hours — the one Enterprise
+call, 1,000 free a month since March 2025. Those calls are counted per
+calendar month in `state_dir()/google-places-usage.json`, and at
+`MEDIA_GOOGLE_PLACES_MONTHLY_MAX` (900 unless set) Google is not asked
+again that month, so the free calls are never passed. Hours are not
+stored. The app credits "Google Maps" and links the place's page.
 
 `GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>` (§6.50), asked by
 the Map when a place's card opens with no hours of OSM's own. →
@@ -45,9 +58,143 @@ DAYS = {1: "Mo", 2: "Tu", 3: "We", 4: "Th", 5: "Fr", 6: "Sa", 7: "Su"}
 _ids: dict[tuple, str] = {}
 _lock = threading.Lock()
 
+GOOGLE = "https://places.googleapis.com/v1"
+#: Enterprise calls a month at most: the free 1,000 with room to spare.
+GOOGLE_MONTHLY_MAX = 900
+#: (method, url, json body or None, headers) → the JSON answer. Tests pass their own.
+GFetch = Callable[[str, str, "dict | None", dict], dict]
+
 
 def _key() -> str:
     return (os.environ.get("MEDIA_FOURSQUARE_KEY") or "").strip()
+
+
+def _gkey() -> str:
+    return (os.environ.get("MEDIA_GOOGLE_PLACES_KEY") or "").strip()
+
+
+def _gmax() -> int:
+    try:
+        return int(os.environ.get("MEDIA_GOOGLE_PLACES_MONTHLY_MAX") or GOOGLE_MONTHLY_MAX)
+    except ValueError:
+        return GOOGLE_MONTHLY_MAX
+
+
+def _state(name: str):
+    from agent_media_core._paths import state_dir
+
+    return state_dir() / name
+
+
+def _read(name: str) -> dict:
+    try:
+        d = json.loads(_state(name).read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write(name: str, d: dict) -> None:
+    p = _state(name)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f".{p.name}.{os.getpid()}")
+        tmp.write_text(json.dumps(d))
+        os.replace(tmp, p)
+    except OSError as e:
+        _failures.swallowed(e)
+
+
+def _month(now) -> str:
+    import datetime as dt
+
+    return (now or dt.datetime.now(dt.timezone.utc)).strftime("%Y-%m")
+
+
+def google_usage(now=None) -> int:
+    """Enterprise calls made to Google this calendar month."""
+    u = _read("google-places-usage.json")
+    return int(u.get("calls") or 0) if u.get("month") == _month(now) else 0
+
+
+def _google_spent(now=None) -> None:
+    with _lock:
+        m = _month(now)
+        u = _read("google-places-usage.json")
+        n = int(u.get("calls") or 0) if u.get("month") == m else 0
+        _write("google-places-usage.json", {"month": m, "calls": n + 1})
+
+
+def _gfetch(method: str, url: str, body: dict | None, headers: dict) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={**headers, **({"Content-Type": "application/json"} if data else {})}, method=method)
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as res:
+        return json.loads(res.read().decode("utf-8") or "{}")
+
+
+def osm_hours_google(hours: dict) -> str:
+    """Google's `regularOpeningHours` (periods of {open, close: {day 0 = Sunday,
+    hour, minute}}) as an OSM opening_hours string; an open period with no
+    close is open all the time ("24/7")."""
+    periods = [p for p in (hours or {}).get("periods") or [] if isinstance(p, dict)]
+    if any(isinstance(p.get("open"), dict) and not p.get("close") for p in periods):
+        return "24/7"
+    regular = []
+    for p in periods:
+        o, c = p.get("open") or {}, p.get("close") or {}
+        if not isinstance(o.get("day"), int):
+            continue
+        day = 7 if o["day"] == 0 else o["day"]
+        ch, cm = int(c.get("hour") or 0), int(c.get("minute") or 0)
+        # Closing at midnight: OSM's 24:00.
+        close = "2400" if (ch, cm) == (0, 0) else f"{ch:02d}{cm:02d}"
+        regular.append({"day": day, "open": f"{int(o.get('hour') or 0):02d}{int(o.get('minute') or 0):02d}", "close": close})
+    return osm_hours(regular)
+
+
+def _google(name: str, la: float, lo: float, gfetch: GFetch | None, now) -> dict:
+    """Google's hours, or `{found: False, reason}` to go on to Foursquare."""
+    if not _gkey():
+        return {"found": False, "reason": "no_key"}
+    if google_usage(now) >= _gmax():
+        return {"found": False, "reason": "google_month_spent"}
+    fetch = gfetch or _gfetch
+    head = {"X-Goog-Api-Key": _gkey()}
+    key = f"{name.lower()}|{round(la, 4)}|{round(lo, 4)}"
+    pid = _read("google-place-ids.json").get(key)
+    try:
+        if not pid:
+            got = fetch("POST", f"{GOOGLE}/places:searchText",
+                        {"textQuery": name, "maxResultCount": 5,
+                         "locationBias": {"circle": {"center": {"latitude": la, "longitude": lo}, "radius": float(NEAR_M)}}},
+                        {**head, "X-Goog-FieldMask": "places.id,places.displayName,places.location"})
+            for r in got.get("places") or []:
+                loc = r.get("location") or {}
+                rl, ro = loc.get("latitude"), loc.get("longitude")
+                if isinstance(rl, (int, float)) and isinstance(ro, (int, float)) and _distance_m(la, lo, rl, ro) > NEAR_M:
+                    continue
+                if _alike(name, str((r.get("displayName") or {}).get("text") or "")) and r.get("id"):
+                    pid = str(r["id"])
+                    break
+            if not pid:
+                return {"found": False, "reason": "no_match"}
+            with _lock:
+                ids = _read("google-place-ids.json")
+                ids[key] = pid  # place IDs may be kept indefinitely
+                _write("google-place-ids.json", ids)
+        _google_spent(now)
+        d = fetch("GET", f"{GOOGLE}/places/{urllib.parse.quote(pid)}", None,
+                  {**head, "X-Goog-FieldMask": "regularOpeningHours,googleMapsUri"})
+    except Exception as e:  # noqa: BLE001 - Google down, a bad key, over quota
+        _failures.swallowed(e)
+        return {"found": False, "reason": "failed"}
+    hours = d.get("regularOpeningHours") if isinstance(d.get("regularOpeningHours"), dict) else {}
+    oh = osm_hours_google(hours)
+    if not oh:
+        return {"found": False, "reason": "no_hours"}
+    return {"found": True, "source": "google", "opening_hours": oh,
+            "display": "; ".join(str(x) for x in hours.get("weekdayDescriptions") or []),
+            "link": str(d.get("googleMapsUri") or f"https://www.google.com/maps/place/?q=place_id:{pid}")}
 
 
 def _words(s: str) -> set[str]:
@@ -121,7 +268,7 @@ def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], dict] | None = None,
-                now=None) -> tuple[bool, dict]:
+                gfetch: GFetch | None = None, now=None) -> tuple[bool, dict]:
     try:
         la, lo = float(lat), float(lon)
     except (TypeError, ValueError):
@@ -129,14 +276,35 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
     name = " ".join((name or "").split())[:120]
     if not name or not (-90 <= la <= 90 and -180 <= lo <= 180):
         return False, {"status": 400, "code": "bad_place", "error": "give a name, lat and lon"}
+    g = _google(name, la, lo, gfetch, now)
+    if not g.get("found"):
+        f = _foursquare(name, la, lo, fetch)
+        if f.get("found") or g.get("reason") == "no_key":
+            g = f
+    if not g.get("found"):
+        return True, g
+    from . import map_places
+
+    open_now, changes = map_places.open_state(g["opening_hours"], la, lo, now)
+    given = g.pop("open_now_given", None)
+    if open_now is None and isinstance(given, bool):
+        open_now = given
+    g["open_now"] = open_now
+    if changes:
+        g["changes_at"] = changes
+    return True, g
+
+
+def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], dict] | None) -> dict:
+    """Foursquare's hours, or `{found: False, reason}`."""
     if not _key():
-        return True, {"found": False, "reason": "no_key"}
+        return {"found": False, "reason": "no_key"}
     try:
         got = _ask({"ll": f"{la:.6f},{lo:.6f}", "query": name, "radius": NEAR_M, "limit": 5,
                     "fields": "fsq_place_id,name,latitude,longitude,hours"}, fetch)
     except Exception as e:  # noqa: BLE001 - Foursquare down, a bad key, a timeout
         _failures.swallowed(e)
-        return True, {"found": False, "reason": "failed"}
+        return {"found": False, "reason": "failed"}
     key = (name.lower(), round(la, 4), round(lo, 4))
     with _lock:
         known = _ids.get(key)
@@ -154,7 +322,7 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
         if best is None and _alike(name, str(r.get("name") or "")):
             best = r
     if best is None:
-        return True, {"found": False, "reason": "no_match"}
+        return {"found": False, "reason": "no_match"}
     fid = str(best.get("fsq_place_id") or "")
     if fid:
         with _lock:
@@ -162,19 +330,13 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
     hours = best.get("hours") if isinstance(best.get("hours"), dict) else {}
     oh = osm_hours(hours.get("regular") or [])
     if not oh:
-        return True, {"found": False, "reason": "no_hours"}
+        return {"found": False, "reason": "no_hours"}
     out = {"found": True, "source": "foursquare", "opening_hours": oh,
            "display": str(hours.get("display") or ""),
            "link": f"https://foursquare.com/v/{urllib.parse.quote(fid)}" if fid else "https://foursquare.com"}
-    from . import map_places
-
-    open_now, changes = map_places.open_state(oh, la, lo, now)
-    if open_now is None and isinstance(hours.get("open_now"), bool):
-        open_now = hours["open_now"]
-    out["open_now"] = open_now
-    if changes:
-        out["changes_at"] = changes
-    return True, out
+    if isinstance(hours.get("open_now"), bool):
+        out["open_now_given"] = hours["open_now"]
+    return out
 
 
 def forget() -> None:

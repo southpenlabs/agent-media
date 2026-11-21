@@ -17,8 +17,11 @@ BLUE_FIN = {"fsq_place_id": "4b0abc", "name": "Blue Fin Fish & Chips Blairgowrie
 
 
 @pytest.fixture(autouse=True)
-def fresh(monkeypatch):
+def fresh(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_FOURSQUARE_KEY", "fsq-test")
+    monkeypatch.delenv("MEDIA_GOOGLE_PLACES_KEY", raising=False)
+    monkeypatch.delenv("MEDIA_GOOGLE_PLACES_MONTHLY_MAX", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     map_hours.forget()
 
 
@@ -63,3 +66,72 @@ def test_no_key_no_match_no_hours_and_failures(monkeypatch):
     assert map_hours.place_hours("", "-38.36", "144.77")[1]["code"] == "bad_place"
     monkeypatch.delenv("MEDIA_FOURSQUARE_KEY")
     assert map_hours.place_hours("Blue Fin", "-38.36", "144.77", fetch=boom)[1] == {"found": False, "reason": "no_key"}
+
+
+# Google first (22 Nov 2026: "Can we also get data from Google on a free tier?").
+G_HOURS = {"regularOpeningHours": {"periods": [{"open": {"day": d, "hour": 11, "minute": 30}, "close": {"day": d, "hour": 20, "minute": 0}} for d in range(7)],
+                                   "weekdayDescriptions": ["Monday: 11:30 AM – 8:00 PM", "Tuesday: 11:30 AM – 8:00 PM"]},
+           "googleMapsUri": "https://maps.google.com/?cid=123"}
+
+
+class FakeGoogle:
+    def __init__(self, places=None, details=None):
+        self.calls = []
+        self.places = places if places is not None else [{"id": "ChIJbluefin", "displayName": {"text": "Blue Fin Blairgowrie"},
+                                                         "location": {"latitude": -38.36118, "longitude": 144.77844}}]
+        self.details = details if details is not None else G_HOURS
+
+    def __call__(self, method, url, body, headers):
+        self.calls.append((method, url, body, headers))
+        if url.endswith("/places:searchText"):
+            return {"places": self.places}
+        return self.details
+
+
+def no_foursquare(url, headers):
+    raise AssertionError("Foursquare asked though Google answered")
+
+
+def test_google_first_found_by_id_then_details_with_hours(monkeypatch):
+    monkeypatch.setenv("MEDIA_GOOGLE_PLACES_KEY", "g-test")
+    g = FakeGoogle()
+    ok, got = map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=no_foursquare, gfetch=g, now=THU_10)
+    assert ok and got["found"] and got["source"] == "google"
+    assert got["opening_hours"] == "Mo-Su 11:30-20:00" and got["open_now"] is False
+    assert got["link"] == "https://maps.google.com/?cid=123" and got["display"].startswith("Monday: 11:30 AM")
+    (m1, u1, b1, h1), (m2, u2, b2, h2) = g.calls
+    # The search asks for no Enterprise field; only the details call does (the free 1,000 a month).
+    assert (m1, u1) == ("POST", "https://places.googleapis.com/v1/places:searchText")
+    assert h1["X-Goog-FieldMask"] == "places.id,places.displayName,places.location" and h1["X-Goog-Api-Key"] == "g-test"
+    assert b1["locationBias"]["circle"]["radius"] == 150.0 and b1["textQuery"] == "Blue Fin Blairgowrie"
+    assert (m2, u2) == ("GET", "https://places.googleapis.com/v1/places/ChIJbluefin")
+    assert h2["X-Goog-FieldMask"] == "regularOpeningHours,googleMapsUri"
+    assert map_hours.google_usage(THU_10) == 1
+    # Opened again: the kept place ID, one call.
+    g2 = FakeGoogle(places=[])
+    assert map_hours.place_hours("Blue Fin Blairgowrie", "-38.361177", "144.778438", fetch=no_foursquare, gfetch=g2, now=THU_10)[1]["found"]
+    assert [c[0] for c in g2.calls] == ["GET"] and map_hours.google_usage(THU_10) == 2
+
+
+def test_google_month_spent_or_no_match_goes_on_to_foursquare(monkeypatch):
+    monkeypatch.setenv("MEDIA_GOOGLE_PLACES_KEY", "g-test")
+    monkeypatch.setenv("MEDIA_GOOGLE_PLACES_MONTHLY_MAX", "1")
+    fsq = lambda u, h: {"results": [BLUE_FIN]}  # noqa: E731
+    first = map_hours.place_hours("Blue Fin Blairgowrie", "-38.3611", "144.7784", fetch=fsq, gfetch=FakeGoogle(), now=THU_10)[1]
+    assert first["source"] == "google"
+    g = FakeGoogle()
+    second = map_hours.place_hours("Blue Fin Blairgowrie", "-38.3611", "144.7784", fetch=fsq, gfetch=g, now=THU_10)[1]
+    assert second["source"] == "foursquare" and g.calls == []  # the month's free calls kept
+    # Someone else's place: on to Foursquare too.
+    other = FakeGoogle(places=[{"id": "x", "displayName": {"text": "Bayview Hotel"}, "location": {"latitude": -38.3612, "longitude": 144.7785}}])
+    monkeypatch.setenv("MEDIA_GOOGLE_PLACES_MONTHLY_MAX", "100")
+    assert map_hours.place_hours("Blue Fin", "-38.3611", "144.7784", fetch=fsq, gfetch=other, now=THU_10)[1]["source"] == "foursquare"
+
+
+def test_google_periods_as_osm_writes_them():
+    sun_first = {"periods": [{"open": {"day": 0, "hour": 9, "minute": 0}, "close": {"day": 0, "hour": 13, "minute": 0}}]
+                 + [{"open": {"day": d, "hour": 7, "minute": 0}, "close": {"day": d, "hour": 15, "minute": 0}} for d in range(1, 6)]
+                 + [{"open": {"day": 5, "hour": 18, "minute": 0}, "close": {"day": 6, "hour": 0, "minute": 0}}]}
+    assert map_hours.osm_hours_google(sun_first) == "Mo-Th 07:00-15:00; Fr 07:00-15:00,18:00-24:00; Su 09:00-13:00"
+    assert map_hours.osm_hours_google({"periods": [{"open": {"day": 0, "hour": 0, "minute": 0}}]}) == "24/7"
+    assert map_hours.osm_hours_google({}) == ""
