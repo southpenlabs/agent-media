@@ -10,9 +10,14 @@ own OSM account (David, 21 Nov 2026: "Can we do one and two?" — one being
                             `code` and `state`; the state is the credential
                             (one pending, ten minutes)
   POST /map/osm/signout     admins → forgets the token
-  POST /map/osm/hours       admins {id: "node/1", opening_hours, name?} →
-                            {ok, changeset, url, version}: the tag set on
-                            that element in a changeset of its own
+  POST /map/osm/hours       admins {id: "node/1", opening_hours?, name?,
+                            tags?: {key: value}, overwrite?: [key],
+                            source?: survey|website|local_knowledge,
+                            source_url?} → {ok, changeset, url, version,
+                            set, kept}: opening_hours set (replacing), and
+                            each of `tags` (site_read's keys only) the
+                            element has not got, or names in `overwrite`,
+                            in a changeset of its own (22 Nov 2026)
 
 The edit is public and under the owner's name, so the app asks before each
 one. The hours are checked with the same parser the Map reads them with
@@ -174,14 +179,63 @@ def valid_hours(hours: str) -> bool:
         return False
 
 
-def set_hours(el_id: str, hours: str, name: str = "", http: Http = _http) -> tuple[bool, dict]:
-    """The element's opening_hours set to `hours`, in a changeset of its own."""
+#: Words a changeset's `source` may say: what OSM allows copying from.
+#: Never Google's or Foursquare's (their hours cannot go to OSM).
+SOURCES = ("survey", "website", "local_knowledge")
+_ENUMS = {"reservation": {"yes", "no", "required", "recommended"},
+          "wheelchair": {"yes", "limited", "no"}, "outdoor_seating": {"yes", "no"},
+          "internet_access": {"wlan", "yes", "no"}, "internet_access:fee": {"yes", "no"}}
+
+
+def _tags(raw) -> tuple[dict[str, str], str]:
+    """The tags asked for, checked against site_read's keys: (tags, error)."""
+    from . import site_read
+
+    if raw in (None, {}):
+        return {}, ""
+    if not isinstance(raw, dict) or len(raw) > 40:
+        return {}, "tags is an object of OSM keys and values"
+    out = {}
+    for k, v in raw.items():
+        k, v = str(k), " ".join(str(v if v is not None else "").split())
+        if k == "opening_hours":
+            return {}, "opening_hours goes in its own field"
+        if k not in site_read.TAG_KEYS and k not in site_read.PAYMENT_KEYS:
+            return {}, f"{k} is not a tag this server sets"
+        if not v or len(v) > 255:
+            return {}, f"{k}: a value of 1 to 255 characters"
+        allowed = {"yes", "no"} if k in site_read.PAYMENT_KEYS else _ENUMS.get(k)
+        if allowed and v not in allowed:
+            return {}, f"{k} is one of {', '.join(sorted(allowed))}"
+        out[k] = v
+    return out, ""
+
+
+def set_hours(el_id: str, hours: str, name: str = "", http: Http = _http, *, tags=None,
+              overwrite=(), source: str = "", source_url: str = "", today=None) -> tuple[bool, dict]:
+    """The element's opening_hours set to `hours` (replacing any) with
+    `check_date:opening_hours` today (OSM's date they were last checked),
+    and any `tags` it has not got yet (one it has is replaced only when
+    named in `overwrite`), in a changeset of its own."""
     m = _ID.fullmatch((el_id or "").strip())
     if not m:
         return False, {"status": 400, "code": "bad_id", "error": "id is node/<n>, way/<n> or relation/<n>"}
     hours = " ".join((hours or "").split())
-    if not hours or len(hours) > 255 or not valid_hours(hours):
+    extra, err = _tags(tags)
+    if err:
+        return False, {"status": 400, "code": "bad_tags", "error": err}
+    if not hours and not extra:
+        return False, {"status": 400, "code": "bad_hours", "error": "give opening_hours or tags"}
+    if hours and (len(hours) > 255 or not valid_hours(hours)):
         return False, {"status": 400, "code": "bad_hours", "error": "those hours are not in OpenStreetMap's form, e.g. Mo-Su 11:30-20:00"}
+    source = (source or "").strip().lower()
+    if source and source not in SOURCES:
+        return False, {"status": 400, "code": "bad_source",
+                       "error": f"source is one of {', '.join(SOURCES)}: OpenStreetMap cannot take what Google or Foursquare say"}
+    source_url = (source_url or "").strip()
+    if source_url and not (source_url.startswith(("http://", "https://")) and len(source_url) <= 255):
+        return False, {"status": 400, "code": "bad_source", "error": "source_url is a web address"}
+    replace = {str(k) for k in (overwrite or []) if isinstance(k, str)} if isinstance(overwrite, (list, tuple)) else set()
     token = _load().get("token")
     if not token:
         return False, {"status": 409, "code": "not_signed_in", "error": "sign in to OpenStreetMap first"}
@@ -198,10 +252,26 @@ def set_hours(el_id: str, hours: str, name: str = "", http: Http = _http) -> tup
     el = root.find(kind)
     if el is None:
         return False, {"status": 502, "code": "no_element", "error": f"OpenStreetMap's answer had no {kind}"}
-    what = name or next((t.get("v") for t in el.findall("tag") if t.get("k") == "name"), "") or el_id
+    have = {t.get("k"): t for t in el.findall("tag")}
+    kept = sorted(k for k in extra if k in have and k not in replace and have[k].get("v") != extra[k])
+    sets = {k: v for k, v in extra.items() if k not in kept and (have.get(k) is None or have[k].get("v") != v)}
+    if hours:
+        import datetime as _dt
+
+        sets = {"opening_hours": hours, **sets,
+                "check_date:opening_hours": (today or _dt.date.today()).isoformat()}
+    if not sets:
+        return False, {"status": 409, "code": "nothing_to_change", "kept": kept,
+                       "error": "OpenStreetMap already has all of that"}
+    what = name or (have["name"].get("v") if "name" in have else "") or el_id
+    said = [k.replace("_", " ") for k in sets if not k.startswith("check_date")][:4]
+    words = ", ".join(said[:-1]) + (" and " if len(said) > 1 else "") + said[-1]
     cs = ET.Element("osm")
     c = ET.SubElement(cs, "changeset")
-    for k, v in (("created_by", CREATED_BY), ("comment", f"Add opening hours for {what}"[:255])):
+    ctags = [("created_by", CREATED_BY), ("comment", f"Add {words} for {what}"[:255])]
+    if source:
+        ctags.append(("source", source_url if source == "website" and source_url else source))
+    for k, v in ctags:
         ET.SubElement(c, "tag", k=k, v=v)
     st, body = http("PUT", f"{api}/changeset/create", ET.tostring(cs, encoding="utf-8"), xml_h)
     if st == 401:
@@ -210,11 +280,11 @@ def set_hours(el_id: str, hours: str, name: str = "", http: Http = _http) -> tup
         return False, {"status": 502, "code": "changeset", "error": f"OpenStreetMap would not open a changeset ({st})"}
     changeset = body.decode().strip()
     try:
-        tag = next((t for t in el.findall("tag") if t.get("k") == "opening_hours"), None)
-        if tag is None:
-            ET.SubElement(el, "tag", k="opening_hours", v=hours)
-        else:
-            tag.set("v", hours)
+        for k, v in sets.items():
+            if have.get(k) is None:
+                ET.SubElement(el, "tag", k=k, v=v)
+            else:
+                have[k].set("v", v)
         el.set("changeset", changeset)
         for a in ("user", "uid", "timestamp", "visible"):
             el.attrib.pop(a, None)
@@ -238,7 +308,11 @@ def set_hours(el_id: str, hours: str, name: str = "", http: Http = _http) -> tup
         map_places.forget()
     except Exception as e:  # noqa: BLE001
         _failures.swallowed(e)
-    return True, {"changeset": changeset, "version": version, "url": f"{_base()}/changeset/{changeset}", "opening_hours": hours}
+    out_d = {"changeset": changeset, "version": version, "url": f"{_base()}/changeset/{changeset}",
+             "set": sorted(sets), "kept": kept}
+    if hours:
+        out_d["opening_hours"] = hours
+    return True, out_d
 
 
 def _page(h: BaseHTTPRequestHandler, code: int, title: str, words: str) -> None:
@@ -297,7 +371,9 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         send_json(h, 200, {"ok": True, **status()})
         return True
     body = read_json(h) or {}
-    ok, detail = set_hours(str(body.get("id") or ""), str(body.get("opening_hours") or ""), str(body.get("name") or "")[:120])
+    ok, detail = set_hours(str(body.get("id") or ""), str(body.get("opening_hours") or ""), str(body.get("name") or "")[:120],
+                           tags=body.get("tags"), overwrite=body.get("overwrite") or (),
+                           source=str(body.get("source") or ""), source_url=str(body.get("source_url") or ""))
     code = 200 if ok else int(detail.pop("status", 400))
     send_json(h, code, {"ok": ok, **detail})
     return True

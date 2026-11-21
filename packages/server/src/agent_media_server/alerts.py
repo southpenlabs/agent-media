@@ -106,6 +106,9 @@ ACTION_HANDLERS: dict[str, str] = {
     "join.": "agent_media_server.join_requests:act",
 }
 ACTION_TIMEOUT_S = 150
+#: A screen of the app a notice's tap opens (`route`, 22 Nov 2026): a path
+#: of the app's own, e.g. "/maps?check=ab12".
+ROUTE_RE = re.compile(r"/[A-Za-z0-9/_.~%?=&-]{0,199}")
 
 
 def _action_commands() -> dict[str, list[str]]:
@@ -193,6 +196,9 @@ def _connect() -> sqlite3.Connection:
     if "actions" not in cols:
         # Added 22 Oct 2026: buttons a producer answers itself (`act`).
         con.execute("ALTER TABLE alerts ADD COLUMN actions TEXT")
+    if "route" not in cols:
+        # Added 22 Nov 2026: the app screen a notice's tap opens (`route`).
+        con.execute("ALTER TABLE alerts ADD COLUMN route TEXT")
     if con.execute("SELECT 1 FROM digest_log LIMIT 1").fetchone() is None:
         # digest_log is 25 Sep 2026's: seed it with the digests kept before.
         with con:
@@ -239,7 +245,7 @@ def _public(row: sqlite3.Row | dict) -> dict:
     open_ = r.get("kind") == "status" and RANK.get(r.get("level"), 0) >= WARN
     return {k: r.get(k) for k in ("id", "kind", "level", "peak", "step", "title", "detail",
                                   "fix", "host", "every_s", "first_seen", "last_seen",
-                                  "changed_at", "cleared_at", "acked_at")} | {
+                                  "changed_at", "cleared_at", "acked_at", "route")} | {
         "open": open_, "speech": _speech(r.get("speech_key")),
         "actions": _row_actions(r) if open_ else []}
 
@@ -338,6 +344,10 @@ def report(body: dict, *, now: float | None = None) -> tuple[bool, dict]:
                     acts = _actions(body.get("actions")) if RANK[row["level"]] >= WARN else []
                     row["actions"] = json.dumps(acts) if acts else None
                     con.execute("UPDATE alerts SET actions=? WHERE id=?", (row["actions"], aid))
+                # Where a tap on its notice goes: the latest report's word too.
+                route = str(body.get("route") or "").strip()
+                row["route"] = route if ROUTE_RE.fullmatch(route) else None
+                con.execute("UPDATE alerts SET route=? WHERE id=?", (row["route"], aid))
                 silent = _sweep(con, now)
         finally:
             con.close()
@@ -548,7 +558,8 @@ def notices(after: int | None, *, now: float | None = None) -> dict:
         out.append({"n": lg["n"], "id": lg["id"], "change": lg["change"],
                     "level": lg["level"], "title": row["title"],
                     "detail": row["detail"][:500], "fix": row["fix"][:300],
-                    "host": row["host"], "at": lg["at"]})
+                    "host": row["host"], "at": lg["at"],
+                    **({"route": row["route"]} if row.get("route") else {})})
     # The latest per alert (a raise then an escalation is one notification),
     # and only the newest few.
     latest = {}
@@ -702,7 +713,7 @@ def _entry_span(lines: list[str], aid: str) -> tuple[int, int] | None:
 
 
 #: Alerts that are requests, not problems: notified, never filed in the inbox.
-NO_RECORD = ("shell.signin.", "quota.")
+NO_RECORD = ("shell.signin.", "quota.", "map.check.")
 
 
 def _org(r: dict, change: str) -> None:

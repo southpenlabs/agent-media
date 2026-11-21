@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import urllib.parse
 
@@ -27,6 +28,8 @@ class FakeOsm:
     def __init__(self):
         self.calls = []
         self.upload = None
+        self.changeset = None
+        self.node = NODE
 
     def __call__(self, method, url, body, headers):
         self.calls.append((method, url.replace("https://www.openstreetmap.org", ""), headers.get("Authorization")))
@@ -38,9 +41,10 @@ class FakeOsm:
         if path == "/api/0.6/user/details.json":
             return 200, json.dumps({"user": {"display_name": "davidj"}}).encode()
         if path == "/api/0.6/node/11583644270" and method == "GET":
-            return 200, NODE
+            return 200, self.node
         if path == "/api/0.6/changeset/create":
-            assert b'k="comment" v="Add opening hours for Blue Fin Blairgowrie"' in body and b'v="Sasonica"' in body
+            assert b'v="Sasonica"' in body
+            self.changeset = body
             return 200, b"777"
         if path == "/api/0.6/node/11583644270" and method == "PUT":
             self.upload = body
@@ -82,10 +86,12 @@ def test_a_stale_or_strange_state_is_refused():
 def test_hours_set_in_a_changeset_of_their_own():
     fake = FakeOsm()
     signed_in(fake)
-    ok, got = osm_edit.set_hours("node/11583644270", "Mo-Su 11:30-20:00", http=fake)
+    ok, got = osm_edit.set_hours("node/11583644270", "Mo-Su 11:30-20:00", http=fake, today=dt.date(2026, 11, 22))
     assert ok, got
     assert got == {"changeset": "777", "version": "4", "url": "https://www.openstreetmap.org/changeset/777",
-                   "opening_hours": "Mo-Su 11:30-20:00"}
+                   "opening_hours": "Mo-Su 11:30-20:00", "set": ["check_date:opening_hours", "opening_hours"], "kept": []}
+    assert '<tag k="check_date:opening_hours" v="2026-11-22" />' in fake.upload.decode()
+    assert b'k="comment" v="Add opening hours for Blue Fin Blairgowrie"' in fake.changeset and b'k="source"' not in fake.changeset
     up = fake.upload.decode()
     assert '<tag k="opening_hours" v="Mo-Su 11:30-20:00" />' in up and 'changeset="777"' in up and 'version="3"' in up
     assert 'user="someone"' not in up and '<tag k="name" v="Blue Fin Blairgowrie" />' in up
@@ -102,3 +108,44 @@ def test_refusals_before_anything_is_sent():
     assert osm_edit.set_hours("shop/1", "Mo-Su 11:30-20:00", http=fake)[1]["code"] == "bad_id"
     assert osm_edit.set_hours("node/1", "whenever we feel like it", http=fake)[1]["code"] == "bad_hours"
     assert len(fake.calls) == n
+
+
+def test_tags_from_the_website_added_but_never_over_what_osm_has():
+    fake = FakeOsm()
+    fake.node = NODE.replace(b'<tag k="amenity"', b'<tag k="phone" v="+61 3 5988 0000"/><tag k="amenity"')
+    signed_in(fake)
+    ok, got = osm_edit.set_hours("node/11583644270", "", http=fake, source="website", source_url="https://bluefin.example/",
+                                 tags={"phone": "+61 3 5988 1111", "website:menu": "https://bluefin.example/menu",
+                                       "cuisine": "fish_and_chips", "payment:cash": "yes"})
+    assert ok, got
+    assert got["set"] == ["cuisine", "payment:cash", "website:menu"] and got["kept"] == ["phone"] and "opening_hours" not in got
+    up = fake.upload.decode()
+    assert '<tag k="phone" v="+61 3 5988 0000" />' in up and '<tag k="website:menu" v="https://bluefin.example/menu" />' in up
+    assert b'k="source" v="https://bluefin.example/"' in fake.changeset
+    assert b"Add website:menu, cuisine and payment:cash for Blue Fin Blairgowrie" in fake.changeset
+    # Named in overwrite, the phone is replaced.
+    fake2 = FakeOsm()
+    fake2.node = fake.node
+    signed_in(fake2)
+    ok, got = osm_edit.set_hours("node/11583644270", "", http=fake2, tags={"phone": "+61 3 5988 1111"}, overwrite=["phone"])
+    assert ok and got["set"] == ["phone"] and '<tag k="phone" v="+61 3 5988 1111" />' in fake2.upload.decode()
+
+
+def test_tags_and_sources_refused_before_anything_is_sent():
+    fake = FakeOsm()
+    signed_in(fake)
+    n = len(fake.calls)
+    assert osm_edit.set_hours("node/1", "Mo-Su 11:30-20:00", http=fake, source="google")[1]["code"] == "bad_source"
+    assert osm_edit.set_hours("node/1", "", http=fake, tags={"name": "Something else"})[1]["code"] == "bad_tags"
+    assert osm_edit.set_hours("node/1", "", http=fake, tags={"wheelchair": "maybe"})[1]["code"] == "bad_tags"
+    assert osm_edit.set_hours("node/1", "", http=fake, tags={"opening_hours": "24/7"})[1]["code"] == "bad_tags"
+    assert osm_edit.set_hours("node/1", "", http=fake)[1]["code"] == "bad_hours"
+    assert len(fake.calls) == n
+
+
+def test_nothing_to_change_opens_no_changeset():
+    fake = FakeOsm()
+    fake.node = NODE.replace(b'<tag k="amenity"', b'<tag k="phone" v="+61 3 5988 0000"/><tag k="amenity"')
+    signed_in(fake)
+    ok, got = osm_edit.set_hours("node/11583644270", "", http=fake, tags={"phone": "+61 3 5988 1111"})
+    assert not ok and got["code"] == "nothing_to_change" and got["kept"] == ["phone"] and fake.changeset is None

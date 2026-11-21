@@ -397,6 +397,8 @@ except /pair, which is how a device gets its token):
                   [&limit] → places of a kind from OpenStreetMap, nearest
                   first, with open_now (map_places.py, §6.50); GET
                   /map/places/kinds → the kinds it takes
+  GET  /map/check_hours → places to check the hours of for OSM (map_check.py,
+                  §6.50); POST {key, done|dismiss: true} takes one off
   GET  /map/link?url= → a shared map link (Google, Apple, OSM, geo:) read
                   into {kind: route|place, points, mode?} (core maps_link.py, §6.50)
   GET  /screen/now → {on, pause, why}: should this device pause what is
@@ -576,7 +578,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
                        "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
-                       "/map/overlay", "/map/link", "/map/place_hours",
+                       "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
@@ -5035,7 +5037,16 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         # device only, and only while its Settings switch is on.
         from . import phone
 
-        ok, detail = phone.share(_bearer(h), _read_json(h))
+        body = _read_json(h)
+        ok, detail = phone.share(_bearer(h), body)
+        if ok:
+            # Beside a place whose hours OSM lacks? Nudge the owner (map_check.py).
+            from . import map_check
+
+            try:
+                map_check.on_location(_bearer(h), body)
+            except Exception as e:  # noqa: BLE001 - the fix is kept either way
+                _failures.swallowed(e)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/phone/ask", "/phone/answer", "/phone/cancel"):
         # The phone as an agent's eyes and hands (server-contract.md §6.21,
@@ -6284,7 +6295,50 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers._gate(bearer, host)
         if ok:
-            ok, detail = map_hours.place_hours(arg("name"), arg("lat"), arg("lon"))
+            # OSM has no hours for it: on the list to check (map_check.py); its own
+            # website (OSM's tag, sent as `website`) is read before Google is asked.
+            from . import map_check, map_saved
+
+            account = map_saved.account_of(bearer, host)
+            # `osm_hours`: OSM has some, and the card asks only so the website's can be compared.
+            osm_hours = arg("osm_hours")
+            key = None
+            try:
+                key = map_check.seen(account, arg("name"), arg("lat"), arg("lon"), osm_id=arg("id"),
+                                     website=arg("website"), osm_hours=osm_hours, kick=False)
+            except Exception as e:  # noqa: BLE001 - the hours are the answer; the list is extra
+                _failures.swallowed(e)
+            ok, detail = map_hours.place_hours(
+                arg("name"), arg("lat"), arg("lon"),
+                site=(lambda: map_check.website_answer(account, key)) if key else None,
+                ask_others=not osm_hours)
+            if ok and key:
+                try:
+                    conflict = map_check.conflict_of(account, key)
+                    if conflict:
+                        detail["conflict"] = conflict
+                    if detail.get("website"):
+                        # Google or Foursquare named the site: only where to look.
+                        map_check.seen(account, arg("name"), arg("lat"), arg("lon"),
+                                       website=str(detail["website"]), kick=False)
+                    map_check.kick_if_due(account, key)
+                    site = map_check.site_of(account, arg("name"), arg("lat"), arg("lon"))
+                    if site:
+                        detail["site"] = site
+                except Exception as e:  # noqa: BLE001
+                    _failures.swallowed(e)
+    elif path == "/map/check_hours" and method in ("GET", "POST"):
+        # Places to check the hours of, for OSM from allowed sources only (map_check.py, §6.50).
+        from . import map_check, map_layers, map_saved
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if method == "GET":
+                ok, detail = map_check.listing(account)
+            else:
+                ok, detail = map_check.change(account, _read_json(h) or {})
     elif method == "GET" and path == "/map/places/kinds":
         from . import map_layers
 

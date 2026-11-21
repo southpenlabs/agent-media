@@ -108,7 +108,7 @@ def test_google_first_found_by_id_then_details_with_hours(monkeypatch):
     assert h1["X-Goog-FieldMask"] == "places.id,places.displayName,places.location" and h1["X-Goog-Api-Key"] == "g-test"
     assert b1["locationBias"]["circle"]["radius"] == 150.0 and b1["textQuery"] == "Blue Fin Blairgowrie"
     assert (m2, u2) == ("GET", "https://places.googleapis.com/v1/places/ChIJbluefin")
-    assert h2["X-Goog-FieldMask"] == "regularOpeningHours,googleMapsUri"
+    assert h2["X-Goog-FieldMask"] == "regularOpeningHours,googleMapsUri,websiteUri"
     assert map_hours.google_usage(THU_10) == 1
     # Opened again: the kept place ID, one call.
     g2 = FakeGoogle(places=[])

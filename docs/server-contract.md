@@ -6366,7 +6366,9 @@ data: {}
 - `alerts` (27 Sep 2026; only with `?alerts=`): the alert store's
   **notices** (§6.17) after cursor `n` —
   `{"last": 57, "notices": [{"n", "id", "change", "level", "title", "detail",
-  "fix", "host", "at"}]}`. Sent after the first `sessions` frame, then
+  "fix", "host", "at", "route"?}]}` (`route`, 22 Nov 2026: the app screen
+  the notification's tap opens, e.g. the check-hours nudge's
+  `/maps?check=<key>`, §6.50). Sent after the first `sessions` frame, then
   whenever the store's log moves. A notice is a `raised` or `escalated` status
   alert that is still open, or a digest at `warn`+; the latest per alert
   (a raise then an escalation is one), at most 5, none older than 24 h.
@@ -6973,6 +6975,10 @@ proposal `docs/proposals/2026-09-24-alerts-and-digests.md`. Pinned by
   appends `Cleared` and marks a routine one (never acked, never `needs`) DONE.
   `MEDIA_ALERTS_INBOX` points elsewhere, `0` turns it off.
 
+- `route` (22 Nov 2026): the app screen a tap on its notice opens, a path
+  of the app's own (`/maps?check=ab12`; `/[A-Za-z0-9/_.~%?=&-]{0,199}`,
+  anything else dropped). The latest report's word; on `GET /alerts` rows
+  and on the `alerts` frame's notices.
 - `actions` (status only, 22 Oct 2026): up to three `{"id":
   "[a-z][a-z0-9-]{0,31}", "label": ≤40 chars}` buttons, for a producer that
   can act on the answer itself (malformed ones are dropped). The latest
@@ -11692,15 +11698,34 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   /map/osm/start` → `{url}` (OSM's OAuth 2 page, PKCE, scopes read_prefs
   write_api, back to `<MEDIA_PUBLIC_URL>/map/osm/callback`, which needs no
   bearer and answers a small page); `POST /map/osm/signout`; `POST
-  /map/osm/hours {id: "node/1"|"way/2"|"relation/3", opening_hours,
-  name?}` → `{changeset, version, url, opening_hours}`, the tag set in a
-  changeset of its own (comment "Add opening hours for <name>",
-  created_by Sasonica), the hours checked first with opening-hours-py. 400
-  `bad_id`, `bad_hours`; 409 `not_signed_in`, `not_configured`,
-  `conflict`; 404/502 `no_element`; 502 `changeset`, `upload`. The app
-  asks before each edit: it is public, under the owner's name.
+  /map/osm/hours {id: "node/1"|"way/2"|"relation/3", opening_hours?,
+  name?, tags?, overwrite?, source?, source_url?}` → `{changeset, version,
+  url, opening_hours?, set, kept}`, in a changeset of its own (comment
+  "Add opening hours[, phone …] for <name>", created_by Sasonica), the hours
+  checked first with opening-hours-py. `opening_hours` replaces OSM's and
+  brings `check_date:opening_hours=<today, YYYY-MM-DD>` (22 Nov 2026). `tags`
+  (22 Nov 2026; from the check list's `proposed.tags`) is `{key: value}`
+  from a fixed list only — `phone`, `email`, `website`, `website:menu`,
+  `reservation` (yes/no/required/recommended), `reservation:website`,
+  `cuisine`, `wheelchair` (yes/limited/no), `outdoor_seating`,
+  `internet_access`, `internet_access:fee`, `addr:housenumber`,
+  `addr:street`, `addr:postcode`, `addr:city`, `addr:suburb`,
+  `addr:state`, `contact:instagram`, `contact:facebook`, `payment:<cash,
+  credit_cards, debit_cards, contactless, visa, mastercard,
+  american_express, apple_pay, google_pay, eftpos, maestro, diners_club>`
+  (yes/no); a key the element already has with another value is left as it
+  is and named in `kept`, unless it is in `overwrite: [key]`. `set` names
+  the keys written. `source` puts the changeset's `source`: `survey`,
+  `local_knowledge`, or `website` (the `source_url` itself when given);
+  anything else is refused, so hours from Google or Foursquare cannot be
+  sent as theirs. 400 `bad_id`, `bad_hours` (neither hours nor tags, or
+  unreadable hours), `bad_tags`, `bad_source`; 409 `not_signed_in`,
+  `not_configured`, `conflict`, `nothing_to_change` (with `kept`; no
+  changeset opened); 404/502 `no_element`; 502 `changeset`, `upload`. The
+  app asks before each edit: it is public, under the owner's name.
   `/map/search` rows carry `id` (the OSM element) for this.
-- **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>`** (21 Nov
+- **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>[&id=<osm
+  element>][&website=<url>][&osm_hours=<OSM's hours>]`** (21 Nov
   2026; David: "how does Google maps get blue fin opening hours?" … "Can
   we do one and two?"; `map_hours.py`, tests in `test_map_hours.py`): a
   place's hours from Google, then Foursquare, for a card OpenStreetMap
@@ -11726,6 +11751,72 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   answer says `cached: true`, and `open_now`/`changes_at` are worked out
   again from its hours on each read. Against both providers' terms (see
   outside-services rows 67 and 69): a public build must turn it off.
+  **The business's own website first** (22 Nov 2026; David: "does it look
+  it up from their website before it looks it up on Google?"): when its
+  address is known — `website` (the place's OSM tag, sent by the app), or
+  one the check list already holds — its schema.org hours are read (one
+  page, 4 s, at most once a week per place, shared with the check list;
+  `map_check.website_answer`, `site_read.py`) and, if there are any,
+  answer `{found: true, source: "website", opening_hours, display (the
+  same), open_now, changes_at?, link (the page read)}`, kept like the
+  others; the app credits "Hours from <site>". A site with no structured
+  hours falls through to Google, then Foursquare. A Google or Foursquare
+  answer may carry `website` (their websiteUri / website, asked in the
+  same call): only where to look next time. Every answer adds `site:
+  {menu_url?, booking_url?, phone?, cuisine?, price_range?, payment?,
+  social?: {instagram?, facebook?}}` once the place's website has been
+  read, for the card's Menu, Book and Call buttons. Each card that asks
+  puts the place on the check list (`/map/check_hours`, `kind:
+  "missing"`), with `id` and `website` when sent. **Conflicts** (22 Nov
+  2026; David: "Yes, build that in"): `osm_hours` means OSM has hours and
+  the app asks only to compare the website's (in the background, at most
+  weekly, for places with OSM hours and a website): Google and Foursquare
+  are never asked (`{found: false, reason: "no_website_hours"}` when the
+  site has none), and when the website's week differs from OSM's — both
+  read with opening-hours-py and their open intervals over a week compared,
+  so how either is written and a PH rule on one side do not count — the
+  answer has `conflict: {osm, website, url}` and the place goes on the list
+  with `kind: "conflict"`.
+- **`GET /map/check_hours`, `POST /map/check_hours`** (22 Nov 2026; David:
+  "let's also upload it to open street maps", choosing "Both": a list to
+  check on a visit and hours read from the place's own website, confirmed
+  by him before sending; `map_check.py`, tests in `test_map_check.py` and
+  `test_site_read.py`). The map's gate; the device's account's own list
+  (`state_dir()/map-check-hours.json`). `GET` → `{places: [{key, kind
+  ("missing": OSM has no hours; "conflict": OSM's and the website's
+  differ), name, lat, lon, osm_id? (the app's `id`, or found by name within
+  80 m through Overpass), website?, proposed?: {opening_hours?, tags: {OSM
+  key: value} (the keys `/map/osm/hours` takes), fields: {readable name:
+  value} (all that was read, including what has no OSM tag: price range,
+  position, features), source: "website", url}, osm_tags?: {key: value}
+  (what OSM has now for opening_hours and the keys proposed, read from
+  OSM's API after each website read, so the app can show it and leave
+  those unticked; a ticked one is sent in `/map/osm/hours`'s `overwrite`),
+  conflict?: {osm, website, url}, site_info?: {rating?, rating_count?} (the site's own rating: for
+  the card only, never for OSM), first_seen, seen_at, nudged_at?}],
+  stats: {compared, conflicts}}`, newest seen first. `stats` counts each
+  pair of OSM and website hours compared once, and how many differed.
+  `POST {key, done: true}` (the app sent the hours to OSM) or `{key,
+  dismiss: true}` → `{key}`: off the list and not put back (done for 30
+  days while Overpass catches up, dismissed for good). 400 `bad_change`,
+  404 `not_listed`. The website is read at most once a week per place (a
+  background reader; the card's own read counts): schema.org JSON-LD or
+  microdata only, never free text, and one obvious hours or contact page
+  on the same site when the first page has no hours; an honest
+  User-Agent, robots.txt obeyed, public addresses only (outside-services
+  row 70). Tags follow the OSM wiki: `reservation:website` for a booking
+  page, `website:menu`, `payment:*`, `contact:instagram`/`contact:facebook`
+  as URLs, `addr:suburb` in Australia, else `addr:city`; `cuisine` only
+  with OSM's own values. **The nudge**: on each `POST /device/location`
+  from one of the owner's devices (precise, accuracy ≤ 100 m), a listed
+  place within 60 m not nudged in 7 days, at most one each 30 min, is
+  raised in the alert store (§6.17) as `map.check.<key>` at `warn`, title
+  "Check the hours at <name>?" (a conflict: "OpenStreetMap and their
+  website disagree on the hours at <name>: which is right?"), `route`
+  `/maps?check=<key>`; the `alerts` frame (§6.13) carries it to the phone,
+  whose tap opens that route. It is cleared once the phone is 500 m away,
+  or the place is done or dismissed; no inbox TODO. Nothing here changes
+  OSM.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,

@@ -48,6 +48,19 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     from agent_media_server import map_places
 
     map_places.forget()
+    # Nor a business's own website (map_check.py, the check-hours list): no
+    # background reading, and a test that wants a page passes its own fetch.
+    from agent_media_server import map_check
+
+    def _no_site(url, *a, **k):
+        raise RuntimeError("a test fetched a real website")
+
+    monkeypatch.setattr(map_check, "BACKGROUND", False)
+    monkeypatch.setattr(map_check, "fetch_page", _no_site)
+    monkeypatch.setattr(map_check, "_get", lambda *a, **k: _no_site(a[0] if a else ""))
+    from agent_media_server import osm_edit as _osm_edit
+
+    monkeypatch.setattr(_osm_edit, "_http", lambda *a, **k: _no_site("openstreetmap.org"))
     # The forges (forge.py): no test asks a real one or reads gh's login.
     # One that wants an answer patches forge._open (and _gh_token) itself.
     from agent_media_server import forge

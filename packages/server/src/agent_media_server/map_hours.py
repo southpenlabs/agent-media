@@ -1,5 +1,6 @@
-"""A place's opening hours when OpenStreetMap has none: Google's, then
-Foursquare's (David, 21 Nov 2026: "how does Google maps get blue fin
+"""A place's opening hours when OpenStreetMap has none: the business's own
+website's (schema.org, map_check.website_answer; 22 Nov 2026), then Google's,
+then Foursquare's (David, 21 Nov 2026: "how does Google maps get blue fin
 opening hours?" … "Can we do one and two?" — two being a Foursquare
 fallback; 22 Nov: "Can we also get data from Google on a free tier?").
 
@@ -229,7 +230,7 @@ def _google(name: str, la: float, lo: float, gfetch: GFetch | None, now) -> dict
                 _write("google-place-ids.json", ids)
         _google_spent(now)
         d = fetch("GET", f"{GOOGLE}/places/{urllib.parse.quote(pid)}", None,
-                  {**head, "X-Goog-FieldMask": "regularOpeningHours,googleMapsUri"})
+                  {**head, "X-Goog-FieldMask": "regularOpeningHours,googleMapsUri,websiteUri"})
     except Exception as e:  # noqa: BLE001 - Google down, a bad key, over quota
         _failures.swallowed(e)
         return {"found": False, "reason": "failed"}
@@ -237,9 +238,13 @@ def _google(name: str, la: float, lo: float, gfetch: GFetch | None, now) -> dict
     oh = osm_hours_google(hours)
     if not oh:
         return {"found": False, "reason": "no_hours"}
-    return {"found": True, "source": "google", "opening_hours": oh,
-            "display": "; ".join(str(x) for x in hours.get("weekdayDescriptions") or []),
-            "link": str(d.get("googleMapsUri") or f"https://www.google.com/maps/place/?q=place_id:{pid}")}
+    out = {"found": True, "source": "google", "opening_hours": oh,
+           "display": "; ".join(str(x) for x in hours.get("weekdayDescriptions") or []),
+           "link": str(d.get("googleMapsUri") or f"https://www.google.com/maps/place/?q=place_id:{pid}")}
+    if isinstance(d.get("websiteUri"), str) and d["websiteUri"].startswith(("http://", "https://")):
+        # Only where to look: the business's own site is read for hours OSM may take (map_check).
+        out["website"] = d["websiteUri"][:500]
+    return out
 
 
 def _words(s: str) -> set[str]:
@@ -313,7 +318,9 @@ def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], dict] | None = None,
-                gfetch: GFetch | None = None, now=None) -> tuple[bool, dict]:
+                gfetch: GFetch | None = None, now=None,
+                site: "Callable[[], dict | None] | None" = None,
+                ask_others: bool = True) -> tuple[bool, dict]:
     try:
         la, lo = float(lat), float(lon)
     except (TypeError, ValueError):
@@ -325,8 +332,25 @@ def place_hours(name: str, lat: str, lon: str, *, fetch: Callable[[str, dict], d
 
     now_s = now.timestamp() if hasattr(now, "timestamp") else (float(now) if isinstance(now, (int, float)) else _time.time())
     key = _cache_key(name, la, lo)
-    g = _cached(key, now_s)
-    if g is None:
+    # The business's own website first (map_check.website_answer: read at
+    # most weekly, else what was read), before any paid call (David, 22 Nov
+    # 2026: "does it look it up from their website before it looks it up on
+    # Google?"). A site with no structured hours falls through.
+    w = None
+    if site is not None:
+        try:
+            w = site()
+        except Exception as e:  # noqa: BLE001 - the site is a maybe: Google next
+            _failures.swallowed(e)
+    found_w = bool(w and w.get("found"))
+    if not ask_others:
+        # OSM has hours (the card asks only to compare the website's): no
+        # paid call, nothing kept.
+        g = dict(w) if found_w else {"found": False, "reason": "no_website_hours"}
+    elif found_w:
+        g = dict(w)
+        _keep(key, dict(w), now_s)
+    elif (g := _cached(key, now_s)) is None:
         g = _google(name, la, lo, gfetch, now)
         if not g.get("found"):
             f = _foursquare(name, la, lo, fetch)
@@ -355,7 +379,7 @@ def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], di
         return {"found": False, "reason": "no_key"}
     try:
         got = _ask({"ll": f"{la:.6f},{lo:.6f}", "query": name, "radius": NEAR_M, "limit": 5,
-                    "fields": "fsq_place_id,name,latitude,longitude,hours"}, fetch)
+                    "fields": "fsq_place_id,name,latitude,longitude,hours,website"}, fetch)
     except Exception as e:  # noqa: BLE001 - Foursquare down, a bad key, a timeout
         _failures.swallowed(e)
         return {"found": False, "reason": "failed"}
@@ -390,6 +414,8 @@ def _foursquare(name: str, la: float, lo: float, fetch: Callable[[str, dict], di
            "link": f"https://foursquare.com/v/{urllib.parse.quote(fid)}" if fid else "https://foursquare.com"}
     if isinstance(hours.get("open_now"), bool):
         out["open_now_given"] = hours["open_now"]
+    if isinstance(best.get("website"), str) and best["website"].startswith(("http://", "https://")):
+        out["website"] = best["website"][:500]
     return out
 
 
