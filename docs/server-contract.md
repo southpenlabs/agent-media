@@ -11685,6 +11685,21 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   has transit tiles (its verbose `/status` `has_transit_tiles`, asked with
   `{"verbose": true}` at most every 30 min), so the app offers Transit only where it works. 404
   `no_router` when no routing service is set. The map's gate, as above.
+- **`/map/osm`, `/map/osm/start`, `/map/osm/callback`, `/map/osm/signout`,
+  `/map/osm/hours`** (21 Nov 2026; David: add hours to OpenStreetMap
+  ourselves, "My OSM account"; `osm_edit.py`, tests in `test_osm_edit.py`):
+  `GET /map/osm` → `{configured, signed_in, user?}`; admins `POST
+  /map/osm/start` → `{url}` (OSM's OAuth 2 page, PKCE, scopes read_prefs
+  write_api, back to `<MEDIA_PUBLIC_URL>/map/osm/callback`, which needs no
+  bearer and answers a small page); `POST /map/osm/signout`; `POST
+  /map/osm/hours {id: "node/1"|"way/2"|"relation/3", opening_hours,
+  name?}` → `{changeset, version, url, opening_hours}`, the tag set in a
+  changeset of its own (comment "Add opening hours for <name>",
+  created_by Sasonica), the hours checked first with opening-hours-py. 400
+  `bad_id`, `bad_hours`; 409 `not_signed_in`, `not_configured`,
+  `conflict`; 404/502 `no_element`; 502 `changeset`, `upload`. The app
+  asks before each edit: it is public, under the owner's name.
+  `/map/search` rows carry `id` (the OSM element) for this.
 - **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>`** (21 Nov
   2026; David: "how does Google maps get blue fin opening hours?" … "Can
   we do one and two?"; `map_hours.py`, tests in `test_map_hours.py`): a

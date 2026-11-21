@@ -576,7 +576,8 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
                        "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trip",
-                       "/map/overlay", "/map/link", "/map/place_hours"})
+                       "/map/overlay", "/map/link", "/map/place_hours",
+                       "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -994,6 +995,12 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         _json(h, 403, {"ok": False, "code": "guest",
                        "error": "a guest may read and listen here, not change anything"})
         return True
+    if path.startswith("/map/osm"):
+        # Adding hours to OpenStreetMap under the owner's account; the callback has no bearer (osm_edit).
+        from . import osm_edit
+
+        if osm_edit.handle(h, method, path, _bearer(h), _json, _read_json):
+            return True
     if path.startswith(("/accounts/spotify/", "/accounts/spotify-speaker/")):
         # Signing in with Spotify; the callback has no bearer (spotify_auth).
         from . import spotify_auth

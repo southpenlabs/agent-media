@@ -79,6 +79,9 @@ def find(words: str, near: tuple[float, float] | None = None, limit: int = 5) ->
         name = str(r.get("name") or "") or address.split(",")[0].strip()
         row = {"name": name, "address": address, "lat": lat, "lon": lon,
                "kind": str(r.get("type") or r.get("category") or "")}
+        # Its OpenStreetMap element, so the Map can add hours to it (osm_edit).
+        if r.get("osm_type") in ("node", "way", "relation") and str(r.get("osm_id") or "").isdigit():
+            row["id"] = f"{r['osm_type']}/{r['osm_id']}"
         hours = (r.get("extratags") or {}).get("opening_hours") if isinstance(r.get("extratags"), dict) else None
         if hours:
             row["opening_hours"] = str(hours)
