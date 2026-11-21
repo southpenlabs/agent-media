@@ -5,7 +5,7 @@ whenever possible... And it would be helpful if you could offer guidance
 based on the brand of earbuds being used", then "Can you work out that the
 earbuds being used And which one if it's a single ... on the fly?"
 
-Status: **proposed**. Extends one-tap answers
+Status: **decided, not started**. Extends one-tap answers
 (`2026-11-06-one-tap-answers.md`, part 6 item 3, "Pick by voice") from
 voice to the earbuds' own buttons.
 
@@ -118,10 +118,8 @@ part waits until a supported pair is in use.
 3. App: "Teach me your earbuds", posting learned profiles.
 4. Spoken guidance on first connect of a new model.
 
-## Open questions
+## Decided (David, 22 Nov 2026: "yes to volume locked or unlocked")
 
-- Should a volume step answer even when the user meant to change volume
-  during the 30 s window? (Proposed: yes, with Undo; the volume is put back
-  either way.)
-- Answer by taps with the screen on too, or only when the phone is locked
-  or the black screen is up?
+- A volume step during the answer window answers, with Undo; the volume
+  is put back either way.
+- Taps answer whether the phone is locked or unlocked, screen on or off.
