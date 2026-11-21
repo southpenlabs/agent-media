@@ -11685,6 +11685,17 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   has transit tiles (its verbose `/status` `has_transit_tiles`, asked with
   `{"verbose": true}` at most every 30 min), so the app offers Transit only where it works. 404
   `no_router` when no routing service is set. The map's gate, as above.
+- **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>`** (21 Nov
+  2026; David: "how does Google maps get blue fin opening hours?" … "Can
+  we do one and two?"; `map_hours.py`, tests in `test_map_hours.py`): a
+  place's hours from Foursquare, for a card OpenStreetMap has none for. →
+  `{found: true, source: "foursquare", opening_hours (OSM's syntax, built
+  from Foursquare's regular hours), display (Foursquare's words), open_now,
+  changes_at?, link (its Foursquare page)}` or `{found: false, reason:
+  no_key | no_match | no_hours | failed}`. A match is a like name within
+  150 m. Off without `MEDIA_FOURSQUARE_KEY`. Nothing but the matched
+  `fsq_place_id` is kept (Foursquare's terms); the app shows "Hours from
+  Foursquare" with the link. 400 `bad_point`, `bad_place`.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,
