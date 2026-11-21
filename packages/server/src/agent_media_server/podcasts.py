@@ -23,6 +23,16 @@ def _q(h: BaseHTTPRequestHandler, name: str) -> str:
     return (urllib.parse.parse_qs(h.path.partition("?")[2]).get(name) or [""])[0].strip()
 
 
+def _traced(send_json, bearer: str, path: str, body: dict):
+    """`send_json` that also writes the answer to the device's media trail."""
+    from . import media_trail
+
+    def send(h, code, obj):
+        media_trail.record(bearer, path, body, bool(obj.get("ok")), code, obj)
+        return send_json(h, code, obj)
+    return send
+
+
 def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_json, read_json) -> bool:
     from agent_media_core import podcast_discover as P
 
@@ -46,6 +56,7 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         else:
             body = read_json(h)
             body = body if isinstance(body, dict) else {}
+            send_json = _traced(send_json, bearer, path, body)
             action = str(body.get("action") or "")
             if action == "follow":
                 P.follow(body.get("feed") or "", body.get("title") or "", body.get("author") or "",

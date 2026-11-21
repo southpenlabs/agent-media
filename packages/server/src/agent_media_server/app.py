@@ -6011,8 +6011,14 @@ def _music(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     elif method == "GET":
         ok, detail = music.now(_bearer(h))
     else:
-        ok, detail = music.control(_read_json(h) or {}, _bearer(h))
-    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        body = _read_json(h) or {}
+        ok, detail = music.control(body, _bearer(h))
+    code = 200 if ok else detail.pop("status", 400)
+    if method == "POST":
+        from . import media_trail
+
+        media_trail.record(_bearer(h), path, body, ok, code, detail)
+    _json(h, code, {"ok": ok, **detail})
     return True
 
 

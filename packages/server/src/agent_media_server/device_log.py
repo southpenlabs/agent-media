@@ -7,8 +7,9 @@ sends its lines here, outbound, tagged with where they came from (`source`:
 "update" for the updater; any short name). Any paired device may post, a
 guest too: it is the device's own report, not a change to the server.
 
-The newest KEEP_LINES per device are kept, each with its source and when it
-arrived, in `<state>/device-log.json` (0600), so a restart keeps them.
+The newest KEEP_LINES per device and source are kept (so the app's chatty
+connection lines never push out the rarer ones), each with its source and
+when it arrived, in `<state>/device-log.json` (0600), so a restart keeps them.
 Read them with `GET /device/log?device=<id>[&source=]` (an admin) or at the
 desk with `media-visual-canvas devices --log ID [--source S]`.
 """
@@ -25,7 +26,7 @@ from agent_media_core._paths import state_dir
 
 from . import auth
 
-#: Lines kept per device, lines taken from one post, characters kept of a line.
+#: Lines kept per device and source, lines taken from one post, characters kept of a line.
 KEEP_LINES = 200
 MAX_LINES = 200
 MAX_CHARS = 500
@@ -60,16 +61,30 @@ def _save(logs: dict[str, list[dict]]) -> None:
 
 
 def append(device: str, source: str, lines: list[str], now: float | None = None) -> int:
-    """Keep `lines` under `device`, newest KEEP_LINES only. Returns how many."""
+    """Keep `lines` under `device`, the newest KEEP_LINES of each source only.
+    Returns how many."""
     at = round(time.time() if now is None else now, 3)
     rows = [{"at": at, "source": source, "line": ln} for ln in lines]
     if not rows:
         return 0
     with _LOCK:
         logs = _load()
-        logs[device] = (logs.get(device, []) + rows)[-KEEP_LINES:]
+        logs[device] = _trim(logs.get(device, []) + rows)
         _save(logs)
     return len(rows)
+
+
+def _trim(rows: list[dict]) -> list[dict]:
+    """`rows` less all but the newest KEEP_LINES of each source, order kept."""
+    seen: dict[str, int] = {}
+    keep = []
+    for r in reversed(rows):
+        src = str(r.get("source") or "")
+        seen[src] = seen.get(src, 0) + 1
+        if seen[src] <= KEEP_LINES:
+            keep.append(r)
+    keep.reverse()
+    return keep
 
 
 def read(device: str, source: str = "") -> list[dict]:
