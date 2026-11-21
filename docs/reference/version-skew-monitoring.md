@@ -308,9 +308,17 @@ media restart-services [--only NAME …] [--after SECONDS] [--force] [--dry-run]
     it. A restart of sessiond *now* from inside one of its sessions is
     refused as well, because it would end that chat.
   - **speech services** (tts-shim, sink-speech, speech-state, clips, the
-    speech fifo, and the canvas, which carries the speech frames) are
-    refused while a reply is being spoken, and while one is waiting for
-    the voice: a restart in the gap between two replies cuts the next one.
+    speech fifo, and the canvas, which carries the speech frames) wait
+    only for a reply that is nearly done (20 s or less of its clips left,
+    `MEDIA_RESTART_SPEECH_WAIT_S`). Since 22 Nov 2026 speech is carried
+    across the restart instead of holding it off. New speech is held
+    while the services restart (`media speech-hold`, owner `restart`), so
+    replies waiting for the voice keep their place and play afterwards. A
+    reply being spoken is stopped at its sentence, as a listener's Stop
+    would, and replayed from there once the services are back up, ahead
+    of the queue. A paused reply is left alone; its Play picks it up.
+    `--force` still carries speech across. `MEDIA_RESTART_SPEECH_RESUME=0`
+    restores the old wait: refused while a reply is spoken or waiting.
 - `--after SECONDS` runs the restart later and returns at once with the unit
   name. Under systemd it is a transient user unit (`systemd-run --user
   --on-active=N --collect`), outside every caller's cgroup, so it survives

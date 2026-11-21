@@ -26,7 +26,20 @@ What makes it safe to run unattended (David, 18 Oct 2026):
     for it. Use `after`.
   - speech (tts-shim, sink-speech, speech-state, clips, the speech fifo,
     and the canvas, which carries the speech frames to the phone):
-    refused while a reply is being spoken.
+    refused only while a reply being spoken is nearly done (at most
+    `MEDIA_RESTART_SPEECH_WAIT_S`, 20 s, left by its clip lengths). Any
+    other reply is picked up again instead (22 Nov 2026; David: "Maybe it
+    should resume it rather than wait for it to finish"): see "speech across
+    a restart" below. `MEDIA_RESTART_SPEECH_RESUME=0` waits as before, for a
+    reply being spoken and for replies waiting their turn.
+* **speech across a restart** (`restart()`): while speech services
+  restart, new speech is held (`media speech-hold`, owner `restart`), so the
+  replies waiting their turn keep their place and play after it rather
+  than holding the restart off; their processes run in scopes of their own
+  and outlive it. A reply being spoken is stopped first, as a listener's
+  Stop (its row keeps the sentence), and once the services are back up it
+  is replayed from that sentence (`media replay --id N --resume`), ahead of
+  the queue. A paused one is stopped and left: its Play picks it up.
 * **`after`**: the restart runs later, outside the caller. Under systemd it
   is a transient user unit (`systemd-run --user --on-active=N`), so it
   survives the caller being killed. Elsewhere (runit, Windows) it is a
@@ -336,6 +349,48 @@ def speech_paused_long(now: float | None = None) -> bool:
         return False
 
 
+def speech_resume_on() -> bool:
+    """Whether a restart picks speech back up rather than waiting for it
+    (MEDIA_RESTART_SPEECH_RESUME, on by default)."""
+    return os.environ.get("MEDIA_RESTART_SPEECH_RESUME", "1").strip() != "0"
+
+
+def speech_wait_s() -> float:
+    """How much of a reply a restart still waits out (MEDIA_RESTART_SPEECH_WAIT_S)."""
+    return _env_f("MEDIA_RESTART_SPEECH_WAIT_S", 20.0)
+
+
+def speech_left_s(np: "Optional[dict]" = None) -> "Optional[float]":
+    """Seconds left of the reply being spoken, from the now-playing row's
+    clip lengths and current sentence (the current clip counted whole), or
+    None when the row does not say. A paused reply: None too, since its
+    clock is stopped and nothing will finish it."""
+    try:
+        if np is None:
+            from . import cli
+
+            np = cli._now_speaking()
+        if not np:
+            return None
+        ex = np.get("extras") or {}
+        if ex.get("paused_at") or ex.get("live_pause"):
+            return None
+        durs = ex.get("clip_durations_s")
+        idx = ex.get("current_sentence_idx")
+        if not isinstance(durs, list) or not durs or not isinstance(idx, int):
+            return None
+        return float(sum(float(d or 0) for d in durs[max(0, idx):]))
+    except Exception as _exc:  # noqa: BLE001 — unsure: not known
+        _failures.swallowed(_exc)
+        return None
+
+
+def speech_nearly_done() -> bool:
+    """Whether the reply being spoken has little enough left to wait for."""
+    left = speech_left_s()
+    return left is not None and left <= speech_wait_s()
+
+
 def speech_waiting() -> int:
     """How many replies are waiting for the voice (intake/submit.py
     `speech_queue`): said, not yet heard. A restart in the gap between
@@ -429,10 +484,17 @@ def waiting_on(selected: list[Service], caller: str = "", *, now: bool = False,
         # check, then restart").
         speech = []
     if speech:
+        resume = speech_resume_on()
         if speech_in_flight():
-            out.append({"session": "", "kind": "speech", "label": "a reply is being spoken",
-                        "why": f"{', '.join(speech)} would cut it off"})
-        else:
+            # Picked up again after the restart (`restart()`), unless it is
+            # about to end anyway: then waiting costs less than the cut.
+            if not resume or speech_nearly_done():
+                out.append({"session": "", "kind": "speech",
+                            "label": "a reply is being spoken",
+                            "why": f"{', '.join(speech)} would cut it off"})
+        elif not resume:
+            # Resuming, the replies waiting their turn are held across the
+            # restart instead (`restart()`): they wait, it does not.
             n = speech_waiting()
             if n:
                 out.append({"session": "", "kind": "speech",
@@ -1082,7 +1144,108 @@ def alert(level: str, title: str = "", detail: str = "", fix: str = "", *,
         print(f"restart-services: alert store: {e}", file=sys.stderr)
 
 
+#: The speech hold a restart of the speech services sets, by owner.
+SPEECH_HOLD_OWNER = "restart"
+
+
+def _stop_speech() -> None:
+    """Stop the reply being spoken as a listener's Stop would, without the
+    `cut` earcon: its row is filed with the sentence it reached."""
+    from . import cli
+    from .sinks.speech import SinkSpeech, mark_speech_stopped
+
+    target = cli._active_speech_target()
+    mark_speech_stopped(tick=False)
+    SinkSpeech().stop(target)
+
+
+def _resume_speech(row_id: int) -> None:
+    """Replay history row `row_id` from where it was stopped, detached and in
+    a scope of its own so it outlives this run's unit."""
+    from .procinfo import outliving_service
+
+    subprocess.Popen(outliving_service([sys.executable, "-m", "agent_media_core.cli",
+                                        "replay", "--id", str(row_id), "--resume"]),
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def _cut_row() -> "Optional[dict]":
+    """The reply just stopped for a restart, when it has more to hear."""
+    from . import cli, reply_position
+
+    row = cli._last_spoken_row()
+    if not row or not isinstance(row.get("id"), int):
+        return None
+    ex = row.get("extras") or {}
+    if isinstance(ex, str):
+        ex = json.loads(ex or "{}")
+    return row if reply_position.heard_to(ex) is not None else None
+
+
+def speech_before_restart(emit: Callable[[str], None]) -> bool:
+    """Hold new speech for the restart, and stop the reply being spoken, if
+    any and not paused (a paused one is left: its Play picks it up). True
+    when a reply was stopped, to be picked up by `speech_after_restart`."""
+    from . import cli
+    from .intake.submit import set_speech_hold
+
+    set_speech_hold(health_s() + 90.0, SPEECH_HOLD_OWNER)
+    if not speech_in_flight() or cli._speech_paused_mirror():
+        return False
+    try:
+        _stop_speech()
+    except Exception as e:  # noqa: BLE001 — the restart goes ahead regardless
+        emit(f"speech: could not stop the reply being spoken ({e}); it is cut off")
+        return False
+    deadline = time.time() + 20.0
+    while speech_in_flight() and time.time() < deadline:
+        _sleep(0.5)
+    emit("speech: stopped the reply being spoken; it picks up after the restart")
+    return True
+
+
+def speech_after_restart(stopped: bool, emit: Callable[[str], None]) -> None:
+    """Replay the reply `speech_before_restart` stopped from its sentence,
+    then lift the hold, once that replay has the voice (so it plays before
+    the replies held behind it) or after 15 s."""
+    from .intake.submit import release_speech_hold
+
+    try:
+        row = _cut_row() if stopped else None
+        if row is not None:
+            _resume_speech(int(row["id"]))
+            emit(f"speech: picking reply {row['id']} back up where it stopped")
+            deadline = time.time() + 15.0
+            while not speech_in_flight() and time.time() < deadline:
+                _sleep(0.5)
+        elif stopped:
+            emit("speech: the stopped reply was not found to pick up; its Play has it")
+    except Exception as e:  # noqa: BLE001 — never leave the hold on
+        emit(f"speech: could not pick the reply back up ({e}); its Play has it")
+    finally:
+        release_speech_hold(SPEECH_HOLD_OWNER)
+
+
 def restart(selected: list[Service], emit: Callable[[str], None]) -> int:
+    """Restart `selected`, carrying speech across it (module doc) when a
+    speech service is among them."""
+    speech = speech_resume_on() and any(is_speech(s) and s.state != "parked"
+                                        for s in selected)
+    stopped = False
+    if speech:
+        try:
+            stopped = speech_before_restart(emit)
+        except Exception as e:  # noqa: BLE001 — the restart goes ahead regardless
+            emit(f"speech: could not hold speech for the restart ({e})")
+    try:
+        return _restart(selected, emit)
+    finally:
+        if speech:
+            speech_after_restart(stopped, emit)
+
+
+def _restart(selected: list[Service], emit: Callable[[str], None]) -> int:
     rc = OK
     done: list[Service] = []
     failed: list[str] = []
@@ -1124,7 +1287,8 @@ PASS_ENV = ("PATH", "HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOM
             "MEDIA_VISUAL_PORT", "MEDIA_VISUAL_MAGICDNS_HOST", "AGENT_ALERT_URL",
             "MEDIA_RESTART_HEALTH_S", "MEDIA_RESTART_RETRY_S",
             "MEDIA_RESTART_WAIT_MAX_S", "MEDIA_RESTART_DRAIN_MAX_S",
-            "MEDIA_RESTART_DRAIN_POLL_S", "MEDIA_RESTART_ANNOUNCE")
+            "MEDIA_RESTART_DRAIN_POLL_S", "MEDIA_RESTART_ANNOUNCE",
+            "MEDIA_RESTART_SPEECH_RESUME", "MEDIA_RESTART_SPEECH_WAIT_S")
 
 
 def fire_argv(selected: list[Service], force: bool, drain: bool = False) -> list[str]:
@@ -1280,6 +1444,10 @@ def run(only: "Optional[list[str]]" = None, *, after: float = 0, force: bool = F
         res["busy"] = reasons
         for r in reasons:
             emit(f"busy: {r}")
+        if (speech_resume_on() and any(is_speech(s) for s in selected)
+                and speech_in_flight() and not any(r.startswith("speech:") for r in reasons)):
+            emit("speech: a reply is being spoken; it would be stopped and picked up "
+                 "where it left off after the restart")
         if force:
             emit("busy checks: skipped (--force)")
         elif not reasons:

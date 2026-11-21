@@ -76,9 +76,15 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_RESTART_ANNOUNCE", "0")
     monkeypatch.setattr(cli, "_sv_dir", lambda: None)
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: False)
+    # Never the real player: a stop or a replay is only written down.
+    speech_calls: list = []
+    monkeypatch.setattr(rs, "_stop_speech", lambda: speech_calls.append("stop"))
+    monkeypatch.setattr(rs, "_resume_speech", lambda rid: speech_calls.append(("resume", rid)))
+    monkeypatch.setattr(rs, "_cut_row", lambda: None)
 
     class Host:
         path = tmp_path
+        speech = speech_calls
 
         @staticmethod
         def calls() -> list[str]:
@@ -192,52 +198,106 @@ def test_callers_other_tasks_refuse(host, monkeypatch, capsys):
     assert "your own session has 2 other task(s)" in capsys.readouterr().out
 
 
-def test_speech_services_refused_while_speaking(host, monkeypatch, capsys):
+def _speaking(monkeypatch, left_s=None, **extras):
+    """A reply in flight, with `left_s` seconds of clips from the current one."""
+    row = {"extras": dict(extras)}
+    if left_s is not None:
+        row["extras"].update(clip_durations_s=[3.0, float(left_s)], current_sentence_idx=1)
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
+    monkeypatch.setattr(cli, "_now_speaking", lambda: row)
+    return row
+
+
+def test_speech_services_wait_for_a_reply_nearly_done(host, monkeypatch, capsys):
+    _speaking(monkeypatch, left_s=8)
     assert _run("--only", "tts-shim") == 3
     assert "a reply is being spoken" in capsys.readouterr().out
     assert _run("--only", "mcp") == 0   # not a speech service
+    assert host.speech == []
 
 
-def test_canvas_refused_while_speaking(host, monkeypatch, capsys):
+def test_canvas_waits_for_a_reply_nearly_done(host, monkeypatch, capsys):
     """The canvas carries the speech frames to the phone: restarting it
     mid-reply cut the phone's player off from the reply's timeline."""
-    monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
+    _speaking(monkeypatch, left_s=8)
     assert _run("--only", "canvas") == 3
     assert "a reply is being spoken" in capsys.readouterr().out
     monkeypatch.setattr(cli, "_speech_in_flight", lambda: False)
     assert _run("--only", "canvas") == 0
 
 
-def test_a_long_paused_reply_does_not_hold_off_the_canvas(host, monkeypatch, capsys):
-    """A reply paused for minutes is not being spoken: it held a canvas
-    restart off for an hour (David, 8 Nov 2026: "Teach the check, then
-    restart"). The speech services proper still wait, and a short pause or
-    a player inside the canvas still counts."""
+def test_a_longer_reply_is_stopped_and_picked_up_after(host, monkeypatch, capsys):
+    """David, 22 Nov 2026: "Maybe it should resume it rather than wait for it
+    to finish". Stopped before the restart, replayed from its row after, and
+    new speech held in between."""
+    from agent_media_core.intake import submit
+
+    _speaking(monkeypatch, left_s=45)
+    seen = {}
+    flight = iter([True, True, False])   # busy check, before-stop, then stopped
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: next(flight, False))
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+
+    def cut_row():
+        seen["held"] = submit.speech_hold_until() > 0
+        return {"id": 77}
+
+    monkeypatch.setattr(rs, "_cut_row", cut_row)
+    assert _run("--only", "canvas") == 0
+    out = capsys.readouterr().out
+    assert host.speech == ["stop", ("resume", 77)]
+    assert seen["held"] and submit.speech_hold_until() == 0
+    assert "picking reply 77 back up" in out
+    assert host.restarts() == ["agent-media-visual-canvas.service"]
+
+
+def test_unknown_length_is_picked_up_too(host, monkeypatch):
+    _speaking(monkeypatch)
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
+    assert _run("--only", "tts-shim") == 0
+    assert host.speech == ["stop"]       # no row found: its Play has it
+
+
+def test_a_paused_reply_is_left_alone(host, monkeypatch):
     import time as _t
 
-    monkeypatch.setattr(cli, "_speech_in_flight", lambda: True)
-    row = {"extras": {"paused_at": _t.time() - 1200}}
-    monkeypatch.setattr(cli, "_now_speaking", lambda: row)
+    _speaking(monkeypatch, left_s=45, paused_at=_t.time() - 30)
+    assert _run("--only", "tts-shim") == 0
+    assert host.speech == []
+
+
+def test_resume_off_waits_as_before(host, monkeypatch, capsys):
+    import time as _t
+
+    monkeypatch.setenv("MEDIA_RESTART_SPEECH_RESUME", "0")
+    row = _speaking(monkeypatch, left_s=45)
+    assert _run("--only", "tts-shim") == 3
+    # A long-paused reply still does not hold off the canvas alone (8 Nov 2026).
+    row["extras"]["paused_at"] = _t.time() - 1200
     assert _run("--only", "canvas") == 0
     assert _run("--only", "tts-shim") == 3
-    row["extras"]["paused_at"] = _t.time() - 30
-    assert _run("--only", "canvas") == 3
-    row["extras"].pop("paused_at")
-    assert _run("--only", "canvas") == 3
+    assert host.speech == []
 
 
-def test_speech_services_refused_while_a_reply_waits(host, monkeypatch, capsys):
-    """Nothing speaking, but a reply is waiting for the voice: a restart in
-    that gap cuts the next reply (the canvas restart of 4 Nov 2026 went
-    through between one reply's end and the next)."""
-    monkeypatch.setattr(cli, "_speech_in_flight", lambda: False)
+def test_replies_waiting_are_held_not_waited_for(host, monkeypatch, capsys):
+    """Nothing speaking, but replies waiting for the voice: a restart in that
+    gap cut the next reply's follow-along (4 Nov 2026). They are held across
+    the restart now, and play after it."""
+    from agent_media_core.intake import submit
+
     monkeypatch.setattr(rs, "speech_waiting", lambda: 2)
+    held = []
+    real = rs._restart
+    monkeypatch.setattr(rs, "_restart",
+                        lambda sel, emit: (held.append(submit.speech_hold_until() > 0),
+                                           real(sel, emit))[1])
+    assert _run("--only", "canvas") == 0
+    assert held == [True] and submit.speech_hold_until() == 0
+    monkeypatch.setenv("MEDIA_RESTART_SPEECH_RESUME", "0")
     assert _run("--only", "canvas") == 3
     assert "2 reply(ies) waiting to be spoken" in capsys.readouterr().out
     assert _run("--only", "mcp") == 0   # not a speech service
-    monkeypatch.setattr(rs, "speech_waiting", lambda: 0)
-    assert _run("--only", "canvas") == 0
 
 
 def test_after_schedules_a_transient_unit_and_returns(host, capsys, monkeypatch):
