@@ -2606,6 +2606,13 @@ ahead.
     matcher with the question cards', voiceAnswer.ts, ordinals in all eight
     languages). On the black screen the chips, or a one-question card's
     options, as large buttons once the reply has been read. App only.
+    **Answer by earbud taps** proposed 22 Nov 2026 (David: "answer
+    questions with taps on my earbuds ... guidance based on the brand"):
+    options read in pairs, the play key picks the first, a volume step the
+    second (put back), next for more, read back with Undo; the server
+    knows each earbud model's keys and says how to use them. David's Anko
+    buds measured (left tap play, right tap volume up, double tap next).
+    `docs/proposals/2026-11-22-answer-by-earbud-taps.md`. Not started.
 
 60. **Recent replies in the full player** (David, 8 Nov 2026: "Can we get a
     list of the latest replies read from the full media player?" and "And
