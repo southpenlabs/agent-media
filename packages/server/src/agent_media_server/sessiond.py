@@ -3069,7 +3069,9 @@ class Supervisor:
         payload = {"hook_event_name": "Stop", "session_id": sid, "cwd": cwd,
                    "last_assistant_message": text}
         try:
-            subprocess.run([sys.executable, "-m", "agent_media_core.intake.hook_claude_code"],
+            # `-P`: the chat's folder stays off the import path (a `types.py`
+            # there would break the interpreter before the hook runs).
+            subprocess.run([sys.executable, "-P", "-m", "agent_media_core.intake.hook_claude_code"],
                            input=json.dumps(payload), text=True, cwd=cwd or None,
                            env={**env, "MEDIA_HOOK_HOLD": "1"}, timeout=120,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

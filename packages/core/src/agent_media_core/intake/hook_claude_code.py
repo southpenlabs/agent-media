@@ -1415,13 +1415,28 @@ def _scope_stop(raw: str) -> bool:
 
         from ..procinfo import outliving_service
 
-        cmd = [sys.executable, "-m", "agent_media_core.intake.hook_claude_code"]
+        # `-P`: the hook runs in whatever folder the agent last cd'd to, and
+        # `-m` would put that folder first on the import path; core's own
+        # package folder has a `types.py`, which shadows the standard
+        # library's and killed the copy before any of this module ran, the
+        # reply lost with no trace (23 Nov 2026, chat 0a561be1).
+        cmd = [sys.executable, "-P", "-m", "agent_media_core.intake.hook_claude_code"]
         scoped = outliving_service(cmd)
         if scoped == cmd:
             return False
-        proc = subprocess.Popen(scoped, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, start_new_session=True,
-                                env={**os.environ, "MEDIA_HOOK_SCOPED": "1"})
+        logp = Path.home() / ".cache" / "agent-media" / "hook-play.log"
+        try:
+            logp.parent.mkdir(parents=True, exist_ok=True)
+            err = open(logp, "ab")
+        except OSError:
+            err = subprocess.DEVNULL
+        try:
+            proc = subprocess.Popen(scoped, stdin=subprocess.PIPE, stdout=err,
+                                    stderr=err, start_new_session=True,
+                                    env={**os.environ, "MEDIA_HOOK_SCOPED": "1"})
+        finally:
+            if err is not subprocess.DEVNULL:
+                err.close()
         proc.stdin.write(raw.encode("utf-8"))
         proc.stdin.close()
         return True

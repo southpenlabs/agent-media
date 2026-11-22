@@ -108,7 +108,7 @@ def test_inside_a_unit_the_stop_goes_to_a_scope_of_its_own(monkeypatch):
     assert H.main() == 0
     (argv, env, data), = started
     assert argv[:3] == ["systemd-run", "--user", "--scope"]
-    assert argv[-2:] == ["-m", "agent_media_core.intake.hook_claude_code"]
+    assert argv[-3:] == ["-P", "-m", "agent_media_core.intake.hook_claude_code"]
     assert env["MEDIA_HOOK_SCOPED"] == "1"
     assert json.loads(data)["last_assistant_message"] == "Done."
 
@@ -131,3 +131,16 @@ def test_outside_a_unit_nothing_changes(monkeypatch):
     monkeypatch.setattr(H, "_handle_stop", lambda p: handled.append(p) or 0)
     assert H.main() == 0
     assert started == [] and len(handled) == 1
+
+
+def test_the_scoped_copy_starts_from_a_folder_that_shadows_the_stdlib(tmp_path):
+    """The Stop hook runs in the agent's last folder; core's package folder
+    has a `types.py`. `-P` keeps it off the path, so the copy gets to main()."""
+    import subprocess
+    import sys
+
+    (tmp_path / "types.py").write_text("raise SystemExit('shadowed')\n")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "MEDIA_HOOK_ENABLED": "0"}
+    run = subprocess.run([sys.executable, "-P", "-m", "agent_media_core.intake.hook_claude_code"],
+                         input="", cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
