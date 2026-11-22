@@ -493,6 +493,7 @@ CORS_PATHS = frozenset({
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
+    "/local/avatar", "/local/avatars",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -733,6 +734,10 @@ def body_limit(path: str) -> int:
         from . import local_messages
 
         return local_messages.MAX_BODY  # a batch of a Local chat's messages (Full copy)
+    if path == "/local/avatar":
+        from . import local_messages
+
+        return local_messages.MAX_AVATAR_BYTES  # a Local chat sender's picture (Full copy)
     if path == "/local/backup":
         # Past the guard: the route checks the bearer first, then refuses a
         # body over local_backup.max_bytes() unread, as JSON (§6.61 Backup).
@@ -1200,7 +1205,16 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
 
 
 def _delete(h: BaseHTTPRequestHandler, path: str) -> bool:
-    """The app's DELETE routes: a Local chats backup (local_backup.py, §6.61)."""
+    """The app's DELETE routes: a Local chats backup (local_backup.py, §6.61),
+    a Local chat sender's picture (local_messages.py, §6.61 Full copy)."""
+    if path == "/local/avatar":
+        from . import local_messages
+
+        q = parse_qs(h.path.partition("?")[2])
+        ok, detail = local_messages.delete_avatar((q.get("chat") or [""])[0],
+                                                  (q.get("sender") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        return True
     m = LOCAL_BACKUP.fullmatch(path)
     if not m:
         return False
@@ -1379,6 +1393,7 @@ def _options(h: BaseHTTPRequestHandler, path: str) -> bool:
     h.send_header("Access-Control-Allow-Methods",
                   "POST, OPTIONS" if path in CORS_POST_PATHS
                   else "GET, DELETE, OPTIONS" if LOCAL_BACKUP.fullmatch(path)
+                  else "GET, POST, DELETE, OPTIONS" if path == "/local/avatar"
                   else "GET, POST, OPTIONS")
     h.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
     h.send_header("Access-Control-Max-Age", CORS_MAX_AGE)
@@ -1452,6 +1467,41 @@ def _room_avatar(h: BaseHTTPRequestHandler, thread: str, query: str) -> None:
         return
     h.send_response(200)
     h.send_header("Content-Type", ctype)
+    h.send_header("Content-Length", str(len(data)))
+    h.send_header("ETag", tag)
+    h.send_header("Cache-Control", "private, max-age=86400")
+    h.send_header("X-Content-Type-Options", "nosniff")
+    _cors(h)
+    h.end_headers()
+    h.wfile.write(data)
+
+
+def _local_avatar(h: BaseHTTPRequestHandler, query: str) -> None:
+    """`GET /local/avatar?chat=&sender=` (§6.61 Full copy): a Local chat
+    sender's picture, to whoever may read the chat; `?access_token=` for an
+    <img>; ETag and 304 as a room member's picture."""
+    from . import local_messages
+
+    q = parse_qs(query)
+    bearer = _bearer(h)
+    if not bearer:
+        bearer = ((q.get("access_token") or [""])[0]).strip()
+        auth.set_request_bearer(bearer)
+    ok, got = local_messages.avatar((q.get("chat") or [""])[0], (q.get("sender") or [""])[0],
+                                    bearer)
+    if not ok:
+        _json(h, got.pop("status", 404), {"ok": False, **got})
+        return
+    tag = f'"{got["etag"]}"'
+    if tag in (h.headers.get("If-None-Match") or ""):
+        h.send_response(304)
+        h.send_header("ETag", tag)
+        _cors(h)
+        h.end_headers()
+        return
+    data = got["data"]
+    h.send_response(200)
+    h.send_header("Content-Type", got["type"])
     h.send_header("Content-Length", str(len(data)))
     h.send_header("ETag", tag)
     h.send_header("Cache-Control", "private, max-age=86400")
@@ -2674,6 +2724,15 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = local_settings.get(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/avatars":
+        # Which senders' pictures a Local chat has here, by version, so the
+        # phone sends only a new one (local_messages.py, §6.61 Full copy).
+        from . import local_messages
+
+        ok, detail = local_messages.avatars((parse_qs(query).get("chat") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/local/avatar":
+        _local_avatar(h, query)
     elif path == "/local/backups":
         # The Local chats backups the caller may see (local_backup.py, §6.61).
         from . import local_backup
@@ -5357,6 +5416,20 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import local_messages
 
         ok, detail = local_messages.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/avatar":
+        # Full copy: a Local chat sender's picture, once per version, from
+        # the device that bridges the chat (local_messages.py, §6.61).
+        from . import local_messages
+
+        q = parse_qs(h.path.partition("?")[2])
+        try:
+            n = min(int(h.headers.get("Content-Length", "0")), local_messages.MAX_AVATAR_BYTES)
+        except ValueError:
+            n = 0
+        ok, detail = local_messages.put_avatar((q.get("chat") or [""])[0],
+                                               (q.get("sender") or [""])[0],
+                                               h.rfile.read(n) if n > 0 else b"", _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/mark":
         # Pin to top and Mark unread, from a chat's long press or ⋮

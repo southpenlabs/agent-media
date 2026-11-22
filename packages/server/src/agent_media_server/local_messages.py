@@ -28,6 +28,16 @@ and a redacted reaction is gone. `changed` is a counter over the whole
 store, bumped by every row written or changed, which is what the search
 index reads from (`changed_since`).
 
+**Senders' pictures** (22 Nov 2026, sasonica-app mail #1189). The phone
+sends each sender's profile picture once per version (`POST /local/avatar`),
+kept beside the messages in the `avatars` table as a 256 px thumbnail and
+answered as `sender.avatar` in the chat's log, as a room member's picture
+is. Its `etag` is the hash of the bytes the phone sent, so the phone can
+tell an unchanged picture without sending it (`GET /local/avatars`). Only
+the picture: the sender's name already rides with each message, and the
+rest of the companion's card (phone number, service, is_bot) stays on the
+phone. They go with the messages (`_delete`).
+
 **When it goes.** Switching the dial off `full` deletes every message here
 and its rows in the search index (`purge`, from local_settings.post); a
 chat its phone has not listed for `GONE_DAYS` (30), or no longer known at
@@ -83,6 +93,9 @@ CREATE TABLE IF NOT EXISTS msgs (
 CREATE INDEX IF NOT EXISTS msgs_order ON msgs(chat, at, seq);
 CREATE INDEX IF NOT EXISTS msgs_target ON msgs(chat, target);
 CREATE INDEX IF NOT EXISTS msgs_changed ON msgs(chat, changed);
+CREATE TABLE IF NOT EXISTS avatars (
+  chat TEXT NOT NULL, sender TEXT NOT NULL, etag TEXT NOT NULL, type TEXT NOT NULL,
+  data BLOB NOT NULL, at REAL NOT NULL, PRIMARY KEY (chat, sender));
 """
 
 _LOCAL = threading.local()
@@ -417,6 +430,12 @@ def _view(conn, chat: str, rows: list[dict]) -> list[dict]:
     from . import replies
 
     msgs = [_message(r) for r in rows]
+    pics = _avatar_tags(conn, chat)
+    if pics:
+        for r, m in zip(rows, msgs):
+            tag = None if r["mine"] or not r["sender_id"] else pics.get(r["sender_id"])
+            if tag:
+                m["sender"]["avatar"] = {"url": avatar_url(chat, r["sender_id"]), "etag": tag}
     ids = [m["id"] for m in msgs]
     reacts: dict[str, dict[str, list]] = {}
     for i in range(0, len(ids), 500):
@@ -584,7 +603,10 @@ def _delete(chats: list[str] | None) -> dict:
                              f"({','.join('?' * len(SHOWN))}){where}", (*SHOWN, *args)).fetchone()[0]
             gone = [r[0] for r in conn.execute(f"SELECT DISTINCT chat FROM msgs WHERE 1=1{where}",
                                                args)]
+            gone += [r[0] for r in conn.execute(
+                f"SELECT DISTINCT chat FROM avatars WHERE 1=1{where}", args) if r[0] not in gone]
             conn.execute(f"DELETE FROM msgs WHERE 1=1{where}", args)
+            conn.execute(f"DELETE FROM avatars WHERE 1=1{where}", args)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -613,11 +635,133 @@ def prune(now: float | None = None) -> dict:
         return {"messages": 0, "chats": 0}
     now = time.time() if now is None else now
     stale = []
-    for (chat,) in _connect().execute("SELECT DISTINCT chat FROM msgs"):
+    for (chat,) in _connect().execute("SELECT chat FROM msgs UNION SELECT chat FROM avatars"):
         rec = local_chats.record(chat)
         if rec is None or (rec.get("gone") and now - float(rec["gone"]) > GONE_DAYS * 86400):
             stale.append(chat)
     return _delete(stale) if stale else {"messages": 0, "chats": 0}
+
+
+# --- senders' pictures -------------------------------------------------------------
+
+#: The largest picture the phone may send; kept as a thumbnail of AVATAR_PX.
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+AVATAR_PX = 256
+
+
+def avatar_etag(data: bytes) -> str:
+    """A picture's version: the first 16 hex of the sha256 of the bytes as sent."""
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def avatar_url(chat: str, sender: str) -> str:
+    from urllib.parse import quote
+
+    return f"/local/avatar?chat={quote(chat, safe='')}&sender={quote(sender, safe='')}"
+
+
+def _avatar_tags(conn, chat: str) -> dict[str, str]:
+    return {s: t for s, t in conn.execute("SELECT sender, etag FROM avatars WHERE chat=?",
+                                          (chat,))}
+
+
+def _bridging(chat, sender, bearer: str) -> tuple[bool, dict]:
+    """The checks a picture's sending or taking off shares with a message batch."""
+    user, err = auth.gate(bearer)
+    if not user:
+        return False, err
+    if auth.is_guest(bearer):
+        return False, {"code": "guest", "status": 403,
+                       "error": "a guest does not see the phone's chats"}
+    device = auth.device_id(bearer)
+    if not device:
+        return False, {"error": "only a paired device bridges chats", "status": 403}
+    if not enabled():
+        return False, dict(NOT_ENABLED)
+    if not isinstance(chat, str) or not local_chats.is_local(chat):
+        return _bad("chat is a Local chat's id, local:<network>:<id>")
+    if not isinstance(sender, str) or not _EVENT.fullmatch(sender):
+        return _bad("sender is the sender_id its messages carry: 1-255 characters")
+    rec = local_chats.record(chat)
+    if rec is None:
+        return False, {"error": "no such chat: a phone has not listed it", "status": 404,
+                       "code": "not_found"}
+    if rec.get("device") != device:
+        return False, {"error": "only the device that bridges this chat sends its pictures",
+                       "status": 403, "code": "not_bridging"}
+    return True, {}
+
+
+def put_avatar(chat, sender, data: bytes, bearer: str,
+               now: float | None = None) -> tuple[bool, dict]:
+    """`POST /local/avatar?chat=&sender=`, the picture's bytes: kept as a
+    thumbnail, replacing the one before. `{chat, sender, etag, changed}`."""
+    from . import contacts_photos
+
+    ok, err = _bridging(chat, sender, bearer)
+    if not ok:
+        return ok, err
+    if len(data) > MAX_AVATAR_BYTES:
+        return False, {"error": f"a picture is at most {MAX_AVATAR_BYTES >> 20} MB",
+                       "status": 413, "code": "too_big", "limit": MAX_AVATAR_BYTES}
+    got = contacts_photos.thumbnail(data, AVATAR_PX, MAX_AVATAR_BYTES) if data else None
+    if got is None:
+        return _bad("the body is the picture: JPEG, PNG, GIF or WebP", code="not_an_image")
+    thumb, ctype = got
+    tag = avatar_etag(data)
+    now = time.time() if now is None else now
+    with _WRITE:
+        conn = _connect()
+        row = conn.execute("SELECT etag FROM avatars WHERE chat=? AND sender=?",
+                           (chat, sender)).fetchone()
+        changed = row is None or row[0] != tag
+        if changed:
+            conn.execute("INSERT OR REPLACE INTO avatars VALUES(?,?,?,?,?,?)",
+                         (chat, sender, tag, ctype, thumb, now))
+    return True, {"chat": chat, "sender": sender, "etag": tag, "changed": changed}
+
+
+def delete_avatar(chat, sender, bearer: str) -> tuple[bool, dict]:
+    """`DELETE /local/avatar?chat=&sender=`: the sender took their picture off."""
+    ok, err = _bridging(chat, sender, bearer)
+    if not ok:
+        return ok, err
+    if not _exists():
+        return True, {"chat": chat, "sender": sender, "deleted": False}
+    with _WRITE:
+        n = _connect().execute("DELETE FROM avatars WHERE chat=? AND sender=?",
+                               (chat, sender)).rowcount
+    return True, {"chat": chat, "sender": sender, "deleted": bool(n)}
+
+
+def avatars(chat, bearer: str) -> tuple[bool, dict]:
+    """`GET /local/avatars?chat=`: `{sender id: etag}` of the pictures held,
+    so the phone sends only a new or changed one."""
+    ok, err = may_read(bearer)
+    if not ok:
+        return ok, err
+    if not isinstance(chat, str) or not local_chats.is_local(chat):
+        return _bad("chat is a Local chat's id, local:<network>:<id>")
+    if local_chats.record(chat) is None:
+        return False, {"error": "no such chat: a phone has not listed it", "status": 404,
+                       "code": "not_found"}
+    tags = _avatar_tags(_connect(), chat) if _exists() else {}
+    return True, {"chat": chat, "avatars": tags}
+
+
+def avatar(chat: str, sender: str, bearer: str) -> tuple[bool, dict]:
+    """`GET /local/avatar?chat=&sender=`: `{data, type, etag}`, or the refusal
+    (404 when none is held)."""
+    ok, err = may_read(bearer)
+    if not ok:
+        return ok, err
+    row = _connect().execute("SELECT data, type, etag FROM avatars WHERE chat=? AND sender=?",
+                             (chat, sender)).fetchone() if _exists() else None
+    if row is None:
+        return False, {"error": "no picture", "status": 404, "code": "not_found"}
+    return True, {"data": bytes(row[0]), "type": row[1], "etag": row[2]}
 
 
 def _reset_for_tests() -> None:

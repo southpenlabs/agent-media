@@ -6097,6 +6097,7 @@ local look, never a network call:
 | `local_backup` | always true (§6.61 Backup, 17 Nov 2026): `POST /local/backup`, `GET /local/backups`, `GET`/`DELETE /local/backup/<id>`: the phone's encrypted Local chats bundles, kept as ciphertext |
 | `local_settings` | always true (§6.61 Settings, 18 Nov 2026): `GET`/`POST /local/settings`: what leaves the phone, backup, applying to the networks |
 | `local_full` | always true (§6.61 Full copy, 18 Nov 2026): `POST /local/messages` while the dial is at `full`; a `local:` id reads through `/conversation/log` and `/threads/<id>/events`; search's harness `local` |
+| `local_avatars` | always true (§6.61 Full copy, Senders' pictures, 22 Nov 2026): `GET`/`POST`/`DELETE /local/avatar?chat=&sender=`, `GET /local/avatars?chat=`; `sender.avatar` in a Local chat's log |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -14158,6 +14159,57 @@ POST /local/messages {"chat": "local:<network>:<id>", "messages": [<in>…]}    
   its phone's full list has not had it for 30 days, or it is no longer
   listed at all (checked when a phone posts a full list or messages).
 - `/features` `local_full: true`.
+
+#### Senders' pictures (built 22 Nov 2026)
+
+Asked by sasonica-app (mail #1189; David, 22 Nov 2026: "Ask agent-media for
+that"): the phone's Local chats show each sender's picture, read from the
+companion (IBridges v8 `sender_avatar_url`); at Full copy Sasonica sends
+each one here once per version, so another device and the server's log show
+it as they show a room member's. Code: `agent_media_server/local_messages.py`.
+
+```
+POST   /local/avatar?chat=local:<network>:<id>&sender=<sender_id>
+       Content-Type: image/*; body = the picture (JPEG, PNG, GIF or WebP), at most 2 MB
+  → {"ok": true, "chat", "sender", "etag": "<16 hex>", "changed": bool}
+DELETE /local/avatar?chat=…&sender=…   → {"ok": true, "chat", "sender", "deleted": bool}
+GET    /local/avatars?chat=…           → {"ok": true, "chat", "avatars": {"<sender_id>": "<etag>"}}
+GET    /local/avatar?chat=…&sender=…[&access_token=]   → the picture; ETag, If-None-Match → 304
+```
+
+- **The version** is `etag`: the first 16 hex of the sha256 of the bytes
+  as sent, so the phone computes it itself. It sends a sender's picture
+  when the hash differs from the one it last sent, or from
+  `GET /local/avatars` (after a reinstall). One sent again unchanged
+  answers `changed: false` and writes nothing; a new one replaces it.
+  `DELETE` when the sender took theirs off.
+- **`sender`** is the `sender_id` the sender's messages carry (1–255
+  characters, no control characters), URL-encoded; a sender's messages
+  without a `sender_id` get no picture. Not "me": the owner's own is not
+  asked for.
+- **Who sends**, as for `POST /local/messages`: the device that bridges the
+  chat (403 `not_bridging` otherwise), a listed chat (404 `not_found`),
+  **409 `not_enabled`** unless the dial is at `full`; a guest 403, no bearer
+  401. Not an image 400 `code: "not_an_image"`; over 2 MB 413.
+- **Kept** in `local-messages.db` (table `avatars`) as a 256 px JPEG
+  thumbnail where the server has Pillow, else as sent; deleted with the
+  chat's messages: all when the dial leaves `full`, a chat's when it is
+  pruned (30 days gone from its phone's list).
+- **Read** by whoever reads the chat's log (any non-guest device not
+  limited to its folders; 403 `guest` otherwise), `?access_token=` for an
+  `<img>`, `Cache-Control: private, max-age=86400`; 404 when none is held.
+- **In the log** (`/conversation/log?session=local:…`, the thread's event
+  stream), an incoming message whose sender has one carries
+  `"sender": {"id", "name", "avatar": {"url": "/local/avatar?chat=…&sender=…",
+  "etag"}}`, as a room member's (§6.1); absent otherwise.
+- **The card's other fields stay on the phone.** The name already rides
+  with each message (`from`, kept only as names are, above); the service is
+  the chat's network; `is_bot` has no use here yet; a phone number is a
+  third person's personal data the server has no need of. Asked for once
+  something here needs one, not before. (A WhatsApp `sender_id` may already
+  hold the number: that is the network's id for them, sent with their
+  messages since Full copy began, and goes with them.)
+- `/features` `local_avatars: true`.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

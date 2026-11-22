@@ -290,3 +290,103 @@ def test_hosted_refuses_full_unless_allowed(server, phone, monkeypatch):
     # Allowed no longer: the copy stops being taken.
     monkeypatch.delenv("MEDIA_LOCAL_FULL_ON_HOSTED")
     assert send(server, t, WA, [msg(2)])[0] == 409
+
+
+# --- senders' pictures (22 Nov 2026, sasonica-app mail #1189) ---------------------
+
+def _png(color=(200, 30, 30), px=600):
+    """A plain PNG, made without Pillow (CI has none: the picture is then kept as sent)."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + \
+            struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+    row = b"\x00" + bytes(color) * px
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", px, px, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * px)) + chunk(b"IEND", b""))
+
+
+def pic(server, method, token, chat=WA, sender="61411111111@s.whatsapp.net", data=None,
+        headers=None):
+    import http.client
+    from urllib.parse import quote
+
+    conn = http.client.HTTPConnection(*server, timeout=10)
+    path = f"/local/avatar?chat={quote(chat, safe='')}&sender={quote(sender, safe='')}"
+    hdrs = {**(_auth(token) if token else {}), **(headers or {})}
+    if data is not None:
+        hdrs["Content-Type"] = "image/png"
+    conn.request(method, path, body=data, headers=hdrs)
+    res = conn.getresponse()
+    raw = res.read()
+    conn.close()
+    return res, raw
+
+
+def test_a_senders_picture_rides_with_their_messages(server, phone):
+    import json
+
+    tok = phone["token"]
+    sid = "61411111111@s.whatsapp.net"
+    data = _png()
+    # Off Full copy nothing is taken.
+    res, raw = pic(server, "POST", tok, data=data)
+    assert res.status == 409 and json.loads(raw)["code"] == "not_enabled"
+    assert dial(server, tok, "full")[0] == 200
+    res, raw = pic(server, "POST", tok, data=data)
+    got = json.loads(raw)
+    assert res.status == 200 and got["changed"] is True
+    assert got["etag"] == local_messages.avatar_etag(data)
+    # Sent again unchanged: nothing written; the list lets the phone skip it.
+    assert json.loads(pic(server, "POST", tok, data=data)[1])["changed"] is False
+    from urllib.parse import quote
+
+    res, lst = call(server, "GET", f"/local/avatars?chat={quote(WA, safe='')}", headers=_auth(tok))
+    assert res.status == 200 and lst["avatars"] == {sid: got["etag"]}
+    # In the log: the sender's picture, not on "me" or a sender without one.
+    assert send(server, tok, WA, [msg(1, sender_id=sid), msg(2, frm="me"),
+                                  msg(3, frm="Bo", sender_id="614222@s.whatsapp.net")])[0] == 200
+    st, lg = log(server, tok, WA)
+    a, me, bo = lg["messages"]
+    assert a["sender"]["avatar"] == {"url": local_messages.avatar_url(WA, sid),
+                                     "etag": got["etag"]}
+    assert "avatar" not in me["sender"] and "avatar" not in bo["sender"]
+    # Served as a thumbnail, by access_token for an <img>, 304 when unchanged.
+    url = a["sender"]["avatar"]["url"]
+    res, body = call(server, "GET", f"{url}&access_token={tok}")
+    assert res.status == 200
+    try:
+        import io
+
+        from PIL import Image
+    except ImportError:                       # kept as sent
+        assert body == data and res.getheader("Content-Type") == "image/png"
+    else:                                     # a thumbnail
+        assert res.getheader("Content-Type") == "image/jpeg"
+        assert max(Image.open(io.BytesIO(body)).size) <= local_messages.AVATAR_PX
+    res, _ = call(server, "GET", url, headers={**_auth(tok), "If-None-Match": f'"{got["etag"]}"'})
+    assert res.status == 304
+    # Another paired device reads it; a guest and nobody do not.
+    other = _paired(server, name="Tablet")
+    assert call(server, "GET", url, headers=_auth(other["token"]))[0].status == 200
+    guest = _paired(server, role="guest", name="Visitor")
+    assert call(server, "GET", url, headers=_auth(guest["token"]))[0].status == 403
+    assert call(server, "GET", url)[0].status == 401
+    # Only the bridging device sends one; no image is 400; an unlisted chat 404.
+    assert pic(server, "POST", other["token"], data=data)[0].status == 403
+    res, raw = pic(server, "POST", tok, data=b"hello")
+    assert res.status == 400 and json.loads(raw)["code"] == "not_an_image"
+    assert pic(server, "POST", tok, chat="local:whatsapp:nobody", data=data)[0].status == 404
+    # A new version replaces it; DELETE takes it off.
+    new = _png((10, 10, 200))
+    assert json.loads(pic(server, "POST", tok, data=new)[1])["etag"] == \
+        local_messages.avatar_etag(new)
+    res, raw = pic(server, "DELETE", tok)
+    assert res.status == 200 and json.loads(raw)["deleted"] is True
+    assert call(server, "GET", url, headers=_auth(tok))[0].status == 404
+    # Leaving full takes the pictures with the messages.
+    assert pic(server, "POST", tok, data=data)[0].status == 200
+    assert dial(server, tok, "settings")[0] == 200
+    assert call(server, "GET", url, headers=_auth(tok))[0].status == 404
