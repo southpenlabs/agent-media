@@ -14283,11 +14283,13 @@ docs/proposals/2026-11-22-answer-by-earbud-taps.md. Any paired device.
 `profile`: `{model, label, source: "learned"|"shipped"|"unknown",
 verified, gestures, answer, scheme, guidance: [sentence...], app?}`.
 Gestures: `left_tap`, `right_tap`, `tap` (either side), `double_tap`,
-`triple_tap`, `hold`. Signals: `play`, `pause`, `play_pause`,
+`triple_tap`, `hold`, and per side `left_|right_` + `double_tap` or
+`triple_tap`. Signals: `play`, `pause`, `play_pause`,
 `headsethook`, `next`, `previous`, `volume_up`, `volume_down`,
 `assistant` (the phone's, never the app's), `none`. `answer`: `first` (a
 play key), `second` (a volume step, which the app puts back), `more`
-(next), `back` (previous), each `{gesture, signal}`. `scheme`: `pair`
+(next), `back` (previous), each `{gesture, signal, said}` (`said`: the
+words for it, "double tap" when either side does the job). `scheme`: `pair`
 (first and second), `one_at_a_time` (first only: options read singly, the
 play key on the one wanted), `learn` (nothing known: offer the tap test).
 `guidance` is said once when a model first connects; `app` names the

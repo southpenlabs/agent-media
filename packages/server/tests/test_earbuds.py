@@ -27,16 +27,21 @@ def pixel():
     return _device("Pixel 8a")
 
 
-def test_anko_as_measured_answers_left_then_right_with_double_tap_for_more():
+def test_anko_as_its_manual_says_tap_double_tap_triple_tap():
     p = earbuds.profile_for("anko43641765")
     assert p["source"] == "shipped" and p["verified"] and p["model"] == "anko-tws"
     assert p["scheme"] == "pair"
-    assert p["answer"] == {"first": {"gesture": "left_tap", "signal": "play"},
-                           "second": {"gesture": "right_tap", "signal": "volume_up"},
-                           "more": {"gesture": "double_tap", "signal": "next"}}
-    assert p["guidance"][0] == ("Your Anko earbuds: tap the left bud for the first answer, "
-                                "tap the right bud for the second, double tap for more.")
-    assert p["guidance"][1] == "Triple tap is the phone's voice assistant, not mine."
+    assert p["answer"] == {
+        "first": {"gesture": "tap", "signal": "play_pause", "said": "tap either bud"},
+        "second": {"gesture": "left_double_tap", "signal": "volume_down", "said": "double tap"},
+        "more": {"gesture": "right_triple_tap", "signal": "next",
+                 "said": "triple tap the right bud"},
+        "back": {"gesture": "left_triple_tap", "signal": "previous",
+                 "said": "triple tap the left bud"}}
+    assert p["guidance"][0] == ("Your Anko earbuds: tap either bud for the first answer, "
+                                "double tap for the second, triple tap the right bud for more, "
+                                "triple tap the left bud to go back.")
+    assert p["guidance"][1] == "Press and hold is the phone's voice assistant, not mine."
 
 
 def test_a_brand_without_measured_taps_is_learned_and_names_its_app():
@@ -112,9 +117,10 @@ def test_any_car_steps_with_next_and_picks_with_play():
     p = earbuds.profile_for("SYNC", kind="car")
     assert p["kind"] == "car" and p["model"] == "car" and p["verified"]
     assert p["scheme"] == "step"
-    assert p["answer"] == {"pick": {"gesture": "play_button", "signal": "play_pause"},
-                           "more": {"gesture": "next_button", "signal": "next"},
-                           "back": {"gesture": "previous_button", "signal": "previous"}}
+    assert p["answer"] == {
+        "pick": {"gesture": "play_button", "signal": "play_pause", "said": "press play"},
+        "more": {"gesture": "next_button", "signal": "next", "said": "press next"},
+        "back": {"gesture": "previous_button", "signal": "previous", "said": "press previous"}}
     assert p["guidance"][0] == ("In the car: press next for the next answer, press play to "
                                 "pick the one just read, press previous to go back.")
 

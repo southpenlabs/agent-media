@@ -33,7 +33,11 @@ GESTURES: dict[str, str] = {
     "right_tap": "tap the right bud",
     "tap": "tap either bud",
     "double_tap": "double tap",
+    "left_double_tap": "double tap the left bud",
+    "right_double_tap": "double tap the right bud",
     "triple_tap": "triple tap",
+    "left_triple_tap": "triple tap the left bud",
+    "right_triple_tap": "triple tap the right bud",
     "hold": "press and hold",
     # A car stereo's buttons (kind "car").
     "play_button": "press play",
@@ -54,15 +58,19 @@ SIGNALS = ("play", "pause", "play_pause", "headsethook", "next", "previous",
 PLAY_KEYS = ("play", "pause", "play_pause", "headsethook")
 VOLUME = ("volume_up", "volume_down")
 
-#: The shipped table. `verified` is True only for a pair measured on a real
-#: phone (the Anko row: David's p8a, logcat, 22 Nov 2026). The other rows
+#: The shipped table. `verified` is True only for a pair checked on a real
+#: phone (the Anko row: Kmart's manual for K 43641765, "Workout Pro Wireless
+#: Earphones", model JLR-81000, which names itself anko43641765, matching
+#: what David's p8a logged on 22 Nov 2026). The other rows
 #: carry only the maker's app for remapping taps; their gestures are left to
 #: the tap test, since defaults vary by model and firmware.
 PROFILES: list[dict] = [
     {"id": "anko-tws", "label": "Anko earbuds", "match": r"^anko\d+$",
      "verified": True,
-     "gestures": {"left_tap": "play", "right_tap": "volume_up",
-                  "double_tap": "next", "triple_tap": "assistant", "hold": "none"}},
+     "gestures": {"tap": "play_pause",
+                  "left_double_tap": "volume_down", "right_double_tap": "volume_up",
+                  "left_triple_tap": "previous", "right_triple_tap": "next",
+                  "hold": "assistant"}},
     {"id": "galaxy-buds", "label": "Galaxy Buds", "match": r"galaxy buds",
      "app": "Galaxy Wearable"},
     {"id": "pixel-buds", "label": "Pixel Buds", "match": r"pixel buds",
@@ -130,9 +138,18 @@ def answer_map(gestures: dict[str, str], kind: str = "earbuds") -> dict[str, dic
         for g in GESTURES:  # in GESTURES' order, so a single tap wins over a hold
             s = gestures.get(g)
             if s in signals:
-                out[role] = {"gesture": g, "signal": s}
+                out[role] = {"gesture": g, "signal": s, "said": _said(gestures, g, signals)}
                 break
     return out
+
+
+def _said(gestures: dict[str, str], g: str, signals: tuple[str, ...]) -> str:
+    """The words for gesture `g` in this role: "double tap" when the same
+    gesture on the other side does the same job (a volume step either way)."""
+    for side, other in (("left_", "right_"), ("right_", "left_")):
+        if g.startswith(side) and gestures.get(other + g[len(side):]) in signals:
+            return GESTURES[g[len(side):]]
+    return GESTURES[g]
 
 
 def scheme_of(answer: dict) -> str:
@@ -153,23 +170,25 @@ def guidance(label: str, gestures: dict[str, str], answer: dict, app: str = "",
     words: list[str] = []
     s = scheme_of(answer)
     if s == "step":
-        line = (f"In the car: {GESTURES[answer['more']['gesture']]} for the next answer, "
-                f"{GESTURES[answer['pick']['gesture']]} to pick the one just read")
+        line = (f"In the car: {answer['more']['said']} for the next answer, "
+                f"{answer['pick']['said']} to pick the one just read")
         if "back" in answer:
-            line += f", {GESTURES[answer['back']['gesture']]} to go back"
+            line += f", {answer['back']['said']} to go back"
         words.append(line + ".")
     elif s == "one_at_a_time" and "pick" in answer:
         words.append(f"In the car: answers are read one at a time; "
-                     f"{GESTURES[answer['pick']['gesture']]} on the one you want.")
+                     f"{answer['pick']['said']} on the one you want.")
     elif s == "pair":
-        line = (f"Your {label}: {GESTURES[answer['first']['gesture']]} for the first answer, "
-                f"{GESTURES[answer['second']['gesture']]} for the second")
+        line = (f"Your {label}: {answer['first']['said']} for the first answer, "
+                f"{answer['second']['said']} for the second")
         if "more" in answer:
-            line += f", {GESTURES[answer['more']['gesture']]} for more"
+            line += f", {answer['more']['said']} for more"
+        if "back" in answer:
+            line += f", {answer['back']['said']} to go back"
         words.append(line + ".")
     elif s == "one_at_a_time":
         words.append(f"Your {label}: answers are read one at a time; "
-                     f"{GESTURES[answer['first']['gesture']]} on the one you want.")
+                     f"{answer['first']['said']} on the one you want.")
     else:
         words.append(f"I don't know your {label}'s taps yet. Teach me with a short "
                      "tap test, and you can answer questions with them.")

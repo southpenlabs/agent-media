@@ -15,13 +15,24 @@ Measured on David's p8a with his Anko buds (`anko43641765`), 22 Nov 2026,
 from logcat (`volume_changed`, MediaSessionService "Sending KeyEvent",
 HeadsetStateMachine):
 
-| Gesture | What reached the phone |
-|---|---|
-| Left, one tap | `KEYCODE_MEDIA_PLAY` (a media key; not play/pause) |
-| Right, one tap | music volume up one step (AVRCP absolute volume, no key) |
-| Either, two taps | `KEYCODE_MEDIA_NEXT` |
-| Three taps | Google's voice assistant over HFP (never reaches the app) |
-| Hold ~2 s | nothing |
+**Corrected 22 Nov 2026 from Kmart's manual** (K 43641765, "Workout Pro
+Wireless Earphones", model JLR-81000, pairing name anko43641765). The first
+reading of the log below took gestures in the order tried; the manual shows
+the single tap had paused the reply being spoken (logged as the session
+stopping, not as a key) and every later event was one gesture along:
+
+| Gesture (either bud alone too) | Sends | Seen in the log |
+|---|---|---|
+| One tap, either bud | play/pause (`KEYCODE_MEDIA_PLAY` when paused) | yes |
+| Double tap, left / right | volume down / up (AVRCP absolute volume, no key) | right: yes |
+| Triple tap, left / right | previous / next | right: `KEYCODE_MEDIA_NEXT` |
+| Hold ~2 s, either | the phone's voice assistant (HFP) | yes |
+
+So one tap answers first, a double tap (either bud) second, a triple tap
+on the right reads more and on the left goes back. Each bud does every
+job on its own except more/back, which are a side each: the app should
+take either triple tap as "the next pair" when only one bud is in use
+(it cannot tell which are in).
 
 What this shows, and holds for most earbuds:
 
@@ -44,8 +55,10 @@ What this shows, and holds for most earbuds:
 While a question card with options, or `[[replies:]]` chips, is up and
 the reply has reached them (part 3, "spoken, then tapped"):
 
-1. **Options are read in pairs**: "Left for commit it, right for run the
-   tests first." A third or fourth option: "Double tap for more."
+1. **Options are read in pairs**, in the words the profile gives for its
+   gestures (`answer.*.said`): on the Anko buds "Tap for commit it, double
+   tap for run the tests first." A third or fourth option: "Triple tap for
+   more."
 2. **A tap answers**, by what the earbuds send, not by side as such:
    - the *play/pause* key (any of PLAY, PAUSE, PLAY_PAUSE, HEADSETHOOK)
      picks the first of the pair;
@@ -63,8 +76,8 @@ the reply has reached them (part 3, "spoken, then tapped"):
    read one at a time with a short gap, and a tap during or just after one
    picks it.
 
-On the Anko buds that is: left tap = first, right tap = second, double tap
-= more. The setting is per earbud model (step 2 below), so a pair whose
+On the Anko buds that is: tap = first, double tap = second, triple tap
+= more (right) or back (left). The setting is per earbud model (step 2 below), so a pair whose
 single taps are both play/pause gets the fallback.
 
 ## Guidance by brand
