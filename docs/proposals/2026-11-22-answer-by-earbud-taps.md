@@ -99,7 +99,28 @@ The server knows the earbuds; the app stays generic
   time, the app offers "Teach me your earbuds" — tap once on the left, once
   on the right, twice, while it records which key or volume step arrives —
   and posts the result, so the server builds the profile from what was
-  seen, as was done by hand for the Anko buds.
+  seen.
+- **The manual first** (David, 22 Nov 2026: "if in doubt read the
+  friendly manual", then "Yes, add that to the proposal"). Before asking
+  for a tap test, the server looks for the model's manual: the Anko map
+  read from a log alone was one gesture off, and Kmart's manual put it
+  right. In order:
+  1. a known filing place from the name: retail house brands carry their
+     item number in the pairing name (`anko43641765` -> Kmart's
+     `https://www.kmart.com.au/wcsstore/Kmart/pdfs/43641765_Manual.pdf`);
+     a short table of such places per brand, kept with the profiles;
+  2. otherwise a web search for "<name> manual" (pdf first), through the
+     search service the server already uses, never sending anything but
+     the earbuds' name;
+  3. the manual's text (or, for an image-only PDF, its pages rendered) is
+     read by the fast model into `gestures` (the signals above), with the
+     source URL kept on the profile (`source: "manual"`, `manual_url`).
+  A profile from a manual is `verified: false` until one tap confirms
+  it: the app asks for a single tap and a double tap only ("Tap once...
+  now twice"), not the whole test, and a mismatch falls back to the full
+  test. No manual found: the full tap test as above. A new outside
+  service used for this gets its row in docs/reference/outside-services.md
+  when built.
 
 ## Which bud is worn (later, per brand)
 
@@ -171,7 +192,9 @@ skips above).
 2. Server: `POST /device/earbuds`, `GET /device/earbuds`, `earbuds.json`
    with Anko measured and common brands' defaults marked unverified;
    contract section.
-3. App: "Teach me your earbuds", posting learned profiles.
+3. Server: the manual lookup (filing places, search, the fast model
+   reading it). App: "Teach me your earbuds", the short confirm when a
+   manual was found, posting learned profiles.
 4. Spoken guidance on first connect of a new model.
 5. The car: `kind: "car"`, the `step` scheme in the app and a car profile
    on the server.
