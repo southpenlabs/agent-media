@@ -494,6 +494,7 @@ CORS_PATHS = frozenset({
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/local/avatar", "/local/avatars", "/local/send", "/local/outbox", "/local/outbox/result",
+    "/local/agents",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -5442,7 +5443,15 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         # bridges it, which sends it with its one login (local_send.py, §6.61).
         from . import local_send
 
-        ok, detail = local_send.send(_read_json(h), _bearer(h))
+        ok, detail = local_send.send(_read_json(h), _bearer(h),
+                                     host=_TOKEN_OK is not None and _TOKEN_OK(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/agents":
+        # A Local chat's agents switch: whether agents may send in it (an
+        # admin's device; local_send.py, §6.61 Sending).
+        from . import local_send
+
+        ok, detail = local_send.set_agents(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/outbox/result":
         # The bridging phone says how a message it was to send went.

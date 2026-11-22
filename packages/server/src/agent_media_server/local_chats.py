@@ -217,6 +217,31 @@ def for_bearer(bearer: str, rows):
     return [r for r in rows if not (isinstance(r, dict) and r.get("local"))]
 
 
+def agents_send(session: str) -> bool:
+    """Whether agents may send into this chat (local_send.py, §6.61 Sending):
+    off unless an admin turned it on for this chat."""
+    return (record(session) or {}).get("agents_send") is True
+
+
+def set_agents_send(session: str, on: bool) -> bool:
+    """The chat's agents switch, kept on its record (a phone's next list
+    keeps it, as a title). False when the chat is not listed."""
+    done = []
+
+    def fn(rows: dict) -> bool:
+        rec = rows.get(session)
+        if not isinstance(rec, dict):
+            return False
+        if on:
+            rec["agents_send"] = True
+        else:
+            rec.pop("agents_send", None)
+        done.append(1)
+        return True
+    STORE.update(fn)
+    return bool(done)
+
+
 def settings_of(ids: list[str]) -> dict[str, dict]:
     """`{id: settings}`: the fields a `/targets` row carries for these chats
     (archived, top, marked_unread, quiet, muted, remind, tags, speech, issue, read
@@ -240,7 +265,8 @@ def settings_of(ids: list[str]) -> dict[str, dict]:
     keep = ("archived", "archived_at", "sealed", "speech", "speech_own", "priority",
             "read_receipts", "read_receipts_own", "top", "marked_unread", "quiet", "quiet_rule", "muted",
             "remind", "reminded", "tags", "chat_tags", "issue")
-    return {r["session"]: {k: r.get(k) for k in keep if k in r} for r in base}
+    return {r["session"]: {**{k: r.get(k) for k in keep if k in r},
+                           "agents_send": agents_send(r["session"])} for r in base}
 
 
 def _answer(ids: list[str]) -> list[dict]:

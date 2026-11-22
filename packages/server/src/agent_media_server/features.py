@@ -154,7 +154,8 @@ never a network call, so the app can ask on every start.
   local_send  sending to a Local chat from any device, through the bridging
             phone's one login (local_send.py, §6.61 Sending, 22 Nov 2026): POST
             /local/send, GET /local/outbox, POST /local/outbox/result, DELETE
-            /local/send?id=, the local_send frame on /sessions/events
+            /local/send?id=, the local_send frame on /sessions/events; POST
+            /local/agents, the per-chat agents switch (23 Nov 2026)
   mute      a chat's notifications off, apart from its speech level (mute.py,
             §6.4, 18 Nov 2026): POST /session/mute {session, muted, until?};
             rows and GET /local/chats settings carry `muted: {until}|false`;

@@ -6098,7 +6098,7 @@ local look, never a network call:
 | `local_settings` | always true (§6.61 Settings, 18 Nov 2026): `GET`/`POST /local/settings`: what leaves the phone, backup, applying to the networks |
 | `local_full` | always true (§6.61 Full copy, 18 Nov 2026): `POST /local/messages` while the dial is at `full`; a `local:` id reads through `/conversation/log` and `/threads/<id>/events`; search's harness `local` |
 | `local_avatars` | always true (§6.61 Full copy, Senders' pictures, 22 Nov 2026): `GET`/`POST`/`DELETE /local/avatar?chat=&sender=`, `GET /local/avatars?chat=`; `sender.avatar` in a Local chat's log |
-| `local_send` | always true (§6.61 Sending, 22 Nov 2026): `POST`/`DELETE /local/send`, `GET /local/outbox`, `POST /local/outbox/result`, the `local_send` frame on `/sessions/events?local_send=1`, `local.outgoing` in a Local chat's log. A person's device only; no agent path |
+| `local_send` | always true (§6.61 Sending, 22 Nov 2026): `POST`/`DELETE /local/send`, `GET /local/outbox`, `POST /local/outbox/result`, the `local_send` frame on `/sessions/events?local_send=1`, `local.outgoing` in a Local chat's log; `POST /local/agents`, the per-chat agents switch (agents send with the host token only where it is on) |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -14237,17 +14237,14 @@ GET    /sessions/events?local_send=1 → event: local_send  data: {"outgoing": [
 <out> = {"id": "o_<12 hex>", "chat", "kind": "text"|"reaction", "text" (a reaction's emoji),
          "reply_to": "<event id>"|null, "client_id"|null, "at",
          "state": "waiting"|"sending"|"sent"|"failed", "landed": bool,
-         "by": {"device", "name"},                        // who wrote it
+         "by": {"device", "name"} | {"agent": true, "device": null, "name"},  // who wrote it
          "bridge": {"device", "name", "online": bool},    // the phone that sends it
          "event_id"? (sent), "error"? (failed), "settled_at"?}
 ```
 
 - **Who sends**: a person, on a paired device that may read the chat (not a
   guest, not one limited to its folders: 403 `guest`), at Full copy (409
-  `not_enabled` otherwise). **Not an agent**: the host's own token
-  (`X-Auth-Token`, what `media` and agents use) is 401 here; agents writing
-  in other people's chats waits on a gate of its own, asked of David first.
-  The chat must be listed (404 `not_found`), still on its phone's list (409
+  `not_enabled` otherwise); or an agent, below. The chat must be listed (404 `not_found`), still on its phone's list (409
   `chat_gone`) and bridged by a device (409 `no_bridge`).
 - **The body**: exactly one of `text` (at most 8000 characters, not blank;
   400 `too_long`) or `react` (an emoji, at most 32 characters, with
@@ -14283,6 +14280,27 @@ GET    /sessions/events?local_send=1 → event: local_send  data: {"outgoing": [
 - **Cancel / dismiss**: `DELETE /local/send?id=` takes back a `waiting`
   message or dismisses a `failed` one, from any device that may send; 409
   `taken` once the phone has it (`sending`, `sent`).
+- **Agents** (23 Nov 2026; David picked "Per chat switch": off everywhere
+  by default; in a chat turned on, agents send without asking). Each Local
+  chat has an agents switch:
+
+  ```
+  POST /local/agents {"chat": "local:…", "on": true|false}  → {"ok": true, "chat", "agents_send"}
+  ```
+
+  from an admin's device that may read the chat (403 `not_admin` for a
+  member's, `guest` for a guest's; 404 unlisted). Kept on the chat's record
+  (a phone's next list keeps it) and shown as `agents_send` in its
+  `settings` on `GET /local/chats` (and its `/targets` row's settings). An
+  agent sends with the host's own token (`X-Auth-Token`, no bearer; `media
+  local send <chat> <text> [--as <name>] [--reply-to <id>]`) and an extra
+  field `"agent": {"name"}` (1-60 characters; 400 `agent_name`). Refused 403
+  `agents_off` unless the chat's switch is on. The message goes out from the
+  owner's own account, so its text starts `<name>: ` (as a handed Matrix
+  room's, §6.53); words only (400 `agents_text_only` for a reaction, which
+  could carry no name). Its `<out>` has `by: {"agent": true, "device": null,
+  "name"}`. `agent` from a device's bearer is 400 `field_not_accepted`; a
+  wrong host token 401.
 - **Kept** in `local-messages.db` (table `outbox`), going with the chat's
   messages (the dial leaving `full`, a chat pruned). Waiting 7 days fails
   it as `error: "expired"`; a settled one is forgotten 7 days after.

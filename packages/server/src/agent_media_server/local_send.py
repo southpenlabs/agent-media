@@ -13,10 +13,14 @@ in the phone's next `POST /local/messages` batch as its own ("me"), and the
 outgoing row is marked landed and leaves the list.
 
 **Who sends.** A person, on a paired device that may read the chat (not a
-guest, not one limited to its folders), at Full copy. Not an agent: the
-host's own token (`X-Auth-Token`, what `media` and agents use) is no bearer
-here, so it is 401. Agents writing into other people's chats wants a gate
-of its own, which David is asked about before any agent path is added.
+guest, not one limited to its folders), at Full copy. An agent, with the
+host's own token (`X-Auth-Token`, what `media local send` uses), only in a
+chat whose agents switch an admin turned on (`POST /local/agents`; David,
+23 Nov 2026, picked "Per chat switch": off everywhere by default, and in
+the chats turned on agents send without asking). An agent's message goes
+out from the owner's own network account, so it starts `<Name>: `, as a
+handed Matrix room's does (room_delegate.prefix); an agent sends words
+only, never a reaction (it would carry no name).
 
 **Kept** in the `outbox` table of `local-messages.db` (local_messages.py),
 so it goes with the chat's messages: all when the dial leaves `full`, a
@@ -55,6 +59,10 @@ MAX_ERROR = 500
 STATES = ("waiting", "sending", "sent", "failed")
 OPEN = ("waiting", "sending")
 SEND_FIELDS = frozenset({"chat", "text", "reply_to", "react", "client_id"})
+AGENT_FIELDS = SEND_FIELDS | {"agent"}
+#: `by_device` of a message an agent sent: "agent:" and its name.
+AGENT = "agent:"
+MAX_AGENT_NAME = 60
 RESULT_FIELDS = frozenset({"id", "state", "event_id", "error"})
 _CLIENT = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 _ID = re.compile(r"o_[0-9a-f]{12}")
@@ -130,10 +138,12 @@ def _shape(r: dict, names: dict[str, str] | None = None) -> dict:
 
     rec = local_chats.record(r["chat"]) or {}
     bridge = rec.get("device")
+    by_dev = r["by_device"] or ""
+    by = ({"agent": True, "device": None, "name": by_dev[len(AGENT):]}
+          if by_dev.startswith(AGENT) else {"device": by_dev, "name": name(by_dev)})
     out = {"id": r["id"], "chat": r["chat"], "kind": r["kind"], "text": r["text"],
            "reply_to": r["reply_to"], "client_id": r["client_id"], "at": r["at"],
-           "state": r["state"], "landed": bool(r["landed"]),
-           "by": {"device": r["by_device"], "name": name(r["by_device"])},
+           "state": r["state"], "landed": bool(r["landed"]), "by": by,
            "bridge": {"device": bridge, "name": name(bridge), "online": online(bridge)}}
     if r["event_id"]:
         out["event_id"] = r["event_id"]
@@ -174,15 +184,29 @@ def _may_send(bearer: str) -> tuple[bool, dict, str]:
 # --- POST /local/send -------------------------------------------------------------
 
 
-def send(body, bearer: str, now: float | None = None) -> tuple[bool, dict]:
+def send(body, bearer: str, now: float | None = None,
+         host: bool = False) -> tuple[bool, dict]:
     """`POST /local/send {"chat", "text" | "react", "reply_to"?, "client_id"?}`:
-    held for the bridging phone. `{outgoing, duplicate}`."""
-    ok, err, device = _may_send(bearer)
-    if not ok:
-        return False, err
+    held for the bridging phone. `{outgoing, duplicate}`. `host`: the host's
+    own token and no bearer — an agent, `{"agent": {"name"}}` in the body,
+    let in only where the chat's agents switch is on."""
+    agent = None
+    if host and not bearer:
+        if not local_messages.enabled():
+            return False, dict(local_messages.NOT_ENABLED)
+        a = body.get("agent") if isinstance(body, dict) else None
+        name = " ".join(str((a or {}).get("name") or "").split()) if isinstance(a, dict) else ""
+        if not name or len(name) > MAX_AGENT_NAME or any(ord(c) < 32 for c in name):
+            return _bad(f"agent is {{\"name\"}}: the name its message starts with, "
+                        f"1-{MAX_AGENT_NAME} characters", code="agent_name")
+        agent, device = name, AGENT + name
+    else:
+        ok, err, device = _may_send(bearer)
+        if not ok:
+            return False, err
     if not isinstance(body, dict):
         return _bad("the body must be an object")
-    extra = sorted(set(body) - SEND_FIELDS)
+    extra = sorted(set(body) - (AGENT_FIELDS if agent else SEND_FIELDS))
     if extra:
         return _bad(f"not a field of a message to send: {extra[0]}", code="field_not_accepted",
                     field=extra[0])
@@ -208,6 +232,13 @@ def send(body, bearer: str, now: float | None = None) -> tuple[bool, dict]:
         if not reply_to:
             return _bad("a reaction names the message it is on in reply_to")
         kind, words = "reaction", react.strip()
+    if agent:
+        if kind != "text":
+            return _bad("an agent sends words, not a reaction", code="agents_text_only")
+        words = room_delegate_prefix(agent, words)
+        if len(words) > MAX_TEXT:
+            return _bad(f"text is at most {MAX_TEXT} characters", code="too_long",
+                        limit=MAX_TEXT)
     cid = body.get("client_id")
     if cid is not None and (not isinstance(cid, str) or not _CLIENT.fullmatch(cid)):
         return _bad("client_id is 1-64 letters, digits or _ . : -")
@@ -221,6 +252,9 @@ def send(body, bearer: str, now: float | None = None) -> tuple[bool, dict]:
     if not rec.get("device"):
         return False, {"error": "no device bridges this chat", "status": 409,
                        "code": "no_bridge"}
+    if agent and rec.get("agents_send") is not True:
+        return False, {"error": "agents may not send in this chat: its agents switch is off",
+                       "status": 403, "code": "agents_off"}
     now = time.time() if now is None else now
     with local_messages._WRITE:
         conn = local_messages._connect()
@@ -251,6 +285,48 @@ def send(body, bearer: str, now: float | None = None) -> tuple[bool, dict]:
             raise
     changed()
     return True, {"outgoing": _shape(row), "duplicate": False}
+
+
+def room_delegate_prefix(name: str, text: str) -> str:
+    from . import room_delegate
+
+    return room_delegate.prefix(name, text)
+
+
+# --- POST /local/agents -----------------------------------------------------------
+
+
+def set_agents(body, bearer: str) -> tuple[bool, dict]:
+    """`POST /local/agents {"chat", "on": bool}`: the chat's agents switch,
+    from an admin's device that may read it. `{chat, agents_send}`."""
+    ok, err = local_messages.may_read(bearer)
+    if not ok:
+        return False, err
+    user, err = auth.may_admin(bearer)
+    if not user:
+        return False, err
+    if not isinstance(body, dict):
+        return _bad("the body must be an object")
+    extra = sorted(set(body) - {"chat", "on"})
+    if extra:
+        return _bad(f"not a field: {extra[0]}", code="field_not_accepted", field=extra[0])
+    chat, on = body.get("chat"), body.get("on")
+    if not isinstance(chat, str) or not local_chats.is_local(chat):
+        return _bad("chat is a Local chat's id, local:<network>:<id>")
+    if not isinstance(on, bool):
+        return _bad("on is true or false")
+    try:
+        found = local_chats.set_agents_send(chat, on)
+    except OSError as e:
+        return False, {"error": f"could not save it ({e.strerror or 'write failed'})",
+                       "status": 500}
+    if not found:
+        return False, {"error": "no such chat: a phone has not listed it", "status": 404,
+                       "code": "not_found"}
+    from . import sessions
+
+    sessions.targets_changed()
+    return True, {"chat": chat, "agents_send": on}
 
 
 # --- what the phone takes ---------------------------------------------------------

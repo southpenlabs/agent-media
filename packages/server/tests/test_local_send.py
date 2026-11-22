@@ -50,11 +50,66 @@ def test_not_at_full_copy_is_409(server, phone):
     assert st == 409 and got["code"] == "not_enabled"
 
 
-def test_the_host_token_is_no_way_in(server, full):
-    # Agents use the host's own token: no agent path until David says so.
-    res, got = call(server, "POST", "/local/send", {"chat": WA, "text": "hi"},
+HOST = {"X-Auth-Token": "hosttok"}
+
+
+@pytest.fixture
+def host(monkeypatch):
+    monkeypatch.setenv("AMUX_AUTH_TOKEN", "hosttok")
+
+
+def agents(server, token, on, chat=WA):
+    res, got = call(server, "POST", "/local/agents", {"chat": chat, "on": on}, _auth(token))
+    return res.status, got
+
+
+def test_a_wrong_host_token_is_no_way_in(server, full, host):
+    res, got = call(server, "POST", "/local/send", {"chat": WA, "text": "hi",
+                                                   "agent": {"name": "Kit"}},
                     {"X-Auth-Token": "whatever"})
     assert res.status == 401
+
+
+def test_agents_only_where_the_switch_is_on(server, full, desk, host):
+    body = {"chat": WA, "text": "running late", "agent": {"name": "Kit"}}
+    res, got = call(server, "POST", "/local/send", body, HOST)
+    assert res.status == 403 and got["code"] == "agents_off"
+    # Off by default, shown in the chat's settings.
+    res, chats = call(server, "GET", "/local/chats", headers=_auth(full["token"]))
+    assert {c["id"]: c["settings"]["agents_send"] for c in chats["chats"]}[WA] is False
+    # A member's device may not turn it on; an admin's may.
+    member = _paired(server, role="member", name="Tablet")
+    st, got = agents(server, member["token"], True)
+    assert st == 403 and got["code"] == "not_admin"
+    assert agents(server, full["token"], "yes")[0] == 400
+    assert agents(server, full["token"], True, chat="local:whatsapp:no@s.whatsapp.net")[0] == 404
+    st, got = agents(server, full["token"], True)
+    assert st == 200 and got["agents_send"] is True
+    # The phone's next list keeps it.
+    call(server, "POST", "/local/chats", {"network": "whatsapp", "chats": [
+        {"id": "61400000000@s.whatsapp.net", "name": "Ana", "kind": "person"}]},
+        _auth(full["token"]))
+    res, chats = call(server, "GET", "/local/chats", headers=_auth(full["token"]))
+    assert {c["id"]: c["settings"]["agents_send"] for c in chats["chats"]}[WA] is True
+    # Now an agent sends, its name in front; the phone sees it like any other.
+    res, got = call(server, "POST", "/local/send", body, HOST)
+    assert res.status == 200, got
+    out = got["outgoing"]
+    assert out["text"] == "Kit: running late"
+    assert out["by"] == {"agent": True, "device": None, "name": "Kit"}
+    assert [o["id"] for o in outbox(server, full["token"])[1]["outgoing"]] == [out["id"]]
+    # Words only, a name always, and no agent field from a device.
+    res, got = call(server, "POST", "/local/send", {"chat": WA, "react": "👍", "reply_to": "$e1",
+                                                   "agent": {"name": "Kit"}}, HOST)
+    assert res.status == 400 and got["code"] == "agents_text_only"
+    res, got = call(server, "POST", "/local/send", {"chat": WA, "text": "x"}, HOST)
+    assert res.status == 400 and got["code"] == "agent_name"
+    st, got = send(server, desk["token"], body)
+    assert st == 400 and got["code"] == "field_not_accepted"
+    # Off again: refused again.
+    assert agents(server, full["token"], False)[0] == 200
+    res, got = call(server, "POST", "/local/send", body, HOST)
+    assert res.status == 403 and got["code"] == "agents_off"
 
 
 def test_a_guest_may_not_send(server, full):

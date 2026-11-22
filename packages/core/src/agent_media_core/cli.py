@@ -10423,6 +10423,38 @@ def cmd_room_log(a) -> int:
     return 0
 
 
+def cmd_local(a) -> int:
+    """`media local send <chat> <text>`: an agent's message to one of the
+    phone's Local chats (agent_media_server.local_send, server-contract §6.61
+    "Sending"), through the server with this host's own token. Held there
+    until the bridging phone sends it with its one login; refused unless the
+    chat's agents switch is on. The message starts `<name>: `."""
+    from .phone_ask import _call
+
+    text = " ".join(a.text).strip()
+    if not text or text == "-":
+        text = sys.stdin.read().strip()
+    if not text:
+        print("media local send: nothing to say", file=sys.stderr)
+        return 2
+    body: dict = {"chat": a.chat, "text": text, "agent": {"name": a.as_name}}
+    if a.reply_to:
+        body["reply_to"] = a.reply_to
+    code, obj = _call("POST", "/local/send", body, timeout=30.0)
+    if code != 200 or not obj.get("ok"):
+        print(f"media local send: {obj.get('error') or f'HTTP {code}'}", file=sys.stderr)
+        return 1
+    out = obj.get("outgoing") or {}
+    if a.json:
+        print(json.dumps(obj))
+    else:
+        bridge = out.get("bridge") or {}
+        where = bridge.get("name") or "the phone"
+        print(f"queued {out.get('id')} for {where}"
+              + ("" if bridge.get("online") else f" (offline: it goes when {where} is back)"))
+    return 0
+
+
 def cmd_room(a) -> int:
     """`media room reply <thread> <text>`: an agent's answer in a chat with
     people handed to it (agent_media_server.room_delegate, server-contract
@@ -12010,6 +12042,20 @@ def _build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--before", default="", metavar="ID", help="only messages before this one")
     rl.add_argument("--limit", type=int, default=60, help="how many (default 60, at most 500)")
     rl.set_defaults(func=cmd_room_log)
+
+    lc = sub.add_parser("local", help="the phone's Local chats: send <chat> <text> (only "
+                                      "where the chat's agents switch is on)")
+    lc_sub = lc.add_subparsers(dest="local_cmd", required=True)
+    ls_ = lc_sub.add_parser("send", help="a message to a Local chat, sent by the phone that "
+                                        "bridges it; it starts with your name")
+    ls_.add_argument("chat", metavar="CHAT", help="local:<network>:<id>")
+    ls_.add_argument("text", nargs="*", help="the words; '-' or nothing reads stdin")
+    ls_.add_argument("--as", dest="as_name",
+                     default=os.environ.get("MEDIA_AGENT_NAME") or "Assistant",
+                     help="the name in front of the message (default $MEDIA_AGENT_NAME or Assistant)")
+    ls_.add_argument("--reply-to", default="", metavar="ID", help="the message it answers")
+    ls_.add_argument("--json", action="store_true")
+    ls_.set_defaults(func=cmd_local)
 
     room = sub.add_parser("room", help="a chat with people handed to you: reply <thread> "
                                        "<text> (sent or drafted, as the hand-over allows)")
