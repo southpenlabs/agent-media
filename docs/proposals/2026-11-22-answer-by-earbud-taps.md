@@ -137,7 +137,18 @@ answer mode works there with a scheme of its own:
   name; signals as for earbuds, gestures `next_button`, `previous_button`,
   `play_button`.
 
-Outside a question, the car's buttons keep their meanings.
+**David's car is already known** (15 Oct 2026, "Earbud pause with media
+sessions", sasonica-app build 1225): its buttons send play/pause, next,
+previous, and a hold on next arrives as fast forward (not repeated
+presses); he confirmed next/previous skip a sentence, previous twice goes
+to the start and a hold on next finishes the reply ("the car also works
+with forward and back and start and finish"). So his car needs no button
+test: its profile ships with next, previous, play_pause and fast_forward,
+scheme `step`. Only its Bluetooth name is still to be read (the first
+time it connects after this is built).
+
+Outside a question, the car's buttons keep their meanings (the sentence
+skips above).
 
 ## Build order
 
