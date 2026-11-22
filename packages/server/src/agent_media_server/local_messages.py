@@ -38,6 +38,9 @@ the picture: the sender's name already rides with each message, and the
 rest of the companion's card (phone number, service, is_bot) stays on the
 phone. They go with the messages (`_delete`).
 
+**Sending** (22 Nov 2026, sasonica-app mail #1191) is local_send.py: its
+outbox is a table here, so it goes with the messages too.
+
 **When it goes.** Switching the dial off `full` deletes every message here
 and its rows in the search index (`purge`, from local_settings.post); a
 chat its phone has not listed for `GONE_DAYS` (30), or no longer known at
@@ -96,6 +99,14 @@ CREATE INDEX IF NOT EXISTS msgs_changed ON msgs(chat, changed);
 CREATE TABLE IF NOT EXISTS avatars (
   chat TEXT NOT NULL, sender TEXT NOT NULL, etag TEXT NOT NULL, type TEXT NOT NULL,
   data BLOB NOT NULL, at REAL NOT NULL, PRIMARY KEY (chat, sender));
+CREATE TABLE IF NOT EXISTS outbox (
+  id TEXT PRIMARY KEY, chat TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+  reply_to TEXT, client_id TEXT, by_device TEXT NOT NULL, at REAL NOT NULL,
+  state TEXT NOT NULL, taken_by TEXT, event_id TEXT, error TEXT, settled REAL,
+  landed INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS outbox_chat ON outbox(chat, at);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_client ON outbox(by_device, client_id)
+  WHERE client_id IS NOT NULL;
 """
 
 _LOCAL = threading.local()
@@ -352,12 +363,19 @@ def post(body, bearer: str) -> tuple[bool, dict]:
             for mid in touched:
                 if mid:
                     _settle(conn, chat, mid, clock)
+            landed = conn.execute(
+                "UPDATE outbox SET landed=1 WHERE chat=? AND landed=0 AND event_id IN "
+                "(SELECT id FROM msgs WHERE chat=?)", (chat, chat)).rowcount
             held = conn.execute(f"SELECT count(*) FROM msgs WHERE chat=? AND kind IN "
                                 f"({','.join('?' * len(SHOWN))})", (chat, *SHOWN)).fetchone()[0]
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+    if landed:
+        from . import local_send
+
+        local_send.changed()
     prune()
     return True, {"chat": chat, "stored": stored, "duplicates": dup, "held": held}
 
@@ -516,6 +534,9 @@ def envelope(chat: str, *, limit: int, before: str = "", around: str = "",
         if around:
             jump = {"id": around, "found": False, "newer": False}
     out["messages"] = _view(conn, chat, _rows(conn, chat, ids))
+    from . import local_send
+
+    out["local"]["outgoing"] = local_send.pending(chat)
     out["older"] = older
     if jump is not None:
         out["around"], out["newer"] = jump, jump["newer"]
@@ -605,6 +626,7 @@ def _delete(chats: list[str] | None) -> dict:
                                                args)]
             gone += [r[0] for r in conn.execute(
                 f"SELECT DISTINCT chat FROM avatars WHERE 1=1{where}", args) if r[0] not in gone]
+            out_n = conn.execute(f"DELETE FROM outbox WHERE 1=1{where}", args).rowcount
             conn.execute(f"DELETE FROM msgs WHERE 1=1{where}", args)
             conn.execute(f"DELETE FROM avatars WHERE 1=1{where}", args)
             conn.execute("COMMIT")
@@ -613,8 +635,10 @@ def _delete(chats: list[str] | None) -> dict:
             raise
         if chats is None:
             conn.execute("VACUUM")
-    from . import search
+    from . import local_send, search
 
+    if out_n:
+        local_send.changed()
     for c in gone:
         try:
             search.forget(c)
@@ -635,7 +659,8 @@ def prune(now: float | None = None) -> dict:
         return {"messages": 0, "chats": 0}
     now = time.time() if now is None else now
     stale = []
-    for (chat,) in _connect().execute("SELECT chat FROM msgs UNION SELECT chat FROM avatars"):
+    for (chat,) in _connect().execute("SELECT chat FROM msgs UNION SELECT chat FROM avatars "
+                                      "UNION SELECT chat FROM outbox"):
         rec = local_chats.record(chat)
         if rec is None or (rec.get("gone") and now - float(rec["gone"]) > GONE_DAYS * 86400):
             stale.append(chat)

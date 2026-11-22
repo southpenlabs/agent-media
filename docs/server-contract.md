@@ -6098,6 +6098,7 @@ local look, never a network call:
 | `local_settings` | always true (§6.61 Settings, 18 Nov 2026): `GET`/`POST /local/settings`: what leaves the phone, backup, applying to the networks |
 | `local_full` | always true (§6.61 Full copy, 18 Nov 2026): `POST /local/messages` while the dial is at `full`; a `local:` id reads through `/conversation/log` and `/threads/<id>/events`; search's harness `local` |
 | `local_avatars` | always true (§6.61 Full copy, Senders' pictures, 22 Nov 2026): `GET`/`POST`/`DELETE /local/avatar?chat=&sender=`, `GET /local/avatars?chat=`; `sender.avatar` in a Local chat's log |
+| `local_send` | always true (§6.61 Sending, 22 Nov 2026): `POST`/`DELETE /local/send`, `GET /local/outbox`, `POST /local/outbox/result`, the `local_send` frame on `/sessions/events?local_send=1`, `local.outgoing` in a Local chat's log. A person's device only; no agent path |
 | `quote_part` | always: `POST /reply {"quote_part": true}` — the quote is words picked out of the message `reply_to` names (a selection's Reply, §6.31, 14 Nov 2026) |
 | `music_chapters` | always: a mix's chapters are songs — `GET /music/recent` music rows carry `chapters` and `mix`, and `POST /music {"action": "play"}` takes `start` (§6.9a "A mix's chapters as songs", 8 Nov 2026) |
 | `mix_songs` | always: a song inside a mix is liked, disliked and turned as a song — with no `uri` the keys act on the chapter playing (`whole: true` the clip), with `uri` and `start` on that chapter; `GET /music` has `mix_song` and `whole`; the liked list has a row per liked chapter; `play` takes `end` (§6.9a "A song inside a mix", 12 Nov 2026) |
@@ -14210,6 +14211,82 @@ GET    /local/avatar?chat=…&sender=…[&access_token=]   → the picture; ETag
   hold the number: that is the network's id for them, sent with their
   messages since Full copy began, and goes with them.)
 - `/features` `local_avatars: true`.
+
+#### Sending: from any device, through the phone's one login (built 22 Nov 2026)
+
+Asked by sasonica-app (mail #1191; David, 22 Nov 2026: "It would be nice if
+it could be sent from the server too but with the one login"). The network
+login stays in the companion on the bridging phone; there is no second one.
+The server holds the outgoing message, the bridging phone is told on the
+stream its notifier already holds, sends it through the companion, and says
+how it went; the message then comes back in the Full copy log as the
+phone's own. Code: `agent_media_server/local_send.py`.
+
+```
+POST   /local/send {"chat": "local:<network>:<id>", "text": "…" | "react": "<emoji>",
+                    "reply_to"?: "<event id>", "client_id"?: "<the app's own id>"}
+  → {"ok": true, "outgoing": <out>, "duplicate": bool}
+GET    /local/outbox?chat=…          → {"ok": true, "chat", "outgoing": [<out>…]}   // not yet back in the log
+GET    /local/outbox                 → {"ok": true, "device", "outgoing": [<out>…]} // what this phone is to send
+POST   /local/outbox/result {"id", "state": "sending"|"sent"|"failed",
+                             "event_id"?: "<the network's id>" (sent), "error"?: "<words>" (failed)}
+  → {"ok": true, "outgoing": <out>}
+DELETE /local/send?id=o_…            → {"ok": true, "id", "deleted": true}
+GET    /sessions/events?local_send=1 → event: local_send  data: {"outgoing": [<out>…]}
+
+<out> = {"id": "o_<12 hex>", "chat", "kind": "text"|"reaction", "text" (a reaction's emoji),
+         "reply_to": "<event id>"|null, "client_id"|null, "at",
+         "state": "waiting"|"sending"|"sent"|"failed", "landed": bool,
+         "by": {"device", "name"},                        // who wrote it
+         "bridge": {"device", "name", "online": bool},    // the phone that sends it
+         "event_id"? (sent), "error"? (failed), "settled_at"?}
+```
+
+- **Who sends**: a person, on a paired device that may read the chat (not a
+  guest, not one limited to its folders: 403 `guest`), at Full copy (409
+  `not_enabled` otherwise). **Not an agent**: the host's own token
+  (`X-Auth-Token`, what `media` and agents use) is 401 here; agents writing
+  in other people's chats waits on a gate of its own, asked of David first.
+  The chat must be listed (404 `not_found`), still on its phone's list (409
+  `chat_gone`) and bridged by a device (409 `no_bridge`).
+- **The body**: exactly one of `text` (at most 8000 characters, not blank;
+  400 `too_long`) or `react` (an emoji, at most 32 characters, with
+  `reply_to` naming the message). `reply_to` on a text is the message it
+  answers. Any other field 400 `field_not_accepted`. `client_id` (1-64 of
+  letters, digits, `_ . : -`) makes a retry safe: the same device sending
+  the same `client_id` again gets the first message back, `duplicate:
+  true`. At most 200 waiting per chat (429 `too_many`).
+- **How the phone is told**: the bridging phone opens (or adds to) its
+  background stream with `?local_send=1`, and gets a `local_send` frame with
+  every message `waiting` or `sending` for the chats it bridges, oldest
+  first: after the first `sessions` frame if there are any, then whenever
+  that list changes (a send, a result, a cancel, an expiry; at once, not on
+  the watcher's tick). `GET /local/outbox` with no `chat` answers the same
+  list, for a phone catching up without the stream. While such a stream is
+  open, `bridge.online` is true on every `<out>` for its chats, so another
+  device can say "waiting on <phone>" when it is not.
+- **The outcome**, from the bridging phone only (403 `not_bridging`):
+  `sending` when it takes one (before calling the companion), then `sent`
+  with the network's `event_id` or `failed` with its `error` in words.
+  `sent` and `failed` are final: the same result again answers 200
+  unchanged, a different one 409 `settled`. A phone that restarts mid-send
+  finds its `sending` ones still in the frame and settles them. Unknown id
+  404.
+- **Landing**: once the phone's `POST /local/messages` carries a message
+  whose `event_id` is a sent one's (`from: "me"`, as any message of its
+  own), the outgoing one is `landed` and leaves `/local/outbox?chat=` and
+  the log's `local.outgoing`; a `sent` reported after the batch lands at
+  once.
+- **In the log**: `/conversation/log?session=local:…` carries
+  `local.outgoing`, the chat's `<out>`s not yet landed (waiting, sending,
+  sent, failed), for the composer to draw under the messages.
+- **Cancel / dismiss**: `DELETE /local/send?id=` takes back a `waiting`
+  message or dismisses a `failed` one, from any device that may send; 409
+  `taken` once the phone has it (`sending`, `sent`).
+- **Kept** in `local-messages.db` (table `outbox`), going with the chat's
+  messages (the dial leaving `full`, a chat pruned). Waiting 7 days fails
+  it as `error: "expired"`; a settled one is forgotten 7 days after.
+- `/features` `local_send: true`.
 
 ## 10. v1: threads keyed by session — BUILT 22 Sep 2026
 

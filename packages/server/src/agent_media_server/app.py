@@ -493,7 +493,7 @@ CORS_PATHS = frozenset({
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
     "/sessions/state", "/commands", "/usage", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
-    "/local/avatar", "/local/avatars",
+    "/local/avatar", "/local/avatars", "/local/send", "/local/outbox", "/local/outbox/result",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -1207,6 +1207,15 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
 def _delete(h: BaseHTTPRequestHandler, path: str) -> bool:
     """The app's DELETE routes: a Local chats backup (local_backup.py, §6.61),
     a Local chat sender's picture (local_messages.py, §6.61 Full copy)."""
+    if path == "/local/send":
+        # A message waiting for the phone taken back, or a failed one
+        # dismissed (local_send.py, §6.61 Sending).
+        from . import local_send
+
+        q = parse_qs(h.path.partition("?")[2])
+        ok, detail = local_send.cancel((q.get("id") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+        return True
     if path == "/local/avatar":
         from . import local_messages
 
@@ -1393,7 +1402,7 @@ def _options(h: BaseHTTPRequestHandler, path: str) -> bool:
     h.send_header("Access-Control-Allow-Methods",
                   "POST, OPTIONS" if path in CORS_POST_PATHS
                   else "GET, DELETE, OPTIONS" if LOCAL_BACKUP.fullmatch(path)
-                  else "GET, POST, DELETE, OPTIONS" if path == "/local/avatar"
+                  else "GET, POST, DELETE, OPTIONS" if path in ("/local/avatar", "/local/send")
                   else "GET, POST, OPTIONS")
     h.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
     h.send_header("Access-Control-Max-Age", CORS_MAX_AGE)
@@ -2733,6 +2742,13 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/local/avatar":
         _local_avatar(h, query)
+    elif path == "/local/outbox":
+        # Messages to a Local chat not yet back in its log, or (no chat)
+        # what this device is to send (local_send.py, §6.61 Sending).
+        from . import local_send
+
+        ok, detail = local_send.outbox((parse_qs(query).get("chat") or [""])[0], _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/local/backups":
         # The Local chats backups the caller may see (local_backup.py, §6.61).
         from . import local_backup
@@ -3452,6 +3468,10 @@ def _session_events(h: BaseHTTPRequestHandler, query: str) -> None:
                          want_notes=wants_notes, want_remind=wants_remind,
                          want_unheard=wants_unheard,
                          follow_device=follow_dev,
+                         # `?local_send=1`: messages to send to the Local
+                         # chats this phone bridges (local_send.py, §6.61).
+                         local_send_device=(auth.device_id(bearer) or None) if (
+                             qs.get("local_send") or [""])[0] in ("1", "true") else None,
                          # `?rooms=<n>`: people's new messages in bridged
                          # chats after cursor n (room_notices.py) — the
                          # owner's chats, so the owner's book only.
@@ -5416,6 +5436,19 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import local_messages
 
         ok, detail = local_messages.post(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/send":
+        # A message to a Local chat from any device, held for the phone that
+        # bridges it, which sends it with its one login (local_send.py, §6.61).
+        from . import local_send
+
+        ok, detail = local_send.send(_read_json(h), _bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/local/outbox/result":
+        # The bridging phone says how a message it was to send went.
+        from . import local_send
+
+        ok, detail = local_send.result(_read_json(h), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/local/avatar":
         # Full copy: a Local chat sender's picture, once per version, from

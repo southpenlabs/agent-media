@@ -336,6 +336,10 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     from agent_media_server import mic
 
     mic._reset_for_tests()
+    # Which phones hold a stream for messages to send to Local chats (local_send.py).
+    from agent_media_server import local_send
+
+    local_send._reset_for_tests()
     # And an agent's asks of the phone (phone.py).
     from agent_media_server import phone
 

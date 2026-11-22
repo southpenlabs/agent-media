@@ -60,6 +60,11 @@ thread's one word.
                just the head. One-tap answers ready after their message was
                told come as `answers` [{"n", "thread", "id", "suggestions"}]
                on the same cursor (room_notices.answers_ready)
+    local_send {"outgoing": [...]} — only when asked, `?local_send=1` (a phone
+               that bridges Local chats; §6.61 Sending, local_send.py): every
+               message waiting or being sent through this device to a Local
+               chat it bridges, oldest first. Like `phone`: after the first
+               frame if there are any, then whenever the set changes
     ping       {} after `?ping=` seconds of silence (15–300, default 15)
 
 `state` is `/sessions/state`'s (§6.1): `working` | `waiting` | `approval`.
@@ -89,7 +94,8 @@ import logging
 import threading
 import time
 
-from . import (alerts, auth, follow, mic, notes, phone, remind, room_notices, sessions,
+from . import (alerts, auth, follow, local_send, mic, notes, phone, remind, room_notices,
+               sessions,
                stage, unheard_watch)
 from agent_media_core import failures as _failures
 
@@ -260,6 +266,7 @@ class _Watcher:
         self.rooms_head = 0
         self.mic_head = 0
         self.phone_head = 0
+        self.local_send_head = 0
         self.notes_head = 0
         self.follow_head = 0
         self.stage_head: tuple = ()
@@ -281,6 +288,7 @@ class _Watcher:
         # Read every tick: an ask expiring is a change, noticed here (≤ POLL_S late).
         mic_head = mic.version()
         phone_head = phone.version()
+        local_send_head = local_send.version()
         notes_head = notes.version()
         follow_head = follow.version()
         # Something starting or stopping, while a screen shows Now playing
@@ -296,6 +304,7 @@ class _Watcher:
             if (rows != self.rows or head != self.alerts_head or mic_head != self.mic_head
                     or rooms_head != self.rooms_head
                     or phone_head != self.phone_head or notes_head != self.notes_head
+                    or local_send_head != self.local_send_head
                     or remind_head != self.remind_head or follow_head != self.follow_head
                     or stage_head != self.stage_head):
                 self.rows = rows
@@ -306,6 +315,7 @@ class _Watcher:
                 self.rooms_head = rooms_head
                 self.mic_head = mic_head
                 self.phone_head = phone_head
+                self.local_send_head = local_send_head
                 self.notes_head = notes_head
                 self.version += 1
                 self.cond.notify_all()
@@ -357,6 +367,7 @@ def poke() -> None:
     w = _W
     head = mic.version()
     phone_head = phone.version()
+    local_send_head = local_send.version()
     notes_head = notes.version()
     follow_head = follow.version()
     rooms_head = room_notices.last_seq()
@@ -366,6 +377,7 @@ def poke() -> None:
         w.rooms_head = rooms_head
         w.mic_head = head
         w.phone_head = phone_head
+        w.local_send_head = local_send_head
         w.notes_head = notes_head
         w.follow_head = follow_head
         w.version += 1
@@ -408,7 +420,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
           handoff_after: int | None = None, book_device: str | None = None,
           book_after: int | None = None, want_notes: bool = False,
           want_remind: bool = False, follow_device: str | None = None,
-          rooms_after: int | None = None, want_unheard: bool = False) -> bool:
+          rooms_after: int | None = None, want_unheard: bool = False,
+          local_send_device: str | None = None) -> bool:
     """Hold the connection and stream the session list until it goes. Auth
     is the caller's (app.py), done before this. `mic_for` is None when the
     client did not ask for `mic` frames, else the connecting device's id
@@ -439,6 +452,8 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
     {"unheard": {session: n}}, /sessions/state's `unheard`, on connecting and
     whenever it changes, within a quarter second of a reply being saved or
     heard: the list's Play keys (18 Nov 2026).
+    `local_send_device`: `local_send` frames (local_send.py, `?local_send=1`)
+    — the messages this device is to send to the Local chats it bridges.
     Always True: the request was answered, however the stream ended."""
     from .app import _cors, _json
 
@@ -454,6 +469,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         return True
     h.close_connection = True
     phone.listening(phone_kinds, True)
+    local_send.listening(local_send_device, True)
     if want_unheard:
         unheard_watch.want(True)
     if want_notes:
@@ -507,6 +523,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         # An empty set on connecting is not sent: the phone has nothing to show.
         seen_asks: list[dict] = []
         seen_phone: list[dict] = []
+        seen_outgoing: list[dict] = []
         seen_notes: list[dict] = []
         seen_remind: list[dict] | None = None
         seen_unheard = -1
@@ -583,6 +600,15 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
                         seen_phone = asks
                         send("phone", {"asks": asks})
                         last_sent = time.monotonic()
+                if local_send_device is not None:
+                    outgoing = local_send.for_device(local_send_device)
+                    # Compared without `bridge.online`: this stream itself
+                    # opening is not a change to tell it of.
+                    okey = [{k: v for k, v in o.items() if k != "bridge"} for o in outgoing]
+                    if okey != seen_outgoing:
+                        seen_outgoing = okey
+                        send("local_send", {"outgoing": outgoing})
+                        last_sent = time.monotonic()
                 if want_remind:
                     due_now = reminders_due()
                     if due_now != seen_remind and (due_now or seen_remind is not None):
@@ -626,6 +652,7 @@ def serve(h, bearer: str, *, ping_s: float = PING_DEFAULT_S,
         log.exception("session events: stream failed")
     finally:
         phone.listening(phone_kinds, False)
+        local_send.listening(local_send_device, False)
         if want_unheard:
             unheard_watch.want(False)
         if want_notes:
