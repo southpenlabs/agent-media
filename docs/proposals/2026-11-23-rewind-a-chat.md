@@ -68,13 +68,15 @@ say how to show one.
   takes the rewind when the turn ends, in the same place it handles a held
   message, then resumes the chat at the cut. Its next turn starts with a
   short harness note: "Rewound to <time>: <why>".
-- **Permission** (see the questions at the end): the agent's rewind is off
-  for every chat by default, like the Local chats agents switch (d97a4ba9).
-  When it's on, either it runs straight away or each rewind puts a card up
-  for you to approve.
+- **Permission** (decided, David, 23 Nov 2026: "Ask each time"): the agent
+  may ask for a rewind in any chat, and each one puts a card up for David to
+  approve. The card names the reply it goes back to, how many messages it
+  sets aside, the agent's why, and that files stay as they are. Nothing
+  happens until he approves; declining tells the agent. Like any card, the
+  chat waits on it.
 - **Endpoint:** `POST /session/rewind {session, to, why?}` → `{session,
-  record, rewound: N}`. It needs an admin's device or the host token with
-  the chat's switch on. It is refused (`busy`) while a question or
+  record, rewound: N}`. From an admin's device it runs; from the host token
+  it puts up the approval card and answers `{pending: true}`. It is refused (`busy`) while a question or
   permission card is up.
 
 ### 4. Files stay where they are
@@ -112,12 +114,10 @@ share:
    mail).
 5. agent-sessions ingest and catalogue (§5), in its own thread.
 
-## Open questions for David
+## Decided
 
-1. When the agent's rewind is on, does it run straight away, or does each
-   one put a card up for you to approve?
-2. May the agent rewind on its own judgement (e.g. a long detour that
-   failed), or only when you've asked for it in that chat?
+- The agent's rewinds are asked for, never taken: each puts a card up for
+  David to approve, in any chat (David, 23 Nov 2026: "Ask each time").
 
 ## Open source
 
