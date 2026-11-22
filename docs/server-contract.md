@@ -14293,6 +14293,14 @@ play key on the one wanted), `learn` (nothing known: offer the tap test).
 `guidance` is said once when a model first connects; `app` names the
 maker's app for remapping taps. The shipped table is verified only for
 Anko (`anko<digits>`); the other brands carry their app and are learned.
+**A car stereo** (22 Nov 2026): `kind: "car"` on `POST /device/earbuds`
+and `/learn` (else `"earbuds"`; kept on the row, echoed as `profile.kind`).
+Gestures `play_button`, `next_button`, `previous_button`, `hold_next`;
+signals also `fast_forward`, `rewind`. A car's `answer` is `pick` (a play
+key, on the option just read), `more`, `back`; `scheme` `step` (pick and
+more) or `one_at_a_time`. A car not learned by name takes the shipped car
+profile (play/pause, next, previous, hold next = fast forward: David's
+car, confirmed 15 Oct 2026), `model: "car"`.
 Stored in `<state>/earbuds.json` (learned, by name) and
 `earbuds-devices.json` (per device). Code: `earbuds.py`.
 

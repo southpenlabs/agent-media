@@ -35,12 +35,20 @@ GESTURES: dict[str, str] = {
     "double_tap": "double tap",
     "triple_tap": "triple tap",
     "hold": "press and hold",
+    # A car stereo's buttons (kind "car").
+    "play_button": "press play",
+    "next_button": "press next",
+    "previous_button": "press previous",
+    "hold_next": "hold next",
 }
+
+#: What is connected: earbuds (or a headset), or a car stereo.
+KINDS = ("earbuds", "car")
 
 #: What a gesture can reach the phone as. `assistant` is the phone's voice
 #: assistant (over HFP, never the app); `none` is measured to send nothing.
 SIGNALS = ("play", "pause", "play_pause", "headsethook", "next", "previous",
-           "volume_up", "volume_down", "assistant", "none")
+           "volume_up", "volume_down", "fast_forward", "rewind", "assistant", "none")
 
 #: The media keys the app hears as "the play key" (any of them answers first).
 PLAY_KEYS = ("play", "pause", "play_pause", "headsethook")
@@ -71,6 +79,14 @@ PROFILES: list[dict] = [
      "note": "AirPods' taps cannot be changed from an Android phone."},
 ]
 
+#: Any car stereo, until one is learned by name: the buttons David's car was
+#: confirmed to send (15 Oct 2026, the sentence skips: next, previous,
+#: play/pause, a hold on next as fast forward). Most cars' AVRCP buttons are
+#: the same three; the volume knob is the car's own amplifier, so no step.
+CAR: dict = {"id": "car", "label": "car stereo", "verified": True,
+             "gestures": {"play_button": "play_pause", "next_button": "next",
+                          "previous_button": "previous", "hold_next": "fast_forward"}}
+
 LEARNED = JsonMap("earbuds.json")
 WORN = JsonMap("earbuds-devices.json")
 
@@ -96,10 +112,19 @@ def _clean_gestures(v) -> dict[str, str]:
     return {g: s for g, s in v.items() if g in GESTURES and s in SIGNALS}
 
 
-def answer_map(gestures: dict[str, str]) -> dict[str, dict]:
-    """Which gesture answers what: `first` (a play key), `second` (a volume
-    step, put back by the app), `more` (next), `back` (previous)."""
-    want = {"first": PLAY_KEYS, "second": VOLUME, "more": ("next",), "back": ("previous",)}
+def _kind(v) -> str:
+    return v if v in KINDS else "earbuds"
+
+
+def answer_map(gestures: dict[str, str], kind: str = "earbuds") -> dict[str, dict]:
+    """Which gesture answers what. Earbuds: `first` (a play key), `second` (a
+    volume step, put back by the app), `more` (next), `back` (previous). A
+    car: `pick` (a play key, on the option just read), `more`, `back`."""
+    want: dict[str, tuple[str, ...]]
+    if kind == "car":
+        want = {"pick": PLAY_KEYS, "more": ("next",), "back": ("previous",)}
+    else:
+        want = {"first": PLAY_KEYS, "second": VOLUME, "more": ("next",), "back": ("previous",)}
     out: dict[str, dict] = {}
     for role, signals in want.items():
         for g in GESTURES:  # in GESTURES' order, so a single tap wins over a hold
@@ -111,6 +136,10 @@ def answer_map(gestures: dict[str, str]) -> dict[str, dict]:
 
 
 def scheme_of(answer: dict) -> str:
+    if "pick" in answer:
+        # A car: step through with next/previous, play picks; play alone,
+        # options read singly.
+        return "step" if "more" in answer else "one_at_a_time"
     if "first" in answer and "second" in answer:
         return "pair"
     if "first" in answer:
@@ -123,7 +152,16 @@ def guidance(label: str, gestures: dict[str, str], answer: dict, app: str = "",
     """What to say once when this pair first connects."""
     words: list[str] = []
     s = scheme_of(answer)
-    if s == "pair":
+    if s == "step":
+        line = (f"In the car: {GESTURES[answer['more']['gesture']]} for the next answer, "
+                f"{GESTURES[answer['pick']['gesture']]} to pick the one just read")
+        if "back" in answer:
+            line += f", {GESTURES[answer['back']['gesture']]} to go back"
+        words.append(line + ".")
+    elif s == "one_at_a_time" and "pick" in answer:
+        words.append(f"In the car: answers are read one at a time; "
+                     f"{GESTURES[answer['pick']['gesture']]} on the one you want.")
+    elif s == "pair":
         line = (f"Your {label}: {GESTURES[answer['first']['gesture']]} for the first answer, "
                 f"{GESTURES[answer['second']['gesture']]} for the second")
         if "more" in answer:
@@ -145,11 +183,16 @@ def guidance(label: str, gestures: dict[str, str], answer: dict, app: str = "",
     return words
 
 
-def profile_for(name: str, learned: JsonMap = LEARNED) -> dict:
-    """The profile for earbuds called `name`: learned, shipped, or unknown."""
-    name = _clean_name(name)
+def profile_for(name: str, learned: JsonMap = LEARNED, kind: str = "earbuds") -> dict:
+    """The profile for earbuds (or a car stereo) called `name`: learned,
+    shipped, or unknown; a car not learned takes `CAR`."""
+    name, kind = _clean_name(name), _kind(kind)
     row = learned.get(_key(name)) if name else None
-    shipped = next((p for p in PROFILES if name and re.search(p["match"], name, re.I)), None)
+    shipped: dict | None
+    if kind == "car":
+        shipped = CAR
+    else:
+        shipped = next((p for p in PROFILES if name and re.search(p["match"], name, re.I)), None)
     if isinstance(row, dict):
         gestures = _clean_gestures(row.get("gestures"))
         label = (shipped or {}).get("label") or name
@@ -159,10 +202,12 @@ def profile_for(name: str, learned: JsonMap = LEARNED) -> dict:
         label, source, verified = shipped["label"], "shipped", bool(shipped.get("verified"))
     else:
         gestures, label, source, verified = {}, name or "earbuds", "unknown", False
-    answer = answer_map(gestures)
+    if isinstance(row, dict) and kind == "car":
+        label = name
+    answer = answer_map(gestures, kind)
     app = (shipped or {}).get("app", "")
     return {"model": (shipped or {}).get("id") or (_key(name) if name else ""),
-            "label": label, "source": source, "verified": verified,
+            "kind": kind, "label": label, "source": source, "verified": verified,
             "gestures": gestures, "answer": answer, "scheme": scheme_of(answer),
             "guidance": guidance(label, gestures, answer, app, (shipped or {}).get("note", "")),
             **({"app": app} if app else {})}
@@ -177,7 +222,8 @@ def report(device: str, body, now: float | None = None,
     if body.get("connected") is False or not name:
         worn.update(lambda rows: rows.pop(device, None) is not None)
         return True, {"earbuds": None}
-    row = {"name": name, "oui": _clean_oui(body.get("oui")),
+    kind = _kind(body.get("kind"))
+    row = {"name": name, "oui": _clean_oui(body.get("oui")), "kind": kind,
            "at": int(now if now is not None else time.time())}
 
     def put(rows: dict) -> bool:
@@ -185,7 +231,7 @@ def report(device: str, body, now: float | None = None,
         return True
 
     worn.update(put)
-    return True, {"earbuds": row, "profile": profile_for(name, learned)}
+    return True, {"earbuds": row, "profile": profile_for(name, learned, kind)}
 
 
 def current(device: str, worn: JsonMap = WORN, learned: JsonMap = LEARNED) -> dict:
@@ -193,7 +239,7 @@ def current(device: str, worn: JsonMap = WORN, learned: JsonMap = LEARNED) -> di
     row = worn.get(device)
     if not isinstance(row, dict) or not row.get("name"):
         return {"earbuds": None}
-    return {"earbuds": row, "profile": profile_for(row["name"], learned)}
+    return {"earbuds": row, "profile": profile_for(row["name"], learned, row.get("kind", ""))}
 
 
 def learn(body, now: float | None = None, learned: JsonMap = LEARNED) -> tuple[bool, dict]:
@@ -207,7 +253,8 @@ def learn(body, now: float | None = None, learned: JsonMap = LEARNED) -> tuple[b
     if not gestures:
         return False, {"status": 400, "error": "gestures is required: "
                        f"{{gesture: signal}}, gestures {list(GESTURES)}, signals {list(SIGNALS)}"}
-    row = {"name": name, "gestures": gestures,
+    kind = _kind(body.get("kind"))
+    row = {"name": name, "gestures": gestures, "kind": kind,
            "at": int(now if now is not None else time.time())}
 
     def put(rows: dict) -> bool:
@@ -215,4 +262,4 @@ def learn(body, now: float | None = None, learned: JsonMap = LEARNED) -> tuple[b
         return True
 
     learned.update(put)
-    return True, {"profile": profile_for(name, learned)}
+    return True, {"profile": profile_for(name, learned, kind)}

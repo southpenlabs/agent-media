@@ -106,3 +106,31 @@ def test_unpaired_is_401(server):
     assert res.status == 401
     res, _ = call(server, "POST", "/device/earbuds", {"name": "x"}, {})
     assert res.status == 401
+
+
+def test_any_car_steps_with_next_and_picks_with_play():
+    p = earbuds.profile_for("SYNC", kind="car")
+    assert p["kind"] == "car" and p["model"] == "car" and p["verified"]
+    assert p["scheme"] == "step"
+    assert p["answer"] == {"pick": {"gesture": "play_button", "signal": "play_pause"},
+                           "more": {"gesture": "next_button", "signal": "next"},
+                           "back": {"gesture": "previous_button", "signal": "previous"}}
+    assert p["guidance"][0] == ("In the car: press next for the next answer, press play to "
+                                "pick the one just read, press previous to go back.")
+
+
+def test_a_car_named_like_earbuds_is_still_a_car():
+    assert earbuds.profile_for("anko43641765", kind="car")["scheme"] == "step"
+    assert earbuds.profile_for("SYNC", kind="spaceship")["kind"] == "earbuds"
+
+
+def test_a_car_reported_and_learned_over_http(server, pixel):
+    hdrs, _ = pixel
+    res, got = call(server, "POST", "/device/earbuds", {"name": "My Car", "kind": "car"}, hdrs)
+    assert got["earbuds"]["kind"] == "car" and got["profile"]["scheme"] == "step"
+    res, got = call(server, "POST", "/device/earbuds/learn",
+                    {"name": "My Car", "kind": "car", "gestures": {"play_button": "play"}}, hdrs)
+    assert got["profile"]["source"] == "learned" and got["profile"]["scheme"] == "one_at_a_time"
+    res, got = call(server, "GET", "/device/earbuds", None, hdrs)
+    assert got["profile"]["kind"] == "car" and got["profile"]["label"] == "My Car"
+    assert got["profile"]["guidance"][0].startswith("In the car: answers are read one at a time")
