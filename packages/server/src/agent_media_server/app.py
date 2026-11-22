@@ -6466,13 +6466,6 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                         detail["site"] = site
                 except Exception as e:  # noqa: BLE001
                     _failures.swallowed(e)
-    elif path == "/map/check_hours" and method in ("GET", "POST"):
-        # Places to check the hours of, for OSM from allowed sources only (map_check.py, §6.50).
-        from . import map_check, map_layers, map_saved
-
-        host = _TOKEN_OK is not None and _TOKEN_OK(h)
-        ok, detail = map_layers._gate(bearer, host)
-        if ok:
     elif path == "/map/reviews" and method in ("GET", "POST"):
         # A place's reviews from Mangrove, and posting the account's own (map_reviews.py, §6.50).
         from . import map_layers, map_reviews, map_saved
@@ -6485,6 +6478,13 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_reviews.reviews(arg("name"), arg("lat"), arg("lon"), arg("osm_id"), account)
             else:
                 ok, detail = map_reviews.post(account, _read_json(h) or {})
+    elif path == "/map/check_hours" and method in ("GET", "POST"):
+        # Places to check the hours of, for OSM from allowed sources only (map_check.py, §6.50).
+        from . import map_check, map_layers, map_saved
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
             account = map_saved.account_of(bearer, host)
             if method == "GET":
                 ok, detail = map_check.listing(account)
