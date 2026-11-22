@@ -409,6 +409,10 @@ except /pair, which is how a device gets its token):
                   §6.50); POST {key, done|dismiss: true} takes one off
   GET  /map/link?url= → a shared map link (Google, Apple, OSM, geo:) read
                   into {kind: route|place, points, mode?} (core maps_link.py, §6.50)
+  GET  /map/reviews?name=&lat=&lon=[&osm_id=] → a place's reviews from Mangrove
+                  (open data, CC BY 4.0), with stars and count; POST {name, lat,
+                  lon, stars, opinion?, confirm: true} posts the account's own,
+                  signed with its key (map_reviews.py, §6.50)
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -589,7 +593,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours",
-                       "/map/traffic", "/map/traffic/eta", "/map/offline"})
+                       "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/reviews"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6469,6 +6473,18 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         host = _TOKEN_OK is not None and _TOKEN_OK(h)
         ok, detail = map_layers._gate(bearer, host)
         if ok:
+    elif path == "/map/reviews" and method in ("GET", "POST"):
+        # A place's reviews from Mangrove, and posting the account's own (map_reviews.py, §6.50).
+        from . import map_layers, map_reviews, map_saved
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if method == "GET":
+                ok, detail = map_reviews.reviews(arg("name"), arg("lat"), arg("lon"), arg("osm_id"), account)
+            else:
+                ok, detail = map_reviews.post(account, _read_json(h) or {})
             account = map_saved.account_of(bearer, host)
             if method == "GET":
                 ok, detail = map_check.listing(account)

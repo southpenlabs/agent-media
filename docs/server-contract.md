@@ -11949,6 +11949,36 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   whose tap opens that route. It is cleared once the phone is 500 m away,
   or the place is done or dismissed; no inbox TODO. Nothing here changes
   OSM.
+- **`GET /map/reviews?name=<name>&lat=<lat>&lon=<lon>[&osm_id=node/1]`,
+  `POST /map/reviews`** (22 Nov 2026, maps proposal step 8; David: "fuck
+  yeah!", to reviews from open data; `map_reviews.py`, tests in
+  `test_map_reviews.py`): a place's reviews from Mangrove
+  (mangrove.reviews, open data, CC BY 4.0 unless a review says CC BY-SA),
+  asked as its card opens. The place is the `geo:` subject
+  `geo:<lat>,<lon>?q=<name>&u=100`; Mangrove matches reviews within their
+  uncertainty of the point whose name matches ignoring case and
+  punctuation. → `{found, count, rated (how many gave stars), average
+  (stars 1–5, one decimal, or null), reviews: [{stars? (1–5, from
+  Mangrove's 0–100), rating?, opinion?, date (YYYY-MM-DD), author?,
+  license? (when not CC BY 4.0), mine? (signed with this account's key),
+  link (the review on mangrove.reviews)}] (newest first, at most 5), link
+  (the place on mangrove.reviews), credit: "Mangrove", license: "CC BY
+  4.0", signed_up (this account has a key), osm_id?}`, or `{found: false,
+  reason: "failed", credit, link}` when Mangrove did not answer. Kept a
+  day per name and point; a post clears it. The app credits "Reviews from
+  Mangrove (open data)" with the link. POST `{name, lat, lon, stars (1–5),
+  opinion? (≤1000), osm_id?, nickname? (≤50), confirm: true}` → `{ok,
+  signature, link, license}`: a review signed ES256 with this account's
+  P-256 key (made on first use, kept 0600 in
+  `state_dir()/mangrove-keys.json`, never sent: only the signature and
+  public key go) and sent to Mangrove's `/submit`, where it is public at
+  once and for good, under CC BY 4.0; `metadata` carries `client_id:
+  https://sasonica.com`, `is_personal_experience: true` and the OSM id.
+  400 `not_confirmed` (no `confirm: true`: the app asks first, saying it
+  is published openly), `bad_place`, `bad_stars`, `too_long`; 502
+  `refused` (Mangrove's words in `error`), `unreachable`; 500 `key`.
+  Gated, not a guest. Website ratings (schema.org, from the site reader)
+  stay on the card and are never sent here.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,

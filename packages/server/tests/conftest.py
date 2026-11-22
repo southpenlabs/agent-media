@@ -109,6 +109,17 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(map_offline, "_http_range", _no_outside)
     monkeypatch.setattr(map_offline, "_get", _no_outside)
     map_traffic._reset_for_tests()
+    # Mangrove's reviews (map_reviews.py) are never read or posted by a test,
+    # and no test makes a key in the real state folder.
+    from agent_media_server import map_reviews
+
+    def _no_mangrove(*a, **k):
+        raise RuntimeError("a test reached Mangrove (api.mangrove.reviews)")
+
+    monkeypatch.setattr(map_reviews, "_get", _no_mangrove)
+    monkeypatch.setattr(map_reviews, "_post", _no_mangrove)
+    monkeypatch.setattr(map_reviews, "_keys_path", lambda: tmp_path / "mangrove-keys.json")
+    map_reviews.forget()
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")
