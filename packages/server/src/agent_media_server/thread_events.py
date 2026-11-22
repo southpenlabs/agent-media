@@ -234,6 +234,8 @@ def snapshot(session: str, limit: int | None = None,
                         if (l.get("at") or 0.0) >= cutoff or l.get("live")]
     env.update({"state": st["state"], "session_live": st["session_live"],
                 "live": st["session_live"], "pane": st["pane"],
+                # A rewind asked before the thread was opened (§6.64).
+                "rewind": rewind.view(session),
                 "background": st["background"],
                 "resumable": sessions.session_exists(session),
                 "agents": (agent_counts(session, st["session_live"]) if count_agents

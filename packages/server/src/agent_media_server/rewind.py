@@ -154,7 +154,9 @@ def _carry_out(session: str, row: dict, now: float) -> tuple[bool, dict]:
 
 def request(body, bearer: str, host: bool = False,
             now: float | None = None) -> tuple[bool, dict]:
-    """`POST /session/rewind {"session", "to" | "back", "why"?}`. From a
+    """`POST /session/rewind {"session", "to" | "back", "why"?, "dry_run"?}`.
+    `dry_run` answers `{to, n, text}`, what it would set aside, and does
+    nothing. From a
     paired device it is carried out (`state` `done`, or `waiting` for the turn
     to end). With the host's own token and no bearer (an agent, `media
     session rewind`) it is kept as a request for a person to approve (`state`
@@ -183,6 +185,11 @@ def request(body, bearer: str, host: bool = False,
         return False, err
     if found["n"] == 0:
         return _bad("nothing comes after that reply", 409, "nothing_to_rewind")
+    if body.get("dry_run"):
+        # What a rewind there would set aside, for the confirm step; nothing
+        # is kept or done.
+        return True, {"session": session, "dry_run": True, "to": found["id"], "n": found["n"],
+                      "text": found["text"]}
     row = {"id": secrets.token_hex(6), "to": found["id"], "record": found["record"],
            "n": found["n"], "text": found["text"], "to_at": found["at"], "why": why,
            "by": "agent" if by_agent else "you", "asked_at": round(now, 3)}

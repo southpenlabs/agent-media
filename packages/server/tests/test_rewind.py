@@ -121,3 +121,19 @@ def test_a_request_can_be_cancelled(host, gate):
     rewind.request({"session": sid, "back": 1}, "", host=True)
     ok, d = rewind.cancel({"session": sid}, "", host=True)
     assert ok and d["cancelled"] and rewind.view(sid) is None
+
+
+def test_a_dry_run_counts_and_does_nothing(host, gate):
+    sid, replies = _two_turns(host)
+    ok, d = rewind.request({"session": sid, "to": replies[0]["id"], "dry_run": True}, "tok")
+    assert ok and d["dry_run"] and d["n"] == 2 and d["to"] == replies[0]["id"], d
+    assert rewind.view(sid) is None and host.sup.sessions[sid].resume_at == ""
+
+
+def test_the_snapshot_carries_a_waiting_request(host, gate):
+    from agent_media_server import thread_events
+
+    sid, _ = _two_turns(host)
+    rewind.request({"session": sid, "back": 1, "why": "x"}, "", host=True)
+    ok, snap = thread_events.snapshot(sid, count_agents=False)
+    assert ok and snap["rewind"]["state"] == "asked" and snap["rewind"]["why"] == "x"

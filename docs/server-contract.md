@@ -14481,6 +14481,9 @@ is `409 not_headless`, a chat on another host or another agent
   - With the **host's own token** and no bearer (an agent, `media session
     rewind`) it is only **asked**: → `{ok, session, pending: true, rewind}`
     with `state: "asked"`. Nothing happens until a person answers it.
+  - `dry_run: true`: → `{ok, session, dry_run, to, n, text}`, what it
+    would set aside, and nothing is kept or done: the confirm step's exact
+    count.
   - Refusals: `no_such_reply` 404, `too_far` 409 (fewer replies than
     `back`), `nothing_to_rewind` 409 (the newest reply), `not_headless` 409,
     401 with neither a device nor the host token.
@@ -14495,7 +14498,9 @@ is `409 not_headless`, a chat on another host or another agent
 - **`rewind`** (object or null), on the thread stream (§11) as its own
   event `{rewind}`: `{id, to, n, text, why, by: "agent" | "you", state:
   "asked" | "waiting" | "done" | "declined" | "failed", asked_at,
-  answered_at?, error?}`. `n` is how many messages are set aside, and
+  answered_at?, error?}`, and the same `rewind` in the thread's
+  **snapshot**, so a request asked before the thread was opened is there
+  from the first frame. `n` is how many messages are set aside, and
   `text` the first 200 characters of the reply it goes back to. An outcome
   is shown for a day. **The app's card:** while `state` is `asked`, show
   `why`, the reply it goes back to (`to`, `text`), `n`, and that files stay
