@@ -34,6 +34,13 @@ job on its own except more/back, which are a side each: the app should
 take either triple tap as "the next pair" when only one bud is in use
 (it cannot tell which are in).
 
+**Which bud, from the taps** (David, 22 Nov 2026): the side shows in the
+side-specific signals only — volume down or previous is the left bud,
+volume up or next the right. The app keeps the sides seen per connection:
+one side = probably that bud alone (left only: previous reads more), both
+= both in, none yet = unknown. Taken from `profile.gestures`' left_/right_
+entries, not hard-coded per brand.
+
 What this shows, and holds for most earbuds:
 
 - **Which earbuds: yes, on the fly.** `AudioDeviceCallback` already fires
