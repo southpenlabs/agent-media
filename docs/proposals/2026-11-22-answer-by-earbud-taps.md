@@ -106,6 +106,39 @@ separate programs, or be read as protocol documentation, never copied in.
 Not needed for David's Anko buds, which have no such protocol, so this
 part waits until a supported pair is in use.
 
+## In the car
+
+David, 22 Nov 2026: "would it be possible to use the car stereo too?",
+then "Add the car to the proposal".
+
+A car stereo's buttons (steering wheel, head unit) reach the phone over
+Bluetooth as the same AVRCP media keys: play/pause, next, previous. So the
+answer mode works there with a scheme of its own:
+
+- **Telling a car from earbuds**: the Bluetooth device class says so
+  (`BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO`; the app already reads
+  the connected device for its output label). The app sends `kind: "car"`
+  with `POST /device/earbuds`; the server answers a car profile.
+- **Scheme `step`**: the volume knob usually turns the car's own
+  amplifier, not the phone's, so a volume step is not an answer here.
+  Instead **next** reads the next option, **previous** the one before, and
+  **play/pause** picks the one just read. Options are read one at a time,
+  the first straight after the question ("First: commit it. Next for more,
+  play to pick").
+- **Read back with Undo** as with earbuds, longer (5 s) since a hand may
+  be on the wheel; any button takes it back.
+- **Nothing on the screen is needed**, and nothing new is shown while the
+  phone is in the car (Android Auto or not): the answer is heard and
+  spoken only. Under Android Auto the same media session gets the keys.
+- **A car with only play/pause** (some head units): scheme
+  `one_at_a_time`, as for one-key earbuds.
+- **Learned the same way**: the tap test becomes a button test ("press
+  next on the wheel"), posted to `/device/earbuds/learn` under the car's
+  name; signals as for earbuds, gestures `next_button`, `previous_button`,
+  `play_button`.
+
+Outside a question, the car's buttons keep their meanings.
+
 ## Build order
 
 1. App: answer mode on the media session (play/next/previous) and the
@@ -116,6 +149,8 @@ part waits until a supported pair is in use.
    contract section.
 3. App: "Teach me your earbuds", posting learned profiles.
 4. Spoken guidance on first connect of a new model.
+5. The car: `kind: "car"`, the `step` scheme in the app and a car profile
+   on the server.
 
 ## Decided (David, 22 Nov 2026: "yes to volume locked or unlocked")
 
