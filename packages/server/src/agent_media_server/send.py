@@ -1317,11 +1317,14 @@ def reply(text: str, bearer: str, *, quote: str = "",
             replies.record(session, reply_to.strip(), quote.strip())
         # A message taken back since the last one (`/session/retract`): this
         # one opens by saying so, since the agent may have read it already.
-        from . import reactions, retract
+        from . import reactions, retract, rewind
 
         # Reactions since the last message (`/session/react`) are told the
         # same way, after it: a thumbs-up costs no turn of its own.
         text = retract.with_note(session, reactions.with_notes(session, text))
+        # A rewind since (§6.64): the chat no longer remembers what came
+        # after the reply it went back to, so it is told, once.
+        text = rewind.with_note(session, text)
         # A voice clip goes with its words, so the agent hears it (§6.36).
         from . import voice_clips
 

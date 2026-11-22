@@ -14455,6 +14455,64 @@ Stored in `<state>/earbuds.json` (learned, by name) and
 
 ---
 
+### 6.64 Rewinding a chat — gated; an agent only asks (built 23 Nov 2026)
+
+David, 23 Nov 2026: "how do we give you permission to rewind a chat", "And
+other permission so you can rewind too", and for that permission, "Ask each
+time". docs/proposals/2026-11-23-rewind-a-chat.md; `rewind.py`.
+
+A rewind takes a chat back to one of its replies, **in the same thread**.
+The chat remembers everything up to and including that reply and nothing
+after it, and the link, title and project stay as they were. It is Branch
+with its history (§6.34) without the new thread. Claude Code makes the cut
+itself (`--resume <id> --resume-session-at <record>` keeps the id; the
+turns after the record stay in the file as a dead branch). **Files on disk
+are not changed.** Headless Claude Code chats only for now: a pane's chat
+is `409 not_headless`, a chat on another host or another agent
+`unsupported`. `/features` `rewind`.
+
+- `POST /session/rewind {session, to | back, why?}`. `to` is the id of one
+  of the chat's replies (an assistant message in the log). `back: N` counts
+  replies back from the newest, so 1 sets aside the newest exchange. `why`
+  is at most 300 characters.
+  - From a **paired device** it is carried out: → `{ok, session, rewind}`
+    with `rewind.state` `done`, or `waiting` while a running turn (a card,
+    a queued message, a background task) is let finish first.
+  - With the **host's own token** and no bearer (an agent, `media session
+    rewind`) it is only **asked**: → `{ok, session, pending: true, rewind}`
+    with `state: "asked"`. Nothing happens until a person answers it.
+  - Refusals: `no_such_reply` 404, `too_far` 409 (fewer replies than
+    `back`), `nothing_to_rewind` 409 (the newest reply), `not_headless` 409,
+    401 with neither a device nor the host token.
+- `POST /session/rewind/answer {session, id, approve}`: a person's answer
+  to an agent's request, from a paired device only. The host token cannot
+  answer, so an agent never approves its own request. Approved → as from a
+  device; declined → `state: "declined"`. A request lapses after 24 h
+  unanswered; one not waiting is `404 not_pending`.
+- `POST /session/rewind/cancel {session}`: drops a request still asked, or
+  an approved one still waiting for its turn (a device or the host token).
+- `GET /session/rewind?session=` → `{ok, rewind}`.
+- **`rewind`** (object or null), on the thread stream (§11) as its own
+  event `{rewind}`: `{id, to, n, text, why, by: "agent" | "you", state:
+  "asked" | "waiting" | "done" | "declined" | "failed", asked_at,
+  answered_at?, error?}`. `n` is how many messages are set aside, and
+  `text` the first 200 characters of the reply it goes back to. An outcome
+  is shown for a day. **The app's card:** while `state` is `asked`, show
+  `why`, the reply it goes back to (`to`, `text`), `n`, and that files stay
+  as they are, with **Approve** and **Decline**
+  (`/session/rewind/answer`).
+- **`rewound`** on a message in `/conversation/log` and the thread stream:
+  `{to, at}` on each message a rewind set aside. A message marked once keeps
+  its first marking. The app folds a run of them into one row ("N messages
+  rewound") that opens to show them; search still finds them. A terminal
+  `/rewind` is marked the same way.
+- **The person's way in:** hold a reply, then **Rewind to here** (beside
+  Branch), asked once before going ahead → `POST /session/rewind {session,
+  to}`.
+- The chat's next message, sent through the server, opens with a note that
+  it was rewound (with the agent's `why`), or that its request was
+  declined.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in

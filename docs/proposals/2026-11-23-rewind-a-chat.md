@@ -1,4 +1,4 @@
-# Rewinding a chat (proposal, 23 Nov 2026)
+# Rewinding a chat (proposal, 23 Nov 2026; server side built the same day, contract §6.64)
 
 David, 23 Nov 2026: "how do we give you permission to rewind a chat and how
 do we add that functionality to agent-sessions?" … "And other permission
@@ -31,18 +31,12 @@ title, project and Up next all stay as they were.
 A Claude Code transcript is a tree: each record names its `parentUuid`, and
 the conversation is the path from the newest record back to the root.
 
-- **Preferred, still to check:** `claude --resume <chat>
-  --resume-session-at <record>` *without* `--fork-session` keeps the same
-  session id and adds the next turn as a new branch off `<record>`. The cut
-  turns stay in the file as a dead branch. Check this with a throwaway
-  `claude -p` (Haiku) before building anything. If it works, the thread id
-  never changes.
-- **Fallback:** fork as Branch does (`sessiond.fork_from`), then point the
-  old id at the new one in a new `<state_dir>/rewound.json` (`{"<old id>":
-  {"to": "<new id>", "at", "record"}}`). `sessions`, `thread_events`, the
-  thread link `/app/t/<old>` and `media session send <old>` all follow that
-  pointer, the same way `moves.json` re-files a moved chat today. The old
-  transcript is never edited.
+- **In place (verified 23 Nov 2026, built):** `claude --resume <chat>
+  --resume-session-at <record>` without `--fork-session` keeps the same
+  session id and writes the next turn as a new branch off `<record>`; a
+  plain `--resume` afterwards stays on the new branch. The cut turns stay
+  in the file as a dead branch. So the thread id never changes and no
+  `rewound.json` pointer is needed.
 
 ### 2. The readers follow the tree, not the file order
 
@@ -109,7 +103,7 @@ share:
 2. A tree-walking transcript reader with the rewound marker, tested on
    fixtures that have a dead branch (§2).
 3. `POST /session/rewind` plus taking the rewind at turn end in sessiond,
-   and `media session rewind`. Contract section §6.62 (§3).
+   and `media session rewind`. Contract section §6.64 (§3).
 4. The app's **Rewind to here** and the folded rewound row (sasonica-app
    mail).
 5. agent-sessions ingest and catalogue (§5), in its own thread.

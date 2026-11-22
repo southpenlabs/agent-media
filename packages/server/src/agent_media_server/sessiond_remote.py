@@ -469,6 +469,9 @@ class Remote:
             return {"ok": True, "session": sid, "seq": int(v.get("seq") or 0),
                     "events": evs[-200:], "state": v.get("state"), "live": bool(v.get("live")),
                     "pid": None, "pending": list(v.get("pending") or [])}
+        if op in ("rewind", "cancel_rewind"):
+            return {"ok": False, "code": "unsupported",
+                    "error": f"this thread runs on {host}; rewinding it is not supported there yet"}
         if op == "relocate":
             return {"ok": False, "code": "unsupported",
                     "error": f"this thread runs on {host}; moving it to another folder "

@@ -71,7 +71,7 @@ import threading
 import time
 import zlib
 
-from . import agents, background, driver, file_links, reactions, replies, retract, sessions, threads, transcript
+from . import agents, background, driver, file_links, reactions, replies, retract, rewind, sessions, threads, transcript
 from agent_media_core import failures as _failures
 
 log = logging.getLogger("agent-media.server.thread_events")
@@ -416,7 +416,8 @@ class Watcher:
                               "actions": env.get("actions") or []},
                "state": st, "pending": {"pending": bool(env.get("pending"))},
                "recap": env.get("recap"), "context": env.get("context"),
-               "move": move_status(self.session)}
+               "move": move_status(self.session),
+               "rewind": {"rewind": rewind.view(self.session)}}
         # The background agents' count: not in the baseline. Reading a long
         # chat's agent transcripts the first time was over a third of its
         # first open (0.6 s of 1.6 s, 18 Nov 2026), so the first frame says

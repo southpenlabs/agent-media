@@ -495,6 +495,7 @@ CORS_PATHS = frozenset({
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/local/avatar", "/local/avatars", "/local/send", "/local/outbox", "/local/outbox/result",
     "/local/agents",
+    "/session/rewind", "/session/rewind/answer", "/session/rewind/cancel",
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
@@ -2743,6 +2744,17 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/local/avatar":
         _local_avatar(h, query)
+    elif path == "/session/rewind":
+        # The chat's rewind: a request waiting, or the last one's outcome
+        # (rewind.py, §6.64). A paired device or the host's own token.
+        from . import rewind
+
+        if not (_TOKEN_OK is not None and _TOKEN_OK(h) and not _bearer(h)):
+            user, err = auth.gate(_bearer(h))
+            if not user:
+                _json(h, err.pop("status", 401), {"ok": False, **err})
+                return True
+        _json(h, 200, {"ok": True, "rewind": rewind.view((parse_qs(query).get("session") or [""])[0])})
     elif path == "/local/outbox":
         # Messages to a Local chat not yet back in its log, or (no chat)
         # what this device is to send (local_send.py, §6.61 Sending).
@@ -5492,6 +5504,21 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         ok, detail = read_receipts.session_read(
             str(body.get("session") or ""), _bearer(h), mid=str(body.get("id") or ""),
             why=str(body.get("why") or ""), mode=str(body.get("mode") or ""))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path in ("/session/rewind", "/session/rewind/answer", "/session/rewind/cancel"):
+        # A chat taken back to one of its replies (rewind.py, §6.64): from a
+        # paired device at once; from the host's own token (an agent) only
+        # as a request a person approves.
+        from . import rewind
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        body = _read_json(h)
+        if path == "/session/rewind":
+            ok, detail = rewind.request(body, _bearer(h), host=host)
+        elif path == "/session/rewind/answer":
+            ok, detail = rewind.answer(body, _bearer(h))
+        else:
+            ok, detail = rewind.cancel(body, _bearer(h), host=host)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/session/branch":
         # A long press on a reply, then Branch (server-contract.md §6.34): a

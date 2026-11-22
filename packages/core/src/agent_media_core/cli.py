@@ -10330,12 +10330,19 @@ def _session_deliver(argv: list[str]) -> int:
 def cmd_session(a) -> int:
     """`media session list|send`: headless sessions (sessiond) seen and
     messaged from another session (agent_media_server.headless_mail).
-    `media session holder <id>`: who runs it now (live_copy.py)."""
+    `media session holder <id>`: who runs it now (live_copy.py).
+    `media session rewind --back N | --to <id> [--why]`: ask for this chat
+    to be rewound (agent_media_server.rewind)."""
     if a.args and a.args[0] == "holder":
         from . import live_copy
         return live_copy.main(a.args[1:])
     if a.args and a.args[0] == "deliver":
         return _session_deliver(a.args[1:])
+    if a.args and a.args[0] == "rewind":
+        # Ask for this chat to be taken back to a reply; a person approves
+        # it on a card in the thread (agent_media_server.rewind, §6.64).
+        rw = _server_module("rewind")
+        return 1 if rw is None else rw.main(a.args[1:])
     if a.args and a.args[0] in ("move-folder", "folder-links"):
         # Claude's chat folders: a moved repo's chats, the recorded links
         # (agent_media_server.claude_folders).

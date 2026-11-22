@@ -616,6 +616,15 @@ class HeadlessDriver:
         return True, {"session": session, "adopted": bool(r.get("adopted")),
                       "driver": HEADLESS}
 
+    def rewind(self, session: str, at: str) -> dict:
+        """Take `session` back to its record `at` at its next start
+        (sessiond `rewind`). sessiond's answer: `ok`, and `waiting` when a
+        running turn is waited for; `code`/`error` when refused."""
+        return call("rewind", session=session, at=at, timeout=60.0)
+
+    def cancel_rewind(self, session: str) -> dict:
+        return call("cancel_rewind", session=session)
+
     def relocate(self, session: str, cwd: str) -> str:
         """Make `session` resume in `cwd` (moves.py). "" when done, else why
         not. With sessiond down its record on disk is rewritten, which is

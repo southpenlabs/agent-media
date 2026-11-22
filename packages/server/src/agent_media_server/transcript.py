@@ -334,6 +334,13 @@ class Builder:
         self._stop: str | None = None          # its last stop_reason
         self._tools: dict[str, tuple[str, dict]] = {}
         self._seen: set[str] = set()
+        #: For each record fed, by uuid: len(messages) right after it — where a
+        #: rewind to that record cuts (`_rewind`).
+        self._at: dict[str, int] = {}
+        #: Prompts whose parent was not in view when they came (a tail read
+        #: starts mid-file): (parent, len(messages) then, at). `merge_older`
+        #: folds them once the older records are in.
+        self._unplaced: list[tuple[str, int, float]] = []
 
     # -- helpers --
 
@@ -363,8 +370,11 @@ class Builder:
         self._close()
         # A queued prompt and its echo, or a record repeated by a resume:
         # the same words twice in a row are one message.
+        # Not across a rewind, though: the same words sent again after one
+        # are a new message.
         last = self.messages[-1] if self.messages else None
         if last and last["role"] == "user" and last["parts"] \
+                and not last.get("rewound") \
                 and last["parts"][0].get("text") == text:
             return
         msg = {"id": str(rec.get("uuid") or ""), "role": "user",
@@ -393,6 +403,58 @@ class Builder:
             if uid in self._seen:
                 return
             self._seen.add(uid)
+        if is_boundary(rec, self.sidechain):
+            self._rewind(rec)
+        self._feed_record(rec)
+        if uid:
+            self._at[str(uid)] = len(self.messages)
+
+    def _rewind(self, rec: dict) -> None:
+        """A prompt whose parent is an earlier record with messages built
+        after it: Claude Code's `--resume-session-at` (or a terminal
+        /rewind) kept the file and branched from that record, so what came
+        after it is set aside — kept, and marked `rewound`. A parent not in
+        view folds nothing (until `merge_older` brings it in)."""
+        parent = rec.get("parentUuid")
+        if not parent:
+            return
+        parent = str(parent)
+        at = epoch(rec.get("timestamp")) or 0.0
+        start = self._at.get(parent)
+        if start is None:
+            self._unplaced.append((parent, len(self.messages), at))
+            return
+        if start < len(self.messages):
+            self._close()
+            self._fold(parent, start, len(self.messages), at)
+
+    def _fold(self, parent: str, start: int, end: int, at: float) -> None:
+        for msg in self.messages[start:end]:
+            # A rewind inside a rewound stretch keeps the first marking.
+            if "rewound" not in msg:
+                msg["rewound"] = {"to": parent, "at": at}
+
+    def merge_older(self, older: "Builder") -> None:
+        """Put `older`'s messages (the records before this builder's first,
+        fed to a builder of their own) in front of this one's."""
+        n = len(older.messages)
+        self.messages[:0] = older.messages
+        self._seen |= older._seen
+        # This builder's indices move up by `n`; a record both saw (one a
+        # resume repeated) is where the older builder put it, as a read from
+        # the start would have.
+        at = {k: v + n for k, v in self._at.items()}
+        at.update(older._at)
+        self._at = at
+        # The older builder read from the start: its own unplaced prompts'
+        # parents were never fed, and never will be.
+        unplaced, self._unplaced = self._unplaced, []
+        for parent, end, when in unplaced:
+            start = self._at.get(parent)
+            if start is not None:
+                self._fold(parent, start, end + n, when)
+
+    def _feed_record(self, rec: dict) -> None:
         kind = rec.get("type")
         if kind == "assistant":
             self._feed_assistant(rec)
@@ -1390,8 +1452,7 @@ def _read(path: str, full: bool, sidechain: bool = False,
                     older = f.reader.build(f.sidechain)
                     _feed_range(older, fh, 0, f.lo, f.reader.wants)
                     older.close_open()
-                    f.builder.messages[:0] = older.messages
-                    f.builder._seen |= older._seen
+                    f.builder.merge_older(older)
                     f.lo = 0
                 _feed_range(f.builder, fh, f.offset, end, f.reader.wants)
                 f.builder.settle()

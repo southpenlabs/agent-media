@@ -154,7 +154,8 @@ Ops (request `{"op", …}` → `{"ok": true, …}` or `{"ok": false, "error",
 "code"}`): `ping`, `list`, `get`, `start`, `send`, `resume`, `interrupt`,
 `answer`, `close`, `park`, `events`, `configure` (model and plan mode;
 session_settings.py), `relocate` (the directory a moved thread resumes in;
-moves.py), `release` (what is held for a restart goes now, and the restart
+moves.py), `rewind` / `cancel_rewind` (take the chat back to a record
+at its next start, waiting for a running turn; rewind.py), `release` (what is held for a restart goes now, and the restart
 lets the session through: the app's Send now), `run_now` and `slots` (above;
 `send` and `start` take `slot: "high"`), `hosts` (the other hosts that run
 sessions for this one). `start` with `host` starts the session on another
@@ -619,6 +620,13 @@ class Session:
         #: --resume-session-at`) under this id; every spawn after resumes this one.
         self.fork_from = ""
         self.fork_at = ""
+        #: A rewind (rewind.py, §6.64): `rewind_to` is a record asked for
+        #: while a turn was running, taken when it ends (`_rewind_due`);
+        #: `resume_at` is the record the next spawn resumes at
+        #: (`--resume-session-at`, in place: the same id, the turns after it
+        #: left in the file as a dead branch). Each is cleared once used.
+        self.rewind_to = ""
+        self.resume_at = ""
         #: Started while every slot was busy (`start`): made and its first
         #: message held, no process yet. Its first spawn starts it afresh
         #: (`--session-id`, or the fork), not `--resume` of a transcript
@@ -802,6 +810,8 @@ class Session:
                 "tasks": self.active_tasks(), "task_list": self.task_list(),
                 "last_text": self.last_text, "held": self.held, "cut_off": self.cut_off,
                 "quota_resumed": self.quota_resumed, "interrupt_killed": self.interrupt_killed,
+                **({"rewind_to": self.rewind_to} if self.rewind_to else {}),
+                **({"resume_at": self.resume_at} if self.resume_at else {}),
                 **({"unstarted": True, "fork_from": self.fork_from, "fork_at": self.fork_at}
                    if self.unstarted else {})}
 
@@ -838,6 +848,8 @@ class Session:
         s.lost = list(rec.get("lost") or [])
         s.last_text = str(rec.get("last_text") or "")
         s.held = [m for m in rec.get("held") or [] if isinstance(m, dict) and m.get("text")]
+        s.rewind_to = str(rec.get("rewind_to") or "")
+        s.resume_at = str(rec.get("resume_at") or "")
         s.unstarted = bool(rec.get("unstarted"))
         if s.unstarted:
             s.fork_from = str(rec.get("fork_from") or "")
@@ -2551,6 +2563,8 @@ class Supervisor:
                      "--resume-session-at", s.fork_at, "--session-id", s.id]
             return argv
         argv += ["--resume", s.id] if resume else ["--session-id", s.id]
+        if resume and s.resume_at:
+            argv += ["--resume-session-at", s.resume_at]
         return argv
 
     def _spawn(self, s: Session, *, resume: bool) -> None:
@@ -2576,6 +2590,10 @@ class Supervisor:
             raise Refused(f"could not start {os.path.basename(exe)} ({e})", "spawn_failed") from e
         s.proc = proc
         s.closing = s.parking = False
+        if s.resume_at and "--resume-session-at" in argv:
+            log.info("sessiond: %s resumed at %s (rewound)", s.id[:8], s.resume_at[:8])
+            s.resume_at = ""
+            self._save(s)
         s.exit_code = None
         s.queued.clear()
         if s.agent == "antigravity":
@@ -2847,6 +2865,7 @@ class Supervisor:
                 s.result_at = now
                 s.set_state("approval" if s.pending else "waiting")
                 self._drain_cut(s, now)
+                self._rewind_due(s)
                 # The first result, however many messages joined that turn
                 # (one sent mid-turn made it 2, and the thread was never
                 # named; David, 7 Nov 2026). `auto_titled` keeps it to once a
@@ -3750,6 +3769,51 @@ class Supervisor:
             self._save(s)
             return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
 
+    def rewind(self, session: str, at: str) -> dict:
+        """Take `session` back to its record `at` (rewind.py, §6.64): the
+        next spawn resumes there in place. A live idle session is parked
+        now; one mid-turn, on a card, with a message queued or background
+        work in flight keeps `rewind_to` and is parked when its turn ends
+        (`_rewind_due`), so nothing it is doing is cut. `waiting` says
+        which. Claude Code only."""
+        at = (at or "").strip()
+        if not at:
+            raise Refused("no record to rewind to", "bad_request")
+        with self.lock:
+            s = self._get(session)
+            if s.agent != "claude":
+                raise Refused(f"a {s.agent} chat cannot be rewound", "unsupported")
+            if s.unstarted:
+                raise Refused("this chat has not started yet", "unsupported")
+            s.rewind_to = at
+            self._rewind_due(s)
+            waiting = bool(s.rewind_to)
+            if not waiting:
+                self._await_exit(s)
+            self._save(s)
+            return {"session": session, "at": at, "waiting": waiting, **self._brief(s)}
+
+    def cancel_rewind(self, session: str) -> dict:
+        with self.lock:
+            s = self._get(session)
+            had = bool(s.rewind_to)
+            s.rewind_to = ""
+            self._save(s)
+            return {"session": session, "cancelled": had, **self._brief(s)}
+
+    def _rewind_due(self, s: Session) -> None:
+        """Carry out a waiting rewind if the session is free: not running,
+        or idle with no card, nothing queued and no background task. Under
+        the lock."""
+        if not s.rewind_to:
+            return
+        if s.live:
+            if s.state != "waiting" or s.pending or s.queued or s.active_tasks():
+                return
+            self._park(s, "rewind")
+        s.resume_at, s.rewind_to = s.rewind_to, ""
+        log.info("sessiond: %s rewinds to %s at its next start", s.id[:8], s.resume_at[:8])
+
     def resume(self, session: str) -> dict:
         if self._agent(session) == "opencode":
             proc = self.oc.ensure()
@@ -4377,6 +4441,10 @@ class Supervisor:
                 return {"ok": True, **self.resume(sid)}
             if op == "relocate":
                 return {"ok": True, **self.relocate(sid, str(req.get("cwd") or ""))}
+            if op == "rewind":
+                return {"ok": True, **self.rewind(sid, str(req.get("at") or ""))}
+            if op == "cancel_rewind":
+                return {"ok": True, **self.cancel_rewind(sid)}
             if op == "adopt":
                 return {"ok": True, **self.adopt(
                     sid, str(req.get("cwd") or ""),
