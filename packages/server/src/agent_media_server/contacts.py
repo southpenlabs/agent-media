@@ -21,7 +21,7 @@ read-only card is `GET /contacts/<id>` (`card`).
   seed's link) and only fills what the others left empty; their other
   fields are the card's `crm` section (David, 17 Oct 2026: "Google wins").
 * **The store.** Each source's `records`, and the merged `contacts`: names,
-  phones (E.164, default region AU, `MEDIA_CONTACTS_REGION`), emails,
+  phones (E.164, in the book's `region()`, default AU), emails,
   addresses, organisations, notes, and `sources` (`[{kind: "android", id:
   <lookup key>, raw: [raw contact ids], accounts, version}, {kind:
   "google", id: "people/c123", etag}]`). A contact's id is a uuid made from
@@ -244,7 +244,7 @@ def owner_env(name: str) -> str | None:
 
 
 def account_settings() -> dict:
-    """Another account's `contacts.json` (`{sources, self, timeline}`); {}
+    """Another account's `contacts.json` (`{sources, self, region, timeline}`); {}
     for the owner, whose settings are the environment."""
     if is_owner():
         return {}
@@ -375,7 +375,20 @@ def db_path() -> Path:
 
 
 def region() -> str:
-    return (os.environ.get("MEDIA_CONTACTS_REGION") or "AU").strip().upper() or "AU"
+    """The region a number written the local way is placed in, per book:
+    the owner's `MEDIA_CONTACTS_REGION` or another account's `contacts.json`
+    `region` ("US", "GB", …); else the country of the book's own number
+    (`self`) when it is written with its `+`; else the host's
+    `MEDIA_CONTACTS_REGION`; else AU. A person abroad's "(415) 555-0100"
+    then matches their +1 contacts (parity sweep 24 Nov 2026, K3)."""
+    got = (setting("MEDIA_CONTACTS_REGION", "region") or "").strip().upper()
+    if re.fullmatch(r"[A-Z]{2}", got):
+        return got
+    for x in (setting("MEDIA_CONTACTS_SELF", "self") or "").split(","):
+        if (reg := region_of(x.strip())):
+            return reg
+    got = (os.environ.get("MEDIA_CONTACTS_REGION") or "").strip().upper()
+    return got if re.fullmatch(r"[A-Z]{2}", got) else "AU"
 
 
 # --- phone numbers --------------------------------------------------------------
@@ -383,8 +396,23 @@ def region() -> str:
 # Regions whose national numbers start with a trunk 0: country code. AU is
 # the one checked closely (its number lengths); the others are best effort.
 _TRUNK0 = {"AU": "61", "NZ": "64", "GB": "44", "IE": "353", "DE": "49", "FR": "33",
-           "IT": "39", "NL": "31", "IN": "91", "JP": "81", "ZA": "27"}
+           "NL": "31", "IN": "91", "JP": "81", "ZA": "27"}
+#: Italy has no trunk 0: a landline's 0 is part of the number, kept after
+#: +39 ("06 1234 5678" is +39 06 1234 5678); a mobile starts with 3.
+_KEEP0 = {"IT": "39"}
+#: A country code's region, for a book's own `+…` number (longest first).
+_CC_REGION = sorted({**{cc: r for r, cc in _TRUNK0.items()}, **{cc: r for r, cc in _KEEP0.items()},
+                     "1": "US"}.items(), key=lambda kv: -len(kv[0]))
 _E164 = re.compile(r"\+[1-9]\d{6,14}")
+
+
+def region_of(raw: str) -> str | None:
+    """The region of a number written with its `+` (`+1 415…` is US), or
+    None: one written the local way says nothing of where it is."""
+    if not raw.lstrip().startswith("+"):
+        return None
+    d = re.sub(r"\D", "", raw)
+    return next((r for cc, r in _CC_REGION if d.startswith(cc)), None)
 
 
 def _e164_ok(s: str) -> str | None:
@@ -443,6 +471,10 @@ def e164(raw: str | None, default_region: str = "AU") -> str | None:
             return "+1" + d
         if len(d) == 11 and d[0] == "1":
             return "+" + d
+        return None
+    if (cc := _KEEP0.get(reg)):
+        if d[0] in "03" and 6 <= len(d) <= 11:
+            return _e164_ok("+" + cc + d)
         return None
     cc = _TRUNK0.get(reg)
     if cc and d.startswith("0") and len(d) > 6:

@@ -78,6 +78,29 @@ def test_e164_other_regions():
     assert contacts.e164("021 123 4567", "NZ") == "+64211234567"
     # International as written, whatever the default.
     assert contacts.e164("+61412345678", "US") == "+61412345678"
+    assert contacts.e164("(415) 555-0100", "US") == "+14155550100"
+    # Italy keeps a landline's 0 after +39; a mobile starts with 3.
+    assert contacts.e164("06 1234 5678", "IT") == "+390612345678"
+    assert contacts.e164("347 123 4567", "IT") == "+393471234567"
+    assert contacts.e164("+39 06 1234 5678", "AU") == "+390612345678"
+    assert contacts.e164("1234", "IT") is None
+
+
+def test_region_is_per_book(monkeypatch):
+    monkeypatch.delenv("MEDIA_CONTACTS_REGION", raising=False)
+    monkeypatch.delenv("MEDIA_CONTACTS_SELF", raising=False)
+    assert contacts.region() == "AU"
+    monkeypatch.setenv("MEDIA_CONTACTS_SELF", "0412 345 678")  # local: says nothing
+    assert contacts.region() == "AU"
+    monkeypatch.setenv("MEDIA_CONTACTS_SELF", "+44 20 7946 0958")
+    assert contacts.region() == "GB"
+    monkeypatch.setenv("MEDIA_CONTACTS_REGION", "us")
+    assert contacts.region() == "US"
+    monkeypatch.setenv("MEDIA_CONTACTS_REGION", "nonsense")
+    assert contacts.region() == "GB"
+    assert contacts.region_of("+1 415 555 0100") == "US"
+    assert contacts.region_of("+353 1 234 5678") == "IE"
+    assert contacts.region_of("415 555 0100") is None
 
 
 # --- who a room member is -------------------------------------------------------

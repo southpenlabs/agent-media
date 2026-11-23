@@ -8479,7 +8479,7 @@ contact id from another book is 404, as an unknown one is). Pinned by
   `<state_dir>/accounts/<key>/` and `~/.config/agent-media/accounts/<key>/`,
   `<key>` being `acct-` and 20 hex digits of the SHA-256 of `<iss>|<sub>`
   (`abs-…` keys, for ABS logins, went with Audiobookshelf). Its settings
-  are its `contacts.json` there (`{sources, self, timeline}`), its Google
+  are its `contacts.json` there (`{sources, self, region, timeline}`), its Google
   sign-in and CRM connection (§ "The CRM") its own files there; Google's
   OAuth client is shared. It never reads the phone, and no Matrix room is
   any of its contacts' (they are the owner's rooms).
@@ -8509,8 +8509,12 @@ when accepted.
   phone's digits as stored (`+61412…`), as dialled at home (`0412…`) or as
   written on the phone; or part of an email. No `q`: everyone.
 - **`contacts`**: at most `limit` (default 200, at most 5000), best match
-  then name order. `phones` are E.164 (default region AU,
-  `MEDIA_CONTACTS_REGION`); a number that cannot be placed (no area code,
+  then name order. `phones` are E.164, a number written the local way
+  placed in the book's region: the owner's `MEDIA_CONTACTS_REGION`, another
+  account's `contacts.json` `region` (`"US"`, `"GB"`, …), else the country
+  of the book's own `+…` number (`self`), else the host's
+  `MEDIA_CONTACTS_REGION`, else AU (Italy keeps a landline's 0 after +39);
+  a number that cannot be placed (no area code,
   letters) is left out here and kept on the card. `total` is every match.
 - **`sources`**: each source this host reads or has read: `synced_at` its
   last good read (epoch s, `null` before one), `error` why the last try

@@ -222,6 +222,22 @@ def test_another_accounts_book_counts_no_texts_or_calls(monkeypatch, two_books):
         assert not contacts_drupal.configured()               # the owner's CRM is not hers
 
 
+def test_another_accounts_region_is_its_own(monkeypatch, two_books):
+    monkeypatch.setenv("MEDIA_CONTACTS_REGION", "AU")
+    monkeypatch.setenv("MEDIA_CONTACTS_SELF", "+61412345678")
+    with contacts.as_account(two_books):
+        assert contacts.region() == "AU"                      # the host's default
+        d = contacts.account_config_dir()
+        d.mkdir(parents=True)
+        (d / "contacts.json").write_text(json.dumps({"self": ["+1 415 555 0100"]}))
+        assert contacts.region() == "US"                      # from her own number
+        assert contacts.e164("(415) 555-0100", contacts.region()) == "+14155550100"
+        (d / "contacts.json").write_text(json.dumps({"self": ["+1 415 555 0100"],
+                                                     "region": "IT"}))
+        assert contacts.region() == "IT"                      # set outright
+    assert contacts.region() == "AU"                          # the owner's is unchanged
+
+
 # --- the loop and the command line -------------------------------------------------
 
 def test_the_loop_syncs_every_book(monkeypatch, two_books):
