@@ -3,6 +3,8 @@
 opencode's own free models need nothing; a key for a provider adds that
 provider's free models to the sheet (opencode_models.py) — OpenRouter's
 `…:free`, 50 requests a day on a free account, 1000 once it has had credit.
+A plan's provider (`plan`: OpenCode Go) is a paid subscription instead: its
+key puts every model of the plan on the sheet, for as long as it is kept.
 opencode keeps keys in `auth.json` beside its database, one entry per
 provider, `{"<provider>": {"type": "api", "key": "…"}}` — what `opencode auth
 login` writes, and what `opencode auth list` counts (measured 28 Sep 2026 on
@@ -29,6 +31,12 @@ PROVIDERS = {
         "name": "OpenRouter",
         "signup": "https://openrouter.ai/keys",
         "check": "https://openrouter.ai/api/v1/key",
+    },
+    "opencode-go": {
+        "name": "OpenCode Go",
+        "signup": "https://opencode.ai/go",
+        "check": "https://opencode.ai/zen/go/v1/models",
+        "plan": "Go",
     },
 }
 
@@ -72,11 +80,21 @@ def stored() -> dict:
 
 
 def providers() -> list[dict]:
-    """`[{id, name, signup, set}]`, for the page. Never the key itself."""
+    """`[{id, name, signup, set, kind}]`, for the page; `kind` is "plan" for
+    a subscription, "free" for a provider whose key adds free models. Never
+    the key itself."""
     have = stored()
     return [{"id": pid, "name": p["name"], "signup": p["signup"],
-             "set": isinstance(have.get(pid), dict) and bool(have[pid].get("key"))}
+             "set": isinstance(have.get(pid), dict) and bool(have[pid].get("key")),
+             "kind": "plan" if p.get("plan") else "free"}
             for pid, p in PROVIDERS.items()]
+
+
+def signed_in_plans() -> list[tuple[str, str]]:
+    """`[(provider, note)]`: the plans a key is kept for, the sheet's reason
+    to offer their models."""
+    return [(row["id"], PROVIDERS[row["id"]]["plan"]) for row in providers()
+            if row["kind"] == "plan" and row["set"]]
 
 
 def well_formed(key: str) -> bool:
@@ -97,6 +115,8 @@ def check(provider: str, key: str, timeout: float = 10.0) -> tuple[bool | None, 
         return None, f"{p['name']} answered {e.code}"
     except (OSError, ValueError) as e:
         return None, f"could not reach {p['name']} ({e.__class__.__name__})"
+    if p.get("plan"):
+        return True, f"Signed in: the {p['name']} models are on opencode's list"
     data = body.get("data") if isinstance(body, dict) else None
     if isinstance(data, dict) and data.get("is_free_tier"):
         return True, "Free account: its free models, 50 requests a day"

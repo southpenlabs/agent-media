@@ -16,10 +16,11 @@ after the free ones (`extras`): a gateway's, a paid or uncensored one. Its
 catalog's toolcall flag is not trusted there (Venice's says yes for a model
 that never calls a tool), so the setting says which are chat only.
 
-`MEDIA_OPENCODE_PLANS` names whole providers the host pays a plan for
-(`opencode-go=Go`): every tool-using model the listing has from each is
-offered, after the free ones and before the extras, so a model the plan adds
-shows up on the next listing with nothing to edit (`plans`).
+A plan signed in from the Coding agents page (opencode_keys.py: OpenCode
+Go) puts every tool-using model the listing has from it on the sheet, after
+the free ones and before the extras, so a model the plan adds shows up on
+the next listing with nothing to edit, and signing out takes them off
+(`plans`).
 
 A price of 0 is only taken as free from those two: a custom provider (a
 local gateway) has no prices at all, which reads as 0 and means "unknown".
@@ -134,30 +135,26 @@ def sheet(listing: str, rows: list[dict] | None = None) -> list[dict]:
     return [{"id": m["id"], "label": m["name"], "note": "Free"} for m in free]
 
 
-def plans(listing: str, setting: str | None = None,
+def plans(listing: str, signed_in: list[tuple[str, str]] | None = None,
           rows: list[dict] | None = None) -> list[dict]:
-    """Every tool-using, not deprecated model of the providers
-    `MEDIA_OPENCODE_PLANS` names, by name, each provider in the setting's
-    order.
-
-    Comma-separated provider names, each optionally `=Note` (the row's note,
-    else the provider's name), e.g. `opencode-go=Go`. Read from the listing
-    each time, so the plan's new models appear and retired ones go.
+    """Every tool-using, not deprecated model of the plans signed in
+    (`[(provider, note)]`, else opencode_keys.signed_in_plans()), by name,
+    each plan in turn. A plan's `…-free` model is left out: a free model is
+    on the sheet as Free already, and is not what the plan is for.
     """
-    raw = os.environ.get("MEDIA_OPENCODE_PLANS", "") if setting is None else setting
+    if signed_in is None:
+        from . import opencode_keys
+
+        signed_in = opencode_keys.signed_in_plans()
     listed = parse(listing) if rows is None else rows
     out: list[dict] = []
-    for item in raw.split(","):
-        provider, _, note = item.strip().partition("=")
-        provider = provider.strip()
-        if not provider:
-            continue
+    for provider, note in signed_in:
         mine = sorted((m for m in listed if m["id"].split("/", 1)[0] == provider
                        and m["toolcall"] and m["status"] != "deprecated"
+                       and not m["id"].endswith("-free")
                        and not any(o["id"] == m["id"] for o in out)),
                       key=lambda m: m["name"].lower())
-        out += [{"id": m["id"], "label": m["name"], "note": note.strip() or provider}
-                for m in mine]
+        out += [{"id": m["id"], "label": m["name"], "note": note} for m in mine]
     return out
 
 

@@ -203,15 +203,26 @@ opencode-go/chatty
 {"id": "chatty", "name": "Chatty", "capabilities": {"toolcall": false}}
 opencode-go/old
 {"id": "old", "name": "Old", "capabilities": {"toolcall": true}, "status": "deprecated"}
+opencode-go/beam-free
+{"id": "beam-free", "name": "Beam Free", "capabilities": {"toolcall": true}}
 """
-    # By name; no tool use or deprecated is left out; another provider is not
-    # taken; a provider with no note is noted by its own name.
-    assert om.plans(listing, "opencode-go=Go, nobody") == [
+    # By name; no tool use, deprecated or a free one is left out; another
+    # provider is not taken.
+    assert om.plans(listing, [("opencode-go", "Go")]) == [
         {"id": "opencode-go/glm-5.3", "label": "GLM-5.3", "note": "Go"},
         {"id": "opencode-go/kimi-k3.1-pro", "label": "Kimi K3.1 Pro", "note": "Go"},
     ]
-    assert om.plans(listing, "opencode-go")[0]["note"] == "opencode-go"
-    assert om.plans(listing, "") == []
+    assert om.plans(listing, []) == []
+
+
+def test_a_plan_is_offered_only_while_its_key_is_kept(monkeypatch):
+    from agent_media_core import opencode_keys as ok
+
+    monkeypatch.setattr(ok, "stored", lambda: {"openrouter": {"key": "x" * 20}})
+    assert ok.signed_in_plans() == []
+    assert {r["id"]: r["kind"] for r in ok.providers()} == {"openrouter": "free", "opencode-go": "plan"}
+    monkeypatch.setattr(ok, "stored", lambda: {"opencode-go": {"key": "x" * 20}})
+    assert ok.signed_in_plans() == [("opencode-go", "Go")]
 
 
 def test_the_setting_adds_models_after_the_free_ones(monkeypatch):
@@ -231,6 +242,7 @@ def test_the_setting_adds_models_after_the_free_ones(monkeypatch):
     assert om.extras(LISTING, "") == []
 
     monkeypatch.setenv("MEDIA_OPENCODE_MODELS", setting)
+    monkeypatch.setattr(om, "plans", lambda *a, **k: [])   # no plan signed in
     monkeypatch.setattr(om, "_run", lambda argv, timeout: LISTING if argv[0] == "models"
                         else '{"model": "venice/venice-uncensored-1-2"}')
     om.forget()

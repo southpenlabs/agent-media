@@ -44,7 +44,11 @@ def test_saved_where_opencode_reads_it_and_owner_only(data):
                      "openrouter": {"type": "api", "key": KEY}}
     assert stat.S_IMODE(data.stat().st_mode) == 0o600
     assert ok_.providers() == [{"id": "openrouter", "name": "OpenRouter",
-                                "signup": "https://openrouter.ai/keys", "set": True}]
+                                "signup": "https://openrouter.ai/keys", "set": True,
+                                "kind": "free"},
+                               {"id": "opencode-go", "name": "OpenCode Go",
+                                "signup": "https://opencode.ai/go", "set": False,
+                                "kind": "plan"}]
     assert ok_.remove("openrouter") and not ok_.remove("openrouter")
     assert json.loads(data.read_text()) == {"anthropic": {"type": "api", "key": "keep-me"}}
 
