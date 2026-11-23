@@ -178,8 +178,9 @@ def test_a_favourites_row_carries_the_song_it_was_made_from(st):
            "tracks": [{"key": "k2", "original_id": "mixvideo01", "original_start": 754.0}]}
     one, two, made, none = M.with_titles(rows, store=st, favourites=fav)
     assert one["uri"] == "yt:https://www.youtube.com/watch?v=66A_3uwuZ_I" and "start" not in one
+    assert one["art"] == "https://i.ytimg.com/vi/66A_3uwuZ_I/hqdefault.jpg"
     assert (two["uri"], two["start"]) == ("yt:https://www.youtube.com/watch?v=mixvideo01", 754.0)
-    assert "uri" not in made and "uri" not in none
+    assert "uri" not in made and "uri" not in none and "art" not in made
 
 
 # ---- the bed, Sing it in and Sing it out -------------------------------------------------

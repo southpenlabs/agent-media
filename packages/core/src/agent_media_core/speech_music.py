@@ -254,6 +254,7 @@ def with_titles(rows: list[dict], store=None, favourites=None) -> list[dict]:
         song = _song_of(r, songs)
         if song:
             r["uri"], start = song
+            r["art"] = f"https://i.ytimg.com/vi/{r['uri'].rsplit('=', 1)[-1]}/hqdefault.jpg"
             if start:
                 r["start"] = start
         out.append(r)
