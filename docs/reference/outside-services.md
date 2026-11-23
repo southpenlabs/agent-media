@@ -312,6 +312,13 @@ Sorted with what blocks a public release first. 61 rows.
   and podcast downloads, lengths, and reading the listener's likes.
 - **How:** yt-dlp, Mopidy-YouTube and ytmusicapi with sign-ins copied from
   a browser. No API key.
+  The add-on's own download (`youtube_downloads._here_fetch`) lets yt-dlp
+  fetch YouTube's challenge solver when it is not installed
+  (`--remote-components`, MEDIA_YTDLP_REMOTE_COMPONENTS, default
+  `ejs:github`: yt-dlp-ejs's script from yt-dlp's GitHub releases, run on
+  the host's Deno or another JavaScript runtime; `ejs:npm` from npm; `off`
+  for an installed yt-dlp-ejs). No credential; gated with the add-on
+  (24 Nov 2026).
 - **Terms:** YouTube's terms bar downloading "except: (a) as specifically
   permitted by the Service" (https://www.youtube.com/t/terms); the API
   policies bar storing copies, separating audio from video and playing from
