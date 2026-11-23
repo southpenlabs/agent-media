@@ -151,6 +151,8 @@ ACTIONS = {
     # A start the play gate held (agent_media_core.play_gate): played now on
     # purpose, or forgotten.
     "held": "held",
+    # A playlist made, changed, removed or played (agent_media_core.music_playlists).
+    "playlist": "playlist",
 }
 
 _CACHE_TTL_S = 2.5
@@ -1493,6 +1495,90 @@ def brainz_play(body: dict, bearer: str) -> tuple[bool, dict]:
     return True, {**out, "queued": len(rest)}
 
 
+def playlist_play(pid: str, start=1, background: bool = True) -> tuple[bool, dict]:
+    """A playlist in order from song `start` (1-based): the first song that
+    can be found played, the rest found and queued one by one after it, in
+    the background (`background=False`, the CLI's: before returning)."""
+    from agent_media_core import music_playlists as mp
+
+    p = mp.find(pid)
+    if not p:
+        return False, {"error": "no playlist by that name", "status": 404}
+    if not isinstance(start, int) or isinstance(start, bool) or start < 1:
+        return False, {"error": "from is a song number", "status": 400}
+    songs = (p.get("songs") or [])[start - 1:]
+    if not songs:
+        return False, {"error": "that playlist has no songs there", "status": 404}
+
+    def body(action: str, s: dict) -> dict:
+        return ({"action": action, "uri": s["uri"]} if s.get("uri")
+                else {"action": action, "find": {"artist": s.get("artist") or "", "title": s.get("title") or ""}})
+    missed: list[str] = []
+    ok, out = False, {"error": "none of its songs could be found", "status": 404}
+    while songs:
+        s, songs = songs[0], songs[1:]
+        ok, out = owner_control(body("play", s))
+        if ok or out.get("held") or out.get("code") == "downloader_offline" or out.get("status") not in (404,):
+            break
+        missed.append(mp.song_name(s))
+    if not ok:
+        return False, out
+
+    def queue():
+        for s in songs:
+            try:
+                good, why = owner_control(body("add", s))
+                if not good:
+                    print(f"music: playlist {p['id']}: {mp.song_name(s)} not queued: {why.get('error')}",
+                          file=sys.stderr)
+            except Exception as e:  # noqa: BLE001 — one missing, the rest still queued
+                _failures.swallowed(e)
+    if songs:
+        if background:
+            _spawn(queue)
+        else:
+            queue()
+    return True, {**out, "playlist": {"id": p["id"], "title": p.get("title")},
+                  "queued": len(songs), "missed": missed}
+
+
+def _playlist_control(body: dict) -> tuple[bool, dict]:
+    """`POST /music {"action": "playlist", "op": …}`: `make` {title, songs,
+    about?}, `add` {id, songs}, `remove` {id, n}, `move` {id, n, to},
+    `rename` {id, title}, `delete` {id}, `play` {id, from?}. A song is
+    {artist, title, uri?} or "Artist - Title"."""
+    from agent_media_core import music_playlists as mp
+
+    op, pid = str(body.get("op") or ""), str(body.get("id") or "")
+    songs = body.get("songs") if isinstance(body.get("songs"), list) else []
+    try:
+        if op == "play":
+            return playlist_play(pid, body.get("from") or 1)
+        if op == "make":
+            p = mp.make(str(body.get("title") or ""), songs, str(body.get("about") or ""),
+                        str(body.get("by") or "you"))
+        elif op == "add":
+            p = mp.add(pid, songs)
+        elif op == "remove":
+            p = mp.remove_song(pid, body.get("n"))
+        elif op == "move":
+            p = mp.move_song(pid, body.get("n"), body.get("to"))
+        elif op == "rename":
+            p = mp.rename(pid, str(body.get("title") or ""))
+        elif op == "delete":
+            if not mp.delete(pid):
+                return False, {"error": "no playlist by that name", "status": 404}
+            return True, {"deleted": pid}
+        else:
+            return False, {"error": "op must be make, add, remove, move, rename, delete or play", "status": 400}
+    except LookupError as e:
+        return False, {"error": str(e), "status": 404}
+    except ValueError as e:
+        return False, {"error": str(e), "status": 400}
+    row = next((r for r in mp.items() if r["id"] == f"playlist:{p['id']}"), None)
+    return True, {"playlist": row}
+
+
 def _played_book(uri: str) -> bool:
     """Whether `uri` is one the book and podcast lists hold (what was
     played, the library, new episodes) — the only books this route will
@@ -1536,9 +1622,19 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     ok, err = auth.may_control_speech(bearer)
     if not ok:
         return False, err
+    return owner_control(body)
+
+
+def owner_control(body: dict) -> tuple[bool, dict]:
+    """`control` past its gate: the owner's own (`media playlist play`
+    runs here, in the CLI, with no device's token)."""
     action = str(body.get("action") or "")
     if action not in ACTIONS:
         return False, {"error": "unknown action", "status": 400}
+    if action == "playlist":
+        return _playlist_control(body)
+    if action == "play" and isinstance(body.get("uri"), str) and body["uri"].startswith("playlist:"):
+        return playlist_play(body["uri"], body.get("from") or 1)
     if action in ("play", "add", "like") and not body.get("uri") and isinstance(body.get("find"), dict):
         # A Discover row by name (music_discover.resolve): found with the
         # host's YouTube search, then played, queued or liked as any song.

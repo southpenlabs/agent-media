@@ -11416,6 +11416,48 @@ def _build_parser() -> argparse.ArgumentParser:
                                              "(\"yesterday\", \"Tuesday\", \"18 Nov\")")
     t.add_argument("question", nargs="*", help="a place or a day; none is today")
     t.set_defaults(func=cmd_location_where)
+    s = sub.add_parser("playlist", help="playlists: named lists of songs, in the Music "
+                                         "tab's Playlists, played in order (music_playlists)")
+    psub = s.add_subparsers(dest="playlist_cmd", required=True)
+    t = psub.add_parser("list", help="the playlists, the last changed first")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("show", help="one playlist's songs, numbered")
+    t.add_argument("name", help="its id or title")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("make", help="a new playlist from songs given as \"Artist - Title\" "
+                                     "(or a yt:/web address), one per argument or line of stdin")
+    t.add_argument("title")
+    t.add_argument("songs", nargs="*", help="the songs; none reads them from stdin, one per line")
+    t.add_argument("--about", default="", help="a line on what it is for")
+    t.add_argument("--by", default="agent", help="who made it (shown in the app)")
+    t.add_argument("--play", action="store_true", help="and play it now")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("add", help="songs added at the end")
+    t.add_argument("name")
+    t.add_argument("songs", nargs="+")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("remove", help="song N taken out")
+    t.add_argument("name")
+    t.add_argument("n", type=int)
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("move", help="song N moved to place TO")
+    t.add_argument("name")
+    t.add_argument("n", type=int)
+    t.add_argument("to", type=int)
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("rename")
+    t.add_argument("name")
+    t.add_argument("title")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("delete")
+    t.add_argument("name")
+    t.set_defaults(func=cmd_playlist)
+    t = psub.add_parser("play", help="played in order: the first song now, the rest queued")
+    t.add_argument("name")
+    t.add_argument("--from", dest="start", type=int, default=1, help="start at song N")
+    t.set_defaults(func=cmd_playlist)
     s = sub.add_parser("tune", help="songs of the listener's own near some words "
                                      "(tune_related; the reply's tune is reply_tune)")
     tsub = s.add_subparsers(dest="tune_cmd", required=True)
@@ -12750,6 +12792,75 @@ def cmd_place_things(a) -> int:
     if got.get("rooms_unreachable"):
         print("(the rooms cannot be asked just now)")
     return 0
+
+
+def cmd_playlist(a) -> int:
+    """`media playlist …` (music_playlists)."""
+    from . import music_playlists as mp
+
+    def show(p: dict) -> None:
+        print(f"{p['title']}  ({p['id']}, {len(p.get('songs') or [])} songs)")
+        if p.get("about"):
+            print(f"  {p['about']}")
+        for i, song in enumerate(p.get("songs") or [], 1):
+            print(f"{i:>3}. {mp.song_name(song)}")
+
+    def play(pid: str, start: int) -> int:
+        music = _server_module("music")
+        if music is None:
+            return 1
+        ok, out = music.playlist_play(pid, start, background=False)
+        if not ok:
+            print(f"playlist play: {out.get('error')}", file=sys.stderr)
+            return 1
+        for m in out.get("missed") or []:
+            print(f"not found: {m}", file=sys.stderr)
+        print(f"playing {out['playlist']['title']}: {out.get('title') or 'the first song'}, "
+              f"{out.get('queued', 0)} more queued")
+        return 0
+
+    try:
+        cmd = a.playlist_cmd
+        if cmd == "list":
+            pls = mp.all_playlists()
+            if a.json:
+                print(json.dumps(mp.items(), ensure_ascii=False, indent=1))
+            elif not pls:
+                print("no playlists yet: media playlist make <title> <songs…>")
+            for p in [] if a.json else pls:
+                print(f"{p['id']}\t{len(p.get('songs') or [])} songs\t{p['title']}")
+            return 0
+        if cmd == "make":
+            songs = list(a.songs or []) or [ln for ln in sys.stdin.read().splitlines() if ln.strip()]
+            p = mp.make(a.title, songs, a.about, a.by)
+            show(p)
+            return play(p["id"], 1) if a.play else 0
+        if cmd == "play":
+            return play(a.name, a.start)
+        if cmd == "delete":
+            if not mp.delete(a.name):
+                raise LookupError("no playlist by that name")
+            print(f"deleted {a.name}")
+            return 0
+        p = mp.find(a.name)
+        if not p:
+            raise LookupError("no playlist by that name")
+        if cmd == "show" and a.json:
+            print(json.dumps(p, ensure_ascii=False, indent=1))
+            return 0
+        if cmd == "add":
+            p = mp.add(a.name, list(a.songs))
+        elif cmd == "remove":
+            p = mp.remove_song(a.name, a.n)
+        elif cmd == "move":
+            p = mp.move_song(a.name, a.n, a.to)
+        elif cmd == "rename":
+            p = mp.rename(a.name, a.title)
+        show(p)
+        return 0
+    except (LookupError, ValueError) as e:
+        print(f"playlist: {e}", file=sys.stderr)
+        return 1
 
 
 def cmd_tune_index(a) -> int:

@@ -169,7 +169,7 @@ def _inferred(speakers: list[tuple[float, str]], at: float) -> Optional[str]:
 
 KINDS = ("music", "book", "podcast")
 #: What each kind's list can be (`GET /music/recent?list=`), what was played first.
-LISTS = {"music": ("recent", "liked", "most", "stations", "albums", "sung"),
+LISTS = {"music": ("recent", "liked", "most", "stations", "albums", "playlists", "sung"),
          "book": ("recent", "progress", "finished", "all", "most", "added", "unstarted"),
          "podcast": ("recent", "most", "saved")}
 
@@ -531,7 +531,8 @@ def _listed(kind: str = "music", which: str = "recent", store: Optional[StateSto
     newest); `liked` the songs liked; `progress`, `finished` and `all` a
     book library's (`progress` 0–1, `finished`); `saved` the YouTube links
     saved for the Podcasts tab (podcast_links); `albums` the Spotify albums,
-    playlists and songs saved for the Music tab (music_links); `sung` every
+    playlists and songs saved for the Music tab (music_links); `playlists`
+    the playlists made here (music_playlists); `sung` every
     song sung out after a long reply, taken up or not (music_sung).
 
     `q` searches: `recent` and `most` the whole history (recent()), the
@@ -560,6 +561,12 @@ def _listed(kind: str = "music", which: str = "recent", store: Optional[StateSto
         from . import music_links
 
         return music_links.items()[:limit]
+    if which == "playlists":
+        # Named lists of songs made here (music_playlists; David, 23 Nov
+        # 2026: "We should implement a playlist feature"), each with its songs.
+        from . import music_playlists
+
+        return music_playlists.items()[:limit]
     if which == "saved":
         from . import podcast_links
 

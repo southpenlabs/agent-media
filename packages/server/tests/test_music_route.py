@@ -266,7 +266,7 @@ def test_recent_is_the_played_list(server, signed_in, audio_host, monkeypatch):
     monkeypatch.setattr(music_recent, "_liked", lambda store, limit: items[:1])
     res, obj = call(server, "GET", "/music/recent", headers=AUTH)
     assert res.status == 200 and obj == {"ok": True, "kind": "music", "list": "recent",
-                                         "lists": ["recent", "liked", "most", "stations", "albums", "sung"], "items": items}
+                                         "lists": ["recent", "liked", "most", "stations", "albums", "playlists", "sung"], "items": items}
     res, obj = call(server, "GET", "/music/recent?kind=book", headers=AUTH)
     assert res.status == 200 and obj["kind"] == "book" and obj["items"] == []
     assert obj["lists"] == ["recent", "progress", "finished", "all", "most", "added", "unstarted"]
