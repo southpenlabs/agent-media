@@ -294,3 +294,28 @@ def test_the_route_takes_sort_since_service(server, signed_in, phone):
     assert res.status == 200 and [c["name"] for c in obj["contacts"]] == ["Mel Jones"]
     assert obj["sort"] == "recent" and obj["talked"] is True
     assert obj["contacts"][0]["last"]["channel"] == "messenger"
+
+
+def _put(cid, name, family=""):
+    conn = contacts._connect(create=True)
+    try:
+        card = {"name": name, "names": [{"display": name, "given": "", "family": family}]}
+        conn.execute("INSERT INTO contacts (id, name, card, updated) VALUES (?,?,?,0)",
+                     (cid, name, json.dumps(card)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_the_name_orders_put_the_unlettered_last_and_surname_sorts_by_family():
+    for i, (name, fam) in enumerate([("(no name)", ""), ("+61 412 345 678", ""), ("Zoë Adams", ""),
+                                     ("Adam Young", "Young"), ("ben", ""), ("Émile", "")]):
+        _put(f"c{i}", name, fam)
+    names = lambda got: [c["name"] for c in got["contacts"]]  # noqa: E731
+    assert names(contacts.listing()) == ["Adam Young", "ben", "Émile", "Zoë Adams",
+                                         "(no name)", "+61 412 345 678"]
+    got = contacts.listing(sort="surname")
+    assert got["sort"] == "surname"
+    # Adams, ben, Émile (one word: the word itself), Young; then the "#" group.
+    assert names(got) == ["Zoë Adams", "ben", "Émile", "Adam Young",
+                          "(no name)", "+61 412 345 678"]

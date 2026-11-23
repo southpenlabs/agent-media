@@ -2329,10 +2329,34 @@ def _source_states(conn: sqlite3.Connection | None) -> list[dict]:
     return out
 
 
-#: `GET /contacts`'s orders: `name` (the default), `recent` (last talked to
-#: first) and `most` (most talked to over the last 90 days first); a person
-#: never talked to comes after everyone who was, by name.
-SORTS = ("name", "recent", "most")
+#: `GET /contacts`'s orders: `name` (the default), `surname` (family name
+#: first), `recent` (last talked to first) and `most` (most talked to over the
+#: last 90 days first); a person never talked to comes after everyone who
+#: was, by name. In the name orders a name that does not start with a letter
+#: (none, a number, a symbol) goes after the lettered ones, as the "#" group.
+SORTS = ("name", "surname", "recent", "most")
+
+
+def _name_key(name: str, card: dict, surname: bool = False) -> tuple[int, str]:
+    """A row's place in the name orders: (0 lettered or 1 the "#" group,
+    the folded name). `surname` puts the family name first: the card's own
+    when a source gave one, else a name's last word."""
+    full = fold(name)
+    if not full[:1].isalpha():
+        return (1, full)
+    key = full
+    if surname:
+        fam = ""
+        for n in card.get("names") or []:
+            fam = fold(n.get("family") or "")
+            if fam:
+                break
+        if not fam and len(full.split()) > 1:
+            fam = full.split()[-1]
+        if fam:
+            rest = full.replace(fam, "", 1).strip() if fam in full else full
+            key = f"{fam} {rest}".strip()
+    return (0, key)
 
 
 def _services_of(card: dict, act: dict | None) -> set[str]:
@@ -2411,7 +2435,7 @@ def listing(q: str = "", limit: int | str | None = None,
                     row["photo"] = contacts_photos.field(cid, card, pics)
                     row["last"] = last
                     row["count_90d"] = (act or {}).get("count_90d", 0)
-                    rows.append((score, fold(name), row))
+                    rows.append((score, _name_key(name, card, order == "surname"), row))
         states = _source_states(conn)
     finally:
         if conn is not None:

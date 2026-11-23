@@ -8919,6 +8919,11 @@ with `q` and the labels:
 - `sort=name` (the default), `recent` (last talked to first) or `most`
   (`count_90d` first); people never talked to come after, by name; with a
   `q`, how well it matches still comes first. Anything else is `name`.
+  `sort=surname` (24 Nov 2026, parity sweep K5) orders by family name: the
+  card's own when a source gave one, else the name's last word. In both
+  name orders a name that does not start with a letter (`(no name)`, a
+  number, a symbol) comes after the lettered ones, as Google's and Apple's
+  "#" group does.
 - `since=<days>`: only people talked to within that many days.
 - `service=<channel>`: only people on that channel (`sms`, `signal`,
   `messenger`, `instagram`, `teams`, `whatsapp`, `call`, `email`, `chat`):
