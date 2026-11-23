@@ -129,6 +129,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(map_reviews, "_post", _no_mangrove)
     monkeypatch.setattr(map_reviews, "_keys_path", lambda: tmp_path / "mangrove-keys.json")
     map_reviews.forget()
+    # Wikipedia, Wikidata, Commons, Wikivoyage and Nominatim (map_wiki.py) are
+    # never asked by a test, and its answers are kept in a scratch folder.
+    from agent_media_server import map_wiki
+
+    def _no_wiki(*a, **k):
+        raise RuntimeError("a test reached Wikimedia or Nominatim (map_wiki.py)")
+
+    monkeypatch.setattr(map_wiki, "_get", _no_wiki)
+    monkeypatch.setattr(map_wiki, "_cache_root", lambda: tmp_path / "place-wiki")
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

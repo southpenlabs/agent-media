@@ -107,7 +107,9 @@ TAG_KEYS = frozenset({"brand", "operator", "cuisine", "wheelchair", "fee", "acce
                       "outdoor_seating", "diet:vegetarian", "diet:vegan", "dispensing",
                       "emergency", "covered", "lit", "shelter", "bench", "route_ref",
                       "network", "atm", "maxstay", "parking", "amperage", "voltage",
-                      "check_date:opening_hours", "description", "unisex", "male", "female"})
+                      "check_date:opening_hours", "description", "unisex", "male", "female",
+                      # The place card's Wikipedia and Wikidata (map_wiki.py).
+                      "wikidata", "wikipedia"})
 TAG_PREFIXES = ("socket:", "fuel:", "charging_station:")
 
 _lock = threading.Lock()

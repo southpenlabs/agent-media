@@ -76,7 +76,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 33 | MusicBrainz | artists, albums, recordings | none (named client) | public API, 1 request a second | sign up with MetaBrainz as a commercial user (tiers from $0) | no |
 | 34 | Cover Art Archive | album covers | none | public | check current terms on showing covers in a paid product | no |
 | 35 | ListenBrainz | recommendations, likes, fresh releases, an artist's popular songs and albums, similar artists | the listener's own name (and token); none for popularity or similar artists | public API, 1 request a second | as MusicBrainz | no |
-| 36 | Wikipedia and Wikidata | profiles of artists, authors, shows | none | public APIs | credit Wikipedia text (CC BY-SA) where shown: to confirm it is | no |
+| 36 | Wikipedia and Wikidata | profiles of artists, authors, shows (the Map's place cards: row 85) | none | public APIs | credit Wikipedia text (CC BY-SA) where shown: to confirm it is | no |
 | 37 | Internet Archive | free recordings for the music bed; free films that play in the app (`watch_free.py`, §6.54 "Free films") | none (named client) | public APIs | nothing; licences are filtered and kept (films: only items stating public domain or Creative Commons, streamed by the device from archive.org) | no |
 | 38 | ccMixter | CC BY instrumentals for the music bed | none | public query API | show each track's credit where it plays: to confirm | no |
 | 39 | Podcast RSS feeds | episodes of followed shows | none | each publisher's own feed | nothing | no |
@@ -125,6 +125,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 82 | ACT Government open data (data.act.gov.au, Socrata): "Traffic speed camera locations" (426s-vdu4) and "Mobile Distraction - Fixed and Transportable camera locations" (5ezj-yjxz) | the Map's "ACT cameras (official)" layer and camera alerts (`map_gov_cameras.py`, `MEDIA_MAP_CAMERAS_ACT`; 23 Nov 2026) | none (open CSV downloads, a named client) | two small CSVs a week (`map_gov_cameras refresh`, a weekly timer) | CC BY 4.0: credit "ACT Government (Access Canberra)" on the layer | no (official open data; the setting is per state) |
 | 83 | Transport for NSW "NSW Speed Cameras" (opendata.transport.nsw.gov.au, dataset fb34bd89…: fixed and red-light speed camera CSVs) | the Map's "NSW cameras (official)" layer and camera alerts (`map_gov_cameras.py`, `MEDIA_MAP_CAMERAS_NSW`; 23 Nov 2026) | none | two small CSVs a week | CC BY: credit "Transport for NSW"; last published 2021, so the layer says newer cameras are missing | no (the setting is per state) |
 | 84 | Australian Bureau of Statistics ASGS 2021 state boundaries (geo.abs.gov.au ArcGIS service, STE layer) | the boxes of the offline maps' regions (`map_offline.REGIONS`; read once by hand, 23 Nov 2026; nothing asked at run time) | none | one extent query per state, once | CC BY 4.0: credit "Australian Bureau of Statistics" (in the code beside the boxes) | no |
+| 85 | Wikimedia for the Map's place card: Wikidata (wbgetentities), English Wikipedia (REST page summary), Wikimedia Commons (imageinfo; the device loads the thumbnail from Wikimedia), English Wikivoyage (action=parse wikitext); with Nominatim's lookup and reverse (row 11) to find the item and town | a landmark's write-up, photo and facts, and its town's See / Do / Eat / Sleep (`GET /map/place/wiki`, map_wiki.py, §6.50; maps proposal step 9, 23 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time, never in parallel, Nominatim a second apart; each answer kept on disk 30 days, a miss 3 | **Fine**: Wikidata CC0; Wikipedia and Wikivoyage text CC BY-SA 4.0, credited with a link and the licence where shown; each Commons photo shown with its author and its own licence, linking its file page | no |
 
 ## The services, one by one
 
@@ -924,6 +925,42 @@ hosted tier), every one of these becomes a reseller question.
 - **Terms:** following a link the user shared, once, as a browser would;
   no Google Maps content is stored or shown (the app draws its own map).
 - **Personal-use switch:** no.
+
+### 85. Wikimedia on the Map's place card
+
+- **Used for:** a place card's short write-up (English Wikipedia's REST
+  summary, `en.wikipedia.org/api/rest_v1/page/summary/<title>`), photo
+  (the item's P18 image, asked of Commons'
+  `commons.wikimedia.org/w/api.php?action=query&prop=imageinfo` for a
+  960 px thumbnail, its author and licence) and facts (Wikidata's
+  `wbgetentities`: opened or founded, heritage listing, architect,
+  population, official website), found through OSM's `wikidata` tag; and
+  the town's See / Do / Eat / Sleep listings from English Wikivoyage
+  (`en.wikivoyage.org/w/api.php?action=parse&prop=wikitext`, read with
+  mwparserfromhell, MIT). `GET /map/place/wiki`, map_wiki.py, §6.50
+  (maps proposal step 9; David, 23 Nov 2026: "Go on with step 9"). When
+  the card has no `wikidata`, the OSM element's own tags are asked of
+  Nominatim's `/lookup`, and the town at the point of its `/reverse`
+  (row 11's service, a second apart on the public one). Only an item,
+  a title or a point rounded to about a kilometre leaves the server; no
+  account. The photo itself is loaded by the device from Wikimedia.
+- **Terms:** Wikidata's data is CC0. Wikipedia's and Wikivoyage's text
+  is CC BY-SA 4.0 (https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use,
+  section 7): re-use with credit (a link to the article does) and the
+  licence; the card shows "Wikipedia" and "Wikivoyage" each with "CC BY-SA
+  4.0" and a link, and shortens the text without changing it. A Commons
+  file carries its own licence (CC BY, CC BY-SA, public domain); the card
+  shows the author and that licence under the photo, linking the file
+  page (https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia).
+  Wikimedia asks for a descriptive User-Agent with a contact
+  (https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy) and
+  for requests in series, not parallel
+  (https://www.mediawiki.org/wiki/API:Etiquette): every request goes
+  through one lock, and each answer is kept 30 days (a miss 3).
+- **Personal-use switch:** no; the licences allow any use with credit.
+- **Production:** fine as is: one card's requests at a time per install.
+  A much busier service would read Wikidata and Wikivoyage from their
+  dumps instead.
 
 ### 71. name-suggestion-index and Wikidata (place nicknames)
 

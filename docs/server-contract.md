@@ -12048,6 +12048,37 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `refused` (Mangrove's words in `error`), `unreachable`; 500 `key`.
   Gated, not a guest. Website ratings (schema.org, from the site reader)
   stay on the card and are never sent here.
+- **`GET /map/place/wiki?[wikidata=Q…][&osm=node/1][&wikipedia=en:Title][&lat=&lon=]`**
+  (23 Nov 2026, maps proposal step 9; David: "Go on with step 9";
+  `map_wiki.py`, tests in `test_map_wiki.py`): a place card's write-up,
+  photo and facts, and its town's things to see, do, eat and sleep. The
+  item is `wikidata` (OSM's tag: `/map/places` passes `wikidata` and
+  `wikipedia` in `tags`), else the OSM element's own tag (`osm`, read
+  with Nominatim's lookup), else none. → `{found, wikidata?, label?,
+  description?, link? (the Wikidata item), summary?: {title, text (the
+  English Wikipedia REST summary, at most 700 characters), link, credit:
+  "Wikipedia", license: "CC BY-SA 4.0", license_url}, image?: {thumb (a
+  960 px Commons thumbnail, loaded by the device from Wikimedia), width?,
+  height?, page (its Commons file page), author?, license?, license_url?,
+  credit: "Wikimedia Commons"}, facts: [{key: opened | inception |
+  heritage | architect | population | website, value (a date as YYYY,
+  YYYY-MM or YYYY-MM-DD; English labels; a number as digits), year? (a
+  population's), link? (the website)}], voyage?: {title, link, place (the
+  town's name), self (the place is the article's own town), sections:
+  [{key: see | do | eat | sleep, count, items: [{name, alt?, text?, url?,
+  address?, price?, hours?, lat?, lon?}] (at most 8)}] (only sections
+  with listings), credit: "Wikivoyage", license: "CC BY-SA 4.0",
+  license_url}}`; `{found: false, reason: "failed", facts: []}` when a
+  service did not answer. The town is the item itself when it has a
+  Wikivoyage article, else the suburb or town at the point (Nominatim's
+  reverse, suburb level: Flinders Street Station is in "Melbourne/CBD"),
+  else one step up the item's P131, never a state or country; an article
+  with no listings is not shown. Each answer is kept on disk 30 days (a
+  miss 3; a failure not at all) in `~/.cache/agent-media/place-wiki/`.
+  The card shows the credit and licence of each part it shows: "Wikipedia
+  (CC BY-SA 4.0)", the photo's author and licence linking its Commons
+  page, "Wikivoyage (CC BY-SA 4.0)". 400 `bad_place` (none of wikidata,
+  osm, wikipedia or a point), `bad_wikidata`. Gated, not a guest.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,

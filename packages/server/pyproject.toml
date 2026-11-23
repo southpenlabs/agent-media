@@ -20,7 +20,9 @@ requires-python = ">=3.11"
 # cryptography (Apache-2.0 OR BSD-3-Clause): the ES256 signature on a review
 # posted to Mangrove (map_reviews.py).
 dependencies = ["agent-media-core", "httpx>=0.27", "icalendar>=6", "websockets>=15,<17",
-                "opening-hours-py>=2.1", "vobject>=0.9.9", "cryptography>=42"]
+                "opening-hours-py>=2.1", "vobject>=0.9.9", "cryptography>=42",
+                # Wikivoyage's listings on the Map's place card (map_wiki.py), MIT.
+                "mwparserfromhell>=0.6"]
 
 [project.optional-dependencies]
 # Tags by meaning for the tags sheet's Auto (tag_embed.py): a small local
