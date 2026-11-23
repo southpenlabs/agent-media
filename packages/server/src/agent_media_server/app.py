@@ -5279,6 +5279,13 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                 map_check.on_location(_bearer(h), body)
             except Exception as e:  # noqa: BLE001 - the fix is kept either way
                 _failures.swallowed(e)
+            # The account's devices on the phone's network take its point (map_things.py).
+            from . import map_things
+
+            try:
+                map_things.on_location(_bearer(h), body)
+            except Exception as e:  # noqa: BLE001 - the fix is kept either way
+                _failures.swallowed(e)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/location/history":
         # "Keep where I've been": a batch of the phone's thinned fixes (location_history.py).

@@ -206,6 +206,14 @@ def forget(account: str, body: dict, path: Path | None = None) -> tuple[bool, di
                 conn.execute("DELETE FROM names WHERE account=?", (account,))
                 conn.commit()
                 conn.execute("VACUUM")
+                if path is None:
+                    # Devices found beside the phone came from its fixes: they go too.
+                    from . import map_things
+
+                    try:
+                        map_things.forget_found(account)
+                    except Exception as e:  # noqa: BLE001 - the history is forgotten either way
+                        failures.swallowed(e)
                 return True, {"forgot": n, "all": True}
             span = _day_span(str(body.get("day") or ""))
             if span is None:

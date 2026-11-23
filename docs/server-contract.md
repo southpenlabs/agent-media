@@ -11751,6 +11751,19 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   <name-or-id> --here | lat,lon [--label …] | --remove` (the phone's shared
   location, §6.21b); `media place things` lists them. Behind the map's
   gate. `/features` `map_things`.
+  **Found beside the phone** (24 Nov 2026,
+  docs/proposals/2026-11-22-things-place-themselves.md): when a paired
+  phone's fix comes in (`POST /device/location`), each other device of its
+  account (one with a kind) that reached the server in the last 10 minutes
+  from the same network takes that fix as its point: the same public IPv4,
+  the same IPv6 /64 or the same LAN /24; never the tailnet or loopback.
+  Accuracy is the fix's, at least 50 m. Kept per account in
+  `map-things-found.json`, the newest point per device only, dropped past
+  the account's location-history keep and by its forget all. Placed by
+  hand always wins and is never moved by this. Each listed thing carries
+  `source: hand|phone`, a found one also `accuracy_m` and `found_at`
+  (epoch s); the layer's properties carry the same. `delete` takes a found
+  one off and keeps it off until it is placed by hand.
 - **Pictures over the map** (19 Nov 2026; David: "Can we get an overlay
   with the Hot Springs map"; `map_overlays.py`). An overlay is
   `state_dir()/map-overlays/<id>.json` `{name, image, coordinates: [[lon,

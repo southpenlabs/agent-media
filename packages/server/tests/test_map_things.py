@@ -131,3 +131,81 @@ def test_the_owners_things_are_shared_by_their_devices(server, fake):
     call(server, "POST", "/map/things", {"kind": "speaker", "id": "local", "lat": 1, "lon": 2}, headers=pixel)
     got = call(server, "GET", "/map/things", headers=tablet)[1]["things"]
     assert [(t["kind"], t["id"], t["name"]) for t in got] == [("speaker", "local", "red2")]
+
+
+# --- found beside the phone (docs/proposals/2026-11-22-things-place-themselves.md) ---
+
+def test_network_says_where_only_when_it_can():
+    assert map_things.network("203.0.113.7") == "203.0.113.7"
+    assert map_things.network("192.168.1.20") == map_things.network("192.168.1.99") == "192.168.1.0/24"
+    assert map_things.network("2001:db8:1:2::5") == map_things.network("2001:db8:1:2:ffff::1")
+    for nothing in ("127.0.0.1", "100.101.1.2", "fd7a:115c:a1e0::5", "fe80::1", "", "not an ip"):
+        assert map_things.network(nothing) is None, nothing
+
+
+def _beside(fake, tmp_path):
+    """A phone and a TV of one account, both last seen from 203.0.113.7."""
+    pixel, pid = _device("Pixel 8a")
+    tv, tid = _device("TCL Smart TV")
+    assert devices.set_kind(pid, "phone") and devices.set_kind(tid, "tv")
+    rows = devices.list_devices()
+    for d in rows:
+        d["last_ip"] = "203.0.113.7"
+    return pixel, pid, tv, tid, rows
+
+
+def test_a_device_on_the_phones_network_takes_its_fix(server, fake, tmp_path):
+    pixel, pid, tv, tid, rows = _beside(fake, tmp_path)
+    fix = {"lat": -37.812341, "lon": 144.962341, "accuracy_m": 12}
+    bearer = pixel["Authorization"].removeprefix("Bearer ")
+    assert map_things.on_location(bearer, fix, ip="203.0.113.7", devs=rows) == [tid]
+
+    got = call(server, "GET", "/map/things", headers=pixel)[1]
+    found = {t["id"]: t for t in got["things"]}
+    assert set(found) == {tid}  # never the phone itself
+    assert found[tid]["source"] == "phone" and found[tid]["accuracy_m"] == map_things.NET_M
+    assert (found[tid]["lat"], found[tid]["lon"]) == (-37.81234, 144.96234)
+    assert tid not in {u["id"] for u in got["unplaced"]}
+    from agent_media_server import auth
+
+    layer = {f["properties"]["thing"]: f["properties"] for f in map_things.features(auth.device_account(rows[0]))}
+    assert layer[tid]["source"] == "phone" and layer[tid]["found_at"]
+
+    # Another network, the tailnet, or a stale sighting: nothing found.
+    assert map_things.on_location(bearer, fix, ip="198.51.100.1", devs=rows) == []
+    assert map_things.on_location(bearer, fix, ip="100.90.1.1", devs=rows) == []
+    for d in rows:
+        d["last_seen"] = 0
+    assert map_things.on_location(bearer, fix, ip="203.0.113.7", devs=rows) == []
+
+
+def test_by_hand_wins_and_off_stays_off(server, fake, tmp_path):
+    pixel, pid, tv, tid, rows = _beside(fake, tmp_path)
+    bearer = pixel["Authorization"].removeprefix("Bearer ")
+    fix = {"lat": -37.8, "lon": 144.9}
+    map_things.on_location(bearer, fix, ip="203.0.113.7", devs=rows)
+
+    # Placed by hand: that point, and a later fix does not move it.
+    res, obj = call(server, "POST", "/map/things", {"kind": "device", "id": tid, "lat": -37.7, "lon": 145.0}, headers=pixel)
+    assert res.status == 200 and obj["thing"]["source"] == "hand"
+    assert map_things.on_location(bearer, {"lat": -38.0, "lon": 144.0}, ip="203.0.113.7", devs=rows) == []
+    t = next(t for t in call(server, "GET", "/map/things", headers=pixel)[1]["things"] if t["id"] == tid)
+    assert (t["lat"], t["source"]) == (-37.7, "hand")
+
+    # Taken off: gone, and not found again until placed by hand.
+    assert call(server, "POST", "/map/things", {"kind": "device", "id": tid, "delete": True}, headers=pixel)[0].status == 200
+    assert map_things.on_location(bearer, fix, ip="203.0.113.7", devs=rows) == []
+    got = call(server, "GET", "/map/things", headers=pixel)[1]
+    assert tid not in {t["id"] for t in got["things"]} and tid in {u["id"] for u in got["unplaced"]}
+
+
+def test_found_points_go_with_forget_all(server, fake, tmp_path):
+    from agent_media_server import auth, location_history
+
+    pixel, pid, tv, tid, rows = _beside(fake, tmp_path)
+    bearer = pixel["Authorization"].removeprefix("Bearer ")
+    map_things.on_location(bearer, {"lat": -37.8, "lon": 144.9}, ip="203.0.113.7", devs=rows)
+    account = auth.device_account(rows[0])
+    assert tid in map_things._found(account)
+    assert location_history.forget(account, {"all": True})[0]
+    assert map_things._found(account) == {}
