@@ -11,6 +11,8 @@ def test_watch_id_forms():
     assert mf.watch_id("https://youtu.be/a82hE1aupo8?t=10") == "a82hE1aupo8"
     assert mf.watch_id("https://www.youtube.com/shorts/a82hE1aupo8") == "a82hE1aupo8"
     assert mf.watch_id("a82hE1aupo8") == "a82hE1aupo8"
+    # The server's own link to a cached song, as the app's player sends it back.
+    assert mf.watch_id("https://red2.example/music/files/J2OCSWF7sAw.mp4") == "J2OCSWF7sAw"
     assert mf.watch_id("https://example.com/stream.mp3") is None
     assert mf.watch_id("not-an-id") is None
 

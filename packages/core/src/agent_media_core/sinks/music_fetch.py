@@ -35,8 +35,10 @@ from . import music_local
 
 log = logging.getLogger(__name__)
 
+# `/music/files/<id>.<ext>` is the server's own link to a cached song, which
+# the app's player plays (and sends back for Like, Rotation and the rest).
 _WATCH_ID_RE = re.compile(
-    r"(?:[?&]v=|youtu\.be/|/shorts/|/live/)([A-Za-z0-9_-]{11})")
+    r"(?:[?&]v=|youtu\.be/|/shorts/|/live/|/music/files/)([A-Za-z0-9_-]{11})")
 
 # Reuse the phone's ControlMaster options so repeated fetches are cheap.
 _SSH_OPTS = music_local._SSH_OPTS
