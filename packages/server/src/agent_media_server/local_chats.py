@@ -55,8 +55,13 @@ from ._jsonmap import JsonMap
 from agent_media_core import failures as _failures
 
 #: The networks the companion bridges: id → the name a person knows.
+#: All nine the companion runs (sasonica-bridges docs/api.md `-networks`):
+#: Telegram and the rest came later, and a chat of one not listed here had no
+#: Local id, so its Mute, Quiet and Archive went to the phone and got "no such
+#: route" (David, 23 Nov 2026, a Telegram chat's Mute).
 NETWORKS = {"meta": "Messenger", "instagram": "Instagram", "whatsapp": "WhatsApp",
-            "gmessages": "Google Messages"}
+            "gmessages": "Google Messages", "telegram": "Telegram", "signal": "Signal",
+            "slack": "Slack", "discord": "Discord", "teams": "Microsoft Teams"}
 KINDS = ("person", "group")
 _NET_ID = r"[A-Za-z0-9][A-Za-z0-9._@+=-]{0,127}"
 NET_ID = re.compile(_NET_ID)

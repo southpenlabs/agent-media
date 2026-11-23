@@ -62,7 +62,7 @@ def test_good_ids(sid):
     assert local_chats.is_local(sid)
 
 
-@pytest.mark.parametrize("sid", ["local:telegram:1", "local:whatsapp:", "local:whatsapp:../x",
+@pytest.mark.parametrize("sid", ["local:irc:1", "local:whatsapp:", "local:whatsapp:../x",
                                  "local:whatsapp:a/b", "local:whatsapp:a:b", "phone.IWFiYw",
                                  "local:whatsapp:" + "a" * 129, "local:whatsapp:.hidden",
                                  "LOCAL:whatsapp:1", "local:whatsapp:a b"])
@@ -72,7 +72,7 @@ def test_bad_ids(sid):
 
 def test_bad_lists_are_refused(server, phone):
     t = phone["token"]
-    assert post(server, t, {"network": "telegram", "chats": []})[0] == 400
+    assert post(server, t, {"network": "irc", "chats": []})[0] == 400
     assert post(server, t, {"network": "whatsapp", "chats": [{"id": "a/b", "kind": "person"}]})[0] == 400
     assert post(server, t, {"network": "whatsapp", "chats": [{"id": "a", "kind": "channel"}]})[0] == 400
     assert post(server, t, {"network": "whatsapp", "chats": [{"id": "a", "kind": "person",

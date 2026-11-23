@@ -103,8 +103,8 @@ def test_bad_changes_are_refused(server, monkeypatch):
         st, got = post(server, t, {field: v})
         assert st == 400 and got["field"] == field, (field, v)
     assert post(server, t, {"leaves_phone": "everything"})[0] == 400
-    st, got = post(server, t, {"network_exceptions": {"telegram": True}})
-    assert st == 400 and got["code"] == "unknown_network" and got["field"] == "telegram"
+    st, got = post(server, t, {"network_exceptions": {"irc": True}})
+    assert st == 400 and got["code"] == "unknown_network" and got["field"] == "irc"
     assert post(server, t, {"network_exceptions": {"whatsapp": "yes"}})[0] == 400
     assert post(server, t, {"network_exceptions": []})[0] == 400
     assert post(server, t, {"backup": "cloud"})[0] == 400
