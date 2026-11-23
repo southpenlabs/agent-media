@@ -342,6 +342,8 @@ except /pair, which is how a device gets its token):
   GET  /contacts/labels → every label on someone, with counts (§6.25)
   GET  /contacts/suggestions → every open "Same person?" pair, both sides'
                   names, sources, labels and last contact (contacts_review.py)
+  GET  /contacts/export.vcf[?photos=1] → the caller's book as one vCard
+                  file, to take to another app (contacts_vcard.py, §6.25)
   POST /contacts/import[?name=] <a Facebook or Instagram export: .zip or
                   JSON, raw or multipart> → its friends / followers / following
                   into the caller's book, the counts (contacts_import.py, §6.25)
@@ -516,7 +518,7 @@ CORS_PATHS = frozenset({
     "/sessions/events", "/search", "/search/help", "/search/compose", "/contacts",
     "/contacts/google", "/contacts/google/login", "/contacts/google/finish",
     "/contacts/google/signout", "/contacts/labels", "/contacts/suggestions",
-    "/contacts/import", "/contacts/timeline/backfill", "/bridges",
+    "/contacts/import", "/contacts/timeline/backfill", "/contacts/export.vcf", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
@@ -1577,6 +1579,34 @@ def _room_media(h: BaseHTTPRequestHandler, thread: str, ev_id: str, query: str) 
 def _contact_photo(h: BaseHTTPRequestHandler, cid: str, query: str) -> None:
     """`GET /contacts/<id>/photo` (§6.25): their picture from the caller's
     book, gated as the card is; `?access_token=` for an <img>, which cannot
+def _contacts_export(h: BaseHTTPRequestHandler, query: str) -> None:
+    """`GET /contacts/export.vcf[?photos=1]` (§6.25 "Export"): the caller's
+    book as one vCard file, gated as the list is; `?access_token=` for a
+    plain download link, which cannot set a header (contacts_vcard.py)."""
+    from . import contacts_vcard
+
+    q = parse_qs(query)
+    bearer = _bearer(h)
+    if not bearer:
+        bearer = ((q.get("access_token") or [""])[0]).strip()
+        auth.set_request_bearer(bearer)
+    user, err = auth.gate(bearer)
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    photos = ((q.get("photos") or [""])[0]).strip() in ("1", "true", "yes")
+    data = contacts_vcard.export(photos=photos).encode()
+    h.send_response(200)
+    h.send_header("Content-Type", contacts_vcard.TYPE)
+    h.send_header("Content-Length", str(len(data)))
+    h.send_header("Content-Disposition", f'attachment; filename="{contacts_vcard.filename()}"')
+    h.send_header("Cache-Control", "private, no-store")
+    h.send_header("X-Content-Type-Options", "nosniff")
+    _cors(h)
+    h.end_headers()
+    h.wfile.write(data)
+
+
     set a header; `?size=large` the larger one (the thumbnail when there is
     none). An ETag (the picture's hash) and Last-Modified; a matching
     If-None-Match is 304; none to have is 404."""
@@ -2751,6 +2781,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = local_messages.avatars((parse_qs(query).get("chat") or [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/contacts/export.vcf":
+        _contacts_export(h, query)
     elif path == "/local/avatar":
         _local_avatar(h, query)
     elif path == "/session/rewind":
