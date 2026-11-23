@@ -282,9 +282,10 @@ def test_v2_keys_are_its_credentials_and_auth_json_is_carried(server, tmp_path):
     assert json.loads(auth.read_text())["openrouter"]["key"].endswith("x" * 30)  # untouched
 
 
-def test_v2_model_sheet_is_its_model_list(server):
+def test_v2_model_sheet_is_its_model_list(server, monkeypatch):
     from agent_media_core import opencode_models
 
+    monkeypatch.delenv("MEDIA_OPENCODE_MODELS", raising=False)  # the host's own extras
     opencode_models.forget()
     offered, default = opencode_models.models()
     assert [m["id"] for m in offered] == ["opencode/big-pickle", "openrouter/google/gemma:free"]
