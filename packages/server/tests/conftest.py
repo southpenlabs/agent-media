@@ -97,6 +97,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(map_vic, "_get", _no_vic)
     monkeypatch.setattr(map_vic, "_road_line", _no_vic)
     monkeypatch.setattr(map_vic, "_cache", lambda: tmp_path / "vic-roads.json")
+    # Nor other states' camera lists (map_gov_cameras.py), and none is switched on from the env file.
+    from agent_media_server import map_gov_cameras
+
+    def _no_gov(*a, **k):
+        raise RuntimeError("a test reached a state's open-data portal")
+
+    monkeypatch.setattr(map_gov_cameras, "_get", _no_gov)
+    for st in map_gov_cameras.STATES.values():
+        monkeypatch.delenv(st["env"], raising=False)
     # Live traffic (TomTom) and the offline map's Protomaps build are never
     # asked by a test: one that wants an answer passes its own fetch.
     from agent_media_server import map_offline, map_traffic

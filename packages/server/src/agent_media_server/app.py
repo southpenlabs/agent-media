@@ -596,7 +596,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
-                       "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/reviews"})
+                       "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6453,6 +6453,14 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         ok, detail = map_layers._gate(bearer, host)
         if ok:
             detail = map_offline.listing()
+    elif method == "POST" and path == "/map/offline/build":
+        # A state's offline map asked for: queued and built one at a time, off the server's process (map_offline.py).
+        from . import map_layers, map_offline
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            ok, detail = map_offline.request(str((_read_json(h) or {}).get("region") or ""))
     elif method == "POST" and path == "/map/traffic/eta":
         # The time along what is left of a route being guided, in today's traffic (map_traffic.py).
         from . import map_layers

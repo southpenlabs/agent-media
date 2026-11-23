@@ -11564,6 +11564,21 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   spreadsheet the page links, finds each road with Nominatim's structured
   search (one a second, kept in the cache dir, a miss asked again after 30
   days) and keeps `vic-cameras.json` in the state dir.
+- **Other states' official camera sites** (23 Nov 2026; `map_gov_cameras.py`).
+  Per state, off until switched on: `MEDIA_MAP_CAMERAS_ACT=1` gives a layer
+  `cameras_act`, `MEDIA_MAP_CAMERAS_NSW=1` a layer `cameras_nsw` ("ACT
+  cameras (official)", `kind: "points"`, `bbox: true`, `min_zoom` 9, `source`
+  and `note` saying how old and how complete), each feature `title` (Speed
+  camera, Red light and speed camera, Point-to-point camera, Mobile speed
+  camera site, Phone camera site), `detail` (the road) and `enforces`
+  (`speed`, `red_light`, `average_speed`, `mobile_speed`, `phone`). The ACT's
+  lists are data.act.gov.au's (CC BY 4.0, monthly; decommissioned cameras
+  left out), NSW's Transport for NSW's fixed and red-light lists (CC BY, last
+  published 2021). `GET /map/alerts` adds the switched-on states' cameras to
+  `points` with `source: "act"|"nsw"` (not the vans' possible sites), leaving
+  out one within 40 m of an OSM camera of the same kind. `python -m
+  agent_media_server.map_gov_cameras refresh [state …]` (weekly on the host)
+  keeps `gov-cameras-<state>.json` in the state dir.
 - **Reported phone cameras** (11 Nov 2026; David: "let's use the speed
   camera locations data for personal use"; `map_reports.py`): a
   personal-use method, `camera-reports` (core `personal_use`), provided by
@@ -11756,6 +11771,23 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   404 `no_file` for any other. `python -m agent_media_server.map_offline
   build` (monthly on the owner's server) extracts the area from the newest
   Protomaps planet build by range requests (outside-services row 75).
+  **Every state and territory on request** (23 Nov 2026; David: "Should we
+  apply this to other state maps?"). The listing also carries `regions:
+  [{id, name, bounds, approx_bytes, state: none|queued|building|ready|failed,
+  built?, version?, bytes?, done?, total?, error?}]` for all eight
+  (`victoria`, `new-south-wales` (its box holds the ACT),
+  `australian-capital-territory`, `queensland`, `south-australia`,
+  `western-australia`, `tasmania`, `northern-territory`; boxes from the ABS's
+  state extents, row 84) and `on_request: true`; `areas` lists each built
+  region, Victoria first. **`POST /map/offline/build {region}`** (the map's
+  gate) queues the region and answers the listing; 400 `no_region` for an
+  unknown one, 503 `not_started` when no worker could be started. Builds run
+  one at a time in `python -m agent_media_server.map_offline work`, started
+  by the server as a transient `systemd-run --user` unit (`--slice` from
+  `MEDIA_MAP_OFFLINE_SLICE`, `MemoryMax` from `MEDIA_MAP_OFFLINE_MEMORY_MAX`,
+  default 2G; a detached process without systemd), which leaves when the
+  queue is empty. The monthly `build` with no `--region` rebuilds every
+  region built so far.
 - **Sharing a trip** (19 Nov 2026; David: the link "by default ends when
   the trip ends but has an option for other" lengths, opened by "anyone
   with the link"; `map_trips.py`, `/features` `map_trips`). `POST

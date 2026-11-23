@@ -140,6 +140,12 @@ def _all() -> list[dict]:
 
     for lay in map_vic.layers():
         out.append({"layer": lay, "features": map_vic.read})
+    # Other states' official camera sites (map_gov_cameras.py), each where switched on.
+    from . import map_gov_cameras
+
+    for lay in map_gov_cameras.layers():
+        state = lay["id"].removeprefix("cameras_")
+        out.append({"layer": lay, "features": (lambda st: lambda bbox: map_gov_cameras.read(st, bbox))(state)})
     # People's reports of phone cameras, a personal-use add-on (map_reports.py).
     from . import map_reports
 
@@ -249,7 +255,8 @@ def alerts(near: str, radius_km: str, bearer: str, host: bool = False) -> tuple[
     """`GET /map/alerts?near=lat,lon[&radius_km=]`: the cameras the phone
     alerts on as it drives (David, 10 Nov 2026: "alerts for when approaching
     them"), compact: `points` (speed, red light, average speed cameras with
-    `kind` and `limit`) and `roads` (Victoria's phone and seatbelt sites,
+    `kind` and `limit`, and other states' official ones where switched on,
+    map_gov_cameras.py) and `roads` (Victoria's phone and seatbelt sites,
     where on, each a name and its lines)."""
     import math
 
@@ -290,6 +297,10 @@ def alerts(near: str, radius_km: str, bearer: str, host: bool = False) -> tuple[
     for r in map_reports.reports():
         if box[1] <= r["lat"] <= box[3] and box[0] <= r["lon"] <= box[2]:
             points.append({"lat": r["lat"], "lon": r["lon"], "kind": "phone", "reported": r.get("kind") or "phone"})
+    # Other states' official cameras (map_gov_cameras.py), less those OSM already gave.
+    from . import map_gov_cameras
+
+    points += map_gov_cameras.alert_points(box, points)
     if map_vic.enabled():
         feats, _x = map_vic.read(box)
         for f in feats:

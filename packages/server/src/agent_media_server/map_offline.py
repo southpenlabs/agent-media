@@ -28,18 +28,39 @@ version, bounds, max_zoom, bytes, files with their paths), `{areas: []}`
 until a build is done; `GET /map/offline/<area>/<file>` hands a file over,
 a byte range at a time when asked (the phone downloads over Wi-Fi and
 resumes), behind the map's gate.
+
+Every Australian state and territory on request (David, 23 Nov 2026:
+"Should we apply this to other state maps?"). REGIONS holds each one's box,
+from the ABS's state boundaries (ASGS 2021 STE, CC BY 4.0: each state's
+extent, a little margin added, NSW without Lord Howe Island): a box, not
+the outline, since an extract is a box of tiles anyway, so "this area
+covers where I am" is the box too. NSW's box holds the ACT. The listing's
+`regions` names every one with its rough size and state (ready, queued,
+building with bytes done, failed); `POST /map/offline/build {region}`
+(`request`) puts one on the queue and, unless a worker is already on it,
+starts one: `python -m agent_media_server.map_offline work` as a transient
+`systemd-run --user` unit, so the build is not the server's own child and
+can sit in a build pool with its own memory cap (MEDIA_MAP_OFFLINE_SLICE,
+MEDIA_MAP_OFFLINE_MEMORY_MAX; a detached process where there is no
+systemd). The worker builds the queue one region at a time and goes when it
+is empty; the monthly `build` (no --region) rebuilds every region built so
+far, Victoria when there are none.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
+import fcntl
 import gzip
 import json
 import math
 import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import time
 import urllib.error
@@ -58,6 +79,19 @@ ASSETS = "https://protomaps.github.io/basemaps-assets"
 BOUNDS = (140.95, -39.25, 150.05, -33.95)
 AREA = "victoria"
 AREA_NAME = "Victoria"
+#: Every state and territory: id → (name, box w, s, e, n, rough MB at MAX_ZOOM).
+#: Boxes from the ABS's ASGS 2021 state extents (CC BY 4.0), rounded outwards;
+#: sizes (tiles and the fonts) from `build --dry-run` against the 23 Nov 2026 planet build.
+REGIONS: dict[str, tuple[str, tuple[float, float, float, float], int]] = {
+    "victoria": ("Victoria", BOUNDS, 230),
+    "new-south-wales": ("New South Wales and the ACT", (140.95, -37.55, 153.70, -28.10), 344),
+    "australian-capital-territory": ("Australian Capital Territory", (148.70, -35.97, 149.45, -35.07), 12),
+    "queensland": ("Queensland", (137.95, -29.23, 153.60, -9.09), 253),
+    "south-australia": ("South Australia", (128.95, -38.11, 141.05, -25.95), 95),
+    "western-australia": ("Western Australia", (112.87, -35.24, 129.05, -13.64), 177),
+    "tasmania": ("Tasmania", (143.77, -43.79, 148.55, -39.15), 57),
+    "northern-territory": ("Northern Territory", (128.95, -26.05, 138.05, -10.86), 45),
+}
 #: Zoom 15 is the builds' deepest, but Victoria to 15 is 525 MB and to 14
 #: is 240 MB (22 Nov 2026); MapLibre draws 14's tiles on past it, every road
 #: and its name there, the buildings' outlines and house numbers coarser.
@@ -330,7 +364,7 @@ def _directories(entries: list[tuple[int, int, int, int]]) -> tuple[bytes, bytes
 
 
 def extract(url: str, out: Path, bounds=BOUNDS, max_zoom: int = MAX_ZOOM, fetch: RangeFetch | None = None,
-            progress: Callable[[int, int], None] | None = None) -> dict:
+            progress: Callable[[int, int], None] | None = None, area: str = AREA) -> dict:
     """Write the box's tiles from the PMTiles archive at `url` to `out`
     (a new PMTiles v3 archive); answers what `plan` found."""
     fetch = fetch or _http_range
@@ -356,7 +390,7 @@ def extract(url: str, out: Path, bounds=BOUNDS, max_zoom: int = MAX_ZOOM, fetch:
     root, leaves = _directories(entries)
     w, s, e, n = bounds
     meta = dict(p["metadata"]) if isinstance(p["metadata"], dict) else {}
-    meta["sasonica:area"] = AREA
+    meta["sasonica:area"] = area
     meta_b = gzip.compress(json.dumps(meta).encode(), mtime=0)
     nh = dict(h)
     nh.update(root_offset=HEADER_LEN, root_length=len(root),
@@ -467,52 +501,265 @@ def newest_build(get: Callable[[str], bytes] | None = None) -> str:
     return keys[-1]
 
 
-def build(dry_run: bool = False, max_zoom: int = MAX_ZOOM, out_dir: Path | None = None) -> dict:
+def _region(rid: str) -> tuple[str, tuple[float, float, float, float], int]:
+    if rid not in REGIONS:
+        raise ValueError(f"no such region: {rid}")
+    return REGIONS[rid]
+
+
+@contextlib.contextmanager
+def _locked(d: Path):
+    """The offline dir's lock, held across a read and write of the manifest or the jobs."""
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / ".lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _read(p: Path, empty: dict) -> dict:
+    try:
+        got = json.loads(p.read_text())
+        return got if isinstance(got, dict) else dict(empty)
+    except FileNotFoundError:
+        return dict(empty)
+    except (OSError, ValueError) as e:
+        _failures.swallowed(e)
+        return dict(empty)
+
+
+def _write(p: Path, data: dict) -> None:
+    tmp = p.with_name(f".{p.name}.tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    os.replace(tmp, p)
+
+
+def _order(rid: str) -> int:
+    return list(REGIONS).index(rid) if rid in REGIONS else len(REGIONS)
+
+
+def build(dry_run: bool = False, max_zoom: int = MAX_ZOOM, out_dir: Path | None = None, region: str = AREA,
+          progress: Callable[[int, int], None] | None = None, key: str | None = None,
+          assets_from: Path | None = None) -> dict:
+    """Extract one region from the newest planet build into the offline dir and
+    list it in the manifest (the other regions kept as they are)."""
     d = out_dir or offline_dir()
-    key = newest_build()
+    name, bounds, _mb = _region(region)
+    key = key or newest_build()
     url = BUILD_URL.format(key=key)
     if dry_run:
-        p = plan(url, BOUNDS, max_zoom)
-        return {"build": key, "tiles": p["tiles"], "contents": p["contents"], "bytes": p["bytes"],
+        p = plan(url, bounds, max_zoom)
+        return {"region": region, "build": key, "tiles": p["tiles"], "contents": p["contents"], "bytes": p["bytes"],
                 "max_zoom": p["max_zoom"]}
     d.mkdir(parents=True, exist_ok=True)
     started = time.time()
     last = [0.0]
 
-    def progress(done: int, total: int) -> None:
+    def say(done: int, total: int) -> None:
+        if progress:
+            progress(done, total)
         if time.time() - last[0] > 30:
             last[0] = time.time()
-            print(f"{done >> 20} of {total >> 20} MB", flush=True)
+            print(f"{region}: {done >> 20} of {total >> 20} MB", flush=True)
 
-    p = extract(url, d / f"{AREA}.pmtiles", BOUNDS, max_zoom, progress=progress)
-    size_a = assets(d / f"{AREA}-assets.zip")
+    p = extract(url, d / f"{region}.pmtiles", bounds, max_zoom, progress=say, area=region)
+    zip_path = d / f"{region}-assets.zip"
+    if assets_from and assets_from.is_file() and assets_from != zip_path:
+        # The same fonts and sprites for every region: one download a run.
+        part = zip_path.with_name(zip_path.name + ".part")
+        shutil.copyfile(assets_from, part)
+        os.replace(part, zip_path)
+        size_a = zip_path.stat().st_size
+    else:
+        size_a = assets(zip_path)
     version = key.split(".")[0]
-    area = {"id": AREA, "name": AREA_NAME, "version": version, "source": f"Protomaps build {key}",
+    area = {"id": region, "name": name, "version": version, "source": f"Protomaps build {key}",
             "built_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "bounds": list(BOUNDS), "max_zoom": p["max_zoom"],
+            "bounds": list(bounds), "max_zoom": p["max_zoom"],
             "credit": "© OpenStreetMap contributors · Protomaps",
-            "files": [{"name": f"{AREA}.pmtiles", "bytes": (d / f"{AREA}.pmtiles").stat().st_size, "kind": "tiles"},
-                      {"name": f"{AREA}-assets.zip", "bytes": size_a, "kind": "assets"}]}
-    tmp = d / f".{MANIFEST}.tmp"
-    tmp.write_text(json.dumps({"areas": [area]}, indent=1))
-    os.replace(tmp, d / MANIFEST)
-    print(f"built {AREA} from {key} in {round(time.time() - started)} s: "
+            "files": [{"name": f"{region}.pmtiles", "bytes": (d / f"{region}.pmtiles").stat().st_size, "kind": "tiles"},
+                      {"name": f"{region}-assets.zip", "bytes": size_a, "kind": "assets"}]}
+    with _locked(d):
+        man = _read(d / MANIFEST, {"areas": []})
+        areas = [a for a in man.get("areas") or [] if isinstance(a, dict) and a.get("id") != region] + [area]
+        areas.sort(key=lambda a: _order(str(a.get("id"))))
+        _write(d / MANIFEST, {**man, "areas": areas})
+    print(f"built {region} from {key} in {round(time.time() - started)} s: "
           f"{sum(f['bytes'] for f in area['files']) >> 20} MB", flush=True)
     return area
 
 
-def listing(out_dir: Path | None = None) -> dict:
-    """`GET /map/offline`: what there is to download, with each file's path."""
+def built_regions(out_dir: Path | None = None) -> list[str]:
+    """The regions in the manifest: the ones someone has asked for."""
     d = out_dir or offline_dir()
+    man = _read(d / MANIFEST, {"areas": []})
+    return [str(a["id"]) for a in man.get("areas") or [] if isinstance(a, dict) and a.get("id") in REGIONS]
+
+
+def build_all(out_dir: Path | None = None, max_zoom: int = MAX_ZOOM) -> list[dict]:
+    """The monthly rebuild: every region built so far (Victoria when none), one at a time."""
+    d = out_dir or offline_dir()
+    want = built_regions(d) or [AREA]
+    key = newest_build()
+    out: list[dict] = []
+    failed: list[str] = []
+    for rid in want:
+        try:
+            out.append(build(max_zoom=max_zoom, out_dir=d, region=rid, key=key,
+                             assets_from=d / f"{out[0]['id']}-assets.zip" if out else None))
+        except (OSError, ValueError, RuntimeError) as e:
+            # One region's failure does not keep the others old.
+            _failures.swallowed(e)
+            print(f"offline map {rid} not built: {e}", file=sys.stderr, flush=True)
+            failed.append(rid)
+    if failed and not out:
+        raise RuntimeError("no region built: " + ", ".join(failed))
+    return out
+
+
+# --- builds on request ------------------------------------------------------------
+
+JOBS = "jobs.json"
+#: A worker that has not said its pid this long after it was started is taken as never started.
+START_GRACE_S = 120
+
+
+def _alive(pid: int) -> bool:
     try:
-        man = json.loads((d / MANIFEST).read_text())
-    except FileNotFoundError:
-        return {"areas": []}
-    except (OSError, ValueError) as e:
-        _failures.swallowed(e)
-        return {"areas": []}
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return b"map_offline" in f.read()
+    except OSError:
+        return False
+
+
+def _worker_live(w: dict | None, now: float) -> bool:
+    if not w:
+        return False
+    pid = w.get("pid")
+    if pid:
+        return _alive(int(pid))
+    return now - float(w.get("started") or 0) < START_GRACE_S
+
+
+def start_worker(unit: str, out_dir: Path) -> None:
+    """The worker as a transient user unit (in its own slice and memory cap where
+    the host says), or a detached process where there is no systemd."""
+    cmd = [sys.executable, "-m", "agent_media_server.map_offline", "work"]
+    env_d = f"MEDIA_MAP_OFFLINE_DIR={out_dir}"
+    if shutil.which("systemd-run") and os.environ.get("XDG_RUNTIME_DIR"):
+        run = ["systemd-run", "--user", "--collect", "--quiet", "--unit", unit, "--nice=10",
+               "-p", f"MemoryMax={os.environ.get('MEDIA_MAP_OFFLINE_MEMORY_MAX') or '2G'}",
+               "-p", "MemorySwapMax=0", f"--setenv={env_d}"]
+        if os.environ.get("MEDIA_MAP_OFFLINE_SLICE"):
+            run.append(f"--slice={os.environ['MEDIA_MAP_OFFLINE_SLICE']}")
+        subprocess.run([*run, *cmd], check=True, capture_output=True, timeout=30)
+        return
+    subprocess.Popen(cmd, env={**os.environ, "MEDIA_MAP_OFFLINE_DIR": str(out_dir)}, start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def request(region: str, out_dir: Path | None = None,
+            starter: Callable[[str, Path], None] | None = None) -> tuple[bool, dict]:
+    """`POST /map/offline/build {region}`: the region on the queue, and a worker
+    started unless one is on it. Answers the listing."""
+    d = out_dir or offline_dir()
+    if region not in REGIONS:
+        return False, {"status": 400, "code": "no_region", "error": "no such region"}
+    now = time.time()
+    start = None
+    with _locked(d):
+        jobs = _read(d / JOBS, {})
+        queue = [q for q in jobs.get("queue") or [] if q in REGIONS]
+        running = (jobs.get("running") or {}).get("region")
+        live = _worker_live(jobs.get("worker"), now)
+        if region not in queue and not (live and running == region):
+            queue.append(region)
+        jobs["queue"] = queue
+        (jobs.get("failed") or {}).pop(region, None)
+        if not live:
+            start = f"agent-media-map-offline-{int(now)}"
+            jobs["worker"] = {"unit": start, "started": now}
+            jobs.pop("running", None)
+        _write(d / JOBS, jobs)
+    if start:
+        try:
+            (starter or start_worker)(start, d)
+        except (OSError, subprocess.SubprocessError) as e:
+            _failures.swallowed(e)
+            with _locked(d):
+                jobs = _read(d / JOBS, {})
+                jobs.pop("worker", None)
+                _write(d / JOBS, jobs)
+            return False, {"status": 503, "code": "not_started",
+                           "error": f"the offline map build could not be started: {e}"}
+    return True, listing(d)
+
+
+def work(out_dir: Path | None = None, builder: Callable[..., dict] | None = None) -> int:
+    """The worker: the queue's regions built one at a time, then gone. Answers how many were built."""
+    d = out_dir or offline_dir()
+    builder = builder or build
+    with _locked(d):
+        jobs = _read(d / JOBS, {})
+        w = jobs.get("worker") or {}
+        if w.get("pid") and w["pid"] != os.getpid() and _alive(int(w["pid"])):
+            return 0  # another worker has it
+        jobs["worker"] = {**w, "pid": os.getpid(), "started": w.get("started") or time.time()}
+        _write(d / JOBS, jobs)
+    built = 0
+    key = None
+    assets_from: Path | None = None
+    while True:
+        with _locked(d):
+            jobs = _read(d / JOBS, {})
+            queue = [q for q in jobs.get("queue") or [] if q in REGIONS]
+            if not queue:
+                jobs.pop("running", None)
+                jobs.pop("worker", None)
+                jobs["queue"] = []
+                _write(d / JOBS, jobs)
+                return built
+            rid = queue.pop(0)
+            jobs["queue"] = queue
+            jobs["running"] = {"region": rid, "done": 0, "total": 0, "since": round(time.time())}
+            _write(d / JOBS, jobs)
+        seen = [0.0]
+
+        def progress(done: int, total: int, rid: str = rid) -> None:
+            if time.time() - seen[0] < 5 and done < total:
+                return
+            seen[0] = time.time()
+            with _locked(d):
+                jobs = _read(d / JOBS, {})
+                if (jobs.get("running") or {}).get("region") == rid:
+                    jobs["running"].update(done=done, total=total)
+                    _write(d / JOBS, jobs)
+
+        try:
+            key = key or newest_build()
+            builder(out_dir=d, region=rid, progress=progress, key=key, assets_from=assets_from)
+            assets_from = d / f"{rid}-assets.zip"
+            built += 1
+        except Exception as e:  # noqa: BLE001 - said in the listing, and the queue goes on
+            _failures.swallowed(e)
+            print(f"offline map {rid} not built: {e}", file=sys.stderr, flush=True)
+            with _locked(d):
+                jobs = _read(d / JOBS, {})
+                jobs.setdefault("failed", {})[rid] = {"error": str(e)[:300], "at": round(time.time())}
+                _write(d / JOBS, jobs)
+
+
+def listing(out_dir: Path | None = None) -> dict:
+    """`GET /map/offline`: what there is to download, with each file's path
+    (`areas`), and every region there is to ask for with its state (`regions`)."""
+    d = out_dir or offline_dir()
+    man = _read(d / MANIFEST, {"areas": []})
     areas = []
     for a in man.get("areas") or []:
+        if not isinstance(a, dict) or not a.get("id"):
+            continue
         files = []
         for f in a.get("files") or []:
             p = d / str(f.get("name") or "")
@@ -521,7 +768,27 @@ def listing(out_dir: Path | None = None) -> dict:
             files.append({**f, "bytes": p.stat().st_size, "path": f"/map/offline/{a['id']}/{f['name']}"})
         else:
             areas.append({**a, "files": files, "bytes": sum(f["bytes"] for f in files)})
-    return {"areas": areas}
+    jobs = _read(d / JOBS, {})
+    live = _worker_live(jobs.get("worker"), time.time())
+    running = (jobs.get("running") or {}) if live else {}
+    queue = set(jobs.get("queue") or []) if live else set()
+    failed = jobs.get("failed") or {}
+    have = {a["id"]: a for a in areas}
+    regions = []
+    for rid, (name, bounds, mb) in REGIONS.items():
+        r: dict = {"id": rid, "name": name, "bounds": list(bounds), "approx_bytes": mb << 20}
+        if rid in have:
+            r.update(built=True, version=have[rid].get("version"), bytes=have[rid]["bytes"])
+        if running.get("region") == rid:
+            r.update(state="building", done=running.get("done") or 0, total=running.get("total") or 0)
+        elif rid in queue:
+            r["state"] = "queued"
+        elif rid in failed:
+            r.update(state="failed", error=str((failed[rid] or {}).get("error") or ""))
+        else:
+            r["state"] = "ready" if rid in have else "none"
+        regions.append(r)
+    return {"areas": areas, "regions": regions, "on_request": True}
 
 
 FILE = re.compile(r"/map/offline/([a-z0-9-]{1,40})/([A-Za-z0-9._-]{1,80})")
@@ -540,10 +807,13 @@ def file_for(area: str, name: str, out_dir: Path | None = None) -> Path | None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m agent_media_server.map_offline")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build", help="extract Victoria's tiles from the newest Protomaps build")
+    b = sub.add_parser("build", help="extract regions' tiles from the newest Protomaps build "
+                                     "(no --region: every region built so far, Victoria when none)")
+    b.add_argument("--region", action="append", choices=sorted(REGIONS))
     b.add_argument("--dry-run", action="store_true", help="say how big it would be, read no tiles")
     b.add_argument("--max-zoom", type=int, default=MAX_ZOOM)
     sub.add_parser("list", help="what GET /map/offline answers")
+    sub.add_parser("work", help="build the regions asked for (POST /map/offline/build), one at a time")
     a = ap.parse_args(argv)
     from agent_media_core import logs
 
@@ -551,8 +821,17 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "list":
         print(json.dumps(listing(), indent=1))
         return 0
+    if a.cmd == "work":
+        print(f"built {work()} offline map region(s)", flush=True)
+        return 0
     try:
-        print(json.dumps(build(dry_run=a.dry_run, max_zoom=a.max_zoom), indent=1))
+        if a.dry_run:
+            out = [build(dry_run=True, max_zoom=a.max_zoom, region=r) for r in (a.region or [AREA])]
+        elif a.region:
+            out = [build(max_zoom=a.max_zoom, region=r) for r in a.region]
+        else:
+            out = build_all(max_zoom=a.max_zoom)
+        print(json.dumps(out, indent=1))
     except (OSError, ValueError, RuntimeError) as e:
         print(f"offline map not built: {e}", file=sys.stderr)
         return 1
@@ -561,5 +840,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
