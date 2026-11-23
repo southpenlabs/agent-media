@@ -10267,6 +10267,30 @@ card per plan on Coding agents, and a thread's own plan's warnings under
 its input box (a Codex or Antigravity thread its agent's; opencode only on
 an `opencode-go/…` model).
 
+**Prepaid credit and API keys** (24 Nov 2026). `GET /usage/credits` lists
+the providers a key is found for on the host, looked for in the environment,
+opencode's credentials, `~/.config/litellm/litellm.env` and `~/.zsh_secrets`
+(MEDIA_CREDIT_KEY_FILES, colon-separated, names more), never configured
+(credit_usage.py):
+
+```
+→ {"ok": true, "low_at": 1.0,                 // MEDIA_CREDIT_LOW, in currency units
+   "credits": [{"id": "openrouter"|"venice"|"anthropic"|"openai"|"qwen",
+                "name": "OpenRouter",
+                "state": "ok"|"low"|"empty"|"rejected"|"unknown",
+                "currency": "USD"|null,
+                "left": 5.07|null, "limit": 20.0|null, "used": 14.93|null,
+                "note": ""}]}
+```
+
+OpenRouter says what was bought and used; Venice its USD balance (DIEM in
+`note`); the Anthropic API key has no balance, so a one-token request every
+six hours says whether there is credit; the OpenAI and Qwen (Alibaba Model
+Studio: DASHSCOPE_API_KEY or QWEN_API_KEY) keys only whether they work.
+Never a key. The app shows them on Coding agents, and a thread whose model
+id names one of them (`venice/…`, `openrouter/…`, `gateway/venice/…`) warns
+under its input box when it is low, used up or its key refused.
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by

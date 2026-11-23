@@ -504,7 +504,7 @@ CORS_PATHS = frozenset({
     "/session/ask/part", "/voice/check", "/voice/tidy", "/voice/tidy/intents", "/voice/tidy/sent", "/voice/tidy/draft",
     "/speech/now", "/speech/recent", "/speech/up-next", "/speech/heard", "/speech/ctl", "/speech/sentences", "/speech/clip", "/speech/say", "/news", "/feedback/settings", "/storage", "/speech/default", "/speech/thinking", "/speech/balance", "/speech/speed-reset", "/speech/music-bed", "/speech/music-bed/song", "/speech/music/log", "/speech/music/next", "/speech/voice", "/speech/voice/sample", "/speech/voice/download", "/speech/stt",
     "/settings/language", "/settings/read-receipts", "/settings/personal", "/settings/agent", "/settings/services", "/settings/people", "/settings/mail", "/settings/prompts", "/settings/models", "/settings/models/usage",
-    "/sessions/state", "/commands", "/usage", "/usage/plans", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
+    "/sessions/state", "/commands", "/usage", "/usage/plans", "/usage/credits", "/rename", "/session/quiet", "/session/mute", "/session/remind", "/session/issue",
     "/local/chats", "/local/backup", "/local/backups", "/local/settings", "/local/messages",
     "/local/avatar", "/local/avatars", "/local/send", "/local/outbox", "/local/outbox/result",
     "/local/agents",
@@ -2672,6 +2672,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         log.info(f"commands: {h.client_address[0]} {query} -> "
               f"{len(detail.get('commands') or []) if ok else detail}")
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    elif path == "/usage/credits":
+        # Prepaid credit and API keys found on the host (credit_usage.py).
+        from . import credit_usage
+
+        ok, detail = credit_usage.credits(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/usage/plans":
         # The subscriptions signed in here whose usage /usage?plan= answers.
         from . import plan_usage
