@@ -191,6 +191,29 @@ def test_opencode_sheet_is_the_free_tool_users_its_own_first():
     assert om.default_note(om.sheet(LISTING), "gateway/x") == "gateway/x"
 
 
+def test_a_plan_offers_every_tool_using_model_of_its_provider():
+    from agent_media_core import opencode_models as om
+
+    listing = LISTING + """opencode-go/kimi-k3.1-pro
+{"id": "kimi-k3.1-pro", "name": "Kimi K3.1 Pro", "cost": {"input": 1, "output": 4},
+ "capabilities": {"toolcall": true}, "status": "active"}
+opencode-go/glm-5.3
+{"id": "glm-5.3", "name": "GLM-5.3", "capabilities": {"toolcall": true}}
+opencode-go/chatty
+{"id": "chatty", "name": "Chatty", "capabilities": {"toolcall": false}}
+opencode-go/old
+{"id": "old", "name": "Old", "capabilities": {"toolcall": true}, "status": "deprecated"}
+"""
+    # By name; no tool use or deprecated is left out; another provider is not
+    # taken; a provider with no note is noted by its own name.
+    assert om.plans(listing, "opencode-go=Go, nobody") == [
+        {"id": "opencode-go/glm-5.3", "label": "GLM-5.3", "note": "Go"},
+        {"id": "opencode-go/kimi-k3.1-pro", "label": "Kimi K3.1 Pro", "note": "Go"},
+    ]
+    assert om.plans(listing, "opencode-go")[0]["note"] == "opencode-go"
+    assert om.plans(listing, "") == []
+
+
 def test_the_setting_adds_models_after_the_free_ones(monkeypatch):
     from agent_media_core import opencode_models as om
 

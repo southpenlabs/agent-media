@@ -16,6 +16,11 @@ after the free ones (`extras`): a gateway's, a paid or uncensored one. Its
 catalog's toolcall flag is not trusted there (Venice's says yes for a model
 that never calls a tool), so the setting says which are chat only.
 
+`MEDIA_OPENCODE_PLANS` names whole providers the host pays a plan for
+(`opencode-go=Go`): every tool-using model the listing has from each is
+offered, after the free ones and before the extras, so a model the plan adds
+shows up on the next listing with nothing to edit (`plans`).
+
 A price of 0 is only taken as free from those two: a custom provider (a
 local gateway) has no prices at all, which reads as 0 and means "unknown".
 
@@ -129,6 +134,33 @@ def sheet(listing: str, rows: list[dict] | None = None) -> list[dict]:
     return [{"id": m["id"], "label": m["name"], "note": "Free"} for m in free]
 
 
+def plans(listing: str, setting: str | None = None,
+          rows: list[dict] | None = None) -> list[dict]:
+    """Every tool-using, not deprecated model of the providers
+    `MEDIA_OPENCODE_PLANS` names, by name, each provider in the setting's
+    order.
+
+    Comma-separated provider names, each optionally `=Note` (the row's note,
+    else the provider's name), e.g. `opencode-go=Go`. Read from the listing
+    each time, so the plan's new models appear and retired ones go.
+    """
+    raw = os.environ.get("MEDIA_OPENCODE_PLANS", "") if setting is None else setting
+    listed = parse(listing) if rows is None else rows
+    out: list[dict] = []
+    for item in raw.split(","):
+        provider, _, note = item.strip().partition("=")
+        provider = provider.strip()
+        if not provider:
+            continue
+        mine = sorted((m for m in listed if m["id"].split("/", 1)[0] == provider
+                       and m["toolcall"] and m["status"] != "deprecated"
+                       and not any(o["id"] == m["id"] for o in out)),
+                      key=lambda m: m["name"].lower())
+        out += [{"id": m["id"], "label": m["name"], "note": note.strip() or provider}
+                for m in mine]
+    return out
+
+
 def extras(listing: str, setting: str | None = None,
            rows: list[dict] | None = None) -> list[dict]:
     """The models `MEDIA_OPENCODE_MODELS` adds to the sheet, in its order.
@@ -175,7 +207,7 @@ def configured() -> str:
 
 
 def models() -> tuple[list[dict], str]:
-    """`(sheet, default)`: the free models then the extras, and what
+    """`(sheet, default)`: the free models, the plans', then the extras, and what
     "Default" runs."""
     global _memo
     with _LOCK:
@@ -195,8 +227,10 @@ def models() -> tuple[list[dict], str]:
     else:
         listing = _run(["models", "--verbose"], 60.0)
     free = sheet(listing, rows)
-    offered = free + [m for m in extras(listing, rows=rows)
-                      if not any(f["id"] == m["id"] for f in free)]
+    offered = list(free)
+    for m in plans(listing, rows=rows) + extras(listing, rows=rows):
+        if not any(o["id"] == m["id"] for o in offered):
+            offered.append(m)
     default = configured() or FREE_DEFAULT
     if free:
         with _LOCK:
