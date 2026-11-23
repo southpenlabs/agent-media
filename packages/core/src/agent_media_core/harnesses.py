@@ -261,8 +261,19 @@ def opencode_error_text(error) -> str:
 
 
 def opencode_last_reply(session: str) -> tuple[str, str]:
-    """`(message id, text)` of what the agent said since the last prompt —
-    every assistant step's text, in order — or ("", "") when it said nothing.
+    """`(message id, text)` of the reply that ended the turn — the text after
+    its last tool call — or ("", "") when it said nothing.
+
+    The words before a tool call are its progress ("On it. Let me pull the
+    key rows…"), heard live by thinking speech if the thread has it on, and
+    folded with the steps in the app, as a Claude turn's are. Until 24 Nov
+    2026 every step's text since the prompt was read out as the reply: one
+    turn of "Spicy Marinara GitHub project research" was nine minutes of
+    audio for a one-minute answer (David: "should every step update be
+    considered as the thinking?"). A reply under `REPLY_SHORT` characters
+    ("Done.") takes the text before it back to that length, so findings said
+    before a closing word are still heard; a turn that ended on a tool says
+    its last words.
 
     opencode's plugin hears "idle" but not the words; they are in the
     database by then, so the speech hook reads them here. The id is the
@@ -283,10 +294,11 @@ def opencode_last_reply(session: str) -> tuple[str, str]:
             "from message m left join part p on p.message_id = m.id where m.session_id = ? "
             "order by m.time_created, m.id, p.id", (session,))
     said: list[str] = []
+    after_tool = 0
     last = failed = ""
     for mid, role, pdata, error in rows:
         if role == "user":
-            said, last, failed = [], "", ""
+            said, after_tool, last, failed = [], 0, "", ""
             continue
         if role != "assistant":
             continue
@@ -300,13 +312,26 @@ def opencode_last_reply(session: str) -> tuple[str, str]:
             p = json.loads(pdata) if pdata else {}
         except ValueError:
             continue
-        if isinstance(p, dict) and p.get("type") == "text" and not p.get("synthetic"):
+        if not isinstance(p, dict):
+            continue
+        if p.get("type") == "tool":
+            after_tool = len(said)
+        elif p.get("type") == "text" and not p.get("synthetic"):
             text = str(p.get("text") or "").strip()
             if text:
                 said.append(text)
+    start = min(after_tool, max(len(said) - 1, 0))
+    while start > 0 and len("\n\n".join(said[start:])) < REPLY_SHORT:
+        start -= 1
+    said = said[start:]
     if failed:
         said.append(failed)
     return (last, "\n\n".join(said)) if said else ("", "")
+
+
+#: A reply after the turn's last tool shorter than this ("Done.", "Pushed.")
+#: is spoken with the words before it (`opencode_last_reply`).
+REPLY_SHORT = 80
 
 
 def _opencode_session(session: str) -> tuple:

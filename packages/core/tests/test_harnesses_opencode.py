@@ -139,6 +139,35 @@ def test_the_last_reply_is_everything_said_since_the_prompt(store):
     assert harnesses.opencode_last_reply("ses_" + "d" * 26) == ("", "")
 
 
+def test_words_before_a_tool_are_progress_not_the_reply(store):
+    """Only the reply after the turn's last tool is spoken; a short one
+    ("Done.") brings the words before it, and a turn that ended on a tool
+    says its last words (24 Nov 2026)."""
+    tool = {"type": "tool", "tool": "bash", "callID": "c", "state": {"status": "completed"}}
+    reply = "Here is what I found: the key is fine, and the forge's SSH server rejects every signature it is given."
+    long_ = "ses_" + "h" * 26
+    add(store, long_, messages=[
+        ("user", {}, [{"type": "text", "text": "fix it"}]),
+        ("assistant", {}, [{"type": "text", "text": "On it."}, tool]),
+        ("assistant", {}, [{"type": "text", "text": "Checking the logs."}, tool]),
+        ("assistant", {"finish": "stop"}, [{"type": "text", "text": reply}]),
+    ])
+    assert harnesses.opencode_last_reply(long_)[1] == reply
+    short = "ses_" + "i" * 26
+    add(store, short, messages=[
+        ("user", {}, [{"type": "text", "text": "fix it"}]),
+        ("assistant", {}, [{"type": "text", "text": reply}, tool]),
+        ("assistant", {"finish": "stop"}, [{"type": "text", "text": "Done."}]),
+    ])
+    assert harnesses.opencode_last_reply(short)[1] == reply + "\n\nDone."
+    ended = "ses_" + "j" * 26
+    add(store, ended, messages=[
+        ("user", {}, [{"type": "text", "text": "fix it"}]),
+        ("assistant", {}, [{"type": "text", "text": "Running it now."}, tool]),
+    ])
+    assert harnesses.opencode_last_reply(ended)[1] == "Running it now."
+
+
 @pytest.fixture
 def spoken(store, tmp_path, monkeypatch):
     from agent_media_core.intake import hook_opencode

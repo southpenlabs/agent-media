@@ -1797,20 +1797,22 @@ def spoken_keys(reply: str) -> list[str]:
 
 def _final_texts(msg: dict) -> list[str]:
     """What the hook may have been handed as the reply: the last text part,
-    and every text part after the last tool call, joined; and every text
-    part of the turn, joined, as opencode's hook hands it over
-    (harnesses.opencode_last_reply: each part stripped, the steps between
-    the tools included). Keyed on that, an opencode turn with a tool in it
-    matched none of the others, nor by words (its line opens on the turn's
+    and every text part after the last tool call, joined; and the forms
+    opencode's hook hands over (harnesses.opencode_last_reply: each part
+    stripped; the reply after the last tool, and before 24 Nov 2026 every
+    text part of the turn). Without those, an opencode turn with a tool in
+    it matched none of the others, nor by words (its line opens on the turn's
     first words, its last part is the reply), so the reply that ended it had
     no ▶ (David, 24 Nov 2026, "Spicy Marinara GitHub project research": "Can
     we have a play button here")."""
     texts = []
     tail: list[str] = []
     whole: list[str] = []
+    after_tool = 0
     for p in msg["parts"]:
         if p["type"] in ("tool", "ask"):
             tail = []
+            after_tool = len(whole)
         elif p["type"] == "text":
             tail.append(p["text"])
             if t := str(p["text"] or "").strip():
@@ -1819,8 +1821,16 @@ def _final_texts(msg: dict) -> list[str]:
         texts.append(tail[-1])
         if len(tail) > 1:
             texts.extend(["\n\n".join(tail), "\n".join(tail)])
-    if len(whole) > 1 and (w := "\n\n".join(whole)) not in texts:
-        texts.append(w)
+    # opencode's reply since 24 Nov 2026: the stripped parts after the last
+    # tool, a short one with the words before it (opencode_last_reply); and
+    # before that date, every part (the turn spoken whole).
+    from agent_media_core.harnesses import REPLY_SHORT
+    start = min(after_tool, max(len(whole) - 1, 0))
+    while start > 0 and len("\n\n".join(whole[start:])) < REPLY_SHORT:
+        start -= 1
+    for w in ("\n\n".join(whole[start:]), "\n\n".join(whole) if len(whole) > 1 else ""):
+        if w and w not in texts:
+            texts.append(w)
     return texts
 
 

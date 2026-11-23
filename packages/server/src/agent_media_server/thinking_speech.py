@@ -91,8 +91,11 @@ def _interim(harness: str, parts: list[dict], i: int) -> bool:
     question (the AskUserQuestion read-out's lead-in), and a turn that goes
     on after the answer puts its later steps in the same message, so they
     were read again as thinking (David, 3 Nov 2026: "why is this reply being
-    repeated as thinking?"). The first step or card after the words decides."""
-    if harness != "claude":
+    repeated as thinking?"). The first step or card after the words decides.
+
+    An opencode turn's are the same: since 24 Nov 2026 its hook speaks only
+    the reply after the last tool (harnesses.opencode_last_reply)."""
+    if harness not in ("claude", "opencode"):
         return False
     for q in parts[i + 1:]:
         if q.get("type") == "ask":
