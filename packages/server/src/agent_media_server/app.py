@@ -1579,9 +1579,6 @@ def _room_media(h: BaseHTTPRequestHandler, thread: str, ev_id: str, query: str) 
     _send_file(h, path, size, ctype)
 
 
-def _contact_photo(h: BaseHTTPRequestHandler, cid: str, query: str) -> None:
-    """`GET /contacts/<id>/photo` (§6.25): their picture from the caller's
-    book, gated as the card is; `?access_token=` for an <img>, which cannot
 def _contacts_export(h: BaseHTTPRequestHandler, query: str) -> None:
     """`GET /contacts/export.vcf[?photos=1]` (§6.25 "Export"): the caller's
     book as one vCard file, gated as the list is; `?access_token=` for a
@@ -1610,6 +1607,9 @@ def _contacts_export(h: BaseHTTPRequestHandler, query: str) -> None:
     h.wfile.write(data)
 
 
+def _contact_photo(h: BaseHTTPRequestHandler, cid: str, query: str) -> None:
+    """`GET /contacts/<id>/photo` (§6.25): their picture from the caller's
+    book, gated as the card is; `?access_token=` for an <img>, which cannot
     set a header; `?size=large` the larger one (the thumbnail when there is
     none). An ETag (the picture's hash) and Last-Modified; a matching
     If-None-Match is 304; none to have is 404."""
@@ -2781,6 +2781,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _timeline_backfill(h, start=False)
     elif path == "/contacts/google":
         _contacts_google(h, "state")
+    elif path == "/contacts/export.vcf":
+        _contacts_export(h, query)
     elif path in ("/contacts", "/contacts/labels", "/contacts/suggestions") or \
             CONTACT.fullmatch(path):
         # People, from the phone's contacts (contacts.py, §6.25): the list or
@@ -2805,8 +2807,6 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
 
         ok, detail = local_messages.avatars((parse_qs(query).get("chat") or [""])[0], _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
-    elif path == "/contacts/export.vcf":
-        _contacts_export(h, query)
     elif path == "/local/avatar":
         _local_avatar(h, query)
     elif path == "/session/rewind":

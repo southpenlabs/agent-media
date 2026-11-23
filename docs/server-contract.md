@@ -9153,6 +9153,19 @@ there when the export held conversations ("Past conversations" above):
 opens). Names are never logged. CLI: `media contacts [--account WHO]
 import <file>`.
 
+#### Export — `GET /contacts/export.vcf[?photos=1]` — gated (24 Nov 2026)
+
+The caller's own book as one vCard 3.0 file, to take to Google, Apple,
+Outlook or anywhere else (`text/vcard; charset=utf-8`, `Content-Disposition:
+attachment; filename="contacts-<date>.vcf"`, `no-store`). One card per
+person, by name: FN, N, TEL and EMAIL with their labels as TYPE words, ADR
+(the address as one line, in the street part), ORG, TITLE, URL, BDAY (no
+year as `1604-MM-DD` with `X-APPLE-OMIT-YEAR`), NOTE, labels as CATEGORIES,
+the contact id as UID; `photos=1` adds each thumbnail as an inline PHOTO.
+`?access_token=` stands in for the header, for a plain download link. No
+book is an empty 200. Pinned by `packages/server/tests/test_contacts_vcard.py`
+(the file reads back through the CardDAV parser into the same cards).
+
 #### `GET /contacts/labels` — gated (`auth.gate`)
 
 ```json
