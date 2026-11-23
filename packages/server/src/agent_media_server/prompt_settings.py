@@ -157,6 +157,12 @@ def _photo() -> dict:
     return photo_edit.prompt_report()
 
 
+def _sign() -> dict:
+    from . import osm_read
+
+    return osm_read.prompt_report()
+
+
 def _personas() -> list[dict]:
     from . import personas
 
@@ -166,7 +172,7 @@ def _personas() -> list[dict]:
 
 def report(guest: bool = False) -> dict:
     prompts = []
-    for build in (_writing, _quick, _tidy, _summary, _photo):
+    for build in (_writing, _quick, _tidy, _summary, _photo, _sign):
         try:
             prompts.append(build())
         except Exception as e:  # noqa: BLE001 — one prompt never hides the rest

@@ -167,7 +167,7 @@ def test_the_order_and_memory_left_out():
     d = mr.report()
     assert [r["key"] for r in d["roles"]] == ["agents", "quick", "tidy", "voice_check", "summary",
                                               "followups", "describe", "canvas", "private", "photo",
-                                              "stt", "voices"]
+                                              "sign", "stt", "voices"]
     assert all("error" not in r for r in d["roles"])
     assert d["left_out"][0]["key"] == "memory"
 
@@ -299,8 +299,8 @@ def test_memory_rows_from_its_own_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_AGENT_MEMORY_CONFIG", str(_memory_dir(tmp_path)))
     d = mr.report()
     keys = [r["key"] for r in d["roles"]]
-    assert keys[:12] == [r.key for r in mr.ROLES]
-    assert keys[12:] == ["memory_summarize", "memory_rerank", "memory_dream", "memory_reply",
+    assert keys[:13] == [r.key for r in mr.ROLES]
+    assert keys[13:] == ["memory_summarize", "memory_rerank", "memory_dream", "memory_reply",
                          "memory_agent"]
     rows = {r["key"]: r for r in d["roles"]}
     s = rows["memory_summarize"]

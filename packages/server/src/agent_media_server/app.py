@@ -595,7 +595,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
-                       "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours",
+                       "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/reviews"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
@@ -716,9 +716,9 @@ def body_limit(path: str) -> int:
     (/upload), which is streamed to disk after the bearer is checked."""
     if path == "/upload":
         return uploads.max_bytes()
-    if path == "/photo/edit":
-        # Past the guard: the route refuses a body over photo_edit.MAX_BYTES
-        # itself, unread, as JSON `why: too_big` the app can show.
+    if path in ("/photo/edit", "/map/osm/read_hours"):
+        # Past the guard: the route refuses a body over its MAX_BYTES
+        # (photo_edit, osm_read) itself, unread, as JSON the app can show.
         return 1 << 40
     if path == "/read":
         from . import read_it

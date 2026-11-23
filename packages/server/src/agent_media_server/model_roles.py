@@ -154,6 +154,12 @@ def _photo_on() -> bool:
     return photo_edit.configured()
 
 
+def _sign_on() -> bool:
+    from . import osm_read
+
+    return osm_read.available()
+
+
 def _private_on() -> bool:
     return bool(models("private"))
 
@@ -232,6 +238,14 @@ ROLES: tuple[Role, ...] = (
                       Suggestion("gateway:gpt-image-1", "openai", "costly"),
                       Suggestion("gateway:venice/flux-dev", "venice", "costly")),
          on=_photo_on, route="photo"),
+    Role("sign", "Reading an opening-hours sign", "a vision chat model (reads a photo)",
+         **_chat("sign"),
+         suggestions=(Suggestion("gemini-3-flash", "google-signin", "free", True),
+                      Suggestion("claude-haiku-4-5", "anthropic", "cheap"),
+                      Suggestion("gpt-4o-mini", "openai", "cheap")),
+         on=_sign_on,
+         note="the Map card's camera in Add hours (osm_read.py); the photo goes to the model "
+              "for that one read and is not kept"),
     Role("stt", "Speech to text", "speech to text (a Whisper-style model)",
          ("Settings → Speech to text", "MEDIA_STT_PROVIDER", "MEDIA_STT_URL", "MEDIA_STT_MODEL"),
          mode="stt",

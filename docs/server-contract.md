@@ -11823,7 +11823,7 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
 - **`/map/osm`, `/map/osm/start`, `/map/osm/callback`, `/map/osm/signout`,
   `/map/osm/hours`** (21 Nov 2026; David: add hours to OpenStreetMap
   ourselves, "My OSM account"; `osm_edit.py`, tests in `test_osm_edit.py`):
-  `GET /map/osm` → `{configured, signed_in, user?}`; admins `POST
+  `GET /map/osm` → `{configured, signed_in, user?, read_sign}`; admins `POST
   /map/osm/start` → `{url}` (OSM's OAuth 2 page, PKCE, scopes read_prefs
   write_api, back to `<MEDIA_PUBLIC_URL>/map/osm/callback`, which needs no
   bearer and answers a small page); `POST /map/osm/signout`; `POST
@@ -11853,6 +11853,34 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   changeset opened); 404/502 `no_element`; 502 `changeset`, `upload`. The
   app asks before each edit: it is public, under the owner's name.
   `/map/search` rows carry `id` (the OSM element) for this.
+- **`POST /map/osm/read_hours[?name=<place name>]`** (23 Nov 2026; David:
+  "take a photo of a location's opening hours to be submitted to open
+  street maps"; `osm_read.py`, tests in `test_osm_read.py`): admins, not a
+  guest, as `/map/osm/hours`. The photo of the sign is the raw body
+  (image/jpeg, png or webp, up to 15 MB; downscaled to 2048 px on its long
+  side as `/photo/edit` does) → 200 `{opening_hours: "Mo-Fr 07:00-15:00;
+  Sa 08:00-13:00", read: "<the sign's own words, as read>", model}`. The
+  hours pass opening-hours-py, the check `/map/osm/hours` makes; `read` is
+  for the person to compare under the box. 422 `no_hours` (not a sign, too
+  blurry, or hours the parser refuses; `read` given when the model read
+  some words); 503 `no_model` (no model named or no gateway key, or none
+  answered; `error` says why); 400 `bad_image` (no body, not a JPEG, PNG or
+  WebP); 413 `too_big` (refused unread); 429 `busy` (one read per device at
+  a time). The model is told to write only what the sign says: a day or
+  time it cannot read is left out, never guessed; a closed day left out or
+  `off`; public holidays only when the sign names them (`PH off`); `name`
+  is told to it as the place's name. Nothing is published here: the
+  person checks the box and taps Publish, which is `/map/osm/hours` with
+  `source: survey`. Nothing is kept: the photo is in memory for the one
+  request and goes to the model for that read only; one journal line
+  (sizes, model, time, outcome) is written. The model is a vision chat
+  model on the summary gateway: Settings → Models' role `sign`
+  (§6.60; `MEDIA_SIGN_READ_MODELS`, a comma list tried in order, a model
+  whose hours the parser refuses passing to the next; default the
+  gateway's default model), its prompt in Settings → Prompts (§6.57, key
+  `sign`). `GET /map/osm` carries `read_sign: true` when a model is named
+  and the gateway has a key (a local look, no call), so the app shows the
+  camera only then; an older server has no `read_sign` and no button.
 - **`GET /map/place_hours?name=<name>&lat=<lat>&lon=<lon>[&id=<osm
   element>][&website=<url>][&osm_hours=<OSM's hours>]`** (21 Nov
   2026; David: "how does Google maps get blue fin opening hours?" … "Can

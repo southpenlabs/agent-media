@@ -39,7 +39,7 @@ def test_every_prompt_is_listed_in_full(who):
     ok, d = ps.settings("admin")
     assert ok
     p = _by_key(d)
-    assert set(p) == {"writing", "quick", "tidy", "summary", "photo"}
+    assert set(p) == {"writing", "quick", "tidy", "summary", "photo", "sign"}
     assert p["quick"]["text"] == quick.SYSTEM_PROMPT
     # The writing guide: its rules with their tags, the markers flagged.
     w = p["writing"]

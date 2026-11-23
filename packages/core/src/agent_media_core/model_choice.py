@@ -61,6 +61,8 @@ CHAT_ROLES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], Optional[str]
     "canvas": ("first", ("MEDIA_VISUAL_SVG_MODEL", "MEDIA_VISUAL_SHAPE_MODEL", "MEDIA_SUMMARY_MODEL"),
                (), SUMMARY_DEFAULT),
     "private": ("list", ("MEDIA_PRIVATE_MODELS",), (), None),
+    # Reading an opening-hours sign from a photo (osm_read.py): a vision model.
+    "sign": ("list", ("MEDIA_SIGN_READ_MODELS",), (), SUMMARY_DEFAULT),
 }
 #: The roles a choice can be saved for (the others have pickers of their own).
 CHOOSABLE = tuple(CHAT_ROLES) + ("photo",)

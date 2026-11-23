@@ -2,7 +2,7 @@
 own OSM account (David, 21 Nov 2026: "Can we do one and two?" — one being
 "add them to OpenStreetMap ourselves"; asked how: "My OSM account").
 
-  GET  /map/osm             → {ok, configured, signed_in, user?}
+  GET  /map/osm             → {ok, configured, signed_in, user?, read_sign}
   POST /map/osm/start       admins → {ok, url}: OSM's sign-in page (OAuth 2
                             with PKCE; no client secret, so the app is
                             registered as a public client)
@@ -18,6 +18,9 @@ own OSM account (David, 21 Nov 2026: "Can we do one and two?" — one being
                             each of `tags` (site_read's keys only) the
                             element has not got, or names in `overwrite`,
                             in a changeset of its own (22 Nov 2026)
+  POST /map/osm/read_hours  admins; a photo of the sign as the body →
+                            {ok, opening_hours, read}: read, never
+                            published (osm_read.py, 23 Nov 2026)
 
 The edit is public and under the owner's name, so the app asks before each
 one. The hours are checked with the same parser the Map reads them with
@@ -53,7 +56,8 @@ from agent_media_core import failures as _failures
 
 from . import auth
 
-PATHS = ("/map/osm", "/map/osm/start", "/map/osm/callback", "/map/osm/signout", "/map/osm/hours")
+PATHS = ("/map/osm", "/map/osm/start", "/map/osm/callback", "/map/osm/signout", "/map/osm/hours",
+         "/map/osm/read_hours")
 PENDING_S = 600
 SCOPES = "read_prefs write_api"
 CREATED_BY = "Sasonica"
@@ -352,7 +356,9 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         if not user:
             send_json(h, err.pop("status", 401), {"ok": False, **err})
         else:
-            send_json(h, 200, {"ok": True, **status()})
+            from . import osm_read
+
+            send_json(h, 200, {"ok": True, **status(), "read_sign": osm_read.available()})
         return True
     if method != "POST":
         return False
@@ -365,6 +371,12 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
             send_json(h, 200, {"ok": True, "url": begin()})
         except ValueError as e:
             send_json(h, 409, {"ok": False, "code": "not_configured", "error": str(e)})
+        return True
+    if path == "/map/osm/read_hours":
+        # A photo of the sign read into hours; nothing published (osm_read.py).
+        from . import osm_read
+
+        osm_read.handle(h, bearer, send_json)
         return True
     if path == "/map/osm/signout":
         signout()
