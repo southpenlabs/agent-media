@@ -474,6 +474,26 @@ def test_spoken_join_by_key_even_when_summarised(script):
     assert out[0]["spoken"]["id"] == 4
 
 
+def test_a_turn_spoken_whole_joins_by_every_text_part(script):
+    """opencode's hook speaks every text part of the turn, the steps between
+    the tools too, each stripped and joined by a blank line, and keys the
+    line on that (harnesses.opencode_last_reply). The reply that ended such
+    a turn had no ▶ (24 Nov 2026)."""
+    from agent_media_core.intake._text import strip_markdown
+    s = script
+    s.prompt("Fix SSH first")
+    s.text("On it. Let me pull the key rows.\n")
+    s.tool("Bash", {"command": "x"}, "t1")
+    s.result("t1", "ok")
+    s.text("Done — the tier is **built**.")
+    out = msgs()
+    reply = out[1]
+    whole = "On it. Let me pull the key rows.\n\nDone — the tier is **built**."
+    key = T._key(strip_markdown(whole))
+    T.join_speech(out, [_line("agent", strip_markdown(whole), reply["at"] + 30, key=key, rid=9)])
+    assert reply["spoken"]["id"] == 9
+
+
 def test_spoken_join_by_words_and_unspoken_stays_null(script):
     s = script
     s.prompt("One")
