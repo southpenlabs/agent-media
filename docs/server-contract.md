@@ -5174,7 +5174,7 @@ cache), `"fetching"` (downloading now) or null; `pct` (10 Nov 2026) on a
   the first pick is found and downloaded (about a minute), then it replaces
   it. `radio` gains `"kind": "mix" | "dj"` and `"note"`, the DJ's sentence on
   the mood (`""` for a Mix station); a DJ station's `seed` is
-  `{"id": null, "title": "Claude DJ"}`.
+  `{"id": null, "title": "Agent DJ"}`.
 - **The house speakers** (20 Oct 2026) are a radio player too (`rooms`,
   radio_io.RoomsPlayer): a station started while music plays on the house,
   or with Plays on set to House speakers, runs on Mopidy. Each song is

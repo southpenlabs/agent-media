@@ -362,7 +362,7 @@ def dj(station, monkeypatch):
 def test_a_dj_station_puts_its_first_pick_on_in_place_of_what_plays(dj):
     (player, sent, _, _), asked = dj
     snap = radio.start_dj("sasonica")
-    assert snap["on"] and snap["kind"] == "dj" and snap["seed"]["title"] == "Claude DJ"
+    assert snap["on"] and snap["kind"] == "dj" and snap["seed"]["title"] == "Agent DJ"
     assert sent == []              # what was playing plays on until then
     radio.tick()
     assert len(asked) == 1 and sent == [("dj000xxxxxx", True)]

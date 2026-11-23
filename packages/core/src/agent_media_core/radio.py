@@ -190,7 +190,7 @@ def _title_of(st: dict, vid: Optional[str]) -> str:
 def _shown_station(e: dict) -> dict:
     seed = e.get("seed") or {}
     return {"sid": e.get("sid") or _sid(e), "kind": e.get("kind") or "mix",
-            "title": seed.get("title") or ("Claude DJ" if e.get("kind") == "dj" else ""),
+            "title": seed.get("title") or ("Agent DJ" if e.get("kind") == "dj" else ""),
             "seed_id": seed.get("id"), "where": e.get("where") or "",
             "stopped": e.get("stopped") or 0, "current": _title_of(e, e.get("current")),
             "left": len(e.get("queue") or [])}
@@ -496,7 +496,7 @@ def start_dj(where: str) -> dict:
         st.clear()
         st.update(_blank())
         st.update(on=True, where=where, kind="dj", fresh=True, started=time.time(),
-                  seed={"id": None, "title": "Claude DJ", "channel": ""})
+                  seed={"id": None, "title": "Agent DJ", "channel": ""})
     return snapshot()
 
 
