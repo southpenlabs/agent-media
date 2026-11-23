@@ -64,7 +64,7 @@ def _served_url(path: str) -> Optional[str]:
 
 #: What the public route serves: a cached track's own name, nothing else.
 _SERVED_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,120}")
-SERVED_TYPES = {".mka": "audio/x-matroska", ".webm": "audio/webm", ".m4a": "audio/mp4", ".opus": "audio/ogg",
+SERVED_TYPES = {".mka": "audio/x-matroska", ".webm": "audio/webm", ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".opus": "audio/ogg",
                 ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".flac": "audio/flac", ".aac": "audio/aac"}
 
 
