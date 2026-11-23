@@ -418,13 +418,105 @@ def _parse_body(raw: str) -> tuple[str, str, str]:
     return raw, "", ""
 
 
-def _play(url: str, verdict: sharemod.Verdict, where: str) -> None:
+class _ThreadTee:
+    """sys.stderr, also copied into a buffer for the threads that ask.
+
+    The dispatch runs the CLI in-process, and the CLI says why a play failed
+    with `print(..., file=sys.stderr)`. Swapping sys.stderr for one thread is
+    not possible, and swapping it for all of them would swallow what other
+    requests print; so this passes every write through and keeps a copy only
+    for a thread that registered a buffer (`_caught_stderr`).
+    """
+
+    def __init__(self, under) -> None:
+        self._under = under
+        self.bufs: dict = {}
+
+    def write(self, s: str) -> int:
+        buf = self.bufs.get(threading.get_ident())
+        if buf is not None:
+            buf.append(s)
+        return self._under.write(s)
+
+    def __getattr__(self, name):
+        return getattr(self._under, name)
+
+
+_TEE_LOCK = threading.Lock()
+
+
+class _caught_stderr:
+    """What this thread prints to stderr while inside, as a list of strings."""
+
+    def __enter__(self) -> list:
+        with _TEE_LOCK:
+            if not isinstance(sys.stderr, _ThreadTee):
+                sys.stderr = _ThreadTee(sys.stderr)
+            self._tee = sys.stderr
+        self._buf: list = []
+        self._tee.bufs[threading.get_ident()] = self._buf
+        return self._buf
+
+    def __exit__(self, *exc) -> None:
+        self._tee.bufs.pop(threading.get_ident(), None)
+
+
+#: What a phone fetch says when no downloader is there to take it
+#: (the server's phone_jobs, and the ssh fallback behind it). The server's
+#: music route reads the same words (music.py `_DOWNLOADER_GONE`).
+DOWNLOADER_GONE = ("no phone worker connected", "no phone worker took it")
+
+#: The note id: a second failed share replaces the first rather than stacking.
+NOTE_ID = "share-failed"
+
+
+def failure_words(said: str) -> str:
+    """The note's text for a share that did not play, from what the CLI said.
+
+    A YouTube link with no downloader connected says so in the words the
+    app's own play button uses (server music.py `_failed_answer`); anything
+    else is the CLI's last line, without its `media music play (…) failed:`
+    preamble.
+    """
+    if any(w in said for w in DOWNLOADER_GONE):
+        return ("YouTube can't be downloaded: its downloader, the phone's "
+                "Termux jobs, isn't connected. Open it on the phone and share "
+                "again.")
+    lines = [ln.strip() for ln in said.splitlines() if ln.strip()]
+    last = lines[-1] if lines else ""
+    if " failed: " in last:
+        last = last.split(" failed: ", 1)[1]
+    return (last or "It didn't play, and nothing said why.")[:400]
+
+
+def _tell_phone(verdict: sharemod.Verdict, said: str) -> None:
+    """Put the failure in the phone's shade (David, 23 Nov 2026: a YouTube
+    share did nothing — all three downloaders were down and only the journal
+    knew). Best effort: a note that does not go still leaves the log line."""
+    from .. import phone_notes
+
+    what = verdict.title or "the shared link"
     try:
-        rc = sharemod.dispatch(url, verdict, where=where)
-        if rc:
-            log.warning("share dispatch exited %d for %s", rc, url)
-    except Exception as e:  # noqa: BLE001 — a dead thread must still say why
-        log.warning("share dispatch failed for %s: %s", url, e)
+        phone_notes.post(NOTE_ID, f"Couldn't play {what}"[:120],
+                         failure_words(said), priority="high", ttl_s=1800.0)
+    except Exception as e:  # noqa: BLE001 — the log line already said it
+        log.info("share: no phone note: %s", e)
+
+
+def _play(url: str, verdict: sharemod.Verdict, where: str) -> None:
+    from ..play_gate import EXIT_HELD
+
+    with _caught_stderr() as said:
+        try:
+            rc = sharemod.dispatch(url, verdict, where=where)
+        except Exception as e:  # noqa: BLE001 — a dead thread must still say why
+            log.warning("share dispatch failed for %s: %s", url, e)
+            _tell_phone(verdict, str(e))
+            return
+    # Held is not failed: the play gate has said so itself, and it plays later.
+    if rc and rc != EXIT_HELD:
+        log.warning("share dispatch exited %d for %s", rc, url)
+        _tell_phone(verdict, "".join(said))
 
 
 class _Server(socketserver.ThreadingTCPServer):

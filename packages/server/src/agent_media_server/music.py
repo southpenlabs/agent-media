@@ -217,8 +217,10 @@ def _run_book(uri: str, force: bool = False) -> tuple[bool, str]:
 
 
 #: What a phone fetch says when no downloader is there to take it
-#: (phone_jobs.run, and the ssh fallback behind it).
-_DOWNLOADER_GONE = ("no phone worker connected", "no phone worker took it")
+#: (phone_jobs.run, and the ssh fallback behind it). One list with the share
+#: listener's, which tells the phone the same thing for a failed share.
+from agent_media_core.entrypoints.share_listener import (  # noqa: E402
+    DOWNLOADER_GONE as _DOWNLOADER_GONE)
 
 
 def _failed_answer(said: str, fallback: str) -> dict:

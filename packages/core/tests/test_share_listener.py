@@ -616,3 +616,70 @@ def test_ask_status_defaults_to_speech(server, monkeypatch):
     with urllib.request.urlopen(base + "/ask", timeout=5) as r:
         r.read()
     assert seen == ["speech"]
+
+
+# A failed share tells the phone (David, 23 Nov 2026: a YouTube share did
+# nothing — every downloader was down and only the journal knew).
+
+@pytest.fixture()
+def notes(monkeypatch):
+    from agent_media_core import phone_notes
+    posted = []
+    monkeypatch.setattr(phone_notes, "post",
+                        lambda *a, **k: posted.append((a, k)) or {"ok": True})
+    return posted
+
+
+def _verdict(title="Smoke Mood"):
+    return share.Verdict(channel="music", content_type="music",
+                         reason="test", title=title)
+
+
+def test_a_share_with_no_downloader_says_so_on_the_phone(monkeypatch, notes):
+    import sys
+
+    def runner_fail(url, verdict, where=""):
+        print("media music play (sasonica) failed: sink-music-local: phone "
+              "fetch failed (255): no phone worker connected", file=sys.stderr)
+        return 1
+
+    monkeypatch.setattr(share, "dispatch", runner_fail)
+    share_listener._play("https://youtu.be/x", _verdict(), "")
+    (args, kw), = notes
+    assert args[0] == share_listener.NOTE_ID
+    assert args[1] == "Couldn't play Smoke Mood"
+    assert "downloader" in args[2] and "Termux jobs" in args[2]
+
+
+def test_another_failure_gives_the_cli_its_words(monkeypatch, notes):
+    import sys
+
+    def runner_fail(url, verdict, where=""):
+        print("media music play (sasonica) failed: the mixer is gone",
+              file=sys.stderr)
+        return 1
+
+    monkeypatch.setattr(share, "dispatch", runner_fail)
+    share_listener._play("https://youtu.be/x", _verdict(""), "")
+    (args, _), = notes
+    assert args[1] == "Couldn't play the shared link"
+    assert args[2] == "the mixer is gone"
+
+
+def test_a_played_or_held_share_leaves_the_phone_alone(monkeypatch, notes):
+    from agent_media_core.play_gate import EXIT_HELD
+    for rc in (0, EXIT_HELD):
+        monkeypatch.setattr(share, "dispatch", lambda *a, rc=rc, **k: rc)
+        share_listener._play("https://youtu.be/x", _verdict(), "")
+    assert notes == []
+
+
+def test_only_the_sharing_thread_is_caught():
+    import sys
+    seen = []
+    with share_listener._caught_stderr() as mine:
+        t = threading.Thread(target=lambda: print("other", file=sys.stderr))
+        t.start(); t.join()
+        print("mine", file=sys.stderr)
+    seen = "".join(mine)
+    assert "mine" in seen and "other" not in seen
