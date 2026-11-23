@@ -117,3 +117,66 @@ def get(bearer: str, *, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
         return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
     _cache = (now(), out)
     return True, out
+
+
+# --- a subscription signed in for opencode (`?plan=opencode-go`) -------------
+
+#: The plans whose usage can be asked, by their opencode provider: where,
+#: asked with the plan's own key (opencode_keys.py). OpenCode Go's answer
+#: (measured 24 Nov 2026) is `{"usage": {"rolling"|"weekly"|"monthly":
+#: {"status", "percent", "resetsAt"}}}`, the rolling one its 5-hour window.
+PLAN_URLS = {"opencode-go": "https://opencode.ai/zen/go/v1/usage"}
+_PLAN_KINDS = (("rolling", "session"), ("weekly", "weekly_all"), ("monthly", "monthly"))
+WARN_AT = 80
+
+_plan_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _plan_fetch(url: str, key: str) -> dict:
+    # opencode.ai answers Python's own User-Agent with 403 (24 Nov 2026).
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}",
+                                               "User-Agent": "agent-media"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.load(r)
+
+
+def shape_plan(raw: dict) -> dict:
+    """A plan's answer as the card's windows: its 5-hour window as `session`,
+    its week as `weekly_all`, its month as `monthly`. It sends no severity,
+    so one at WARN_AT% or more, or not "ok", is a warning."""
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+    windows = []
+    for theirs, kind in _PLAN_KINDS:
+        w = usage.get(theirs)
+        if not isinstance(w, dict) or w.get("percent") is None:
+            continue
+        pct = int(w["percent"])
+        warn = pct >= WARN_AT or str(w.get("status") or "ok") != "ok"
+        windows.append({"kind": kind, "label": None, "percent": pct,
+                        "resets_at": _epoch(str(w.get("resetsAt") or "").replace("Z", "+00:00")),
+                        "severity": "warning" if warn else "normal"})
+    return {"windows": windows, "extra": None}
+
+
+def get_plan(bearer: str, plan: str, *, fetch=_plan_fetch, now=time.time) -> tuple[bool, dict]:
+    """`GET /usage?plan=<provider>`: that plan's usage, in `get`'s shape."""
+    ok, detail = auth.may_control_speech(bearer)
+    if not ok:
+        return False, detail
+    if plan not in PLAN_URLS:
+        return False, {"code": "unknown_plan", "error": f"no usage for {plan!r}", "status": 400}
+    at, kept = _plan_cache.get(plan, (0.0, {}))
+    if kept and now() - at < TTL_S:
+        return True, kept
+    from agent_media_core import opencode_keys
+
+    key = str((opencode_keys.stored().get(plan) or {}).get("key") or "")
+    if not key:
+        return False, {"code": "no_login", "error": f"{plan} is not signed in on the server", "status": 404}
+    try:
+        out = shape_plan(fetch(PLAN_URLS[plan], key))
+    except Exception as e:  # network, 401 (a revoked key), a changed shape
+        _failures.swallowed(e)
+        return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
+    _plan_cache[plan] = (now(), out)
+    return True, out

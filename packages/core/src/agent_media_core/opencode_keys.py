@@ -105,7 +105,10 @@ def check(provider: str, key: str, timeout: float = 10.0) -> tuple[bool | None, 
     """`(True, note)` a good key, `(False, why)` a refused one, `(None, why)`
     when the provider could not be asked."""
     p = PROVIDERS[provider]
-    req = urllib.request.Request(p["check"], headers={"Authorization": f"Bearer {key}"})
+    # opencode.ai answers Python's own User-Agent with 403, which read as a
+    # refused key (24 Nov 2026), so every check names itself.
+    req = urllib.request.Request(p["check"], headers={"Authorization": f"Bearer {key}",
+                                                      "User-Agent": "agent-media"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = json.loads(r.read() or b"{}")

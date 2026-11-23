@@ -66,3 +66,29 @@ def test_extra_usage_in_currency_units():
     raw["extra_usage"].update(used_credits=5000, spend_limit_reached=True)
     assert plan_usage.shape(raw)["extra"]["left"] == 0.0
     assert plan_usage.shape(raw)["extra"]["limit_reached"] is True
+
+
+GO = {"usage": {"rolling": {"status": "ok", "percent": 35, "resetsAt": "2026-11-24T01:51:33.000Z"},
+                "weekly": {"status": "ok", "percent": 81, "resetsAt": "2026-11-30T00:00:00.000Z"},
+                "monthly": {"status": "ok", "percent": 18, "resetsAt": "2026-12-16T09:20:48.000Z"},
+                "yearly": {"percent": 1}}}
+
+
+def test_a_plans_usage_in_the_cards_shape(monkeypatch):
+    from agent_media_core import opencode_keys
+
+    monkeypatch.setattr(plan_usage, "_plan_cache", {})
+    monkeypatch.setattr(opencode_keys, "stored", lambda: {"opencode-go": {"key": "k" * 20}})
+    asked = []
+    ok, out = plan_usage.get_plan("t", "opencode-go", fetch=lambda url, key: asked.append(url) or GO)
+    assert ok and asked == ["https://opencode.ai/zen/go/v1/usage"]
+    assert [(w["kind"], w["percent"], w["severity"]) for w in out["windows"]] == [
+        ("session", 35, "normal"), ("weekly_all", 81, "warning"), ("monthly", 18, "normal")]
+    assert out["windows"][0]["resets_at"] == 1795485093
+    plan_usage.get_plan("t", "opencode-go", fetch=lambda url, key: asked.append(url) or GO)
+    assert len(asked) == 1, "kept for a minute"
+
+    monkeypatch.setattr(plan_usage, "_plan_cache", {})
+    monkeypatch.setattr(opencode_keys, "stored", lambda: {})
+    assert plan_usage.get_plan("t", "opencode-go")[1]["code"] == "no_login"
+    assert plan_usage.get_plan("t", "nobody")[1]["code"] == "unknown_plan"

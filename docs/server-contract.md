@@ -10247,6 +10247,15 @@ until that window resets (3 Nov 2026).
 when Anthropic did not answer (an expired login included). A kind the app
 does not know is dropped by the server.
 
+**A plan signed in for opencode** (24 Nov 2026). `GET /usage?plan=opencode-go`
+answers that subscription's usage in the same shape, asked of
+`opencode.ai/zen/go/v1/usage` with the key kept from the Coding agents page
+(§`POST /harnesses/apikey`), kept for a minute: its rolling 5-hour window as
+`session`, its week as `weekly_all`, its month as `monthly` (a kind only a
+plan has); `label` and `extra` null. It sends no severity, so a window at
+80% or more, or not `ok`, is `warning`. 404 `no_login` without the key, 400
+`unknown_plan` for another provider, 502 `unavailable` as above.
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by

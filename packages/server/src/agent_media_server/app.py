@@ -2676,7 +2676,8 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         # How much of the Claude plan is spent (plan_usage.py): the card's numbers.
         from . import plan_usage
 
-        ok, detail = plan_usage.get(_bearer(h))
+        plan = (parse_qs(h.path.partition("?")[2]).get("plan") or [""])[0]
+        ok, detail = plan_usage.get_plan(_bearer(h), plan) if plan else plan_usage.get(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/conversation/log":
         # The same conversation, read rather than heard, by `?session=`
