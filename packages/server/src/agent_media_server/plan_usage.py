@@ -119,63 +119,218 @@ def get(bearer: str, *, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
     return True, out
 
 
-# --- a subscription signed in for opencode (`?plan=opencode-go`) -------------
+# --- the other subscriptions (`?plan=…`) ------------------------------------
 
-#: The plans whose usage can be asked, by their opencode provider: where,
-#: asked with the plan's own key (opencode_keys.py). OpenCode Go's answer
-#: (measured 24 Nov 2026) is `{"usage": {"rolling"|"weekly"|"monthly":
-#: {"status", "percent", "resetsAt"}}}`, the rolling one its 5-hour window.
-PLAN_URLS = {"opencode-go": "https://opencode.ai/zen/go/v1/usage"}
-_PLAN_KINDS = (("rolling", "session"), ("weekly", "weekly_all"), ("monthly", "monthly"))
+#: Each plan's usage, in the card's shape, from the login the host already
+#: has for it (David, 24 Nov 2026: "do all that for codex and anti-gravity
+#: too ... and any other subscriptions I have"):
+#:
+#: - `opencode-go`: OpenCode Go, the key kept from the Coding agents page
+#:   (opencode_keys.py), `opencode.ai/zen/go/v1/usage` → `{"usage":
+#:   {"rolling"|"weekly"|"monthly": {"status", "percent", "resetsAt"}}}`.
+#: - `codex`: the ChatGPT plan Codex is signed in with (`$CODEX_HOME/
+#:   auth.json`), `chatgpt.com/backend-api/wham/usage` → `rate_limit.
+#:   primary_window` (5 hours) and `secondary_window` (a week), each
+#:   `{used_percent, limit_window_seconds, reset_at}`; what Codex's /status reads.
+#: - `antigravity`: the Google login the gateway's proxy keeps for it
+#:   (`~/.cli-proxy-api/antigravity-*.json`, MEDIA_ANTIGRAVITY_AUTH),
+#:   `cloudcode-pa…/v1internal:fetchAvailableModels` → per model
+#:   `quotaInfo: {remainingFraction, resetTime}`, shown a family at a time
+#:   (Claude, Gemini, GPT-OSS: the most used of its models, and its reset) as `model` windows.
+#:
+#: Measured 24 Nov 2026. A plan with no login here is not listed (`plans`).
 WARN_AT = 80
+UA = "agent-media"   # opencode.ai answers Python's own User-Agent with 403
 
 _plan_cache: dict[str, tuple[float, dict]] = {}
 
 
-def _plan_fetch(url: str, key: str) -> dict:
-    # opencode.ai answers Python's own User-Agent with 403 (24 Nov 2026).
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}",
-                                               "User-Agent": "agent-media"})
+class NoLogin(Exception):
+    """The plan is not signed in on this host."""
+
+
+def _ask(url: str, headers: dict, body: Optional[dict] = None, ua: str = UA) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={
+        **headers, "User-Agent": ua, **({"Content-Type": "application/json"} if data else {})})
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.load(r)
 
 
+def _window(kind: str, pct: float, resets_at: Optional[int], warn: bool = False,
+            label: Optional[str] = None) -> dict:
+    pct = int(round(pct))
+    return {"kind": kind, "label": label, "percent": pct, "resets_at": resets_at,
+            "severity": "warning" if warn or pct >= WARN_AT else "normal"}
+
+
+def _iso(v: object) -> Optional[int]:
+    return _epoch(str(v).replace("Z", "+00:00")) if v else None
+
+
+# OpenCode Go
+
+_PLAN_KINDS = (("rolling", "session"), ("weekly", "weekly_all"), ("monthly", "monthly"))
+
+
 def shape_plan(raw: dict) -> dict:
-    """A plan's answer as the card's windows: its 5-hour window as `session`,
-    its week as `weekly_all`, its month as `monthly`. It sends no severity,
-    so one at WARN_AT% or more, or not "ok", is a warning."""
+    """OpenCode Go's answer: its 5-hour window as `session`, its week as
+    `weekly_all`, its month as `monthly`. It sends no severity, so one at
+    WARN_AT% or more, or not "ok", is a warning."""
     usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
     windows = []
     for theirs, kind in _PLAN_KINDS:
         w = usage.get(theirs)
         if not isinstance(w, dict) or w.get("percent") is None:
             continue
-        pct = int(w["percent"])
-        warn = pct >= WARN_AT or str(w.get("status") or "ok") != "ok"
-        windows.append({"kind": kind, "label": None, "percent": pct,
-                        "resets_at": _epoch(str(w.get("resetsAt") or "").replace("Z", "+00:00")),
-                        "severity": "warning" if warn else "normal"})
+        windows.append(_window(kind, float(w["percent"]), _iso(w.get("resetsAt")),
+                               warn=str(w.get("status") or "ok") != "ok"))
     return {"windows": windows, "extra": None}
 
 
-def get_plan(bearer: str, plan: str, *, fetch=_plan_fetch, now=time.time) -> tuple[bool, dict]:
-    """`GET /usage?plan=<provider>`: that plan's usage, in `get`'s shape."""
+def _go_key() -> str:
+    from agent_media_core import opencode_keys
+
+    return str((opencode_keys.stored().get("opencode-go") or {}).get("key") or "")
+
+
+def _go() -> dict:
+    key = _go_key()
+    if not key:
+        raise NoLogin
+    return shape_plan(_ask("https://opencode.ai/zen/go/v1/usage", {"Authorization": f"Bearer {key}"}))
+
+
+# Codex (the ChatGPT plan)
+
+def _codex_auth() -> dict:
+    from agent_media_core import harnesses
+
+    try:
+        tokens = json.loads((harnesses._codex_dir() / "auth.json").read_text()).get("tokens") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return tokens if tokens.get("access_token") else {}
+
+
+def shape_codex(raw: dict) -> dict:
+    """ChatGPT's rate limits: a 5-hour window as `session`, a week as
+    `weekly_all` (by the window's own length, whichever it sends)."""
+    rl = raw.get("rate_limit") if isinstance(raw.get("rate_limit"), dict) else {}
+    windows = []
+    for key in ("primary_window", "secondary_window"):
+        w = rl.get(key)
+        if not isinstance(w, dict) or w.get("used_percent") is None:
+            continue
+        secs = int(w.get("limit_window_seconds") or 0)
+        kind = "session" if secs and secs <= 6 * 3600 else "weekly_all" if secs <= 8 * 86400 else "monthly"
+        windows.append(_window(kind, float(w["used_percent"]),
+                               int(w["reset_at"]) if w.get("reset_at") else None,
+                               warn=bool(rl.get("limit_reached")) and float(w["used_percent"]) >= 100))
+    return {"windows": windows, "extra": None}
+
+
+def _codex() -> dict:
+    t = _codex_auth()
+    if not t:
+        raise NoLogin
+    return shape_codex(_ask("https://chatgpt.com/backend-api/wham/usage", {
+        "Authorization": f"Bearer {t['access_token']}", "ChatGPT-Account-Id": str(t.get("account_id") or "")}))
+
+
+# Antigravity
+
+def _antigravity_auth() -> dict:
+    import glob
+
+    pattern = os.environ.get("MEDIA_ANTIGRAVITY_AUTH") or str(Path.home() / ".cli-proxy-api/antigravity-*.json")
+    for f in sorted(glob.glob(pattern)):
+        try:
+            data = json.loads(Path(f).read_text())
+        except (OSError, ValueError):
+            continue
+        if data.get("access_token") and not data.get("disabled"):
+            return data
+    return {}
+
+
+def _family(name: str) -> str:
+    """A model's family, its quota's: "Claude Opus 5.5 (High)" → Claude."""
+    return name.split()[0] if name else ""
+
+
+def shape_antigravity(raw: dict) -> dict:
+    """Per-model quota, a family at a time: the most used of its models, and
+    that model's reset. Models with no name (tab completion, its
+    own helpers) are left out."""
+    fams: dict[str, tuple[float, Optional[int]]] = {}
+    for m in (raw.get("models") or {}).values():
+        q = m.get("quotaInfo") if isinstance(m, dict) else None
+        fam = _family(str(m.get("displayName") or "")) if isinstance(m, dict) else ""
+        if not fam or not isinstance(q, dict) or q.get("remainingFraction") is None:
+            continue
+        used = 100.0 * (1.0 - float(q["remainingFraction"]))
+        at = _iso(q.get("resetTime"))
+        was = fams.get(fam)
+        if was is None or used > was[0] or (used == was[0] and was[1] is None):
+            fams[fam] = (used, at)
+    return {"windows": [_window("model", used, at, label=fam)
+                        for fam, (used, at) in sorted(fams.items())], "extra": None}
+
+
+def _antigravity() -> dict:
+    a = _antigravity_auth()
+    if not a:
+        raise NoLogin
+    return shape_antigravity(_ask("https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+                                  {"Authorization": f"Bearer {a['access_token']}"},
+                                  {"project": str(a.get("project_id") or "")},
+                                  ua="antigravity"))   # 403 to any other name (24 Nov 2026)
+
+
+#: id → its name, the agent whose threads run on it, whether it is signed in
+#: here, and the ask.
+PLANS = {
+    "opencode-go": {"name": "OpenCode Go", "agent": "opencode", "here": lambda: bool(_go_key()), "fetch": _go},
+    "codex": {"name": "ChatGPT", "agent": "codex", "here": lambda: bool(_codex_auth()), "fetch": _codex},
+    "antigravity": {"name": "Antigravity", "agent": "antigravity",
+                    "here": lambda: bool(_antigravity_auth()), "fetch": _antigravity},
+}
+
+
+def plans(bearer: str) -> tuple[bool, dict]:
+    """`GET /usage/plans`: the plans signed in here, `[{id, name, agent}]`."""
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
-    if plan not in PLAN_URLS:
+    out = []
+    for pid, p in PLANS.items():
+        try:
+            here = p["here"]()
+        except Exception as e:
+            _failures.swallowed(e)
+            here = False
+        if here:
+            out.append({"id": pid, "name": p["name"], "agent": p["agent"]})
+    return True, {"plans": out}
+
+
+def get_plan(bearer: str, plan: str, *, fetch=None, now=time.time) -> tuple[bool, dict]:
+    """`GET /usage?plan=<id>`: that plan's usage, in `get`'s shape."""
+    ok, detail = auth.may_control_speech(bearer)
+    if not ok:
+        return False, detail
+    if plan not in PLANS:
         return False, {"code": "unknown_plan", "error": f"no usage for {plan!r}", "status": 400}
     at, kept = _plan_cache.get(plan, (0.0, {}))
     if kept and now() - at < TTL_S:
         return True, kept
-    from agent_media_core import opencode_keys
-
-    key = str((opencode_keys.stored().get(plan) or {}).get("key") or "")
-    if not key:
-        return False, {"code": "no_login", "error": f"{plan} is not signed in on the server", "status": 404}
     try:
-        out = shape_plan(fetch(PLAN_URLS[plan], key))
-    except Exception as e:  # network, 401 (a revoked key), a changed shape
+        out = (fetch or PLANS[plan]["fetch"])()
+    except NoLogin:
+        return False, {"code": "no_login", "error": f"{PLANS[plan]['name']} is not signed in on the server",
+                       "status": 404}
+    except Exception as e:  # network, 401 (a revoked or expired login), a changed shape
         _failures.swallowed(e)
         return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
     _plan_cache[plan] = (now(), out)

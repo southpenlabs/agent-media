@@ -80,15 +80,52 @@ def test_a_plans_usage_in_the_cards_shape(monkeypatch):
     monkeypatch.setattr(plan_usage, "_plan_cache", {})
     monkeypatch.setattr(opencode_keys, "stored", lambda: {"opencode-go": {"key": "k" * 20}})
     asked = []
-    ok, out = plan_usage.get_plan("t", "opencode-go", fetch=lambda url, key: asked.append(url) or GO)
+    monkeypatch.setattr(plan_usage, "_ask", lambda url, headers, body=None: asked.append(url) or GO)
+    ok, out = plan_usage.get_plan("t", "opencode-go")
     assert ok and asked == ["https://opencode.ai/zen/go/v1/usage"]
     assert [(w["kind"], w["percent"], w["severity"]) for w in out["windows"]] == [
         ("session", 35, "normal"), ("weekly_all", 81, "warning"), ("monthly", 18, "normal")]
     assert out["windows"][0]["resets_at"] == 1795485093
-    plan_usage.get_plan("t", "opencode-go", fetch=lambda url, key: asked.append(url) or GO)
+    plan_usage.get_plan("t", "opencode-go")
     assert len(asked) == 1, "kept for a minute"
 
     monkeypatch.setattr(plan_usage, "_plan_cache", {})
     monkeypatch.setattr(opencode_keys, "stored", lambda: {})
     assert plan_usage.get_plan("t", "opencode-go")[1]["code"] == "no_login"
     assert plan_usage.get_plan("t", "nobody")[1]["code"] == "unknown_plan"
+
+
+CODEX = {"plan_type": "plus", "rate_limit": {"allowed": True, "limit_reached": False,
+         "primary_window": {"used_percent": 0, "limit_window_seconds": 18000, "reset_at": 1795484508},
+         "secondary_window": {"used_percent": 84, "limit_window_seconds": 604800, "reset_at": 1795639420}}}
+
+
+def test_codex_is_its_five_hours_and_its_week():
+    out = plan_usage.shape_codex(CODEX)
+    assert [(w["kind"], w["percent"], w["resets_at"], w["severity"]) for w in out["windows"]] == [
+        ("session", 0, 1795484508, "normal"), ("weekly_all", 84, 1795639420, "warning")]
+
+
+AG = {"models": {
+    "claude-opus-5-5-high": {"displayName": "Claude Opus 5.5 (High)",
+                             "quotaInfo": {"remainingFraction": 0.4, "resetTime": "2026-11-24T03:41:54Z"}},
+    "claude-sonnet-5-5-low": {"displayName": "Claude Sonnet 5.5 (Low)",
+                              "quotaInfo": {"remainingFraction": 1, "resetTime": "2026-11-24T02:00:00Z"}},
+    "gemini-3-flash": {"displayName": "Gemini 3 Flash", "quotaInfo": {"remainingFraction": 1}},
+    "tab_flash_lite_preview": {"quotaInfo": {"remainingFraction": 0}},
+}}
+
+
+def test_antigravity_a_family_at_a_time():
+    # The most used of a family, and its reset; a helper with no name left out.
+    out = plan_usage.shape_antigravity(AG)
+    assert [(w["kind"], w["label"], w["percent"]) for w in out["windows"]] == [
+        ("model", "Claude", 60), ("model", "Gemini", 0)]
+    assert out["windows"][0]["resets_at"] == 1795491714
+
+
+def test_plans_lists_only_those_signed_in(monkeypatch):
+    monkeypatch.setitem(plan_usage.PLANS["opencode-go"], "here", lambda: False)
+    monkeypatch.setitem(plan_usage.PLANS["codex"], "here", lambda: True)
+    monkeypatch.setitem(plan_usage.PLANS["antigravity"], "here", lambda: 1 / 0)
+    assert plan_usage.plans("t") == (True, {"plans": [{"id": "codex", "name": "ChatGPT", "agent": "codex"}]})

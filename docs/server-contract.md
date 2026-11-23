@@ -10247,14 +10247,25 @@ until that window resets (3 Nov 2026).
 when Anthropic did not answer (an expired login included). A kind the app
 does not know is dropped by the server.
 
-**A plan signed in for opencode** (24 Nov 2026). `GET /usage?plan=opencode-go`
-answers that subscription's usage in the same shape, asked of
-`opencode.ai/zen/go/v1/usage` with the key kept from the Coding agents page
-(§`POST /harnesses/apikey`), kept for a minute: its rolling 5-hour window as
-`session`, its week as `weekly_all`, its month as `monthly` (a kind only a
-plan has); `label` and `extra` null. It sends no severity, so a window at
-80% or more, or not `ok`, is `warning`. 404 `no_login` without the key, 400
-`unknown_plan` for another provider, 502 `unavailable` as above.
+**The other subscriptions** (24 Nov 2026). `GET /usage/plans` lists those
+signed in on the host, `{"plans": [{"id", "name", "agent"}]}` (`agent`: the
+harness whose threads run on it), and `GET /usage?plan=<id>` answers one in
+the same shape as Claude's, kept for a minute, each from the login the host
+already has (plan_usage.py):
+
+| id | name | asked of, with | windows |
+|---|---|---|---|
+| `opencode-go` | OpenCode Go | `opencode.ai/zen/go/v1/usage`, the key from the Coding agents page (§`POST /harnesses/apikey`) | `session` (its rolling 5 hours), `weekly_all`, `monthly` |
+| `codex` | ChatGPT | `chatgpt.com/backend-api/wham/usage`, Codex's own login (`$CODEX_HOME/auth.json`) | `session`, `weekly_all` (by each window's length) |
+| `antigravity` | Antigravity | `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`, the gateway proxy's Google login (`~/.cli-proxy-api/antigravity-*.json`, `MEDIA_ANTIGRAVITY_AUTH`) | `model`, one per family (`label` Claude, Gemini, GPT-OSS: the most used of its models, and that model's reset) |
+
+`monthly` and `model` are kinds only a plan has. `extra` is null. None
+sends a severity Claude's way, so a window at 80% or more (or one its plan
+says is not ok / reached) is `warning`. 404 `no_login` when the plan is not
+signed in, 400 `unknown_plan`, 502 `unavailable` as above. The app shows a
+card per plan on Coding agents, and a thread's own plan's warnings under
+its input box (a Codex or Antigravity thread its agent's; opencode only on
+an `opencode-go/…` model).
 
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 

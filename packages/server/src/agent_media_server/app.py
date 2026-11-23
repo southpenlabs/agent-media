@@ -2672,6 +2672,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         log.info(f"commands: {h.client_address[0]} {query} -> "
               f"{len(detail.get('commands') or []) if ok else detail}")
         _json(h, 200 if ok else detail.pop("status", 404), {"ok": ok, **detail})
+    elif path == "/usage/plans":
+        # The subscriptions signed in here whose usage /usage?plan= answers.
+        from . import plan_usage
+
+        ok, detail = plan_usage.plans(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/usage":
         # How much of the Claude plan is spent (plan_usage.py): the card's numbers.
         from . import plan_usage
