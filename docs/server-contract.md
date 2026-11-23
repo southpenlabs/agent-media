@@ -3954,6 +3954,7 @@ It only records: nothing chooses music by it yet.
 | `history_id` | the reply's speech-history row, `null` when not known (a private reading, a held tune played later) |
 | `session` | the reply's thread, or `null` |
 | `thread_title` | the title the reply's history row was spoken under, `null` without one |
+| `uri`, `start` | a favourite's row (`source` `favourites` or `app`): the song it was made from, its original's YouTube video as a `yt:` uri, and `start` (seconds) where it is a song inside a mix; `POST /music {action: "play", uri, start}` plays it. Absent for any other row, or a favourite no longer kept (24 Nov 2026) |
 | `track_key` | our own id for the track: the favourite's key, a library track's address, `yt:<id>` for a streaming one, `generated:<mood>`, the tune's hand-off `id`; `null` when none |
 | `artist`, `title` | as known (`null` for none); a reply tune's are the agent's own line, on either route |
 | `source` | `favourites`, `library`, `stream`, `generated` (a bed); `handoff` or `spotify` (a tune's route); `app` (a row written from the app's report alone) |

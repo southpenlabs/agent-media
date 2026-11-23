@@ -45,6 +45,8 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 
+from agent_media_core import failures as _failures
+
 log = logging.getLogger(__name__)
 
 #: What a row can be.
@@ -224,11 +226,14 @@ def age_s(text: str) -> float:
     return float(m.group(1)) * _AGE_S[m.group(2).lower()]
 
 
-def with_titles(rows: list[dict], store=None) -> list[dict]:
+def with_titles(rows: list[dict], store=None, favourites=None) -> list[dict]:
     """`rows` with `thread_title`: the title the reply's history row kept
     (`extras.source_title`), None where there is no row or no title. A row
-    without a `session` takes its reply's. Never raises."""
+    without a `session` takes its reply's. A favourite's row also has the
+    `uri` (and `start`) of the song it was made from (`favourites`: the
+    music_bed_favourites index, read when not given). Never raises."""
     out, seen = [], {}
+    songs: Optional[dict] = None
     for r in rows:
         r = dict(r)
         r["thread_title"] = None
@@ -244,8 +249,49 @@ def with_titles(rows: list[dict], store=None) -> list[dict]:
                     r["session"] = str(ex["source_session"])
             except Exception as e:  # noqa: BLE001 — a row without its title
                 log.debug("speech music: title: %s", e)
+        if songs is None:
+            songs = _songs() if favourites is None else _songs(favourites)
+        song = _song_of(r, songs)
+        if song:
+            r["uri"], start = song
+            if start:
+                r["start"] = start
         out.append(r)
     return out
+
+
+def _songs(data=None) -> dict:
+    """Each favourite's key: `(video id, start)` of its original, from the
+    favourites and their made tracks. Empty when the index can't be read."""
+    out: dict = {}
+    try:
+        if data is None:
+            from . import music_bed_favourites as fav
+
+            data = fav.load()
+        for f in data.get("favourites") or []:
+            if f.get("key") and f.get("id"):
+                out[f["key"]] = (str(f["id"]), float(f.get("start") or 0))
+        for t in data.get("tracks") or []:
+            if t.get("key") and t.get("original_id"):
+                out.setdefault(t["key"], (str(t["original_id"]), float(t.get("original_start") or 0)))
+    except Exception as e:  # noqa: BLE001 — rows without a song
+        _failures.swallowed(e)
+    return out
+
+
+def _song_of(row: dict, songs: dict) -> Optional[tuple[str, float]]:
+    """The song a favourite's row was made from, as `(uri, start)`: its
+    original's YouTube video (and where in a mix it starts), so the Media
+    tab's Outros and Backing rows name it with a tap that plays it (David,
+    24 Nov 2026: "display the actual song title the row is referring to,
+    with a link to play it"). None for a generated bed, a tune, a song not
+    kept."""
+    key = row.get("track_key")
+    got = songs.get(key) if key and row.get("source") in ("favourites", "app") else None
+    if not got:
+        return None
+    return f"yt:https://www.youtube.com/watch?v={got[0]}", got[1]
 
 
 # ---- what the players' callers know -------------------------------------------------------------

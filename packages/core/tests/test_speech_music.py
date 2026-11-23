@@ -170,6 +170,18 @@ def test_a_row_takes_its_threads_title_from_the_reply(st):
     assert tune["thread_title"] is None and tune["session"] is None
 
 
+def test_a_favourites_row_carries_the_song_it_was_made_from(st):
+    # The Media tab's Outros name the song with a tap that plays it (David, 24 Nov 2026).
+    rows = [{"track_key": "k1", "source": "favourites"}, {"track_key": "k2", "source": "favourites"},
+            {"track_key": "k1", "source": "generated"}, {"track_key": None, "source": "favourites"}]
+    fav = {"favourites": [{"key": "k1", "id": "66A_3uwuZ_I"}],
+           "tracks": [{"key": "k2", "original_id": "mixvideo01", "original_start": 754.0}]}
+    one, two, made, none = M.with_titles(rows, store=st, favourites=fav)
+    assert one["uri"] == "yt:https://www.youtube.com/watch?v=66A_3uwuZ_I" and "start" not in one
+    assert (two["uri"], two["start"]) == ("yt:https://www.youtube.com/watch?v=mixvideo01", 754.0)
+    assert "uri" not in made and "uri" not in none
+
+
 # ---- the bed, Sing it in and Sing it out -------------------------------------------------
 
 def _favourite(tmp_path):
