@@ -324,6 +324,12 @@ def _agents() -> bool:
     return sessiond.use_tcp() or sessiond.socket_path().exists()
 
 
+def _scenes() -> bool:
+    from . import scenes
+
+    return scenes.configured()
+
+
 CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "mail_accounts": _mail_accounts,
           "bridges": _bridges, "personas": _personas, "quick": lambda: True,
           "read": lambda: True, "read_page": _signed_in, "signed_in": _signed_in, "stories": _stories,
@@ -331,7 +337,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "m
           "astro": _personal("astro"), "listenbrainz": _personal("listenbrainz"),
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
-          "photo_edit": _photo_edit, "agents": _agents, "device_kinds": lambda: True,
+          "photo_edit": _photo_edit, "agents": _agents, "scenes": _scenes, "device_kinds": lambda: True,
           "practice_upload": lambda: True, "device_limits": lambda: True, "task_stop": lambda: True}
 
 
