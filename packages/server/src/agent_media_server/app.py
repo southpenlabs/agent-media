@@ -344,9 +344,12 @@ except /pair, which is how a device gets its token):
                   names, sources, labels and last contact (contacts_review.py)
   GET  /contacts/export.vcf[?photos=1] → the caller's book as one vCard
                   file, to take to another app (contacts_vcard.py, §6.25)
-  POST /contacts/import[?name=] <a Facebook or Instagram export: .zip or
-                  JSON, raw or multipart> → its friends / followers / following
-                  into the caller's book, the counts (contacts_import.py, §6.25)
+  POST /contacts {"name", "phones", "emails"} → a person added by hand to
+                  the caller's book: {id, joined, contact} (contacts_manual.py)
+  POST /contacts/import[?name=] <a .vcf, or a Facebook or Instagram export:
+                  .zip or JSON, raw or multipart> → its people (the vCards, or
+                  friends / followers / following) into the caller's book,
+                  the counts (contacts_manual.py, contacts_import.py, §6.25)
   POST /contacts/<id>/same|different {"other"} → "Same person?" answered:
                   the bridged one joins the other, or the suggestion goes
   GET  /contacts/google → the caller's book's Google: signed in as whom,
@@ -2192,10 +2195,30 @@ def _multipart_file(ctype: str, body: bytes) -> tuple[bytes, str] | None:
     return None
 
 
+def _contact_create(h: BaseHTTPRequestHandler) -> None:
+    """`POST /contacts {"name", "phones", "emails", "notes"?}` (§6.25): a
+    person added by hand to the caller's own book (contacts_manual.py), so a
+    book with no source has a way in; gated as the other contacts routes.
+    `{id, joined, contact}`; 400 when it names no one."""
+    from . import contacts, contacts_manual
+
+    user, err = auth.gate(_bearer(h))
+    if not user:
+        _json(h, err.pop("status", 403), {"ok": False, **err})
+        return
+    try:
+        got = contacts_manual.create(_read_json(h))
+    except ValueError as e:
+        _json(h, 400, {"ok": False, "error": str(e)})
+        return
+    _json(h, 200, {"ok": True, **got, "contact": contacts.card(got["id"])})
+
+
 def _contacts_import(h: BaseHTTPRequestHandler) -> None:
-    """`POST /contacts/import[?name=]` (§6.25): a data export — Facebook or
-    Instagram (friends, followers, messages), Google Takeout's Chats (.mbox
-    or its zip) — raw (`application/zip`, `application/json`,
+    """`POST /contacts/import[?name=]` (§6.25): a vCard file (.vcf, any
+    phone's or address book's export; contacts_manual.py), or a data
+    export — Facebook or Instagram (friends, followers, messages), Google
+    Takeout's Chats (.mbox or its zip) — raw (`application/zip`, `application/json`,
     `application/mbox`) or as a form's file, into the caller's own book.
     Gated as the other contacts routes; the body's size was checked against
     contacts.IMPORT_MAX before this (a larger one goes through `contacts
@@ -2229,7 +2252,8 @@ def _contacts_import(h: BaseHTTPRequestHandler) -> None:
         data, name = part[0], name or part[1]
     if not data:
         _json(h, 400, {"ok": False,
-                       "error": "expected an export (.zip, .mbox or .json) as the body"})
+                       "error": "expected a .vcf or an export (.zip, .mbox or .json) "
+                                "as the body"})
         return
     try:
         got = contacts.import_export(data, name)
@@ -4557,6 +4581,8 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         _devices_scope(h)
     elif CONTACT_NOTES.fullmatch(path):
         _contact_note(h, CONTACT_NOTES.fullmatch(path).group(1))
+    elif path == "/contacts":
+        _contact_create(h)
     elif path == "/contacts/import":
         _contacts_import(h)
     elif path == "/contacts/timeline/backfill":

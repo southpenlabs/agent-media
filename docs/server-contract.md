@@ -9105,9 +9105,28 @@ the files and mails seen, the Drive files taken under `drive`, what is
 raised). Pinned by `packages/server/tests/test_contacts_exports.py` and
 `test_contacts_drive_import.py`.
 
+#### `POST /contacts {"name", "phones", "emails", "notes"?}` — gated (`auth.gate`)
+
+A person added by hand to the caller's own book, so a book with no source
+(no Google, no CardDAV, not the owner's phone) has a way in
+(contacts_manual.py, the `manual` records). `phones` and `emails` are lists
+or one comma-separated string; a number is read in the book's region. One
+sharing a number (else an address) with exactly one person already there
+joins them, what is there winning field by field. →
+`{"ok": true, "id": "<contact id>", "joined": false, "contact": {…the card}}`;
+400 when it names no one (no name, number or email) or an email has no `@`.
+Kept across syncs; no source reads it again.
+
 #### `POST /contacts/import[?name=<file name>]` — gated (`auth.gate`)
 
-The body is the export: a `.zip` of it (the whole download, or the
+A vCard file (`BEGIN:VCARD` first, or a `.vcf`/`.vcard` name: any phone's,
+Google's, Apple's or Outlook's export) is read card by card into the
+caller's book as `manual` records (group cards skipped; a card keyed by its
+`UID`, else its content, so a file imported twice is the same people) →
+`{"ok": true, "imported": {"vcard": 3}, "people": 3, "joined": 0,
+"skipped": 0, "contacts": 3}`; 400 `not_an_export` when no person is in it.
+
+Otherwise the body is the export: a `.zip` of it (the whole download, or the
 friends / followers / messages part, or a Takeout zip), an `.mbox`, or one
 of those JSON files (a list, or one `message_N.json`), raw
 (`application/zip`, `application/json`, `application/mbox`) or as a

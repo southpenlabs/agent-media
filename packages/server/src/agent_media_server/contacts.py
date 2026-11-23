@@ -156,7 +156,7 @@ LIMIT_MAX = 5000
 #: How long a login waits for the code before giving up.
 LOGIN_WAIT_S = 900.0
 #: The sources, in the order they merge.
-KINDS = ("carddav", "android", "google", "bridges", "import", "drupal")
+KINDS = ("carddav", "android", "google", "bridges", "import", "drupal", "manual")
 #: The sources whose people are only names and handles (a bridge's ghost,
 #: an export's friend): they join by number, address, handle or a kept
 #: Join, and a same name is only "Same person?".
@@ -634,6 +634,8 @@ def _source(kind: str, sid: str, meta: dict) -> dict:
     if kind == "import":
         return {"kind": "import", "id": sid, "export": meta.get("export") or "",
                 "lists": meta.get("lists") or []}
+    if kind == "manual":
+        return {"kind": "manual", "id": sid, "via": meta.get("via") or ""}
     if kind == "found":
         return {"kind": "found", "id": sid, "network": meta.get("network") or "",
                 "network_name": meta.get("network_name") or "",
@@ -886,6 +888,7 @@ def _rebuild(conn: sqlite3.Connection) -> None:
             g_phone.setdefault(aid, {}).setdefault(p, set()).add(cid)
         for e in emails:
             g_email.setdefault(aid, {}).setdefault(e, set()).add(cid)
+    _rebuild_manual(recs, book)
     _rebuild_bridges(conn, recs, book)
     _rebuild_drupal(conn, recs, book)
     old = {cid: (raw, upd) for cid, raw, upd in conn.execute(
@@ -1000,6 +1003,46 @@ def _rebuild_carddav(conn: sqlite3.Connection, recs: list, book: dict, by_phone:
         if res:
             out[res] = cid
     return out
+
+
+def _rebuild_manual(recs: list, book: dict) -> None:
+    """The people made here (contacts_manual.py: by hand or from a .vcf)
+    into the book, before the bridges so a chat can find them: each joins
+    the one contact sharing its number, else its address, what is already
+    there winning field by field (the other's labels and handles kept);
+    else it stands as its own. One made here earlier counts: same number,
+    one person, as everywhere in the book."""
+    by_phone: dict[str, set] = {}
+    by_email: dict[str, set] = {}
+    for cid, entry in book.items():
+        phones, emails = _keys(entry["card"])
+        for p in phones:
+            by_phone.setdefault(p, set()).add(cid)
+        for e in emails:
+            by_email.setdefault(e, set()).add(cid)
+    mine = sorted(((json.loads(meta), sid, card) for kind, sid, card, meta in recs
+                   if kind == "manual"), key=lambda r: (r[0].get("at") or 0, r[1]))
+    for m, sid, card in mine:              # the first made first: it keeps the contact
+        c = json.loads(card)
+        src = _source("manual", sid, m)
+        phones, emails = _keys(c)
+        hits: set = set()
+        for p in phones:
+            hits |= by_phone.get(p, set())
+        if not hits:
+            for e in emails:
+                hits |= by_email.get(e, set())
+        if len(hits) == 1:
+            cid = next(iter(hits))
+            book[cid] = {"card": _merge(book[cid]["card"], c),
+                         "sources": book[cid]["sources"] + [src]}
+        else:
+            cid = contact_id("manual", sid)
+            book[cid] = {"card": c, "sources": [src]}
+        for p in phones:
+            by_phone.setdefault(p, set()).add(cid)
+        for e in emails:
+            by_email.setdefault(e, set()).add(cid)
 
 
 def refold() -> bool:
@@ -2053,11 +2096,17 @@ IMPORT_MAX = 64 * 1024 * 1024
 
 def import_export(data: bytes, name: str = "", *, via: str = "") -> dict:
     """A data export as it was sent (`POST /contacts/import`, the phone's
-    Downloads): a .zip, an .mbox or one JSON file. Its people lists
-    (contacts_import.py) and its past conversations (contacts_history.py),
-    whichever it holds. contacts_import.NotAnExport when it holds neither."""
-    from . import contacts_history, contacts_import
+    Downloads): a .vcf (contacts_manual.py), a .zip, an .mbox or one JSON
+    file. Its people lists (contacts_import.py) and its past conversations
+    (contacts_history.py), whichever it holds. contacts_import.NotAnExport
+    when it holds neither."""
+    from . import contacts_history, contacts_import, contacts_manual
 
+    if contacts_manual.looks_like_vcard(data, name):
+        try:
+            return contacts_manual.import_vcf(data, name)
+        except contacts_manual.NotAVcard as e:
+            raise contacts_import.NotAnExport(str(e)) from e
     if data[:4] == b"PK\x03\x04":
         try:
             zf = zipfile.ZipFile(io.BytesIO(data))
@@ -3404,6 +3453,7 @@ def status() -> dict:
                        **per.get("google", {}), "accounts": gaccts},
             "bridges": {"owner_bridges": sorted(_owner_bridges()), **per.get("bridges", {})},
             "import": {**per.get("import", {})},
+            "manual": {**per.get("manual", {})},
             "drupal": {"connection": str(_drupal_config_path()), "configured": _drupal_configured(),
                        **per.get("drupal", {})},
             "background": (os.environ.get("MEDIA_CONTACTS") or "1").strip() != "0"}
