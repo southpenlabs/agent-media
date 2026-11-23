@@ -12079,6 +12079,33 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   (CC BY-SA 4.0)", the photo's author and licence linking its Commons
   page, "Wikivoyage (CC BY-SA 4.0)". 400 `bad_place` (none of wikidata,
   osm, wikipedia or a point), `bad_wikidata`. Gated, not a guest.
+- **`GET /map/street_photos?near=lat,lon[&radius_m=80][&heading=0-359][&limit=6]`**
+  (24 Nov 2026, maps proposal step 9; David: "Go on with street photos";
+  `map_street_photos.py`, tests in `test_map_street_photos.py`): street-level
+  photos near a point, a free Street View. → `{photos: [{source: panoramax |
+  mapillary, id, thumb (Panoramax's 500 px thumbnail, Mapillary's 256 px),
+  image (2048 px, or Mapillary's 1024 px), link (the source's own viewer at
+  the photo), date? (YYYY-MM-DD taken), author?, license ("CC BY-SA 4.0",
+  "Licence Ouverte 2.0", …), license_url?, credit: "Panoramax" | "Mapillary",
+  heading? (degrees the camera looked), pano (a 360° photo), facing (looks
+  the way wanted), distance_m, lat, lon}], sources: {panoramax: ok | failed,
+  mapillary: ok | failed | off}}`. Within `radius_m` (5-500); those looking
+  the right way first (along `heading` when given, else toward the point:
+  a card's place; a 360° photo looks every way), nearest first in each;
+  at most `limit` (1-12). Panoramax (the federated meta-catalogue,
+  `api.panoramax.xyz`, no key) always; Mapillary (Graph API) only with
+  `MEDIA_MAPILLARY_TOKEN`, the owner's own client token, else `off`. The
+  device loads each picture from its source. Each photo is shown with its
+  author, licence and source, linking the source's page. Answers kept on
+  disk in `~/.cache/agent-media/street-photos/` (Panoramax 7 days,
+  Mapillary 12 hours as its picture links expire, an empty answer 2 days,
+  a failure not at all). 400 `bad_point`, `bad_ask`. Gated, not a guest.
+- **`GET /map/street_photos/along?points=lat,lon[,heading];…[&radius_m=40]`**
+  (24 Nov 2026, same module): a route's turns, at most 8 points →
+  `{points: [photo | null]}`, the best photo (as above) at each that looks
+  the way the route goes there, else null. Panoramax only: Mapillary's
+  terms (§5) forbid its use "in connection with real-time navigation or
+  route guidance". 400 `bad_points`. Gated, not a guest.
 - **`GET /map/search?q=<words>[&near=lat,lon]`** → `{places: [{name,
   address, lat, lon, kind, distance_m? (given near), opening_hours?,
   open_now?, changes_at?}]}`, the Map's search box (core `place_find`,

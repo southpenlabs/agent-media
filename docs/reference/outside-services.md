@@ -126,6 +126,8 @@ Sorted with what blocks a public release first. 61 rows.
 | 83 | Transport for NSW "NSW Speed Cameras" (opendata.transport.nsw.gov.au, dataset fb34bd89…: fixed and red-light speed camera CSVs) | the Map's "NSW cameras (official)" layer and camera alerts (`map_gov_cameras.py`, `MEDIA_MAP_CAMERAS_NSW`; 23 Nov 2026) | none | two small CSVs a week | CC BY: credit "Transport for NSW"; last published 2021, so the layer says newer cameras are missing | no (the setting is per state) |
 | 84 | Australian Bureau of Statistics ASGS 2021 state boundaries (geo.abs.gov.au ArcGIS service, STE layer) | the boxes of the offline maps' regions (`map_offline.REGIONS`; read once by hand, 23 Nov 2026; nothing asked at run time) | none | one extent query per state, once | CC BY 4.0: credit "Australian Bureau of Statistics" (in the code beside the boxes) | no |
 | 85 | Wikimedia for the Map's place card: Wikidata (wbgetentities), English Wikipedia (REST page summary), Wikimedia Commons (imageinfo; the device loads the thumbnail from Wikimedia), English Wikivoyage (action=parse wikitext); with Nominatim's lookup and reverse (row 11) to find the item and town | a landmark's write-up, photo and facts, and its town's See / Do / Eat / Sleep (`GET /map/place/wiki`, map_wiki.py, §6.50; maps proposal step 9, 23 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time, never in parallel, Nominatim a second apart; each answer kept on disk 30 days, a miss 3 | **Fine**: Wikidata CC0; Wikipedia and Wikivoyage text CC BY-SA 4.0, credited with a link and the licence where shown; each Commons photo shown with its author and its own licence, linking its file page | no |
+| 86 | Panoramax (the federated meta-catalogue's STAC search, api.panoramax.xyz; pictures served by each instance, e.g. panoramax.openstreetmap.fr, IGN's, MapComplete's) | street-level photos on the Map's place card and at a route's turns (`GET /map/street_photos`, `/map/street_photos/along`, map_street_photos.py, §6.50; maps proposal step 9, 24 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time; no published rate limit; answers kept on disk 7 days, an empty one 2; the device loads each picture from its instance | **Fine**: each picture carries its own licence (mostly CC BY-SA 4.0; IGN's Licence Ouverte 2.0), shown under it with its author and "Panoramax", linking its viewer page | no |
+| 87 | Mapillary (Meta) Graph API (graph.mapillary.com/images; pictures from Meta's CDN) | the same street-level photos on the place card, beside Panoramax's; never along a route (map_street_photos.py, §6.50; 24 Nov 2026) | the owner's own registered app's client token, `MEDIA_MAPILLARY_TOKEN` (off without one; none on red2 yet) | not in use until a token is set; answers kept 12 hours (its picture links are signed and expire), an empty one 2 days | **Needs work**: images CC BY-SA 4.0 (some sets CC BY-NC-SA); terms §11 ask for Mapillary's logo and a link back where its images are shown (the card shows the word "Mapillary" linking the photo: add the logo before a public release); §5 bars use "in connection with real-time navigation or route guidance" (so not asked along a route); §12 limits commercial use to listed purposes, so a product for others needs Mapillary's written agreement or drops it | no (off without a key; an owner's own token is the per-install case. Gate it with the switch if a shared product token is ever used) |
 
 ## The services, one by one
 
@@ -961,6 +963,56 @@ hosted tier), every one of these becomes a reseller question.
 - **Production:** fine as is: one card's requests at a time per install.
   A much busier service would read Wikidata and Wikivoyage from their
   dumps instead.
+
+### 86. Panoramax on the Map
+
+- **Used for:** street-level photos near a place card's point and at a
+  route's turns: `GET https://api.panoramax.xyz/api/search?bbox=…&limit=100`
+  (the federated meta-catalogue, a STAC API), sorted here by whether the
+  photo looks at the place (or along the route) and by distance.
+  `map_street_photos.py`, §6.50 (maps proposal step 9; David, 24 Nov
+  2026: "Go on with street photos"). Only a small box around the point
+  leaves the server; no account. The device loads the thumbnail and the
+  2048 px picture from the instance that holds it.
+- **Terms:** Panoramax is open (its software MIT/AGPL, its pictures
+  "freely accessible and reusable", https://docs.panoramax.fr/), each
+  picture under its own licence given in its metadata (`license`, an SPDX
+  id: CC-BY-SA-4.0 on most instances, etalab-2.0 on IGN's). The card
+  shows the author (the account that sent it), the licence and
+  "Panoramax" under each photo, linking its page in Panoramax's viewer.
+  No key and no published rate limit: one request at a time with a named
+  User-Agent, answers kept 7 days.
+- **Personal-use switch:** no.
+- **Production:** fine as is. A much busier service would read
+  Panoramax's vector tiles (`/api/map/{z}/{x}/{y}.mvt`) or run an
+  instance of its own.
+
+### 87. Mapillary on the Map
+
+- **Used for:** the same photos from Mapillary's Graph API
+  (`graph.mapillary.com/images?bbox=…&fields=…`, the token in an
+  `Authorization: OAuth` header), only when `MEDIA_MAPILLARY_TOKEN` is
+  set; never along a route.
+- **Terms** (https://www.mapillary.com/terms, effective 15 Feb 2024,
+  read 24 Nov 2026): other users' images are CC BY-SA 4.0 by default
+  (§3(b); some data sets CC BY-NC-SA). Each app registers for its own
+  client (§11), must add value beyond redistributing content, and shows
+  Mapillary's logo with a link back where its images are shown (the card
+  shows "Mapillary" linking the photo's page; the logo is to add before a
+  public release). §5 forbids use "for or in connection with real-time
+  navigation or route guidance", so `/map/street_photos/along` asks
+  Panoramax only; §5 also forbids un-blurring. §12 limits commercial use
+  to improving products and serving clients, with safeguards. Caching is
+  not addressed; answers are kept 12 hours (the picture links Mapillary
+  signs expire).
+- **Credential:** the owner's own: sign in at mapillary.com, Dashboard →
+  Developers → Register application, copy its "Client token" (MLY|…) into
+  `MEDIA_MAPILLARY_TOKEN` in `~/.config/agent-media.env`, then
+  `media update --only agent-media-server` or a restart.
+- **Personal-use switch:** no while each install uses its owner's own
+  token (an off-by-default setting, like TomTom's key). A product shipping
+  one shared token would need Mapillary's written agreement (§12) and
+  should be gated until it has it.
 
 ### 71. name-suggestion-index and Wikidata (place nicknames)
 

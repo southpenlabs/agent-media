@@ -138,6 +138,15 @@ def _clean_media_env(monkeypatch, tmp_path, request):
 
     monkeypatch.setattr(map_wiki, "_get", _no_wiki)
     monkeypatch.setattr(map_wiki, "_cache_root", lambda: tmp_path / "place-wiki")
+    # Panoramax and Mapillary (map_street_photos.py) are never asked by a
+    # test, and its answers are kept in a scratch folder.
+    from agent_media_server import map_street_photos
+
+    def _no_street(*a, **k):
+        raise RuntimeError("a test reached Panoramax or Mapillary (map_street_photos.py)")
+
+    monkeypatch.setattr(map_street_photos, "_get", _no_street)
+    monkeypatch.setattr(map_street_photos, "_cache_root", lambda: tmp_path / "street-photos")
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

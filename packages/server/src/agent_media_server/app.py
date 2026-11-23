@@ -416,6 +416,11 @@ except /pair, which is how a device gets its token):
   GET  /map/place/wiki?wikidata=|osm=|lat=&lon= → a place's write-up, photo and
                   facts (Wikipedia, Commons, Wikidata) and its town's See / Do /
                   Eat / Sleep (Wikivoyage), credited (map_wiki.py, §6.50)
+  GET  /map/street_photos?near=lat,lon[&radius_m=&heading=&limit=] → the
+                  nearest street-level photos (Panoramax; Mapillary with
+                  MEDIA_MAPILLARY_TOKEN), credited; /map/street_photos/along?
+                  points=lat,lon[,heading];… → one per route turn, Panoramax
+                  only (map_street_photos.py, §6.50)
   GET  /screen/now → {on, pause, why}: should this device pause what is
                   playing on it now (screens.py, §6.21f); POST /devices/pause
                   {id, on, for?} sets its switch (an admin, like a role)
@@ -600,7 +605,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews",
-                       "/map/place/wiki"})
+                       "/map/place/wiki", "/map/street_photos", "/map/street_photos/along"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6641,6 +6646,17 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         if ok:
             ok, detail = map_wiki.place_wiki(arg("wikidata"), arg("osm"), arg("wikipedia"), arg("name"),
                                              arg("lat") or None, arg("lon") or None)
+    elif method == "GET" and path in ("/map/street_photos", "/map/street_photos/along"):
+        # Street-level photos near a point or at a route's turns (map_street_photos.py, §6.50).
+        from . import map_layers, map_street_photos
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok and path == "/map/street_photos":
+            ok, detail = map_street_photos.street_photos(arg("near"), arg("radius_m") or None,
+                                                         arg("heading") or None, arg("limit") or None)
+        elif ok:
+            ok, detail = map_street_photos.along(arg("points"), arg("radius_m") or None)
     elif path == "/map/check_hours" and method in ("GET", "POST"):
         # Places to check the hours of, for OSM from allowed sources only (map_check.py, §6.50).
         from . import map_check, map_layers, map_saved
