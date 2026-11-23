@@ -189,6 +189,23 @@ def test_a_failed_control_is_502_with_the_state(server, signed_in, audio_host, p
     assert res.status == 502 and obj["error"] == "nothing playing" and obj["now"] == SAID
 
 
+@pytest.mark.parametrize("named,words", [("p8a Termux jobs", "its downloader, p8a Termux jobs, isn't connected"),
+                                         ("", "its downloader isn't connected")])
+def test_a_play_with_no_downloader_says_so(server, signed_in, audio_host, player, monkeypatch, named, words):
+    """A YouTube song tapped while the phone's downloader is offline: plain words and a code,
+    not the CLI's "phone fetch failed (255)" (David, 23 Nov 2026)."""
+    from agent_media_server import phone_jobs
+
+    said = ("media music play (sasonica) failed: sink-music-local: phone fetch failed (255): "
+            "no phone worker connected")
+    monkeypatch.setattr(music, "_run", lambda argv, *_: (False, said))
+    monkeypatch.setattr(phone_jobs, "workers", lambda: [{"name": "red5 jobs", "phone": False},
+                                                         {"name": named, "phone": True}])
+    res, obj = call(server, "POST", "/music", {"action": "play", "uri": "yt:https://www.youtube.com/watch?v=tAGnKpE4NCI"}, AUTH)
+    assert res.status == 502 and obj["code"] == "downloader_offline"
+    assert words in obj["error"] and "phone fetch" not in obj["error"]
+
+
 @pytest.mark.parametrize("who,status", [(None, 401)])
 def test_controls_are_gated(server, monkeypatch, audio_host, player, who, status):
     monkeypatch.setattr(auth, "_device", lambda bearer: who)

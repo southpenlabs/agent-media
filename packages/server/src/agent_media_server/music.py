@@ -216,6 +216,33 @@ def _run_book(uri: str, force: bool = False) -> tuple[bool, str]:
     return _cli(["book", "play", *(["--in-treatment"] if force else []), "--", uri])
 
 
+#: What a phone fetch says when no downloader is there to take it
+#: (phone_jobs.run, and the ssh fallback behind it).
+_DOWNLOADER_GONE = ("no phone worker connected", "no phone worker took it")
+
+
+def _failed_answer(said: str, fallback: str) -> dict:
+    """The answer to a play that failed. A YouTube download with no
+    downloader connected says so in plain words, naming the device it waits
+    on, with `code` "downloader_offline" (David, 23 Nov 2026: a tapped song
+    said "Downloading" and nothing came, the phone's Termux worker offline;
+    the answer was the CLI's "media music play (sasonica) failed:
+    sink-music-local: phone fetch failed (255): …")."""
+    if any(w in said for w in _DOWNLOADER_GONE):
+        name = ""
+        try:
+            from . import phone_jobs
+
+            name = next((w["name"] for w in phone_jobs.workers() if w.get("phone")), "")
+        except Exception as _exc:  # noqa: BLE001 — the words without the name
+            _failures.swallowed(_exc)
+        who = f"its downloader, {name}," if name else "its downloader"
+        return {"error": f"YouTube can't be downloaded: {who} isn't connected. "
+                         "Open it on the phone and try again.",
+                "code": "downloader_offline", "status": 502, **_answer()}
+    return {"error": said or fallback, "status": 502, **_answer()}
+
+
 def _held_answer(said: str) -> dict:
     """The answer to a play the play gate held: 409, `held`, and why."""
     return {"error": said.removeprefix("media: ") or "held: a treatment is under way",
@@ -1689,7 +1716,7 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
         _reset_cache()
         if not done:
             print(f"music: book play failed: {said}", file=sys.stderr)
-            return False, {"error": said or "book failed", "status": 502, **_answer()}
+            return False, _failed_answer(said, "book failed")
         return True, _answer()
     elif action == "spotify":
         return _spotify_play(body)
@@ -1744,5 +1771,5 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
     _reset_cache(forget=action == "stop")
     if not done:
         print(f"music: {' '.join(argv)} failed: {said}", file=sys.stderr)
-        return False, {"error": said or f"{action} failed", "status": 502, **_answer()}
+        return False, _failed_answer(said, f"{action} failed")
     return True, _answer()

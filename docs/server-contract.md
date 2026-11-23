@@ -4800,6 +4800,13 @@ like the speech gate. red5: dotfiles' `phs-treatment-guard now`.
   tools answer `{"ok": false, "held": true, "reason", "id"}`; these controls
   answer **409** `{"error", "held": true, "code": "held", …the GET
   answer}`.
+- **No downloader** (23 Nov 2026). A `play`, `add` or `book` whose YouTube
+  download found no downloader to take it (the phone's jobs worker offline,
+  and the ssh behind it unreachable) answers **502** `{"error", "code":
+  "downloader_offline", …the GET answer}`, `error` in plain words naming the
+  worker ("YouTube can't be downloaded: its downloader, p8a Termux jobs,
+  isn't connected. Open it on the phone and try again."). Any other failed
+  control is 502 `{"error"}` with what the command said.
 - **Play now**: `GET /music` adds `"on_hold": [{id, at, uri, title, kind,
   target, session, reason}]` (newest first; the key is absent without a
   gate). `{"action": "held", "id"?, "play": true}` plays one now, through the
