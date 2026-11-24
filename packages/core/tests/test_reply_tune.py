@@ -27,6 +27,7 @@ def scratch(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(radio, "is_on", lambda: False)
+    monkeypatch.delenv("MEDIA_MUSIC_SASONICA_ENDPOINT", raising=False)
 
 
 def _event(tune="Nina Simone - Feeling Good", **md):
@@ -209,3 +210,16 @@ def test_the_switch_is_listed_only_with_a_route(monkeypatch):
 def test_split():
     assert reply_tune.split("Björk – Joga") == ("Björk", "Joga")
     assert reply_tune.split("Clair de Lune") == ("", "Clair de Lune")
+
+
+def test_not_over_a_song_in_the_apps_own_player(handoff, monkeypatch):
+    """24 Nov 2026: a tune replaced The Sea playing in the app's player."""
+    monkeypatch.setenv("MEDIA_MUSIC_SASONICA_ENDPOINT", "tcp://127.0.0.1:1")
+    song = {"path": "http://localhost:6616/rOLN9T9w9kA.mka", "idle-active": False}
+    monkeypatch.setattr(radio_io.PhonePlayer, "props", lambda self: {**song, "pause": False})
+    assert reply_tune.after_reply(_event(), 1) == "the app's music player has a song"
+    monkeypatch.setattr(radio_io.PhonePlayer, "props", lambda self: {**song, "pause": True})
+    assert reply_tune.after_reply(_event(), 1) == "the app's music player has a song"
+    assert handoff.sent == []
+    monkeypatch.setattr(radio_io.PhonePlayer, "props", lambda self: {"idle-active": True})
+    assert reply_tune.after_reply(_event(), 1) is None

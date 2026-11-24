@@ -28,7 +28,8 @@ nothing plays:
 **When it does not.** While the switch is off (below); in a thinking
 readout; within the cooldown (``MEDIA_REPLY_TUNE_COOLDOWN_MIN``, default 30
 minutes, across the whole install); while a radio station is on; while the
-route's player is already playing. It plays after the speech, never under
+route's player is already playing; while the app's own music player has a
+song loaded, playing or paused by the reply. It plays after the speech, never under
 it (Developer Policy III.7: no overlapping Spotify with other audio).
 
 **The switch and the start level** (David, 4 Nov 2026: a song he was not
@@ -230,6 +231,9 @@ def _after_reply(event, row: int) -> Optional[str]:
     from . import radio
     if radio.is_on():
         return _skip("a radio station is on", line)
+    busy = _app_music_busy()
+    if busy:
+        return _skip(busy, line)
     artist, title = split(line)
     if not title:
         return _skip("no title", line)
@@ -253,6 +257,24 @@ def _after_reply(event, row: int) -> Optional[str]:
     _record(entry)
     _log(line, artist, title, r, entry["level"], row=row, session=entry["session"])
     log.info("reply tune %r played on %s", line, r)
+    return None
+
+
+def _app_music_busy() -> Optional[str]:
+    """Why the app's own music player rules a tune out, else None. A track
+    loaded there, playing or paused, is the listener's: the reply's speech
+    pauses it by audio focus, so "paused" is no sign it is done with. The
+    hand-off player shares the phone's music session, so a tune sent with
+    replace took the place of the song playing (David, 24 Nov 2026: The Sea
+    went silent for a tune; "It's stopped again"). Unset endpoint or no
+    answer: nothing to protect."""
+    from .sinks import music_sasonica
+    if not music_sasonica.configured():
+        return None
+    from . import radio_io
+    p = radio_io.PhonePlayer("sasonica").props() or {}
+    if p and not p.get("idle-active") and p.get("path"):
+        return "the app's music player has a song"
     return None
 
 
