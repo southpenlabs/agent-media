@@ -1061,6 +1061,12 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         _json(h, 403, {"ok": False, "code": "guest",
                        "error": "a guest may read and listen here, not change anything"})
         return True
+    if path.startswith("/scenes") and method in ("GET", "POST"):
+        # The Sacred Scenes companion server, proxied through this server so
+        # the app reaches it on one origin (scenes.py).
+        from . import scenes
+
+        return scenes.handle(h, method, path)
     if path.startswith("/map/osm"):
         # Adding hours to OpenStreetMap under the owner's account; the callback has no bearer (osm_edit).
         from . import osm_edit
