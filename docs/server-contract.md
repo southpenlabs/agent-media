@@ -10296,7 +10296,10 @@ under its input box when it is low, used up or its key refused.
 left on what pays for each model, every row carries `group` (what pays for it, by name: "Go", "Venice",
 "Free", "" when not known; the app's header over its rows) and `base` (its
 note without the group's name), and each row it knows of carries
-`usage: {"state": "ok"|"near"|"out", "text", "percent"?, "left"?}` and says
+`usage: {"state": "ok"|"near"|"out", "text", "percent"?, "left"?, "resets_at"?}`
+(`text` ends with when the limit that stops it first resets, in the host's
+time: "35% used · resets 4:00 PM", "resets Thu 4:59 PM", "resets 16 Dec";
+25 Nov 2026) and says
 it in its `note` ("Go · 35% used", "$7.00 left"): plans with room first (most
 room first), then credit (most money first), the free models, then those
 near a limit, then those out (model_headroom.py). A new chat on "Default"

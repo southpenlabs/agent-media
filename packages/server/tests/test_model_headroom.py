@@ -125,7 +125,8 @@ def test_openrouter_free_models_have_their_own_allowance(usage):
     rows = mh.annotate([{"id": "opencode/big-pickle", "label": "Big Pickle", "note": "Free"},
                         {"id": "openrouter/qwen/x:free", "label": "Qwen free", "note": "Free"}])
     q = next(r for r in rows if r["id"].endswith(":free"))
-    assert (q["group"], q["usage"]["text"], q["usage"]["state"]) == ("OpenRouter free", "100 left today", "near")
+    assert (q["group"], q["usage"]["state"]) == ("OpenRouter free", "near")
+    assert q["usage"]["text"].startswith("100 left today · resets "), "and when the day starts again"
     assert next(r for r in rows if r["id"] == "opencode/big-pickle")["group"] == "Free"
 
 
@@ -215,3 +216,16 @@ def test_the_tap_switches_the_model_and_asks_again(monkeypatch):
     with _pt.raises(Stop):
         send.reply("Retry on Venice DeepSeek", "t", session="0f0e0d0c-0b0a-4909-8807-060504030201")
     assert switched == [{"model": "venice/deepseek-v4"}]
+
+
+def test_when_a_limit_resets_is_said(monkeypatch):
+    import time
+    monkeypatch.setenv("TZ", "Australia/Melbourne")
+    time.tzset()
+    now = 1795485093 - 3 * 3600                       # 24 Nov 2026, 9:51 am Melbourne
+    assert mh.resets(1795485093, now) == "resets 12:51 PM", "today: the time"
+    assert mh.resets(1795639420, now) == "resets Thu 7:43 AM", "this week: the day and time"
+    assert mh.resets(1797412848, now) == "resets 16 Dec", "further off: the date"
+    assert mh.resets(None, now) == ""
+    u = mh._windows_usage([{"percent": 35, "resets_at": None}, {"percent": 62, "resets_at": 1795639420}], 80)
+    assert u["percent"] == 62 and u["text"].startswith("62% used · resets "), "the window that stops it first"

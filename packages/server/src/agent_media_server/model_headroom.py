@@ -68,12 +68,29 @@ def _plan_usage(plan: str) -> Optional[dict]:
     except Exception as e:  # never let the sheet fail on a usage ask
         log.warning("headroom: %s usage failed (%s)", plan, e)
         return None
-    windows = out.get("windows") or [] if ok else []
-    if not windows:
-        return None
-    used = max(int(w.get("percent") or 0) for w in windows)
-    state = "out" if used >= 100 else "near" if used >= plan_usage.WARN_AT else "ok"
-    return {"state": state, "percent": used, "text": f"{used}% used"}
+    return _windows_usage(out.get("windows") or [] if ok else [], plan_usage.WARN_AT)
+
+
+def resets(at: Optional[float], now: Optional[float] = None) -> str:
+    """When a limit resets, in the host's time (David, 25 Nov 2026: "rather
+    than just the percentage, could we also say when it resets?"): "resets
+    4:00 PM" today, "resets Thu 4:00 PM" within the week, else "resets 16 Dec"."""
+    import time as _t
+
+    if not at:
+        return ""
+    now = _t.time() if now is None else now
+    when, today = _t.localtime(at), _t.localtime(now)
+    if when.tm_yday == today.tm_yday and when.tm_year == today.tm_year:
+        return "resets " + _t.strftime("%-I:%M %p", when)
+    if at - now < 6.5 * 86400:
+        return "resets " + _t.strftime("%a %-I:%M %p", when)
+    return "resets " + _t.strftime("%-d %b", when)
+
+
+def _with_reset(text: str, at: Optional[float]) -> str:
+    r = resets(at)
+    return f"{text} · {r}" if r else text
 
 
 def _credit_rows() -> dict[str, dict]:
@@ -105,6 +122,7 @@ def _credit_usage(row: Optional[dict]) -> Optional[dict]:
     if row["state"] in ("ok", "low") and cap and row.get("left") is not None and cap["remaining"] < row["left"]:
         # The key's spending cap stops it before the credit does.
         text = f"${cap['remaining']:.2f} left {'this week' if cap.get('every') == 'weekly' else 'under its cap'}"
+        text = _with_reset(text, _iso_epoch(cap.get("resets_at")))
     out = {"state": state, "text": text}
     if row.get("left") is not None:
         out["left"] = min(row["left"], cap["remaining"]) if cap else row["left"]
@@ -118,7 +136,21 @@ def _free_daily(row: Optional[dict]) -> Optional[dict]:
         return None
     left, limit = int(free["remaining"]), int(free["limit"]) or 1
     state = "out" if left <= 0 else "near" if left < limit * 0.2 else "ok"
-    return {"state": state, "percent": round(100 * (limit - left) / limit), "text": f"{left:,} left today"}
+    # OpenRouter's day starts at midnight UTC.
+    import time as _t
+
+    midnight = (int(_t.time()) // 86400 + 1) * 86400
+    return {"state": state, "percent": round(100 * (limit - left) / limit),
+            "text": _with_reset(f"{left:,} left today", midnight)}
+
+
+def _iso_epoch(v) -> Optional[float]:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp() if v else None
+    except ValueError:
+        return None
 
 
 def annotate(offered: list[dict]) -> list[dict]:
@@ -206,11 +238,16 @@ def auto_default(offered: list[dict], configured: str) -> str:
 # --- the other agents' sheets -------------------------------------------------
 
 def _windows_usage(windows: list[dict], warn_at: int) -> Optional[dict]:
+    """The most used window's percent and when it resets ("35% used ·
+    resets 4:00 PM"): the limit that will stop it first."""
     if not windows:
         return None
-    used = max(int(w.get("percent") or 0) for w in windows)
+    top = max(windows, key=lambda w: int(w.get("percent") or 0))
+    used = int(top.get("percent") or 0)
     state = "out" if used >= 100 else "near" if used >= warn_at else "ok"
-    return {"state": state, "percent": used, "text": f"{used}% used"}
+    at = top.get("resets_at")
+    return {"state": state, "percent": used, "text": _with_reset(f"{used}% used", at),
+            **({"resets_at": at} if at else {})}
 
 
 def _claude_windows() -> list[dict]:
@@ -251,7 +288,7 @@ def _claude_own_weeks() -> dict[str, dict]:
             continue
         state = max(own["state"], (plan or {}).get("state", "ok"), key=order.get)
         out[str(w["label"])] = {"state": state, "percent": own["percent"],
-                                "text": f"{own['percent']}% of its week used"}
+                                "text": _with_reset(f"{own['percent']}% of its week used", w.get("resets_at"))}
     return out
 
 
@@ -409,7 +446,8 @@ def _codex_own(m: dict) -> Optional[tuple[str, dict]]:
             if own:
                 state = max(own["state"], (plan or {}).get("state", "ok"), key=order.get)
                 return label, {"state": state, "percent": own["percent"],
-                               "text": f"{own['percent']}% of its own limit used"}
+                               "text": _with_reset(f"{own['percent']}% of its own limit used",
+                                                   w.get("resets_at"))}
     return None
 
 
