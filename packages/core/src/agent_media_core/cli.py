@@ -11409,6 +11409,27 @@ def _build_parser() -> argparse.ArgumentParser:
     t = psub.add_parser("things", help="the devices, rooms and speakers on the Map, and the ones not placed")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_things)
+    t = psub.add_parser("when", help="do something when the user arrives at a place or leaves it "
+                                      "(\"remind me at Bunnings\": place when arrive Bunnings Cheltenham "
+                                      "-37.95,145.05 --remind \"buy screws\")")
+    t.add_argument("on", choices=["arrive", "leave"])
+    t.add_argument("name", nargs="+", help="the place's name; with no point, one of the user's saved "
+                                          "places (home, work, or one of their own)")
+    t.add_argument("--at", default="", help="lat,lon (from `media place find`)")
+    t.add_argument("--here", action="store_true", help="at the phone's shared location")
+    what = t.add_mutually_exclusive_group(required=True)
+    what.add_argument("--remind", metavar="TEXT", help="a note on the phone and said aloud; once")
+    what.add_argument("--say", metavar="TEXT", help="said aloud, each time")
+    what.add_argument("--music", nargs="?", const="", metavar="URI",
+                      help="play this in the rooms, or with none resume what was playing")
+    what.add_argument("--catchup", action="store_true", help="say what is waiting")
+    t.add_argument("--radius", type=float, default=None, help="metres (50-2000, default 150)")
+    t.add_argument("--again", action="store_true", help="a reminder that stays on after it fires")
+    t.set_defaults(func=cmd_place_when)
+    t = psub.add_parser("triggers", help="the user's triggers by place (place when …)")
+    t.add_argument("--remove", default="", metavar="ID", help="take one off")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_triggers)
     s = sub.add_parser("location", help="where the user has been, from \"Keep where I've been\" "
                                          "(location_where; maps proposal step 5)")
     lsub = s.add_subparsers(dest="location_cmd", required=True)
@@ -12706,7 +12727,7 @@ _LATLON = re.compile(r"-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?")
 def _place_point_opt(argv: list[str]) -> list[str]:
     """`media place thing room kitchen -37.8,144.96`: a southern point starts
     with "-", which argparse takes for an option; it becomes `--at=…`."""
-    if argv[:2] != ["place", "thing"]:
+    if argv[:2] not in (["place", "thing"], ["place", "when"]):
         return argv
     return [f"--at={t}" if _LATLON.fullmatch(t) else t for t in argv]
 
@@ -12768,6 +12789,115 @@ def cmd_place_thing(a) -> int:
     else:
         t = out["thing"]
         print(f"{t.get('label') or name} placed @ {t['lat']},{t['lon']}")
+    return 0
+
+
+def _saved_place(words: str) -> dict | None:
+    """One of the user's saved places (Home, Work, their own) by id, name or label."""
+    from .phone_ask import _call
+
+    code, got = _call("GET", "/map/saved")
+    if code != 200:
+        return None
+    want = " ".join(words.lower().split())
+    for p in got.get("places") or []:
+        if want in {str(p.get(k) or "").lower() for k in ("id", "name", "label")}:
+            return p
+    return None
+
+
+def cmd_place_when(a) -> int:
+    from . import place_find, place_things
+    from .phone_ask import _call
+
+    words = list(a.name)
+    at = a.at
+    if not at and len(words) > 1 and place_things.point(words[-1]):
+        at = words.pop()
+    name = " ".join(words)
+    if a.here and at:
+        print("place when: --here or a lat,lon, not both", file=sys.stderr)
+        return 2
+    if a.here:
+        where = place_find.near_point("phone")
+        if where is None:
+            print("place when: the phone is not sharing its location", file=sys.stderr)
+            return 1
+    elif at:
+        where = place_things.point(at)
+        if where is None:
+            print(f"place when: {at!r} is not lat,lon", file=sys.stderr)
+            return 1
+    else:
+        try:
+            saved = _saved_place(name)
+        except (OSError, ValueError) as e:
+            print(f"place when: the server did not answer: {e}", file=sys.stderr)
+            return 1
+        if saved is None:
+            print(f"place when: {name!r} is not a saved place; give its lat,lon "
+                  "(media place find) or --here", file=sys.stderr)
+            return 1
+        where = (saved["lat"], saved["lon"])
+        name = saved.get("label") or saved.get("name") or name
+    body: dict = {"name": name, "lat": where[0], "lon": where[1], "on": a.on}
+    if a.remind is not None:
+        body.update(do="remind", text=a.remind, once=not a.again)
+    elif a.say is not None:
+        body.update(do="say", text=a.say)
+    elif a.music is not None:
+        body["do"] = "music"
+        if a.music:
+            body["uri"] = a.music
+    else:
+        body["do"] = "catchup"
+    if a.radius is not None:
+        body["radius_m"] = a.radius
+    thread = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("MEDIA_SOURCE_SESSION") or ""
+    if thread:
+        body["thread"] = thread
+    try:
+        code, out = _call("POST", "/map/triggers", body)
+    except (OSError, ValueError) as e:
+        print(f"place when: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place when: {out.get('error') or code}", file=sys.stderr)
+        return 1
+    t = out["trigger"]
+    print(f"{t['id']}: on {'arriving at' if t['on'] == 'arrive' else 'leaving'} {t['name']} "
+          f"({t['radius_m']} m), {t['do']}" + (f": {t['text']}" if t.get("text") else "")
+          + ("" if a.remind is None or not t.get("once") else ", once"))
+    return 0
+
+
+def cmd_place_triggers(a) -> int:
+    from .phone_ask import _call
+
+    try:
+        if a.remove:
+            code, out = _call("POST", "/map/triggers", {"id": a.remove, "delete": True})
+            if code != 200:
+                print(f"place triggers: {out.get('error') or code}", file=sys.stderr)
+                return 1
+            print(f"{a.remove} taken off")
+            return 0
+        code, got = _call("GET", "/map/triggers")
+    except (OSError, ValueError) as e:
+        print(f"place triggers: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place triggers: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(got, ensure_ascii=False, indent=1))
+        return 0
+    for t in got.get("triggers") or []:
+        print(f"{t['id']}  {t['on']:6} {t['name']} ({t['radius_m']} m): {t['do']}"
+              + (f" {t['text']!r}" if t.get("text") else "") + (f" {t['uri']}" if t.get("uri") else "")
+              + ("  [off]" if t.get("off") else "") + (f"  fired {t['count']}x" if t.get("count") else ""))
+    if not got.get("triggers"):
+        print("no triggers by place")
     return 0
 
 

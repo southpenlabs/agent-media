@@ -524,7 +524,7 @@ CORS_PATHS = frozenset({
     "/contacts/import", "/contacts/timeline/backfill", "/contacts/export.vcf", "/bridges",
     "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
-    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
+    "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/places/watch", "/device/places/cross", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
     "/notes", "/notes/clear",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
@@ -604,7 +604,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
-                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things",
+                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things", "/map/triggers",
                        "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
@@ -2608,6 +2608,19 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
             return True
         _json(h, 200, {"ok": True, "location": phone.shared()})
         return True
+    if path == "/device/places/watch":
+        # The circles the phone watches for triggers by place (place_triggers.py):
+        # a paired device, not a guest; no names or texts, only where.
+        from . import place_triggers
+
+        user, err = auth.gate(_bearer(h))
+        if not user or not auth.device_id(_bearer(h)):
+            _json(h, 401, {"ok": False, **(err or {"error": "a paired device only"})})
+        elif auth.is_guest(_bearer(h)):
+            _json(h, 403, {"ok": False, "code": "guest", "error": "a guest device has no triggers"})
+        else:
+            _json(h, 200, {"ok": True, **place_triggers.regions(auth.account_key(user))[1]})
+        return True
     agents_m = THREAD_AGENTS.fullmatch(path)
     log_m = AGENT_LOG.fullmatch(path)
     if agents_m or log_m:
@@ -4559,6 +4572,20 @@ def _post(h: BaseHTTPRequestHandler, path: str) -> bool:
                 log.info(f"flag clock: {path} not noted ({e})")
 
 
+def _place_triggers_on(h: BaseHTTPRequestHandler, body) -> None:
+    """A phone's fix (a share or a history batch): any trigger by place it crossed fires
+    (place_triggers.py). Never in the way of keeping the fix."""
+    from . import place_triggers
+
+    try:
+        user, _ = auth.gate(_bearer(h))
+        dev_id = auth.device_id(_bearer(h))
+        if user and dev_id and not auth.is_guest(_bearer(h)):
+            place_triggers.on_fixes(auth.account_key(user), dev_id, place_triggers.points_of(body))
+    except Exception as e:  # noqa: BLE001 - the fix is kept either way
+        _failures.swallowed(e)
+
+
 def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
     if path == "/pair":
         _pair(h)
@@ -5299,6 +5326,7 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                 map_things.on_location(_bearer(h), body)
             except Exception as e:  # noqa: BLE001 - the fix is kept either way
                 _failures.swallowed(e)
+            _place_triggers_on(h, body)
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/device/location/history":
         # "Keep where I've been": a batch of the phone's thinned fixes (location_history.py).
@@ -5311,7 +5339,24 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         elif auth.is_guest(_bearer(h)):
             ok, detail = False, {"status": 403, "code": "guest", "error": "a guest device keeps no history here"}
         else:
-            ok, detail = location_history.add(auth.account_key(user), dev_id, _read_json(h))
+            body = _read_json(h)
+            ok, detail = location_history.add(auth.account_key(user), dev_id, body)
+            if ok:
+                _place_triggers_on(h, body)
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/device/places/cross":
+        # The phone thinks it crossed a trigger's circle: its fix, checked now
+        # rather than in the next batch (place_triggers.py).
+        from . import place_triggers
+
+        user, err = auth.gate(_bearer(h))
+        dev_id = auth.device_id(_bearer(h))
+        if not user or not dev_id:
+            ok, detail = False, err or {"status": 401, "error": "a paired device only"}
+        elif auth.is_guest(_bearer(h)):
+            ok, detail = False, {"status": 403, "code": "guest", "error": "a guest device has no triggers"}
+        else:
+            ok, detail = place_triggers.cross(auth.account_key(user), dev_id, _read_json(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/phone/ask", "/phone/answer", "/phone/cancel"):
         # The phone as an agent's eyes and hands (server-contract.md §6.21,
@@ -6596,6 +6641,19 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_things.listing(account)
             else:
                 ok, detail = map_things.change(account, _read_json(h) or {})
+    elif path == "/map/triggers" and method in ("GET", "POST"):
+        # Triggers by place: on arriving or leaving, a reminder, words, music or a
+        # catch-up (place_triggers.py, maps step 11).
+        from . import map_layers, map_saved, place_triggers
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if method == "GET":
+                ok, detail = place_triggers.listing(account)
+            else:
+                ok, detail = place_triggers.change(account, _read_json(h) or {})
     elif path.startswith("/map/history"):
         # Where the person has been: "Keep where I've been" (location_history.py, step 5).
         # The owner's devices (not a guest) and the host's own token; GETs read, POSTs change.

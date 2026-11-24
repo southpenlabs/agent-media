@@ -14755,6 +14755,35 @@ is `409 not_headless`, a chat on another host or another agent
   it was rewound (with the agent's `why`), or that its request was
   declined.
 
+### 6.65 Triggers by place — gated, not a guest (built 24 Nov 2026)
+
+Something happens when the person arrives somewhere or leaves it (maps proposal
+step 11; David, 24 Nov 2026, choosing triggers by place first). Code:
+`place_triggers.py`; tests in `test_place_triggers.py`.
+
+- A trigger: `{id, name, lat, lon, radius_m (50–2000, default 150), on: arrive|leave,
+  do: remind|say|music|catchup, text?, uri?, once, quiet_s (default 1800), thread?,
+  made, fired?, count, off?}`. `remind` posts a note (§6.23, `place-<id>`) and says it;
+  `say` says it; `music` plays `uri` in the rooms, or resumes there; `catchup` is
+  `media catchup`. `once` defaults to true for `remind`: fired, it turns itself `off`.
+- `GET /map/triggers` → `{triggers}`; `POST /map/triggers {id?, …}` makes one or
+  changes the given fields of one (→ `{trigger}`), `{id, delete: true}` → `{deleted}`.
+  The owner's devices (not a guest) and the host's token (the owner's). 400 codes:
+  `bad_point`, `bad_name`, `bad_radius`, `bad_on`, `bad_do`, `bad_text`, `bad_uri`,
+  `bad_quiet`, `bad_id`, `too_many` (50); 404 `not_found`.
+- `GET /device/places/watch` → `{regions: [{id, lat, lon, radius_m}], version}`: what
+  the phone watches, the triggers that are on; no names or texts. A paired device, not
+  a guest (401/403).
+- `POST /device/places/cross {lat, lon, accuracy_m?, at?}` → `{fired: [id…]}`: the
+  phone thinks it crossed a circle and sends that fix at once. Nothing else is kept of
+  it (not the shared location, not history).
+- Every fix is checked: this one, the background share (§6.21b) and history batches.
+  Inside is within `radius_m` with accuracy no worse than `max(2 × radius, 200 m)`,
+  outside is beyond `radius_m + 100 m` plus the accuracy; between, the last state
+  holds. A device's first fix for a circle only sets its state; a fix over 15 min old
+  fires nothing; a trigger does not fire again within `quiet_s`. State per device and
+  trigger in `place-triggers-state.json`, no coordinates.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in
