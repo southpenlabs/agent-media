@@ -611,7 +611,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews",
-                       "/map/place/wiki", "/map/street_photos", "/map/street_photos/along"})
+                       "/map/place/wiki", "/map/tour/near", "/map/street_photos", "/map/street_photos/along"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6803,6 +6803,14 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         if ok:
             ok, detail = map_wiki.place_wiki(arg("wikidata"), arg("osm"), arg("wikipedia"), arg("name"),
                                              arg("lat") or None, arg("lon") or None)
+    elif method == "GET" and path == "/map/tour/near":
+        # The audio tour: what is worth hearing about near a point (map_tour.py, maps step 10).
+        from . import map_layers, map_tour
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            ok, detail = map_tour.near(arg("lat"), arg("lon"), arg("radius_m"), arg("lang") or "en")
     elif method == "GET" and path in ("/map/street_photos", "/map/street_photos/along"):
         # Street-level photos near a point or at a route's turns (map_street_photos.py, §6.50).
         from . import map_layers, map_street_photos

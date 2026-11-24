@@ -14860,6 +14860,21 @@ place parked --here` set it by hand.
   `map-parked.json` (0600). The `parked` layer (§6.50) draws it: "Your car", `age_s`,
   `accuracy_m`, the car's name as `detail`.
 
+### 6.67 The audio tour — gated, not a guest (built 24 Nov 2026)
+
+What is worth hearing about near a point (maps proposal step 10). Code: `map_tour.py`;
+tests in `test_map_tour.py`. The Map's Tour asks as it moves and says the next place
+ahead not yet said; "What's that?" says the best one ahead now.
+
+- `GET /map/tour/near?lat=&lon=&radius_m=(50–2000, default 400)&lang=` → `{places:
+  [{id, title, lat, lon, distance_m, bearing, text, link, credit, license,
+  license_url}], lang}`, nearest first. `text` is the article's lead cut to two
+  sentences (a bracket after the name taken out, it reads badly aloud); `bearing`
+  degrees from north, from the point. 400 `bad_point`, `bad_radius`; 502 `unreachable`.
+- Wikipedia's geosearch and the leads (prop=extracts) in `lang`'s Wikipedia, English
+  where that has none; lists and roads left out. Through map_wiki's lock and
+  User-Agent, kept per ~100 m cell as the place cards are. Text CC BY-SA 4.0, credited.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in
