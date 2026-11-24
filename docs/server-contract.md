@@ -10303,6 +10303,14 @@ near a limit, then those out (model_headroom.py). A new chat on "Default"
 runs the roomiest model when opencode's own default is near or out, and
 `default` says so ("… (instead of X, near its limit)").
 
+**The other agents' sheets** (25 Nov 2026) carry the same `group`, `base`
+and `usage`, in their own order with a group's rows together: Claude's
+models under `Claude` (the plan's most used of its 5 hours and week),
+Codex's under `ChatGPT`, Antigravity's a family at a time, pi's by provider
+(`meridian` is the Claude plan; venice, openrouter and the API keys their
+credit; another provider its own name, no usage). A sheet nothing is known
+of has no `group` on any row and is drawn without headers.
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by

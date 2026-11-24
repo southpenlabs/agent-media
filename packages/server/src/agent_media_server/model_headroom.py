@@ -23,6 +23,14 @@ shows it too. The sheet is then ordered: what is paid for and has room
 (plans by most room, then credit by most money), the free models, then
 those near a limit, then those out; each group keeps its own order.
 
+The other agents' sheets get the same header and usage, in their own order
+(`grouped`; David, 25 Nov 2026: "It might be nice to add it for lists
+without groups too"): Claude's models under the Claude plan's most used of
+its 5 hours and week, Codex's under ChatGPT's, Antigravity's a family at a
+time (its quota is per family), pi's by provider (meridian is the Claude
+plan; venice, openrouter and the API keys their credit). A sheet nothing is
+known of (grok's, a host with no login) is left with no groups at all.
+
 `auto_default` is what a new chat on "Default" runs when opencode's own
 default is near or out: the first model with room, else "" (opencode's own).
 """
@@ -173,3 +181,106 @@ def auto_default(offered: list[dict], configured: str) -> str:
         return ""
     best = next((m for m in offered if (m.get("usage") or {}).get("state", "ok") == "ok"), None)
     return best["id"] if best else ""
+
+
+# --- the other agents' sheets -------------------------------------------------
+
+def _windows_usage(windows: list[dict], warn_at: int) -> Optional[dict]:
+    if not windows:
+        return None
+    used = max(int(w.get("percent") or 0) for w in windows)
+    state = "out" if used >= 100 else "near" if used >= warn_at else "ok"
+    return {"state": state, "percent": used, "text": f"{used}% used"}
+
+
+def _claude_usage() -> Optional[dict]:
+    """The Claude plan's room: the most used of its 5 hours and its week
+    (one model's own week is that model's, not the plan's)."""
+    from . import plan_usage
+
+    try:
+        ok, out = plan_usage.claude_now()
+    except Exception as e:
+        log.warning("headroom: claude usage failed (%s)", e)
+        return None
+    windows = [w for w in (out.get("windows") or [] if ok else []) if w.get("kind") != "weekly_scoped"]
+    return _windows_usage(windows, plan_usage.WARN_AT)
+
+
+def _family_usage() -> dict[str, dict]:
+    """Antigravity's room a family at a time: {"Claude": usage, …}."""
+    from . import plan_usage
+
+    try:
+        ok, out = plan_usage.plan_now("antigravity")
+    except Exception as e:
+        log.warning("headroom: antigravity usage failed (%s)", e)
+        return {}
+    return {str(w.get("label")): u for w in (out.get("windows") or [] if ok else [])
+            if (u := _windows_usage([w], plan_usage.WARN_AT))}
+
+
+def grouped(agent: str, offered: list[dict]) -> list[dict]:
+    """`offered` (Claude's, Codex's, Antigravity's or pi's sheet) with
+    `group`, `base` and `usage` per row, a group's rows brought together in
+    the order the groups first appear. Unchanged when nothing is known of
+    any row, so the sheet is drawn with no headers."""
+    if not offered or agent == "opencode":
+        return offered
+    names: dict[int, str] = {}
+    usages: dict[str, Optional[dict]] = {}
+    if agent == "claude":
+        usages["Claude"] = _claude_usage()
+        names = {i: "Claude" for i in range(len(offered))}
+    elif agent == "codex":
+        usages["ChatGPT"] = _plan_usage("codex")
+        names = {i: "ChatGPT" for i in range(len(offered))}
+    elif agent == "antigravity":
+        usages.update(_family_usage())
+        names = {i: g for i, m in enumerate(offered)
+                 if (g := str(m.get("label") or m["id"]).split()[0]) in usages}
+    elif agent == "pi":
+        credits: Optional[dict[str, dict]] = None
+        for i, m in enumerate(offered):
+            provider = str(m.get("provider") or m["id"].split("/")[0])
+            if provider == "meridian":            # Claude Max through the proxy
+                if "Claude" not in usages:
+                    usages["Claude"] = _claude_usage()
+                names[i] = "Claude"
+                continue
+            kind, sid = source(m["id"])
+            if kind == "plan":
+                group = _plan_name(sid, "")
+                if group not in usages:
+                    usages[group] = _plan_usage(sid)
+            elif kind == "credit":
+                from . import credit_usage
+
+                if credits is None:
+                    credits = _credit_rows()
+                group = str((credit_usage.PROVIDERS.get(sid) or {}).get("name") or sid)
+                usages.setdefault(group, _credit_usage(credits.get(sid)))
+            else:
+                group = provider
+            names[i] = group
+    else:
+        return offered
+    if not any(usages.get(g) for g in names.values()):
+        return offered
+    order: list[str] = []
+    rows = []
+    for i, m in enumerate(offered):
+        group = names.get(i, "")
+        if group not in order:
+            order.append(group)
+        row = dict(m)
+        note = str(m.get("note") or "")
+        provider = str(m.get("provider") or "")
+        # The note without the provider's name in front ("meridian · 200K context").
+        base = note[len(provider):].lstrip(" ·") if provider and note.startswith(provider) else note
+        row["group"], row["base"] = group, "" if base == group else base
+        if usages.get(group):
+            row["usage"] = usages[group]
+        rows.append((order.index(group), i, row))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    return [r for *_, r in rows]

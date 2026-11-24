@@ -28,6 +28,8 @@ def _no_watcher(monkeypatch):
     from agent_media_server import model_headroom
     monkeypatch.setattr(model_headroom, "_plan_usage", lambda plan: None)
     monkeypatch.setattr(model_headroom, "_credit_rows", lambda: {})
+    monkeypatch.setattr(model_headroom, "_claude_usage", lambda: None)
+    monkeypatch.setattr(model_headroom, "_family_usage", lambda: {})
     yield
     ss._PENDING.clear()
 

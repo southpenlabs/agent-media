@@ -60,3 +60,43 @@ def test_a_refused_key_is_out(usage):
     usage(credit={"venice": {"state": "rejected", "left": None, "currency": None}})
     rows = mh.annotate(SHEET)
     assert rows[-1]["usage"]["text"] == "key refused" and rows[-1]["usage"]["state"] == "out"
+
+
+# --- the other agents' sheets --------------------------------------------------
+
+OK35 = {"state": "ok", "percent": 35, "text": "35% used"}
+
+
+def test_claudes_and_codexs_models_sit_under_their_plan(monkeypatch):
+    monkeypatch.setattr(mh, "_claude_usage", lambda: OK35)
+    rows = mh.grouped("claude", [{"id": "opus", "label": "Opus 5.5", "note": "For complex work"},
+                                 {"id": "haiku", "label": "Haiku 5.5", "note": "Fastest"}])
+    assert [(r["id"], r["group"], r["base"], r["usage"]["text"]) for r in rows] == [
+        ("opus", "Claude", "For complex work", "35% used"), ("haiku", "Claude", "Fastest", "35% used")]
+    monkeypatch.setattr(mh, "_plan_usage", lambda plan: {"state": "near", "percent": 84, "text": "84% used"})
+    assert mh.grouped("codex", [{"id": "g", "label": "GPT", "note": ""}])[0]["group"] == "ChatGPT"
+
+
+def test_nothing_known_leaves_the_sheet_with_no_groups(monkeypatch):
+    monkeypatch.setattr(mh, "_claude_usage", lambda: None)
+    sheet = [{"id": "opus", "label": "Opus", "note": ""}]
+    assert mh.grouped("claude", sheet) == sheet
+    assert mh.grouped("grok", sheet) == sheet
+
+
+def test_antigravity_a_family_at_a_time_and_pi_by_provider(monkeypatch):
+    monkeypatch.setattr(mh, "_family_usage", lambda: {"Claude": OK35, "Gemini": {"state": "out", "percent": 100, "text": "100% used"}})
+    rows = mh.grouped("antigravity", [{"id": "g3", "label": "Gemini 3 Flash", "note": ""},
+                                      {"id": "c", "label": "Claude Opus 5.5 (High)", "note": ""},
+                                      {"id": "g25", "label": "Gemini 2.5 Pro", "note": ""}])
+    assert [(r["id"], r["group"], r["usage"]["state"]) for r in rows] == [
+        ("g3", "Gemini", "out"), ("g25", "Gemini", "out"), ("c", "Claude", "ok")]
+
+    monkeypatch.setattr(mh, "_claude_usage", lambda: OK35)
+    monkeypatch.setattr(mh, "_credit_rows", lambda: {"venice": {"state": "ok", "left": 7.0, "currency": "USD"}})
+    rows = mh.grouped("pi", [
+        {"id": "meridian/claude-opus", "label": "claude-opus", "provider": "meridian", "note": "meridian · 1M context"},
+        {"id": "venice/qwen", "label": "qwen", "provider": "venice", "note": "venice · 128K context"},
+        {"id": "ollama/x", "label": "x", "provider": "ollama", "note": "ollama"}])
+    assert [(r["group"], r["base"], (r.get("usage") or {}).get("text")) for r in rows] == [
+        ("Claude", "1M context", "35% used"), ("Venice", "128K context", "$7.00 left"), ("ollama", "", None)]

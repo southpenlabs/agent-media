@@ -263,6 +263,12 @@ def _answer(session: str, **extra) -> dict:
              else _native_sheet(st["agent"], session) if st["agent"] in ("codex", "grok")
              else _opencode_sheet(st["model"]) if st["agent"] == "opencode"
              else _pi_sheet(session, st["model"]) if st["agent"] == "pi" else models())
+    if st["agent"] != "opencode":
+        # A header and its usage over each group of models (model_headroom.py);
+        # opencode's sheet has them already, in headroom order.
+        from . import model_headroom
+
+        sheet = model_headroom.grouped(st["agent"] or "claude", sheet)
     waiting = pending(session)
     if waiting:
         # Shown as chosen; `pending` says it is made when the turn ends.
@@ -492,6 +498,17 @@ def _configure_pi(session: str, pane: str, model: str) -> tuple[bool, dict]:
 
 
 def new_sheet(agent: str = "claude", profile: str = "") -> dict:
+    """`_new_sheet`, its models under their groups' headers and usage
+    (model_headroom.grouped); opencode's has them already."""
+    out = _new_sheet(agent, profile)
+    if agent != "opencode" and out.get("models"):
+        from . import model_headroom
+
+        out = {**out, "models": model_headroom.grouped(agent, out["models"])}
+    return out
+
+
+def _new_sheet(agent: str = "claude", profile: str = "") -> dict:
     """A new chat's sheet: Claude Code's aliases, opencode's free models, or
     the models pi lists for `profile` (a harness profile, "" its default
     one), with what its "Default" runs; {} for an agent with no chip."""

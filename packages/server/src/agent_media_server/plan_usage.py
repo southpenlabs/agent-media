@@ -100,10 +100,15 @@ def _extra(extra: dict) -> Optional[dict]:
 
 
 def get(bearer: str, *, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
-    global _cache
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
+    return claude_now(fetch=fetch, now=now)
+
+
+def claude_now(*, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
+    """`get` without the gate, for the server's own use (model_headroom.py)."""
+    global _cache
     at, kept = _cache
     if kept and now() - at < TTL_S:
         return True, kept
