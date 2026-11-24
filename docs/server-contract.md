@@ -12204,8 +12204,20 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   the right way first (along `heading` when given, else toward the point:
   a card's place; a 360° photo looks every way), nearest first in each;
   at most `limit` (1-12). Panoramax (the federated meta-catalogue,
-  `api.panoramax.xyz`, no key) always; Mapillary (Graph API) only with
-  `MEDIA_MAPILLARY_TOKEN`, the owner's own client token, else `off`. The
+  `api.panoramax.xyz`, no key) always; Mapillary (Graph API) with
+  `MEDIA_MAPILLARY_TOKEN` (the owner's own client token) when set, else
+  through `https://sasonica.com/street/v1/near` (24 Nov 2026, David: "I'd
+  prefer it to work from sasonica.com rather than each host server
+  individually"; the Worker `deploy/street` holds South Pen Labs' one
+  client token): `GET …/near?lat=&lon=&radius_m=&limit=&ts=&pub=` with
+  `X-Sasonica-Signature: base64url(Ed25519(path?query))`, the install key
+  of the lookup (`tunnel.identity`), → `{data: [Mapillary's image fields]}`;
+  only install ids on its allowlist are served (David's own), 403 to any
+  other or an unsigned ask, 503 `not_configured` until its token is set,
+  either read here as `off` (quietly, not asked again for 15 minutes),
+  answers kept an hour in Cloudflare's cache, a per-install rate limit.
+  `MEDIA_MAPILLARY_CENTRAL=0` turns central off (`off` without a token);
+  `MEDIA_MAPILLARY_CENTRAL_URL` moves it. The
   device loads each picture from its source. Each photo is shown with its
   author, licence and source, linking the source's page. Answers kept on
   disk in `~/.cache/agent-media/street-photos/` (Panoramax 7 days,

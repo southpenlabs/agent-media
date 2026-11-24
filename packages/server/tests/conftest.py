@@ -147,6 +147,12 @@ def _clean_media_env(monkeypatch, tmp_path, request):
 
     monkeypatch.setattr(map_street_photos, "_get", _no_street)
     monkeypatch.setattr(map_street_photos, "_cache_root", lambda: tmp_path / "street-photos")
+    # Mapillary only when a test asks for it: no owner's token from the env
+    # file, and not through sasonica.com/street (test_map_street_photos.py
+    # turns each on against a stand-in).
+    monkeypatch.delenv("MEDIA_MAPILLARY_TOKEN", raising=False)
+    monkeypatch.setenv("MEDIA_MAPILLARY_CENTRAL", "0")
+    map_street_photos.forget()
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

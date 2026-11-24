@@ -127,7 +127,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 84 | Australian Bureau of Statistics ASGS 2021 state boundaries (geo.abs.gov.au ArcGIS service, STE layer) | the boxes of the offline maps' regions (`map_offline.REGIONS`; read once by hand, 23 Nov 2026; nothing asked at run time) | none | one extent query per state, once | CC BY 4.0: credit "Australian Bureau of Statistics" (in the code beside the boxes) | no |
 | 85 | Wikimedia for the Map's place card: Wikidata (wbgetentities), English Wikipedia (REST page summary), Wikimedia Commons (imageinfo; the device loads the thumbnail from Wikimedia), English Wikivoyage (action=parse wikitext); with Nominatim's lookup and reverse (row 11) to find the item and town | a landmark's write-up, photo and facts, and its town's See / Do / Eat / Sleep (`GET /map/place/wiki`, map_wiki.py, §6.50; maps proposal step 9, 23 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time, never in parallel, Nominatim a second apart; each answer kept on disk 30 days, a miss 3 | **Fine**: Wikidata CC0; Wikipedia and Wikivoyage text CC BY-SA 4.0, credited with a link and the licence where shown; each Commons photo shown with its author and its own licence, linking its file page | no |
 | 86 | Panoramax (the federated meta-catalogue's STAC search, api.panoramax.xyz; pictures served by each instance, e.g. panoramax.openstreetmap.fr, IGN's, MapComplete's) | street-level photos on the Map's place card and at a route's turns (`GET /map/street_photos`, `/map/street_photos/along`, map_street_photos.py, §6.50; maps proposal step 9, 24 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time; no published rate limit; answers kept on disk 7 days, an empty one 2; the device loads each picture from its instance | **Fine**: each picture carries its own licence (mostly CC BY-SA 4.0; IGN's Licence Ouverte 2.0), shown under it with its author and "Panoramax", linking its viewer page | no |
-| 87 | Mapillary (Meta) Graph API (graph.mapillary.com/images; pictures from Meta's CDN) | the same street-level photos on the place card, beside Panoramax's; never along a route (map_street_photos.py, §6.50; 24 Nov 2026) | the owner's own registered app's client token, `MEDIA_MAPILLARY_TOKEN` (off without one; none on red2 yet) | not in use until a token is set; answers kept 12 hours (its picture links are signed and expire), an empty one 2 days | **Needs work**: images CC BY-SA 4.0 (some sets CC BY-NC-SA); terms §11 ask for Mapillary's logo and a link back where its images are shown (the card shows the word "Mapillary" linking the photo: add the logo before a public release); §5 bars use "in connection with real-time navigation or route guidance" (so not asked along a route); §12 limits commercial use to listed purposes, so a product for others needs Mapillary's written agreement or drops it | no (off without a key; an owner's own token is the per-install case. Gate it with the switch if a shared product token is ever used) |
+| 87 | Mapillary (Meta) Graph API (graph.mapillary.com/images; pictures from Meta's CDN) | the same street-level photos on the place card, beside Panoramax's; never along a route (map_street_photos.py, §6.50; 24 Nov 2026) | South Pen Labs' one registered client token, held as the Worker secret `MAPILLARY_TOKEN` of sasonica.com/street (`deploy/street`), which serves only allowlisted install ids (David's own: red2/red5's `wgg5vlgrugd5ktj3kytuzyrfve`), each ask signed with the install key; or an owner's own `MEDIA_MAPILLARY_TOKEN`, which is asked directly instead. `MEDIA_MAPILLARY_CENTRAL=0` turns central off (24 Nov 2026; the central token is not set yet: 503 not_configured) | not in use until a token is set; per-install rate limit 60 a minute at the Worker, answers kept an hour in Cloudflare's cache and 12 hours on each server (its picture links are signed and expire), an empty one 2 days | **Needs work**: images CC BY-SA 4.0 (some sets CC BY-NC-SA); terms §11 ask for Mapillary's logo and a link back where its images are shown (the card shows the word "Mapillary" linking the photo: add the logo before a public release); §5 bars use "in connection with real-time navigation or route guidance" (so not asked along a route); §12 limits commercial use to listed purposes, so a product for others needs Mapillary's written agreement or drops it | no (off without a key; an owner's own token is the per-install case. Gate it with the switch if a shared product token is ever used) |
 
 ## The services, one by one
 
@@ -998,8 +998,12 @@ hosted tier), every one of these becomes a reseller question.
 
 - **Used for:** the same photos from Mapillary's Graph API
   (`graph.mapillary.com/images?bbox=…&fields=…`, the token in an
-  `Authorization: OAuth` header), only when `MEDIA_MAPILLARY_TOKEN` is
-  set; never along a route.
+  `Authorization: OAuth` header); never along a route. Asked by the
+  Worker at `https://sasonica.com/street/v1/near` (`deploy/street`, 24 Nov
+  2026, David: "I'd prefer it to work from sasonica.com rather than each
+  host server individually") for the installs on its allowlist, each ask
+  signed with the install's Ed25519 key as the lookup is; or directly by a
+  server whose owner set `MEDIA_MAPILLARY_TOKEN`.
 - **Terms** (https://www.mapillary.com/terms, effective 15 Feb 2024,
   read 24 Nov 2026): other users' images are CC BY-SA 4.0 by default
   (§3(b); some data sets CC BY-NC-SA). Each app registers for its own
@@ -1012,14 +1016,25 @@ hosted tier), every one of these becomes a reseller question.
   to improving products and serving clients, with safeguards. Caching is
   not addressed; answers are kept 12 hours (the picture links Mapillary
   signs expire).
-- **Credential:** the owner's own: sign in at mapillary.com, Dashboard →
-  Developers → Register application, copy its "Client token" (MLY|…) into
-  `MEDIA_MAPILLARY_TOKEN` in `~/.config/agent-media.env`, then
-  `media update --only agent-media-server` or a restart.
-- **Personal-use switch:** no while each install uses its owner's own
-  token (an off-by-default setting, like TomTom's key). A product shipping
-  one shared token would need Mapillary's written agreement (§12) and
-  should be gated until it has it.
+- **Credential:** South Pen Labs' own registered client (mapillary.com,
+  Dashboard → Developers → Register application, its "Client token"
+  MLY|…), held only at Cloudflare as the Worker secret: from
+  `deploy/street`, `CLOUDFLARE_API_TOKEN=$SPL_CLOUDFLARE_TOKEN npx wrangler
+  secret put MAPILLARY_TOKEN` (no server restart needed). Until it is set
+  the Worker answers 503 `not_configured` and every server shows
+  Mapillary `off`. An owner may instead put their own token in
+  `MEDIA_MAPILLARY_TOKEN` (`~/.config/agent-media.env`, then
+  `media update --only agent-media-server`); it is asked directly.
+- **Allowlist:** the Worker var `ALLOWED` in `deploy/street/wrangler.jsonc`
+  (comma-separated install ids, `media-tunnel id` on a host): David's own
+  installs only, today `wgg5vlgrugd5ktj3kytuzyrfve` (red2, and red5 before
+  it: one install key). Each app registering its own client is what
+  Mapillary's terms ask (§11), and §12 limits commercial use, so other
+  people's installs are added only once Mapillary agrees in writing to a
+  shared token; an unlisted install gets 403 and shows `off`.
+- **Personal-use switch:** no while only David's own installs are served
+  (the allowlist is the gate). Serving other people's installs through
+  the shared token needs Mapillary's written agreement first.
 
 ### 71. name-suggestion-index and Wikidata (place nicknames)
 

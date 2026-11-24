@@ -1,0 +1,32 @@
+// sasonica.com/street/v1/near — Mapillary's street photos for David's own
+// installs through one client token held here, so no host needs its own
+// MEDIA_MAPILLARY_TOKEN (src/index.ts; agent-media map_street_photos.py,
+// docs/server-contract.md §6.50, docs/reference/outside-services.md row 87).
+// South Pen Labs account, on the sasonica.com zone, beside /r, /facts and
+// /feedback. The route is /street/* only.
+//
+//     CLOUDFLARE_API_TOKEN=$SPL_CLOUDFLARE_TOKEN npx wrangler deploy
+//
+// The token (until it is set every signed request is 503 not_configured):
+//
+//     CLOUDFLARE_API_TOKEN=$SPL_CLOUDFLARE_TOKEN npx wrangler secret put MAPILLARY_TOKEN
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sasonica-street",
+  "main": "src/index.ts",
+  "account_id": "d255073199b24b2895921acfb9dd761f",
+  "routes": [{ "pattern": "sasonica.com/street/*", "zone_name": "sasonica.com" }],
+  "compatibility_date": "2026-07-01",
+  // Where an install looks is its own business: no invocation logs.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  // Install ids served. Mapillary's terms (§11, §12) have each app register
+  // its own client, so until Mapillary agrees in writing to one token for
+  // other people's installs, only David's own are listed: red2 and red5
+  // (one install key, moved with the server on 13 Nov 2026).
+  "vars": { "ALLOWED": "wgg5vlgrugd5ktj3kytuzyrfve" },
+  "ratelimits": [
+    // Per install (the id the signature proves) and per source address.
+    { "name": "PER_INSTALL", "namespace_id": "4819", "simple": { "limit": 60, "period": 60 } },
+    { "name": "PER_ADDRESS", "namespace_id": "4820", "simple": { "limit": 120, "period": 60 } }
+  ]
+}

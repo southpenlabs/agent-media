@@ -145,3 +145,88 @@ def test_routes_gated_not_a_guest(server, monkeypatch):  # noqa: F811
     assert devices.set_role(dev_id, "guest")
     assert call(server, "GET", "/map/street_photos?near=-37,145", headers=hdrs)[0].status == 403
     assert call(server, "GET", "/map/street_photos?near=-37,145")[0].status == 401
+
+
+# --- through sasonica.com/street (deploy/street) --------------------------------
+
+def _unb64(s: str) -> bytes:
+    import base64
+
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _central(asked: list, status=200, mly=MLY):
+    """A stand-in for the Worker: it checks the signature as the Worker does."""
+    from agent_media_core._ed25519 import verify
+
+    from agent_media_server import tunnel
+
+    def get(url, headers):
+        asked.append((url, headers))
+        u = urllib.parse.urlsplit(url)
+        if u.netloc == "api.panoramax.xyz":
+            return 200, json.dumps({"features": [], "links": []}).encode()
+        assert u.netloc == "street.example" and u.path == "/street/v1/near", url
+        q = urllib.parse.parse_qs(u.query)
+        pub = _unb64(q["pub"][0])
+        assert verify(pub, f"{u.path}?{u.query}".encode(), _unb64(headers["X-Sasonica-Signature"]))
+        assert tunnel.install_id_of(pub) == tunnel.identity()[2]
+        assert q["lat"] == ["-37.81830"] and q["radius_m"] == ["80"] and "Authorization" not in headers
+        if status != 200:
+            return status, json.dumps({"error": "not_configured" if status == 503 else "not_allowed"}).encode()
+        return 200, json.dumps({"data": mly}).encode()
+    return get
+
+
+def _on_central(monkeypatch):
+    monkeypatch.setenv("MEDIA_MAPILLARY_CENTRAL", "1")
+    monkeypatch.setenv("MEDIA_MAPILLARY_CENTRAL_URL", "https://street.example/street/v1")
+
+
+def test_without_a_token_mapillary_comes_signed_through_sasonica_com(monkeypatch):
+    _on_central(monkeypatch)
+    asked: list = []
+    ok, got = sp.street_photos("-37.8183,144.9671", get=_central(asked), now=0.0)
+    assert got["sources"] == {"panoramax": "ok", "mapillary": "ok"}
+    m = got["photos"][0]
+    assert m["source"] == "mapillary" and m["author"] == "melb_walker" and m["credit"] == "Mapillary"
+    # Kept as a direct answer is: a second card asks nobody.
+    n = len(asked)
+    sp.street_photos("-37.8183,144.9671", get=_central(asked), now=60.0)
+    assert len(asked) == n
+
+
+def test_an_owners_token_wins_over_central(monkeypatch):
+    _on_central(monkeypatch)
+    monkeypatch.setenv("MEDIA_MAPILLARY_TOKEN", "MLY|1|abc")
+    asked: list = []
+    ok, got = sp.street_photos("-37.8183,144.9671", get=_fake(asked), now=0.0)
+    assert got["sources"]["mapillary"] == "ok"
+    assert not any(urllib.parse.urlsplit(u).netloc == "street.example" for u, _ in asked)
+
+
+def test_central_refusing_or_not_configured_reads_as_off_and_waits(monkeypatch):
+    _on_central(monkeypatch)
+    for status in (503, 403):
+        sp.forget()
+        asked: list = []
+        ok, got = sp.street_photos("-37.8183,144.9671", get=_central(asked, status=status), now=0.0)
+        assert ok and got["sources"] == {"panoramax": "ok", "mapillary": "off"}
+        n = len(asked)
+        # Not asked again for a while (nor is the refusal kept on disk as an answer).
+        sp.street_photos("-37.9,145.0", get=_central(asked, status=status), now=1.0)
+        assert not any(urllib.parse.urlsplit(u).netloc == "street.example" for u, _ in asked[n:])
+    sp.forget()
+    ok, got = sp.street_photos("-37.8183,144.9671", get=_central([], status=502), now=0.0)
+    assert got["sources"]["mapillary"] == "failed"
+
+
+def test_central_can_be_turned_off_and_never_serves_a_route(monkeypatch):
+    _on_central(monkeypatch)
+    asked: list = []
+    sp.along(f"{HERE[0]},{HERE[1]},0", get=_central(asked), now=0.0)
+    assert asked and all(urllib.parse.urlsplit(u).netloc == "api.panoramax.xyz" for u, _ in asked)
+    monkeypatch.setenv("MEDIA_MAPILLARY_CENTRAL", "0")
+    ok, got = sp.street_photos("-37.8183,144.9671", get=_central(asked), now=0.0)
+    assert got["sources"]["mapillary"] == "off"
+    assert sp.central_base() == ""

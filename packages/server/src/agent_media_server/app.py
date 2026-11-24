@@ -422,8 +422,9 @@ except /pair, which is how a device gets its token):
                   facts (Wikipedia, Commons, Wikidata) and its town's See / Do /
                   Eat / Sleep (Wikivoyage), credited (map_wiki.py, §6.50)
   GET  /map/street_photos?near=lat,lon[&radius_m=&heading=&limit=] → the
-                  nearest street-level photos (Panoramax; Mapillary with
-                  MEDIA_MAPILLARY_TOKEN), credited; /map/street_photos/along?
+                  nearest street-level photos (Panoramax; Mapillary through
+                  sasonica.com/street or MEDIA_MAPILLARY_TOKEN), credited;
+                  /map/street_photos/along?
                   points=lat,lon[,heading];… → one per route turn, Panoramax
                   only (map_street_photos.py, §6.50)
   GET  /screen/now → {on, pause, why}: should this device pause what is

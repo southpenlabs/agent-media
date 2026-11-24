@@ -1,6 +1,7 @@
 """Street-level photos near a point, for the Map's place card and along a
 route: a free Street View from Panoramax (open, no key) and Mapillary
-(its Graph API, only with the owner's own client token). Maps proposal
+(its Graph API: through sasonica.com's one token, or the owner's own).
+Maps proposal
 step 9; David, 24 Nov 2026: "Go on with street photos".
 
   GET /map/street_photos?near=lat,lon[&radius_m=80][&heading=0-359][&limit=6]
@@ -37,8 +38,20 @@ Terms (read 24 Nov 2026):
   needs its own registered client; §5 forbids use "for or in connection
   with real-time navigation or route guidance", so the route's photos
   (`along`) ask Panoramax only; §11 asks for Mapillary's logo and a link
-  back where its images are shown; §12 limits commercial use. Off unless
-  MEDIA_MAPILLARY_TOKEN is set (the owner's own client token).
+  back where its images are shown; §12 limits commercial use.
+
+Mapillary is asked one of two ways (David, 24 Nov 2026: "I'd prefer it to
+work from sasonica.com rather than each host server individually"):
+- MEDIA_MAPILLARY_TOKEN set: the Graph API directly, with that token (the
+  owner's own registered client).
+- Otherwise, central: https://sasonica.com/street/v1/near (deploy/street),
+  a Worker holding South Pen Labs' one client token, signed with this
+  install's key (tunnel.identity) as the lookup is. It serves only the
+  install ids on its allowlist (David's own, until Mapillary agrees in
+  writing to a shared token). A 403 (not listed) or 503 (no token there
+  yet) reads as "off", quietly, and is not asked again for CENTRAL_OFF_S.
+  MEDIA_MAPILLARY_CENTRAL=0 turns central off; MEDIA_MAPILLARY_CENTRAL_URL
+  moves it.
 
 Answers are kept on disk (one file a key) in
 ~/.cache/agent-media/street-photos/: Panoramax's for CACHE_S, Mapillary's
@@ -66,6 +79,9 @@ from agent_media_core import failures as _failures
 USER_AGENT = "agent-media/1.0 (Sasonica map street photos; +https://sasonica.com; https://github.com/southpenlabs/agent-media)"
 PANORAMAX = "https://api.panoramax.xyz"
 MAPILLARY = "https://graph.mapillary.com/images"
+CENTRAL = "https://sasonica.com/street/v1"
+#: After central says "not for you" (403) or "no token yet" (503).
+CENTRAL_OFF_S = 15 * 60
 TIMEOUT_S = 8
 CACHE_S = 7 * 86400
 MAPILLARY_CACHE_S = 12 * 3600
@@ -122,6 +138,19 @@ def mapillary_token() -> str:
     return (os.environ.get("MEDIA_MAPILLARY_TOKEN") or "").strip()
 
 
+def central_base() -> str:
+    """sasonica.com's Mapillary route, or "" when turned off."""
+    from agent_media_core.intake._env import switched_off
+
+    if os.environ.get("MEDIA_MAPILLARY_CENTRAL", "1").strip() == "0" or switched_off("MEDIA_MAPILLARY_CENTRAL_URL"):
+        return ""
+    return (os.environ.get("MEDIA_MAPILLARY_CENTRAL_URL") or CENTRAL).rstrip("/")
+
+
+#: Monotonic time until which central is taken as off (None: ask it).
+_central_off_until: float | None = None
+
+
 # --- the disk cache ----------------------------------------------------------
 
 def _cache_root() -> Path:
@@ -156,7 +185,10 @@ def _memo(key: str, keep_s: float, now_s: float, make: Callable[[], list]) -> li
 
 
 def forget() -> None:
-    """Clears the disk cache (tests; `rm -r ~/.cache/agent-media/street-photos` does the same)."""
+    """Clears the disk cache and central's "off" (tests; `rm -r
+    ~/.cache/agent-media/street-photos` does the first)."""
+    global _central_off_until
+    _central_off_until = None
     root = _cache_root()
     if root.is_dir():
         for f in root.glob("*.json"):
@@ -260,6 +292,43 @@ def _mapillary(pt: tuple[float, float], radius_m: int, token: str, get: Get | No
     return _memo(f"mly|{box}", MAPILLARY_CACHE_S, now_s, make)
 
 
+class _Off(Exception):
+    """Central says Mapillary is not for this install now (403, 503)."""
+
+
+def _central(pt: tuple[float, float], radius_m: int, base: str, get: Get | None, now_s: float) -> list[dict]:
+    """The same photos through sasonica.com's token, the ask signed with this install's key."""
+    box = _bbox(pt, radius_m)
+
+    def make() -> list[dict]:
+        from agent_media_core._ed25519 import sign
+
+        from . import tunnel
+
+        ident = tunnel.identity()
+        if ident is None:
+            raise _Failed("no install key")
+        seed, pub, _iid = ident
+        q = urllib.parse.urlencode({"lat": f"{pt[0]:.5f}", "lon": f"{pt[1]:.5f}", "radius_m": radius_m,
+                                    "limit": ASK_N, "ts": f"{time.time():.3f}", "pub": tunnel._b64url(pub)})
+        url = f"{base}/near?{q}"
+        signed = urllib.parse.urlsplit(url)
+        sig = tunnel._b64url(sign(seed, f"{signed.path}?{signed.query}".encode()))
+        with _lock:
+            status, body = (get or _get)(url, {"X-Sasonica-Signature": sig})
+        if status in (403, 503):
+            raise _Off(f"{status} from {base}/near: {body[:120]!r}")
+        if status != 200:
+            raise _Failed(f"{status} from {base}/near")
+        try:
+            d = json.loads(body)
+        except ValueError as e:
+            raise _Failed(str(e)) from e
+        return [p for f in (d or {}).get("data") or [] if (p := _from_mapillary(f))]
+
+    return _memo(f"mly|{box}", MAPILLARY_CACHE_S, now_s, make)
+
+
 def _from_mapillary(f: dict) -> dict | None:
     pid = str(f.get("id") or "")
     coords = (f.get("geometry") or {}).get("coordinates") or []
@@ -316,6 +385,26 @@ def _rank(photos: list[dict], pt: tuple[float, float], heading: float | None, ra
     return sorted(out, key=lambda p: (not p["facing"], p["distance_m"]))
 
 
+def _mapillary_any(pt: tuple[float, float], radius: int, get: Get | None, now_s: float) -> tuple[str, list[dict]]:
+    """`(state, photos)`: the owner's token first, else central; state ok | failed | off."""
+    global _central_off_until
+    token = mapillary_token()
+    base = "" if token else central_base()
+    if not token and (not base or (_central_off_until is not None and time.monotonic() < _central_off_until)):
+        return "off", []
+    try:
+        if token:
+            return "ok", _mapillary(pt, radius, token, get, now_s)
+        return "ok", _central(pt, radius, base, get, now_s)
+    except _Off as e:
+        _failures.swallowed(e)
+        _central_off_until = time.monotonic() + CENTRAL_OFF_S
+        return "off", []
+    except (_Failed, OSError, ValueError) as e:
+        _failures.swallowed(e)
+        return "failed", []
+
+
 def street_photos(near: str = "", radius_m: Any = None, heading: Any = None, limit: Any = None, *,
                   get: Get | None = None, now: float | None = None) -> tuple[bool, dict]:
     now_s = time.time() if now is None else now
@@ -335,16 +424,8 @@ def street_photos(near: str = "", radius_m: Any = None, heading: Any = None, lim
     except (_Failed, OSError, ValueError) as e:
         _failures.swallowed(e)
         sources["panoramax"] = "failed"
-    token = mapillary_token()
-    if not token:
-        sources["mapillary"] = "off"
-    else:
-        try:
-            found += _mapillary(pt, radius, token, get, now_s)
-            sources["mapillary"] = "ok"
-        except (_Failed, OSError, ValueError) as e:
-            _failures.swallowed(e)
-            sources["mapillary"] = "failed"
+    sources["mapillary"], mly = _mapillary_any(pt, radius, get, now_s)
+    found += mly
     return True, {"photos": _rank(found, pt, head, radius)[:n], "sources": sources}
 
 
@@ -352,8 +433,8 @@ def along(points: str = "", radius_m: Any = None, *, get: Get | None = None,
           now: float | None = None) -> tuple[bool, dict]:
     """The best Panoramax photo at each point (`lat,lon[,heading]` joined by `;`), or null.
 
-    Mapillary is not asked: its terms (§5) forbid use in connection with
-    route guidance."""
+    Mapillary is not asked, neither directly nor through sasonica.com: its
+    terms (§5) forbid use in connection with route guidance."""
     now_s = time.time() if now is None else now
     raw = [s for s in str(points or "").split(";") if s.strip()]
     radius = _int(radius_m, ALONG_RADIUS_M, 5, 200)
