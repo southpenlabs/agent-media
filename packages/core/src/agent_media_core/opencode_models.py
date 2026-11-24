@@ -49,6 +49,9 @@ MODEL_ID = re.compile(r"[a-z0-9][a-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:/-]*")
 
 _LOCK = threading.Lock()
 _memo: tuple[float, list, str] = (0.0, [], "")
+#: Each listed model's price, `(input, output)` per million tokens, from the
+#: same listing as the sheet: what a paid-per-use row says (model_headroom.py).
+_costs: dict[str, tuple[float, float]] = {}
 
 
 def _run(argv: list[str], timeout: float) -> str:
@@ -223,6 +226,8 @@ def models() -> tuple[list[dict], str]:
             rows = []
     else:
         listing = _run(["models", "--verbose"], 60.0)
+    listed = parse(listing) if rows is None else rows
+    _costs.update({m["id"]: m["cost"] for m in listed if m.get("cost")})
     free = sheet(listing, rows)
     offered = list(free)
     for m in plans(listing, rows=rows) + extras(listing, rows=rows):
@@ -292,3 +297,9 @@ def forget() -> None:
     global _memo
     with _LOCK:
         _memo = (0.0, [], "")
+
+
+def cost_of(model: str) -> tuple[float, float]:
+    """`(input, output)` per million tokens as the listing priced `model`,
+    or (0, 0) when it has no price (a gateway's, or not listed)."""
+    return _costs.get(model, (0.0, 0.0))

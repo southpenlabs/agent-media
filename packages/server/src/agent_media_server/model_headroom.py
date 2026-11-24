@@ -190,6 +190,15 @@ def annotate(offered: list[dict]) -> list[dict]:
             group = "Free" if kind == "free" else ""
         row["group"] = group
         row["base"] = "" if note == group else note
+        if kind == "credit":
+            # Paid per use: its price is what spends the credit (David, 25 Nov
+            # 2026: "the token rate for each"). Not on a plan's or a free
+            # model's row, where it is noise.
+            price = _price(m["id"])
+            if price:
+                row["base"] = " · ".join(x for x in (row["base"], price) if x)
+                note = " · ".join(x for x in (note, price) if x)
+                row["note"] = note
         if usage:
             row["usage"] = usage
             if usage.get("text"):
@@ -517,3 +526,17 @@ def take_retry(session: str, text: str) -> str:
         _RETRY.pop(session, None)
         return held[1]
     return ""
+
+
+def _money(v: float) -> str:
+    return f"${v:.2f}".rstrip("0").rstrip(".") if v >= 0.1 else f"${v:.3f}".rstrip("0")
+
+
+def _price(model: str) -> str:
+    """"$0.33 in · $1.32 out per M" for a priced model, else ""."""
+    from agent_media_core import opencode_models
+
+    i, o = opencode_models.cost_of(model)
+    if not i and not o:
+        return ""
+    return f"{_money(i)} in · {_money(o)} out per M"

@@ -229,3 +229,17 @@ def test_when_a_limit_resets_is_said(monkeypatch):
     assert mh.resets(None, now) == ""
     u = mh._windows_usage([{"percent": 35, "resets_at": None}, {"percent": 62, "resets_at": 1795639420}], 80)
     assert u["percent"] == 62 and u["text"].startswith("62% used · resets "), "the window that stops it first"
+
+
+def test_a_paid_per_use_row_says_its_price(usage, monkeypatch):
+    from agent_media_core import opencode_models
+    usage(go={"state": "ok", "percent": 35, "text": "35% used"},
+          credit={"venice": {"state": "ok", "left": 7.0, "currency": "USD"}})
+    monkeypatch.setattr(opencode_models, "_costs", {"venice/deepseek-v4": (0.33, 1.32),
+                                                     "opencode-go/glm-5.3": (1.0, 4.0),
+                                                     "gateway/venice/uncensored": (0.0, 0.0)})
+    rows = {r["id"]: r for r in mh.annotate(SHEET)}
+    assert rows["venice/deepseek-v4"]["base"] == "$0.33 in · $1.32 out per M"
+    assert rows["gateway/venice/uncensored"]["base"] == "Chat only", "no price known: none said"
+    assert "per M" not in rows["opencode-go/glm-5.3"]["base"], "a plan's row: no price"
+    assert mh._price("x/cheap") == "" and mh._money(0.075) == "$0.075"
