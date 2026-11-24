@@ -340,12 +340,39 @@ def hold_client(host: str, cwd: str = "") -> bool:
                 except OSError as e:
                     log.warning("reply: could not hold a client on %s (%s)", host, e)
                     return False
-    deadline = time.monotonic() + 5.0
+    # A holder takes well under a second on a quiet host, but at load 17 its
+    # client was attached and drawing yet not listed after 5 s, and an
+    # Install from the app was refused (sasonica-app mail #1303, 24 Nov
+    # 2026). So the wait is long, and is cut short only by a holder that has
+    # died, which no amount of waiting brings back.
+    unit = _HOLD_UNIT.format(host=re.sub(r"[^A-Za-z0-9_.-]", "-", host))
+    deadline = time.monotonic() + HOLD_WAIT_S
+    next_look = time.monotonic() + 1.0
     while time.monotonic() < deadline:
         if _has_client(host):
             return True
+        if time.monotonic() >= next_look:
+            next_look = time.monotonic() + 1.0
+            if not _holder_alive(host, unit):
+                return _has_client(host)
         time.sleep(0.2)
     return False
+
+
+#: How long `hold_client` waits for its holder's client to show.
+HOLD_WAIT_S = 20.0
+
+
+def _holder_alive(host: str, unit: str) -> bool:
+    """Whether the holder `hold_client` started for `host` is still running:
+    its in-process one, else its systemd unit."""
+    with _HOLDER_LOCK:
+        held = _HOLDERS.get(host)
+    if held is not None:
+        return held.poll() is None
+    r = subprocess.run(["systemctl", "--user", "is-active", "--quiet", f"{unit}.service"],
+                       capture_output=True, check=False)
+    return r.returncode == 0
 
 
 def ensure_host(host: str, cwd: str) -> bool:

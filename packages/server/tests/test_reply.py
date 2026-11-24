@@ -1295,3 +1295,33 @@ def test_fresh_codex_shared_daemon_registers_first_prompt(monkeypatch, _asker):
     assert ok and detail["session"] == sid
     assert seen[0][:3] == ("%9", send.compose("hello", "context"), "/project")
     assert recorded == [(sid, "hello", "%9")]
+
+
+def test_hold_client_waits_past_a_slow_client_and_stops_for_a_dead_holder(monkeypatch):
+    # sasonica-app mail #1303: at load 17 the holder's client was attached but
+    # not listed within 5 s, and an Install was refused.
+    clock = {"t": 0.0}
+    monkeypatch.setattr(send.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(send.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+    monkeypatch.setattr(send.shutil, "which", lambda n: "/usr/bin/systemd-run")
+    alive = {"rc": 0}
+
+    class Done:
+        stderr = ""
+
+        def __init__(self, rc):
+            self.returncode = rc
+
+    def run(argv, **k):
+        return Done(alive["rc"] if "is-active" in argv else 0)
+
+    monkeypatch.setattr(send.subprocess, "run", run)
+    send._HOLDERS.clear()
+    monkeypatch.setattr(send, "_has_client", lambda h: clock["t"] > 8.0)
+    assert send.hold_client("amux-scratch", "/x") is True
+
+    clock["t"] = 0.0
+    alive["rc"] = 3                       # the unit has gone
+    monkeypatch.setattr(send, "_has_client", lambda h: False)
+    assert send.hold_client("amux-scratch", "/x") is False
+    assert clock["t"] < 3.0               # no 20 s wait for a holder that died
