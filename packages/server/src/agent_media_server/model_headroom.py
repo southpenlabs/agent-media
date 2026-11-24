@@ -101,10 +101,24 @@ def _credit_usage(row: Optional[dict]) -> Optional[dict]:
         text = f"{cur}{row['left']:.2f} left"
     else:
         text = ""
+    cap = row.get("cap") or {}
+    if row["state"] in ("ok", "low") and cap and row.get("left") is not None and cap["remaining"] < row["left"]:
+        # The key's spending cap stops it before the credit does.
+        text = f"${cap['remaining']:.2f} left {'this week' if cap.get('every') == 'weekly' else 'under its cap'}"
     out = {"state": state, "text": text}
     if row.get("left") is not None:
-        out["left"] = row["left"]
+        out["left"] = min(row["left"], cap["remaining"]) if cap else row["left"]
     return out
+
+
+def _free_daily(row: Optional[dict]) -> Optional[dict]:
+    """OpenRouter's free models' daily requests: what is left today."""
+    free = (row or {}).get("free_daily")
+    if not free:
+        return None
+    left, limit = int(free["remaining"]), int(free["limit"]) or 1
+    state = "out" if left <= 0 else "near" if left < limit * 0.2 else "ok"
+    return {"state": state, "percent": round(100 * (limit - left) / limit), "text": f"{left:,} left today"}
 
 
 def annotate(offered: list[dict]) -> list[dict]:
@@ -134,6 +148,12 @@ def annotate(offered: list[dict]) -> list[dict]:
             from . import credit_usage
 
             group = str((credit_usage.PROVIDERS.get(sid) or {}).get("name") or sid)
+        elif kind == "free" and m["id"].startswith("openrouter/"):
+            # OpenRouter's free models share a daily allowance of their own.
+            group = "OpenRouter free"
+            if credits is None:
+                credits = _credit_rows()
+            usage = _free_daily(credits.get("openrouter"))
         else:
             group = "Free" if kind == "free" else ""
         row["group"] = group
@@ -267,6 +287,13 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
     elif agent == "codex":
         usages["ChatGPT"] = _plan_usage("codex")
         names = {i: "ChatGPT" for i in range(len(offered))}
+        # A model with a limit of its own, or held back until a time, under
+        # its own header (as Claude's Fable).
+        for i, m in enumerate(offered):
+            own = _codex_own(m)
+            if own:
+                usages[own[0]] = own[1]
+                names[i] = own[0]
     elif agent == "antigravity":
         usages.update(_family_usage())
         names = {i: g for i, m in enumerate(offered)
@@ -319,3 +346,48 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         rows.append((order.index(group), i, row))
     rows.sort(key=lambda r: (r[0], r[1]))
     return [r for *_, r in rows]
+
+
+def _codex_out() -> dict:
+    from . import plan_usage
+
+    try:
+        ok, out = plan_usage.plan_now("codex")
+    except Exception as e:
+        log.warning("headroom: codex usage failed (%s)", e)
+        return {}
+    return out if ok else {}
+
+
+def _when(at: Optional[int]) -> str:
+    import time as _t
+
+    return _t.strftime("%a %-I:%M %p", _t.localtime(at)) if at else ""
+
+
+def _codex_own(m: dict) -> Optional[tuple[str, dict]]:
+    """`(header, usage)` for a Codex model with a limit of its own: held back
+    ("back Thu 4:00 PM"), or a window of its own ("12% of its week used",
+    its state the worse of that and the plan's)."""
+    from . import plan_usage
+
+    out = _codex_out()
+    mid, label = str(m["id"]), str(m.get("label") or m["id"])
+    status = (out.get("models") or {}).get(mid)
+    if status and not status.get("available", True):
+        when = _when(status.get("available_at"))
+        return label, {"state": "out", "percent": 100, "text": f"back {when}" if when else "not available now"}
+    plan = _windows_usage([w for w in out.get("windows") or [] if w.get("kind") != "weekly_scoped"],
+                          plan_usage.WARN_AT)
+    order = {"ok": 0, "near": 1, "out": 2}
+    for w in out.get("windows") or []:
+        name = str(w.get("label") or "")
+        if w.get("kind") != "weekly_scoped" or not name:
+            continue
+        if name.lower() in (mid.lower(), label.lower()) or mid.lower().startswith(name.lower()):
+            own = _windows_usage([w], plan_usage.WARN_AT)
+            if own:
+                state = max(own["state"], (plan or {}).get("state", "ok"), key=order.get)
+                return label, {"state": state, "percent": own["percent"],
+                               "text": f"{own['percent']}% of its own limit used"}
+    return None

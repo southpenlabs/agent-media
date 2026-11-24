@@ -46,7 +46,8 @@ def test_only_providers_with_a_key_are_listed_and_kept(monkeypatch):
     row = out["credits"][0]
     assert (row["state"], row["left"], row["limit"], row["used"]) == ("low", 0.5, 20.0, 19.5)
     cu.credits("t")
-    assert len(asked) == 1, "kept for a while"
+    assert asked == ["https://openrouter.ai/api/v1/credits", "https://openrouter.ai/api/v1/key"], \
+        "the credit and the key's own limits, then kept for a while"
 
 
 def test_venice_anthropic_and_a_refused_key(monkeypatch):
@@ -57,3 +58,17 @@ def test_venice_anthropic_and_a_refused_key(monkeypatch):
     assert cu.anthropic("k")["state"] == "empty"
     monkeypatch.setattr(cu, "_ask", lambda *a, **k: (401, {}, ""))
     assert cu.openrouter("k")["state"] == "rejected"
+
+
+def test_openrouter_free_allowance_and_a_cap_that_stops_it_first(monkeypatch):
+    def ask(method, url, headers, body=None):
+        if url.endswith("/credits"):
+            return 200, {"data": {"total_credits": 20, "total_usage": 5}}, ""
+        return 200, {"data": {"free_model_daily_requests": {"used": 950, "limit": 1000, "remaining": 50},
+                              "effective_budget": {"limit_usd": 10, "remaining_usd": 0.5,
+                                                   "reset_interval": "weekly", "resets_at": "2026-11-30T00:00:00Z"}}}, ""
+    monkeypatch.setattr(cu, "_ask", ask)
+    row = cu.openrouter("k")
+    assert row["free_daily"] == {"used": 950, "limit": 1000, "remaining": 50}
+    assert row["cap"]["remaining"] == 0.5 and row["left"] == 15.0
+    assert row["state"] == "low", "the cap's $0.50 stops it before the $15 credit"

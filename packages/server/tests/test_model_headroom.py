@@ -117,3 +117,44 @@ def test_a_model_with_its_own_week_has_its_own_header(monkeypatch):
     windows[0]["percent"] = 100
     fable = next(r for r in mh.grouped("claude", [{"id": "fable", "label": "Fable 5.2", "note": ""}]))
     assert fable["usage"]["state"] == "out", "the plan used up stops it too"
+
+
+def test_openrouter_free_models_have_their_own_allowance(usage):
+    usage(credit={"openrouter": {"state": "ok", "left": 5.07, "currency": "USD",
+                                 "free_daily": {"used": 900, "limit": 1000, "remaining": 100}}})
+    rows = mh.annotate([{"id": "opencode/big-pickle", "label": "Big Pickle", "note": "Free"},
+                        {"id": "openrouter/qwen/x:free", "label": "Qwen free", "note": "Free"}])
+    q = next(r for r in rows if r["id"].endswith(":free"))
+    assert (q["group"], q["usage"]["text"], q["usage"]["state"]) == ("OpenRouter free", "100 left today", "near")
+    assert next(r for r in rows if r["id"] == "opencode/big-pickle")["group"] == "Free"
+
+
+def test_a_cap_below_the_credit_is_what_is_said(usage):
+    usage(credit={"openrouter": {"state": "low", "left": 15.0, "currency": "USD",
+                                 "cap": {"limit": 10, "remaining": 0.5, "every": "weekly"}}})
+    r = mh.annotate([{"id": "openrouter/a/b", "label": "x", "note": ""}])[0]
+    assert (r["usage"]["text"], r["usage"]["left"], r["usage"]["state"]) == ("$0.50 left this week", 0.5, "near")
+
+
+def test_a_codex_model_held_back_or_with_its_own_limit(monkeypatch):
+    monkeypatch.setattr(mh, "_plan_usage", lambda plan: OK35)
+    monkeypatch.setattr(mh, "_codex_out", lambda: {
+        "windows": [{"kind": "session", "label": None, "percent": 35},
+                    {"kind": "weekly_scoped", "label": "gpt-6.2-sol", "percent": 12}],
+        "models": {"gpt-6.2-astra": {"available": False, "available_at": 1795639420}}})
+    rows = mh.grouped("codex", [{"id": "gpt-6.2-sol", "label": "GPT-6.2-Sol", "note": "a"},
+                                {"id": "gpt-6.2-astra", "label": "GPT-6.2-Astra", "note": "b"},
+                                {"id": "gpt-6.1-terra", "label": "GPT-6.1 Terra", "note": "c"}])
+    got = {r["id"]: (r["group"], r["usage"]["state"], r["usage"]["text"]) for r in rows}
+    assert got["gpt-6.1-terra"] == ("ChatGPT", "ok", "35% used")
+    assert got["gpt-6.2-sol"] == ("GPT-6.2-Sol", "ok", "12% of its own limit used")
+    assert got["gpt-6.2-astra"][:2] == ("GPT-6.2-Astra", "out") and got["gpt-6.2-astra"][2].startswith("back ")
+
+
+def test_codex_reads_per_model_limits():
+    from agent_media_server import plan_usage
+    out = plan_usage.shape_codex({"rate_limit": {}, "model_usage": {"m": {"available": False, "available_at": 1795639420}},
+                                  "additional_rate_limits": [{"limit_name": "m", "rate_limit": {
+                                      "primary_window": {"used_percent": 40, "reset_at": 1795639420}}}]})
+    assert out["models"] == {"m": {"available": False, "available_at": 1795639420}}
+    assert [(w["kind"], w["label"], w["percent"]) for w in out["windows"]] == [("weekly_scoped", "m", 40)]

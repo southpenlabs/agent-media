@@ -232,7 +232,28 @@ def shape_codex(raw: dict) -> dict:
         windows.append(_window(kind, float(w["used_percent"]),
                                int(w["reset_at"]) if w.get("reset_at") else None,
                                warn=bool(rl.get("limit_reached")) and float(w["used_percent"]) >= 100))
-    return {"windows": windows, "extra": None}
+    # Limits of one model on top of the plan's (`additional_rate_limits`,
+    # empty on a Plus account on 25 Nov 2026, so read defensively): a
+    # weekly_scoped window named for its model, as Claude's Fable is.
+    extra = raw.get("additional_rate_limits")
+    for lim in (extra if isinstance(extra, list) else list(extra.values()) if isinstance(extra, dict) else []):
+        if not isinstance(lim, dict):
+            continue
+        name = str(lim.get("limit_name") or lim.get("model") or lim.get("metered_feature") or "")
+        inner = lim.get("rate_limit") if isinstance(lim.get("rate_limit"), dict) else lim
+        for key in ("primary_window", "secondary_window"):
+            w = inner.get(key)
+            if name and isinstance(w, dict) and w.get("used_percent") is not None:
+                windows.append(_window("weekly_scoped", float(w["used_percent"]),
+                                       int(w["reset_at"]) if w.get("reset_at") else None, label=name))
+    # Whether each model can be used now, and when it can again (`model_usage`).
+    models = {}
+    for mid, m in (raw.get("model_usage") or {}).items() if isinstance(raw.get("model_usage"), dict) else []:
+        if isinstance(m, dict):
+            at = m.get("available_at")
+            models[str(mid)] = {"available": m.get("available") is not False,
+                                "available_at": _iso(at) if isinstance(at, str) else int(at) if at else None}
+    return {"windows": windows, "extra": None, "models": models}
 
 
 def _codex() -> dict:

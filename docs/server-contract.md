@@ -10313,6 +10313,17 @@ Codex's under `ChatGPT`, Antigravity's a family at a time, pi's by provider
 credit; another provider its own name, no usage). A sheet nothing is known
 of has no `group` on any row and is drawn without headers.
 
+**Limits of their own** (25 Nov 2026). OpenRouter's credit row also carries
+`free_daily: {used, limit, remaining}` (its free models' daily requests) and
+`cap: {limit, remaining, every, resets_at}` (the key's spending cap; when it
+is below the credit, it is what is left, and `note` says so). On opencode's
+sheet OpenRouter's `:free` models are their own group, `OpenRouter free`,
+"1,000 left today". Codex's usage carries `models: {id: {available,
+available_at}}` and any `additional_rate_limits` as `weekly_scoped` windows
+named for their model; on Codex's sheet a model held back is its own group,
+"back Thu 4:00 PM", and one with a window of its own "12% of its own limit
+used", as Claude's Fable.
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by

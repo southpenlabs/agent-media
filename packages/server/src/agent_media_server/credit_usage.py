@@ -139,7 +139,26 @@ def openrouter(key: str) -> dict:
     data = d.get("data") or {}
     total, used = float(data.get("total_credits") or 0), float(data.get("total_usage") or 0)
     left = round(total - used, 2)
-    return _row(_money_state(left), currency="USD", left=left, limit=round(total, 2), used=round(used, 2))
+    row = _row(_money_state(left), currency="USD", left=left, limit=round(total, 2), used=round(used, 2))
+    # The key's own limits (`/api/v1/key`): the free models' daily requests,
+    # apart from the credit, and a spending cap on the key that can stop it
+    # before the credit does (David, 25 Nov 2026: "Do all three").
+    status, k, _ = _ask("GET", "https://openrouter.ai/api/v1/key", {"Authorization": f"Bearer {key}"})
+    key_data = (k.get("data") or {}) if status == 200 else {}
+    free = key_data.get("free_model_daily_requests")
+    if isinstance(free, dict) and free.get("limit"):
+        row["free_daily"] = {"used": int(free.get("used") or 0), "limit": int(free["limit"]),
+                             "remaining": int(free.get("remaining") if free.get("remaining") is not None
+                                              else int(free["limit"]) - int(free.get("used") or 0))}
+    cap = key_data.get("effective_budget")
+    if isinstance(cap, dict) and cap.get("limit_usd") is not None and cap.get("remaining_usd") is not None:
+        row["cap"] = {"limit": float(cap["limit_usd"]), "remaining": round(float(cap["remaining_usd"]), 2),
+                      "every": str(cap.get("reset_interval") or ""), "resets_at": cap.get("resets_at")}
+        if row["cap"]["remaining"] < left:
+            # The cap stops it first: what is left is the cap's, until it resets.
+            row["state"] = _money_state(row["cap"]["remaining"])
+            row["note"] = f"key's {row['cap']['every'] or 'spending'} cap: ${row['cap']['remaining']:.2f} left"
+    return row
 
 
 def venice(key: str) -> dict:
