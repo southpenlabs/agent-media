@@ -604,7 +604,7 @@ CORS_PATHS = CORS_PATHS | ORG_PATHS
 
 # The Map page's layers (map_layers.py, §6.50). The same arrangement.
 MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_limit", "/map/route", "/map/search",
-                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things", "/map/triggers",
+                       "/map/places", "/map/places/kinds", "/map/route/modes", "/map/recent_places", "/map/saved", "/map/saved/lists", "/map/things", "/map/triggers", "/map/parked",
                        "/map/history", "/map/history/visits", "/map/history/settings", "/map/history/forget",
                        "/map/trips", "/map/trips/update", "/map/trips/end", "/map/trips/send", "/map/trip",
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
@@ -2699,6 +2699,7 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/usage":
         # How much of the Claude plan is spent (plan_usage.py): the card's numbers.
+        # ?plan=opencode-go: that subscription's instead (§6.30).
         from . import plan_usage
 
         plan = (parse_qs(h.path.partition("?")[2]).get("plan") or [""])[0]
@@ -6641,6 +6642,19 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_things.listing(account)
             else:
                 ok, detail = map_things.change(account, _read_json(h) or {})
+    elif path == "/map/parked" and method in ("GET", "POST"):
+        # Where I parked (map_parked.py, maps step 10): the phone's fix as it left the
+        # car's Bluetooth, or "Parked here" by hand.
+        from . import map_layers, map_parked, map_saved
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            account = map_saved.account_of(bearer, host)
+            if method == "GET":
+                ok, detail = map_parked.get(account)
+            else:
+                ok, detail = map_parked.change(account, _read_json(h) or {})
     elif path == "/map/triggers" and method in ("GET", "POST"):
         # Triggers by place: on arriving or leaving, a reminder, words, music or a
         # catch-up (place_triggers.py, maps step 11).

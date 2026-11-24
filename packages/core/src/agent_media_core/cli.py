@@ -11426,6 +11426,14 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--radius", type=float, default=None, help="metres (50-2000, default 150)")
     t.add_argument("--again", action="store_true", help="a reminder that stays on after it fires")
     t.set_defaults(func=cmd_place_when)
+    t = psub.add_parser("parked", help="where the user's car is parked (set as the phone left the "
+                                        "car's Bluetooth, or by hand), as `Your car @ lat,lon`")
+    t.add_argument("point", nargs="?", default="", help="lat,lon: set it there")
+    t.add_argument("--at", default="", help="lat,lon: set it there")
+    t.add_argument("--here", action="store_true", help="set it at the phone's shared location")
+    t.add_argument("--clear", action="store_true", help="the car is not parked anywhere now")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_parked)
     t = psub.add_parser("triggers", help="the user's triggers by place (place when …)")
     t.add_argument("--remove", default="", metavar="ID", help="take one off")
     t.add_argument("--json", action="store_true")
@@ -12727,7 +12735,7 @@ _LATLON = re.compile(r"-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?")
 def _place_point_opt(argv: list[str]) -> list[str]:
     """`media place thing room kitchen -37.8,144.96`: a southern point starts
     with "-", which argparse takes for an option; it becomes `--at=…`."""
-    if argv[:2] not in (["place", "thing"], ["place", "when"]):
+    if argv[:2] not in (["place", "thing"], ["place", "when"], ["place", "parked"]):
         return argv
     return [f"--at={t}" if _LATLON.fullmatch(t) else t for t in argv]
 
@@ -12868,6 +12876,61 @@ def cmd_place_when(a) -> int:
     print(f"{t['id']}: on {'arriving at' if t['on'] == 'arrive' else 'leaving'} {t['name']} "
           f"({t['radius_m']} m), {t['do']}" + (f": {t['text']}" if t.get("text") else "")
           + ("" if a.remind is None or not t.get("once") else ", once"))
+    return 0
+
+
+def _ago(s: float) -> str:
+    s = int(s)
+    if s < 90:
+        return "just now"
+    if s < 5400:
+        return f"{round(s / 60)} min ago"
+    if s < 36 * 3600:
+        return f"{round(s / 3600)} h ago"
+    return f"{round(s / 86400)} days ago"
+
+
+def cmd_place_parked(a) -> int:
+    from . import place_find, place_things
+    from .phone_ask import _call
+
+    a.at = a.at or a.point
+    if a.here + bool(a.at) + a.clear > 1:
+        print("place parked: one of a lat,lon, --here or --clear", file=sys.stderr)
+        return 2
+    body = None
+    if a.clear:
+        body = {"clear": True}
+    elif a.here or a.at:
+        where = place_find.near_point("phone") if a.here else place_things.point(a.at)
+        if where is None:
+            print("place parked: " + ("the phone is not sharing its location" if a.here
+                                      else f"{a.at!r} is not lat,lon"), file=sys.stderr)
+            return 1
+        body = {"lat": where[0], "lon": where[1], "how": "hand"}
+    try:
+        code, got = _call("POST", "/map/parked", body) if body else _call("GET", "/map/parked")
+    except (OSError, ValueError) as e:
+        print(f"place parked: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place parked: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(got, ensure_ascii=False, indent=1))
+        return 0
+    if a.clear:
+        print("the car's spot taken off" if got.get("cleared") else "no spot was kept")
+        return 0
+    spot = got.get("parked")
+    if not spot:
+        print("no parked spot kept (the phone keeps one when it leaves the car's Bluetooth, "
+              "with Remember where I park on)")
+        return 0
+    how = "as the phone left the car's Bluetooth" if spot.get("how") == "bluetooth" else "set by hand"
+    print(f"Your car @ {spot['lat']},{spot['lon']}    (parked {_ago(spot.get('age_s', 0))}, {how}"
+          + (f", {spot['car']}" if spot.get("car") else "")
+          + (f", within {spot['accuracy_m']} m" if spot.get("accuracy_m") is not None else "") + ")")
     return 0
 
 

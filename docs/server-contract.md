@@ -14785,6 +14785,23 @@ step 11; David, 24 Nov 2026, choosing triggers by place first). Code:
   fires nothing; a trigger does not fire again within `quiet_s`. State per device and
   trigger in `place-triggers-state.json`, no coordinates.
 
+### 6.66 Where I parked — gated, not a guest (built 24 Nov 2026)
+
+The car's spot (maps proposal step 10). Code: `map_parked.py`; tests in
+`test_map_parked.py`. The phone (sasonica-app CarPark.java, Settings → Location →
+"Remember where I park") takes one fix as it disconnects from a car stereo's
+Bluetooth and posts it; reconnecting clears it. The Map's "Parked here" and `media
+place parked --here` set it by hand.
+
+- `GET /map/parked` → `{parked: {lat, lon, accuracy_m?, at, how: bluetooth|hand, car?,
+  age_s} | null}`; a spot over 30 days old is null.
+- `POST /map/parked {lat, lon, accuracy_m?, at? (within the last day), how?, car?}` →
+  `{parked}`, replacing the one before. `{clear: true, how?}` → `{cleared}`; with `how:
+  bluetooth` it only clears a spot Bluetooth set. 400 `bad_point`, `bad_at`.
+- The owner's devices (not a guest) and the host's token; one spot per account in
+  `map-parked.json` (0600). The `parked` layer (§6.50) draws it: "Your car", `age_s`,
+  `accuracy_m`, the car's name as `detail`.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in

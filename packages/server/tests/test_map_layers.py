@@ -60,7 +60,7 @@ def test_an_add_on_layer_and_a_failing_one(server, monkeypatch):
               "features": lambda bbox: 1 / 0}
     monkeypatch.setattr(map_layers, "_addons", lambda: [cams, broken])
     ids = [lay["id"] for lay in call(server, "GET", "/map/layers", headers=pixel)[1]["layers"]]
-    assert ids == ["phone", "things", "speed_cameras", "surveillance", "cams", "broken"]
+    assert ids == ["phone", "things", "parked", "speed_cameras", "surveillance", "cams", "broken"]
     got = call(server, "GET", "/map/layer?id=cams", headers=pixel)[1]
     assert got["features"][0]["properties"]["title"] == "Cam"
     assert call(server, "GET", "/map/layer?id=broken", headers=pixel)[0].status == 502

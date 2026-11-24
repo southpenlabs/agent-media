@@ -47,3 +47,25 @@ def test_triggers_lists(monkeypatch, capsys):
     _fake(monkeypatch)
     args = cli._build_parser().parse_args(["place", "triggers"])
     assert args.func(args) == 0 and "no triggers by place" in capsys.readouterr().out
+
+
+def test_parked_reads_and_sets(monkeypatch, capsys):
+    sent = []
+
+    def call(method, path, body=None, timeout=10.0):
+        sent.append((method, path, body))
+        if method == "GET":
+            return 200, {"parked": {"lat": -37.9, "lon": 145.0, "how": "bluetooth", "age_s": 7200,
+                                    "car": "Corolla", "accuracy_m": 8}}
+        return 200, {"parked": {**body, "age_s": 0}} if not body.get("clear") else {"cleared": True}
+
+    monkeypatch.setattr("agent_media_core.phone_ask._call", call)
+    parser = cli._build_parser()
+    args = parser.parse_args(["place", "parked"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Your car @ -37.9,145.0") and "2 h ago" in out and "Bluetooth" in out
+    args = parser.parse_args(cli._place_point_opt(["place", "parked", "-37.8,144.9"]))
+    assert args.func(args) == 0 and sent[-1] == ("POST", "/map/parked", {"lat": -37.8, "lon": 144.9, "how": "hand"})
+    args = parser.parse_args(["place", "parked", "--clear"])
+    assert args.func(args) == 0 and "taken off" in capsys.readouterr().out

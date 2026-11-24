@@ -109,6 +109,13 @@ def _things_layer(account: str) -> dict:
     return {"layer": _THINGS, "features": lambda _bbox: map_things.features(account)}
 
 
+def _parked_layer(account: str) -> dict:
+    """Where the person's car is parked (map_parked.py, step 10)."""
+    from . import map_parked
+
+    return {"layer": map_parked.LAYER, "features": lambda _bbox: map_parked.features(account)}
+
+
 def _account(bearer: str, host: bool) -> str:
     from . import map_saved
 
@@ -214,7 +221,8 @@ def layers(bearer: str, thread: str = "", host: bool = False) -> tuple[bool, dic
     if not ok:
         return False, err
     all_ = _all()
-    items = [*all_[:1], _things_layer(_account(bearer, host)), *all_[1:]]
+    account = _account(bearer, host)
+    items = [*all_[:1], _things_layer(account), _parked_layer(account), *all_[1:]]
     if thread:
         sid = _thread_id(f"thread:{thread}")
         if not sid:
@@ -230,6 +238,7 @@ def layer(layer_id: str, bbox_raw: str, bearer: str, host: bool = False) -> tupl
     sid = _thread_id(layer_id)
     item = (_thread_layer(sid) if sid else
             _things_layer(_account(bearer, host)) if layer_id == _THINGS["id"] else
+            _parked_layer(_account(bearer, host)) if layer_id == "parked" else
             next((i for i in _all() if i["layer"]["id"] == layer_id), None))
     if item is None:
         return False, {"status": 404, "error": "no such layer"}
