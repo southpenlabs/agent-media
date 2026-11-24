@@ -81,6 +81,11 @@ except /pair, which is how a device gets its token):
                   (no window: it deletes a file and exits)
   GET  /harnesses/updates[?refresh=1] → which of them something newer exists
                   for; goes to the network, so it is its own route
+  GET  /gateway   → the model gateway: up or not and where, its routes (a
+                  key's name and whether set, never its value), its sign-ins
+  POST /gateway/login {"provider"} → the gateway proxy's sign-in in a setup
+                  window, read with /harnesses/screen like an agent's
+  POST /gateway/logout {"id"} → delete one of the proxy's sign-ins
   GET  /setup     → this machine's wiring: `media-setup status --json`'s rows
   POST /setup/run {"name"?} → `media-setup profile [--only name]` in a
                   window, watched with /harnesses/screen like an install
@@ -513,6 +518,7 @@ CORS_PATHS = frozenset({
     "/harnesses", "/harnesses/run", "/harnesses/screen",
     "/harnesses/keys", "/harnesses/apikey", "/harnesses/close", "/harnesses/logout",
     "/harnesses/updates", "/harnesses/profiles", "/harnesses/profiles/remove",
+    "/gateway", "/gateway/login", "/gateway/logout",
     "/presets", "/presets/remove", "/personas/scope",
     "/projects/roots", "/projects/roots/remove", "/projects/roots/default", "/projects/roots/recreate",
     "/folders/grants", "/folders/roles",
@@ -2944,6 +2950,12 @@ def _get(h: BaseHTTPRequestHandler, path: str) -> bool:
         from . import project_roots
 
         ok, detail = project_roots.get(_bearer(h))
+        _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
+    elif path == "/gateway":
+        # The model gateway: up or not, its routes and sign-ins (gateway.py, §6.6a).
+        from . import gateway
+
+        ok, detail = gateway.get(_bearer(h))
         _json(h, 200 if ok else detail.pop("status", 403), {"ok": ok, **detail})
     elif path == "/harnesses":
         # Every harness and what each needs — is it installed, is it
@@ -6174,6 +6186,17 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
         if not ok:
             log.warning(f"harnesses: refused ({detail.get('error')}) on {path} "
                   f"from {h.client_address[0]}")
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path in ("/gateway/login", "/gateway/logout"):
+        # Sign the gateway's proxy into a provider (a setup window, read with
+        # /harnesses/screen) or delete one of its sign-ins (gateway.py, §6.6a).
+        from . import gateway
+
+        body = _read_json(h) or {}
+        if path.endswith("login"):
+            ok, detail = gateway.login(str(body.get("provider") or ""), _bearer(h))
+        else:
+            ok, detail = gateway.logout(str(body.get("id") or ""), _bearer(h))
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path == "/draft":
         # Half a reply, held for next time the conversation is opened.

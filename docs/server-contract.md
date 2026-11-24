@@ -136,7 +136,7 @@ The app routes: `/conversation`, `/conversation/log`, `/conversations`,
 `/session/close`, `/session/answer`, `/session/stop`, `/draft`, `/drafts/saved` (2 Nov 2026), `/speech/now`, `/speech/ctl`,
 `/sessions/state`, `/commands`, `/rename`, `/harnesses`, `/harnesses/run`,
 `/harnesses/screen`, `/harnesses/keys`, `/harnesses/apikey` (28 Sep 2026), `/harnesses/close`,
-`/harnesses/logout`, `/harnesses/updates` (23 Sep 2026), `/share`, `/upload` (25 Sep 2026; its GET 29 Sep 2026),
+`/harnesses/logout`, `/harnesses/updates` (23 Sep 2026), `/gateway`, `/gateway/login`, `/gateway/logout` (25 Nov 2026), `/share`, `/upload` (25 Sep 2026; its GET 29 Sep 2026),
 `/search` (23 Sep 2026), and (22 Sep 2026) `/threads/{session}/events` — matched as a pattern, not
 listed (`app.cors_path`), so its preflight and its answers, refusals
 included, carry the same headers.
@@ -4391,6 +4391,73 @@ busy host is not refused (409) but drained, as `media restart-services
 already waiting) and `drain`, the pending restart (`restart_pending`, §6.1;
 docs/reference/version-skew-monitoring.md). `"drain": false` refuses as
 before.
+
+### 6.6a The agent gateway — gated (built 25 Nov 2026)
+
+A model gateway is one OpenAI-compatible endpoint in front of a host's plans
+and keys: LiteLLM, with CLIProxyAPI behind it holding OAuth sign-ins as API
+routes. Antigravity's usage on the model sheets (`/usage?plan=antigravity`,
+§6.30) comes from the proxy's Google login, not from Antigravity's own
+sign-in; this is what lets the Coding agents page say so (sasonica-app mail
+#1305, David, 25 Nov 2026).
+
+| Route | Request | Response |
+| --- | --- | --- |
+| `GET /gateway` | – | `{"ok", "present", "up", "active", "unit", "url", "host", "models", "routes": [...], "signins": [...], "can_add": [...], "proxy": {"up", "active", "url", "unit"}\|null}` |
+| `POST /gateway/login` | `{"provider"}` (one of `can_add`) | `{"ok", "pane", "provider", "action": "login", "cmd"}` · 400 no such sign-in in this proxy, 409 no proxy here, 503 no window |
+| `POST /gateway/logout` | `{"id"}` (a `signins[].id` with `logout` in its `actions`) | `{"ok", "id", "removed": true}` · 404 no such sign-in, 409 the gateway's own ChatGPT login |
+
+- `present: false` (and empty lists) when the host has no gateway: no
+  LiteLLM unit, config or URL and no proxy. The page shows no Gateway
+  section then.
+- `up`: the gateway's `/health/liveliness` answered just now; `active`: its
+  user unit is running. `url`/`host` say where it listens. `proxy.up` is the
+  proxy's own root answering.
+- `routes[]`: `{"id", "label", "via", "models", "names", "key", "signins"}`,
+  a row per provider in LiteLLM's `model_list`, most models first. `label`
+  is the provider ("Venice", "ChatGPT plan", "CLIProxyAPI", "Ollama",
+  "Claude via red2:3456" for a local bridge named only by its address);
+  `via` the host:port it is reached at (empty for a provider LiteLLM talks
+  to itself); `names` the model names it serves. `key` is `{"name", "set"}`
+  — the environment variable it reads (null name: written in the config) and
+  whether it is set — or null for a route with none. A key's value is never
+  read into the answer. `signins` is `"proxy"` (its models need one of the
+  proxy's sign-ins), `"litellm-chatgpt"`, or null.
+- `signins[]`: `{"id", "provider", "label", "account", "state", "expires_at",
+  "via", "plan", "actions"}`. `via: "proxy"` for each file in CLIProxyAPI's
+  `auth-dir`, `"gateway"` for LiteLLM's own ChatGPT login (listed only when a
+  route uses it). `state`: `in` (it holds a refresh token, or an unexpired
+  access token), `expired`, `off` (disabled in its file), `out` (no login
+  file). `expires_at` (epoch s) is the access token's, which the holder
+  renews by itself; it is not when the sign-in ends. `plan` names the
+  `/usage?plan=` that reads this login (`antigravity`), so the row can carry
+  that usage. `actions`: `login` (sign in again) and `logout`; the ChatGPT
+  login has none — LiteLLM renews it, and signing it in again is at the desk.
+- `can_add[]`: `{"provider", "label", "held"}`, the sign-ins this proxy build
+  has a login for (antigravity, claude, codex, kimi, xai, …, from its `-h`);
+  `held` when one is already listed.
+
+`POST /gateway/login` runs the proxy's `-<provider>-login -no-browser` with
+its config, in a setup window like `/harnesses/run`'s: read it with
+`/harnesses/screen` (its `agent` is `gateway-<provider>`, `action`
+`login`, so `signin` carries the URL), type with `/harnesses/keys`, end
+with `/harnesses/close`. An OAuth sign-in prints a URL; after signing in, the
+browser lands on a `localhost` address that does not load on the phone —
+that whole address is pasted back into the window (it asks for "the callback
+URL"). Codex's is a device code instead. The new sign-in is a file in the
+auth dir, picked up by the running proxy; `GET /gateway` again shows it.
+
+`POST /gateway/logout` deletes that file; the running proxy drops it. It
+takes away the login every route through the proxy uses, so the client asks
+first, as for `/harnesses/logout`.
+
+Read from: LiteLLM's and CLIProxyAPI's user units (`litellm.service`,
+`cli-proxy-api.service`: `ExecStart`'s `--config`/`--host`/`--port` and
+`-config`, `EnvironmentFiles` for key names), their YAML configs, the auth
+dir. Overrides: `MEDIA_GATEWAY_UNIT`, `MEDIA_GATEWAY_CONFIG`,
+`MEDIA_GATEWAY_URL`, `MEDIA_GATEWAY_PROXY_UNIT`, `MEDIA_GATEWAY_PROXY`,
+`MEDIA_GATEWAY_PROXY_CONFIG`. The proxy's management API would need its
+secret key and is not used. Code: `agent_media_server/gateway.py`.
 
 ### 6.7 Share — gated
 
