@@ -14110,7 +14110,8 @@ step 1; David, 17 Nov 2026). Code: `agent_media_server/local_chats.py`.
 `meta`, `instagram`, `whatsapp`, `gmessages`, `telegram`, `signal`, `slack`,
 `discord`, `teams` (the companion's nine; the last five since 23 Nov 2026); the chat id is the portal id
 (`portal_id` in the companion's `/v1/chats`), 1–128 of letters, digits and
-`. _ @ + = -`, starting with a letter or digit. Not the companion's
+`. _ @ + = : -`, starting with a letter or digit (`:` since 24 Nov 2026: Telegram's
+are `user:<n>`, `channel:<n>`). Not the companion's
 `!…:sasonica.local` room id: that is minted per install, and the id must
 survive a reinstall. The app maps its `phone.` rows to these by network and
 portal id.

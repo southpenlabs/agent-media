@@ -57,13 +57,15 @@ def _seed(server, phone, **extra):
 # --- ids ------------------------------------------------------------------------
 
 @pytest.mark.parametrize("sid", [WA, "local:meta:100012345", "local:instagram:3401",
-                                 "local:gmessages:1.42", "local:whatsapp:a"])
+                                 "local:gmessages:1.42", "local:whatsapp:a",
+                                 "local:telegram:user:12345", "local:telegram:channel:-1001:7",
+                                 "local:teams:19:abc@thread.v2"])
 def test_good_ids(sid):
     assert local_chats.is_local(sid)
 
 
 @pytest.mark.parametrize("sid", ["local:irc:1", "local:whatsapp:", "local:whatsapp:../x",
-                                 "local:whatsapp:a/b", "local:whatsapp:a:b", "phone.IWFiYw",
+                                 "local:whatsapp:a/b", "local:whatsapp::a", "phone.IWFiYw",
                                  "local:whatsapp:" + "a" * 129, "local:whatsapp:.hidden",
                                  "LOCAL:whatsapp:1", "local:whatsapp:a b"])
 def test_bad_ids(sid):

@@ -16,9 +16,9 @@ network's portal id (`portal_id` in the companion's `/v1/chats`), not the
 companion's `!…:sasonica.local` room id, which is minted per install. So
 the id survives a reinstall of the companion and is the same from any
 device, and the settings hung on it do not orphan. `network` is one of
-`NETWORKS`; the network's id is 1–128 of letters, digits and `. _ @ + = -`,
+`NETWORKS`; the network's id is 1–128 of letters, digits and `. _ @ + = : -`,
 starting with a letter or digit (a WhatsApp JID, a Messenger thread id, a
-Google Messages conversation id all fit; no `/`, no `:`).
+Google Messages conversation id, Telegram's `user:<n>` all fit; no `/`).
 
 **The record**, `<state_dir>/local-chats.json` (0600), by id: `network`,
 `kind` (person | group), `name` (only where names are kept, below),
@@ -63,7 +63,12 @@ NETWORKS = {"meta": "Messenger", "instagram": "Instagram", "whatsapp": "WhatsApp
             "gmessages": "Google Messages", "telegram": "Telegram", "signal": "Signal",
             "slack": "Slack", "discord": "Discord", "teams": "Microsoft Teams"}
 KINDS = ("person", "group")
-_NET_ID = r"[A-Za-z0-9][A-Za-z0-9._@+=-]{0,127}"
+#: A colon is in it: Telegram's portal ids are `user:<n>`, `chat:<n>`,
+#: `channel:<n>[:<topic>]`, Teams' `19:…@thread.v2`; refusing it gave every
+#: Telegram chat no Local id, so its Quiet went to the phone and got "no such
+#: route" (David, 24 Nov 2026). The network is a fixed alternation, so the
+#: chat part may hold colons without the id becoming ambiguous.
+_NET_ID = r"[A-Za-z0-9][A-Za-z0-9._@+=:-]{0,127}"
 NET_ID = re.compile(_NET_ID)
 ID = re.compile(r"local:(" + "|".join(NETWORKS) + r"):(" + _NET_ID + r")")
 #: What one chat in `POST /local/chats` may say, and nothing else.
@@ -368,7 +373,7 @@ def post(body, bearer: str) -> tuple[bool, dict]:
                     or set(account) - {"id", "name"}
                     or (aname is not None and not isinstance(aname, str))):
                 return _bad(f"chats[{i}].account is {{id, name?}}: id 1-128 letters, digits "
-                            "and . _ @ + = -, name text")
+                            "and . _ @ + = : -, name text")
         row: dict = {"network": network, "kind": kind}
         if account is not None:
             row["account"] = {"id": account["id"]}
