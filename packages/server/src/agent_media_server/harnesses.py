@@ -10,9 +10,11 @@ chat" answers `codex: not found`.
 it. Both halves work the same way, because both are terminal programs that
 ask questions:
 
-* the command is opened in a background tmux window on this host, the way a
-  phone-started chat is (`send.open_window`), so what happens is visible at
-  the desk and survives the app being closed;
+* the command runs in a terminal this server holds itself (terminals.py: a
+  plain subprocess for an install, a pty for a sign-in), so no tmux is
+  needed and it survives the app being closed. `MEDIA_HARNESS_TERMINAL=tmux`
+  opens a background tmux window instead, the way a phone-started chat is
+  (`send.open_window`), visible at the desk;
 * the phone reads that window's screen through `screen()` and types into it
   through `keys()` — an OAuth code pasted back, a `y` to a prompt;
 * when the command exits, the window prints `[finished: <code>]` and the pane
@@ -41,7 +43,7 @@ from pathlib import Path
 
 from agent_media_core import harnesses
 
-from . import auth, panes, send, sessions
+from . import auth, panes, send, sessions, terminals
 
 #: Named keys the phone may press. Text is typed literally; anything that is
 #: not a plain line of text has to be one of these, so a request cannot ask
@@ -81,7 +83,7 @@ def _row(pane: str) -> dict:
     pane by that name; a stale row names a window that is gone, and the
     caller gets the same "no such window" as a made-up one.
     """
-    if not re.fullmatch(r"%[0-9]+", pane or ""):
+    if not (re.fullmatch(r"%[0-9]+", pane or "") or terminals.ID.fullmatch(pane or "")):
         return {}
     try:
         row = json.loads((_registry() / pane.lstrip("%")).read_text())
@@ -90,8 +92,35 @@ def _row(pane: str) -> dict:
     return row if isinstance(row, dict) else {}
 
 
+def _held(pane: str) -> bool:
+    return pane.startswith("t")
+
+
 def _alive(pane: str) -> bool:
+    if _held(pane):
+        return terminals.get(pane) is not None
     return bool(panes._tmux(["display", "-pt", pane, "#{pane_id}"]))
+
+
+def _capture(pane: str) -> str:
+    """The window's screen as text, ANSI stripped."""
+    if _held(pane):
+        term = terminals.get(pane)
+        return "\n".join(term.lines()) if term else ""
+    return panes.strip_ansi(sessions._capture_pane(pane))
+
+
+def _type(pane: str, text: str = "", key: str = "") -> None:
+    """Type `text` literally, then press `key` (one of KEYS)."""
+    if _held(pane):
+        term = terminals.get(pane)
+        if term:
+            term.send(text.encode() + terminals.KEY_BYTES.get(key, b""))
+        return
+    if text:
+        panes._tmux(["send-keys", "-t", pane, "-l", text])
+    if key:
+        panes._tmux(["send-keys", "-t", pane, key])
 
 
 def _forget(pane: str) -> None:
@@ -257,8 +286,25 @@ def remove_profile(agent: str, name: str, delete: bool, bearer: str) -> tuple[bo
 
 # --- doing it --------------------------------------------------------------------
 
-def _window(argv: list[str], title: str) -> tuple[str, str]:
-    """Open a background window running `argv`. `(pane, error)`.
+def _window(argv: list[str], title: str, tty: bool = True) -> tuple[str, str]:
+    """Run `argv` where the app can watch it. `(pane, error)`.
+
+    A terminal this server holds (terminals.py; `tty=False` for a command
+    that only prints, an install), unless `MEDIA_HARNESS_TERMINAL=tmux`.
+    """
+    if os.environ.get("MEDIA_HARNESS_TERMINAL", "").strip().lower() == "tmux":
+        return _tmux_window(argv, title)
+    try:
+        term = terminals.open_terminal(argv, env={**os.environ, "PATH": harnesses.bin_path()},
+                                       cwd=str(Path.home()) if Path.home().is_dir() else "/",
+                                       tty=tty)
+    except OSError as e:
+        return "", f"could not start {argv[0]}: {e}"
+    return term.id, ""
+
+
+def _tmux_window(argv: list[str], title: str) -> tuple[str, str]:
+    """Open a background tmux window running `argv`. `(pane, error)`.
 
     The command is wrapped so that the window outlives it: an installer that
     fails says why on the last line, and that line is the whole point of
@@ -311,18 +357,42 @@ def run(agent: str, action: str, bearer: str, profile: str = "") -> tuple[bool, 
         argv, why = _in_profile(agent, (profile or "").strip(), argv)
         if why:
             return False, {"error": why, "status": 404}
+    # An install only prints, so it needs no terminal; a sign-in asks.
     pane, err = _window(argv, f"{agent}-{profile}-{action}" if profile and action == "login"
-                        else f"{agent}-{action}")
+                        else f"{agent}-{action}", tty=action == "login")
     if err:
         return False, {"error": err, "status": 503}
     cmd = shlex.join(argv)
     _remember(pane, agent, action, cmd)
     keys_ = harnesses.RECIPES[agent].login_keys if action == "login" else ()
+    out: dict = {"pane": pane, "agent": agent, "action": action, "cmd": cmd}
     if keys_:
         import threading
 
         threading.Thread(target=_type_when_ready, args=(pane, keys_), daemon=True).start()
-    return True, {"pane": pane, "agent": agent, "action": action, "cmd": cmd}
+    elif action == "login":
+        # A device-code sign-in prints its URL and code within a second or
+        # two: wait a little so the answer can carry them and the app can
+        # skip the terminal. A sign-in that first asks something says nothing.
+        found = _wait_for_signin(pane)
+        if found:
+            out["signin"] = found
+    return True, out
+
+
+#: How long `run` waits for a sign-in's URL before answering without it.
+SIGNIN_WAIT_S = 6.0
+
+
+def _wait_for_signin(pane: str, wait: float | None = None, step: float = 0.25,
+                     clock=time.monotonic, sleep=time.sleep) -> dict | None:
+    deadline = clock() + (SIGNIN_WAIT_S if wait is None else wait)
+    while True:
+        text = _capture(pane)
+        found = terminals.signin(text.splitlines())
+        if found or DONE.search(text) or not _alive(pane) or clock() >= deadline:
+            return found
+        sleep(step)
 
 
 #: What an agent's prompt shows once it will take a slash command (pi's
@@ -341,16 +411,14 @@ def _type_when_ready(pane: str, lines: tuple[str, ...], wait: float = READY_WAIT
     Enter. Gives up quietly if the window goes away first."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        screen = panes._tmux(["capture-pane", "-p", "-t", pane]) or ""
-        if READY.search(screen):
+        if READY.search(_capture(pane)):
             break
         if not _alive(pane):
             return
         time.sleep(step)
     time.sleep(0.5)          # the prompt draws before it listens
     for line in lines:
-        panes._tmux(["send-keys", "-t", pane, "-l", line])
-        panes._tmux(["send-keys", "-t", pane, "Enter"])
+        _type(pane, line, "Enter")
 
 
 # --- this machine's wiring --------------------------------------------------------
@@ -526,16 +594,20 @@ def screen(pane: str, bearer: str, lines: int = 60) -> tuple[bool, dict]:
     if not _alive(pane):
         _forget(pane)
         return False, {"error": f"window {pane} is gone", "status": 410}
-    text = panes.strip_ansi(sessions._capture_pane(pane))
+    text = _capture(pane)
     found = DONE.search(text)
     rows = [ln.rstrip() for ln in text.splitlines()]
     while rows and not rows[-1]:
         rows.pop()
-    return True, {"pane": pane, "agent": row.get("agent", ""),
-                  "action": row.get("action", ""), "cmd": row.get("cmd", ""),
-                  "lines": rows[-lines:] if lines else rows,
-                  "done": bool(found),
-                  "exit": int(found.group(1)) if found else None}
+    out: dict = {"pane": pane, "agent": row.get("agent", ""),
+           "action": row.get("action", ""), "cmd": row.get("cmd", ""),
+           "lines": rows[-lines:] if lines else rows,
+           "done": bool(found),
+           "exit": int(found.group(1)) if found else None}
+    if row.get("action") == "login" and not found:
+        # The URL (and device code) a sign-in is showing, for an Open button.
+        out["signin"] = terminals.signin(rows)
+    return True, out
 
 
 def keys(pane: str, text: str, key: str, bearer: str) -> tuple[bool, dict]:
@@ -558,12 +630,9 @@ def keys(pane: str, text: str, key: str, bearer: str) -> tuple[bool, dict]:
     text = (text or "").strip()
     if not text and not key:
         return False, {"error": "nothing to type", "status": 400}
-    if text:
-        # A code pasted from a browser is one line; a newline in it would
-        # submit halfway through, so only the first line is typed.
-        panes._tmux(["send-keys", "-t", pane, "-l", text.splitlines()[0]])
-    if key:
-        panes._tmux(["send-keys", "-t", pane, key])
+    # A code pasted from a browser is one line; a newline in it would
+    # submit halfway through, so only the first line is typed.
+    _type(pane, text.splitlines()[0] if text else "", key)
     return True, {"pane": pane}
 
 
@@ -574,7 +643,9 @@ def close(pane: str, bearer: str) -> tuple[bool, dict]:
         return False, detail
     if not _row(pane):
         return False, {"error": f"not a setup window: {pane!r}", "status": 404}
-    if _alive(pane):
+    if _held(pane):
+        terminals.close(pane)
+    elif _alive(pane):
         panes._tmux(["kill-pane", "-t", pane])
     _forget(pane)
     return True, {"pane": pane}

@@ -18,8 +18,8 @@ What `org.py` stands on, as a checklist the phone can read and fix:
   POST /org/setup {"component", "action"} → {"component", "action", "done"}
                     or, for a long one, {"pane", "cmd"}
 
-A long action (a clone, an install) runs in a background tmux window the way
-the harness installs do (`harnesses._window`), and is registered with them,
+A long action (a clone, an install) runs in a terminal the server holds, the
+way the harness installs do (`harnesses._window`), and is registered with them,
 so the app watches it with the same `/harnesses/screen`, `/keys`, `/close`.
 Quick ones (creating the files, enabling a timer) are done in place.
 

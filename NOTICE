@@ -40,6 +40,12 @@ bundled, and their code is never imported by agent-media:
   llama.cpp     MIT (ggml-org/llama.cpp), llama-server run as a separate
                 program
 
+One library is imported under the LGPL: pyte (LGPL-3.0,
+selectel/pyte), the terminal emulator that renders the screen of a sign-in
+the server holds in a pty (packages/server/.../terminals.py). It is used
+unmodified, as an installed package, and can be replaced by any other
+version; agent-media's own code stays Apache-2.0.
+
 This matters if the Android companion in `android/` ever *bundles* libmpv
 rather than talking to a separately-installed mpv over TCP, as it does today:
 linking libmpv would make the app a derivative work of a GPL program, and the

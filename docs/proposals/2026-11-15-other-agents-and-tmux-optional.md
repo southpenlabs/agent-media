@@ -69,6 +69,11 @@ In sam's order, each one breaking nothing:
 7. **A server-held terminal** (a pty, or ConPTY on Windows) behind the
    harness screen and keys routes, so install, sign-in and org setup need
    no tmux.
+   *Built 25 Nov 2026* (`terminals.py`; contract §6.6 "No tmux"): an
+   install is a plain subprocess with its output streamed, a sign-in a pty
+   read through pyte, and `/run` and `/screen` carry `signin {url, code,
+   paste}` for a device-code or paste-back sign-in. ConPTY is not done:
+   on Windows a sign-in runs piped.
 9. **Matrix as the front door.** room_delegate generalised, so any thread
    can have a room that delivers to its session and receives its replies.
 

@@ -12,6 +12,9 @@ from agent_media_server import harnesses as agents
 def _here(tmp_path, monkeypatch):
     """A registry of our own, an open gate, and a tmux that says yes."""
     monkeypatch.setenv("MEDIA_AGENT_SETUP_DIR", str(tmp_path / "setup"))
+    # These are the tmux windows; the held terminal has test_terminals.py.
+    monkeypatch.setenv("MEDIA_HARNESS_TERMINAL", "tmux")
+    monkeypatch.setattr(agents, "SIGNIN_WAIT_S", 0.0)
     monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
     monkeypatch.setattr(send, "ask_target", lambda: ("scratch", "/home/ryer", []))
     monkeypatch.setattr(send, "ensure_host", lambda host, cwd: True)
