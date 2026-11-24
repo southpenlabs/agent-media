@@ -10293,7 +10293,9 @@ under its input box when it is low, used up or its key refused.
 
 **Headroom on opencode's model sheet** (24 Nov 2026). The opencode sheet
 (`GET /session/settings`, a new chat's or a thread's) is ordered by what is
-left on what pays for each model, and each row it knows of carries
+left on what pays for each model, every row carries `group` (what pays for it, by name: "Go", "Venice",
+"Free", "" when not known; the app's header over its rows) and `base` (its
+note without the group's name), and each row it knows of carries
 `usage: {"state": "ok"|"near"|"out", "text", "percent"?, "left"?}` and says
 it in its `note` ("Go · 35% used", "$7.00 left"): plans with room first (most
 room first), then credit (most money first), the free models, then those

@@ -13,7 +13,9 @@ A model's room comes from what pays for it:
 - a free model: nothing to run out of but its own daily limit, which no
   provider reports.
 
-Each row gains `usage: {state, text, percent?, left?}` — `state` ok, near
+Each row gains `group` (what pays for it, by name: "Go", "Venice", "Free",
+or "" when nothing is known: a header over its rows) and `base` (its note
+without the group's name), and `usage: {state, text, percent?, left?}` — `state` ok, near
 (a plan window at plan_usage.WARN_AT% or credit under MEDIA_CREDIT_LOW), or
 out (a window at 100%, credit used up or the key refused) — and its note
 says it ("Go · 35% used", "$7.00 left"), so an app that only shows notes
@@ -115,13 +117,36 @@ def annotate(offered: list[dict]) -> list[dict]:
                 credits = _credit_rows()
             usage = _credit_usage(credits.get(sid))
         row = dict(m)
+        note = m.get("note") or ""
+        # The group's name, for a header over its rows, and the note without
+        # it (`base`: "Chat only", or nothing), for a row under that header.
+        if kind == "plan":
+            group = _plan_name(sid, note)
+        elif kind == "credit":
+            from . import credit_usage
+
+            group = str((credit_usage.PROVIDERS.get(sid) or {}).get("name") or sid)
+        else:
+            group = "Free" if kind == "free" else ""
+        row["group"] = group
+        row["base"] = "" if note == group else note
         if usage:
             row["usage"] = usage
             if usage.get("text"):
-                row["note"] = " · ".join(x for x in (m.get("note") or "", usage["text"]) if x)
-        rows.append((_rank(kind, usage), i, row))
-    rows.sort(key=lambda r: (r[0], r[1]))
-    return [r for _, _, r in rows]
+                row["note"] = " · ".join(x for x in (note, usage["text"]) if x)
+        rows.append((_rank(kind, usage), group, i, row))
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    return [r for *_, r in rows]
+
+
+def _plan_name(plan: str, note: str) -> str:
+    """A plan's short name for its header: the note its rows carry ("Go"),
+    else the plan's own name."""
+    if note:
+        return note
+    from . import plan_usage
+
+    return str((plan_usage.PLANS.get(plan) or {}).get("name") or plan)
 
 
 def _rank(kind: str, usage: Optional[dict]) -> tuple:

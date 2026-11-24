@@ -42,6 +42,9 @@ def test_paid_with_room_first_then_free_then_near_then_out(usage):
     assert rows[2]["note"] == "Chat only · $7.00 left"
     assert rows[-1]["usage"] == {"state": "near", "text": "$0.40 left", "left": 0.4}
     assert "usage" not in rows[4], "nothing known: left as it is"
+    # A header's name per row, and the note without it.
+    assert [(r["group"], r["base"]) for r in rows] == [
+        ("Go", ""), ("Venice", ""), ("Venice", "Chat only"), ("Free", ""), ("", ""), ("OpenRouter", "")]
 
 
 def test_a_plan_at_its_limit_goes_last_and_default_moves(usage):
