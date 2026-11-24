@@ -303,3 +303,18 @@ def cost_of(model: str) -> tuple[float, float]:
     """`(input, output)` per million tokens as the listing priced `model`,
     or (0, 0) when it has no price (a gateway's, or not listed)."""
     return _costs.get(model, (0.0, 0.0))
+
+
+def cost_by_name(name: str) -> tuple[float, float]:
+    """The price of a model by its own name in any provider's listing
+    ("claude-opus-5-5", "gpt-6.2-sol"), the model maker's own first, else the
+    lowest; (0, 0) when none prices it. For a plan's model, whose own row has
+    no price (model_headroom's cost tag)."""
+    name = name.lower()
+    found = [(mid, c) for mid, c in _costs.items()
+             if mid.lower().rsplit("/", 1)[-1] == name and c != (0.0, 0.0)]
+    for maker in ("anthropic/", "openai/", "openrouter/openai/", "google/"):
+        for mid, c in found:
+            if mid.lower().startswith(maker):
+                return c
+    return min((c for _, c in found), default=(0.0, 0.0))

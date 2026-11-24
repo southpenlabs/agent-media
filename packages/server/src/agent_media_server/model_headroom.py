@@ -190,6 +190,12 @@ def annotate(offered: list[dict]) -> list[dict]:
             group = "Free" if kind == "free" else ""
         row["group"] = group
         row["base"] = "" if note == group else note
+        if kind == "plan":
+            # On a plan a price would mislead (each model has its own dollar
+            # limit), so its weight instead: cheap, medium or expensive.
+            tag = _tier(opencode_models_cost(m["id"]))
+            if tag:
+                row["base"] = " · ".join(x for x in (row["base"], tag) if x)
         if kind == "credit":
             # Paid per use: its price is what spends the credit (David, 25 Nov
             # 2026: "the token rate for each"). Not on a plan's or a free
@@ -375,6 +381,9 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         return offered
     if not any(usages.get(g) for g in names.values()):
         return offered
+    from . import credit_usage as _cu
+
+    credit_groups = {str(p.get("name")) for p in _cu.PROVIDERS.values()}
     order: list[str] = []
     rows = []
     for i, m in enumerate(offered):
@@ -387,6 +396,11 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         # The note without the provider's name in front ("meridian · 200K context").
         base = note[len(provider):].lstrip(" ·") if provider and note.startswith(provider) else note
         row["group"], row["base"] = group, "" if base == group else base
+        # What it costs: a price where it is paid per use, else a weight on
+        # the plan (cheap, medium, expensive); nothing when nothing prices it.
+        extra = _row_cost(agent, m, group, credit_groups)
+        if extra:
+            row["base"] = " · ".join(x for x in (row["base"], extra) if x)
         if usages.get(group):
             row["usage"] = usages[group]
         rows.append((order.index(group), i, row))
@@ -540,3 +554,54 @@ def _price(model: str) -> str:
     if not i and not o:
         return ""
     return f"{_money(i)} in · {_money(o)} out per M"
+
+
+#: The bands of `_tier`, by a price blended three parts input to one output
+#: per million tokens (a coding turn reads far more than it writes): Haiku
+#: and the flash models cheap, Sonnet and most of Go medium, Opus, Fable,
+#: GPT-6.2 Astra and Kimi K3 expensive (25 Nov 2026).
+CHEAP_UNDER, EXPENSIVE_FROM = 0.5, 5.0
+
+
+def _tier(cost: tuple[float, float]) -> str:
+    """"Cheap", "Medium cost" or "Expensive" for a priced model, else ""
+    (David, 25 Nov 2026: "Maybe cheap medium expensive can be used when a
+    dollar amount doesn't work")."""
+    i, o = cost
+    if not i and not o:
+        return ""
+    blended = (3 * i + o) / 4
+    return "Cheap" if blended < CHEAP_UNDER else "Expensive" if blended >= EXPENSIVE_FROM else "Medium cost"
+
+
+def opencode_models_cost(model: str) -> tuple[float, float]:
+    from agent_media_core import opencode_models
+
+    return opencode_models.cost_of(model)
+
+
+def _name_for_price(m: dict) -> str:
+    """The name a model goes by in the listings: Claude Code's "Opus 5.5" is
+    claude-opus-5-5; Codex's and pi's ids are their own."""
+    mid = str(m["id"]).rsplit("/", 1)[-1]
+    label = str(m.get("label") or "")
+    if "/" not in str(m["id"]) and "-" not in mid and label:   # a Claude alias
+        return "claude-" + label.lower().replace(" ", "-").replace(".", "-")
+    return mid
+
+
+def _row_cost(agent: str, m: dict, group: str, credit_groups: set[str]) -> str:
+    from agent_media_core import opencode_models
+
+    if not opencode_models._costs:
+        try:
+            opencode_models.models()           # the listing, cached ten minutes
+        except Exception as e:
+            log.warning("headroom: listing for prices failed (%s)", e)
+            return ""
+    if group in credit_groups:
+        return _price(m["id"])
+    if not group:
+        return ""
+    return _tier(opencode_models.cost_of(m["id"]) if "/" in str(m["id"]) and group == "Go"
+                 else opencode_models.cost_by_name(_name_for_price(m)))

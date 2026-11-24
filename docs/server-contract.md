@@ -10302,7 +10302,11 @@ time: "35% used · resets 4:00 PM", "resets Thu 4:59 PM", "resets 16 Dec";
 25 Nov 2026). A row paid per use (prepaid credit or a key: Venice, OpenRouter)
 has its price in `base` and `note`, "$0.33 in · $1.32 out per M", as the
 listing prices it; a plan's, a free one's or an unpriced one's (a gateway's)
-none (25 Nov 2026) and says
+none (25 Nov 2026). A plan's model (Claude's, ChatGPT's, Go's, pi's through the Claude
+plan) says its weight on the plan instead, "Cheap", "Medium cost" or
+"Expensive", by the price the listings give it (its maker's first) blended
+three parts input to one output per million tokens: under $0.50 cheap, $5 or
+more expensive (model_headroom._tier) and says
 it in its `note` ("Go · 35% used", "$7.00 left"): plans with room first (most
 room first), then credit (most money first), the free models, then those
 near a limit, then those out (model_headroom.py). A new chat on "Default"

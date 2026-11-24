@@ -4,6 +4,14 @@ import pytest
 
 from agent_media_server import model_headroom as mh
 
+
+@pytest.fixture(autouse=True)
+def _no_listing(monkeypatch):
+    # Prices come from a fixed table here, never the live listing.
+    from agent_media_core import opencode_models
+    monkeypatch.setattr(opencode_models, "_costs", {"x/none": (0.0, 0.0)})
+    monkeypatch.setattr(opencode_models, "models", lambda: ([], ""))
+
 SHEET = [
     {"id": "opencode/big-pickle", "label": "Big Pickle", "note": "Free"},
     {"id": "opencode-go/glm-5.3", "label": "GLM-5.3", "note": "Go"},
@@ -243,3 +251,12 @@ def test_a_paid_per_use_row_says_its_price(usage, monkeypatch):
     assert rows["gateway/venice/uncensored"]["base"] == "Chat only", "no price known: none said"
     assert "per M" not in rows["opencode-go/glm-5.3"]["base"], "a plan's row: no price"
     assert mh._price("x/cheap") == "" and mh._money(0.075) == "$0.075"
+
+
+def test_a_plans_models_say_how_heavy_they_are():
+    assert mh._tier((0.1, 0.5)) == "Cheap"             # Haiku
+    assert mh._tier((2.0, 10.0)) == "Medium cost"      # Sonnet
+    assert mh._tier((4.0, 20.0)) == "Expensive"        # Opus
+    assert mh._tier((0.0, 0.0)) == ""
+    assert mh._name_for_price({"id": "opus", "label": "Opus 5.5"}) == "claude-opus-5-5"
+    assert mh._name_for_price({"id": "gpt-6.2-sol", "label": "GPT-6.2-Sol"}) == "gpt-6.2-sol"
