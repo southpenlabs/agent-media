@@ -10306,7 +10306,13 @@ none (25 Nov 2026). A plan's model (Claude's, ChatGPT's, Go's, pi's through the 
 plan) says its weight on the plan instead, "Cheap", "Medium cost" or
 "Expensive", by the price the listings give it (its maker's first) blended
 three parts input to one output per million tokens: under $0.50 cheap, $5 or
-more expensive (model_headroom._tier) and says
+more expensive (model_headroom._tier). Since 25 Nov 2026 that weight is
+its own field instead of words: each priced row (a plan's or paid per use)
+carries `weight: {tier: "cheap"|"medium"|"expensive", ratio, scale}` —
+`ratio` its blended price over the sheet's median ("1.8× average"), `tier`
+by that ratio (half or less cheap, double or more expensive), `scale` 0..1
+between the sheet's cheapest and dearest on a log scale; the app draws a bar
+and the words in green, orange or red (model_headroom.weigh) and says
 it in its `note` ("Go · 35% used", "$7.00 left"): plans with room first (most
 room first), then credit (most money first), the free models, then those
 near a limit, then those out (model_headroom.py). A new chat on "Default"

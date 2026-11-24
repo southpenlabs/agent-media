@@ -31,7 +31,7 @@ def _no_watcher(monkeypatch):
     monkeypatch.setattr(model_headroom, "_claude_usage", lambda: None)
     monkeypatch.setattr(model_headroom, "_claude_own_weeks", lambda: {})
     monkeypatch.setattr(model_headroom, "_codex_out", lambda: {})
-    monkeypatch.setattr(model_headroom, "_row_cost", lambda *a, **k: "")
+    monkeypatch.setattr(model_headroom, "_row_cost", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(model_headroom, "_family_usage", lambda: {})
     yield
     ss._PENDING.clear()

@@ -190,12 +190,9 @@ def annotate(offered: list[dict]) -> list[dict]:
             group = "Free" if kind == "free" else ""
         row["group"] = group
         row["base"] = "" if note == group else note
-        if kind == "plan":
-            # On a plan a price would mislead (each model has its own dollar
-            # limit), so its weight instead: cheap, medium or expensive.
-            tag = _tier(opencode_models_cost(m["id"]))
-            if tag:
-                row["base"] = " · ".join(x for x in (row["base"], tag) if x)
+        if kind in ("plan", "credit"):
+            # How fast it goes through tokens, for `weigh` (the row's weight).
+            row["_blended"] = _blend(opencode_models_cost(m["id"]))
         if kind == "credit":
             # Paid per use: its price is what spends the credit (David, 25 Nov
             # 2026: "the token rate for each"). Not on a plan's or a free
@@ -211,7 +208,7 @@ def annotate(offered: list[dict]) -> list[dict]:
                 row["note"] = " · ".join(x for x in (note, usage["text"]) if x)
         rows.append((_rank(kind, usage), group, i, row))
     rows.sort(key=lambda r: (r[0], r[1], r[2]))
-    return [r for *_, r in rows]
+    return weigh([r for *_, r in rows])
 
 
 def _plan_name(plan: str, note: str) -> str:
@@ -398,9 +395,12 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         row["group"], row["base"] = group, "" if base == group else base
         # What it costs: a price where it is paid per use, else a weight on
         # the plan (cheap, medium, expensive); nothing when nothing prices it.
-        extra = _row_cost(agent, m, group, credit_groups)
-        if extra:
-            row["base"] = " · ".join(x for x in (row["base"], extra) if x)
+        cost = _row_cost(m, group, credit_groups)
+        row["_blended"] = _blend(cost)
+        if group in credit_groups:
+            price = _price_text(cost)
+            if price:
+                row["base"] = " · ".join(x for x in (row["base"], price) if x)
         if usages.get(group):
             row["usage"] = usages[group]
         rows.append((order.index(group), i, row))
@@ -412,7 +412,7 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         rows.sort(key=lambda r: (rank[order[r[0]]], r[0], r[1]))
     else:
         rows.sort(key=lambda r: (r[0], r[1]))
-    return [r for *_, r in rows]
+    return weigh([r for *_, r in rows])
 
 
 def _group_rank(usage: Optional[dict]) -> tuple:
@@ -590,7 +590,10 @@ def _name_for_price(m: dict) -> str:
     return mid
 
 
-def _row_cost(agent: str, m: dict, group: str, credit_groups: set[str]) -> str:
+def _row_cost(m: dict, group: str, credit_groups: set[str]) -> tuple[float, float]:
+    """A row's price per million tokens: its own where it is paid per use or
+    on Go, else its model's by name in the listings (a Claude alias, a Codex
+    id); (0, 0) when nothing prices it."""
     from agent_media_core import opencode_models
 
     if not opencode_models._costs:
@@ -598,10 +601,53 @@ def _row_cost(agent: str, m: dict, group: str, credit_groups: set[str]) -> str:
             opencode_models.models()           # the listing, cached ten minutes
         except Exception as e:
             log.warning("headroom: listing for prices failed (%s)", e)
-            return ""
-    if group in credit_groups:
-        return _price(m["id"])
+            return (0.0, 0.0)
     if not group:
-        return ""
-    return _tier(opencode_models.cost_of(m["id"]) if "/" in str(m["id"]) and group == "Go"
-                 else opencode_models.cost_by_name(_name_for_price(m)))
+        return (0.0, 0.0)
+    if group in credit_groups or ("/" in str(m["id"]) and group == "Go"):
+        own = opencode_models.cost_of(m["id"])
+        if own != (0.0, 0.0) or group in credit_groups:
+            return own
+    return opencode_models.cost_by_name(_name_for_price(m))
+
+
+CHEAP_RATIO, EXPENSIVE_RATIO = 0.5, 2.0
+
+
+def _blend(cost: tuple[float, float]) -> Optional[float]:
+    i, o = cost
+    return (3 * i + o) / 4 if (i or o) else None
+
+
+def _price_text(cost: tuple[float, float]) -> str:
+    i, o = cost
+    return f"{_money(i)} in · {_money(o)} out per M" if (i or o) else ""
+
+
+def weigh(rows: list[dict]) -> list[dict]:
+    """Each priced row's `weight`: how fast it goes through tokens beside the
+    rest of its sheet (David, 25 Nov 2026: "a line under each model ... how
+    quickly it goes through tokens in relation to the rest ... green, orange
+    and red"). `{tier, ratio, scale}`: `ratio` its price over the sheet's
+    median ("4× average"), `tier` cheap (CHEAP_RATIO or less), expensive
+    (EXPENSIVE_RATIO or more) or medium by that ratio, `scale`
+    0..1 where it sits between the sheet's cheapest and dearest on a log
+    scale (a bar's length). A row nothing prices has none."""
+    import math
+
+    priced = sorted(r["_blended"] for r in rows if r.get("_blended"))
+    if priced:
+        mid = priced[len(priced) // 2] if len(priced) % 2 else (priced[len(priced) // 2 - 1] + priced[len(priced) // 2]) / 2
+        lo, hi = math.log(priced[0]), math.log(priced[-1])
+    for r in rows:
+        b = r.pop("_blended", None)
+        if not b or not priced:
+            continue
+        ratio = b / mid if mid else 1.0
+        # Against the rest of the sheet, as the multiplier says it: half the
+        # typical rate or less cheap, double or more expensive.
+        tier = "cheap" if ratio <= CHEAP_RATIO else "expensive" if ratio >= EXPENSIVE_RATIO else "medium"
+        scale = (math.log(b) - lo) / (hi - lo) if hi > lo else 0.5
+        r["weight"] = {"tier": tier, "ratio": round(ratio, 1) if ratio >= 1 else round(ratio, 2),
+                       "scale": round(scale, 2)}
+    return rows

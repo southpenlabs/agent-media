@@ -254,9 +254,19 @@ def test_a_paid_per_use_row_says_its_price(usage, monkeypatch):
 
 
 def test_a_plans_models_say_how_heavy_they_are():
-    assert mh._tier((0.1, 0.5)) == "Cheap"             # Haiku
+    assert mh._tier((0.1, 0.5)) == "Cheap"             # Haiku (the bands weigh() colours by)
     assert mh._tier((2.0, 10.0)) == "Medium cost"      # Sonnet
     assert mh._tier((4.0, 20.0)) == "Expensive"        # Opus
     assert mh._tier((0.0, 0.0)) == ""
     assert mh._name_for_price({"id": "opus", "label": "Opus 5.5"}) == "claude-opus-5-5"
     assert mh._name_for_price({"id": "gpt-6.2-sol", "label": "GPT-6.2-Sol"}) == "gpt-6.2-sol"
+
+
+def test_each_priced_row_weighs_against_the_rest():
+    rows = mh.weigh([{"id": "haiku", "_blended": 0.2}, {"id": "sonnet", "_blended": 4.0},
+                     {"id": "opus", "_blended": 8.0}, {"id": "free"}])
+    w = {r["id"]: r.get("weight") for r in rows}
+    assert w["haiku"] == {"tier": "cheap", "ratio": 0.05, "scale": 0.0}
+    assert w["sonnet"]["tier"] == "medium" and w["sonnet"]["ratio"] == 1.0
+    assert w["opus"] == {"tier": "expensive", "ratio": 2.0, "scale": 1.0}, "double the typical rate: expensive"
+    assert w["free"] is None and all("_blended" not in r for r in rows)
