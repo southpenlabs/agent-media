@@ -190,6 +190,11 @@ JOBS: "tuple[Job, ...]" = (
     Job("rock-pools", ["media", "place", "pools", "check"],
         what="tell the owner about tomorrow's good low tides at watched rock pools",
         at=("17:30",), jitter=600, requires_role="server"),
+    # A phone note before a plan or credit runs out: a window at 90% or
+    # credit low, once each (agent_media_server/usage_alerts.py, 25 Nov 2026).
+    Job("usage-alerts", ["media", "usage", "check"],
+        what="tell the owner when a plan or credit is close to running out",
+        every=1800, jitter=120, requires_role="server"),
 )
 
 

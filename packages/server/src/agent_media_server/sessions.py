@@ -736,6 +736,13 @@ def suggestions_for(session: str, pane: str, last_key: str | None = None) -> lis
     the model's up to three (`model`), the terminal's ghost first when it
     fits and says something else. Keyed to the reply like `suggestion_for`
     (docs/proposals/2026-11-06-one-tap-answers.md)."""
+    from . import model_headroom
+
+    retry = model_headroom.retry_chip(session)
+    if retry:
+        # The last turn ran out of its limit or credit: one tap retries it on
+        # the model with the most room (model_headroom.py).
+        return [{"text": retry, "source": "agent"}]
     fu = _followup(session)
     if fu and last_key is not None and (fu.get("key") or "") != (last_key or ""):
         fu = None

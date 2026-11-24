@@ -526,7 +526,7 @@ CORS_PATHS = frozenset({
     "/mail/message", "/mail/attachment", "/mail/say", "/mail/reply", "/mail/threads", "/mail/tag", "/mail/remote/search", "/mail/remote/fetch", "/mail/move",
     "/mic/ask", "/mic/cancel", "/mic/answer",
     "/phone/ask", "/phone/answer", "/phone/cancel", "/device/location", "/device/location/history", "/device/places/watch", "/device/places/cross", "/device/mic", "/screen/now", "/devices/pause", "/devices/follow", "/device/follow", "/devices/stage", "/device/stage", "/device/view", "/device/app", "/device/listen-log", "/device/stories-tray-log", "/device/log",
-    "/notes", "/notes/clear",
+    "/notes", "/notes/clear", "/usage/alerts/check",
     "/speech/state", "/music/state", "/handoff/state", "/book/state",
     "/follow/trace",
 })
@@ -5389,6 +5389,16 @@ def _post_routes(h: BaseHTTPRequestHandler, path: str) -> bool:
                       f"{(a.get('session') or '-')[:8]} → {a['status']}",)
         else:
             ok, detail = phone.cancel(body.get("id"))
+        _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    elif path == "/usage/alerts/check":
+        # A phone note before a plan or credit runs out, from the scheduler's
+        # usage-alerts job: the host's own token only (usage_alerts.py).
+        from . import usage_alerts
+
+        if not (_TOKEN_OK is not None and _TOKEN_OK(h)):
+            _json(h, 401, {"ok": False, "error": "unauthorized"})
+            return True
+        ok, detail = usage_alerts.check()
         _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     elif path in ("/notes", "/notes/clear"):
         # A notification in the phone's shade (§6.23, notes.py; roadmap item

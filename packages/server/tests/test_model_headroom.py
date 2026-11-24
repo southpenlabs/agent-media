@@ -158,3 +158,60 @@ def test_codex_reads_per_model_limits():
                                       "primary_window": {"used_percent": 40, "reset_at": 1795639420}}}]})
     assert out["models"] == {"m": {"available": False, "available_at": 1795639420}}
     assert [(w["kind"], w["label"], w["percent"]) for w in out["windows"]] == [("weekly_scoped", "m", 40)]
+
+
+def test_pis_providers_in_headroom_order(monkeypatch):
+    monkeypatch.setattr(mh, "_claude_usage", lambda: {"state": "near", "percent": 90, "text": "90% used"})
+    monkeypatch.setattr(mh, "_claude_own_weeks", lambda: {})
+    monkeypatch.setattr(mh, "_credit_rows", lambda: {"venice": {"state": "ok", "left": 7.0, "currency": "USD"}})
+    rows = mh.grouped("pi", [
+        {"id": "meridian/claude-opus", "label": "claude-opus", "provider": "meridian", "note": "meridian"},
+        {"id": "ollama/x", "label": "x", "provider": "ollama", "note": "ollama"},
+        {"id": "venice/qwen", "label": "qwen", "provider": "venice", "note": "venice"}])
+    assert [r["group"] for r in rows] == ["Venice", "ollama", "Claude"], "room first, unknown next, near last"
+
+
+# --- a turn that ran out: retry on the roomiest --------------------------------
+
+def test_a_turn_out_of_its_limit_offers_the_roomiest_other_model(usage, monkeypatch):
+    from agent_media_core import opencode_models
+    usage(go={"state": "out", "percent": 100, "text": "100% used"},
+          credit={"venice": {"state": "ok", "left": 7.0, "currency": "USD"}})
+    monkeypatch.setattr(opencode_models, "models", lambda: (SHEET, "opencode-go/glm-5.3"))
+    mh._RETRY.clear()
+    # Go is used up: not another Go model, the roomiest with room.
+    mh.note_turn("s1", "m9", {"name": "APIError", "data": {"statusCode": 429}}, "opencode-go/glm-5.3")
+    assert mh.retry_chip("s1") == "Retry on Venice DeepSeek"
+    assert mh.take_retry("s1", "something else") == ""
+    assert mh.take_retry("s1", "Retry on Venice DeepSeek") == "venice/deepseek-v4"
+    assert mh.retry_chip("s1") == "", "used up by the tap"
+    # A turn that ended well drops an offer.
+    mh.note_turn("s2", "m1", {"name": "APIError", "data": {"statusCode": 402}}, "venice/deepseek-v4")
+    assert mh.retry_chip("s2").startswith("Retry on ")
+    mh.note_turn("s2", "m2", None, "")
+    assert mh.retry_chip("s2") == ""
+    # Another failure (a refused key, a long thread) offers nothing.
+    mh.note_turn("s3", "m1", {"name": "ProviderAuthError", "data": {"statusCode": 401}}, "x/y")
+    assert mh.retry_chip("s3") == ""
+
+
+def test_the_tap_switches_the_model_and_asks_again(monkeypatch):
+    from agent_media_server import auth, send, session_settings
+    mh._RETRY.clear()
+    mh._RETRY["0f0e0d0c-0b0a-4909-8807-060504030201"] = ("m9", "venice/deepseek-v4", "Venice DeepSeek")
+    switched, sent = [], []
+    monkeypatch.setattr(session_settings, "post", lambda s, body, b: switched.append(body) or (True, {}))
+    monkeypatch.setattr(auth, "gate", lambda b: ({"name": "owner"}, {}))
+
+    class Stop(Exception):
+        pass
+
+    from agent_media_server import frozen, quick
+    monkeypatch.setattr(frozen, "refusal", lambda s: None)
+    def has(s):
+        raise Stop
+    monkeypatch.setattr(quick, "has", has)
+    import pytest as _pt
+    with _pt.raises(Stop):
+        send.reply("Retry on Venice DeepSeek", "t", session="0f0e0d0c-0b0a-4909-8807-060504030201")
+    assert switched == [{"model": "venice/deepseek-v4"}]

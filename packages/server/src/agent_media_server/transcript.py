@@ -999,6 +999,19 @@ def _opencode_messages(session: str) -> list[dict] | None:
     for rec in rows:
         b.feed(rec)
     b.settle()
+    # A last turn that ran out of its limit or credit keeps a "Retry on …"
+    # offer for the thread's chips (model_headroom.note_turn).
+    last = rows[-1]
+    if last.get("role") == "assistant":
+        try:
+            from agent_media_core import opencode_models
+
+            from . import model_headroom
+
+            model_headroom.note_turn(session, str(last.get("id") or ""), last.get("error"),
+                                     opencode_models.current(session) if last.get("error") else "")
+        except Exception as e:  # an offer, never the thread's problem
+            _failures.swallowed(e)
     return b.messages
 
 

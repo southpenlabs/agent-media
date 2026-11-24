@@ -1250,6 +1250,21 @@ def reply(text: str, bearer: str, *, quote: str = "",
     if peer and (mode != "continue" or nudge):
         return False, {"error": "a passed-on reply only continues a chat", "status": 403,
                        "code": "peer_reply"}
+    if mode == "continue" and not nudge and not peer:
+        # "Retry on <model>", the chip a turn that ran out of its limit or
+        # credit offers (model_headroom.py): switch the thread to that model,
+        # then ask it to try again; the words sent say so.
+        from . import model_headroom
+
+        retry = model_headroom.take_retry(session, text)
+        if retry:
+            from . import session_settings
+
+            ok, detail = session_settings.post(session, {"model": retry}, bearer)
+            if not ok and not detail.get("busy"):
+                return False, detail
+            text = drawn = ("The last model ran out of its limit or credit, so I switched you to "
+                            f"{text.strip()[len(model_headroom.RETRY_PREFIX):]}. Please try that again.")
     from . import driver
 
     from . import matrix, quick

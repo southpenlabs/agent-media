@@ -11379,6 +11379,11 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="minutes of fade before the stop (default 3)")
     s.add_argument("--target", default="", help="rooms|local|phone")
     s.set_defaults(func=cmd_sleep)
+    s = sub.add_parser("usage", help="plans' and credit's usage (Coding agents' cards)")
+    usub = s.add_subparsers(dest="usage_cmd", required=True)
+    t = usub.add_parser("check", help="post a phone note for any plan or credit close to "
+                                      "running out, once each (the scheduler's usage-alerts job)")
+    t.set_defaults(func=cmd_usage_check)
     s = sub.add_parser("place", help="where a place is, for a reply's [[map:]] marker "
                                       "(place_find; maps proposal step 2)")
     psub = s.add_subparsers(dest="place_cmd", required=True)
@@ -12678,6 +12683,23 @@ def _music_opts_after_uri(argv: list[str], parser) -> list[str]:
     if i >= len(argv) or argv[i] == "--" or not opts:
         return argv
     return [*argv[:2], argv[i], *opts, *argv[i + 1:]]
+
+
+def cmd_usage_check(a) -> int:
+    """`media usage check`: POST /usage/alerts/check (usage_alerts.py)."""
+    from .phone_ask import _call
+
+    try:
+        code, out = _call("POST", "/usage/alerts/check", {})
+    except Exception as e:  # the server not up
+        print(f"usage check: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"usage check: {out.get('error') or code}", file=sys.stderr)
+        return 1
+    for t in out.get("told") or []:
+        print(f"told: {t}")
+    return 0
 
 
 def cmd_place_find(a) -> int:

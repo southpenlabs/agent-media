@@ -344,8 +344,28 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
         if usages.get(group):
             row["usage"] = usages[group]
         rows.append((order.index(group), i, row))
-    rows.sort(key=lambda r: (r[0], r[1]))
+    if agent == "pi":
+        # pi's providers in headroom order, as opencode's sheet (25 Nov 2026):
+        # room first (a plan by most room, credit by most money), then those
+        # nothing is known of, then near a limit, then out.
+        rank = {g: _group_rank(usages.get(g)) for g in order}
+        rows.sort(key=lambda r: (rank[order[r[0]]], r[0], r[1]))
+    else:
+        rows.sort(key=lambda r: (r[0], r[1]))
     return [r for *_, r in rows]
+
+
+def _group_rank(usage: Optional[dict]) -> tuple:
+    state = (usage or {}).get("state")
+    if state == "out":
+        return (4, 0)
+    if state == "near":
+        return (3, 0)
+    if usage and usage.get("left") is not None:
+        return (1, -float(usage["left"]))
+    if usage and usage.get("percent") is not None:
+        return (0, usage["percent"])
+    return (2, 0)
 
 
 def _codex_out() -> dict:
@@ -391,3 +411,71 @@ def _codex_own(m: dict) -> Optional[tuple[str, dict]]:
                 return label, {"state": state, "percent": own["percent"],
                                "text": f"{own['percent']}% of its own limit used"}
     return None
+
+
+# --- a turn that ran out: retry on the roomiest -------------------------------
+#
+# David, 24-25 Nov 2026: "Switch model when one runs out" (do all). When an
+# opencode turn fails on a used-up limit (429) or no credit (402), the thread
+# offers one tap, "Retry on <model>": the model with the most room that is
+# not the one that failed nor in its used-up group. The tap switches the
+# thread to it and asks opencode to try again (send.reply). An offer, never a
+# silent switch, so a model never changes under the person.
+
+RETRY_CODES = (429, 402)
+RETRY_PREFIX = "Retry on "
+#: session → (failed message id, model id, label): the offer for the turn that failed last.
+_RETRY: dict[str, tuple[str, str, str]] = {}
+
+
+def retry_pick(failed: str) -> Optional[tuple[str, str]]:
+    """`(id, label)` of the model to offer instead of `failed`, or None."""
+    from agent_media_core import opencode_models
+
+    sheet = annotate(opencode_models.models()[0])
+    mine = next((m for m in sheet if m["id"] == failed), None)
+    spent = (mine or {}).get("group") if (mine or {}).get("usage") else None
+    for m in sheet:
+        if m["id"] == failed or (spent and m.get("group") == spent):
+            continue
+        if (m.get("usage") or {}).get("state", "ok") != "ok":
+            continue
+        return m["id"], m["label"]
+    return None
+
+
+def note_turn(session: str, message_id: str, error, failed_model: str) -> None:
+    """Called with the last message of an opencode thread as it is read: a
+    limit or credit failure keeps an offer for it; anything else drops it."""
+    code = ((error or {}).get("data") or {}).get("statusCode") if isinstance(error, dict) else None
+    held = _RETRY.get(session)
+    if code not in RETRY_CODES:
+        _RETRY.pop(session, None)
+        return
+    if held and held[0] == message_id:
+        return
+    try:
+        pick = retry_pick(failed_model)
+    except Exception as e:
+        log.warning("headroom: retry pick failed (%s)", e)
+        pick = None
+    if pick:
+        _RETRY[session] = (message_id, pick[0], pick[1])
+    else:
+        _RETRY.pop(session, None)
+
+
+def retry_chip(session: str) -> str:
+    """"Retry on <label>" when the thread's last turn failed on a limit, else ""."""
+    held = _RETRY.get(session)
+    return RETRY_PREFIX + held[2] if held else ""
+
+
+def take_retry(session: str, text: str) -> str:
+    """The model id to switch to when `text` is the offer's own words, else "".
+    The offer is used up by it."""
+    held = _RETRY.get(session)
+    if held and text.strip() == RETRY_PREFIX + held[2]:
+        _RETRY.pop(session, None)
+        return held[1]
+    return ""

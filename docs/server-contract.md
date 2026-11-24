@@ -10324,6 +10324,26 @@ named for their model; on Codex's sheet a model held back is its own group,
 "back Thu 4:00 PM", and one with a window of its own "12% of its own limit
 used", as Claude's Fable.
 
+**pi in headroom order** (25 Nov 2026): pi's providers are ordered as
+opencode's sheet is (room first, nothing known next, near, out).
+
+**Retry on the roomiest** (25 Nov 2026). When an opencode thread's last turn
+failed on a used-up limit (429) or no credit (402), its one-tap chips
+(§6.2.1 `suggestions`) are the one offer `Retry on <label>`: the model with
+the most room that is neither the one that failed nor in its used-up group
+(model_headroom.retry_pick). Sending those exact words (`POST /reply`)
+switches the thread to that model (as `POST /session/settings`) and sends
+"The last model ran out of its limit or credit, so I switched you to
+<label>. Please try that again." instead. An offer, never a silent switch.
+
+**A phone note before something runs out** (25 Nov 2026). The scheduler's
+`usage-alerts` job (`media usage check`, every 30 minutes) posts `POST
+/usage/alerts/check` (the host's token): a note (`usage-<key>`, 12 hours)
+for each plan window at MEDIA_USAGE_ALERT_AT% (90) or more — the Claude
+plan's, a model's own week, OpenCode Go's, ChatGPT's, Antigravity's — and
+each credit low, used up or refused; once until the window resets or the
+credit is fine again (usage_alerts.py, `usage-alerts.json`). → `{told}`.
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by
