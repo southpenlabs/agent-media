@@ -193,18 +193,46 @@ def _windows_usage(windows: list[dict], warn_at: int) -> Optional[dict]:
     return {"state": state, "percent": used, "text": f"{used}% used"}
 
 
-def _claude_usage() -> Optional[dict]:
-    """The Claude plan's room: the most used of its 5 hours and its week
-    (one model's own week is that model's, not the plan's)."""
+def _claude_windows() -> list[dict]:
     from . import plan_usage
 
     try:
         ok, out = plan_usage.claude_now()
     except Exception as e:
         log.warning("headroom: claude usage failed (%s)", e)
-        return None
-    windows = [w for w in (out.get("windows") or [] if ok else []) if w.get("kind") != "weekly_scoped"]
-    return _windows_usage(windows, plan_usage.WARN_AT)
+        return []
+    return out.get("windows") or [] if ok else []
+
+
+def _claude_usage() -> Optional[dict]:
+    """The Claude plan's room: the most used of its 5 hours and its week."""
+    from . import plan_usage
+
+    return _windows_usage([w for w in _claude_windows() if w.get("kind") != "weekly_scoped"],
+                          plan_usage.WARN_AT)
+
+
+def _claude_own_weeks() -> dict[str, dict]:
+    """A model's own week on top of the plan's (Fable's, 25 Nov 2026: "doesn't
+    Fable have a different limit? why isn't that limit displayed?"), by the
+    name the plan gives it: its own percent in the words, its state the worse
+    of its week and the plan's, since either stops it."""
+    from . import plan_usage
+
+    windows = _claude_windows()
+    plan = _windows_usage([w for w in windows if w.get("kind") != "weekly_scoped"], plan_usage.WARN_AT)
+    order = {"ok": 0, "near": 1, "out": 2}
+    out = {}
+    for w in windows:
+        if w.get("kind") != "weekly_scoped" or not w.get("label"):
+            continue
+        own = _windows_usage([w], plan_usage.WARN_AT)
+        if not own:
+            continue
+        state = max(own["state"], (plan or {}).get("state", "ok"), key=order.get)
+        out[str(w["label"])] = {"state": state, "percent": own["percent"],
+                                "text": f"{own['percent']}% of its week used"}
+    return out
 
 
 def _family_usage() -> dict[str, dict]:
@@ -231,7 +259,11 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
     usages: dict[str, Optional[dict]] = {}
     if agent == "claude":
         usages["Claude"] = _claude_usage()
-        names = {i: "Claude" for i in range(len(offered))}
+        own = _claude_own_weeks()
+        usages.update(own)
+        # A model with a week of its own (Fable) under its own header.
+        names = {i: next((n for n in own if str(m.get("label") or m["id"]).lower().startswith(n.lower())), "Claude")
+                 for i, m in enumerate(offered)}
     elif agent == "codex":
         usages["ChatGPT"] = _plan_usage("codex")
         names = {i: "ChatGPT" for i in range(len(offered))}
@@ -246,7 +278,10 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
             if provider == "meridian":            # Claude Max through the proxy
                 if "Claude" not in usages:
                     usages["Claude"] = _claude_usage()
-                names[i] = "Claude"
+                    usages.update(_claude_own_weeks())
+                label = str(m.get("label") or m["id"]).lower()
+                names[i] = next((n for n in usages if n != "Claude" and usages[n]
+                                 and n.lower() in label.replace("claude-", "")), "Claude")
                 continue
             kind, sid = source(m["id"])
             if kind == "plan":

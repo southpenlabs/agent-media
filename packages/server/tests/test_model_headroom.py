@@ -69,6 +69,7 @@ OK35 = {"state": "ok", "percent": 35, "text": "35% used"}
 
 def test_claudes_and_codexs_models_sit_under_their_plan(monkeypatch):
     monkeypatch.setattr(mh, "_claude_usage", lambda: OK35)
+    monkeypatch.setattr(mh, "_claude_own_weeks", lambda: {})
     rows = mh.grouped("claude", [{"id": "opus", "label": "Opus 5.5", "note": "For complex work"},
                                  {"id": "haiku", "label": "Haiku 5.5", "note": "Fastest"}])
     assert [(r["id"], r["group"], r["base"], r["usage"]["text"]) for r in rows] == [
@@ -100,3 +101,19 @@ def test_antigravity_a_family_at_a_time_and_pi_by_provider(monkeypatch):
         {"id": "ollama/x", "label": "x", "provider": "ollama", "note": "ollama"}])
     assert [(r["group"], r["base"], (r.get("usage") or {}).get("text")) for r in rows] == [
         ("Claude", "1M context", "35% used"), ("Venice", "128K context", "$7.00 left"), ("ollama", "", None)]
+
+
+def test_a_model_with_its_own_week_has_its_own_header(monkeypatch):
+    # Fable: its own week (4%) on top of the plan's (46%); either stops it.
+    windows = [{"kind": "weekly_all", "label": None, "percent": 46},
+               {"kind": "weekly_scoped", "label": "Fable", "percent": 4}]
+    monkeypatch.setattr(mh, "_claude_windows", lambda: windows)
+    rows = mh.grouped("claude", [{"id": "opus", "label": "Opus 5.5", "note": "a"},
+                                 {"id": "fable", "label": "Fable 5.2", "note": "b"},
+                                 {"id": "haiku", "label": "Haiku 5.5", "note": "c"}])
+    assert [(r["id"], r["group"], r["usage"]["text"]) for r in rows] == [
+        ("opus", "Claude", "46% used"), ("haiku", "Claude", "46% used"),
+        ("fable", "Fable", "4% of its week used")]
+    windows[0]["percent"] = 100
+    fable = next(r for r in mh.grouped("claude", [{"id": "fable", "label": "Fable 5.2", "note": ""}]))
+    assert fable["usage"]["state"] == "out", "the plan used up stops it too"

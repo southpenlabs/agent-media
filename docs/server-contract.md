@@ -10305,7 +10305,9 @@ runs the roomiest model when opencode's own default is near or out, and
 
 **The other agents' sheets** (25 Nov 2026) carry the same `group`, `base`
 and `usage`, in their own order with a group's rows together: Claude's
-models under `Claude` (the plan's most used of its 5 hours and week),
+models under `Claude` (the plan's most used of its 5 hours and week), a
+model with a week of its own (Fable) under its own name, "4% of its week
+used", its state the worse of its week and the plan's (25 Nov 2026),
 Codex's under `ChatGPT`, Antigravity's a family at a time, pi's by provider
 (`meridian` is the Claude plan; venice, openrouter and the API keys their
 credit; another provider its own name, no usage). A sheet nothing is known

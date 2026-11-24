@@ -29,6 +29,7 @@ def _no_watcher(monkeypatch):
     monkeypatch.setattr(model_headroom, "_plan_usage", lambda plan: None)
     monkeypatch.setattr(model_headroom, "_credit_rows", lambda: {})
     monkeypatch.setattr(model_headroom, "_claude_usage", lambda: None)
+    monkeypatch.setattr(model_headroom, "_claude_own_weeks", lambda: {})
     monkeypatch.setattr(model_headroom, "_family_usage", lambda: {})
     yield
     ss._PENDING.clear()
