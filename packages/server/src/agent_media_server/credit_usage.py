@@ -199,6 +199,11 @@ def credits(bearer: str, *, now=time.time) -> tuple[bool, dict]:
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
+    return True, {"credits": found(now=now), "low_at": low_at()}
+
+
+def found(*, now=time.time) -> list[dict]:
+    """`credits` without the gate, for the server's own use (model_headroom.py)."""
     out = []
     for pid, p in PROVIDERS.items():
         key = find_key(p["vars"], p["opencode"])
@@ -213,4 +218,4 @@ def credits(bearer: str, *, now=time.time) -> tuple[bool, dict]:
                 kept = _row("unknown", note="Did not answer")
             _cache[pid] = (now(), kept)
         out.append({"id": pid, "name": p["name"], **kept})
-    return True, {"credits": out, "low_at": low_at()}
+    return out

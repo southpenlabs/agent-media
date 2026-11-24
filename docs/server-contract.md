@@ -10291,6 +10291,16 @@ Never a key. The app shows them on Coding agents, and a thread whose model
 id names one of them (`venice/…`, `openrouter/…`, `gateway/venice/…`) warns
 under its input box when it is low, used up or its key refused.
 
+**Headroom on opencode's model sheet** (24 Nov 2026). The opencode sheet
+(`GET /session/settings`, a new chat's or a thread's) is ordered by what is
+left on what pays for each model, and each row it knows of carries
+`usage: {"state": "ok"|"near"|"out", "text", "percent"?, "left"?}` and says
+it in its `note` ("Go · 35% used", "$7.00 left"): plans with room first (most
+room first), then credit (most money first), the free models, then those
+near a limit, then those out (model_headroom.py). A new chat on "Default"
+runs the roomiest model when opencode's own default is near or out, and
+`default` says so ("… (instead of X, near its limit)").
+
 ### 6.31 Replies to a message — gated (built 29 Oct 2026)
 
 Code: `agent_media_server/replies.py`, `matrix.Room.send`. Pinned by

@@ -24,6 +24,10 @@ def _no_watcher(monkeypatch):
     by a polling thread."""
     ss._PENDING.clear()
     monkeypatch.setattr(ss, "_start_watch", lambda s: None)
+    # No usage asked of the real providers (model_headroom.py): rows stay as they are.
+    from agent_media_server import model_headroom
+    monkeypatch.setattr(model_headroom, "_plan_usage", lambda plan: None)
+    monkeypatch.setattr(model_headroom, "_credit_rows", lambda: {})
     yield
     ss._PENDING.clear()
 

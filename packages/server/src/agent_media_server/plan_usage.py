@@ -320,6 +320,11 @@ def get_plan(bearer: str, plan: str, *, fetch=None, now=time.time) -> tuple[bool
     ok, detail = auth.may_control_speech(bearer)
     if not ok:
         return False, detail
+    return plan_now(plan, fetch=fetch, now=now)
+
+
+def plan_now(plan: str, *, fetch=None, now=time.time) -> tuple[bool, dict]:
+    """`get_plan` without the gate, for the server's own use (model_headroom.py)."""
     if plan not in PLANS:
         return False, {"code": "unknown_plan", "error": f"no usage for {plan!r}", "status": 400}
     at, kept = _plan_cache.get(plan, (0.0, {}))

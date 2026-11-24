@@ -82,7 +82,14 @@ def clean_new(agent: str, model: str, mode: str) -> tuple[str, str]:
     if agent == "opencode":
         from agent_media_core import opencode_models
 
-        return opencode_models.allowed(model), ("plan" if mode == "plan" else "")
+        chosen = opencode_models.allowed(model)
+        if not chosen and not (model or "").strip():
+            # "Default": opencode's own, unless that is near or out of room (model_headroom.py).
+            from . import model_headroom
+
+            offered, default = opencode_models.models()
+            chosen = model_headroom.auto_default(model_headroom.annotate(offered), default)
+        return chosen, ("plan" if mode == "plan" else "")
     if agent == "pi":
         from agent_media_core import pi_models
 
@@ -292,7 +299,9 @@ def _opencode_sheet(current: str) -> list:
     on if that is not one of them (a gateway's, a paid one)."""
     from agent_media_core import opencode_models
 
-    offered, _ = opencode_models.models()
+    from . import model_headroom
+
+    offered = model_headroom.annotate(opencode_models.models()[0])
     if current and not any(m["id"] == current for m in offered):
         offered = [{"id": current, "label": current.split("/", 1)[-1], "note": ""}, *offered]
     return offered
@@ -496,9 +505,17 @@ def new_sheet(agent: str = "claude", profile: str = "") -> dict:
     if agent == "opencode":
         from agent_media_core import opencode_models
 
+        from . import model_headroom
+
         offered, default = opencode_models.models()
-        return {"models": offered, "default": opencode_models.default_note(offered, default),
-                "can": {"model": True, "plan": True}}
+        # In headroom order, each with its usage (model_headroom.py); "Default"
+        # runs the roomiest model when opencode's own is near or out of room.
+        offered = model_headroom.annotate(offered)
+        auto = model_headroom.auto_default(offered, default)
+        note = opencode_models.default_note(offered, auto or default)
+        if auto:
+            note += f" (instead of {opencode_models.label_of(default, offered) or default}, near its limit)"
+        return {"models": offered, "default": note, "can": {"model": True, "plan": True}}
     if agent == "pi":
         from agent_media_core import harness_profiles, pi_models
 
