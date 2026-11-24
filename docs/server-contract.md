@@ -14884,13 +14884,30 @@ The sun, wind, sea, tides and rock pools at a point (maps proposal steps 10–11
   [from, to], golden_pm?: [from, to], dusk?}] (today and two more days, the place's
   own days), wind?: {kmh, gust_kmh, from_deg, temp_c?}, sea?: {wave_m, swell_m,
   swell_s, swell_from_deg, water_c?, big_swell}, tides?: [{at, kind: low|high, m}],
-  pools?: [{at, m, good}], note?, credit}`. Times epoch seconds. 400 `bad_point`; 502
+  pools?: [{at, m, good, swell_m?}], note?, credit}`. Times epoch seconds. 400 `bad_point`; 502
   `unreachable` when Open-Meteo answers neither forecast.
 - The sun worked out on the server (NOAA's equations; golden hour the sun between -4°
   and 6°, dusk civil). Wind from Open-Meteo's forecast; the sea from its marine
   forecast, absent inland. Tides are the hourly sea level's turning points; `pools`
   the low tides with half an hour of light either side, `good` the lowest third;
   `big_swell` swell from 2.5 m or waves from 3 m. Kept an hour per ~1 km.
+
+### 6.69 Rock pools: the day-before heads-up — gated, not a guest (built 24 Nov 2026)
+
+Spots watched for a note the evening before a good low tide (maps proposal step 11).
+Code: `map_pools.py`; tests in `test_map_pools.py`.
+
+- `GET /map/pools` → `{spots: [{id, name, lat, lon}]}`; `POST /map/pools {name, lat, lon}`
+  → `{spot}` (a spot within 100 m of one watched is that one, renamed); `{id, delete:
+  true}` → `{deleted}`. The owner's devices (not a guest) and the host's token. 400
+  `bad_point`, `bad_name`, `too_many` (20); 404 `not_found`.
+- `POST /map/pools/check` (the host's token only; the scheduler's `rock-pools` job, 17:30
+  daily, runs `media place pools check`) → `{told: [{id, name, at, m, swell_m?}]}`. For
+  each of the owner's spots, §6.68's `pools` that are `good` and fall tomorrow in the
+  spot's own time: a note (§6.23, `pools-<id>`, 20 h) "Rock pools at <name> tomorrow",
+  "Low −1.19 m at 5:40 pm.", and "Swell 2.7 m then: keep off the rock platforms." when
+  the swell then is 2.5 m or more. Once a day per spot. Other accounts' spots are kept
+  and listed, not yet told (notes reach the host's phones).
 
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 

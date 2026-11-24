@@ -7,7 +7,7 @@ are exposed ... and any other relevant information".
     GET /map/outdoors?lat=&lon= → {ok, tz, sun: [{day, sunrise, sunset, golden_am:
         [from, to], golden_pm: [from, to], dusk}], wind?: {kmh, gust_kmh, from_deg,
         temp_c?}, sea?: {wave_m, swell_m, swell_s, swell_from_deg, water_c?,
-        big_swell}, tides?: [{at, kind: low|high, m}], pools?: [{at, m, good}],
+        big_swell}, tides?: [{at, kind: low|high, m}], pools?: [{at, m, good, swell_m?}],
         credit, note}
 
 - The sun: worked out here (NOAA's solar position equations, public domain; the
@@ -232,6 +232,12 @@ def outdoors(lat: Any, lon: Any, get: Get | None = None, now: float | None = Non
         tides = [t for t in turning_points(times, levels) if t["at"] >= now - 3 * 3600]
         out["tides"] = tides[:8]
         out["pools"] = pools(tides, out["sun"] + sun_days(la, lo, local_today + dt.timedelta(days=3), 4), now)
+        # The swell at each pool low, for the heads-up's warning (map_pools.py).
+        swells = _series(sea, "swell_wave_height")
+        for p in out["pools"]:
+            k = min(range(len(times)), key=lambda j: abs(times[j] - p["at"]))
+            if k < len(swells) and swells[k] is not None:
+                p["swell_m"] = round(float(swells[k]), 1)
         out["note"] = NOTE
     if wx is None and sea is None:
         return False, {"status": 502, "code": "unreachable", "error": "Open-Meteo did not answer"}

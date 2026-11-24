@@ -185,6 +185,11 @@ JOBS: "tuple[Job, ...]" = (
     Job("mail-sync", ["media", "mail", "sync"],
         what="fetch the mail accounts added from Sasonica", every=600, jitter=30,
         requires_role="server"),
+    # Rock pools: a note the evening before a good low tide at a watched spot
+    # (agent_media_server/map_pools.py; nothing to do with none watched).
+    Job("rock-pools", ["media", "place", "pools", "check"],
+        what="tell the owner about tomorrow's good low tides at watched rock pools",
+        at=("17:30",), jitter=600, requires_role="server"),
 )
 
 

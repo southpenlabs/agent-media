@@ -11441,6 +11441,13 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--here", action="store_true", help="at the phone's shared location")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_outdoors)
+    t = psub.add_parser("pools", help="rock-pool spots watched for a heads-up the day before a good "
+                                       "low tide: list, `watch <name> lat,lon|--here`, `--remove ID`, `check`")
+    t.add_argument("words", nargs="*", help="nothing to list; `watch <name> [lat,lon]`; `check` (the scheduler's)")
+    t.add_argument("--at", default="", help="lat,lon")
+    t.add_argument("--here", action="store_true", help="at the phone's shared location")
+    t.add_argument("--remove", default="", metavar="ID", help="stop watching one")
+    t.set_defaults(func=cmd_place_pools)
     t = psub.add_parser("triggers", help="the user's triggers by place (place when …)")
     t.add_argument("--remove", default="", metavar="ID", help="take one off")
     t.add_argument("--json", action="store_true")
@@ -12742,7 +12749,8 @@ _LATLON = re.compile(r"-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?")
 def _place_point_opt(argv: list[str]) -> list[str]:
     """`media place thing room kitchen -37.8,144.96`: a southern point starts
     with "-", which argparse takes for an option; it becomes `--at=…`."""
-    if argv[:2] not in (["place", "thing"], ["place", "when"], ["place", "parked"], ["place", "outdoors"]):
+    if argv[:2] not in (["place", "thing"], ["place", "when"], ["place", "parked"], ["place", "outdoors"],
+                        ["place", "pools"]):
         return argv
     return [f"--at={t}" if _LATLON.fullmatch(t) else t for t in argv]
 
@@ -13033,6 +13041,58 @@ def cmd_place_outdoors(a) -> int:
         print(json.dumps(got, ensure_ascii=False, indent=1))
         return 0
     print("\n".join(outdoors_words(got)))
+    return 0
+
+
+def cmd_place_pools(a) -> int:
+    from . import place_find, place_things
+    from .phone_ask import _call
+
+    words = list(a.words)
+    try:
+        if a.remove:
+            code, out = _call("POST", "/map/pools", {"id": a.remove, "delete": True})
+            if code != 200:
+                print(f"place pools: {out.get('error') or code}", file=sys.stderr)
+                return 1
+            print(f"{a.remove} no longer watched")
+            return 0
+        if words[:1] == ["check"]:
+            code, out = _call("POST", "/map/pools/check", {})
+            if code != 200:
+                print(f"place pools: {out.get('error') or code}", file=sys.stderr)
+                return 1
+            for t in out.get("told") or []:
+                print(f"told: {t['name']} low {t['m']:+.2f} m")
+            return 0
+        if words[:1] == ["watch"]:
+            words = words[1:]
+            at = a.at or (words.pop() if words and place_things.point(words[-1]) else "")
+            where = place_find.near_point("phone") if a.here else place_things.point(at) if at else None
+            if where is None or not words:
+                print("place pools watch: a name and a lat,lon (media place find), or --here", file=sys.stderr)
+                return 2
+            code, out = _call("POST", "/map/pools", {"name": " ".join(words), "lat": where[0], "lon": where[1]})
+            if code != 200:
+                print(f"place pools: {out.get('error') or code}", file=sys.stderr)
+                return 1
+            s = out["spot"]
+            print(f"{s['id']}: watching {s['name']} @ {s['lat']},{s['lon']}; a note the evening before a good low tide")
+            return 0
+        if words:
+            print("place pools: nothing, `watch <name> lat,lon`, or `check`", file=sys.stderr)
+            return 2
+        code, got = _call("GET", "/map/pools")
+    except (OSError, ValueError) as e:
+        print(f"place pools: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place pools: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    for s in got.get("spots") or []:
+        print(f"{s['id']}  {s['name']} @ {s['lat']},{s['lon']}")
+    if not got.get("spots"):
+        print("no rock-pool spots watched")
     return 0
 
 

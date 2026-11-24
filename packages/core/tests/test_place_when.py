@@ -94,3 +94,25 @@ def test_outdoors_in_words(monkeypatch, capsys):
     assert out[2].endswith("big swell, keep off the rock platforms") and "from the SW" in out[2]
     assert out[3].startswith("Tides: low ") and out[4].startswith("Rock pools, best lows in daylight: ")
     assert out[-1] == "By Open-Meteo"
+
+
+def test_pools_watch_list_and_check(monkeypatch, capsys):
+    sent = []
+
+    def call(method, path, body=None, timeout=10.0):
+        sent.append((method, path, body))
+        if path == "/map/pools/check":
+            return 200, {"told": [{"name": "Blairgowrie", "m": -1.19}]}
+        if method == "GET":
+            return 200, {"spots": [{"id": "rp-1", "name": "Blairgowrie", "lat": -38.365, "lon": 144.77}]}
+        return 200, {"spot": {"id": "rp-1", **body}}
+
+    monkeypatch.setattr("agent_media_core.phone_ask._call", call)
+    parser = cli._build_parser()
+    args = parser.parse_args(cli._place_point_opt(["place", "pools", "watch", "Blairgowrie", "-38.365,144.77"]))
+    assert args.func(args) == 0
+    assert sent[-1] == ("POST", "/map/pools", {"name": "Blairgowrie", "lat": -38.365, "lon": 144.77})
+    args = parser.parse_args(["place", "pools"])
+    assert args.func(args) == 0 and "rp-1  Blairgowrie" in capsys.readouterr().out
+    args = parser.parse_args(["place", "pools", "check"])
+    assert args.func(args) == 0 and "told: Blairgowrie low -1.19 m" in capsys.readouterr().out
