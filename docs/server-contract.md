@@ -14875,6 +14875,23 @@ ahead not yet said; "What's that?" says the best one ahead now.
   where that has none; lists and roads left out. Through map_wiki's lock and
   User-Agent, kept per ~100 m cell as the place cards are. Text CC BY-SA 4.0, credited.
 
+### 6.68 Outdoors by place — gated, not a guest (built 24 Nov 2026)
+
+The sun, wind, sea, tides and rock pools at a point (maps proposal steps 10–11). Code:
+`map_outdoors.py`; tests in `test_map_outdoors.py`.
+
+- `GET /map/outdoors?lat=&lon=` → `{tz, sun: [{day, sunrise?, sunset?, golden_am?:
+  [from, to], golden_pm?: [from, to], dusk?}] (today and two more days, the place's
+  own days), wind?: {kmh, gust_kmh, from_deg, temp_c?}, sea?: {wave_m, swell_m,
+  swell_s, swell_from_deg, water_c?, big_swell}, tides?: [{at, kind: low|high, m}],
+  pools?: [{at, m, good}], note?, credit}`. Times epoch seconds. 400 `bad_point`; 502
+  `unreachable` when Open-Meteo answers neither forecast.
+- The sun worked out on the server (NOAA's equations; golden hour the sun between -4°
+  and 6°, dusk civil). Wind from Open-Meteo's forecast; the sea from its marine
+  forecast, absent inland. Tides are the hourly sea level's turning points; `pools`
+  the low tides with half an hour of light either side, `good` the lowest third;
+  `big_swell` swell from 2.5 m or waves from 3 m. Kept an hour per ~1 km.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in

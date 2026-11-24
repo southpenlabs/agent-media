@@ -11434,6 +11434,13 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--clear", action="store_true", help="the car is not parked anywhere now")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_parked)
+    t = psub.add_parser("outdoors", help="the sun, wind, sea, tides and rock pools at a place: "
+                                          "a lat,lon, --here, or a saved place (home)")
+    t.add_argument("name", nargs="*", help="lat,lon, or one of the user's saved places")
+    t.add_argument("--at", default="", help="lat,lon")
+    t.add_argument("--here", action="store_true", help="at the phone's shared location")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_place_outdoors)
     t = psub.add_parser("triggers", help="the user's triggers by place (place when …)")
     t.add_argument("--remove", default="", metavar="ID", help="take one off")
     t.add_argument("--json", action="store_true")
@@ -12735,7 +12742,7 @@ _LATLON = re.compile(r"-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?")
 def _place_point_opt(argv: list[str]) -> list[str]:
     """`media place thing room kitchen -37.8,144.96`: a southern point starts
     with "-", which argparse takes for an option; it becomes `--at=…`."""
-    if argv[:2] not in (["place", "thing"], ["place", "when"], ["place", "parked"]):
+    if argv[:2] not in (["place", "thing"], ["place", "when"], ["place", "parked"], ["place", "outdoors"]):
         return argv
     return [f"--at={t}" if _LATLON.fullmatch(t) else t for t in argv]
 
@@ -12931,6 +12938,101 @@ def cmd_place_parked(a) -> int:
     print(f"Your car @ {spot['lat']},{spot['lon']}    (parked {_ago(spot.get('age_s', 0))}, {how}"
           + (f", {spot['car']}" if spot.get("car") else "")
           + (f", within {spot['accuracy_m']} m" if spot.get("accuracy_m") is not None else "") + ")")
+    return 0
+
+
+_COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def outdoors_words(got: dict) -> list[str]:
+    """`GET /map/outdoors`'s answer as lines an agent can say, in the place's own time."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    try:
+        tz = ZoneInfo(got.get("tz") or "UTC")
+    except Exception:  # noqa: BLE001 - an unknown zone reads as UTC
+        tz = ZoneInfo("UTC")
+
+    def hm(t: float, day: bool = False) -> str:
+        d = _dt.datetime.fromtimestamp(t, tz)
+        return d.strftime("%a %H:%M" if day else "%H:%M")
+
+    def compass(deg: float) -> str:
+        return _COMPASS[round(deg / 45) % 8]
+
+    out = []
+    sun = (got.get("sun") or [{}])[0]
+    if sun.get("sunrise") and sun.get("sunset"):
+        line = f"Sun today: rises {hm(sun['sunrise'])}, sets {hm(sun['sunset'])}"
+        if sun.get("golden_pm"):
+            line += f"; golden hour {hm(sun['golden_pm'][0])}-{hm(sun['golden_pm'][1])}"
+        if sun.get("dusk"):
+            line += f"; dark by {hm(sun['dusk'])}"
+        out.append(line)
+    w = got.get("wind")
+    if w:
+        out.append(f"Wind {w['kmh']} km/h from the {compass(w['from_deg'])}, gusts {w['gust_kmh']}"
+                   + (f"; {w['temp_c']}°C" if w.get("temp_c") is not None else ""))
+    sea = got.get("sea")
+    if sea:
+        out.append(f"Sea: waves {sea['wave_m']} m, swell {sea['swell_m']} m at {sea['swell_s']} s from the "
+                   f"{compass(sea['swell_from_deg'])}" + (f", water {sea['water_c']}°C" if sea.get("water_c") is not None else "")
+                   + (" - big swell, keep off the rock platforms" if sea.get("big_swell") else ""))
+    if got.get("tides"):
+        out.append("Tides: " + ", ".join(f"{t['kind']} {hm(t['at'], True)} ({t['m']:+.2f} m)" for t in got["tides"][:4]))
+    good = [p for p in got.get("pools") or [] if p.get("good")]
+    if good:
+        out.append("Rock pools, best lows in daylight: " + ", ".join(f"{hm(p['at'], True)} ({p['m']:+.2f} m)" for p in good[:3]))
+    if got.get("note"):
+        out.append(got["note"])
+    if got.get("credit"):
+        out.append(got["credit"])
+    return out
+
+
+def cmd_place_outdoors(a) -> int:
+    from . import place_find, place_things
+    from .phone_ask import _call
+
+    words = list(a.name)
+    at = a.at or (words.pop() if words and place_things.point(words[-1]) else "")
+    if a.here:
+        where = place_find.near_point("phone")
+        if where is None:
+            print("place outdoors: the phone is not sharing its location", file=sys.stderr)
+            return 1
+    elif at:
+        where = place_things.point(at)
+        if where is None:
+            print(f"place outdoors: {at!r} is not lat,lon", file=sys.stderr)
+            return 1
+    elif words:
+        try:
+            saved = _saved_place(" ".join(words))
+        except (OSError, ValueError) as e:
+            print(f"place outdoors: the server did not answer: {e}", file=sys.stderr)
+            return 1
+        if saved is None:
+            print(f"place outdoors: {' '.join(words)!r} is not a saved place; give a lat,lon "
+                  "(media place find) or --here", file=sys.stderr)
+            return 1
+        where = (saved["lat"], saved["lon"])
+    else:
+        print("place outdoors: a lat,lon, --here or a saved place", file=sys.stderr)
+        return 2
+    try:
+        code, got = _call("GET", f"/map/outdoors?lat={where[0]}&lon={where[1]}")
+    except (OSError, ValueError) as e:
+        print(f"place outdoors: the server did not answer: {e}", file=sys.stderr)
+        return 1
+    if code != 200:
+        print(f"place outdoors: {got.get('error') or code}", file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(got, ensure_ascii=False, indent=1))
+        return 0
+    print("\n".join(outdoors_words(got)))
     return 0
 
 

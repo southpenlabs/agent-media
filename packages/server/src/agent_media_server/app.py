@@ -611,7 +611,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews",
-                       "/map/place/wiki", "/map/tour/near", "/map/street_photos", "/map/street_photos/along"})
+                       "/map/place/wiki", "/map/tour/near", "/map/outdoors", "/map/street_photos", "/map/street_photos/along"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6803,6 +6803,14 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         if ok:
             ok, detail = map_wiki.place_wiki(arg("wikidata"), arg("osm"), arg("wikipedia"), arg("name"),
                                              arg("lat") or None, arg("lon") or None)
+    elif method == "GET" and path == "/map/outdoors":
+        # Outdoors by place: the sun, tides, sea and wind at a point (map_outdoors.py, maps steps 10-11).
+        from . import map_layers, map_outdoors
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = map_layers._gate(bearer, host)
+        if ok:
+            ok, detail = map_outdoors.outdoors(arg("lat"), arg("lon"))
     elif method == "GET" and path == "/map/tour/near":
         # The audio tour: what is worth hearing about near a point (map_tour.py, maps step 10).
         from . import map_layers, map_tour

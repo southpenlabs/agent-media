@@ -45,7 +45,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 2 | Spotify Web API | music taste for the DJ and favourites; play on the listener's devices | the owner's own app (client ID in Settings, PKCE) | Development Mode: 5 users, owner needs Premium | **Blocks** as a shared app (extended access is for organisations with 250k monthly users). Per-install own app only, or drop | reading: no; reply tune and speaker: yes |
 | 3 | TMDb | posters, trailers, where to watch | the owner's own key | free key, non-commercial | **Blocks** a paid product: a commercial licence from TMDb, or keep each install on its owner's key and confirm that is allowed | no |
 | 4 | Trakt | Movies and Shows tabs | the owner's own API app | Development app: its maker plus 16 invited people | **Needs work**: request Production access (free, reviewed), https redirect, privacy policy, the "not endorsed" notice; decide one product app or one per install | no |
-| 5 | Open-Meteo | weather for the music bed; city lookup | none | free endpoint, non-commercial only | **Blocks** a paid product on the free endpoint: a paid plan, a self-hosted Open-Meteo, or another source; add credit | no |
+| 5 | Open-Meteo | weather for the music bed; city lookup; the Map's Outdoors (wind, sea, tides) | none | free endpoint, non-commercial only | **Blocks** a paid product on the free endpoint: a paid plan, a self-hosted Open-Meteo, or another source; add credit | no |
 | 6 | Google People API | contacts book | the owner's own Google OAuth client | per-install client, unverified | **Needs work**: a shared client needs Google's verification (sensitive scope); a per-install client is capped at 100 users and shows a warning | no |
 | 7 | YouTube through yt-dlp, Mopidy-YouTube, ytmusicapi | music playback, radio, downloads, lengths, account likes | none, or copied browser sign-ins | against YouTube's terms; already moved to an add-on | Nothing to register. The product has **no music source of its own** without it: decide what public installs play | **yes** (six methods) |
 | 8 | Apple iTunes Search API and Apple's chart feeds | podcast search and charts, top songs and albums, show profiles, shared episode links | none | public, keyless; about 20 calls a minute | **Needs work**: Apple's terms are for promoting store content beside a badge; likely not a general podcast directory. Podcast Index is the usual replacement | no |
@@ -263,14 +263,18 @@ Sorted with what blocks a public release first. 61 rows.
 
 - **Used for:** the current weather that picks a music bed
   (`music_bed.py:511`, `MEDIA_MUSIC_BED_WEATHER`), and finding the
-  listener's city and forecast (`personal_prefs.py:73`, `:77`).
-- **How:** the free, keyless endpoints `api.open-meteo.com` and
-  `geocoding-api.open-meteo.com`.
+  listener's city and forecast (`personal_prefs.py:73`, `:77`); since 24
+  Nov 2026 the Map's Outdoors section and `media place outdoors`
+  (`map_outdoors.py`): the wind now, and the marine forecast's waves, swell,
+  sea temperature and sea level (tides) for a week, kept an hour per ~1 km.
+- **How:** the free, keyless endpoints `api.open-meteo.com`,
+  `marine-api.open-meteo.com` and `geocoding-api.open-meteo.com`.
 - **Terms:** "You may only use the free API services for non-commercial
   purposes", under 10,000 calls a day; commercial includes "Websites or
   apps that have subscriptions" (https://open-meteo.com/en/terms). Credit
   is required (CC BY 4.0, https://open-meteo.com/en/pricing).
-- **Not done yet:** no credit line is shown anywhere.
+- **Not done yet:** the music bed shows no credit line; the Map's Outdoors
+  does ("Weather and sea data by Open-Meteo.com (CC BY 4.0)").
 - **Production:** small. A paid plan with a key, or a self-hosted
   Open-Meteo (it is open source), or a setting for the address so each
   install chooses. Add the credit.

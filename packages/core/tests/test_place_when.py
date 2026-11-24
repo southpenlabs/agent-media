@@ -69,3 +69,28 @@ def test_parked_reads_and_sets(monkeypatch, capsys):
     assert args.func(args) == 0 and sent[-1] == ("POST", "/map/parked", {"lat": -37.8, "lon": 144.9, "how": "hand"})
     args = parser.parse_args(["place", "parked", "--clear"])
     assert args.func(args) == 0 and "taken off" in capsys.readouterr().out
+
+
+def test_outdoors_in_words(monkeypatch, capsys):
+    got = {"tz": "Australia/Melbourne",
+           "sun": [{"sunrise": 1795000000, "sunset": 1795051000, "golden_pm": [1795048000, 1795052000], "dusk": 1795053000}],
+           "wind": {"kmh": 13, "gust_kmh": 30, "from_deg": 139, "temp_c": 13.4},
+           "sea": {"wave_m": 1.6, "swell_m": 2.7, "swell_s": 8, "swell_from_deg": 223, "big_swell": True, "water_c": 17.1},
+           "tides": [{"at": 1795010000, "kind": "low", "m": -0.35}],
+           "pools": [{"at": 1795010000, "m": -0.35, "good": True}], "note": "Not for navigation.", "credit": "By Open-Meteo"}
+    asked = []
+
+    def call(method, path, body=None, timeout=10.0):
+        asked.append(path)
+        return 200, got
+
+    monkeypatch.setattr("agent_media_core.phone_ask._call", call)
+    args = cli._build_parser().parse_args(cli._place_point_opt(["place", "outdoors", "-38.36,144.77"]))
+    assert args.func(args) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert asked == ["/map/outdoors?lat=-38.36&lon=144.77"]
+    assert out[0].startswith("Sun today: rises ") and "golden hour" in out[0]
+    assert out[1] == "Wind 13 km/h from the SE, gusts 30; 13.4°C"
+    assert out[2].endswith("big swell, keep off the rock platforms") and "from the SW" in out[2]
+    assert out[3].startswith("Tides: low ") and out[4].startswith("Rock pools, best lows in daylight: ")
+    assert out[-1] == "By Open-Meteo"
