@@ -128,6 +128,8 @@ Sorted with what blocks a public release first. 61 rows.
 | 85 | Wikimedia for the Map's place card: Wikidata (wbgetentities), English Wikipedia (REST page summary), Wikimedia Commons (imageinfo; the device loads the thumbnail from Wikimedia), English Wikivoyage (action=parse wikitext); with Nominatim's lookup and reverse (row 11) to find the item and town | a landmark's write-up, photo and facts, and its town's See / Do / Eat / Sleep (`GET /map/place/wiki`, map_wiki.py, §6.50; maps proposal step 9, 23 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time, never in parallel, Nominatim a second apart; each answer kept on disk 30 days, a miss 3 | **Fine**: Wikidata CC0; Wikipedia and Wikivoyage text CC BY-SA 4.0, credited with a link and the licence where shown; each Commons photo shown with its author and its own licence, linking its file page | no |
 | 86 | Panoramax (the federated meta-catalogue's STAC search, api.panoramax.xyz; pictures served by each instance, e.g. panoramax.openstreetmap.fr, IGN's, MapComplete's) | street-level photos on the Map's place card and at a route's turns (`GET /map/street_photos`, `/map/street_photos/along`, map_street_photos.py, §6.50; maps proposal step 9, 24 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request at a time; no published rate limit; answers kept on disk 7 days, an empty one 2; the device loads each picture from its instance | **Fine**: each picture carries its own licence (mostly CC BY-SA 4.0; IGN's Licence Ouverte 2.0), shown under it with its author and "Panoramax", linking its viewer page | no |
 | 87 | Mapillary (Meta) Graph API (graph.mapillary.com/images; pictures from Meta's CDN) | the same street-level photos on the place card, beside Panoramax's; never along a route (map_street_photos.py, §6.50; 24 Nov 2026) | South Pen Labs' one registered client token, held as the Worker secret `MAPILLARY_TOKEN` of sasonica.com/street (`deploy/street`), which serves only allowlisted install ids (David's own: red2/red5's `wgg5vlgrugd5ktj3kytuzyrfve`), each ask signed with the install key; or an owner's own `MEDIA_MAPILLARY_TOKEN`, which is asked directly instead. `MEDIA_MAPILLARY_CENTRAL=0` turns central off (24 Nov 2026; the central token is not set yet: 503 not_configured) | not in use until a token is set; per-install rate limit 60 a minute at the Worker, answers kept an hour in Cloudflare's cache and 12 hours on each server (its picture links are signed and expire), an empty one 2 days | **Needs work**: images CC BY-SA 4.0 (some sets CC BY-NC-SA); terms §11 ask for Mapillary's logo and a link back where its images are shown (the card shows the word "Mapillary" linking the photo: add the logo before a public release); §5 bars use "in connection with real-time navigation or route guidance" (so not asked along a route); §12 limits commercial use to listed purposes, so a product for others needs Mapillary's written agreement or drops it | no (off without a key; an owner's own token is the per-install case. Gate it with the switch if a shared product token is ever used) |
+| 88 | VicEmergency (Emergency Management Victoria): the GeoJSON its public map loads, emergency.vic.gov.au/public/events-geojson.json | the Map's "Emergencies (VicEmergency)" layer (incidents and warnings by level, `map_vic_live.py`, §6.50) and route warnings through Watch and Act or Emergency Warning areas (maps proposal step 9, 24 Nov 2026); only where `MEDIA_MAP_VIC=1`, `MEDIA_VIC_EMERGENCY=0` turns it off | none (named client: a User-Agent with the site and repo) | one request at most every 90 s however many devices look; the last copy shown up to 30 min if it is down | **Needs work**: EMV's data notice releases its feed data under CC BY 3.0 AU, credit "State of Victoria" (shown on the layer and each card, with a link to the warning's own page); its support page says the formal data feed is by request (vicemergency.zendesk.com), so a public release asks EMV for feed access first | no (official public safety data; Victoria only) |
+| 89 | Transport Victoria Open Data (Department of Transport and Planning): "Unplanned Disruptions - Road" v3 and "Planned Disruptions - Road" v1 (api.opendata.transport.vic.gov.au) | the Map's "Road closures & roadworks" layer and avoiding full closures in driving routes (`map_vic_live.py`, §6.50; 24 Nov 2026) | the owner's own free Open Data account key, `MEDIA_VIC_ROADS_KEY`, sent as the `KeyID` header (off without one; none on red2 yet) | unplanned at most every 2 min, planned every 30 min (limits 10-20 calls a minute), up to 8 pages of 1000 | **Fine**: CC BY 4.0, credit "Department of Transport and Planning" on the layer and each card | no (official open data; each install its owner's key) |
 
 ## The services, one by one
 
@@ -1052,6 +1054,59 @@ hosted tier), every one of these becomes a reseller question.
 - A search that still finds nothing is reworded once by the install's own
   fast model (`place_find.reword`, `MEDIA_PLACE_REWORD=0` for none): the
   search words go to that model's gateway (row for the gateway's models).
+
+### 88. VicEmergency on the Map
+
+- **Used for:** VicEmergency's incidents and warnings for Victoria:
+  `GET https://emergency.vic.gov.au/public/events-geojson.json` (the file
+  the public map at emergency.vic.gov.au loads; the larger
+  `osom-geojson.json` adds past burn areas, not wanted), drawn as the
+  `vic_emergency` layer and checked against each route (`map_vic_live.py`,
+  §6.50; maps proposal step 9, David 24 Nov 2026: "Go on with Victoria
+  live"). Nothing about the user leaves the server: the same file is asked
+  for whoever looks, at most every 90 s.
+- **Terms** (read 24 Nov 2026): EMV's "Emergency data" notice says the
+  State of Victoria owns the copyright in data from its feeds and releases
+  it under Creative Commons Attribution 3.0 Australia, crediting "State of
+  Victoria" (images, branding, the coat of arms and agency logos
+  excluded), provided "as is". VicEmergency's support page says the data
+  feed "is not currently available publicly" and offers a request form;
+  the CFA's own RSS terms (personal, non-commercial) point third-party
+  developers to EMV. The layer and each card credit "VicEmergency, ©
+  State of Victoria, CC BY 3.0 AU" and link the warning's page on
+  VicEmergency; the layer's note says VicEmergency and 000 come first.
+- **Personal-use switch:** no (a Victoria-only setting, `MEDIA_MAP_VIC`).
+- **Production:** before other people use it, ask EMV through that form
+  for feed access (and its address, if it differs) and say how often it is
+  asked.
+
+### 89. Transport Victoria's road disruptions on the Map
+
+- **Used for:** closures and roadworks on Victoria's roads, from the
+  Department of Transport and Planning's Open Data APIs:
+  `GET https://api.opendata.transport.vic.gov.au/api/opendata/roads/disruptions/unplanned/v3?page=&limit=1000`
+  and `GET https://api.opendata.transport.vic.gov.au/opendata/roads/disruptions/planned/v1/?format=GeoJson`
+  (paged by the `NextPageToken` header), drawn as the `vic_roads` layer;
+  each full closure in force is avoided by driving routes
+  (`map_vic_live.py`, §6.50; 24 Nov 2026). Nothing about the user leaves
+  the server.
+- **Terms:** both datasets are CC BY 4.0 (opendata.transport.vic.gov.au,
+  read 24 Nov 2026), credited "Department of Transport and Planning" on
+  the layer and each card. Rate limits 10-20 calls a minute; unplanned is
+  refreshed upstream each minute (kept 2 minutes here), planned every 30
+  (kept 30).
+- **Credential:** the owner's own, free: make an account on
+  https://opendata.transport.vic.gov.au/ (the Data Exchange Platform), ask
+  for access to "Unplanned Disruptions - Road" and "Planned Disruptions -
+  Road" (one key may need each product added), and put the key in
+  `MEDIA_VIC_ROADS_KEY` in `~/.config/agent-media.env`, then `media update
+  --only agent-media-server`. It is sent as the `KeyID` header (the
+  gateway names that field; the planned API's OpenAPI says
+  Ocp-Apim-Subscription-Key, so that is sent too). The older VicTraffic site
+  (traffic.vicroads.vic.gov.au) no longer resolves, so there is no keyless
+  source.
+- **Personal-use switch:** no.
+- **Production:** fine; each install uses its owner's key.
 
 ## Before other people use this
 

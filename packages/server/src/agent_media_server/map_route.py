@@ -23,6 +23,12 @@ for now (not leave at / arrive by) carries `traffic: {duration_s, delay_s,
 no_traffic_s, credit}` on each way TomTom could time, and the ways are put
 fastest-in-traffic first; `traffic=0` asks without.
 
+Victoria live (maps step 9, map_vic_live.py): a driving route avoids the
+full road closures in force (Valhalla's `exclude_locations`; asked again
+without them when no route is left), and each way carries `hazards:
+{alerts, avoided, roadworks, credit}` when it meets a Watch and Act or
+Emergency Warning area or a closure, or avoided one.
+
 Lane guidance (maps step 7 item 4; David, 22 Nov 2026): driving, each step
 whose turn has OSM `turn:lanes` carries `lanes: [{dirs, valid, active}]`,
 left to right, `dirs` of left, slight_left, sharp_left, through, right,
@@ -377,8 +383,28 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "",
         q["alternates"] = n_alt
     if when_d or when_a:
         q["date_time"] = {"type": 1 if when_d else 2, "value": depart or arrive}
+    # Victoria live (map_vic_live.py): a driving route avoids the full closures in force.
+    avoided = 0
+    if costing == "auto":
+        from . import map_vic_live
+
+        try:
+            excl, avoided = map_vic_live.exclusions([a, *stops, b])
+        except Exception as e:  # noqa: BLE001 - routed as if nothing were closed
+            _failures.swallowed(e)
+            excl, avoided = [], 0
+        if excl:
+            q["exclude_locations"] = excl
     try:
-        got = _ask(base, "/route", q)
+        try:
+            got = _ask(base, "/route", q)
+        except urllib.error.HTTPError:
+            if "exclude_locations" not in q:
+                raise
+            # No way round the closures (or one could not be placed): the route as it is, warned of.
+            q.pop("exclude_locations")
+            avoided = 0
+            got = _ask(base, "/route", q)
     except urllib.error.HTTPError as e:
         try:
             err = json.loads(e.read().decode("utf-8") or "{}")
@@ -411,9 +437,14 @@ def route(frm: str, to: str, mode: str = "drive", lang: str = "", via: str = "",
         from . import map_traffic
 
         routes = map_traffic.annotate(routes)
+    # Victoria live: emergencies and closures each way meets (map_vic_live.py).
+    from . import map_vic_live
+
+    if mode != "transit":
+        map_vic_live.annotate(routes, avoided=avoided)
     first = routes[0]
     out = {k: first[k] for k in ("mode", "distance_m", "duration_s", "line", "steps", "legs")}
-    for k in ("depart_at", "arrive_at", "time_zone", "traffic"):
+    for k in ("depart_at", "arrive_at", "time_zone", "traffic", "hazards"):
         if k in first:
             out[k] = first[k]
     out["routes"] = routes

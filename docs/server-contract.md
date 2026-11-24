@@ -11870,6 +11870,52 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   `traffic-usage.json`: `MEDIA_TOMTOM_TRAFFIC_MONTHLY_MAX` tiles (150,000;
   200,000 free) and `MEDIA_TOMTOM_ROUTING_MONTHLY_MAX` routes (15,000; 20,000
   free), 0 for off (outside-services row 74).
+- **Victoria live** (24 Nov 2026, maps step 9 item 3; David: "Go on with
+  Victoria live"; `map_vic_live.py`, tests in `test_map_vic_live.py`). Only
+  where `MEDIA_MAP_VIC=1`. Two layers, read for the box on screen like the
+  cameras (`GET /map/layer?id=&bbox=w,s,e,n`, again every `refresh_s`):
+  - `{id: "vic_emergency", name: "Emergencies (VicEmergency)", kind:
+    "areas", default_on: true, bbox: true, min_zoom: 5, refresh_s: 120}`
+    (`MEDIA_VIC_EMERGENCY=0` turns it off): VicEmergency's incidents as
+    Points and its warnings as a Point and their Polygon areas (`area:
+    true`), each with `{card: true, title, badge, colour, where, detail,
+    link, link_label, credit, at?, source_id, category, kind:
+    warning|incident, incident: fire|flood|other}`; a warning also has
+    `level: emergency_warning|watch_and_act|advice|community` and `rank`
+    (4 to 1). `colour` is the level's (Emergency Warning #d32f2f, Watch
+    and Act #f57c00, Advice #f2c200, community information #2f7fd8), an
+    incident's by kind. Areas come before points, the most serious last.
+    Kind `areas` draws a Polygon filled lightly in its `colour` with a
+    solid edge, and a point as a dot.
+  - `{id: "vic_roads", name: "Road closures & roadworks", kind: "lines",
+    default_on: false, bbox: true, min_zoom: 8, refresh_s: 300}`, only with
+    `MEDIA_VIC_ROADS_KEY` (the owner's Transport Victoria Open Data key):
+    each closure or roadworks as its own LineString (one longer than 5 km
+    is a corridor, drawn by its point) or a Point, with the card's fields
+    and `road: closed|lanes|roadworks`, `planned`, `dashed: true` for
+    roadworks (drawn dashed), `avoid: true` for a full closure in force.
+    Planned works are shown only while on (their dates, and their
+    recurrences where readable: "Times vary" otherwise, and never avoided).
+  A feature with `card: true` opens a card when tapped: `title`, `badge`,
+  `at`, `where`, `detail` (plain text, paragraphs by blank lines), and
+  `link` with `link_label`, and `credit`. The collection carries `stale:
+  true` when the source is down and the last copy (at most 30 minutes old)
+  is shown, `unreachable: true` when there is none. VicEmergency is asked
+  at most every 90 s, the unplanned roads every 2 minutes and planned every
+  30, whoever asks. **In routing:** `GET /map/route` for a drive sends the
+  full closures in force within 15 km of the trip to Valhalla as
+  `exclude_locations` (a few points inside each closed stretch; one at the
+  trip's start or end is left out; at most 50 points), and asks again
+  without them if no route is left. Each way (and the top level, the
+  first's) then carries, when there is something to say, `hazards:
+  {alerts: [{kind: emergency|closure, level:
+  emergency_warning|watch_and_act|closure, level_name, title, where, link,
+  at?, area? (Emergency Warning only: its rings, [[[lon, lat], …]], for
+  "entering" while guided)}], avoided (closures routed round), roadworks
+  (on the way), credit}`: every Watch and Act or Emergency Warning area
+  the way passes through (or within 1 km of one given as a point), and,
+  driving or cycling, each full closure still on it (within 25 m).
+  Walking gets the emergencies only; transit nothing.
 - **Offline maps** (22 Nov 2026, maps step 7 item 4; `map_offline.py`).
   **`GET /map/offline`** (the map's gate) → `{areas: [{id: "victoria", name,
   version, source, built_at, bounds: [w, s, e, n], max_zoom, credit, bytes,

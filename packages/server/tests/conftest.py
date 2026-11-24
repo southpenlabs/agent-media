@@ -153,6 +153,16 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.delenv("MEDIA_MAPILLARY_TOKEN", raising=False)
     monkeypatch.setenv("MEDIA_MAPILLARY_CENTRAL", "0")
     map_street_photos.forget()
+    # VicEmergency and Transport Victoria's road feeds (map_vic_live.py) are
+    # never asked by a test: one that wants an answer passes its own fetch.
+    from agent_media_server import map_vic_live
+
+    def _no_vic(*a, **k):
+        raise RuntimeError("a test reached VicEmergency or Transport Victoria (map_vic_live.py)")
+
+    monkeypatch.setattr(map_vic_live, "_get", _no_vic)
+    monkeypatch.delenv("MEDIA_VIC_ROADS_KEY", raising=False)
+    map_vic_live._reset_for_tests()
     # ...and its squares are kept under a scratch cache, not the real one.
     monkeypatch.setattr(map_osm, "_cache_dir",
                         lambda: (tmp_path / "osm-cache").mkdir(exist_ok=True) or tmp_path / "osm-cache")

@@ -147,6 +147,12 @@ def _all() -> list[dict]:
 
     for lay in map_vic.layers():
         out.append({"layer": lay, "features": map_vic.read})
+    # Victoria live: VicEmergency and the roads' closures (map_vic_live.py), where switched on.
+    from . import map_vic_live
+
+    readers = {"vic_emergency": map_vic_live.read_emergency, "vic_roads": map_vic_live.read_roads}
+    for lay in map_vic_live.layers():
+        out.append({"layer": lay, "features": readers[lay["id"]]})
     # Other states' official camera sites (map_gov_cameras.py), each where switched on.
     from . import map_gov_cameras
 
