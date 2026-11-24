@@ -376,11 +376,19 @@ def grouped(agent: str, offered: list[dict]) -> list[dict]:
             names[i] = group
     else:
         return offered
-    if not any(usages.get(g) for g in names.values()):
-        return offered
     from . import credit_usage as _cu
 
     credit_groups = {str(p.get("name")) for p in _cu.PROVIDERS.values()}
+    if not any(usages.get(g) for g in names.values()):
+        # No usage known (a busy usage endpoint, no login): no headers, but
+        # each model's rate still shows (25 Nov 2026: the bars went with the
+        # headers when Anthropic answered 429).
+        plain = []
+        for i, m in enumerate(offered):
+            row = dict(m)
+            row["_blended"] = _blend(_row_cost(m, names.get(i, "") or "priced", credit_groups))
+            plain.append(row)
+        return weigh(plain)
     order: list[str] = []
     rows = []
     for i, m in enumerate(offered):

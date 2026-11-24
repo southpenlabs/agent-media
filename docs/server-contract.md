@@ -4239,8 +4239,8 @@ Getting an agent onto the host and signed in, from the phone.
 | Route | Request | Response |
 | --- | --- | --- |
 | `GET /harnesses` | – | `{"ok", "agents": [{"name", "present", "path", "version", "auth": "in"\|"out"\|"unknown", "account", "actions": ["install", "login", "logout"], "installed_action": "install"\|"update"}]}` |
-| `POST /harnesses/run` | `{"agent", "action": "install"\|"login"}` | `{"ok", "pane", "agent", "action", "cmd"}` · 400 unknown agent/action, 409 already running, 503 no window |
-| `GET /harnesses/screen?pane=` | – | `{"ok", "pane", "agent", "action", "cmd", "lines": [...], "done": bool, "exit": int\|null}` · 404 not ours, 410 gone |
+| `POST /harnesses/run` | `{"agent", "action": "install"\|"login"}` | `{"ok", "pane", "agent", "action", "cmd", "signin"?}` · 400 unknown agent/action, 409 already running, 503 no window |
+| `GET /harnesses/screen?pane=` | – | `{"ok", "pane", "agent", "action", "cmd", "lines": [...], "done": bool, "exit": int\|null, "signin"?: {"url", "code", "paste"}\|null}` · 404 not ours, 410 gone |
 | `POST /harnesses/keys` | `{"pane", "text"?, "key"?}` | `{"ok", "pane"}` · 400 bad key / nothing to type, 404, 410 |
 | `POST /harnesses/close` | `{"pane"}` | `{"ok", "pane"}` · 404 |
 | `POST /harnesses/logout` (23 Sep 2026) | `{"agent"}` | `{"ok", "agent", "cmd", "exit", "lines", "auth"}` · 400 unknown agent, 409 no sign-out, 503/504 it would not run |
@@ -4248,6 +4248,41 @@ Getting an agent onto the host and signed in, from the phone.
 | `GET /harnesses/updates[?refresh=1]` (23 Sep 2026) | – | `{"ok", "updates": [{"name", "installed", "latest", "behind": bool\|null, "line", "checked_at"}]}` |
 
 Only windows `/harnesses/run` opened can be read or typed into.
+
+**No tmux: the server holds the terminal (25 Nov 2026).** Step 7 of
+docs/proposals/2026-11-15-other-agents-and-tmux-optional.md. `/harnesses/run`,
+`/setup/run` and `POST /org/setup` no longer open a tmux window: the server
+runs the command itself (`terminals.py`). An install is a plain subprocess,
+its output streamed into `lines` as it comes (a `\r` progress line
+overwriting itself); a sign-in runs in a pty, 80×30, rendered by a terminal
+emulator (pyte), so `lines` is its screen. `pane` is then `t` and eight hex
+digits instead of `%N`: an opaque id, taken by `/screen`, `/keys` and
+`/close` as before. `done`, `exit` and the `[finished: N]` last line are as
+they were; keys reach the program only while it runs. The terminal lives in
+the server's process: after a restart of the server its id answers 410, as a
+window that went away did, and a finished one is kept a day. No tmux client
+is needed, so "could not get a client onto tmux session" no longer happens
+here. `MEDIA_HARNESS_TERMINAL=tmux` on the server brings the tmux window
+back (visible at the desk, outliving a restart). Without a pty (Windows) a
+sign-in runs piped.
+
+`signin` is what a sign-in is asking for, read off its screen: `{"url",
+"code", "paste"}`. `url` is the sign-in page (a URL wrapped at the
+terminal's edge is read whole; one that looks like a sign-in is preferred
+to a docs link); `code` a device code shown beside it (`ABCD-EFGH`; codex's
+and grok's `--device-auth`), to be typed on that page, nothing coming back;
+`""` when there is none, and then `paste: true` when the program asks for a
+code from that page to be typed back (Claude's, Gemini's), sent with
+`/harnesses/keys` `{"text": code, "key": "Enter"}`. What is pasted is
+not always a code: the gateway's sign-ins (§6.6a) ask for the address the
+browser lands on (`http://localhost:…/oauth-callback?…`), so the field asks
+for "the code or the address the page ends on". `/screen` carries it on
+every poll of a login that has not finished (`null` while no URL shows);
+`/run` waits up to 6 s for it on a login with nothing to type first, and
+carries it when seen (absent otherwise; pi's and Gemini's open a menu
+first, so theirs comes on `/screen`). With `signin` the client can show the
+URL with an Open button and the code with a Copy, a paste field when
+`paste`, and keep the terminal behind a "Show terminal" for anything else.
 
 **Gemini CLI** (17 Oct 2026) is the sixth row. Install and update are
 `npm install -g @google/gemini-cli[@latest]`. Its sign-in is `gemini`
@@ -10311,7 +10346,10 @@ smallest unit) divided by `10 ** decimal_places`; any it leaves out is
 until that window resets (3 Nov 2026).
 
 404 `no_login` when Claude is not signed in on the host; 502 `unavailable`
-when Anthropic did not answer (an expired login included). A kind the app
+when Anthropic did not answer (an expired login included). Answers are kept three minutes; after a failed ask
+(Anthropic answers 429 when asked too often) the source is not asked again
+for two minutes and the last good answer is served meanwhile, for up to 30
+minutes, as for every plan (25 Nov 2026). A kind the app
 does not know is dropped by the server.
 
 **The other subscriptions** (24 Nov 2026). `GET /usage/plans` lists those

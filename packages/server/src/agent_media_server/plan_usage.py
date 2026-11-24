@@ -29,9 +29,24 @@ from . import auth
 from agent_media_core import failures as _failures
 
 URL = "https://api.anthropic.com/api/oauth/usage"
-TTL_S = 60.0
+TTL_S = 180.0
+#: After a failed ask (Anthropic's 429 on 25 Nov 2026, once the picker, the
+#: status line and the cards all asked): not asked again for RETRY_S, and
+#: the last good answer is served meanwhile for up to STALE_S, so a busy
+#: endpoint never empties the cards or the model sheet's headers.
+RETRY_S = 120.0
+STALE_S = 1800.0
 
 _cache: tuple[float, dict] = (0.0, {})
+#: When the last ask failed, per source ("claude", or a plan's id), and why.
+_failed: dict[str, tuple[float, dict]] = {}
+
+
+def _stale_or(key: str, kept_at: float, kept: dict, err: dict, now: float) -> tuple[bool, dict]:
+    """The last good answer while it is under STALE_S old, else `err`."""
+    if kept and now - kept_at < STALE_S:
+        return True, kept
+    return False, err
 
 
 def _token() -> Optional[str]:
@@ -110,17 +125,24 @@ def claude_now(*, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
     """`get` without the gate, for the server's own use (model_headroom.py)."""
     global _cache
     at, kept = _cache
-    if kept and now() - at < TTL_S:
+    t = now()
+    if kept and t - at < TTL_S:
         return True, kept
+    failed_at, err = _failed.get("claude", (0.0, {}))
+    if err and t - failed_at < RETRY_S:
+        return _stale_or("claude", at, kept, err, t)
     token = _token()
     if not token:
         return False, {"code": "no_login", "error": "Claude is not signed in on the server", "status": 404}
     try:
         out = shape(fetch(token))
-    except Exception as e:  # network, 401 (expired login), a changed shape
+    except Exception as e:  # network, 401 (expired login), 429, a changed shape
         _failures.swallowed(e)
-        return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
-    _cache = (now(), out)
+        err = {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
+        _failed["claude"] = (t, err)
+        return _stale_or("claude", at, kept, err, t)
+    _failed.pop("claude", None)
+    _cache = (t, out)
     return True, out
 
 
@@ -354,15 +376,22 @@ def plan_now(plan: str, *, fetch=None, now=time.time) -> tuple[bool, dict]:
     if plan not in PLANS:
         return False, {"code": "unknown_plan", "error": f"no usage for {plan!r}", "status": 400}
     at, kept = _plan_cache.get(plan, (0.0, {}))
-    if kept and now() - at < TTL_S:
+    t = now()
+    if kept and t - at < TTL_S:
         return True, kept
+    failed_at, err = _failed.get(plan, (0.0, {}))
+    if err and t - failed_at < RETRY_S:
+        return _stale_or(plan, at, kept, err, t)
     try:
         out = (fetch or PLANS[plan]["fetch"])()
     except NoLogin:
         return False, {"code": "no_login", "error": f"{PLANS[plan]['name']} is not signed in on the server",
                        "status": 404}
-    except Exception as e:  # network, 401 (a revoked or expired login), a changed shape
+    except Exception as e:  # network, 401 (a revoked or expired login), 429, a changed shape
         _failures.swallowed(e)
-        return False, {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
-    _plan_cache[plan] = (now(), out)
+        err = {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
+        _failed[plan] = (t, err)
+        return _stale_or(plan, at, kept, err, t)
+    _failed.pop(plan, None)
+    _plan_cache[plan] = (t, out)
     return True, out

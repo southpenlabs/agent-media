@@ -20,6 +20,7 @@ RAW = {
 def _here(monkeypatch):
     monkeypatch.setattr(auth, "may_control_speech", lambda bearer: (True, {}))
     monkeypatch.setattr(plan_usage, "_cache", (0.0, {}))
+    monkeypatch.setattr(plan_usage, "_failed", {})
     monkeypatch.setattr(plan_usage, "_token", lambda: "tok")
 
 
@@ -32,15 +33,15 @@ def test_shape_keeps_the_windows_a_card_shows():
     assert out["extra"] is None
 
 
-def test_kept_for_a_minute():
+def test_kept_for_a_while():
     calls = []
     clock = [1000.0]
     fetch = lambda tok: calls.append(tok) or RAW
     assert plan_usage.get("b", fetch=fetch, now=lambda: clock[0])[0]
-    clock[0] += 30
+    clock[0] += plan_usage.TTL_S - 1
     plan_usage.get("b", fetch=fetch, now=lambda: clock[0])
     assert len(calls) == 1
-    clock[0] += 31
+    clock[0] += 2
     plan_usage.get("b", fetch=fetch, now=lambda: clock[0])
     assert len(calls) == 2
 
@@ -129,3 +130,28 @@ def test_plans_lists_only_those_signed_in(monkeypatch):
     monkeypatch.setitem(plan_usage.PLANS["codex"], "here", lambda: True)
     monkeypatch.setitem(plan_usage.PLANS["antigravity"], "here", lambda: 1 / 0)
     assert plan_usage.plans("t") == (True, {"plans": [{"id": "codex", "name": "ChatGPT", "agent": "codex"}]})
+
+
+def test_a_busy_endpoint_serves_the_last_good_answer_and_backs_off(monkeypatch):
+    # Anthropic's 429 (25 Nov 2026): the last good answer stays, and the
+    # endpoint is not asked again for RETRY_S.
+    monkeypatch.setattr(plan_usage, "_failed", {})
+    clock = [1000.0]
+    calls = []
+
+    def fetch(token):
+        calls.append(clock[0])
+        if len(calls) > 1:
+            raise OSError("HTTP Error 429: Too Many Requests")
+        return RAW
+    ok, first = plan_usage.claude_now(fetch=fetch, now=lambda: clock[0])
+    assert ok
+    clock[0] += plan_usage.TTL_S + 1
+    ok, again = plan_usage.claude_now(fetch=fetch, now=lambda: clock[0])
+    assert ok and again == first and len(calls) == 2, "the failure serves the last good answer"
+    clock[0] += 10
+    plan_usage.claude_now(fetch=fetch, now=lambda: clock[0])
+    assert len(calls) == 2, "not asked again within RETRY_S"
+    clock[0] += plan_usage.STALE_S
+    ok, err = plan_usage.claude_now(fetch=fetch, now=lambda: clock[0])
+    assert not ok and err["code"] == "unavailable", "too old to serve: the failure is said"

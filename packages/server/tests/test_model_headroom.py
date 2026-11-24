@@ -270,3 +270,15 @@ def test_each_priced_row_weighs_against_the_rest():
     assert w["sonnet"]["tier"] == "medium" and w["sonnet"]["ratio"] == 1.0
     assert w["opus"] == {"tier": "expensive", "ratio": 2.0, "scale": 1.0}, "double the typical rate: expensive"
     assert w["free"] is None and all("_blended" not in r for r in rows)
+
+
+def test_rates_show_even_when_no_usage_is_known(monkeypatch):
+    from agent_media_core import opencode_models
+    monkeypatch.setattr(mh, "_claude_usage", lambda: None)
+    monkeypatch.setattr(mh, "_claude_own_weeks", lambda: {})
+    monkeypatch.setattr(opencode_models, "_costs", {"anthropic/claude-opus-5-5": (4.0, 20.0),
+                                                     "anthropic/claude-haiku-5-5": (0.1, 0.5)})
+    rows = mh.grouped("claude", [{"id": "opus", "label": "Opus 5.5", "note": "a"},
+                                 {"id": "haiku", "label": "Haiku 5.5", "note": "b"}])
+    assert all("group" not in r for r in rows), "no headers without usage"
+    assert rows[1]["weight"]["tier"] == "cheap" and rows[0]["weight"]["ratio"] > 1
