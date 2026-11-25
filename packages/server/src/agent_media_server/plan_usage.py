@@ -38,8 +38,28 @@ RETRY_S = 120.0
 STALE_S = 1800.0
 
 _cache: tuple[float, dict] = (0.0, {})
-#: When the last ask failed, per source ("claude", or a plan's id), and why.
-_failed: dict[str, tuple[float, dict]] = {}
+#: When the last ask failed, per source ("claude", or a plan's id), why, how
+#: long to wait before asking again, and how many have failed in a row.
+_failed: dict[str, tuple[float, dict, float, int]] = {}
+
+
+def _wait_after(e: Exception, streak: int) -> float:
+    """How long to leave a source alone after a failure, by what it said
+    (David, 25 Nov 2026: "Can it update how often it checks automatically
+    based on the error it receives"): its own Retry-After when a 429 or 503
+    gives one; else doubling with each failure in a row from RETRY_S (2, 4,
+    8 … minutes), a refused login (401, 403) starting at ten minutes since
+    asking again will not mend it; never past STALE_S."""
+    code = getattr(e, "code", None)
+    headers = getattr(e, "headers", None)
+    try:
+        said = float(headers.get("Retry-After")) if headers is not None and headers.get("Retry-After") else 0.0
+    except (TypeError, ValueError):
+        said = 0.0
+    if said > 0:
+        return min(max(said, 30.0), STALE_S)
+    first = 600.0 if code in (401, 403) else RETRY_S
+    return min(first * 2 ** max(0, streak - 1), STALE_S)
 
 
 def _stale_or(key: str, kept_at: float, kept: dict, err: dict, now: float) -> tuple[bool, dict]:
@@ -128,8 +148,8 @@ def claude_now(*, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
     t = now()
     if kept and t - at < TTL_S:
         return True, kept
-    failed_at, err = _failed.get("claude", (0.0, {}))
-    if err and t - failed_at < RETRY_S:
+    failed_at, err, wait, streak = _failed.get("claude", (0.0, {}, 0.0, 0))
+    if err and t - failed_at < wait:
         return _stale_or("claude", at, kept, err, t)
     token = _token()
     if not token:
@@ -139,7 +159,7 @@ def claude_now(*, fetch=_fetch, now=time.time) -> tuple[bool, dict]:
     except Exception as e:  # network, 401 (expired login), 429, a changed shape
         _failures.swallowed(e)
         err = {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
-        _failed["claude"] = (t, err)
+        _failed["claude"] = (t, err, _wait_after(e, streak + 1), streak + 1)
         return _stale_or("claude", at, kept, err, t)
     _failed.pop("claude", None)
     _cache = (t, out)
@@ -379,8 +399,8 @@ def plan_now(plan: str, *, fetch=None, now=time.time) -> tuple[bool, dict]:
     t = now()
     if kept and t - at < TTL_S:
         return True, kept
-    failed_at, err = _failed.get(plan, (0.0, {}))
-    if err and t - failed_at < RETRY_S:
+    failed_at, err, wait, streak = _failed.get(plan, (0.0, {}, 0.0, 0))
+    if err and t - failed_at < wait:
         return _stale_or(plan, at, kept, err, t)
     try:
         out = (fetch or PLANS[plan]["fetch"])()
@@ -390,7 +410,7 @@ def plan_now(plan: str, *, fetch=None, now=time.time) -> tuple[bool, dict]:
     except Exception as e:  # network, 401 (a revoked or expired login), 429, a changed shape
         _failures.swallowed(e)
         err = {"code": "unavailable", "error": f"usage not available: {e}", "status": 502}
-        _failed[plan] = (t, err)
+        _failed[plan] = (t, err, _wait_after(e, streak + 1), streak + 1)
         return _stale_or(plan, at, kept, err, t)
     _failed.pop(plan, None)
     _plan_cache[plan] = (t, out)

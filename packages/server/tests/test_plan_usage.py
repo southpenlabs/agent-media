@@ -155,3 +155,19 @@ def test_a_busy_endpoint_serves_the_last_good_answer_and_backs_off(monkeypatch):
     clock[0] += plan_usage.STALE_S
     ok, err = plan_usage.claude_now(fetch=fetch, now=lambda: clock[0])
     assert not ok and err["code"] == "unavailable", "too old to serve: the failure is said"
+
+
+def test_the_wait_follows_the_error():
+    import urllib.error
+    from email.message import Message
+
+    def http(code, retry=None):
+        h = Message()
+        if retry:
+            h["Retry-After"] = retry
+        return urllib.error.HTTPError("u", code, "x", h, None)
+    assert plan_usage._wait_after(http(429, "300"), 1) == 300, "its own Retry-After"
+    assert plan_usage._wait_after(http(429), 1) == plan_usage.RETRY_S
+    assert plan_usage._wait_after(http(429), 3) == plan_usage.RETRY_S * 4, "doubling in a row"
+    assert plan_usage._wait_after(http(401), 1) == 600, "a refused login waits longer"
+    assert plan_usage._wait_after(OSError("down"), 9) == plan_usage.STALE_S, "never past STALE_S"

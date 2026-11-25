@@ -10347,9 +10347,10 @@ until that window resets (3 Nov 2026).
 
 404 `no_login` when Claude is not signed in on the host; 502 `unavailable`
 when Anthropic did not answer (an expired login included). Answers are kept three minutes; after a failed ask
-(Anthropic answers 429 when asked too often) the source is not asked again
-for two minutes and the last good answer is served meanwhile, for up to 30
-minutes, as for every plan (25 Nov 2026). A kind the app
+(Anthropic answers 429 when asked too often) the last good answer is served
+for up to 30 minutes and the source is left alone for as long as its error
+says: its own Retry-After, else two minutes doubling with each failure in a
+row, a refused login from ten (plan_usage._wait_after; 25 Nov 2026). A kind the app
 does not know is dropped by the server.
 
 **The other subscriptions** (24 Nov 2026). `GET /usage/plans` lists those
