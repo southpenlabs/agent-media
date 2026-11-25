@@ -330,6 +330,15 @@ Sorted with what blocks a public release first. 61 rows.
   the host's Deno or another JavaScript runtime; `ejs:npm` from npm; `off`
   for an installed yt-dlp-ejs). No credential; gated with the add-on
   (24 Nov 2026).
+  The Videos tab's YouTube rows (§6.70) are yt-dlp's reading of a results
+  page, and searching an account's subscriptions reads which channels it
+  subscribes to through the YouTube Data API (`subscriptions?mine=true`,
+  `channels?mine=true`; youtube.readonly) with each account's own OAuth
+  token in yt-profile's folder and the owner's Google clients
+  (`oauth_web.json`, `oauth_client.json`), about 1 unit a page of 50 from
+  the owner's Google project's 10,000 a day, kept a day; each subscribed
+  channel is then searched on YouTube's own channel search page with
+  yt-dlp, 12 at a time, kept an hour (25 Nov 2026). Gated with the add-on.
 - **Terms:** YouTube's terms bar downloading "except: (a) as specifically
   permitted by the Service" (https://www.youtube.com/t/terms); the API
   policies bar storing copies, separating audio from video and playing from

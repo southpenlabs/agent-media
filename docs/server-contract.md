@@ -15109,7 +15109,7 @@ Code: `map_pools.py`; tests in `test_map_pools.py`.
 The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 25 Nov
 2026). Code: core `videos.py`, server `videos.py`; tests in `test_videos.py`.
 
-- `GET /videos/sources` → `{sources: [{id, name, site, filters, types, lists, open_in}], filters:
+- `GET /videos/sources` → `{sources: [{id, name, site, filters, types, lists, open_in, accounts?}], filters:
   {length, date, type, sort}}`: the sources this install searches, in order. `filters`
   names the filters a source applies, `types` the kinds it has; `lists` is empty until
   step 3. `open_in: [{id, name, package, home}]` names the open-source players on the
@@ -15140,6 +15140,22 @@ The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 
   again in 12 min"}` and is not asked again until its Retry-After or rate-limit reset
   (else 15 minutes), each search meanwhile reporting it the same way. 400 for a bad
   filter or no `q`.
+- An account's subscriptions (25 Nov 2026, David: "I'd like to be able to search particular
+  accounts subscribed channels"): the `yt` source in `/videos/sources` carries `accounts:
+  [{id, name, channels}]`, the YouTube sign-ins whose subscriptions can be searched (the
+  add-on's `youtube-accounts` `video_accounts`/`subscriptions` and `youtube-metadata`; empty
+  without them). `name` and `channels` (how many it subscribes to) are known once it has
+  been read, else the id and null. `GET /videos/search?q=&account=<id>&length=&type=&page=`
+  searches `q` inside each channel that account subscribes to (YouTube's own search on the
+  channel's page, 8 rows a channel, up to 150 channels, 12 at once) and answers the same
+  shape with only `yt` in `sources`, plus `account: {id, name, channels}`. The `yt` entry
+  adds `account`, `channels`, `searched` (channels that answered), `pending` (still going
+  when the answer left, at most 12 s: they finish behind and are kept, so asking again
+  gets them) and `failed`. Rows: a title holding more of the words first, then each
+  channel's first rows, then their second; `channel` always set. `length` and `type`
+  apply (video or live; playlist or channel give none, `type` in `ignored`); `date` and
+  `sort` are ignored and named. The subscriptions are kept a day, each channel's answer an
+  hour. 400 for an account not listed.
 - `VideoItem`: `{source, id, url, title, channel: {name?, id?, url?}, kind:
   video|live|playlist|channel, duration_s?, published?, views?, thumb?, embed?,
   playable_audio?, practice?, licence?, host?, count?}`. `published` is Unix seconds. `embed` is a

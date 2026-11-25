@@ -502,13 +502,181 @@ def open_in(sid: str) -> list[dict]:
     return [{"id": p, **PLAYERS[p]} for p in OPEN_IN.get(sid, ())]
 
 
+# ---- An account's subscriptions (YouTube, the add-on) ------------------------
+#
+# David, 25 Nov 2026: "I'd like to be able to search particular accounts
+# subscribed channels". The add-on's "youtube-accounts" reads which
+# channels a signed-in account subscribes to (the Data API, youtube.readonly,
+# 1 unit a page); each of those channels is then searched with YouTube's own
+# search inside the channel (its /search?query= page, read by the add-on's
+# "youtube-metadata" search_videos), ACCOUNT_AT_ONCE at a time. A channel
+# that has not answered by the time limit goes on in the background and its
+# rows are kept for the next ask (`pending` says how many).
+
+ACCOUNT_LIMIT_S = 12.0
+ACCOUNT_AT_ONCE = 12
+ACCOUNT_CHANNELS = 150
+PER_CHANNEL = 8
+SUBS_S = 24 * 3600.0
+CHANNEL_S = 3600.0
+_SUBS: dict = {}
+_CHAN: dict = {}
+_POOL: list = []
+
+
+def _accounts_addon() -> Any:
+    from . import youtube_addon
+    addon = youtube_addon.get("youtube-accounts")
+    return addon if addon is not None and hasattr(addon, "subscriptions") and hasattr(addon, "video_accounts") else None
+
+
+def accounts() -> list[dict]:
+    """The YouTube accounts whose subscriptions can be searched: ``[{id,
+    name, channels}]`` (name and channels known once read, else the id and
+    None). Empty without both add-on methods."""
+    addon = _accounts_addon()
+    if addon is None or _yt_addon() is None:
+        return []
+    try:
+        names = list(addon.video_accounts())
+    except Exception as e:  # noqa: BLE001 — no accounts this time
+        _failures.swallowed(e)
+        return []
+    out = []
+    for n in names:
+        hit = _SUBS.get(n)
+        got = hit[1] if hit else {}
+        out.append({"id": n, "name": got.get("title") or n,
+                    "channels": len(got["channels"]) if got.get("channels") is not None else None})
+    return out
+
+
+def subscribed(name: str, now: Optional[float] = None) -> dict:
+    """``{"title", "channels": [{id, title, thumb}]}`` for one account, kept a day."""
+    now = time.time() if now is None else now
+    with _LOCK:
+        hit = _SUBS.get(name)
+    if hit and now - hit[0] < SUBS_S:
+        return hit[1]
+    addon = _accounts_addon()
+    if addon is None:
+        raise RuntimeError("YouTube accounts are not offered here")
+    got = addon.subscriptions(name, timeout=LIMIT_S)
+    got = {"title": got.get("title") or name, "channels": list(got.get("channels") or [])}
+    with _LOCK:
+        _SUBS[name] = (now, got)
+    return got
+
+
+def _channel_rows(ch: dict, q: str, now: float) -> list[dict]:
+    """One channel's own search for `q`, kept CHANNEL_S."""
+    key = (ch["id"], q.lower())
+    with _LOCK:
+        hit = _CHAN.get(key)
+    if hit and now - hit[0] < CHANNEL_S:
+        return hit[1]
+    addon = _yt_addon()
+    if addon is None:
+        raise RuntimeError("YouTube is not offered here")
+    url = (f"https://www.youtube.com/channel/{urllib.parse.quote(ch['id'], safe='')}/search?"
+           + urllib.parse.urlencode({"query": q}))
+    rows = [r for r in yt_rows(addon.search_videos(url, 1, PER_CHANNEL, 20.0)) if r["kind"] in ("video", "live")]
+    for r in rows:
+        c = r.get("channel") or {}
+        r["channel"] = {"name": c.get("name") or ch.get("title"), "id": c.get("id") or ch["id"],
+                        "url": c.get("url") or f"https://www.youtube.com/channel/{ch['id']}"}
+    with _LOCK:
+        if len(_CHAN) > 5000:
+            _CHAN.clear()
+        _CHAN[key] = (now, rows)
+    return rows
+
+
+def _pool() -> ThreadPoolExecutor:
+    if not _POOL:
+        _POOL.append(ThreadPoolExecutor(max_workers=ACCOUNT_AT_ONCE, thread_name_prefix="videos-account"))
+    return _POOL[0]
+
+
+def search_account(q: str, account: str, filters: Optional[dict] = None, page: int = 1,
+                   clock: Callable[[], float] = time.time, limit_s: Optional[float] = None) -> dict:
+    """What GET /videos/search?account= answers (less `ok`): `q` searched in
+    each channel the YouTube account subscribes to. ValueError for a bad
+    ask; a failure reading the account is the `yt` entry's error."""
+    q = (q or "").strip()
+    if not q or len(q) > 200:
+        raise ValueError("q is the words to search for, up to 200 characters")
+    known = {a["id"]: a for a in accounts()}
+    if account not in known:
+        raise ValueError("account must be one of /videos/sources' yt accounts")
+    page = max(1, min(int(page or 1), MOST_PAGES))
+    f = filters or {}
+    now = clock()
+    entry: dict = {"id": "yt", "account": account}
+    try:
+        subs = subscribed(account, now)
+    except Exception as e:  # noqa: BLE001 — reported as YouTube failing
+        _failures.swallowed(e)
+        return {"q": q, "page": page, "filters": f, "items": [], "account": {"id": account, "name": account},
+                "sources": [{**entry, "ok": False, "error": _why(e)}]}
+    chans = subs["channels"][:ACCOUNT_CHANNELS]
+    futs = [_pool().submit(_channel_rows, ch, q, now) for ch in chans]
+    wait(futs, timeout=ACCOUNT_LIMIT_S if limit_s is None else limit_s)
+    lists, failed, pending = [], 0, 0
+    for fu in futs:
+        if not fu.done():
+            pending += 1
+            continue
+        try:
+            lists.append(fu.result())
+        except Exception as e:  # noqa: BLE001 — one channel's failure leaves the rest
+            _failures.swallowed(e)
+            failed += 1
+    if f.get("type") in ("playlist", "channel"):
+        lists = []
+    elif f.get("type"):
+        lists = [[r for r in rows if r["kind"] == f["type"]] for rows in lists]
+    if f.get("length"):
+        lists = [[r for r in rows if _length_ok(f["length"], r.get("duration_s"))] for rows in lists]
+    # Each channel's own order is YouTube's; across channels, a title with
+    # more of the words comes first, then the channels' first rows, then
+    # their second … (never the subscription list's alphabetical order).
+    words = [w for w in re.findall(r"\w+", q.casefold()) if len(w) > 1]
+    ranked = []
+    for rows in lists:
+        for rank, r in enumerate(rows):
+            title = (r.get("title") or "").casefold()
+            ranked.append((-sum(w in title for w in words), rank, r))
+    ranked.sort(key=lambda x: (x[0], x[1]))
+    merged, seen = [], set()
+    for _, _, r in ranked:
+        if r["id"] not in seen:
+            seen.add(r["id"])
+            merged.append(r)
+    items = [{**it, "practice": True} if _practice(it) else it
+             for it in merged[(page - 1) * PER_PAGE: page * PER_PAGE]]
+    entry.update(ok=bool(lists) or not chans or pending == 0, count=len(items), channels=len(chans),
+                 searched=len(lists), pending=pending, failed=failed)
+    if not entry["ok"]:
+        entry["error"] = "timed out" if pending else "every channel failed"
+    if len(merged) > page * PER_PAGE:
+        entry["next"] = page + 1
+    dropped = [k for k in f if k in ("date", "sort")] + (["type"] if f.get("type") in ("playlist", "channel") else [])
+    if dropped:
+        entry["ignored"] = sorted(dropped)
+    return {"q": q, "page": page, "filters": f, "items": items,
+            "account": {"id": account, "name": subs["title"], "channels": len(subs["channels"])},
+            "sources": [entry]}
+
+
 def sources() -> list[dict]:
     """What GET /videos/sources lists (lists come with step 3)."""
     out = []
     for sid in offered():
         name, site, filters, _ = SOURCES[sid]
         out.append({"id": sid, "name": name, "site": site, "filters": list(filters),
-                    "types": list(TYPES_OF[sid]), "lists": [], "open_in": open_in(sid)})
+                    "types": list(TYPES_OF[sid]), "lists": [], "open_in": open_in(sid),
+                    **({"accounts": accounts()} if sid == "yt" else {})})
     return out
 
 
@@ -534,6 +702,8 @@ _LOCK = threading.Lock()
 def clear_cache() -> None:
     with _LOCK:
         _CACHE.clear()
+        _SUBS.clear()
+        _CHAN.clear()
         _COOL.clear()
 
 

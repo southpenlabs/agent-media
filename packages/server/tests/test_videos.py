@@ -210,3 +210,56 @@ def test_a_429_is_a_failure_and_the_source_rests(server, signed_in, sites, monke
     _, obj = call(server, "GET", "/videos/search?q=b&sources=vimeo", headers=AUTH)
     assert obj["sources"][0]["ok"] is False and "rate limited" in obj["sources"][0]["error"]
     assert len(asked) == 1, "not asked again while it rests"
+
+
+class _Accounts:
+    def video_accounts(self):
+        return ["topic-bjj"]
+
+    def subscriptions(self, name, timeout=20.0):
+        return {"title": "BJJ", "channels": [{"id": "UCa", "title": "Alpha"}, {"id": "UCb", "title": "Beta"},
+                                             {"id": "UCslow", "title": "Slow"}]}
+
+
+class _ChannelSearch:
+    def __init__(self):
+        self.urls = []
+
+    def search_videos(self, url, start, end, timeout):
+        self.urls.append(url)
+        if "UCslow" in url:
+            time.sleep(0.6)
+        cid = url.split("/channel/")[1].split("/")[0]
+        return {"entries": [
+            {"ie_key": "Youtube", "id": f"{cid}-1", "title": "warm up drill", "duration": 100},
+            {"ie_key": "Youtube", "id": f"{cid}-2", "title": "closed guard pass", "duration": 1500}]}
+
+
+def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkeypatch):
+    yt, acc = _ChannelSearch(), _Accounts()
+    monkeypatch.setenv("MEDIA_YOUTUBE_METADATA", "1")
+    monkeypatch.setenv("MEDIA_YOUTUBE_ACCOUNTS", "1")
+    monkeypatch.setattr(videos, "ACCOUNT_LIMIT_S", 0.3)
+    personal_use.register("youtube-metadata", yt)
+    personal_use.register("youtube-accounts", acc)
+    try:
+        _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
+        assert obj["sources"][0]["accounts"] == [{"id": "topic-bjj", "name": "topic-bjj", "channels": None}]
+        _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj", headers=AUTH)
+        assert obj["account"] == {"id": "topic-bjj", "name": "BJJ", "channels": 3}
+        src = obj["sources"][0]
+        assert (src["ok"], src["channels"], src["searched"], src["pending"]) == (True, 3, 2, 1)
+        # A title with the words first; each row says its channel.
+        assert [i["id"] for i in obj["items"]][:2] == ["UCa-2", "UCb-2"]
+        assert obj["items"][0]["channel"] == {"name": "Alpha", "id": "UCa", "url": "https://www.youtube.com/channel/UCa"}
+        assert "query=guard" in yt.urls[0]
+        time.sleep(0.5)  # the slow channel finishes behind and is kept
+        _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj&length=short", headers=AUTH)
+        assert obj["sources"][0]["searched"] == 3 and {i["id"] for i in obj["items"]} == {"UCa-1", "UCb-1", "UCslow-1"}
+        _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
+        assert obj["sources"][0]["accounts"][0]["channels"] == 3
+        res, obj = call(server, "GET", "/videos/search?q=guard&account=someone-else", headers=AUTH)
+        assert res.status == 400
+    finally:
+        personal_use.register("youtube-metadata", None)
+        personal_use.register("youtube-accounts", None)

@@ -116,6 +116,11 @@ feeds are cached for 5 minutes, refreshed on pull.
   `/videos/sources` names each source's players (`open_in`); the app offers
   one only when it is installed and resolves the url, as HandoffPlugin
   checks music apps. GPL-3 apps, handed to and never built in.
+- **Search an account's subscriptions** (built 25 Nov 2026; David: "I'd
+  like to be able to search particular accounts subscribed channels"): pick
+  one of the YouTube sign-ins (the topic accounts) and the box searches
+  only inside the channels it subscribes to (`/videos/search?account=`,
+  contract §6.70).
 - **Music's and Practice's searches** gain a "Videos" fold drawn from the
   same endpoint (YouTube only, type video). Their own song and practice
   rows stay as they are.
