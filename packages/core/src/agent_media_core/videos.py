@@ -629,7 +629,7 @@ def accounts(fill: bool = True) -> list[dict]:
         hit = _SUBS.get(n)
         got = hit[1] if hit else {}
         k = known.get(n) or {}
-        if not got and not k:
+        if not got:   # not read since this process started: its follows go to the index too
             unread.append(n)
         chans = len(got["channels"]) if got.get("channels") is not None else k.get("channels")
         out.append({"id": n, "name": _label(got.get("title") or k.get("name") or n), "channels": chans,

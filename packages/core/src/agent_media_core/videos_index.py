@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS quota(day TEXT PRIMARY KEY, units INTEGER);
 """
 
 _LOCK = threading.RLock()
+#: Set when there may be new work (an account's follows read), so the
+#: indexer does not sleep out its idle wait.
+_WAKE = threading.Event()
 _CONN: dict = {}
 _PRIORITY: list = []
 
@@ -140,6 +143,7 @@ def set_follows(account: str, channels: list[dict], path: Optional[Path] = None)
             c.execute("INSERT OR IGNORE INTO channels(id, title) VALUES (?, ?)", (ch["id"], ch.get("title")))
             c.execute("INSERT OR IGNORE INTO follows(account, channel) VALUES (?, ?)", (account, ch["id"]))
         c.commit()
+    _WAKE.set()
 
 
 def prefer(account: str) -> None:
@@ -325,8 +329,13 @@ def _run(api_of: Callable[[], Optional[Api]]) -> None:
         except Exception as e:  # noqa: BLE001 — the indexer must not die; it tries again later
             _failures.swallowed(e)
             did = "error"
-        time.sleep({"details": STEP_GAP_S, "uploads": STEP_GAP_S, "rss": RSS_GAP_S,
-                    "spent": SPENT_S, "error": 60.0}.get(did, IDLE_S))
+        gap = {"details": STEP_GAP_S, "uploads": STEP_GAP_S, "rss": RSS_GAP_S,
+               "spent": SPENT_S, "error": 60.0}.get(did, IDLE_S)
+        if did in ("idle", "spent"):
+            _WAKE.clear()
+            _WAKE.wait(gap)
+        else:
+            time.sleep(gap)
 
 
 # ---- what the Videos tab asks --------------------------------------------------
