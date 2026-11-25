@@ -14391,8 +14391,11 @@ GET /local/chats → {"ok": true, "names": bool, "chats": [<chat>…]}   // ever
   name), so another device can hide one account's chats. Echoed as
   `network.account` here and on the chat's `/targets` row, as on a Matrix
   row (§6.1); `name` only where names are kept. Optional: a chat sent
-  without it keeps the one it had. 400 when it is not `{id, name?}` with
-  an id like a chat id's.
+  without it keeps the one it had. 400 `code: "field_not_accepted"`,
+  `field: "account"` when it is not `{id, name?}` with an id like a chat
+  id's or with a `/` in it (25 Nov 2026: Google Messages names its login
+  `<google account>/<number>`, and every Google Messages list was refused
+  from 21 Nov until then).
 - **Never content**: any field not named above, in the body or a chat, is
   400 `code: "field_not_accepted"`, `field` naming it (text, previews,
   senders). 400 for a network not in the list, a bad id, kind or time; at

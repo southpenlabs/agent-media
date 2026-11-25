@@ -344,3 +344,16 @@ def test_a_chat_names_the_bridge_login_it_comes_through(server, phone, shelf, mo
         st, got = post(server, t, {"network": "meta", "chats": [
             {"id": "100012345", "kind": "person", "account": bad}]})
         assert st == 400, (bad, got)
+        assert got.get("field") == "account", got
+
+
+def test_a_google_messages_login_with_a_slash_is_taken(server, phone):
+    # mautrix-gmessages names a login `<google account>/<number>`: refused
+    # before 25 Nov 2026, so no Google Messages list was kept from 21 Nov.
+    t = phone["token"]
+    acct = {"id": "someone@gmail.com/1795334005681", "name": "Pixel"}
+    st, got = post(server, t, {"network": "gmessages", "full": True, "chats": [
+        {"id": "1.18", "kind": "person", "name": "PHS Therapy", "account": acct}]})
+    assert st == 200, got
+    rec = local_chats.record("local:gmessages:1.18")
+    assert rec["name"] == "PHS Therapy" and rec["account"]["id"] == acct["id"]

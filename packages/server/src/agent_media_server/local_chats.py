@@ -70,6 +70,14 @@ KINDS = ("person", "group")
 #: chat part may hold colons without the id becoming ambiguous.
 _NET_ID = r"[A-Za-z0-9][A-Za-z0-9._@+=:-]{0,127}"
 NET_ID = re.compile(_NET_ID)
+#: A bridge login's id (a chat's `account`): a network id, or a slash in it.
+#: Google Messages names its login `<google account>/<number>`
+#: (mautrix-gmessages FinishGaiaPairing), so from 21 Nov 2026, when chats began
+#: carrying `account`, every Google Messages list was refused, and the server
+#: kept the names it had that day while the bridge's ids came to mean other
+#: chats (25 Nov 2026: a PHS Therapy text titled "Steven Toshack"). Never part
+#: of a session id, so a slash here cannot make one ambiguous.
+ACCOUNT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@+=:/-]{0,127}")
 ID = re.compile(r"local:(" + "|".join(NETWORKS) + r"):(" + _NET_ID + r")")
 #: What one chat in `POST /local/chats` may say, and nothing else.
 CHAT_FIELDS = frozenset({"id", "name", "kind", "updated", "account"})
@@ -375,11 +383,11 @@ def post(body, bearer: str) -> tuple[bool, dict]:
             # #1140): `{id, name?}`, echoed as `network.account`.
             aid = account.get("id") if isinstance(account, dict) else None
             aname = account.get("name") if isinstance(account, dict) else None
-            if (not isinstance(aid, str) or not NET_ID.fullmatch(aid)
+            if (not isinstance(aid, str) or not ACCOUNT_ID.fullmatch(aid)
                     or set(account) - {"id", "name"}
                     or (aname is not None and not isinstance(aname, str))):
                 return _bad(f"chats[{i}].account is {{id, name?}}: id 1-128 letters, digits "
-                            "and . _ @ + = : -, name text")
+                            "and . _ @ + = : / -, name text", code="field_not_accepted", field="account")
         row: dict = {"network": network, "kind": kind}
         if account is not None:
             row["account"] = {"id": account["id"]}
