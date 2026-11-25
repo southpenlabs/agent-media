@@ -284,7 +284,7 @@ def test_rename_keeps_sasonicas_own_name_over_the_networks(server, phone):
     rec = local_chats.record(WA)
     assert rec["title"] == "Ana (climbing)" and rec["name"] == "Ana"
     rows = {r["session"]: r for r in local_chats.rows()}
-    assert rows[WA]["title"] == "Ana (climbing)"
+    assert rows[WA]["title"] == "Ana (climbing)" and rows[WA]["renamed"] is True
     # A phone's next list does not undo it.
     _seed(server, phone)
     assert local_chats.record(WA)["title"] == "Ana (climbing)"
@@ -292,6 +292,8 @@ def test_rename_keeps_sasonicas_own_name_over_the_networks(server, phone):
     res, obj = call(server, "POST", "/rename", {"session": WA, "title": ""}, _auth(t))
     assert res.status == 200 and obj["title"] == "Ana"
     assert "title" not in local_chats.record(WA)
+    rows = {r["session"]: r for r in local_chats.rows()}
+    assert rows[WA]["title"] == "Ana" and rows[WA]["renamed"] is False
 
 
 def test_rename_a_local_chat_refuses_unlisted_auto_and_names_off(server, phone, monkeypatch):

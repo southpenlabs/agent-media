@@ -207,7 +207,13 @@ def rows(flags=frozenset(), pinned=frozenset()) -> list[dict]:
         if not isinstance(rec, dict) or rec.get("gone") or not is_local(sid):
             continue
         v = _view(sid, rec, dev_names, names)
-        out.append({"session": sid, "title": v.get("title") or v.get("name") or "", "live": False, "pane": None,
+        # `renamed`: the title is Sasonica's own name for the chat (Rename),
+        # not the network's as last posted. The app shows the phone's live
+        # name over any other: a posted name goes stale when the bridge
+        # signs in again and its chat ids come to mean other chats (25 Nov
+        # 2026, a PHS Therapy text shown under "Steven Toshack").
+        out.append({"session": sid, "title": v.get("title") or v.get("name") or "", "renamed": bool(v.get("title")),
+                    "live": False, "pane": None,
                     "at": rec.get("updated") or rec.get("last_seen"), "recap": None,
                     "archived": sid in flags, "rested": None, "pinned": sid in pinned,
                     "harness": "local", "source": "local", "local": True,

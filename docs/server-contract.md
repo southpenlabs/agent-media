@@ -14419,13 +14419,20 @@ not gone, with every settings field any row has, and:
 ```
 {"session": "local:…", "harness": "local", "source": "local", "local": true,
  "network": {"id", "name"}, "kind", "device", "device_name",
- "title": "<name>" | "", "at": <updated or last_seen>, "recap": null, "live": false,
+ "title": "<name>" | "", "renamed": <bool>, "at": <updated or last_seen>, "recap": null, "live": false,
  "drivable": false, "mark_carried": null, "spaces": ["people"] (or its groups), …}
 ```
 
 A guest is sent none. The app merges these with the companion's live rows
 by id, shows the server's settings, and for a chat whose phone is not this
 device says where it lives (`device_name`).
+
+`renamed` (25 Nov 2026) says `title` is Sasonica's own name for the chat
+(Rename, below), not the network's name as last posted. Where the phone's
+companion has the chat, the app shows its live name unless `renamed`: a
+posted name goes stale, and when a bridge signs in again its chat ids can
+come to mean other chats (a PHS Therapy text was shown in a chat titled
+"Steven Toshack", the name 1.18 had had four days before).
 
 #### Backup: the phone's encrypted bundle, kept as ciphertext (built 17 Nov 2026)
 
