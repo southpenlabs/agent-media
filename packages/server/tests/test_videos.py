@@ -244,7 +244,7 @@ def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkey
     personal_use.register("youtube-accounts", acc)
     try:
         _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
-        assert obj["sources"][0]["accounts"] == [{"id": "topic-bjj", "name": "topic-bjj", "channels": None}]
+        assert obj["sources"][0]["accounts"][0]["id"] == "topic-bjj"
         _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj", headers=AUTH)
         assert obj["account"] == {"id": "topic-bjj", "name": "BJJ", "channels": 3}
         src = obj["sources"][0]
@@ -257,9 +257,16 @@ def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkey
         _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj&length=short", headers=AUTH)
         assert obj["sources"][0]["searched"] == 3 and {i["id"] for i in obj["items"]} == {"UCa-1", "UCb-1", "UCslow-1"}
         _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
-        assert obj["sources"][0]["accounts"][0]["channels"] == 3
+        assert obj["sources"][0]["accounts"] == [{"id": "topic-bjj", "name": "BJJ", "channels": 3}]
         res, obj = call(server, "GET", "/videos/search?q=guard&account=someone-else", headers=AUTH)
         assert res.status == 400
     finally:
         personal_use.register("youtube-metadata", None)
         personal_use.register("youtube-accounts", None)
+
+
+
+def test_account_names_lose_their_dashes():
+    assert videos._label("david-j-4-bjj") == "david j 4 bjj"
+    assert videos._label("David J 4 Astrology") == "David J 4 Astrology"
+    assert videos._label("Tarot - Daily") == "Tarot - Daily"

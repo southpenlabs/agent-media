@@ -530,10 +530,75 @@ def _accounts_addon() -> Any:
     return addon if addon is not None and hasattr(addon, "subscriptions") and hasattr(addon, "video_accounts") else None
 
 
-def accounts() -> list[dict]:
+def _label(name: str) -> str:
+    """An account's name as the picker shows it: a sign-in's file name or a
+    channel named like one ("david-j-4-bjj") with its dashes as spaces; a
+    channel's own name with spaces in it is left alone (David, 26 Nov 2026:
+    "remove the dashes too")."""
+    name = (name or "").strip()
+    if " " not in name:
+        name = re.sub(r"[-_]+", " ", name).strip()
+    return name
+
+
+def _names_path() -> Any:
+    from ._paths import state_dir
+    return state_dir() / "videos-accounts.json"
+
+
+def _known() -> dict:
+    """``{id: {"name", "channels"}}`` from the last reads, kept on disk so a
+    restart still has every account's name."""
+    try:
+        d = json.loads(_names_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(name: str, got: dict) -> None:
+    try:
+        with _LOCK:
+            d = _known()
+            d[name] = {"name": got.get("title") or name, "channels": len(got.get("channels") or [])}
+            p = _names_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(d, indent=1))
+            tmp.replace(p)
+    except OSError as e:
+        _failures.swallowed(e)
+
+
+_FILLING: list = []
+
+
+def _fill_names(names: list[str]) -> None:
+    """Read, one after another in the background, each account not yet read,
+    so the picker shows every account's own name and channel count."""
+    if _FILLING or not names:
+        return
+    _FILLING.append(True)
+
+    def run() -> None:
+        try:
+            for n in names:
+                try:
+                    subscribed(n)
+                except Exception as e:  # noqa: BLE001 — that account keeps its id
+                    _failures.swallowed(e)
+        finally:
+            _FILLING.clear()
+
+    threading.Thread(target=run, name="videos-account-names", daemon=True).start()
+
+
+def accounts(fill: bool = True) -> list[dict]:
     """The YouTube accounts whose subscriptions can be searched: ``[{id,
-    name, channels}]`` (name and channels known once read, else the id and
-    None). Empty without both add-on methods."""
+    name, channels}]``, by name. `name` is the account's own channel name
+    once read (else its id), dashes as spaces; `channels` how many it
+    subscribes to, None until read. Those not read are read in the
+    background (`fill`). Empty without both add-on methods."""
     addon = _accounts_addon()
     if addon is None or _yt_addon() is None:
         return []
@@ -542,12 +607,19 @@ def accounts() -> list[dict]:
     except Exception as e:  # noqa: BLE001 — no accounts this time
         _failures.swallowed(e)
         return []
-    out = []
+    known = _known()
+    out, unread = [], []
     for n in names:
         hit = _SUBS.get(n)
         got = hit[1] if hit else {}
-        out.append({"id": n, "name": got.get("title") or n,
-                    "channels": len(got["channels"]) if got.get("channels") is not None else None})
+        k = known.get(n) or {}
+        if not got and not k:
+            unread.append(n)
+        chans = len(got["channels"]) if got.get("channels") is not None else k.get("channels")
+        out.append({"id": n, "name": _label(got.get("title") or k.get("name") or n), "channels": chans})
+    if fill:
+        _fill_names(unread)
+    out.sort(key=lambda a: a["name"].casefold())
     return out
 
 
@@ -565,6 +637,7 @@ def subscribed(name: str, now: Optional[float] = None) -> dict:
     got = {"title": got.get("title") or name, "channels": list(got.get("channels") or [])}
     with _LOCK:
         _SUBS[name] = (now, got)
+    _remember(name, got)
     return got
 
 
