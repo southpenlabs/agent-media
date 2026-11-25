@@ -339,6 +339,16 @@ Sorted with what blocks a public release first. 61 rows.
   the owner's Google project's 10,000 a day, kept a day; each subscribed
   channel is then searched on YouTube's own channel search page with
   yt-dlp, 12 at a time, kept an hour (25 Nov 2026). Gated with the add-on.
+  Since 26 Nov 2026 the server also indexes those channels' uploads in the
+  background (`videos_index.py`): `channels.list` (topics, country; 1 unit
+  per 50 channels), `playlistItems.list` on each uploads playlist (1 unit
+  per 50 videos, the newest 500 a channel), `videos.list` for lengths
+  (1 unit per 50), at most 8,000 units a day of the project's 10,000; then
+  each channel's public RSS feed (youtube.com/feeds/videos.xml, no key)
+  every 6 hours. The titles and descriptions stay in the server's own
+  database. The Data API's policies limit how long API data may be kept
+  (refreshed or deleted within 30 days); the RSS refresh and a re-read of
+  each channel monthly would be needed before anyone else uses this.
 - **Terms:** YouTube's terms bar downloading "except: (a) as specifically
   permitted by the Service" (https://www.youtube.com/t/terms); the API
   policies bar storing copies, separating audio from video and playing from

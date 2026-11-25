@@ -596,6 +596,18 @@ def _fill_names(names: list[str]) -> None:
     threading.Thread(target=run, name="videos-account-names", daemon=True).start()
 
 
+def _index_facts(account: str) -> dict:
+    """What the index knows of an account, for the picker: ``{"indexed":
+    {channels, indexed, videos}, "topics": [{id, name, channels}],
+    "countries": [{id, channels}]}``; {} when there is no index."""
+    try:
+        from . import videos_index
+        return {"indexed": videos_index.progress(account), **videos_index.facets(account)}
+    except Exception as e:  # noqa: BLE001 — the picker still lists it
+        _failures.swallowed(e)
+        return {}
+
+
 def accounts(fill: bool = True) -> list[dict]:
     """The YouTube accounts whose subscriptions can be searched: ``[{id,
     name, channels}]``, by name. `name` is the account's own channel name
@@ -620,9 +632,11 @@ def accounts(fill: bool = True) -> list[dict]:
         if not got and not k:
             unread.append(n)
         chans = len(got["channels"]) if got.get("channels") is not None else k.get("channels")
-        out.append({"id": n, "name": _label(got.get("title") or k.get("name") or n), "channels": chans})
+        out.append({"id": n, "name": _label(got.get("title") or k.get("name") or n), "channels": chans,
+                    **_index_facts(n)})
     if fill:
         _fill_names(unread)
+        _start_index()
     # One that subscribes to nothing has nothing to search; two sign-ins of
     # the same channel are one choice.
     seen: set = set()
@@ -651,6 +665,11 @@ def subscribed(name: str, now: Optional[float] = None) -> dict:
     with _LOCK:
         _SUBS[name] = (now, got)
     _remember(name, got)
+    try:
+        from . import videos_index
+        videos_index.set_follows(name, got["channels"])
+    except Exception as e:  # noqa: BLE001 — the index is a help; the live search still works
+        _failures.swallowed(e)
     return got
 
 
@@ -684,17 +703,47 @@ def _pool() -> ThreadPoolExecutor:
     return _POOL[0]
 
 
+def _index_api() -> Any:
+    """The add-on's Data API read, as videos_index wants it, or None."""
+    addon = _accounts_addon()
+    if addon is None or not hasattr(addon, "api"):
+        return None
+    return lambda acct, path, params: addon.api(acct, path, params, 20.0)
+
+
+def _start_index() -> None:
+    from . import videos_index
+    if _index_api() is not None:
+        videos_index.start(_index_api)
+
+
+def _index_item(r: dict) -> dict:
+    vid = r["id"]
+    return _item("yt", vid, f"https://www.youtube.com/watch?v={vid}", r.get("title"),
+                 {"name": r.get("channel_title"), "id": r.get("channel"),
+                  "url": f"https://www.youtube.com/channel/{r.get('channel')}"},
+                 duration_s=r.get("duration_s"), published=r.get("published"),
+                 thumb=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                 embed=f"https://www.youtube.com/embed/{vid}", playable_audio=True, indexed=True)
+
+
 def search_account(q: str, account: str, filters: Optional[dict] = None, page: int = 1,
+                   topic: str = "", country: str = "",
                    clock: Callable[[], float] = time.time, limit_s: Optional[float] = None) -> dict:
     """What GET /videos/search?account= answers (less `ok`): `q` searched in
-    each channel the YouTube account subscribes to. ValueError for a bad
-    ask; a failure reading the account is the `yt` entry's error."""
+    every channel the YouTube account subscribes to, narrowed to a `topic`
+    or `country` of theirs. Channels in the index (videos_index) answer from
+    it at once; those not indexed yet are searched live on YouTube, up to
+    ACCOUNT_CHANNELS of them. ValueError for a bad ask; a failure reading
+    the account is the `yt` entry's error."""
+    from . import videos_index as VI
     q = (q or "").strip()
     if not q or len(q) > 200:
         raise ValueError("q is the words to search for, up to 200 characters")
     known = {a["id"]: a for a in accounts()}
     if account not in known:
         raise ValueError("account must be one of /videos/sources' yt accounts")
+    topic, country = (topic or "").strip()[:80], (country or "").strip().upper()[:2]
     page = max(1, min(int(page or 1), MOST_PAGES))
     f = filters or {}
     now = clock()
@@ -703,30 +752,56 @@ def search_account(q: str, account: str, filters: Optional[dict] = None, page: i
         subs = subscribed(account, now)
     except Exception as e:  # noqa: BLE001 — reported as YouTube failing
         _failures.swallowed(e)
-        return {"q": q, "page": page, "filters": f, "items": [], "account": {"id": account, "name": account},
+        return {"q": q, "page": page, "filters": f, "items": [], "account": {"id": account, "name": _label(account)},
                 "sources": [{**entry, "ok": False, "error": _why(e)}]}
-    chans = subs["channels"][:ACCOUNT_CHANNELS]
-    futs = [_pool().submit(_channel_rows, ch, q, now) for ch in chans]
-    wait(futs, timeout=ACCOUNT_LIMIT_S if limit_s is None else limit_s)
+    VI.prefer(account)
+    _start_index()
+    api = _index_api()
+    want = page * PER_PAGE + 1
+    skip_kind = f.get("type") in ("playlist", "channel", "live")
+    # From the index.
+    idx: list = []
+    if not skip_kind:
+        since = int(now - _DAYS[f["date"]] * 86400) if f.get("date") else None
+        sort = "date" if f.get("sort") == "date" else ""
+        if f.get("length") and api is not None:
+            cands = VI.search(account, q, topic, country, since, sort, limit=200)
+            try:
+                lengths = VI.fill_durations(api, account, [r["id"] for r in cands if r.get("duration_s") is None])
+            except Exception as e:  # noqa: BLE001 — without lengths, those rows are left out
+                _failures.swallowed(e)
+                lengths = {}
+            for r in cands:
+                r["duration_s"] = r.get("duration_s") if r.get("duration_s") is not None else lengths.get(r["id"])
+            idx = [r for r in cands if _length_ok(f["length"], r.get("duration_s"))][:want]
+        else:
+            idx = VI.search(account, q, topic, country, since, sort, limit=want)
+    # Live, for the channels the index has nothing of yet.
+    by_id = {ch["id"]: ch for ch in subs["channels"]}
+    todo = [by_id[c] for c in VI.channel_ids(account, topic, country, indexed=False) if c in by_id]
+    if not topic and not country:
+        listed = set(VI.channel_ids(account))
+        todo += [ch for ch in subs["channels"] if ch["id"] not in listed]
+    todo = todo[:ACCOUNT_CHANNELS]
     lists, failed, pending = [], 0, 0
-    for fu in futs:
-        if not fu.done():
-            pending += 1
-            continue
-        try:
-            lists.append(fu.result())
-        except Exception as e:  # noqa: BLE001 — one channel's failure leaves the rest
-            _failures.swallowed(e)
-            failed += 1
-    if f.get("type") in ("playlist", "channel"):
-        lists = []
-    elif f.get("type"):
+    if todo and f.get("type") not in ("playlist", "channel"):
+        futs = [_pool().submit(_channel_rows, ch, q, now) for ch in todo]
+        wait(futs, timeout=ACCOUNT_LIMIT_S if limit_s is None else limit_s)
+        for fu in futs:
+            if not fu.done():
+                pending += 1
+                continue
+            try:
+                lists.append(fu.result())
+            except Exception as e:  # noqa: BLE001 — one channel's failure leaves the rest
+                _failures.swallowed(e)
+                failed += 1
+    if f.get("type"):
         lists = [[r for r in rows if r["kind"] == f["type"]] for rows in lists]
     if f.get("length"):
         lists = [[r for r in rows if _length_ok(f["length"], r.get("duration_s"))] for rows in lists]
-    # Each channel's own order is YouTube's; across channels, a title with
-    # more of the words comes first, then the channels' first rows, then
-    # their second … (never the subscription list's alphabetical order).
+    # The index's rows first, best first; then the live ones: a title with
+    # more of the words first, then each channel's first rows, then their second.
     words = [w for w in re.findall(r"\w+", q.casefold()) if len(w) > 1]
     ranked = []
     for rows in lists:
@@ -735,23 +810,35 @@ def search_account(q: str, account: str, filters: Optional[dict] = None, page: i
             ranked.append((-sum(w in title for w in words), rank, r))
     ranked.sort(key=lambda x: (x[0], x[1]))
     merged, seen = [], set()
-    for _, _, r in ranked:
+    for r in [_index_item(r) for r in idx] + [r for _, _, r in ranked]:
         if r["id"] not in seen:
             seen.add(r["id"])
             merged.append(r)
-    items = [{**it, "practice": True} if _practice(it) else it
-             for it in merged[(page - 1) * PER_PAGE: page * PER_PAGE]]
-    entry.update(ok=bool(lists) or not chans or pending == 0, count=len(items), channels=len(chans),
+    shown = merged[(page - 1) * PER_PAGE: page * PER_PAGE]
+    # Each shown indexed row's length (1 unit for the page), where not known.
+    unknown = [it["id"] for it in shown if it.get("indexed") and it.get("duration_s") is None]
+    if unknown and api is not None:
+        try:
+            lengths = VI.fill_durations(api, account, unknown)
+            shown = [{**it, "duration_s": lengths.get(it["id"])} if it["id"] in lengths else it for it in shown]
+        except Exception as e:  # noqa: BLE001 — shown without a length
+            _failures.swallowed(e)
+    items = [{k: v for k, v in ({**it, "practice": True} if _practice(it) else it).items() if k != "indexed"}
+             for it in shown]
+    prog = VI.progress(account)
+    entry.update(ok=bool(idx) or bool(lists) or not todo or pending == 0, count=len(items),
+                 channels=len(subs["channels"]), indexed=prog["indexed"], videos=prog["videos"],
                  searched=len(lists), pending=pending, failed=failed)
     if not entry["ok"]:
         entry["error"] = "timed out" if pending else "every channel failed"
     if len(merged) > page * PER_PAGE:
         entry["next"] = page + 1
-    dropped = [k for k in f if k in ("date", "sort")] + (["type"] if f.get("type") in ("playlist", "channel") else [])
+    dropped = (["sort"] if f.get("sort") == "views" else []) + (["type"] if f.get("type") in ("playlist", "channel") else [])
     if dropped:
         entry["ignored"] = sorted(dropped)
-    return {"q": q, "page": page, "filters": f, "items": items,
-            "account": {"id": account, "name": subs["title"], "channels": len(subs["channels"])},
+    return {"q": q, "page": page, "filters": f, "topic": topic or None, "country": country or None, "items": items,
+            "account": {"id": account, "name": _label(subs["title"]), "channels": len(subs["channels"]),
+                        **VI.facets(account)},
             "sources": [entry]}
 
 

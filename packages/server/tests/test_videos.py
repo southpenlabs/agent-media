@@ -246,7 +246,7 @@ def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkey
         _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
         assert obj["sources"][0]["accounts"][0]["id"] == "topic-bjj"
         _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj", headers=AUTH)
-        assert obj["account"] == {"id": "topic-bjj", "name": "BJJ", "channels": 3}
+        assert {k: obj["account"][k] for k in ("id", "name", "channels")} == {"id": "topic-bjj", "name": "BJJ", "channels": 3}
         src = obj["sources"][0]
         assert (src["ok"], src["channels"], src["searched"], src["pending"]) == (True, 3, 2, 1)
         # A title with the words first; each row says its channel.
@@ -257,7 +257,8 @@ def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkey
         _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj&length=short", headers=AUTH)
         assert obj["sources"][0]["searched"] == 3 and {i["id"] for i in obj["items"]} == {"UCa-1", "UCb-1", "UCslow-1"}
         _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
-        assert obj["sources"][0]["accounts"] == [{"id": "topic-bjj", "name": "BJJ", "channels": 3}]
+        assert {k: obj["sources"][0]["accounts"][0][k] for k in ("id", "name", "channels")} == {
+            "id": "topic-bjj", "name": "BJJ", "channels": 3}
         res, obj = call(server, "GET", "/videos/search?q=guard&account=someone-else", headers=AUTH)
         assert res.status == 400
     finally:
@@ -271,3 +272,54 @@ def test_account_names_lose_their_dashes():
     assert videos._label("zantrau") == "Zantrau"
     assert videos._label("David J 4 Astrology") == "David J 4 Astrology"
     assert videos._label("Tarot - Daily") == "Tarot - Daily"
+
+
+class _IndexedAccounts(_Accounts):
+    def __init__(self):
+        self.calls = []
+
+    def api(self, name, path, params, timeout=20.0):
+        self.calls.append(path)
+        if path == "channels":
+            return {"items": [{"id": "UCa", "snippet": {"title": "Alpha", "country": "AU"}, "statistics": {"videoCount": "1"},
+                               "topicDetails": {"topicCategories": ["https://en.wikipedia.org/wiki/Religion"]}},
+                              {"id": "UCb", "snippet": {"title": "Beta"}, "statistics": {"videoCount": "900"}},
+                              {"id": "UCslow", "snippet": {"title": "Slow"}, "statistics": {"videoCount": "900"}}]}
+        if path == "playlistItems":
+            return {"items": [{"snippet": {"title": "Closed guard from the index", "publishedAt": "2026-11-01T00:00:00Z",
+                                           "resourceId": {"videoId": "idx00000001"}}}]}
+        if path == "videos":
+            return {"items": [{"id": "idx00000001", "contentDetails": {"duration": "PT10M"}}]}
+        raise AssertionError(path)
+
+
+def test_an_account_searches_its_index_then_live_for_the_rest(server, signed_in, sites, monkeypatch):
+    from agent_media_core import videos_index as VI
+    yt, acc = _ChannelSearch(), _IndexedAccounts()
+    monkeypatch.setenv("MEDIA_YOUTUBE_METADATA", "1")
+    monkeypatch.setenv("MEDIA_YOUTUBE_ACCOUNTS", "1")
+    monkeypatch.setattr(videos, "ACCOUNT_LIMIT_S", 2.0)
+    monkeypatch.setattr(VI, "start", lambda api_of: False)   # no background thread in a test
+    VI.close()
+    personal_use.register("youtube-metadata", yt)
+    personal_use.register("youtube-accounts", acc)
+    try:
+        videos.subscribed("topic-bjj")            # the follows go into the index
+        api = videos._index_api()
+        VI.prefer("topic-bjj")
+        assert VI.step(api) == "details" and VI.step(api) == "uploads"   # UCa indexed; UCb, UCslow not
+        _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj", headers=AUTH)
+        src = obj["sources"][0]
+        assert (src["indexed"], src["videos"], src["searched"]) == (1, 1, 2)
+        assert obj["items"][0]["id"] == "idx00000001" and obj["items"][0]["duration_s"] == 600
+        assert obj["items"][0]["channel"]["name"] == "Alpha" and "indexed" not in obj["items"][0]
+        assert not any("/channel/UCa/" in u for u in yt.urls), "an indexed channel is not searched live"
+        assert obj["account"]["topics"] == [{"id": "Religion", "name": "Religion", "channels": 1}]
+        _, obj = call(server, "GET", "/videos/search?q=guard&account=topic-bjj&topic=Religion", headers=AUTH)
+        assert [i["id"] for i in obj["items"]] == ["idx00000001"] and obj["topic"] == "Religion"
+        _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
+        assert obj["sources"][0]["accounts"][0]["indexed"] == {"channels": 3, "indexed": 1, "videos": 1}
+    finally:
+        personal_use.register("youtube-metadata", None)
+        personal_use.register("youtube-accounts", None)
+        VI.close()

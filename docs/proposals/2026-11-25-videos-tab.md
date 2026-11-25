@@ -120,7 +120,10 @@ feeds are cached for 5 minutes, refreshed on pull.
   like to be able to search particular accounts subscribed channels"): pick
   one of the YouTube sign-ins (the topic accounts) and the box searches
   only inside the channels it subscribes to (`/videos/search?account=`,
-  contract §6.70).
+  contract §6.70). Since 26 Nov 2026 from an index of the channels'
+  uploads kept on the server (all of them searched at once, the live search
+  only for channels not indexed yet), narrowed by YouTube's topic or the
+  channel's country.
 - **Music's and Practice's searches** gain a "Videos" fold drawn from the
   same endpoint (YouTube only, type video). Their own song and practice
   rows stay as they are.

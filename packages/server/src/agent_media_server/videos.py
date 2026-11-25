@@ -3,7 +3,7 @@
 
   GET /videos/sources   gated → {"ok", "sources": [{id, name, site, filters, types, lists, open_in}],
                                  "filters": {length, date, type, sort}}
-  GET /videos/search?q=&account=<yt account id>&length=&type=&page=   gated → the same shape, YouTube only:
+  GET /videos/search?q=&account=<yt account id>&topic=&country=&length=&date=&type=&sort=&page=   gated → the same shape, YouTube only:
                         q searched in each channel the account subscribes to, plus "account": {id, name, channels}
   GET /videos/search?q=&sources=yt,peertube,archive,dailymotion,odysee,vimeo&length=&date=&type=&sort=&page=
                         gated → {"ok", "q", "page", "filters", "items": [VideoItem],
@@ -43,7 +43,8 @@ def handle(h: BaseHTTPRequestHandler, method: str, path: str, bearer: str, send_
         except ValueError:
             raise ValueError("page is a number from 1") from None
         account = (q.get("account") or "").strip()
-        got = (videos.search_account(q.get("q") or "", account, filters, page) if account
+        got = (videos.search_account(q.get("q") or "", account, filters, page,
+                                     topic=q.get("topic") or "", country=q.get("country") or "") if account
                else videos.search(q.get("q") or "", wanted, filters, page))
     except ValueError as e:
         send_json(h, 400, {"ok": False, "error": str(e)})

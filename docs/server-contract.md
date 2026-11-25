@@ -15156,6 +15156,27 @@ The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 
   apply (video or live; playlist or channel give none, `type` in `ignored`); `date` and
   `sort` are ignored and named. The subscriptions are kept a day, each channel's answer an
   hour. 400 for an account not listed.
+- The index (26 Nov 2026, David asked for "another way" than searching every channel
+  live, and to filter channels "by region or category"; core `videos_index.py`): the
+  server keeps, in its own SQLite, the newest 500 uploads (title, description, date) of
+  every channel an account follows, read through the YouTube Data API in the background
+  (at most 8,000 of the project's 10,000 units a day; the account searched last first,
+  small channels first) and kept fresh from each channel's free RSS feed every 6 hours.
+  `account=` searches the index for every channel already in it, at once (all the words,
+  the last as a prefix; title weighted over description), and searches live only the
+  channels not indexed yet (up to 150). Indexed rows come first. Now `date` applies (by
+  upload date) and `sort=date` gives the newest first; `sort=views` is ignored. `length`
+  applies by each candidate's length, asked of the API once and kept. A row shown from
+  the index gets its length the same way (1 unit a page).
+  - `&topic=<name>` narrows to the account's channels YouTube files under that topic
+    (its topicCategories: "Religion", "Health", "Lifestyle", "Music" …), `&country=<ISO
+    code>` to those that give that country. Channels whose topics are not read yet are
+    left out of a narrowed search.
+  - The answer's `account` adds `topics: [{id, name, channels}]` and `countries: [{id,
+    channels}]` (most channels first), and `sources[0]` adds `indexed` (channels fully
+    indexed) and `videos` (searchable videos). Each `/videos/sources` yt account adds
+    `indexed: {channels, indexed, videos}`, `topics` and `countries` too, so the Show menu
+    can offer them before a search.
 - `VideoItem`: `{source, id, url, title, channel: {name?, id?, url?}, kind:
   video|live|playlist|channel, duration_s?, published?, views?, thumb?, embed?,
   playable_audio?, practice?, licence?, host?, count?}`. `published` is Unix seconds. `embed` is a
