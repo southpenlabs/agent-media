@@ -2571,6 +2571,12 @@ def main() -> None:
     from agent_media_server import speech_frames as _speech_frames
     for _ch in _speech_frames.CHANNELS:
         _speech_frames.start(channel=_ch)
+    # The Videos tab's index of each YouTube account's subscriptions
+    # (agent_media_core.videos_index, §6.70): started here so it builds
+    # without waiting for the account list to be opened; nothing without
+    # the personal-use add-on.
+    from agent_media_core import videos as _videos
+    threading.Thread(target=_videos.accounts, name="videos-accounts", daemon=True).start()
     if args.public:
         host, _, port = args.public.rpartition(":")
         pub = http_pool.server((host or "127.0.0.1", int(port)), PublicHandler)
