@@ -39,9 +39,15 @@ renders what the server answers), so a new site is a server change only.
 | PeerTube | Sepia Search, `https://sepiasearch.org/api/v1/search/videos` (no key; returns each video's licence) | no |
 | Internet Archive | `archive.org/advancedsearch.php`, `mediatype:movies` (as Free films already does) | no |
 | Dailymotion | `api.dailymotion.com/videos?search=` (no key) | no |
+| Odysee | its search index, `https://lighthouse.odysee.tv/search?s=&mediaType=video&include=channel,title,duration,release_time` (no key); a video's page and stream through yt-dlp's `lbry` extractor | no |
+| Rumble | not searched: no public search, and its search page refuses automated clients (403 from red2). A Rumble channel or video link is read by yt-dlp (`RumbleChannel`, `Rumble`) | no |
 
-Vimeo needs an app token and its search API is closed to new apps, so it is
-left out. Rumble and Odysee have no stable public search. Invidious and
+David asked for Odysee and Rumble too ("Can we also include Odyssee and
+Rumble?"). Odysee is a source like the rest. Rumble comes in by link and
+channel: a pasted Rumble link plays, and a Rumble channel can be followed,
+its uploads listed among Subscriptions (`/videos/list?source=rumble&list=channel:<url>`).
+Getting round its search page's block is not done. Vimeo needs an app token
+and its search API is closed to new apps, so it is left out. Invidious and
 Piped were considered as YouTube back ends. They were not chosen: their
 public instances come and go, and yt-dlp is already here.
 
@@ -55,7 +61,7 @@ Dailymotion: the Videos tab is not a personal-only feature.
 lists are YouTube's subscriptions, Watch later, History, Recommended and
 the account's playlists, given only when a sign-in is held.
 
-`GET /videos/search?q=&sources=yt,peertube,archive,dailymotion&length=short|medium|long&date=today|week|month|year&type=video|live|playlist|channel&sort=relevance|date|views&page=`
+`GET /videos/search?q=&sources=yt,peertube,archive,dailymotion,odysee&length=short|medium|long&date=today|week|month|year&type=video|live|playlist|channel&sort=relevance|date|views&page=`
 answers `{items: [VideoItem], sources: [{id, ok, error?, next?}]}`. Each
 source is asked in parallel with its own time limit (6 s). A slow or failed
 source is reported in `sources` and leaves its rows out; it never holds up
@@ -103,11 +109,11 @@ feeds are cached for 5 minutes, refreshed on pull.
 
 ## Order
 
-1. Server: `/videos/sources` and `/videos/search` with all four sources,
+1. Server: `/videos/sources` and `/videos/search` with the five searched sources,
    and the mock's copy (agent-media).
 2. App: the tab, search, filters, row actions.
 3. Server: `/videos/list` (the YouTube account feeds), `/videos/channel`,
-   `/videos/playlist`.
+   `/videos/playlist`, and followed Rumble and Odysee channels.
 4. App: the funnel's lists, channel and playlist pages, and the Videos fold
    in Music and Practice.
 
@@ -118,4 +124,4 @@ outside its player does (outside-services.md §7). Watching a YouTube video
 in the viewer is YouTube's own embed. PeerTube instances and the Archive
 publish their videos for playback and say each video's licence.
 Dailymotion's API terms allow search and its embed player. outside-services.md
-gets entries for Sepia Search and Dailymotion with step 1.
+gets entries for Sepia Search, Dailymotion, Odysee and Rumble with step 1.
