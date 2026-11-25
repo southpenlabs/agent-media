@@ -267,6 +267,7 @@ def test_an_accounts_subscriptions_are_searched(server, signed_in, sites, monkey
 
 
 def test_account_names_lose_their_dashes():
-    assert videos._label("david-j-4-bjj") == "david j 4 bjj"
+    assert videos._label("david-j-4-bjj") == "David J 4 Bjj"
+    assert videos._label("zantrau") == "Zantrau"
     assert videos._label("David J 4 Astrology") == "David J 4 Astrology"
     assert videos._label("Tarot - Daily") == "Tarot - Daily"

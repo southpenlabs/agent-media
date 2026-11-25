@@ -537,7 +537,10 @@ def _label(name: str) -> str:
     "remove the dashes too")."""
     name = (name or "").strip()
     if " " not in name:
-        name = re.sub(r"[-_]+", " ", name).strip()
+        # A file-like name reads as a person's: "david-j-4-bjj" → "David J 4 Bjj",
+        # as the others' own channel names do (David, 26 Nov 2026: "just use
+        # their generic first name last name").
+        name = " ".join(w[:1].upper() + w[1:] for w in re.sub(r"[-_]+", " ", name).split())
     return name
 
 
