@@ -439,25 +439,138 @@ def select_output(channel: str, device: str | None) -> None:
     a targeted snapshot hydrates the new one. Neither changes the shared
     model or sends a replay to any other device.
     """
-    from agent_media_core._paths import state_dir
-
     hub = _HUBS[channel]
-    path = state_dir() / f"frames-output-{channel}"
     with hub.lock:
         if device and not any(v[0] == device for v in hub.listeners.values()):
             raise ValueError("that device is not connected to this player")
-        old = hub.device()
-        if device:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
-            tmp.write_text(device + "\n")
-            os.replace(tmp, path)
-        else:
-            path.unlink(missing_ok=True)
-        if not _hand_over(hub, old, hub.device()):
+        if not _pick(hub, device):
             return
     from . import session_events
     session_events.poke()
+
+
+def _pick(hub: "_Hub", device: str | None) -> bool:
+    """Write (or, None, clear) `hub`'s picked device and hand over what is
+    playing; whether it moved. Called with hub.lock held."""
+    from agent_media_core._paths import state_dir
+
+    path = state_dir() / f"frames-output-{hub.channel}"
+    old = hub.device()
+    if device:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+        tmp.write_text(device + "\n")
+        os.replace(tmp, path)
+    else:
+        path.unlink(missing_ok=True)
+    return _hand_over(hub, old, hub.device())
+
+
+# --- a picked device that is forgotten --------------------------------------
+#
+# 25 Nov 2026: the Pixel 8a signed out and enrolled again as a new device
+# (d_1bb9149624f0 → d_594c4327138b). Speech stayed picked to the old id, which
+# nothing could ever connect as again, so every reply was refused ("no device
+# plays speech: none has ?speech=frames on its stream") while the new pairing
+# sat listening, and the app showed a random string "no longer connected".
+# Now a pick to a forgotten device goes to Automatic at once, and comes back
+# on the same device pairing again (same account and name).
+
+#: How long a forgotten device's pick waits for that device to pair again.
+SUCCESSOR_S = 86400.0
+
+
+def _orphan_path(channel: str) -> Path:
+    from agent_media_core._paths import state_dir
+    return state_dir() / f"frames-output-{channel}.forgotten.json"
+
+
+def _same_device(was: dict, account: str, name: str) -> bool:
+    """A new pairing is the forgotten one's successor: the same name, and the
+    same account when the old one had one (a pair-code device has none)."""
+    if not name or name.strip().lower() != str(was.get("name") or "").strip().lower():
+        return False
+    return str(was.get("account") or "").lower() == (account or "").lower()
+
+
+def device_dropped(device_id: str, account: str = "", name: str = "",
+                   now: float | None = None, successor: str | None = None) -> list[str]:
+    """A paired device was forgotten (signed out, revoked, expired, swept).
+    Each channel picked to it goes to `successor` (its new pairing, already
+    paired) when there is one; else to Automatic, remembering it for
+    `SUCCESSOR_S` so `device_added` can give the pick to its next pairing.
+    The channels that changed."""
+    now = time.time() if now is None else now
+    changed: list[str] = []
+    moved = False
+    for channel in CHANNELS:
+        hub = _HUBS[channel]
+        with hub.lock:
+            if not device_id or output_device(channel) != device_id:
+                continue
+            if not successor:
+                try:
+                    path = _orphan_path(channel)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"device": device_id, "account": account or "",
+                                                "name": name or "", "at": round(now, 3)}))
+                except OSError as e:
+                    _failures.swallowed(e)
+            moved = _pick(hub, successor) or moved
+        changed.append(channel)
+        log.warning(f"{channel} output: {device_id} ({name!r}) was forgotten; "
+                    + (f"moved to {successor}, its new pairing" if successor
+                       else "back to Automatic until it pairs again"))
+    if moved:
+        from . import session_events
+        session_events.poke()
+    return changed
+
+
+def device_added(device_id: str, account: str = "", name: str = "",
+                 now: float | None = None) -> list[str]:
+    """A device paired: a channel whose picked device was forgotten in the
+    last `SUCCESSOR_S`, and that nobody has picked again since, is picked to
+    it when it is the same device (`_same_device`). The channels picked."""
+    now = time.time() if now is None else now
+    picked: list[str] = []
+    for channel in CHANNELS:
+        path = _orphan_path(channel)
+        try:
+            was = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(was, dict) or now - float(was.get("at") or 0) > SUCCESSOR_S:
+            path.unlink(missing_ok=True)
+            continue
+        if not _same_device(was, account, name):
+            continue
+        hub = _HUBS[channel]
+        with hub.lock:
+            path.unlink(missing_ok=True)
+            if output_device(channel):
+                continue  # Picked again by hand since: that stands.
+            # Not connected yet: the pick holds for it, as any pick does.
+            _pick(hub, device_id)
+        picked.append(channel)
+        log.warning(f"{channel} output: moved from forgotten {was.get('device')} "
+                    f"to {device_id} ({name!r}), its new pairing")
+    return picked
+
+
+def forget_stale_picks(known: set[str]) -> list[str]:
+    """At start: a channel picked to a device that is no longer paired goes
+    to Automatic (a pick left from before `device_dropped`, or written while
+    the device store was out of reach). Skipped with no devices known, so an
+    unreadable store never clears a good pick. The channels cleared."""
+    if not known:
+        return []
+    cleared: list[str] = []
+    for channel in CHANNELS:
+        picked = output_device(channel)
+        if picked and picked not in known:
+            cleared += [c for c in device_dropped(picked) if c == channel]
+    return cleared
 
 
 #: The channels whose Automatic follows the device used last: speech.
@@ -1125,6 +1238,11 @@ def start(listen: str | None = None, upstream: str | None = None,
     listen = listen or os.environ.get(f"{key}_LISTEN", "")
     if not listen:
         return None
+    try:
+        from . import devices
+        forget_stale_picks({str(d.get("id")) for d in devices.list_devices() if d.get("id")})
+    except Exception as _exc:  # noqa: BLE001 — a stale pick is not worth the port
+        _failures.swallowed(_exc)
     up = upstream if upstream is not None else os.environ.get(f"{key}_UPSTREAM", "")
     far = _hostport(up) if up else None
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

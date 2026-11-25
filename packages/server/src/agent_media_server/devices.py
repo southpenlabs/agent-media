@@ -334,11 +334,38 @@ def revoke(device_id: str, *, expired: bool = False) -> bool:
         keep = [d for d in rows if d.get("id") != device_id]
         if len(keep) == len(rows):
             return False
+        gone = next(d for d in rows if d.get("id") == device_id)
         if expired:
-            gone = next(d for d in rows if d.get("id") == device_id)
             _mark_expired(str(gone.get("sha256") or ""))
         _save(keep)
-        return True
+    _outputs("device_dropped", gone)
+    return True
+
+
+def _outputs(event: str, row: dict) -> None:
+    """Tell the frame players a device came or went, so a speech or music
+    output picked to it follows it to its next pairing (speech_frames
+    `device_dropped` / `device_added`). Never fails the pairing."""
+    try:
+        from . import speech_frames
+
+        did, account, name = (str(row.get(k) or "") for k in ("id", "account", "name"))
+        if event == "device_added":
+            speech_frames.device_added(did, account, name)
+            return
+        # The app enrols its new pairing before it signs the old one out
+        # (25 Nov 2026, the same second): the successor may already be here.
+        with _LOCK:
+            later = [d for d in _load() if d.get("id") != did
+                     and float(d.get("created") or 0) >= float(row.get("created") or 0)
+                     and speech_frames._same_device(row, str(d.get("account") or ""),
+                                                    str(d.get("name") or ""))]
+        successor = str(max(later, key=lambda d: float(d.get("created") or 0))["id"]) if later else None
+        speech_frames.device_dropped(did, account, name, successor=successor)
+    except Exception as e:  # noqa: BLE001 — the device store comes first
+        from agent_media_core import failures
+
+        failures.swallowed(e)
 
 
 # --- device limits: expiry, forgotten when unused, scope ---------------------------
@@ -1035,6 +1062,7 @@ def redeem(code: str, device: str, ip: str = "") -> dict | None:
         if isinstance(entry.get("device_expires_at"), (int, float)):
             row["expires_at"] = entry["device_expires_at"]
         _save(list(_load(fresh=True)) + [row])
+    _outputs("device_added", row)
     return {"token": token, "device_id": row["id"], "name": name,
             "enrol": may_enrol(row), "jobs": bool(row.get("jobs")), "role": role_of(row),
             **({"search": True} if row.get("search") else {}),
@@ -1108,6 +1136,7 @@ def enrol_account(claims: dict, device: str, ip: str = "", *, enrol: bool = Fals
            **({"rt": refresh_token} if refresh_token else {})}
     with _locked():
         _save(list(_load(fresh=True)) + [row])
+    _outputs("device_added", row)
     return {"token": token, "device_id": row["id"], "name": name, "enrol": bool(enrol),
             "username": username, "role": role}
 
@@ -1124,7 +1153,10 @@ def revoke_account(who: str) -> int:
                                         (d.get("account") and d.get("account", "").lower() == who.lower()))]
         if len(keep) != len(rows):
             _save(keep)
-        gone = len(rows) - len(keep)
+        dropped = [d for d in rows if d not in keep]
+        gone = len(dropped)
+    for d in dropped:
+        _outputs("device_dropped", d)
     # An account let in by answering its request is let in no longer.
     from . import join_requests
     join_requests.forget(who)
