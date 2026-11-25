@@ -111,7 +111,10 @@ class GmessagesSender:
             q["login_id"] = self.cfg["login_id"]
         url = (f"{bridge.url}/_matrix/provision/v3/create_dm/"
                f"{urllib.parse.quote(number, safe='')}?{urllib.parse.urlencode(q)}")
-        room = self._http("POST", url, bridge.secret, None, "The Google Messages bridge").get("dm_room_mxid")
+        try:
+            room = self._http("POST", url, bridge.secret, None, "The Google Messages bridge").get("dm_room_mxid")
+        except SmsError as e:
+            raise SmsError(self._why_refused(bridge, owner) or str(e)) from None
         if not room:
             raise SmsError("The Google Messages bridge gave no chat for that number")
         r = urllib.parse.quote(room, safe="")
@@ -120,6 +123,41 @@ class GmessagesSender:
         got = self._http("PUT", f"{api}/rooms/{r}/send/m.room.message/{urllib.parse.quote(txn, safe='')}",
                          token, {"msgtype": "m.text", "body": body}, "The homeserver")
         return str(got.get("event_id") or "")
+
+
+    # The bridge's own reasons (its bridge_state errors) in the words the alert shows.
+    STATES = {
+        "gm-phone-not-responding": "Google Messages on the phone is not answering the bridge "
+                                   "(open Messages on the phone; turn off its battery optimisation)",
+        "gm-unpaired": "The phone unpaired Google Messages from the bridge; sign it in again on the "
+                       "app's Bridges page",
+    }
+
+    def _why_refused(self, bridge, owner: str) -> str:
+        """Why the bridge would not start a chat, from its whoami: no login (the
+        phone unpaired it, or it was signed out) or a login that is not connected.
+        Empty when that cannot be told, so the HTTP refusal stands."""
+        url = (f"{bridge.url}/_matrix/provision/v3/whoami?"
+               f"{urllib.parse.urlencode({'user_id': owner})}")
+        try:
+            logins = self._http("GET", url, bridge.secret, None, "The Google Messages bridge").get("logins")
+        except SmsError:
+            return ""
+        if not isinstance(logins, list):
+            return ""
+        if self.cfg.get("login_id"):
+            logins = [l for l in logins if isinstance(l, dict) and l.get("id") == self.cfg["login_id"]]
+        if not logins:
+            return ("Google Messages is not signed in to the bridge; sign it in again on the "
+                    "app's Bridges page")
+        state = logins[0].get("state") if isinstance(logins[0], dict) else None
+        state = state if isinstance(state, dict) else {}
+        event, error = str(state.get("state_event") or ""), str(state.get("error") or "")
+        if event and event != "CONNECTED":
+            return self.STATES.get(error) or (
+                f"Google Messages is {event.lower().replace('_', ' ')} at the bridge"
+                + (f" ({error})" if error else ""))
+        return ""
 
 
 def _sender(cfg: dict):
