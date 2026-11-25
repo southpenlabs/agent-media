@@ -109,6 +109,13 @@ feeds are cached for 5 minutes, refreshed on pull.
   handing a YouTube video to the music player as now). A long press offers
   Watch, Listen (where `playable_audio`), Queue as music, Save to Practice
   (`POST /practice add`), Open on the site, and the channel's page.
+- **Open in <app>** (built in step 1's server, 25 Nov 2026; idea from the
+  Metrolist chat, agent-mail #1326): beside Open on the site, a row can be
+  handed to an open-source player on the phone, NewPipe, Tubular or
+  LibreTube, by a VIEW intent on its url with the package set.
+  `/videos/sources` names each source's players (`open_in`); the app offers
+  one only when it is installed and resolves the url, as HandoffPlugin
+  checks music apps. GPL-3 apps, handed to and never built in.
 - **Music's and Practice's searches** gain a "Videos" fold drawn from the
   same endpoint (YouTube only, type video). Their own song and practice
   rows stay as they are.

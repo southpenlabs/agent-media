@@ -481,13 +481,34 @@ def offered() -> list[str]:
     return [s for s in SOURCES if (s != "yt" or _yt_addon() is not None) and (s != "vimeo" or vimeo_token())]
 
 
+#: The open-source players on the phone a source's links can be handed to
+#: ("Open in <app>" on a row): an Android VIEW intent on the row's url with
+#: the package set. The app offers one only where it is installed and
+#: resolves that url, so a PeerTube instance NewPipe does not know is not
+#: offered. All GPL-3, so a handoff to a separate app: none of their code
+#: comes in (docs/decisions/2026-09-22-licensing.md). From the Metrolist
+#: chat's idea, agent-mail #1326 (David, 25 Nov 2026: "Send them the idea").
+PLAYERS = {
+    "newpipe": {"name": "NewPipe", "package": "org.schabi.newpipe", "home": "https://newpipe.net/"},
+    "tubular": {"name": "Tubular", "package": "org.polymorphicshade.tubular",
+                "home": "https://github.com/polymorphicshade/Tubular"},
+    "libretube": {"name": "LibreTube", "package": "com.github.libretube", "home": "https://libretube.dev/"},
+}
+OPEN_IN = {"yt": ("newpipe", "tubular", "libretube"), "peertube": ("newpipe", "tubular")}
+
+
+def open_in(sid: str) -> list[dict]:
+    """The players a source's video links can be handed to, most likely first."""
+    return [{"id": p, **PLAYERS[p]} for p in OPEN_IN.get(sid, ())]
+
+
 def sources() -> list[dict]:
     """What GET /videos/sources lists (lists come with step 3)."""
     out = []
     for sid in offered():
         name, site, filters, _ = SOURCES[sid]
         out.append({"id": sid, "name": name, "site": site, "filters": list(filters),
-                    "types": list(TYPES_OF[sid]), "lists": []})
+                    "types": list(TYPES_OF[sid]), "lists": [], "open_in": open_in(sid)})
     return out
 
 

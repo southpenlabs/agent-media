@@ -61,6 +61,9 @@ def test_sources_without_the_addon(server, signed_in, sites):
     assert res.status == 200, obj
     assert [s["id"] for s in obj["sources"]] == ["peertube", "archive", "dailymotion", "odysee"]
     assert obj["filters"]["sort"] == ["relevance", "date", "views"]
+    by = {s["id"]: s for s in obj["sources"]}
+    assert [p["package"] for p in by["peertube"]["open_in"]] == ["org.schabi.newpipe", "org.polymorphicshade.tubular"]
+    assert by["archive"]["open_in"] == []
 
 
 def test_search_interleaves_and_shapes_rows(server, signed_in, sites):
@@ -141,6 +144,7 @@ def test_youtube_with_the_addon(server, signed_in, sites, monkeypatch):
     try:
         _, obj = call(server, "GET", "/videos/sources", headers=AUTH)
         assert obj["sources"][0]["id"] == "yt"
+        assert [p["id"] for p in obj["sources"][0]["open_in"]] == ["newpipe", "tubular", "libretube"]
         _, obj = call(server, "GET", "/videos/search?q=lofi&sources=yt&type=video&sort=views&page=2", headers=AUTH)
     finally:
         personal_use.register("youtube-metadata", None)

@@ -1,7 +1,7 @@
 """The Videos tab: one search across several video sites (server-contract
 §6.70; agent_media_core.videos; docs/proposals/2026-11-25-videos-tab.md).
 
-  GET /videos/sources   gated → {"ok", "sources": [{id, name, site, filters, types, lists}],
+  GET /videos/sources   gated → {"ok", "sources": [{id, name, site, filters, types, lists, open_in}],
                                  "filters": {length, date, type, sort}}
   GET /videos/search?q=&sources=yt,peertube,archive,dailymotion,odysee,vimeo&length=&date=&type=&sort=&page=
                         gated → {"ok", "q", "page", "filters", "items": [VideoItem],

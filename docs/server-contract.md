@@ -15091,10 +15091,16 @@ Code: `map_pools.py`; tests in `test_map_pools.py`.
 The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 25 Nov
 2026). Code: core `videos.py`, server `videos.py`; tests in `test_videos.py`.
 
-- `GET /videos/sources` → `{sources: [{id, name, site, filters, types, lists}], filters:
+- `GET /videos/sources` → `{sources: [{id, name, site, filters, types, lists, open_in}], filters:
   {length, date, type, sort}}`: the sources this install searches, in order. `filters`
   names the filters a source applies, `types` the kinds it has; `lists` is empty until
-  step 3. Ids: `yt` (only with the personal-use add-on's `youtube-metadata`
+  step 3. `open_in: [{id, name, package, home}]` names the open-source players on the
+  phone its video links can be handed to, most likely first ("Open in <name>" on a row,
+  beside "Open on the site"): an Android VIEW intent on the row's `url` with `package`
+  set, offered only where the app is installed and resolves that url (a PeerTube
+  instance NewPipe does not know is not offered); `home` is where to get it. YouTube:
+  NewPipe, Tubular, LibreTube; PeerTube: NewPipe, Tubular; the rest none yet. All are
+  GPL-3 apps handed to, never built in. (Agent-mail #1326, 25 Nov 2026.) Ids: `yt` (only with the personal-use add-on's `youtube-metadata`
   `search_videos`), `peertube` (Sepia Search), `archive`, `dailymotion`, `odysee`, and
   `vimeo` (only with `MEDIA_VIMEO_TOKEN`). Rumble is not searched (its search page
   refuses automated clients); it and tokenless Vimeo come by link and followed channel.
