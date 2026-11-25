@@ -5142,6 +5142,13 @@ def _follow_replay(a) -> int:
     # stamp is per conversation, and an older one was for something else.
     _np0 = state.get_now_playing("speech") or {}
     replay_session = str((_np0.get("extras") or {}).get("source_session") or "")
+    # A replay starts at its thread's speed, as a live reply does
+    # (speech_speed.at_reply_start; sasonica-app mail #1317).
+    try:
+        from . import speech_speed
+        speech_speed.at_reply_start(_sock(), replay_session)
+    except Exception as _exc:  # noqa: BLE001
+        _failures.swallowed(_exc)
     follow_began = time.time()
     read_idx: list = [None]
 
@@ -5277,7 +5284,7 @@ def _follow_replay(a) -> int:
         # A replay ends like a reply: back to 1× if chosen (speech_speed.py).
         try:
             from . import speech_speed
-            speech_speed.at_reply_end(_sock())
+            speech_speed.at_reply_end(_sock(), replay_session)
         except Exception as _exc:  # noqa: BLE001
             _failures.swallowed(_exc)
         return 0

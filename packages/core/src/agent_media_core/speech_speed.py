@@ -187,20 +187,29 @@ def _heard() -> dict:
         return {}
 
 
-def _set_rate(sock, rate: float) -> bool:
-    """Write `rate` down and send it to the player when it is not already that. True if changed."""
+def _set_rate(sock, rate: float, *, always: bool = False) -> bool:
+    """Write `rate` down and send it to the player when the note differs, or
+    with `always` every time. True if the rate written down changed.
+
+    `always` is for a reply's start: the note is what the server last wrote,
+    not what the player has, and a player that restarted (the phone's after
+    an app update) is back at its own rate while the note still says 1.2
+    (sasonica-app mail #1317, 25 Nov 2026). One local IPC call.
+    """
+    changed = False
     try:
         from .state.store import StateStore
         st = StateStore()
         cur = st.get_speech_speed()
         cur = float(cur) if isinstance(cur, (int, float)) else 1.0
-        if abs(cur - rate) < 0.005:
-            return False
-        # Written first, as a press does: the next press ladders off it
-        # even if the player is out of reach.
-        st.set_speech_speed(rate)
+        if abs(cur - rate) >= 0.005:
+            # Written first, as a press does: the next press ladders off it
+            # even if the player is out of reach.
+            st.set_speech_speed(rate)
+            changed = True
     except Exception:  # noqa: BLE001 — never cost a reply
         log.debug("speech speed: store failed", exc_info=True)
+    if not (changed or always):
         return False
     try:
         from .sinks import _mpv_ipc as ipc
@@ -208,7 +217,7 @@ def _set_rate(sock, rate: float) -> bool:
                     retry_errors=False)
     except Exception:  # noqa: BLE001 — unreachable keeps its rate
         log.debug("speech speed: player not reached", exc_info=True)
-    return True
+    return changed
 
 
 def _current_rate() -> float | None:
@@ -249,7 +258,11 @@ def at_reply_start(sock, session: str = "", now: float | None = None) -> bool:
     except Exception:  # noqa: BLE001 — never cost a reply
         log.debug("speech speed: start failed", exc_info=True)
         return False
-    return False if rate is None else _set_rate(sock, rate)
+    if rate is None:
+        # The speed carrying on is the one written down; sent anyway, for a
+        # player that restarted without it (see `_set_rate`).
+        rate = _current_rate()
+    return False if rate is None else _set_rate(sock, rate, always=True)
 
 
 def at_reply_end(sock, session: str = "", now: float | None = None) -> bool:

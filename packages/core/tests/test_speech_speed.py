@@ -120,7 +120,21 @@ def test_carrying_speed_leaves_the_start_alone(sent):
     StateStore().set_speech_speed(2.0)
     assert speech_speed.at_reply_start("sock", "s1") is False
     assert speech_speed.at_reply_end("sock", "s1") is False
-    assert StateStore().get_speech_speed() == 2.0 and sent == []
+    # The carrying speed is sent at the start all the same (a player that
+    # restarted has lost it), and nothing at the end.
+    assert StateStore().get_speech_speed() == 2.0
+    assert sent == [("sock", ("set_property", "speed", 2.0))]
+
+
+def test_a_restarted_player_is_given_its_threads_speed_again(sent):
+    # sasonica-app mail #1317: the phone's player came back at 1x after an
+    # app update while the note still said 1.2, and nothing was re-sent.
+    speech_speed.save_settings(per_thread=True, start=1.0)
+    StateStore().set_speech_speed(1.2)
+    speech_speed.at_reply_end("sock", "t")
+    sent.clear()
+    assert speech_speed.at_reply_start("sock", "t") is False     # the note had it
+    assert sent == [("sock", ("set_property", "speed", 1.2))]    # the player is told
 
 
 def test_back_to_the_start_speed_after_a_break(sent):
