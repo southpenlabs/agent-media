@@ -574,6 +574,9 @@ WATCH_PATHS = frozenset({"/watch", "/watch/item", "/watch/search", "/watch/show"
                          "/accounts/trakt/finish", "/accounts/trakt/signout",
                          "/watch/free", "/watch/free/file", "/watch/free/subtitles"})
 CORS_PATHS = CORS_PATHS | WATCH_PATHS
+# The Videos tab: one search across several video sites (videos.py, §6.70).
+VIDEOS_PATHS = frozenset({"/videos/sources", "/videos/search"})
+CORS_PATHS = CORS_PATHS | VIDEOS_PATHS
 # A link shared or pasted into a Media tab (media_links.py, §6.46).
 MEDIA_LINK_PATHS = frozenset({"/media/links", "/media/person", "/media/people", "/media/search"})
 CORS_PATHS = CORS_PATHS | MEDIA_LINK_PATHS
@@ -1096,6 +1099,11 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         from . import watch
 
         return watch.handle(h, method, path, _bearer(h), _json)
+    if path in VIDEOS_PATHS and method == "GET":
+        # One search across several video sites (videos.py, §6.70).
+        from . import videos
+
+        return videos.handle(h, method, path, _bearer(h), _json)
     if path in AUDIO_PATHS and method in ("GET", "POST"):
         return _audio(h, method, path)
     if path in ROOM_DELEGATE_PATHS and method in ("GET", "POST"):

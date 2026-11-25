@@ -15072,6 +15072,46 @@ Code: `map_pools.py`; tests in `test_map_pools.py`.
   the swell then is 2.5 m or more. Once a day per spot. Other accounts' spots are kept
   and listed, not yet told (notes reach the host's phones).
 
+### 6.70 Videos: one search across several video sites — gated (built 25 Nov 2026)
+
+The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 25 Nov
+2026). Code: core `videos.py`, server `videos.py`; tests in `test_videos.py`.
+
+- `GET /videos/sources` → `{sources: [{id, name, site, filters, types, lists}], filters:
+  {length, date, type, sort}}`: the sources this install searches, in order. `filters`
+  names the filters a source applies, `types` the kinds it has; `lists` is empty until
+  step 3. Ids: `yt` (only with the personal-use add-on's `youtube-metadata`
+  `search_videos`), `peertube` (Sepia Search), `archive`, `dailymotion`, `odysee`, and
+  `vimeo` (only with `MEDIA_VIMEO_TOKEN`). Rumble is not searched (its search page
+  refuses automated clients); it and tokenless Vimeo come by link and followed channel.
+- `GET /videos/search?q=&sources=<ids,…>&length=short|medium|long&date=today|week|month|year
+  &type=video|live|playlist|channel&sort=relevance|date|views&page=` → `{q, page, filters,
+  items: [VideoItem], sources: [{id, ok, count?, next?, ignored?, error?}]}`. `q` is
+  required (up to 200 characters); without `sources`, all offered. Every source is asked
+  at once and the answer waits at most 6 s: a source that has not answered is `{ok:
+  false, error: "timed out"}`, a failed one carries its `error` ("answered 503"), one
+  not offered here "not offered here"; its rows are left out and the rest stand. `items`
+  interleave the sources by rank (each source's first, then each one's second …), up to
+  12 a source a page; `next` is the page to ask for more of that source. Short is under
+  4 minutes, long over 20 (YouTube's bounds). A filter a source cannot apply is dropped
+  for it and named in `ignored` (the Archive's length; Vimeo's length and date; Odysee's
+  sort by views); a `type` a source has none of gives none of its rows, with `type` in
+  `ignored`. Odysee's length is applied to its rows here. Answers kept 10 minutes per
+  source, words, filters and page; Vimeo's 6 hours (its token may ask 50 times a quarter
+  hour). A source that answers 429 is `{ok: false, error: "rate limited (429): asked
+  again in 12 min"}` and is not asked again until its Retry-After or rate-limit reset
+  (else 15 minutes), each search meanwhile reporting it the same way. 400 for a bad
+  filter or no `q`.
+- `VideoItem`: `{source, id, url, title, channel: {name?, id?, url?}, kind:
+  video|live|playlist|channel, duration_s?, published?, views?, thumb?, embed?,
+  playable_audio?, licence?, host?, count?}`. `published` is Unix seconds. `embed` is a
+  URL the viewer may frame (YouTube's /embed/, PeerTube's, archive.org/embed, Dailymotion's
+  player where the video allows it, Odysee's /$/embed/, Vimeo's player). `playable_audio`
+  is true on YouTube videos (POST /music plays them, with the add-on). `licence` is the
+  short name of PeerTube's, the Archive's and Vimeo's licence ("Attribution", "CC BY-NC
+  3.0", "Public domain"). `host` is a PeerTube video's instance; `count` a playlist's
+  length.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in

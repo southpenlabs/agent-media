@@ -130,6 +130,11 @@ Sorted with what blocks a public release first. 61 rows.
 | 87 | Mapillary (Meta) Graph API (graph.mapillary.com/images; pictures from Meta's CDN) | the same street-level photos on the place card, beside Panoramax's; never along a route (map_street_photos.py, §6.50; 24 Nov 2026) | South Pen Labs' one registered client token, held as the Worker secret `MAPILLARY_TOKEN` of sasonica.com/street (`deploy/street`), which serves only allowlisted install ids (David's own: red2/red5's `wgg5vlgrugd5ktj3kytuzyrfve`), each ask signed with the install key; or an owner's own `MEDIA_MAPILLARY_TOKEN`, which is asked directly instead. `MEDIA_MAPILLARY_CENTRAL=0` turns central off (24 Nov 2026; the central token is not set yet: 503 not_configured) | not in use until a token is set; per-install rate limit 60 a minute at the Worker, answers kept an hour in Cloudflare's cache and 12 hours on each server (its picture links are signed and expire), an empty one 2 days | **Needs work**: images CC BY-SA 4.0 (some sets CC BY-NC-SA); terms §11 ask for Mapillary's logo and a link back where its images are shown (the card shows the word "Mapillary" linking the photo: add the logo before a public release); §5 bars use "in connection with real-time navigation or route guidance" (so not asked along a route); §12 limits commercial use to listed purposes, so a product for others needs Mapillary's written agreement or drops it | no (off without a key; an owner's own token is the per-install case. Gate it with the switch if a shared product token is ever used) |
 | 88 | VicEmergency (Emergency Management Victoria): the GeoJSON its public map loads, emergency.vic.gov.au/public/events-geojson.json | the Map's "Emergencies (VicEmergency)" layer (incidents and warnings by level, `map_vic_live.py`, §6.50) and route warnings through Watch and Act or Emergency Warning areas (maps proposal step 9, 24 Nov 2026); only where `MEDIA_MAP_VIC=1`, `MEDIA_VIC_EMERGENCY=0` turns it off | none (named client: a User-Agent with the site and repo) | one request at most every 90 s however many devices look; the last copy shown up to 30 min if it is down | **Needs work**: EMV's data notice releases its feed data under CC BY 3.0 AU, credit "State of Victoria" (shown on the layer and each card, with a link to the warning's own page); its support page says the formal data feed is by request (vicemergency.zendesk.com), so a public release asks EMV for feed access first | no (official public safety data; Victoria only) |
 | 89 | Transport Victoria Open Data (Department of Transport and Planning): "Unplanned Disruptions - Road" v3 and "Planned Disruptions - Road" v1 (api.opendata.transport.vic.gov.au) | the Map's "Road closures & roadworks" layer and avoiding full closures in driving routes (`map_vic_live.py`, §6.50; 24 Nov 2026) | the owner's own free Open Data account key, `MEDIA_VIC_ROADS_KEY`, sent as the `KeyID` header (off without one; none on red2 yet) | unplanned at most every 2 min, planned every 30 min (limits 10-20 calls a minute), up to 8 pages of 1000 | **Fine**: CC BY 4.0, credit "Department of Transport and Planning" on the layer and each card | no (official open data; each install its owner's key) |
+| 90 | Sepia Search (sepiasearch.org, Framasoft's search across PeerTube instances; thumbnails and videos served by each instance) | the Videos tab's PeerTube rows (`GET /videos/search`, core `videos.py`, §6.70; 25 Nov 2026) | none (named client: a User-Agent with the site and repo) | one request per search and page, answers kept 10 min; the device loads thumbnails and the embed from each instance | **Fine**: a public API of free software (AGPL) with no published limit; each video's licence is shown | no |
+| 91 | Dailymotion Data API (api.dailymotion.com/videos, no key) | the Videos tab's Dailymotion rows and its embed player (§6.70; 25 Nov 2026) | none | one request per search and page, kept 10 min | **Check**: its developer terms allow search and the embed player; read them again before a public release and whether a registered key is expected at volume | no |
+| 92 | Odysee's search index (lighthouse.odysee.tv/search; thumbnails from thumbnails.lbry.com / thumbs.odycdn.com, the embed from odysee.com) | the Videos tab's Odysee rows (§6.70; David, 25 Nov 2026: "Can we also include Odyssee and Rumble?") | none | one request per search and page, kept 10 min | **Needs work**: the index Odysee's own site uses, undocumented and without published terms; ask Odysee before a public release, or gate it | no |
+| 93 | Rumble (rumble.com, read by yt-dlp's Rumble and RumbleChannel extractors) | not searched: its search page refuses automated clients (403 from red2), and that is not worked round. A shared Rumble link and followed channels come with the Videos proposal's step 3 | none | not in use yet | **Needs work**: its terms bar automated access; decide with step 3 whether reading a link or channel with yt-dlp goes behind the personal-use switch | to decide (step 3) |
+| 94 | Vimeo API (api.vimeo.com/videos?query=) | the Videos tab's Vimeo rows, only when a token is set (§6.70; David, 25 Nov 2026: "What about Vimeo?") | the owner's own free Vimeo developer app's access token (public scope), `MEDIA_VIMEO_TOKEN` (set on red2 25 Nov 2026; without one Vimeo is off the source list) | 50 asks a quarter hour per token (x-ratelimit-limit): one request per search and page, answers kept 6 hours; a 429 rests it until its reset, reported as Vimeo failing | **Check**: its API terms ask for attribution and for the embed player for playback (`embed` is its player); whether its search covers all public videos for a new app is unconfirmed | no (each install its owner's token) |
 
 ## The services, one by one
 
@@ -1111,6 +1116,34 @@ hosted tier), every one of these becomes a reseller question.
   source.
 - **Personal-use switch:** no.
 - **Production:** fine; each install uses its owner's key.
+
+### 90 to 94. The Videos tab's sites
+
+- **Used for:** one search across several video sites (`GET /videos/search`,
+  core `videos.py`, §6.70; docs/proposals/2026-11-25-videos-tab.md, David,
+  25 Nov 2026). The search words go to each site the user picked, from the
+  server, with a User-Agent naming agent-media; nothing else about the user
+  does. Each site is asked once per search and page, answers kept 10
+  minutes. The device loads each row's thumbnail, and a played video's
+  embed, from the site itself.
+- **YouTube** (§7) is asked only through the personal-use add-on
+  (`youtube-metadata` `search_videos`: yt-dlp on a results page).
+- **Sepia Search** (row 90): Framasoft's index of PeerTube instances,
+  `GET https://sepiasearch.org/api/v1/search/videos`; each video's licence is
+  shown. **Dailymotion** (row 91): `GET https://api.dailymotion.com/videos?search=`
+  with no key; its embed only where the video allows it. **Odysee** (row
+  92): `GET https://lighthouse.odysee.tv/search`, the index Odysee's own site
+  uses; it has no published terms, so ask Odysee before others use it.
+  **The Internet Archive**: the advanced search with `mediatype:movies`, as
+  Free films already asks.
+- **Rumble** (row 93) is not searched: it has no public search, and its
+  search page answers automated clients with 403; that is not worked round.
+- **Vimeo** (row 94): its search answers an unauthenticated ask with error
+  8003, so it is searched only with the owner's token: make an app at
+  https://developer.vimeo.com/apps, generate an unauthenticated access token
+  with the public scope, and put it in `MEDIA_VIMEO_TOKEN` in
+  `~/.config/agent-media.env`, then `media update --only agent-media-server`.
+- **Personal-use switch:** YouTube yes (the add-on); the rest no.
 
 ## Before other people use this
 
