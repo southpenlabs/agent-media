@@ -72,6 +72,7 @@ def test_search_interleaves_and_shapes_rows(server, signed_in, sites):
     assert pt["channel"] == {"name": "Chan", "id": "chan@tube.example", "url": "https://tube.example/c/chan"}
     assert ia["duration_s"] == 4097 and ia["licence"] == "Public domain" and ia["embed"].endswith("/reefer_madness1938")
     assert dm["published"] == 1263509297 and dm["kind"] == "video"
+    assert pt["practice"] and ia["practice"] and dm["practice"] and od["practice"]
     assert od["url"] == "https://odysee.com/rules-%28piano:882c" and od["channel"]["url"] == "https://odysee.com/@Skele:04e4"
     by = {s["id"]: s for s in obj["sources"]}
     assert by["peertube"] == {"id": "peertube", "ok": True, "count": 1, "next": 2}
@@ -149,6 +150,7 @@ def test_youtube_with_the_addon(server, signed_in, sites, monkeypatch):
     assert base64.b64decode(sp) == bytes([0x08, 3, 0x12, 2, 0x10, 1])
     kinds = [(i["id"], i["kind"], i.get("playable_audio")) for i in obj["items"]]
     assert kinds == [("lTRiuFIWV54", "video", True), ("Dx5qFachd3A", "live", True), ("UCxx", "channel", None)]
+    assert [i.get("practice") for i in obj["items"]] == [True, None, None]
     assert obj["items"][0]["embed"] == "https://www.youtube.com/embed/lTRiuFIWV54"
 
 

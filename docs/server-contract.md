@@ -11337,6 +11337,20 @@ names the first time they are read.
 - `POST /practice {"action": "add", "url", "title"?}` → the list, plus
   `{"added": "youtube" | "podcast", "title"}`: a YouTube link, or a
   podcast feed with audio episodes. 400 for anything else.
+- `POST /practice {"action": "add", "url", "embed", "title"?, "teacher"?, "art"?, "length"?}`
+  (25 Nov 2026, David: "Let Practice keep other sites' videos") → the list, plus `{"added":
+  "video", "id": "vid:<hash>", "title", "site"}`: a Videos tab row (§6.70, `practice:
+  true`) sent as it came, `url` its page, `embed` its `embed`, `teacher` its
+  channel's name, `art` its thumb, `length` its `duration_s`. Kept in the library as an
+  item of source `embed`, as Insight Timer's (`page` = url, `site`, `art` and
+  `art_large` = art, `duration_s`; the title gets " — teacher"), so `play` answers its
+  embed, and `style`, `remove` and the info page work as for those. The embed must be
+  the page's own site's player: `https://<the page's host>/videos/embed/…` for a
+  PeerTube page (`/w/` or `/videos/watch/`), `archive.org/embed/` for archive.org,
+  `geo.dailymotion.com/player.html?video=` or `www.dailymotion.com/embed/video/` for
+  Dailymotion, `odysee.com/$/embed/` for Odysee, `player.vimeo.com/video/` for Vimeo;
+  else 400. A YouTube url is saved as a YouTube link, whatever `embed` says. The same
+  url saved again replaces its row.
 - `POST /practice {"action": "add", "upload", "title"?}` (20 Nov 2026,
   `/features` `practice_upload`) → the list, plus `{"added": "file", "id",
   "title"}`: a file from the phone. `upload` is the `path` `POST /upload`
@@ -15104,10 +15118,13 @@ The Media tab's Videos (docs/proposals/2026-11-25-videos-tab.md, step 1; David, 
   filter or no `q`.
 - `VideoItem`: `{source, id, url, title, channel: {name?, id?, url?}, kind:
   video|live|playlist|channel, duration_s?, published?, views?, thumb?, embed?,
-  playable_audio?, licence?, host?, count?}`. `published` is Unix seconds. `embed` is a
+  playable_audio?, practice?, licence?, host?, count?}`. `published` is Unix seconds. `embed` is a
   URL the viewer may frame (YouTube's /embed/, PeerTube's, archive.org/embed, Dailymotion's
   player where the video allows it, Odysee's /$/embed/, Vimeo's player). `playable_audio`
-  is true on YouTube videos (POST /music plays them, with the add-on). `licence` is the
+  is true on YouTube videos (POST /music plays them, with the add-on). `practice` is true
+  where `POST /practice add` keeps the row (§6.45): a YouTube video (sent as its url) and
+  another site's video whose `embed` is its own site's player (sent with url, embed,
+  title, teacher, art and length); never on live, playlist or channel rows. `licence` is the
   short name of PeerTube's, the Archive's and Vimeo's licence ("Attribution", "CC BY-NC
   3.0", "Public domain"). `host` is a PeerTube video's instance; `count` a playlist's
   length.

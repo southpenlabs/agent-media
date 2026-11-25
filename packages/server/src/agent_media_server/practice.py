@@ -215,6 +215,16 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             return False, got
         ok, detail = listing(bearer)
         return ok, {**detail, **got}
+    if action == "add" and body.get("embed"):
+        # Another site's video from the Videos tab, kept in its own player (§6.45, §6.70).
+        try:
+            got = lib.add_video(str(body.get("url") or ""), str(body["embed"]), title=str(body.get("title") or ""),
+                                teacher=str(body.get("teacher") or ""), art=str(body.get("art") or ""),
+                                length=body.get("length"))
+        except ValueError as e:
+            return False, {"error": str(e)}
+        ok, detail = listing(bearer)
+        return ok, {**detail, **got}
     if action == "add":
         try:
             got = lib.add(str(body.get("url") or ""), title=str(body.get("title") or ""))

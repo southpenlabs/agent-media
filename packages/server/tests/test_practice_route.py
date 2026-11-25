@@ -256,3 +256,39 @@ def test_an_upload_add_refuses_what_it_should(server, shelf, signed_in, uploaded
 def test_features_offers_practice_upload(server, shelf, signed_in):
     res, obj = call(server, "GET", "/features", None, AUTH)
     assert res.status == 200 and obj["practice_upload"] is True
+
+
+def test_another_sites_video_is_kept_in_its_own_player(server, shelf, signed_in):
+    """A Videos tab row (§6.70 practice: true) saved as an embed item (§6.45)."""
+    body = {"action": "add", "url": "https://tube.example/w/abcdefgh12", "title": "Yin for hips",
+            "embed": "https://tube.example/videos/embed/abcdefgh12", "teacher": "Chan",
+            "art": "https://tube.example/t.jpg", "length": 1800}
+    res, obj = call(server, "POST", "/practice", body, AUTH)
+    assert res.status == 200, obj
+    assert obj["added"] == "video" and obj["site"] == "peertube"
+    it = next(i for i in obj["items"] if i["id"] == obj["id"])
+    assert (it["source"], it["embed"], it["page"], it["teacher"], it["art"], it["duration_s"], it["style_path"][0]) == (
+        "embed", body["embed"], body["url"], "Chan", body["art"], 1800, "Movement")
+    res, obj2 = call(server, "POST", "/practice", {"action": "play", "id": it["id"]}, AUTH)
+    assert res.status == 200 and obj2["embed"] == body["embed"] and obj2["page"] == body["url"]
+    res, obj2 = call(server, "POST", "/practice", {"action": "style", "id": it["id"], "path": ["Sound"]}, AUTH)
+    assert next(i for i in obj2["items"] if i["id"] == it["id"])["style"] == "Sound"
+    res, obj2 = call(server, "POST", "/practice", {"action": "remove", "id": it["id"]}, AUTH)
+    assert res.status == 200 and not [i for i in obj2["items"] if i["id"] == it["id"]]
+
+
+@pytest.mark.parametrize("url,embed", [
+    ("https://tube.example/w/abcdefgh12", "https://evil.example/videos/embed/abcdefgh12"),  # another instance
+    ("https://archive.org/details/x", "https://example.com/embed/x"),                       # not a player
+    ("https://example.com/v/1", "https://player.vimeo.com/video/1"),                       # page not Vimeo's
+    ("http://vimeo.com/1", "https://player.vimeo.com/video/1"),
+])
+def test_an_embed_off_its_sites_player_is_400(server, shelf, signed_in, url, embed):
+    res, obj = call(server, "POST", "/practice", {"action": "add", "url": url, "embed": embed}, AUTH)
+    assert res.status == 400 and "own site's player" in obj["error"]
+
+
+def test_a_youtube_row_with_an_embed_is_still_a_youtube_link(server, shelf, signed_in):
+    res, obj = call(server, "POST", "/practice", {"action": "add", "url": "https://www.youtube.com/watch?v=AAAAAAAAAAA",
+                                                  "embed": "https://www.youtube.com/embed/AAAAAAAAAAA", "title": "T"}, AUTH)
+    assert res.status == 200 and obj["added"] == "youtube"

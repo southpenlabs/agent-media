@@ -413,6 +413,50 @@ def _vimeo(q: str, f: dict, page: int, fetch: Fetch, timeout: float, now: float)
     return out, bool((data.get("paging") or {}).get("next")), ignored
 
 
+# ---- Saving a row to Practice ----------------------------------------------
+
+_EMBEDS = (
+    # (site, the page's host pattern, the embed's pattern); a PeerTube embed
+    # must be on its page's own instance.
+    ("peertube", None, re.compile(r"^https://([a-z0-9.-]+)/videos/embed/[A-Za-z0-9-]{2,64}(\?[^\s]*)?$")),
+    ("archive", re.compile(r"^archive\.org$"), re.compile(r"^https://archive\.org/embed/[A-Za-z0-9._-]{1,120}$")),
+    ("dailymotion", re.compile(r"^(www\.)?dailymotion\.com$"),
+     re.compile(r"^https://(geo\.dailymotion\.com/player\.html\?video=|www\.dailymotion\.com/embed/video/)[A-Za-z0-9]{3,20}$")),
+    ("odysee", re.compile(r"^odysee\.com$"), re.compile(r"^https://odysee\.com/\$/embed/[^\s?#]{3,300}$")),
+    ("vimeo", re.compile(r"^(www\.)?vimeo\.com$"), re.compile(r"^https://player\.vimeo\.com/video/\d{1,15}(\?[^\s]*)?$")),
+)
+
+
+def embed_site(url: str, embed: str) -> Optional[str]:
+    """The Videos source whose page `url` is and whose own player `embed`
+    is, or None: Practice keeps another site's video only in that site's
+    own player, never a frame of any page."""
+    url, embed = (url or "").strip(), (embed or "").strip()
+    if not url.startswith("https://") or len(url) > 600 or len(embed) > 600:
+        return None
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    for site, page_host, pattern in _EMBEDS:
+        m = pattern.match(embed)
+        if not m:
+            continue
+        if site == "peertube":
+            if m.group(1).lower() == host and re.search(r"/(videos/watch|w)/", url):
+                return site
+        elif page_host is not None and page_host.match(host):
+            return site
+    return None
+
+
+def _practice(it: dict) -> bool:
+    """Whether Practice can keep the row (POST /practice add): a YouTube
+    video as its link, another site's video in its own player."""
+    if it.get("kind") != "video":
+        return False
+    if it.get("source") == "yt":
+        return True
+    return embed_site(it.get("url") or "", it.get("embed") or "") is not None
+
+
 # ---- The table and the search ---------------------------------------------
 
 #: id → (name, site, the filters it can apply, its search). A type it has
@@ -590,4 +634,5 @@ def search(q: str, wanted: Optional[list[str]] = None, filters: Optional[dict] =
             rows = lists.get(s) or []
             if i < len(rows):
                 items.append(rows[i])
+    items = [{**it, "practice": True} if _practice(it) else it for it in items]
     return {"q": q, "page": page, "filters": f, "items": items, "sources": [report[s] for s in ids]}

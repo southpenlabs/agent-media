@@ -99,6 +99,7 @@ def _load() -> dict:
     d.setdefault("youtube", [])
     d.setdefault("feeds", [])
     d.setdefault("episodes", [])
+    d.setdefault("videos", [])
     return d
 
 
@@ -283,7 +284,12 @@ def _all() -> list[dict]:
     except Exception as _exc:  # noqa: BLE001 — a bad index costs only its own items
         _failures.swallowed(_exc)
         embeds = []
-    return _made() + yt + _files() + eps + embeds + _podcasts(d)
+    vids = [{"id": v["id"], "title": f"{v['title']} — {v['teacher']}" if v.get("teacher") else v["title"],
+             "source": "embed", "site": v.get("site"), "embed": v["embed"], "page": v["url"],
+             "added": v.get("added", 0), "duration": str(v["length"]) if v.get("length") else "",
+             "_uri": v["embed"], **({"art": v["art"], "art_large": v["art"]} if v.get("art") else {})}
+            for v in d["videos"]]
+    return _made() + yt + _files() + eps + embeds + vids + _podcasts(d)
 
 
 def items() -> list[dict]:
@@ -748,6 +754,38 @@ def add(url: str, title: str = "") -> dict:
     return {"added": "podcast", "title": title, "episodes": len(got["episodes"])}
 
 
+def add_video(url: str, embed: str, title: str = "", teacher: str = "", art: str = "",
+              length=None) -> dict:
+    """Save another site's video (a Videos tab row: PeerTube, the Archive,
+    Dailymotion, Odysee, Vimeo) to play in that site's own player, as
+    Insight Timer's do: an item of source "embed", ``vid:<hash>``. The embed
+    must be the page's own site's player (videos.embed_site); ValueError
+    otherwise. A YouTube link is saved as a YouTube link (`add`). David,
+    25 Nov 2026: "Let Practice keep other sites' videos"."""
+    from . import videos
+    url, embed = (url or "").strip(), (embed or "").strip()
+    if youtube_id(url):
+        return add(url, title)
+    site = videos.embed_site(url, embed)
+    if site is None:
+        raise ValueError("embed must be the video's own site's player (PeerTube, the Internet Archive, "
+                         "Dailymotion, Odysee or Vimeo), and url its page")
+    art = (art or "").strip()
+    secs = _seconds(length) if isinstance(length, (int, float, str)) and not isinstance(length, bool) else None
+    vid = _hid("vid", url)
+    d = _load()
+    d["videos"] = [v for v in d["videos"] if v["id"] != vid]
+    row = {"id": vid, "url": url, "embed": embed, "site": site, "title": (title or "").strip()[:300] or url,
+           "teacher": (teacher or "").strip()[:120], "added": time.time()}
+    if art.startswith("https://") and len(art) <= 600:
+        row["art"] = art
+    if secs:
+        row["length"] = secs
+    d["videos"].append(row)
+    _save(d)
+    return {"added": "video", "id": vid, "title": row["title"], "site": site}
+
+
 def add_episode(audio: str, title: str, show: str = "") -> dict:
     """Save one podcast episode by its audio URL (not its whole feed): the
     free copy of a meditation found in a teacher's podcast. ``ep:<hash>``."""
@@ -764,7 +802,7 @@ def add_episode(audio: str, title: str, show: str = "") -> dict:
 
 
 def remove(key: str) -> bool:
-    """Forget a YouTube link (``yt:<id>``), an episode (``ep:<hash>``), a feed
+    """Forget a YouTube link (``yt:<id>``), another site's video (``vid:<hash>``), an episode (``ep:<hash>``), a feed
     (by its URL) or one of the agent's renders (``made:<hash>``). Files in the folder are the folder's."""
     d = _load()
     if key.startswith("yt:"):
@@ -774,6 +812,11 @@ def remove(key: str) -> bool:
         d["youtube"] = [v for v in d["youtube"] if f"yt:{v['vid']}" != key]
         _save(d)
         return len(d["youtube"]) < before
+    if key.startswith("vid:"):
+        before = len(d["videos"])
+        d["videos"] = [v for v in d["videos"] if v["id"] != key]
+        _save(d)
+        return len(d["videos"]) < before
     if key.startswith("ep:"):
         before = len(d["episodes"])
         d["episodes"] = [e for e in d["episodes"] if e["id"] != key]
