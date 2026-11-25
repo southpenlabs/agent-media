@@ -597,7 +597,8 @@ def accounts(fill: bool = True) -> list[dict]:
     """The YouTube accounts whose subscriptions can be searched: ``[{id,
     name, channels}]``, by name. `name` is the account's own channel name
     once read (else its id), dashes as spaces; `channels` how many it
-    subscribes to, None until read. Those not read are read in the
+    subscribes to, None until read. One subscribing to none is left out,
+    and a second sign-in of the same channel. Those not read are read in the
     background (`fill`). Empty without both add-on methods."""
     addon = _accounts_addon()
     if addon is None or _yt_addon() is None:
@@ -619,8 +620,17 @@ def accounts(fill: bool = True) -> list[dict]:
         out.append({"id": n, "name": _label(got.get("title") or k.get("name") or n), "channels": chans})
     if fill:
         _fill_names(unread)
-    out.sort(key=lambda a: a["name"].casefold())
-    return out
+    # One that subscribes to nothing has nothing to search; two sign-ins of
+    # the same channel are one choice.
+    seen: set = set()
+    keep = []
+    for a in sorted(out, key=lambda a: a["name"].casefold()):
+        twin = (a["name"], a["channels"])
+        if a["channels"] == 0 or (a["channels"] is not None and twin in seen):
+            continue
+        seen.add(twin)
+        keep.append(a)
+    return keep
 
 
 def subscribed(name: str, now: Optional[float] = None) -> dict:
