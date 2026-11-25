@@ -20,6 +20,8 @@ had exited. This is that for the whole trail, from the app (David, 15 Oct
    (`~/.cache/claude-incoming`, `~/.cache/agent-sessions-incoming`), which
    are the whole transcript again. Hermes and opencode keep conversations in
    a database shared with every other one, so they cannot be sealed: 409.
+   A private Codex chat runs in a home of its own
+   (agent_media_core.private_home), and that whole folder is taken.
 2. **Its spoken lines**: the speech-history rows (`extras.source_session`),
    which hold the text, and the clip files they name with every file beside
    each clip (`<stem>.*`: the text, the rendered audio).
@@ -54,6 +56,7 @@ import tarfile
 import time
 from pathlib import Path
 
+from agent_media_core import failures as _failures
 from agent_media_core import harnesses, sealed
 from agent_media_core._paths import state_dir
 from agent_media_core.state.store import default_db_path
@@ -68,6 +71,12 @@ SETTLE_S = 3.0
 
 class SealError(Exception):
     pass
+
+
+def harness_profiles_root() -> Path:
+    from agent_media_core import harness_profiles
+
+    return harness_profiles.profiles_root()
 
 
 def bundle_dir() -> Path:
@@ -109,6 +118,14 @@ def staging_roots() -> list[Path]:
 def _transcript_paths(session: str) -> tuple[str, list[Path]]:
     """`(harness, paths)`: the transcript, its folder, the staged copies."""
     harness = harnesses.harness_of(session)
+    home = _home(session, harness)
+    if home:
+        # A chat in a private home (agent_media_core.private_home): the whole
+        # folder is the chat's — its transcript, Codex's databases and
+        # memories, its config with the render. The sign-in links in it are
+        # not restored on unseal but made again (private_home.relink).
+        return harness, [home, *(p for root in staging_roots()
+                                 for p in root.glob(f"*/*/*/{session}.jsonl") if p.is_file())]
     if harness in (harnesses.HERMES, harnesses.OPENCODE):
         raise SealError(f"a {harness} conversation lives in a shared database and "
                         "cannot be sealed")
@@ -160,6 +177,19 @@ def _clips(rows: list[dict]) -> list[Path]:
                 if f.is_file():
                     out[str(f)] = f
     return list(out.values())
+
+
+def _home(session: str, harness: str) -> Path | None:
+    """The private home `session` runs in, if it does."""
+    from agent_media_core import private_home
+
+    if harness not in private_home.HARNESSES:
+        return None
+    try:
+        return private_home.home_of(harness, harnesses.profile_of(session))
+    except Exception as e:  # noqa: BLE001 — not found is the shared store's case
+        _failures.swallowed(e)
+        return None
 
 
 def plan(session: str) -> dict:
@@ -333,6 +363,12 @@ def seal(session: str) -> dict:
         else:
             p.unlink(missing_ok=True)
     report["search_rows"] = search.forget(session)
+    from agent_media_core import private_home
+
+    for p in paths:
+        # A private home's folder is gone with the chat: so is its profile.
+        if p.parent == harness_profiles_root() and p.name.startswith(f"{report['harness']}-{private_home.PREFIX}"):
+            private_home.forget(report["harness"], p.name[len(report["harness"]) + 1:])
     report.update(history=len(report["history"]), bundle=str(dest))
     return report
 
@@ -395,6 +431,13 @@ def unseal(session: str) -> dict:
                     [tuple(r.get(c) for c in cols) for r in rows])
         finally:
             conn.close()
+    from agent_media_core import private_home
+
+    for r in restored:
+        # A private home comes back as a profile, its sign-in linked again.
+        d = Path(r)
+        if (d / private_home.MARK).is_file():
+            private_home.readopt(str(index.get("harness") or ""), d)
     sealed.unmark(session)
     path.unlink(missing_ok=True)
     return {"session": session, "restored": restored, "skipped": skipped, "history": len(rows)}

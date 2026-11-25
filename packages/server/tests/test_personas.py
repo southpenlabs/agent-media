@@ -338,7 +338,11 @@ def test_private_mode_needs_a_system_prompt_agent(described, monkeypatch):
     monkeypatch.setattr(personas, "PRIVATE_MODE_READY", True)
     rows = personas.described()
     assert personas.mode_for("zara", "venice/x", rows, "pi") == "private"
-    assert personas.mode_for("zara", "venice/x", rows, "codex") == "public"   # would be its first message
+    # Codex takes it in a home of its own (private_home.py).
+    assert personas.mode_for("zara", "venice/x", rows, "codex") == "private"
+    # opencode and Hermes: it would be the first message, in a shared store.
+    assert personas.mode_for("zara", "venice/x", rows, "opencode") == "public"
+    assert personas.mode_for("zara", "venice/x", rows, "hermes") == "public"
 
 
 def test_readers_leave_a_private_thread_alone(monkeypatch):
@@ -387,3 +391,38 @@ def test_the_reaper_seals_an_ended_private_thread_and_drops_its_render(repo, mon
     sealed_.clear()
     reap.seal_private(now, apply=True)
     assert set(sealed_) == {ended, live}
+
+
+def test_a_private_codex_chat_runs_in_a_home_of_its_own(described, asker, monkeypatch, tmp_path):
+    """Codex takes a private render in a home of its own
+    (agent_media_core.private_home): the render is the home's standing
+    instructions, never typed into the chat, and a Venice model is the home's
+    provider rather than a --model the pane passes."""
+    import tomllib
+    from pathlib import Path
+
+    from agent_media_core import harness_profiles, private_home
+
+    from agent_media_server import credit_usage
+
+    monkeypatch.setattr(personas, "PRIVATE_MODE_READY", True)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "dot-codex"))
+    monkeypatch.setattr(credit_usage, "find_key", lambda v, o="": "sk-venice")
+    opened = []
+    monkeypatch.setattr(send, "open_window",
+                        lambda s, cwd, *, resume, host="", flags=(), agent="claude", profile=None:
+                        opened.append((agent, list(flags), profile)) or ("%9", ""))
+    # zara's front matter offers her to pi and Claude only; this is about Codex.
+    monkeypatch.setattr(personas, "check", lambda *a, **k: "")
+    ok, d = send.ask("hi", "tok", agent="codex", persona="zara", model="venice/big")
+    assert ok, d
+    agent, flags, profile = opened[-1]
+    assert agent == "codex" and "--model" not in flags and profile.startswith("p-")
+    home = private_home.home_of("codex", profile)
+    cfg = tomllib.loads((home / "config.toml").read_text())
+    assert cfg["model"] == "big" and cfg["model_provider"] == "venice"
+    assert "zara" in cfg["developer_instructions"]
+    assert d["persona_via"] == "system_prompt" and d["private"] is True
+    assert not any("zara" in t for t in asker["typed"])
+    assert repo_calls_mode(described) == "private"
+    assert harness_profiles.env("codex", profile) == {"CODEX_HOME": str(Path(home))}

@@ -122,7 +122,14 @@ def env(harness: str, name: str) -> dict[str, str]:
     """The variable to set for `harness` in profile `name`; {} for the default
     (or a profile that is gone, which then falls back to it)."""
     p = get(harness, name) if name else None
-    return {VARS[harness]: p.dir} if p else {}
+    if not p:
+        return {}
+    from . import private_home
+
+    if private_home.is_home(p):
+        # A private chat's home (private_home.py): more than the one variable.
+        return private_home.env(harness, Path(p.dir))
+    return {VARS[harness]: p.dir}
 
 
 def dirs(harness: str, default: Path) -> list[tuple[str, Path]]:

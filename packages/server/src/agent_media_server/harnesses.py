@@ -188,7 +188,10 @@ def agents(bearer: str) -> tuple[bool, dict]:
         version = harnesses.version_of(name) if here else ""
         # The default login, then one row per harness profile: each is its
         # own sign-in (and its own sessions) with the same program.
-        for profile in ["", *(p.name for p in harness_profiles.of(name))]:
+        # Not a private chat's home (private_home.py): that is the chat's, not a login.
+        from agent_media_core import private_home
+
+        for profile in ["", *(p.name for p in private_home.listed(name))]:
             env = harness_profiles.env(name, profile)
             state, who = harnesses.auth_state(name, env=env) if here else ("unknown", "")
             actions = []

@@ -167,10 +167,14 @@ def mode_for(persona: str, model: str, rows: list[dict], agent: str = "") -> str
     private material on a trusted model once PRIVATE_MODE_READY, else
     "public". Only for an agent that takes it as a system prompt (`via`):
     elsewhere it would be the thread's first message, and Hermes and
-    opencode, which could not be sealed after, are among those."""
+    opencode, which could not be sealed after, are among those. Codex takes it
+    in a home of its own (agent_media_core.private_home), sealed whole."""
+    from agent_media_core import private_home
+
     from . import persona_scope
 
-    if not persona or not PRIVATE_MODE_READY or via(agent) != "system_prompt":
+    if not persona or not PRIVATE_MODE_READY or (
+            via(agent) != "system_prompt" and agent not in private_home.HARNESSES):
         return "public"
     resolved = persona_scope.resolve(rows)
     row = resolved["scope"].get(persona) or {}

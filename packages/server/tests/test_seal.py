@@ -3,6 +3,7 @@ folder into one age bundle, the plaintext gone, and all of it back on unseal."""
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -102,3 +103,36 @@ def test_a_sealed_thread_cannot_be_replied_to(tmp_path, monkeypatch):
 def test_the_route_refuses_what_is_not_a_boolean(tmp_path, monkeypatch):
     ok, detail = seal.session_seal(A, "yes", "")
     assert not ok and detail["status"] == 400
+
+
+B = "01a2116b-92ba-7440-b894-8ad1d661b589"
+
+
+def test_a_private_codex_home_is_sealed_whole_and_comes_back(tmp_path, monkeypatch):
+    """A private chat on Codex runs in a home of its own (private_home.py):
+    sealing takes the whole folder — the transcript, Codex's databases, the
+    config holding the render — but never the user's sign-in it links to."""
+    from agent_media_core import harness_profiles, private_home
+
+    _setup(tmp_path, monkeypatch)
+    codex = tmp_path / "dot-codex"
+    codex.mkdir()
+    (codex / "auth.json").write_text('{"tokens": "mine"}')
+    monkeypatch.setenv("CODEX_HOME", str(codex))
+    p = private_home.make("codex", "You are Wren. The codeword is HERON.")
+    home = Path(p.dir)
+    day = home / "sessions" / "2026" / "11" / "25"
+    day.mkdir(parents=True)
+    (day / f"rollout-2026-11-25T17-36-32-{B}.jsonl").write_text(json.dumps(
+        {"type": "session_meta", "payload": {"id": B, "cwd": "/home/x/proj"}}) + "\n")
+    (home / "thread_history_1.sqlite").write_text("HERON turn")
+    got = seal.seal(B)
+    assert got["harness"] == "codex" and str(home) in got["transcript"]
+    assert not home.exists() and harness_profiles.get("codex", p.name) is None
+    assert (codex / "auth.json").read_text() == '{"tokens": "mine"}'
+    assert b"HERON" not in seal.bundle_path(B).read_bytes()
+
+    seal.unseal(B)
+    assert "HERON" in (home / "config.toml").read_text()
+    assert private_home.home_of("codex", p.name) == home
+    assert (home / "auth.json").is_symlink()

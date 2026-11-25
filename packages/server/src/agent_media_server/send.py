@@ -892,6 +892,17 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
 
     from . import driver
 
+    # A private render on Codex, and Codex on a Venice model, run in a home
+    # of their own (agent_media_core.private_home): the render as its
+    # standing instructions, everything the chat leaves in one folder.
+    home = None
+    model_used = model
+    if agent == "codex" and ((rendered and render_mode == "private") or model.startswith("venice/")):
+        home, why = _private_home(agent, rendered, model)
+        if not home:
+            return False, {"error": why, "status": 502}
+        profile = home.name
+        model_used = ""            # the home's config.toml names it, and its provider
     # sessiond does not know harness profiles yet: a chat in one is a pane.
     chosen = driver.for_new(agent) if not profile else driver.pane_driver()
     if chosen.kind == driver.HEADLESS:
@@ -900,10 +911,12 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
         host = layout.workspace_for(host, cwd)
     from . import session_settings
 
-    model, mode = session_settings.clean_new(agent, model, mode)
+    model, mode = session_settings.clean_new(agent, model_used, mode)
     prompt_file = None
     delivered = ""
-    if rendered:
+    if rendered and home:
+        delivered = "system_prompt"     # in the home's own instructions
+    elif rendered:
         from . import personas
 
         delivered = personas.via(agent, headless=chosen.kind == driver.HEADLESS)
@@ -918,6 +931,10 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
                               flags=flags, quote=quote, model=model, mode=mode,
                               **({"profile": profile} if profile else {}),
                               **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
+    if not ok and home:
+        from agent_media_core import private_home
+
+        private_home.forget(agent, home.name)
     if ok and made_detail:
         detail.update(made_detail)
     if ok and rendered:
@@ -935,6 +952,26 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
                 print(f"ask: a private render's session could not be marked "
                       f"({detail.get('session')!r})", file=sys.stderr, flush=True)
     return ok, detail
+
+
+def _private_home(agent: str, rendered: str, model: str):
+    """`(profile, "")` for a new private home (private_home.make), or
+    `(None, why)`. A Venice model takes the Venice key and its context."""
+    from agent_media_core import harness_profiles, private_home
+
+    key, context = "", 0
+    if agent == "codex" and model.startswith("venice/"):
+        from . import credit_usage
+
+        key = credit_usage.find_key(("VENICE_API_KEY",), "venice")
+        if not key:
+            return None, "no Venice key on this host for a Codex chat on Venice"
+        context = private_home.venice_context(model.split("/", 1)[1])
+    try:
+        return private_home.make(agent, rendered, model=model, venice_key=key,
+                                 venice_context=context), ""
+    except (OSError, harness_profiles.ProfileError) as e:
+        return None, f"could not make the chat's private home: {e}"
 
 
 def _ask_pane(text: str, *, agent: str, cwd: str, host: str, flags: list[str],

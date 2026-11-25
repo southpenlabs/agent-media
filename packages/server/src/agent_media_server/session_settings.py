@@ -517,8 +517,15 @@ def _new_sheet(agent: str = "claude", profile: str = "") -> dict:
 
         if profile and not harness_profiles.get(agent, profile):
             return {"models": []}
-        return {"models": native_models.models(agent, profile),
-                "can": {"model": True, "plan": agent == "codex"}}
+        rows = native_models.models(agent, profile)
+        if agent == "codex" and not profile:
+            # Venice, for a new chat only: it runs in a home of its own
+            # (agent_media_core.private_home; send.ask), which a running
+            # chat cannot move into.
+            from agent_media_core import private_home
+
+            rows += private_home.venice_models()
+        return {"models": rows, "can": {"model": True, "plan": agent == "codex"}}
     if agent == "opencode":
         from agent_media_core import opencode_models
 
