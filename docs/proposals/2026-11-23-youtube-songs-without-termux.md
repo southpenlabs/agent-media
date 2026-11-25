@@ -64,6 +64,62 @@ Opens the song in the YouTube Music app, as the radio's handoff already
 does (`MEDIA_RADIO_HANDOFF_APP`). Sasonica's own player, queue and lock
 screen are not used for that song.
 
+#### Metrolist as the app handed to
+
+25 Nov 2026. David asked how Metrolist and Sasonica could be used
+together ("maybe we could even build off it?"), then said yes to adding it
+here. [Metrolist](https://github.com/MetrolistGroup/Metrolist) is an
+open-source YouTube Music client for Android (`com.metrolist.music`). It is
+actively developed: the last push was 25 Nov 2026, and it now has a
+desktop app too. It plays from the listener's own YouTube Music account
+and adds offline downloads and lyrics, with no Google Play app needed.
+
+- **Handed off to, never built from.** Metrolist is GPL-3.0, so under the
+  licensing decision (decisions/2026-09-22-licensing.md) none of its code
+  comes into the app. It runs as a separate app, the way mpv runs as a
+  separate program. That rules out forking it as Sasonica's player.
+  Ideas can still be borrowed (how it gets a PoToken, its Media3 download
+  cache), but the code cannot.
+- **The handoff already reaches it.** HandoffMusic (sasonica-app
+  `speech/HandoffMusic.java`) asks any app with a media session to play
+  `playFromSearch` / `prepareFromSearch`. Failing that, it connects to the
+  app's media browser, which Metrolist offers: its `MusicService` is a
+  `MediaLibraryService`, and its `onAddMediaItems` resolves a
+  `searchQuery`. So `MEDIA_RADIO_HANDOFF_APP=com.metrolist.music`, or
+  picking it in Settings → Music, should already start songs there.
+  - *Unchecked:* Metrolist may answer a voice search only from the phone's
+    assistant or a verified caller (`isAssistantController`,
+    `isAuthorizedExternalMediaController` in MusicService.kt). Try it on
+    the phone first.
+- **Ask by link, not just by search.** `tryWay` only tries the
+  `music.youtube.com/watch?v=<id>` link when the package name contains
+  "youtube", so it skips Metrolist. Metrolist opens those links: its
+  manifest takes `music.youtube.com`, `youtube.com` `/watch` and
+  `metrolist.cc/watch`. The fix is to treat `com.metrolist.music` as a
+  YouTube app, so a song with a real id plays that exact video rather
+  than the search's best guess. This is about a one-line change in the
+  app.
+- **Personal build only, to begin with.** The public build hands off to
+  apps on the Play Store, and Metrolist is not one: it comes from GitHub,
+  IzzyOnDroid or F-Droid. The personal build offers it in "YouTube songs"
+  as **Open in Metrolist**, beside Stream from YouTube, when it is
+  installed. Settings → Music already lists it as a handoff app:
+  HandoffPlugin lists apps that take `MEDIA_PLAY_FROM_SEARCH`, and
+  Metrolist's manifest declares that.
+- **What comes back by itself.** Signed in to the same Google account,
+  Metrolist's plays and likes land in the account's YouTube Music history.
+  The `youtube-accounts` add-on already reads that history for favourites,
+  so nothing needs building for it.
+- **Duck it, don't pause it.** PauseOthers pauses every app playing during
+  a reply except those in its `MUSIC` set, which keep playing quietly
+  under the speech. Metrolist is not in that set, so for now it is paused
+  like a video. Adding `com.metrolist.music` to the set fixes that, and it
+  goes in the same APK as the link change above.
+- **Upstream.** If the voice-search check turns out to refuse Sasonica, ask
+  Metrolist to accept `playFromSearch` from a verified external controller.
+  The request goes into docs/reference/upstream-contributions.md and to
+  David before it is filed.
+
 ### 4. The choice (server and app)
 
 Settings → Music, "YouTube songs": **Download on the server** (default),
