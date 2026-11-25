@@ -500,8 +500,13 @@ class HeadlessDriver:
         key = "opencode_system" if agent == "opencode" else "system_prompt"
         return call("ping", timeout=3.0).get(key) is True
 
+    def takes_home(self) -> bool:
+        """Whether the running sessiond holds an opencode chat on a private
+        home's own server (`oc_home`, core private_home.py)."""
+        return call("ping", timeout=3.0).get("opencode_home") is True
+
     def start(self, *, agent, cwd, text, host="", flags=(), quote="", model="", mode="",
-              system_prompt_file="", fork_from="", fork_at=""):
+              system_prompt_file="", fork_from="", fork_at="", oc_home=""):
         """A fresh headless session. `host` (the tmux session a pane would
         have opened in) becomes its workspace — what speech is filed and
         voiced under. `flags` are amux's pane flags and are not used: the
@@ -513,9 +518,10 @@ class HeadlessDriver:
         r = call("start", cwd=cwd, text=compose(text, quote), agent=agent, workspace=host,
                  model=model, mode=mode, timeout=30.0, **_slot_kw(),
                  **({"system_prompt_file": system_prompt_file} if system_prompt_file else {}),
+                 **({"oc_home": oc_home} if oc_home else {}),
                  **({"fork_from": fork_from, "fork_at": fork_at} if fork_from else {}))
         if not r.get("ok") and r.get("code") == "unsupported" and agent not in ("claude", "antigravity") \
-                and not fork_from:
+                and not fork_from and not oc_home:
             # A sessiond older than this canvas (it restarts only when its own
             # code changes, and a restart ends its chats): the chat opens in a
             # pane, as before it had an adapter for this agent.

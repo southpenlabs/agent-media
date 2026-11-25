@@ -340,8 +340,9 @@ def test_private_mode_needs_a_system_prompt_agent(described, monkeypatch):
     assert personas.mode_for("zara", "venice/x", rows, "pi") == "private"
     # Codex takes it in a home of its own (private_home.py).
     assert personas.mode_for("zara", "venice/x", rows, "codex") == "private"
-    # opencode and Hermes: it would be the first message, in a shared store.
-    assert personas.mode_for("zara", "venice/x", rows, "opencode") == "public"
+    # opencode too, headless on its home's own server.
+    assert personas.mode_for("zara", "venice/x", rows, "opencode") == "private"
+    # Hermes: it would be the first message, in a shared store.
     assert personas.mode_for("zara", "venice/x", rows, "hermes") == "public"
 
 
@@ -426,3 +427,45 @@ def test_a_private_codex_chat_runs_in_a_home_of_its_own(described, asker, monkey
     assert not any("zara" in t for t in asker["typed"])
     assert repo_calls_mode(described) == "private"
     assert harness_profiles.env("codex", profile) == {"CODEX_HOME": str(Path(home))}
+
+
+def test_a_private_opencode_chat_starts_headless_in_a_home_of_its_own(described, asker, monkeypatch):
+    from agent_media_core import private_home
+
+    from agent_media_server import driver
+
+    monkeypatch.setattr(personas, "PRIVATE_MODE_READY", True)
+    monkeypatch.setattr(personas, "check", lambda *a, **k: "")
+    monkeypatch.setenv("MEDIA_HEADLESS", "1")
+    got = {}
+
+    class Headless:
+        kind = driver.HEADLESS
+        agents = ("claude", "opencode", "antigravity")
+
+        def takes_home(self):
+            return True
+
+        def takes_system_prompt(self, agent="claude"):
+            return True
+
+        def start(self, **kw):
+            got.update(kw)
+            return True, {"session": "ses_x", "cwd": kw["cwd"]}
+
+    monkeypatch.setattr(driver, "for_new", lambda agent="claude": Headless())
+    ok, d = send.ask("hi", "tok", agent="opencode", persona="zara", model="venice/big")
+    assert ok, d
+    assert private_home.is_opencode_home(got["oc_home"])
+    assert "zara" in open(got["system_prompt_file"]).read() and got["text"] == "hi"
+    assert d["persona_via"] == "system_prompt" and d["private"] is True
+
+
+def test_a_private_opencode_chat_is_refused_without_a_session_host_for_it(described, asker, monkeypatch):
+    from agent_media_server import driver
+
+    monkeypatch.setattr(personas, "PRIVATE_MODE_READY", True)
+    monkeypatch.setattr(personas, "check", lambda *a, **k: "")
+    monkeypatch.setattr(driver, "for_new", lambda agent="claude": driver.pane_driver())
+    ok, d = send.ask("hi", "tok", agent="opencode", persona="zara", model="venice/big")
+    assert not ok and d["status"] == 409

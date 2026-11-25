@@ -216,3 +216,35 @@ def carry_over() -> list[str]:
         except opencode_api.ApiError:
             continue
     return done
+
+
+def carry_to(srv) -> list[str]:
+    """The user's keys (their own server's credentials, and auth.json's) into
+    another opencode 2 server that has none for that provider: a private
+    chat's home server (opencode_api.HomeService), whose database starts
+    empty. The providers carried, by name."""
+    from . import opencode_api
+
+    try:
+        rows = srv.call("GET", "/api/credential", timeout=10) or []
+    except opencode_api.ApiError:
+        return []
+    have = {str(c.get("integrationID")) for c in rows if isinstance(c, dict) and c.get("active")}
+    mine = dict(stored())
+    try:
+        old = json.loads(auth_path().read_text())
+    except (OSError, ValueError):
+        old = {}
+    for provider, entry in (old.items() if isinstance(old, dict) else []):
+        mine.setdefault(provider, entry)
+    done = []
+    for provider, entry in mine.items():
+        key = str((entry or {}).get("key") or "") if isinstance(entry, dict) else ""
+        if provider in have or (entry or {}).get("type") != "api" or not well_formed(key):
+            continue
+        try:
+            _v2_add(srv, provider, key)
+            done.append(provider)
+        except opencode_api.ApiError:
+            continue
+    return done

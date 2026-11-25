@@ -349,3 +349,34 @@ def test_a_v2_subagent_reporting_after_the_turn_wakes_the_chat_and_holds_parking
     assert not any((e.get("properties") or {}).get("sessionID") == kid for e in evs)
     # Its child done, the chat parks as any idle one does.
     assert host.sup.park_idle(time.time() + 10 * sessiond.idle_s()) == [sid]
+
+
+def test_a_private_home_chat_runs_on_the_homes_own_server(host, tmp_path):
+    """A private opencode chat (core private_home.py) is held on its home's
+    own `opencode serve` (HomeHost), not the user's: its database is the
+    home's, the home knows its id, and closing it ends that server."""
+    from agent_media_core import opencode_api, private_home
+
+    home = Path(private_home.make("opencode", "unused").dir)
+    persona = tmp_path / "persona.md"
+    persona.write_text("You are Wren.")
+    sid = start(host, "hello", oc_home=str(home), system_prompt_file=str(persona))
+    wait_for(lambda: state(host, sid) == "waiting")
+    hh = host.sup.oc_homes[str(home)]
+    assert hh.up and not host.sup.oc.up
+    assert host.sup.get(sid)["oc_home"] == str(home)
+    assert (home / ".session").read_text().strip() == sid
+    assert private_home.opencode_home_of(sid) == home
+    rec = json.loads((home / "server.json").read_text())
+    assert rec["url"] == hh.base and opencode_api.HomeService(home).find(start=False)
+    assert ("PUT", f"/api/experimental/session/{sid}/instructions/entries/agent-media-persona",
+            {"value": "You are Wren."}) in requests(host)
+    ok, d = driver.headless_driver().close(sid)
+    assert ok and d["closed"]
+    wait_for(lambda: not hh.up and not (home / "server.json").exists())
+
+
+def test_only_a_home_made_here_is_taken(host, tmp_path):
+    ok, d = driver.headless_driver().start(agent="opencode", cwd=str(host.work), text="hi",
+                                          host="p-work", oc_home=str(tmp_path))
+    assert not ok and not host.sup.oc_homes

@@ -905,6 +905,16 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
         model_used = ""            # the home's config.toml names it, and its provider
     # sessiond does not know harness profiles yet: a chat in one is a pane.
     chosen = driver.for_new(agent) if not profile else driver.pane_driver()
+    if agent == "opencode" and rendered and render_mode == "private":
+        # A private opencode chat: a home of its own, held headless on that
+        # home's own server (private_home.py, sessiond_opencode.HomeHost).
+        # A pane would use the user's background server and its database.
+        if chosen.kind != driver.HEADLESS or not chosen.takes_home():
+            return False, {"error": "a private opencode chat needs the session host "
+                                    "(MEDIA_HEADLESS) of this version", "status": 409}
+        home, why = _private_home(agent, rendered, model)
+        if not home:
+            return False, {"error": why, "status": 502}
     if chosen.kind == driver.HEADLESS:
         # No pane, so no tmux session to be filed under: the layout says what
         # it would have been (David's: the session itself; default: the folder).
@@ -914,7 +924,7 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     model, mode = session_settings.clean_new(agent, model_used, mode)
     prompt_file = None
     delivered = ""
-    if rendered and home:
+    if rendered and home and agent == "codex":
         delivered = "system_prompt"     # in the home's own instructions
     elif rendered:
         from . import personas
@@ -930,6 +940,7 @@ def ask(text: str, bearer: str, *, quote: str = "", project: str = "",
     ok, detail = chosen.start(agent=agent, cwd=cwd, text=text, host=host,
                               flags=flags, quote=quote, model=model, mode=mode,
                               **({"profile": profile} if profile else {}),
+                              **({"oc_home": home.dir} if home and agent == "opencode" else {}),
                               **({"system_prompt_file": str(prompt_file)} if prompt_file else {}))
     if not ok and home:
         from agent_media_core import private_home

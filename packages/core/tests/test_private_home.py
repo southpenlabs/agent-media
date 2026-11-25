@@ -37,9 +37,29 @@ def homes(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_only_codex_has_homes_yet(homes):
-    with pytest.raises(harness_profiles.ProfileError):
-        private_home.make("opencode", "r")
+def test_an_opencode_home_is_its_own_data_folder_and_knows_its_chat(homes):
+    p = private_home.make("opencode", "unused")
+    d = Path(p.dir)
+    assert (d / "opencode" / "auth.json").is_symlink()
+    assert harness_profiles.env("opencode", p.name) == {"XDG_DATA_HOME": str(d)}
+    assert private_home.opencode_homes() == [d] and private_home.is_opencode_home(str(d))
+    assert not private_home.is_opencode_home(str(homes))
+    private_home.note_session(d, "ses_abc")
+    private_home._FOUND.clear()
+    assert private_home.opencode_home_of("ses_abc") == d
+    assert private_home.opencode_home_of("ses_other") is None
+
+
+def test_a_stopped_homes_last_activity_is_its_database_written(homes):
+    from agent_media_core import opencode_api
+
+    d = Path(private_home.make("opencode", "unused").dir)
+    private_home.note_session(d, "ses_abc")
+    (d / "opencode" / "opencode.db").write_text("x")
+    import os
+
+    os.utime(d / "opencode" / "opencode.db", (1000, 1000))
+    assert opencode_api.last_at("ses_abc") == 1000
 
 
 def test_a_codex_home_has_the_render_the_sign_in_and_none_of_the_chats(homes):

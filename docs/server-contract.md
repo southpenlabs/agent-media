@@ -8475,7 +8475,7 @@ judged). `trusted_models` are glob patterns on `/ask`'s model id (default
 `venice/*`, `ollama/*`, `local/*`; no model is never trusted): a private
 persona on a trusted model renders `--mode private` when `private_mode` is
 true — only for Claude and pi, which take it as a system prompt, and Codex
-in a home of its own (below; 25 Nov 2026). The session
+and opencode in a home of their own (below; 25 Nov 2026). The session
 is then marked private (`~/.local/state/agent/private.d/<session>`, the mark
 agent-config's `agent-private` uses; `/ask` answers `"private": true`): it
 speaks and is listed, but nothing of it is rewritten, drawn, suggested from,
@@ -8493,7 +8493,8 @@ a folder is made or a window opened. Delivered by the harness's own means:
 | claude | `system_prompt` | `--append-system-prompt-file <file>` — in a pane, and headless at every sessiond spawn (start and each resume) while the file is there |
 | pi | `system_prompt` | `--append-system-prompt <file>` (pi reads a path as its contents) |
 | codex | `prepend`, or `system_prompt` in a home | the first message as below; a private render, or any Codex chat on a `venice/` model, runs in a **private home** instead (agent_media_core.private_home): a harness profile of its own (`CODEX_HOME`, named `p-<hex>`, kept out of the Coding agents page's logins) whose `config.toml` is the user's plus `developer_instructions` (the render) and, for Venice, the provider and its key. The sign-in, hooks, skills and plugins are linked in. Codex copies turns into shared databases and its memories, so this is what lets one chat be sealed: `/session/seal` takes the whole home, and unsealing puts it back as a profile with its links made again |
-| opencode, hermes | `prepend` | the first message is `# Persona`, the render, `---`, then the words |
+| opencode | `system_prompt` headless, else `prepend` | headless: the session's own instructions entry (`agent-media-persona`), set before each prompt. A private render runs in a **private home** (agent_media_core.private_home): its own data folder (XDG_DATA_HOME, so its `opencode.db` is the chat's alone) and its own `opencode serve` (address in `<home>/server.json`), which sessiond holds the chat on (`start` takes `oc_home`; `ping` says `opencode_home`) and the readers ask by the chat's id (`<home>/.session`); opencode's state folder is the user's, where agent-media's speech plugin keeps its own. Only headless: without a session host of this version, 409. The home's server stops when no chat of it is attached and is started again by whoever next needs it; sealing stops it and takes the whole home |
+| hermes | `prepend` | the first message is `# Persona`, the render, `---`, then the words |
 
 A headless Claude whose sessiond predates this (its `ping` lacks
 `"system_prompt": true`) gets `prepend` instead. The file is 0600 under

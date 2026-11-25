@@ -613,6 +613,9 @@ class Session:
         #: every spawn while the file is there — a resume where Claude does
         #: not replay a recorded system prompt still has it.
         self.system_prompt_file = ""
+        #: An opencode chat in a private home (core private_home.py): the
+        #: home's folder, whose own server holds it (sessiond_opencode.HomeHost).
+        self.oc_home = ""
         #: What the process last said it runs (`system/init`).
         self.native_session = ""
         #: A branch with its history (§6.34): the first spawn copies session
@@ -798,7 +801,7 @@ class Session:
                 "server_permissions": self.server_permissions,
                 "owner_server": self.owner_server,
                 "model": self.model, "mode": self.mode, "native_session": self.native_session,
-                "system_prompt_file": self.system_prompt_file,
+                "system_prompt_file": self.system_prompt_file, "oc_home": self.oc_home,
                 "init_model": self.init_model, "init_mode": self.init_mode,
                 "driver": "headless", "state": self.state, "since": round(self.since, 3),
                 "created": round(self.created, 3),
@@ -834,6 +837,7 @@ class Session:
         s.owner_server = str(rec.get("owner_server") or "")
         s.native_session = str(rec.get("native_session") or "")
         s.system_prompt_file = str(rec.get("system_prompt_file") or "")
+        s.oc_home = str(rec.get("oc_home") or "")
         s.init_model = str(rec.get("init_model") or "")
         s.init_mode = str(rec.get("init_mode") or "")
         s.state = str(rec.get("state") or "parked")
@@ -1592,6 +1596,8 @@ class Supervisor:
 
         #: The shared `opencode serve` (sessiond_opencode.py).
         self.oc = Host(self)
+        #: Private homes' servers (sessiond_opencode.HomeHost), by home folder.
+        self.oc_homes: dict = {}
         from .sessiond_remote import Remote
 
         #: Sessions held on other hosts (sessiond_remote.py, roadmap 56).
@@ -2430,7 +2436,8 @@ class Supervisor:
             for s in live:
                 s.parking = True
                 self._close_stdin(s)
-        self.oc.stop()
+        for host in self._oc_hosts():
+            host.stop()
         deadline = time.monotonic() + close_grace_s()
         for s in live:
             proc = s.proc
@@ -3294,7 +3301,14 @@ class Supervisor:
 
         with self.lock:
             oc_idle = [s.id for s in self.sessions.values() if s.agent == "opencode" and idle(s)]
-        kids = self.oc.running_children(oc_idle) if oc_idle else {}
+        kids: dict = {}
+        if oc_idle:
+            with self.lock:
+                by_host: dict = {}
+                for sid in oc_idle:
+                    by_host.setdefault(self.sessions[sid].oc_home, []).append(sid)
+            for home, sids in by_host.items():
+                kids.update(self._oc_host(home).running_children(sids))
         with self.lock:
             for s in list(self.sessions.values()):
                 if idle(s):
@@ -3317,7 +3331,7 @@ class Supervisor:
               workspace: str = "", permissions: str = "", model: str = "",
               mode: str = "", system_prompt_file: str = "", fork_from: str = "",
               fork_at: str = "", slot: str = "", server_permissions: str = "",
-              owner_server: str = "") -> dict:
+              owner_server: str = "", oc_home: str = "") -> dict:
         """`fork_from`/`fork_at` (§6.34): start as a copy of that Claude
         session up to that record, not afresh. `slot: "high"` (Run now):
         with every slot busy, another session is parked for it
@@ -3342,7 +3356,7 @@ class Supervisor:
                                   permissions=perms.mode(permissions), model=model,
                                   mode="plan" if mode == "plan" else "",
                                   fork_from=fork_from, fork_at=fork_at,
-                                  system_prompt_file=system_prompt_file)
+                                  system_prompt_file=system_prompt_file, oc_home=oc_home)
         # A restart pending (David, 11 Nov 2026, screenshot: a new chat
         # refused with "start the chat again once it has" — "this should
         # happen automatically"): the chat is made now and its first message
@@ -3816,7 +3830,7 @@ class Supervisor:
 
     def resume(self, session: str) -> dict:
         if self._agent(session) == "opencode":
-            proc = self.oc.ensure()
+            proc = self._ocx(session).ensure()
             with self.lock:
                 s = self._get(session)
                 opened = not s.live
@@ -3944,7 +3958,7 @@ class Supervisor:
                 was = s.live
                 if was and s.state == "working":
                     try:
-                        self.oc.abort(s.id, s.cwd)
+                        self._oc_host(s.oc_home).abort(s.id, s.cwd)
                     except Refused as e:
                         log.info("sessiond: opencode abort %s: %s", s.id[:12], e.error)
                 self._oc_detach(s, "closed")
@@ -4020,24 +4034,48 @@ class Supervisor:
         self.cond.notify_all()
 
     def _oc_stop_if_unused(self) -> None:
-        """Stop the server when no opencode session is attached to it."""
-        if self.oc.up and not any(x.agent == "opencode" and x.live
-                                  for x in self.sessions.values()):
-            self.oc.stop()
+        """Stop a server when no opencode session is attached to it."""
+        for host in self._oc_hosts():
+            if host.up and not any(x.agent == "opencode" and x.live and x.oc_home == host.home
+                                   for x in self.sessions.values()):
+                host.stop()
 
-    def _oc_host_exited(self, proc: subprocess.Popen, rc: int) -> None:
-        """The server ended: its sessions are no longer live — parked when it
+    def _oc_host(self, home: str = ""):
+        """The server for opencode chats in private home `home` ("" the
+        user's own)."""
+        if not home:
+            return self.oc
+        host = self.oc_homes.get(home)
+        if host is None:
+            from .sessiond_opencode import HomeHost
+
+            host = self.oc_homes[home] = HomeHost(self, home)
+        return host
+
+    def _ocx(self, s):
+        """The server holding session `s` (a Session or its id)."""
+        if isinstance(s, str):
+            with self.lock:
+                s = self._get(s)
+        return self._oc_host(s.oc_home)
+
+    def _oc_hosts(self) -> list:
+        return [self.oc, *self.oc_homes.values()]
+
+    def _oc_host_exited(self, proc: subprocess.Popen, rc: int, host=None) -> None:
+        """A server ended: its sessions are no longer live — parked when it
         was stopped here, ended when it went by itself."""
+        stopping = (host or self.oc).stopping
         with self.cond:
             for s in self.sessions.values():
                 if s.agent == "opencode" and s.proc is proc:
                     s.exit_code = rc
-                    self._oc_detach(s, "parked" if self.oc.stopping else "ended")
+                    self._oc_detach(s, "parked" if stopping else "ended")
         log.info("sessiond: opencode serve exited %s", rc)
 
     def _oc_start(self, cwd: str, text: str, *, workspace: str, permissions: str,
                   model: str, mode: str = "", fork_from: str = "", fork_at: str = "",
-                  system_prompt_file: str = "") -> dict:
+                  system_prompt_file: str = "", oc_home: str = "") -> dict:
         """A new opencode chat; with `fork_from`, a branch with its history:
         opencode's own fork of that session, keeping every message before
         `fork_at` (a message id), or all of them when it is empty
@@ -4046,12 +4084,18 @@ class Supervisor:
 
         if not os.path.isdir(cwd):
             raise Refused(f"no such directory {cwd!r}", "bad_cwd")
-        proc = self.oc.ensure()
+        if oc_home:
+            from agent_media_core import private_home
+
+            if fork_from or not private_home.is_opencode_home(oc_home):
+                raise Refused("not a private home", "bad_request")
+        host = self._oc_host(oc_home)
+        proc = host.ensure()
         rules = oc.ruleset(permissions)
         if fork_from:
-            sid = self.oc.fork(fork_from, fork_at, cwd, rules)
+            sid = host.fork(fork_from, fork_at, cwd, rules)
         else:
-            sid = self.oc.create(cwd, rules, model)
+            sid = host.create(cwd, rules, model)
         if not sid:
             raise Refused("opencode did not make a session", "spawn_failed")
         with self.lock:
@@ -4059,9 +4103,14 @@ class Supervisor:
                         permissions=permissions, model=model, mode=mode)
             # A persona's render (personas.py), sent as `system` with every prompt.
             s.system_prompt_file = system_prompt_file
+            s.oc_home = oc_home
             s.first_text = " ".join(text.split())[:200]
             self.sessions[sid] = s
             self._oc_attach(s, proc)
+        if oc_home:
+            from agent_media_core import private_home
+
+            private_home.note_session(Path(oc_home), sid)
         log.info("sessiond: started opencode %s in %s", sid[:12], cwd)
         return self._oc_send(sid, text, _fresh=True)
 
@@ -4071,7 +4120,8 @@ class Supervisor:
         with self.lock:
             s = self._get(session)
             resumed = not s.live
-        proc = self.oc.ensure()
+        host = self._oc_host(s.oc_home)
+        proc = host.ensure()
         with self.lock:
             s = self._get(session)
             self._oc_attach(s, proc)
@@ -4091,14 +4141,14 @@ class Supervisor:
         # `/name args` for one of opencode's commands or skills (the slash
         # menu, `Host.commands`) runs it, as its TUI would: the prompt API
         # takes the words as they are.
-        cmd = oc.split_command(text, [c["name"] for c in self.oc.commands(s.cwd)]) \
+        cmd = oc.split_command(text, [c["name"] for c in host.commands(s.cwd)]) \
             if text.lstrip().startswith("/") else None
         if cmd:
             self._oc_command(s, *cmd)
         else:
             # Plan mode is opencode's own `plan` agent (no edits, asks before
             # running commands); otherwise its default agent (`build`).
-            self.oc.prompt(s.id, s.cwd, text, model=s.model,
+            host.prompt(s.id, s.cwd, text, model=s.model,
                            agent="plan" if s.mode == "plan" else "",
                            system=_read_text(s.system_prompt_file))
         with self.lock:
@@ -4123,7 +4173,7 @@ class Supervisor:
         logged and the chat put back to waiting."""
         def run() -> None:
             try:
-                self.oc.command(s.id, s.cwd, name, arguments, model=s.model,
+                self._oc_host(s.oc_home).command(s.id, s.cwd, name, arguments, model=s.model,
                                 agent="plan" if s.mode == "plan" else "")
             except Exception as e:  # noqa: BLE001 — told in the log, the chat goes on
                 log.warning("sessiond: opencode %s: /%s: %s", s.id[:12], name,
@@ -4147,14 +4197,15 @@ class Supervisor:
             if not s.live:
                 return {"session": session, "stopped": False, "why": "not live",
                         **self._brief(s)}
-        if self.oc.v2:
-            ours = self.oc.parent_of(task_id) == session
+        host = self._oc_host(s.oc_home)
+        if host.v2:
+            ours = host.parent_of(task_id) == session
         else:
             ours = bool(harnesses.opencode_rows(
                 "select 1 from session where id = ? and parent_id = ?", (task_id, session)))
         if not ours:
             raise Refused("no such agent in this chat", "not_found")
-        self.oc.abort(task_id, s.cwd)
+        host.abort(task_id, s.cwd)
         with self.lock:
             return {"session": session, "stopped": True, "why": None, **self._brief(s)}
 
@@ -4175,13 +4226,14 @@ class Supervisor:
                 return {"session": session, "cwd": s.cwd, "relocated": True, **self._brief(s)}
         from agent_media_core import opencode_api
 
-        if self.oc.v2 and self.oc.up:
-            self.oc.move(session, cwd)
-        elif opencode_api.installed_v2():
+        host = self._oc_host(s.oc_home)
+        if host.v2 and host.up:
+            host.move(session, cwd)
+        elif opencode_api.installed_v2() or s.oc_home:
             # opencode 2 moves a session itself (its history kept; its next
             # command runs in the new folder, checked on 2.3.0), whether or
             # not a chat of ours has its server open.
-            srv = opencode_api.service()
+            srv = opencode_api.service_for(session)
             if srv is None:
                 raise Refused("could not move it: opencode's server is not running", "refused")
             try:
@@ -4209,7 +4261,7 @@ class Supervisor:
         if not live:
             return {"session": session, "renamed": False,
                     "why": "the name is kept here; opencode is told when the chat is next open"}
-        self.oc.rename(s.id, s.cwd, title)
+        self._oc_host(s.oc_home).rename(s.id, s.cwd, title)
         return {"session": session, "renamed": True, "queued": False, "uuid": ""}
 
     def _oc_interrupt(self, session: str) -> dict:
@@ -4224,7 +4276,7 @@ class Supervisor:
             if s.state not in ("working", "starting"):
                 return {"session": session, "interrupted": False, "why": "not working",
                         **self._brief(s)}
-        out = self.oc.abort(s.id, s.cwd)
+        out = self._oc_host(s.oc_home).abort(s.id, s.cwd)
         with self.cond:
             self.cond.wait_for(lambda: s.state not in ("working", "starting") or not s.live,
                                SETTLE_S)
@@ -4238,13 +4290,15 @@ class Supervisor:
         deny = response.get("behavior") == "deny"
         if entry.get("oc") == "question":
             if deny:
-                self.oc.reject_question(s.id, s.cwd, rid)
+                self._oc_host(s.oc_home).reject_question(s.id, s.cwd, rid)
                 return
             inp = (entry.get("request") or {}).get("input") or {}
             answers = ((response.get("updatedInput") or {}).get("answers")) or {}
-            self.oc.reply_question(s.id, s.cwd, rid, inp.get("questions") or [], answers)
+            self._oc_host(s.oc_home).reply_question(s.id, s.cwd, rid,
+                                                    inp.get("questions") or [], answers)
             return
-        self.oc.reply_permission(s.id, s.cwd, rid, deny, str(response.get("message") or ""))
+        self._oc_host(s.oc_home).reply_permission(s.id, s.cwd, rid, deny,
+                                                  str(response.get("message") or ""))
 
     def _oc_answer(self, session: str, request_id: str, entry: dict, response: dict) -> dict:
         with self.lock:
@@ -4264,14 +4318,14 @@ class Supervisor:
         now — for the moments its event stream was not being read."""
         with self.lock:
             attached = [s for s in self.sessions.values() if s.agent == "opencode" and s.live]
-        for cwd in {s.cwd for s in attached}:
+        for home, cwd in {(s.oc_home, s.cwd) for s in attached}:
             try:
-                status, asked = self.oc.snapshot(cwd)
+                status, asked = self._oc_host(home).snapshot(cwd)
             except Refused as e:
                 log.info("sessiond: opencode reconcile in %s: %s", cwd, e.error)
                 continue
             for s in attached:
-                if s.cwd != cwd:
+                if s.cwd != cwd or s.oc_home != home:
                     continue
                 for kind, props in asked:
                     if isinstance(props, dict) and props.get("sessionID") == s.id \
@@ -4382,7 +4436,7 @@ class Supervisor:
                     live = sum(1 for x in self.sessions.values() if x.live)
                 free = mem_available_mb()
                 return {"ok": True, "pid": os.getpid(), "system_prompt": True,
-                        "opencode_system": True, "held": True,
+                        "opencode_system": True, "opencode_home": True, "held": True,
                         "quota": True, "run_now": True, "hosts": True,
                         "max_live": max_live(), "live": live,
                         "free_mb": round(free) if free is not None else None,
@@ -4406,6 +4460,7 @@ class Supervisor:
                     permissions=str(req.get("permissions") or ""),
                     model=str(req.get("model") or ""), mode=str(req.get("mode") or ""),
                     system_prompt_file=str(req.get("system_prompt_file") or ""),
+                    oc_home=str(req.get("oc_home") or ""),
                     fork_from=str(req.get("fork_from") or ""),
                     fork_at=str(req.get("fork_at") or ""),
                     slot=str(req.get("slot") or ""),

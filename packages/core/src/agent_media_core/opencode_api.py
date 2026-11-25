@@ -291,13 +291,124 @@ def service(start: bool = True) -> Service | None:
     return None
 
 
+class HomeService(Service):
+    """The server of one private chat's home (agent_media_core.private_home):
+    a plain `opencode serve` on its own port and password with XDG_DATA_HOME
+    at the home, so its database is the chat's alone. Its address is kept in
+    `<home>/server.json` (not opencode's service.json: opencode's state
+    folder stays the user's, where agent-media's speech plugin keeps its
+    own), and whoever needs it first starts it — sessiond for a turn, a
+    reader for the transcript. It runs until the chat is sealed
+    (`stop_home`) or the host restarts; its log is in the home, sealed too."""
+
+    def __init__(self, home: Path, env: dict | None = None, program: str = "") -> None:
+        super().__init__(env=env, program=program)
+        self.home = Path(home)
+
+    def _read(self) -> dict:
+        try:
+            got = json.loads((self.home / "server.json").read_text())
+            return got if isinstance(got, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def find(self, start: bool = False) -> bool:
+        rec = self._read()
+        if rec.get("url") and _alive(rec.get("pid")) and \
+                self._answers(str(rec["url"]), str(rec.get("password") or "")):
+            return True
+        if not start:
+            return False
+        import fcntl
+        import secrets
+        import socket
+
+        lock = open(self.home / ".server.lock", "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            rec = self._read()
+            if rec.get("url") and _alive(rec.get("pid")) and \
+                    self._answers(str(rec["url"]), str(rec.get("password") or "")):
+                return True
+            with socket.socket() as sk:
+                sk.bind(("127.0.0.1", 0))
+                port = sk.getsockname()[1]
+            password = secrets.token_urlsafe(24)
+            env = config_env({**os.environ, **self.env})
+            env.update(XDG_DATA_HOME=str(self.home), OPENCODE_SERVER_PASSWORD=password)
+            try:
+                with open(self.home / "server.log", "ab") as out:
+                    proc = subprocess.Popen(
+                        [self.program or _program(), "serve", "--hostname", "127.0.0.1",
+                         "--port", str(port)], cwd=str(Path.home()), env=env,
+                        stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                        start_new_session=True)
+            except OSError as e:
+                log.info("opencode: could not start a private home's server: %s", e)
+                return False
+            url = f"http://127.0.0.1:{port}"
+            f = self.home / "server.json"
+            f.write_text(json.dumps({"url": url, "password": password, "pid": proc.pid}))
+            os.chmod(f, 0o600)
+            end = time.monotonic() + float(os.environ.get("MEDIA_SESSIOND_OPENCODE_START") or 60)
+            while time.monotonic() < end and proc.poll() is None:
+                if self._answers(url, password):
+                    return True
+                time.sleep(0.3)
+            stop_home(self.home)
+            return False
+        finally:
+            lock.close()
+
+
+def stop_home(home: Path) -> None:
+    """End a private home's server, if one runs (before it is sealed)."""
+    home = Path(home)
+    try:
+        rec = json.loads((home / "server.json").read_text())
+        pid = int(rec.get("pid") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return
+    if pid and _alive(pid):
+        import signal
+
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        end = time.monotonic() + 5
+        while time.monotonic() < end and _alive(pid):
+            time.sleep(0.1)
+        if _alive(pid):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except OSError:
+                pass
+    (home / "server.json").unlink(missing_ok=True)
+
+
+def service_for(sid: str, start: bool = True) -> Service | None:
+    """The server that holds `sid`: its private home's when it has one
+    (private_home.opencode_home_of), else the user's."""
+    from . import private_home
+
+    home = private_home.opencode_home_of(sid) if sid else None
+    if home is None:
+        return service(start)
+    s = HomeService(home)
+    return s if s.find(start=start) else None
+
+
 # -- what the readers ask -------------------------------------------------------
 
 
 def session(sid: str, *, start: bool = True) -> dict | None:
     """A session's info (`id, parentID, title, location.directory, time…`), or
     None when there is none or no server."""
-    s = service(start)
+    s = service_for(sid, start)
     if s is None:
         return None
     try:
@@ -315,22 +426,37 @@ def sessions(*, directory: str = "", roots: bool = True, archived: bool = False,
              start: bool = True) -> list[dict]:
     """Every session (newest first): in `directory` when given, only those
     with no parent when `roots`, the archived only when `archived`."""
-    s = service(start)
-    if s is None:
-        return []
     params: dict = {"order": "desc", "archived": "true" if archived else "false"}
     if directory:
         params["directory"] = directory
     if roots:
         params["parentID"] = "null"
-    try:
-        return [x for x in s.pages("/api/session", params) if isinstance(x, dict)]
-    except ApiError:
-        return []
+    out: list[dict] = []
+    s = service(start)
+    if s is not None:
+        try:
+            out = [x for x in s.pages("/api/session", params) if isinstance(x, dict)]
+        except ApiError:
+            out = []
+    # Private chats' homes (private_home.py), only where their server is up:
+    # listing never starts one (each is ~480 MB).
+    from . import private_home
+
+    mine = len(out)
+    for home in private_home.opencode_homes():
+        h = HomeService(home)
+        if h.find(start=False):
+            try:
+                out += [x for x in h.pages("/api/session", params) if isinstance(x, dict)]
+            except ApiError:
+                pass
+    if len(out) > mine:
+        out.sort(key=lambda x: -int(((x.get("time") or {}).get("updated")) or 0))
+    return out
 
 
 def children(sid: str, *, start: bool = True) -> list[dict]:
-    s = service(start)
+    s = service_for(sid, start)
     if s is None:
         return []
     try:
@@ -343,7 +469,7 @@ def children(sid: str, *, start: bool = True) -> list[dict]:
 def messages(sid: str, *, start: bool = True) -> list[dict] | None:
     """A session's messages, oldest first; None when there is no server or
     no such session."""
-    s = service(start)
+    s = service_for(sid, start)
     if s is None:
         return None
     try:
@@ -433,6 +559,15 @@ def records(sid: str, *, start: bool = True) -> list[dict] | None:
 
 def last_at(sid: str, *, start: bool = True) -> float | None:
     """When the session's last message was written, in seconds, or None."""
+    from . import private_home
+
+    home = private_home.opencode_home_of(sid)
+    if home is not None and not HomeService(home).find(start=False):
+        # A private home whose server is not running (the reaper asks every
+        # pass): its database was last written then, and nothing is woken.
+        stamps = [f.stat().st_mtime for f in (home / "opencode").glob("opencode.db*")
+                  if f.is_file()]
+        return max(stamps) if stamps else None
     msgs = messages(sid, start=start)
     if not msgs:
         return None

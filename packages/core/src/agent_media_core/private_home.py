@@ -22,12 +22,15 @@ and a resume runs in the same home; `listed()` keeps them out of Settings'
 login list. A Codex chat on Venice runs in one even with no persona: that is
 how Codex reaches Venice at all.
 
-opencode is not here yet. Its data moves with XDG_DATA_HOME, but on opencode
-2 a chat is read through a background server (opencode_api), and its state
-folder (XDG_STATE_HOME, where that server is found) is also where
-agent-media's own speech plugin keeps the speech history: moving it moves
-that too (tried 25 Nov 2026). A home for it means a server per home that
-sessiond runs and the readers ask — sessiond_opencode's work, not this file's.
+An opencode chat's private home is its own data folder (XDG_DATA_HOME at
+the home, so `<home>/opencode/opencode.db` is the chat's alone) and its own
+`opencode serve` (opencode_api.HomeService, address in `<home>/server.json`),
+which sessiond holds the chat on and the readers ask. opencode's state folder
+is not moved: that is also where agent-media's speech plugin keeps the
+speech history, and moving it moved that too (tried 25 Nov 2026). The render
+goes as `system` with every prompt, as for any headless opencode chat. The
+chat's id is written in the home (`.session`) so a reader knows which server
+to ask. Only headless: a pane would use the user's background server.
 
 Standard library only, as harness_profiles.
 """
@@ -38,12 +41,13 @@ import json
 import os
 import secrets
 import shutil
+import urllib.parse
 from pathlib import Path
 
 from . import harness_profiles
 
 #: The harnesses whose private chats run in a home of their own.
-HARNESSES = ("codex",)
+HARNESSES = ("codex", "opencode")
 
 #: The file that says a profile's directory is a private home.
 MARK = ".private-home"
@@ -97,7 +101,10 @@ def make(harness: str, render: str, *, model: str = "", venice_key: str = "",
     d = Path(p.dir)
     try:
         (d / MARK).write_text(json.dumps({"harness": harness}) + "\n")
-        _make_codex(d, render, model, venice_key, venice_context)
+        if harness == "codex":
+            _make_codex(d, render, model, venice_key, venice_context)
+        else:
+            relink("opencode", d)
     except BaseException:
         harness_profiles.remove(harness, name, delete=True)
         raise
@@ -210,7 +217,75 @@ def venice_models(setting: str | None = None) -> list[dict]:
 
 def env(harness: str, d: Path) -> dict[str, str]:
     """The environment a chat in home `d` runs with (harness_profiles.env)."""
+    if harness == "opencode":
+        return {"XDG_DATA_HOME": str(d)}
     return {"CODEX_HOME": str(d)}
+
+
+def opencode_homes() -> list[Path]:
+    """Every opencode private home here."""
+    return [Path(p.dir) for p in harness_profiles.of("opencode") if is_home(p)]
+
+
+def is_opencode_home(path: str) -> bool:
+    """Whether `path` is one of this host's opencode private homes (sessiond
+    is told one by the server; nothing else is taken as one)."""
+    try:
+        want = Path(path).resolve()
+    except (OSError, ValueError):
+        return False
+    return any(d.resolve() == want for d in opencode_homes())
+
+
+def note_session(home: Path, sid: str) -> None:
+    """The opencode chat a home holds (sessiond, once opencode made it)."""
+    f = Path(home) / ".session"
+    f.write_text(sid + "\n")
+    _FOUND[sid] = Path(home)
+
+
+_FOUND: dict[str, Path] = {}
+
+
+def opencode_home_of(sid: str) -> Path | None:
+    """The private home whose server holds opencode session `sid`: the one
+    its id is written in, else (a subagent's session) a home whose server
+    is up and has it. None: the user's own server."""
+    got = _FOUND.get(sid)
+    if got is not None and got.is_dir():
+        return got
+    homes = opencode_homes()
+    for d in homes:
+        try:
+            if (d / ".session").read_text().strip() == sid:
+                _FOUND[sid] = d
+                return d
+        except OSError:
+            continue
+    if not homes or not sid.startswith("ses"):
+        return None
+    from . import opencode_api
+
+    for d in homes:
+        h = opencode_api.HomeService(d)
+        if h.find(start=False):
+            try:
+                h.call("GET", "/api/session/" + urllib.parse.quote(sid), timeout=3.0)
+            except opencode_api.ApiError:
+                continue
+            _FOUND[sid] = d
+            return d
+    return None
+
+
+def quiesce(harness: str, d: Path) -> None:
+    """Before a home is sealed: nothing of it still running (opencode's server)."""
+    if harness == "opencode":
+        from . import opencode_api
+
+        opencode_api.stop_home(d)
+        for k in [k for k, v in _FOUND.items() if v == d]:
+            del _FOUND[k]
 
 
 def readopt(harness: str, d: Path) -> None:
@@ -230,6 +305,8 @@ def relink(harness: str, d: Path) -> None:
         src = _codex_default()
         for name in ("auth.json", "hooks.json", "skills", "plugins", "packages"):
             _link(src / name, d / name)
+    elif harness == "opencode":
+        _link(_opencode_data_default() / "auth.json", d / "opencode" / "auth.json")
 
 
 def forget(harness: str, name: str) -> None:

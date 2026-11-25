@@ -578,12 +578,12 @@ class Host:
                 time.sleep(1.0)
             if self.proc is not proc:
                 return
-            self.sup._oc_host_exited(proc, proc.returncode or 0)
+            self.sup._oc_host_exited(proc, proc.returncode or 0, host=self)
             return
         for line in getattr(proc, "stdout", None) or []:
             self.stderr_tail.append(line.rstrip("\n")[:500])
         rc = proc.wait()
-        self.sup._oc_host_exited(proc, rc)
+        self.sup._oc_host_exited(proc, rc, host=self)
 
     @staticmethod
     def _terminate(proc: subprocess.Popen) -> None:
@@ -604,11 +604,14 @@ class Host:
             # Not ours to end: let go of it; its chats are parked as when ours stops.
             if proc is not None:
                 log.info("sessiond: letting go of opencode's background server")
-                self.sup._oc_host_exited(proc, 0)
+                self.sup._oc_host_exited(proc, 0, host=self)
             return
         if proc is not None and proc.poll() is None:
             log.info("sessiond: stopping opencode serve pid %d", proc.pid)
             self._terminate(proc)
+
+    #: The private home this host serves ("" the user's own server).
+    home = ""
 
     # -- HTTP --
 
@@ -917,3 +920,61 @@ class Host:
                 pass
             self.listening.clear()
             time.sleep(0.5)
+
+
+class HomeHost(Host):
+    """The server of one private chat's home (core private_home.py,
+    opencode_api.HomeService): its own `opencode serve` on the home's data
+    folder, so the chat's database is its alone and can be sealed. Found
+    through `<home>/server.json` or started, as a reader may have started it;
+    stood in for by `_Shared` like opencode's background server. Stopped when
+    no chat of it is attached (it is ours), and it outlives a sessiond
+    restart, to be found again."""
+
+    def __init__(self, sup, home: str) -> None:
+        super().__init__(sup)
+        self.home = home
+
+    def ensure(self):
+        from pathlib import Path
+
+        from agent_media_core import opencode_api
+
+        from .sessiond import Refused
+
+        with self.lock:
+            if self.up:
+                return self.proc
+            exe = self._program()
+            env = config_env(self.sup._base_env(exe))
+            svc = opencode_api.HomeService(Path(self.home), env=env, program=exe)
+            if not svc.find(start=True):
+                raise Refused("the private chat's opencode server did not start", "spawn_failed")
+            from agent_media_core import opencode_keys
+
+            # Its database starts empty: the user's keys, before its first turn.
+            got = opencode_keys.carry_to(svc)
+            if got:
+                log.info("sessiond: keys carried to a private home's server: %s", ", ".join(got))
+            proc = _Shared(int(svc._read().get("pid") or 0))
+            self.base, self.password = svc.url.rstrip("/"), svc.password
+            self.port = int(urllib.parse.urlsplit(self.base).port or 0)
+            self.proc, self.stopping, self.shared = proc, False, True
+            self.v2, self.version = self._detect()
+            threading.Thread(target=self._drain, args=(proc,), daemon=True,
+                             name="sessiond-opencode-home-watch").start()
+            self.listening.clear()
+            threading.Thread(target=self._events, args=(proc,), daemon=True,
+                             name="sessiond-opencode-home-events").start()
+            if not self.listening.wait(10):
+                log.warning("sessiond: a private home's opencode event stream is not connected yet")
+            log.info("sessiond: opencode private home server pid %d at %s", proc.pid, self.base)
+            return proc
+
+    def stop(self) -> None:
+        from pathlib import Path
+
+        from agent_media_core import opencode_api
+
+        super().stop()
+        opencode_api.stop_home(Path(self.home))

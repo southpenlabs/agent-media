@@ -20,7 +20,7 @@ had exited. This is that for the whole trail, from the app (David, 15 Oct
    (`~/.cache/claude-incoming`, `~/.cache/agent-sessions-incoming`), which
    are the whole transcript again. Hermes and opencode keep conversations in
    a database shared with every other one, so they cannot be sealed: 409.
-   A private Codex chat runs in a home of its own
+   A private Codex or opencode chat runs in a home of its own
    (agent_media_core.private_home), and that whole folder is taken.
 2. **Its spoken lines**: the speech-history rows (`extras.source_session`),
    which hold the text, and the clip files they name with every file beside
@@ -186,6 +186,8 @@ def _home(session: str, harness: str) -> Path | None:
     if harness not in private_home.HARNESSES:
         return None
     try:
+        if harness == harnesses.OPENCODE:
+            return private_home.opencode_home_of(session)
         return private_home.home_of(harness, harnesses.profile_of(session))
     except Exception as e:  # noqa: BLE001 — not found is the shared store's case
         _failures.swallowed(e)
@@ -316,6 +318,13 @@ def seal(session: str) -> dict:
     if not _end(session):
         raise SealError("the session did not exit")
     report = plan(session)
+    from agent_media_core import private_home
+
+    for p in report["transcript"]:
+        # A private home: nothing of it still running (opencode's own server,
+        # which a reader may have started again while the plan was made).
+        if (Path(p) / private_home.MARK).is_file():
+            private_home.quiesce(report["harness"], Path(p))
     cwd = sessions.session_cwd(session)
     from . import moves
 
