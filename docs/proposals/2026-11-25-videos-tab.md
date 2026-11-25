@@ -46,8 +46,17 @@ David asked for Odysee and Rumble too ("Can we also include Odyssee and
 Rumble?"). Odysee is a source like the rest. Rumble comes in by link and
 channel: a pasted Rumble link plays, and a Rumble channel can be followed,
 its uploads listed among Subscriptions (`/videos/list?source=rumble&list=channel:<url>`).
-Getting round its search page's block is not done. Vimeo needs an app token
-and its search API is closed to new apps, so it is left out. Invidious and
+Getting round its search page's block is not done.
+
+Vimeo: its REST search (`GET https://api.vimeo.com/videos?query=`) answers
+an unauthenticated ask with error 8003 ("The app didn't receive the user's
+credentials"), so it needs a token from a free Vimeo developer app. Whether
+that search still covers all public videos for a new app could not be
+confirmed (the developer docs render only in a browser). Until a token is
+tried, Vimeo comes in as Rumble does, by link and followed channel (yt-dlp's
+`vimeo`, `vimeo:channel`, `vimeo:user`); with a token in a server setting
+(`MEDIA_VIMEO_TOKEN`), it becomes a searched source. (An earlier draft said
+its search was closed to new apps; that was not checked.) Invidious and
 Piped were considered as YouTube back ends. They were not chosen: their
 public instances come and go, and yt-dlp is already here.
 
