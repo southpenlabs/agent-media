@@ -223,6 +223,8 @@ def step(api: Api, now: Optional[float] = None, path: Optional[Path] = None,
                               "WHERE id=?", (sn.get("title"), (sn.get("country") or None), json.dumps(topics),
                                              int(st.get("videoCount") or 0), now, it["id"]))
                     seen.add(it["id"])
+                    if not int(st.get("videoCount") or 0):   # no uploads: nothing to ask for
+                        c.execute("UPDATE channels SET done=1, rss_at=? WHERE id=?", (now, it["id"]))
                 for cid in set(ids) - seen:   # gone or hidden: nothing to index
                     c.execute("UPDATE channels SET detailed_at=?, videos=0, done=1, failed='not found' WHERE id=?",
                               (now, cid))
