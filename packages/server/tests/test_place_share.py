@@ -473,3 +473,37 @@ def test_cli_previews_then_posts_with_the_token(tmp_path, pds, monkeypatch, caps
     assert ps.main(["posts"], d) == 0 and "Flinders Pier" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         ps.main(["share", "Nowhere"], d)
+
+
+# --- the default account, and a country from the point (27 Nov 2026) ----------
+
+def test_the_default_account_can_be_switched(tmp_path, pds):
+    d = _deps(tmp_path, pds)
+    rows = [{"handle": h, "did": f"did:plc:{h.split('.')[0]}", "pds": pds.base, "password": "zzqq-secret", "added": 1}
+            for h in ("david.example.com", "project.example.com", "third.example.com")]
+    d.accounts_path().write_text(json.dumps({"": rows}))
+    got = ps.set_default("", "@project.example.com", d)
+    assert [(r["handle"], r["default"]) for r in got] == [("project.example.com", True),
+                                                         ("david.example.com", False), ("third.example.com", False)]
+    assert ps.set_default("", "did:plc:third", d)[0]["handle"] == "third.example.com"
+    assert [r["handle"] for r in ps.accounts("", d)][1:] == ["project.example.com", "david.example.com"]
+    assert "zzqq-secret" not in json.dumps(ps.accounts("", d))
+    with pytest.raises(ps.ShareError) as e:
+        ps.set_default("", "nobody.example.com", d)
+    assert e.value.code == "unknown_account"
+
+
+def test_a_card_without_a_country_gets_it_from_the_point(tmp_path, pds):
+    d = _signed_up(tmp_path, pds)
+    asked = []
+    d.country_at = lambda la, lo: asked.append((la, lo)) or "AU"
+    place = {"name": "Flinders Pier", "id": "way/123456", "lat": -38.4741234, "lon": 145.0215678,
+             "address": "Cook St, Flinders"}
+    addr = ps.preview("", {"place": place}, d)["records"][0]["record"]["place"]["address"]
+    assert addr["country"] == "AU" and addr["locality"] == "Flinders" and asked
+    asked.clear()
+    ps.preview("", {"place": PLACE}, d)          # a card with a country is not asked about
+    assert asked == []
+    d.country_at = lambda la, lo: ""
+    rec = ps.preview("", {"place": place}, d)["records"][0]["record"]
+    assert "address" not in rec["place"]          # no country, no address record, as before

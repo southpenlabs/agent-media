@@ -8,6 +8,8 @@ the person's own repo, and with it, if asked, an ordinary Bluesky post
   POST /map/share/accounts {handle, app_password, pds?}  (admin)
                                     → {account}: resolved, signed in, kept
   POST /map/share/accounts/remove {account}  (admin) → {removed}
+  POST /map/share/accounts/default {account}  (admin) → {accounts}: that
+                                       account first, so it is the default
   POST /map/share/preview {place, text?, tags?, photos?, blur?, account?,
        bluesky_post?, langs?}  (admin)
                                     → {token, records, uris, ...}: exactly
@@ -151,6 +153,7 @@ class Deps:
     things: Callable[[str], list] | None = None
     phone_fixes: Callable[[], list] | None = None
     photo_bytes: Callable[[Any, str], bytes] | None = None
+    country_at: Callable[[float, float], str] | None = None
 
     def accounts_path(self) -> Path:
         if self.accounts is not None:
@@ -199,6 +202,35 @@ class Deps:
 
     def photo(self, ref: Any, book: str) -> bytes:
         return (self.photo_bytes or _photo_bytes)(ref, book)
+
+    def country(self, la: float, lo: float) -> str:
+        return (self.country_at or _country_at)(la, lo)
+
+
+
+_countries: dict[str, str] = {}
+
+
+def _country_at(la: float, lo: float) -> str:
+    """The two-letter country at a point, from the geocoder the Map already
+    uses (Nominatim, a reverse lookup at country level), kept per tenth of a
+    degree for the process; "" when it cannot say. For a card that gives an
+    address line but no country (sasonica-app, mail #1367, 27 Nov 2026)."""
+    key = f"{la:.1f},{lo:.1f}"
+    if key in _countries:
+        return _countries[key]
+    from . import map_wiki
+
+    try:
+        q = {"lat": f"{la:.4f}", "lon": f"{lo:.4f}", "zoom": "3", "format": "jsonv2"}
+        r = map_wiki._json(f"{map_wiki._nominatim_base()}/reverse?{urllib.parse.urlencode(q)}", None, nominatim=True)
+        cc = str(((r or {}).get("address") or {}).get("country_code") or "").upper() if isinstance(r, dict) else ""
+    except Exception as e:  # the lookup is a nicety: no country, no address record
+        _failures.swallowed(e)
+        return ""
+    cc = cc if re.fullmatch(r"[A-Z]{2}", cc) else ""
+    _countries[key] = cc
+    return cc
 
 
 _DEPS = Deps()
@@ -786,7 +818,7 @@ def _osm(place: dict) -> dict | None:
     return {"type": t, "id": n} if t in _OSM_TYPES and n > 0 else None
 
 
-def _address(place: dict, blur: bool) -> dict | None:
+def _address(place: dict, blur: bool, country_hint: str = "") -> dict | None:
     a = place.get("address")
     tags = _obj(place.get("tags"))
     parts: dict = {}
@@ -798,7 +830,7 @@ def _address(place: dict, blur: bool) -> dict | None:
         if bits:
             parts["street"] = bits[0] if len(bits) > 1 else ""
             parts["locality"] = bits[-1]
-    country = (parts.get("country") or str(tags.get("addr:country") or "")).strip().upper()
+    country = (parts.get("country") or str(tags.get("addr:country") or "") or country_hint).strip().upper()
     if not re.fullmatch(r"[A-Z]{2}", country):
         return None
     street = parts.get("street") or " ".join(x for x in (str(tags.get("addr:housenumber") or ""),
@@ -952,6 +984,9 @@ def preview(book: str, body: dict, d: Deps | None = None) -> dict:
         osm = None
     location = {"$type": GEO, "latitude": _num(la, decimals), "longitude": _num(lo, decimals)}
     address = _address(place, blur)
+    if address is None and (place.get("address") or _obj(place.get("tags")).get("addr:street")):
+        # The card gave an address but no country: the point says which.
+        address = _address(place, blur, d.country(la, lo))
     link = osm_link(osm, la, lo, decimals)
     images = []
     for p in prepared:
@@ -1176,8 +1211,23 @@ def delete(book: str, uri: str, who: str = "", d: Deps | None = None) -> dict:
 
 # --- the routes -------------------------------------------------------------
 
+def set_default(book: str, who: str, d: Deps | None = None) -> list[dict]:
+    """Make an account the default: it moves to the front of the book's list,
+    the others keep their order (David, 27 Nov 2026: "Can we add a way of
+    switching default accounts")."""
+    d = d or _DEPS
+    a = _pick(book, who, d)
+    with _lock:
+        whole = _load(d)
+        rows = list(whole.get(book) or [])
+        whole[book] = [r for r in rows if r.get("did") == a.get("did")] + [r for r in rows if r.get("did") != a.get("did")]
+        _save(whole, d)
+    return accounts(book, d)
+
+
 READS = frozenset({("GET", "/map/share/accounts"), ("GET", "/map/share/posts")})
 WRITES = frozenset({("POST", "/map/share/accounts"), ("POST", "/map/share/accounts/remove"),
+                    ("POST", "/map/share/accounts/default"),
                     ("POST", "/map/share/preview"), ("POST", "/map/share/confirm"), ("POST", "/map/share/delete")})
 PATHS = frozenset(p for _, p in READS | WRITES)
 
@@ -1205,6 +1255,8 @@ def route(method: str, path: str, bearer: str, host: bool, body: dict, arg: Call
         if path == "/map/share/accounts":
             return True, {"account": add_account(book, str(body.get("handle") or ""),
                                                  str(body.get("app_password") or ""), str(body.get("pds") or ""), d)}
+        if path == "/map/share/accounts/default":
+            return True, {"accounts": set_default(book, str(body.get("account") or body.get("handle") or ""), d)}
         if path == "/map/share/accounts/remove":
             return True, {"removed": remove_account(book, str(body.get("account") or body.get("handle") or ""), d)}
         if path == "/map/share/preview":
@@ -1253,7 +1305,7 @@ def main(argv: list[str] | None = None, d: Deps | None = None) -> int:
     try:
         if cmd == "accounts":
             ap = argparse.ArgumentParser(prog="media place accounts")
-            ap.add_argument("action", nargs="?", default="list", choices=("list", "add", "remove"))
+            ap.add_argument("action", nargs="?", default="list", choices=("list", "add", "remove", "default"))
             ap.add_argument("handle", nargs="?", default="")
             ap.add_argument("--pds", default="", help="the PDS to ask for the handle first")
             a = ap.parse_args(rest)
@@ -1268,6 +1320,10 @@ def main(argv: list[str] | None = None, d: Deps | None = None) -> int:
                 ap.error("say which handle")
             if a.action == "remove":
                 print(json.dumps(remove_account(book, a.handle, d)))
+                return 0
+            if a.action == "default":
+                for r in set_default(book, a.handle, d):
+                    print(f"{r['handle']:<32} {r['did']:<34} {r['pds']}" + ("  (default)" if r["default"] else ""))
                 return 0
             if sys.stdin.isatty():
                 print("app password (abcd-efgh-ijkl-mnop): ", end="", file=sys.stderr, flush=True)

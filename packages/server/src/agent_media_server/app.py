@@ -628,7 +628,7 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews",
                        "/map/place/wiki", "/map/tour/near", "/map/outdoors", "/map/street_photos", "/map/street_photos/along",
                        # Sharing a place on the AT Protocol (place_share.py, §6.50a).
-                       "/map/share/accounts", "/map/share/accounts/remove", "/map/share/preview",
+                       "/map/share/accounts", "/map/share/accounts/remove", "/map/share/accounts/default", "/map/share/preview",
                        "/map/share/confirm", "/map/share/posts", "/map/share/delete"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 

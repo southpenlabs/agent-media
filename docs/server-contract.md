@@ -12653,6 +12653,10 @@ typed into the app, kept with its session 0600 in
   `unknown_handle`; 401 `sign_in_refused`; 502 `no_did_document`, `no_pds`.
 - `POST /map/share/accounts/remove {account}` (a handle or DID) →
   `{removed: {handle, did}}`; 404 `unknown_account`.
+- `POST /map/share/accounts/default {account}` (a handle or DID; admin) →
+  `{accounts}`, the list as GET answers it with that account first and
+  `default: true`; the others keep their order. 404 `unknown_account`. (David,
+  27 Nov 2026: "Can we add a way of switching default accounts".)
 
 The session is kept and refreshed (`refreshSession`; signed in again from
 the app password when that fails).
@@ -12663,7 +12667,7 @@ the app password when that fails).
 {place: {name, lat, lon,                     // the place's own point
          id?: "node/123" | osm?: {type, id}, // OpenStreetMap, when it has one
          address?: {country (2 letters), region?, locality?, street?, postcode?}
-                   | "12 Cook St, Flinders",  // the card's line (used only with a country)
+                   | "12 Cook St, Flinders",  // the card's line; with no country given, the server works it out from the point (Nominatim, country level)
          tags?: {addr:*…},                   // the card's OSM tags, for address parts
          layer?, saved?},                    // where the card came from (refusals below)
  text?: "≤3000", tags?: ["low-tide", …] (≤8; lower-cased, a-z0-9-),
