@@ -45,7 +45,18 @@ AVAILABLE_LEAVES = frozenset({"settings", "encrypted", "full"})
 NOT_BUILT = "not built yet"
 HOSTED_FULL = "not on a server South Pen Labs hosts"
 FIELDS = frozenset({"leaves_phone", "backup", "apply_to_networks", "network_exceptions",
-                    "history_days", "trash_days"})
+                    "history_days", "trash_days", "homes"})
+#: Where each chat account lives: `homes` maps `<network>:<account id>` to
+#: `host` (a bridge on the server's side: the Matrix bridges today, the
+#: bridges core beside the server later) or `phone` (the companion). One
+#: account bridged in both places is one account to PHS-style IT and in the
+#: chat list (David, 26 Nov 2026: "having both causes unnecessary duplicates
+#: in the chat list"; "whether it be on the host or the paired device should
+#: be configurable from settings"). The app shows the home's row of a chat
+#: and hides its twin; an account with no home chosen follows the default,
+#: `host` (its chats read from every device).
+HOMES = ("host", "phone")
+DEFAULT_HOME = "host"
 #: The encrypted copy's two numbers (design step 6, David 18 Nov 2026: "last
 #: 30 days and the option for more with an explanation"; Trash "a setting").
 HISTORY_DAYS = (1, 3650)
@@ -100,7 +111,8 @@ def defaults() -> dict:
     from . import local_chats
 
     return {"leaves_phone": "settings", "backup": "server", "apply_to_networks": True,
-            "network_exceptions": {}, "names": local_chats.names_on(),
+            "network_exceptions": {}, "homes": {}, "default_home": DEFAULT_HOME,
+            "names": local_chats.names_on(),
             "history_days": DEFAULT_DAYS, "trash_days": DEFAULT_DAYS}
 
 
@@ -179,6 +191,9 @@ def view() -> dict:
     out = {k: held.get(k, dflt[k]) for k in ("leaves_phone", "backup", "apply_to_networks",
                                              "history_days", "trash_days")}
     out["network_exceptions"] = dict(exc) if isinstance(exc, dict) else {}
+    homes = held.get("homes")
+    out["homes"] = dict(homes) if isinstance(homes, dict) else {}
+    out["default_home"] = DEFAULT_HOME
     out.update({"defaults": dflt, "hosted": hosted(), "choosable": _choosable(),
                 "updated": held.get("updated"), "by": held.get("by")})
     return out
@@ -260,6 +275,21 @@ def post(body, bearer: str) -> tuple[bool, dict]:
                 return _bad(f"not a network: {k}", code="unknown_network", field=k)
             if v is not None and not isinstance(v, bool):
                 return _bad(f"network_exceptions.{k} is true, false or null")
+    homes = None
+    if "homes" in body:
+        from .local_chats import ACCOUNT_ID
+
+        homes = body["homes"]
+        if homes is not None and not isinstance(homes, dict):
+            return _bad("homes is {\"<network>:<account>\": \"host\"|\"phone\"|null}")
+        for k, v in (homes or {}).items():
+            net, _, acct = str(k).partition(":")
+            if net not in NETWORKS:
+                return _bad(f"not a network: {net}", code="unknown_network", field=k)
+            if not ACCOUNT_ID.fullmatch(acct):
+                return _bad(f"not an account id: {acct!r}", code="bad_account", field=k)
+            if v is not None and v not in HOMES:
+                return _bad(f"homes.{k} is host, phone or null", field=k)
     device = auth.device_id(bearer) or None
     was_full = view()["leaves_phone"] == "full"
 
@@ -286,6 +316,20 @@ def post(body, bearer: str) -> tuple[bool, dict]:
                     rec["network_exceptions"] = cur
                 else:
                     rec.pop("network_exceptions", None)
+        if "homes" in body:
+            if homes is None:
+                rec.pop("homes", None)
+            else:
+                cur = dict(rec.get("homes") or {})
+                for k, v in homes.items():
+                    if v is None:
+                        cur.pop(k, None)
+                    else:
+                        cur[k] = v
+                if cur:
+                    rec["homes"] = cur
+                else:
+                    rec.pop("homes", None)
         rec["updated"] = round(time.time(), 3)
         rec["by"] = device
         rows[KEY] = rec

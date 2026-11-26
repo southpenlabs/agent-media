@@ -116,7 +116,7 @@ def test_targets_row(one_room):
     assert row["session"] == one_room.thread and row["source"] == "matrix"
     assert row["title"] == "sam" and row["archived"] and not row["live"]
     assert row["recap"]["text"] == "Sam: hello" and row["drivable"] is False
-    assert row["network"] == {"id": "gmessages", "name": "Google Messages"}
+    assert row["network"] == {"id": "gmessages", "name": "Google Messages", "service": "gmessages"}
 
 
 def test_the_log_and_the_stream_snapshot_serve_the_room(one_room):
@@ -586,7 +586,8 @@ def test_a_row_names_the_bridge_login_it_comes_through(one_room, monkeypatch):
     monkeypatch.setattr(matrix, "ACCOUNTS_TTL_S", float("inf"))
     (row,) = matrix.rows(set())
     assert row["network"] == {"id": "gmessages", "name": "Google Messages",
-                              "account": {"id": "100042", "name": "david@example.com"}}
+                              "account": {"id": "100042", "name": "david@example.com"},
+                              "service": "gmessages", "chat": "conv-1"}
     assert one_room.info()["network"]["account"]["id"] == "100042"
     # A login not (yet) named: the id alone; no receiver: no account.
     monkeypatch.setattr(matrix, "_ACCOUNT_NAMES", {})
@@ -611,3 +612,18 @@ def test_login_names_come_from_the_bridges_listing(monkeypatch):
     matrix._refresh_accounts(boom)          # kept as it was
     assert matrix._ACCOUNT_NAMES == {"1": "David J", "2": "+61400"}
     assert matrix.with_account(None, ("b", "1", "c"), {}) is None
+
+
+def test_a_rows_network_names_the_chat_and_the_companions_network():
+    """`with_chat`: what the app matches a phone-bridged twin by (26 Nov 2026)."""
+    from agent_media_server.matrix import with_chat
+
+    got = with_chat({"id": "facebookgo", "name": "Facebook Messenger", "account": {"id": "100001"}},
+                    ("@metabot:example.org", "100001", "200002"))
+    assert got == {"id": "facebookgo", "name": "Facebook Messenger", "account": {"id": "100001"},
+                   "service": "meta", "chat": "200002"}
+    teams = with_chat({"id": "go.mau.fi/mautrix", "name": "Microsoft Teams"},
+                      ("@teamsbot:example.org", "", "19:abc@thread.v2"))
+    assert (teams["service"], teams["chat"]) == ("teams", "19:abc@thread.v2")
+    assert with_chat({"id": "somethingelse", "name": "Other"}, None) == {"id": "somethingelse", "name": "Other"}
+    assert with_chat(None, None) is None

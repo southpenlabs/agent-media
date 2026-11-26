@@ -41,7 +41,9 @@ def test_defaults_on_a_persons_own_server(server):
     assert got["hosted"] is False and got["defaults"]["names"] is True
     assert got["defaults"] == {"leaves_phone": "settings", "backup": "server",
                                "apply_to_networks": True, "network_exceptions": {}, "names": True,
-                               "history_days": 30, "trash_days": 30}
+                               "history_days": 30, "trash_days": 30, "homes": {},
+                               "default_home": "host"}
+    assert (got["homes"], got["default_home"]) == ({}, "host")
     assert (got["history_days"], got["trash_days"]) == (30, 30)
     lp = {c["id"]: c for c in got["choosable"]["leaves_phone"]}
     assert lp["settings"]["available"] is True and "why" not in lp["settings"]
@@ -180,3 +182,30 @@ def test_encrypted_copy_with_its_days(server):
     assert (got["leaves_phone"], got["history_days"], got["trash_days"]) == ("encrypted", 365, 7)
     st, got = post(server, t, {"history_days": None})
     assert (got["history_days"], got["trash_days"]) == (30, 7)
+
+
+def test_each_account_gets_a_home(server):
+    """`homes`: where each chat account lives, host or phone, merged by key;
+    null drops one back to the default (David, 26 Nov 2026)."""
+    phone = _paired(server)
+    st, got = post(server, phone["token"], {"homes": {"teams:8:orgid:aaaa-1111": "host",
+                                                      "whatsapp:61400000000@s.whatsapp.net": "phone"}})
+    assert st == 200, got
+    assert got["homes"] == {"teams:8:orgid:aaaa-1111": "host",
+                            "whatsapp:61400000000@s.whatsapp.net": "phone"}
+    st, got = post(server, phone["token"], {"homes": {"whatsapp:61400000000@s.whatsapp.net": None,
+                                                      "gmessages:someone@example.com/61400000001": "phone"}})
+    assert st == 200 and got["homes"] == {"teams:8:orgid:aaaa-1111": "host",
+                                          "gmessages:someone@example.com/61400000001": "phone"}
+    assert get(server, phone["token"])[1]["homes"] == got["homes"]
+    st, got = post(server, phone["token"], {"homes": None})
+    assert st == 200 and got["homes"] == {}
+
+
+def test_bad_homes_are_refused(server):
+    phone = _paired(server)
+    for body in ({"homes": ["teams"]}, {"homes": {"myspace:x": "host"}},
+                 {"homes": {"teams:": "host"}}, {"homes": {"teams:x": "desk"}}):
+        st, got = post(server, phone["token"], body)
+        assert st == 400, (body, got)
+    assert get(server, phone["token"])[1]["homes"] == {}

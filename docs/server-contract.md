@@ -551,7 +551,14 @@ Everything a message can be pointed at.
   (§6.26: its `name`, else the profile's email, phone or user name), asked
   for in the background every 5 min, so absent until first answered or
   with no bridges add-on. No `account` for a room with no receiver (an
-  older bridge); the room's `room` envelope on the log carries it too. `session` is a uuid made from the room id (stable,
+  older bridge); the room's `room` envelope on the log carries it too. `network.service` and `network.chat` (26 Nov 2026,
+  §6.61 "Homes"): the companion's id for the network (`facebookgo` →
+  `meta`, `instagramgo` → `instagram`, the Teams fork's
+  `go.mau.fi/mautrix` named "Microsoft Teams" → `teams`, the rest as they
+  are; absent for a bridge none of those) and the network's own id for the
+  conversation (the `m.bridge` channel id, the same id the companion files
+  a Local chat under), so the app can show a chat bridged on the server and
+  on the phone once. `session` is a uuid made from the room id (stable,
   so every session route takes it); `title` the room's name, else its other
   members; `recap` the last message, `{"text": "<name>: <words>", "at",
   "source": "matrix"}`; never live, rested or pinned. `/conversation/log`
@@ -14505,7 +14512,7 @@ them. **One per server**, not per account: Local chats are kept per server
 ```
 GET /local/settings → <settings>
 POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network_exceptions"?,
-                      "history_days"?, "trash_days"?}
+                      "history_days"?, "trash_days"?, "homes"?}
   → <settings>                                   // a partial change; null = back to the default
 
 <settings> = {"ok": true,
@@ -14514,8 +14521,10 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   "apply_to_networks": bool,
   "network_exceptions": {"<network>": bool},     // that network's own choice over the main switch
   "history_days": n, "trash_days": n,            // the encrypted copy's (default 30 and 30)
+  "homes": {"<network>:<account id>": "host" | "phone"},  // where each chat account lives
+  "default_home": "host",
   "defaults": {"leaves_phone", "backup", "apply_to_networks", "network_exceptions": {}, "names": bool,
-               "history_days": 30, "trash_days": 30},
+               "history_days": 30, "trash_days": 30, "homes": {}, "default_home": "host"},
   "hosted": bool,
   "choosable": {"leaves_phone": [{"id", "available": bool, "explain": "<what leaves, who reads it>",
                                    "why"?: "not built yet" | "not on a server South Pen Labs hosts"}…],
@@ -14563,6 +14572,20 @@ POST /local/settings {"leaves_phone"?, "backup"?, "apply_to_networks"?, "network
   drops them all. A key not a network of §6.61 is 400
   `code: "unknown_network"`, `field` naming it; a value not true, false or
   null 400.
+- **Homes** (26 Nov 2026; David: one account bridged on the server and on
+  the phone is "unnecessary duplicates in the chat list", and "whether it be
+  on the host or the paired device should be configurable from settings"):
+  each chat account's one home, keyed `<network>:<account id>` (a network
+  of §6.61, the bridge login's id as a row's `network.account.id`):
+  `host` (a bridge on the server's side: the Matrix bridges today) or
+  `phone` (the companion). Merged by key like the exceptions, `null` drops
+  one, `"homes": null` drops them all; an unknown network 400
+  `code: "unknown_network"`, a bad account id 400 `code: "bad_account"`, a
+  value not host, phone or null 400. An account with no home follows
+  `default_home`, `host`. The app shows a chat carried in both places once,
+  as its home's row (a Matrix row's `network.service` and `network.chat`,
+  §6.1, against the Local id), and Settings → Bridges offers to sign the
+  other place's login out, so the account has one sign-in.
 - Any other field is 400 `code: "field_not_accepted"`; a bad value 400.
   Nothing is written on a refusal.
 - Stored in `<state_dir>/local-settings.json`, 0600, as only what was

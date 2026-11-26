@@ -1080,6 +1080,35 @@ def with_account(network: dict | None, channel: tuple | None,
     return {**network, "account": {"id": receiver, **({"name": name} if name else {})}}
 
 
+#: A Matrix bridge's protocol id → the companion's network id (local_chats.NETWORKS),
+#: so a chat bridged on the server and on the phone is known as one (`twin_of`).
+#: mautrix-meta calls its two `facebookgo` and `instagramgo`; the Teams fork
+#: gives no protocol id of its own (`go.mau.fi/mautrix`), so it goes by name.
+SERVICES = {"facebookgo": "meta", "facebook": "meta", "messenger": "meta", "meta": "meta",
+            "instagramgo": "instagram", "instagram": "instagram", "whatsapp": "whatsapp",
+            "gmessages": "gmessages", "telegram": "telegram", "signal": "signal",
+            "slackgo": "slack", "slack": "slack", "discordgo": "discord", "discord": "discord",
+            "teams": "teams", "msteams": "teams"}
+SERVICE_NAMES = {"microsoft teams": "teams"}
+
+
+def with_chat(network: dict | None, channel: tuple | None) -> dict | None:
+    """A row's `network` with `service` (the companion's id for the network)
+    and `chat` (the network's own id for the conversation, the `m.bridge`
+    channel): with `account`, what the app matches a phone-bridged twin by
+    (David, 26 Nov 2026: one account, one row in the chat list)."""
+    if not network:
+        return network
+    service = SERVICES.get(str(network.get("id") or "")) or SERVICE_NAMES.get(
+        str(network.get("name") or "").strip().lower())
+    out = dict(network)
+    if service:
+        out["service"] = service
+    if channel and channel[2]:
+        out["chat"] = channel[2]
+    return out
+
+
 _ROOMS: dict[str, Room] = {}       # by thread id
 #: Portals a bridge closed (its "Deleting portal" leave of the owner), by
 #: `_channel`: room ids, the last closed first. A room for the same
@@ -1169,7 +1198,7 @@ def rows(flags: Collection[str] = frozenset()) -> list[dict]:
                                       if last else None),
                             "archived": r.thread in flags, "rested": None, "pinned": False,
                             "harness": "matrix", "source": "matrix", "room": r.id,
-                            "network": with_account(r.network, r.channel),
+                            "network": with_chat(with_account(r.network, r.channel), r.channel),
                             "drivable": bool(owner_token()),
                             # When the network is told it was read (§6.32).
                             "read_receipts": read_receipts.mode_of(r.thread),
