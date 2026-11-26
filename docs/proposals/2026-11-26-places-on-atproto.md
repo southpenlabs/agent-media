@@ -91,10 +91,11 @@ atproto replaces it when the app gains a sign-in screen for other people.
 Voice posts (a spoken note on a place, then on its own) come after, as the
 next app.
 
-## Open
+## Decided (David, 26 Nov 2026)
 
-- Post as David's own account by default, or ask each time between him and
-  `@sasonica.com`?
-- Round a place's coordinates (to ~100 m) for places that are not public
-  businesses or landmarks, such as a quiet beach access?
-- Photos: from the phone's gallery only, or also from a chat's attachments?
+- **Account:** David's own (`david.sasonica.com`) by default, with
+  `@sasonica.com` offered in the confirm step (he was unsure; the default
+  was taken, easy to change in Settings).
+- **Blurring:** offered when posting, off by default: a "blur to about 100 m"
+  tick for places that are not a public business or landmark.
+- **Photos:** from the phone's gallery or a photo already sent in a chat.
