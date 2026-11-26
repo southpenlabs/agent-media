@@ -135,6 +135,7 @@ Sorted with what blocks a public release first. 61 rows.
 | 92 | Odysee's search index (lighthouse.odysee.tv/search; thumbnails from thumbnails.lbry.com / thumbs.odycdn.com, the embed from odysee.com) | the Videos tab's Odysee rows (§6.70; David, 25 Nov 2026: "Can we also include Odyssee and Rumble?") | none | one request per search and page, kept 10 min | **Needs work**: the index Odysee's own site uses, undocumented and without published terms; ask Odysee before a public release, or gate it | no |
 | 93 | Rumble (rumble.com, read by yt-dlp's Rumble and RumbleChannel extractors) | not searched: its search page refuses automated clients (403 from red2), and that is not worked round. A shared Rumble link and followed channels come with the Videos proposal's step 3 | none | not in use yet | **Needs work**: its terms bar automated access; decide with step 3 whether reading a link or channel with yt-dlp goes behind the personal-use switch | to decide (step 3) |
 | 94 | Vimeo API (api.vimeo.com/videos?query=) | the Videos tab's Vimeo rows, only when a token is set (§6.70; David, 25 Nov 2026: "What about Vimeo?") | the owner's own free Vimeo developer app's access token (public scope), `MEDIA_VIMEO_TOKEN` (set on red2 25 Nov 2026; without one Vimeo is off the source list) | 50 asks a quarter hour per token (x-ratelimit-limit): one request per search and page, answers kept 6 hours; a 429 rests it until its reset, reported as Vimeo failing | **Check**: its API terms ask for attribution and for the embed player for playback (`embed` is its player); whether its search covers all public videos for a new app is unconfirmed | no (each install its owner's token) |
+| 95 | The person's AT Protocol PDS (any: David's is pds.sasonica.com, red5) and, to find it, plc.directory (did:plc documents), the handle's own `/.well-known/atproto-did` and the Bluesky AppView (public.api.bsky.app, `resolveHandle`, when the handle has no well-known file) | sharing a place from the Map's card as a `com.sasonica.place.post` record and, if asked, a Bluesky post; listing and deleting them (`/map/share/*`, `media place share`, place_share.py; places proposal step 1, 27 Nov 2026; §6.50a) | the person's own app password per account, typed into the app or `media place accounts add` (stdin), kept with its session tokens 0600 in `atproto-accounts.json`, never logged or answered; none for the directory, well-known or AppView reads | a resolve and `createSession` when an account is added; `describeServer` per preview; `uploadBlob` and one `applyWrites` per confirmed post; `listRecords` when the app lists posts; never automatic (preview, then confirm with its token) | **Fine**: the person posts to their own repo with their own credential, as any Bluesky client does; Bluesky's Community Guidelines and Terms (bsky.social/about/support) apply to what is posted, and its developer guidelines ask clients to respect rate limits (a few calls per post here) and not to automate posting without the person's say (nothing is posted unasked). Before other people: OAuth for atproto replaces app passwords (the proposal's "How the server signs in") | no |
 
 ## The services, one by one
 
@@ -1163,6 +1164,35 @@ hosted tier), every one of these becomes a reseller question.
   with the public scope, and put it in `MEDIA_VIMEO_TOKEN` in
   `~/.config/agent-media.env`, then `media update --only agent-media-server`.
 - **Personal-use switch:** YouTube yes (the add-on); the rest no.
+
+### 95. The AT Protocol: the person's PDS, plc.directory, the Bluesky AppView
+
+- **Used for:** Share on a place's card (`/map/share/*`, `media place share`,
+  `place_share.py`, §6.50a; docs/proposals/2026-11-26-places-on-atproto.md
+  step 1). A `com.sasonica.place.post` record, and an ordinary Bluesky post
+  if asked, written to the person's own repo on their own PDS (any PDS:
+  David's is `https://pds.sasonica.com`, as `david.sasonica.com`).
+- **How:** XRPC over HTTPS, with no client library (MarshalX's `atproto`
+  was looked at; six calls did not need it): `createSession` and
+  `refreshSession`, `describeServer`, `uploadBlob`, `applyWrites`,
+  `listRecords`, `getRecord`. Adding an account resolves the handle
+  (`<handle>/.well-known/atproto-did`, else the Bluesky AppView's
+  `resolveHandle` at `public.api.bsky.app`) and the DID
+  (`https://plc.directory/<did>`, or a did:web's `/.well-known/did.json`).
+  `MEDIA_ATPROTO_PLC_URL` and `MEDIA_ATPROTO_APPVIEW_URL` point elsewhere;
+  tests use a fake PDS on 127.0.0.1 and conftest refuses any other address.
+- **Credential:** an app password per account, the person's own, typed in
+  the app (admins) or given on stdin to `media place accounts add`; kept
+  with its session tokens 0600 in `state_dir()/atproto-accounts.json`,
+  never logged, never answered, never in a chat. The account's own
+  password is refused (only `xxxx-xxxx-xxxx-xxxx`).
+- **What leaves:** only what the preview showed and the person confirmed:
+  the place's own point (to about 100 m when blurred), name, address parts,
+  words, tags and photos stripped of their metadata. Public and permanent
+  in effect: relays copy a repo as it changes.
+- **Before other people:** OAuth for atproto in place of app passwords,
+  once the app has a sign-in screen for them.
+- **Personal-use switch:** no.
 
 ## Before other people use this
 

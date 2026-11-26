@@ -93,6 +93,11 @@ atproto replaces it when the app gains a sign-in screen for other people.
 
 1. **Share a place** from its card: the post, the optional Bluesky post, the
    second ask, Delete. Posts as David to start.
+   **Built 27 Nov 2026** (server side, `place_share.py`; contract §6.50a,
+   `/features` `place_share`): accounts with app passwords, preview with a
+   token, confirm, own posts, delete, and `media place share` for a chat;
+   photos lose their metadata before they leave. The app's screens are
+   sasonica-app's.
 2. **Friends' places** layer (follows' records), and the place card shows
    friends' posts about it.
 3. **Lists**: make, add to, follow.

@@ -423,6 +423,12 @@ except /pair, which is how a device gets its token):
                   (open data, CC BY 4.0), with stars and count; POST {name, lat,
                   lon, stars, opinion?, confirm: true} posts the account's own,
                   signed with its key (map_reviews.py, §6.50)
+  GET  /map/share/accounts | POST …/accounts {handle, app_password} | …/remove
+                  → the AT Protocol accounts a place is shared as; POST
+                  /map/share/preview {place, text, tags, photos, blur, account,
+                  bluesky_post} → the records exactly, and a token; POST
+                  /map/share/confirm {token} writes them; GET /map/share/posts,
+                  POST /map/share/delete {uri} (place_share.py, §6.50a)
   GET  /map/place/wiki?wikidata=|osm=|lat=&lon= → a place's write-up, photo and
                   facts (Wikipedia, Commons, Wikidata) and its town's See / Do /
                   Eat / Sleep (Wikivoyage), credited (map_wiki.py, §6.50)
@@ -620,7 +626,10 @@ MAP_PATHS = frozenset({"/map/layers", "/map/layer", "/map/alerts", "/map/speed_l
                        "/map/overlay", "/map/link", "/map/place_hours", "/map/check_hours",
                        "/map/osm", "/map/osm/start", "/map/osm/signout", "/map/osm/hours", "/map/osm/read_hours",
                        "/map/traffic", "/map/traffic/eta", "/map/offline", "/map/offline/build", "/map/reviews",
-                       "/map/place/wiki", "/map/tour/near", "/map/outdoors", "/map/street_photos", "/map/street_photos/along"})
+                       "/map/place/wiki", "/map/tour/near", "/map/outdoors", "/map/street_photos", "/map/street_photos/along",
+                       # Sharing a place on the AT Protocol (place_share.py, §6.50a).
+                       "/map/share/accounts", "/map/share/accounts/remove", "/map/share/preview",
+                       "/map/share/confirm", "/map/share/posts", "/map/share/delete"})
 CORS_PATHS = CORS_PATHS | MAP_PATHS
 
 # What the watchers report (alerts.py, §6.17). The same arrangement.
@@ -6855,6 +6864,13 @@ def _org(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
                 ok, detail = map_reviews.reviews(arg("name"), arg("lat"), arg("lon"), arg("osm_id"), account)
             else:
                 ok, detail = map_reviews.post(account, _read_json(h) or {})
+    elif path.startswith("/map/share/"):
+        # Sharing a place as an AT Protocol post, and a Bluesky one (place_share.py, §6.50a).
+        from . import place_share
+
+        host = _TOKEN_OK is not None and _TOKEN_OK(h)
+        ok, detail = place_share.route(method, path, bearer, host,
+                                       (_read_json(h) or {}) if method == "POST" else {}, arg)
     elif method == "GET" and path == "/map/place/wiki":
         # A place's Wikipedia, Commons and Wikidata, and its town's Wikivoyage (map_wiki.py, §6.50).
         from . import map_layers, map_wiki

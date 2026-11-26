@@ -10290,6 +10290,15 @@ def cmd_backup(a) -> int:
     return mod.main(a.args or [])
 
 
+def cmd_place_share(a) -> int:
+    """`media place share|accounts|posts|unshare …`: a place as an AT Protocol
+    post, previewed first (agent_media_server.place_share)."""
+    mod = _server_module("place_share")
+    if mod is None:
+        return 1
+    return mod.main(a.args or ["--help"])
+
+
 def cmd_uploads(a) -> int:
     """`media uploads [--days N] [--json]`: every POST /upload, kept or
     refused, from the upload log (agent_media_server.upload_log)."""
@@ -11418,6 +11427,15 @@ def _build_parser() -> argparse.ArgumentParser:
     t.add_argument("--limit", type=int, default=5)
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_place_find)
+    for name, words in (("share", "post a place to your AT Protocol repo (and Bluesky): a preview, then "
+                                  "--go TOKEN once the person has said yes"),
+                        ("accounts", "the AT Protocol accounts places are shared as: list, add <handle> "
+                                     "(app password on stdin), remove <handle>"),
+                        ("posts", "your shared places"),
+                        ("unshare", "delete a shared place and its Bluesky post: <at:// uri>")):
+        t = psub.add_parser(name, add_help=False, help=words)
+        t.add_argument("args", nargs=argparse.REMAINDER)
+        t.set_defaults(func=lambda a, n=name: cmd_place_share(argparse.Namespace(args=[n, *a.args])))
     t = psub.add_parser("link", help="a shared map link (Google, Apple, OSM, geo:) as its "
                                       "places, and the [[route:]] or [[map:]] marker for them")
     t.add_argument("url", nargs="+", help="the link, or words with one in them")
@@ -13305,6 +13323,9 @@ def main(argv=None) -> int:
         return cmd_mail(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["session"]:
         return cmd_session(argparse.Namespace(args=list(argv[1:])))
+    if argv[:1] == ["place"] and argv[1:2] in (["share"], ["accounts"], ["posts"], ["unshare"]):
+        # Its own parser (place_share.main): `--go TOKEN`, a southern lat,lon.
+        return cmd_place_share(argparse.Namespace(args=list(argv[1:])))
     if argv[:1] == ["uploads"]:
         return cmd_uploads(argparse.Namespace(args=list(argv[1:])))
     parser = _build_parser()

@@ -57,6 +57,7 @@ files = [
     "src/agent_media_server/mail_remote.py",
     "src/agent_media_server/forge.py",
     "src/agent_media_server/contacts_carddav.py",
+    "src/agent_media_server/place_share.py",
 ]
 follow_imports = "silent"
 ignore_missing_imports = true

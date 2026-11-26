@@ -12615,6 +12615,144 @@ there are and serves each as GeoJSON; the app draws what it is sent. Code:
   so only the answer enters the chat; the agent notes say to use it only
   when the user asks where they have been.
 
+### 6.50a Sharing a place on the AT Protocol — reading not a guest, posting admins (built 27 Nov 2026)
+
+docs/proposals/2026-11-26-places-on-atproto.md, build step 1 (David, 26 Nov
+2026: "places are a great start"); `place_share.py`, tests in
+`test_place_share.py` against a fake PDS in the process. `/features`:
+`place_share`. A place from the Map's card becomes a
+`com.sasonica.place.post` record in the person's own AT Protocol repo and,
+if asked, an ordinary Bluesky post (`app.bsky.feed.post`) made with it.
+Everything in a repo is public, and deleting it does not unsay it: nothing
+is written without a preview and a confirm carrying the preview's token.
+
+Gates: every route is the Map's (§6.50: a paired device, not a guest; the
+host's own token as the owner). Adding or removing an account, preview,
+confirm and delete need an admin (`not_admin` 403 for a member). Accounts
+are kept per book (the owner's for the host and the owner's devices).
+Errors are `{ok: false, code, error}` with the status below; `refused`
+(502) carries the PDS's own words, `unreachable` (502) when it did not
+answer.
+
+**Accounts** (Settings → Bluesky accounts). An app password per account
+(Bluesky: Settings → Privacy and security → App passwords; any PDS),
+typed into the app, kept with its session 0600 in
+`state_dir()/atproto-accounts.json`, never logged and never answered.
+
+- `GET /map/share/accounts` → `{accounts: [{handle, did, pds, added (epoch
+  s), default (the first: the one used when none is named), signed_in}]}`.
+- `POST /map/share/accounts {handle, app_password, pds?}` → `{account}` (the
+  same shape). The handle (`@` or not) is resolved to its DID (`pds`'s
+  resolveHandle when given, then `https://<handle>/.well-known/atproto-did`,
+  then the Bluesky AppView), the DID to its document (plc.directory for
+  `did:plc`, `/.well-known/did.json` for `did:web`), which must name the
+  handle back, and the document to its PDS; then `createSession` proves
+  the password. Adding one already there replaces its password in place.
+  400 `not_app_password` (not `xxxx-xxxx-xxxx-xxxx`, or the account's own
+  password), `bad_handle`, `handle_mismatch`, `too_many` (10); 404
+  `unknown_handle`; 401 `sign_in_refused`; 502 `no_did_document`, `no_pds`.
+- `POST /map/share/accounts/remove {account}` (a handle or DID) →
+  `{removed: {handle, did}}`; 404 `unknown_account`.
+
+The session is kept and refreshed (`refreshSession`; signed in again from
+the app password when that fails).
+
+**Preview** — `POST /map/share/preview`:
+
+```
+{place: {name, lat, lon,                     // the place's own point
+         id?: "node/123" | osm?: {type, id}, // OpenStreetMap, when it has one
+         address?: {country (2 letters), region?, locality?, street?, postcode?}
+                   | "12 Cook St, Flinders",  // the card's line (used only with a country)
+         tags?: {addr:*…},                   // the card's OSM tags, for address parts
+         layer?, saved?},                    // where the card came from (refusals below)
+ text?: "≤3000", tags?: ["low-tide", …] (≤8; lower-cased, a-z0-9-),
+ photos?: [{upload: "<POST /upload path>", alt?} | {room, event, alt?} | "<path>"] (≤4),
+ blur?: false, account?: "<handle or did>", bluesky_post?: true, langs?: ["en"]}
+```
+
+→ `{token, expires (epoch s, an hour), account: {handle, did, pds},
+records: [{collection, rkey, uri, record}], uris: {place, bluesky?}, link
+(the OSM page), blurred, photos: [{cid, mime, size, resized, width?,
+height?}], bluesky_link?, bluesky_text?, bluesky_truncated?, public (the
+words to show: public and for good)}`. Nothing is sent to the PDS but its
+read-only `describeServer` (for the blob limit). `records` is exactly what
+confirm writes, in that order of meaning; only each `createdAt` is set
+again, to the time it is posted. The app shows the post from it (text,
+place, photos, the Bluesky post's words) and the `public` line.
+
+The place post:
+
+```
+{$type: "com.sasonica.place.post",
+ place: {name, osm?: {type: "node"|"way"|"relation", id: 123},
+         location: {$type: "community.lexicon.location.geo", latitude: "-38.474123", longitude: "145.021568"},
+         address?: {$type: "community.lexicon.location.address", country: "AU", region?, locality?, postalCode?, street?}},
+ text, tags?, images?: [{image: <blob>, alt, aspectRatio?: {width, height}}],
+ langs, blurred?: true, bskyPost?: "at://<did>/app.bsky.feed.post/<rkey>", createdAt}
+```
+
+The Bluesky post: `text` = the words, a blank line, `📍 <name>` and the
+tags as `#hashtags` (the words cut with `…` to fit 300 characters, then
+`bluesky_truncated`; tags dropped first); facets: a link on the name to
+the place's OSM page (`/node/123`, or `?mlat=&mlon=` for one without an
+id) and a tag facet per hashtag; `embed`: `app.bsky.embed.images` with
+the same blobs and alt text, or with no photos an `app.bsky.embed.external`
+card for the OSM page; `langs`.
+
+`blur: true` writes the point to 3 decimals (about 100 m), drops the OSM
+id and the street, and the link is the blurred point's.
+
+Photos: a file shared with `POST /upload` (only under the upload root) or
+a chat room's photo (`{room: <thread>, event: <event id>}`, §6.29), JPEG or
+PNG (WebP and HEIC are converted where Pillow or ffmpeg can). Every one
+loses its metadata — EXIF (where it was taken), XMP, IPTC, comments, the
+multi-picture index and anything after the image (a motion photo's video);
+the orientation alone stays — and one over the limit (the lesser of the
+PDS's `blobUploadLimit` and Bluesky's 1,000,000 bytes for an embedded
+image) is made smaller as a JPEG (`resized`). The blob refs in `records`
+are the CIDs the PDS will give them (CIDv1, raw, sha-256).
+
+Refused (the proposal's hard rule): 403 `private_place` for a place from
+the `phone`, `things` ("Your things"), `parked`, `history` or trip layers,
+`saved: home|work`, a point within 150 m of the book's saved Home or Work
+or 30 m of a placed thing; 403 `phone_position` for `from_phone: true` or a
+point with no OSM id within 15 m of where a phone last said it was (a pin
+dropped on oneself; a café with an OSM id the phone is in is fine). Also
+400 `bad_place`, `too_long`, `too_many_photos`, `bad_photo`; 413
+`photo_too_large`; 404 `no_account` (none set up: offer Settings),
+`unknown_account`.
+
+**Confirm** — `POST /map/share/confirm {token}` → `{uri (the place post),
+cid?, bsky_uri?, bsky_link? (https://bsky.app/profile/<handle>/post/<rkey>),
+account: {handle, did}}`. Uploads the staged photos (`uploadBlob`) and
+writes the records in one `applyWrites` (the Bluesky post and the place
+post together, or neither). The staged preview is used once. 404
+`no_preview` (over an hour old, already posted, another book's), 400
+`bad_token`, 409 `changed` (the staged files no longer match the token),
+502 `blob_mismatch`.
+
+**Own posts** — `GET /map/share/posts?account=&cursor=&limit=` →
+`{account, posts: [{uri, rkey, cid, name, text, tags, createdAt, blurred,
+lat?, lon?, osm?, address?, bsky_uri?, bsky_link?, images: [{url (the
+PDS's getBlob, public), alt}]}], cursor?}`, newest first (`listRecords` on
+the account's repo).
+
+**Delete** — `POST /map/share/delete {uri, account?}` → `{deleted: [uri…],
+note}`: the place post and the Bluesky post it names, in one
+`applyWrites`. 400 `bad_uri` (not a `com.sasonica.place.post` URI), 403
+`not_yours`, 404 `not_found`. The app says what `note` says: copies others
+made may remain.
+
+**The agent path.** `media place share <name> <lat,lon> [--osm node/1]
+[--text …] [--tag …] [--photo <upload path> --alt …] [--blur] [--account
+…] [--no-bluesky] [--country AU --region … --locality … --street …]` prints
+the preview and its token; `media place share --go <token>` posts that
+preview. The agent notes say to run it only when the user asks, show the
+whole preview, and `--go` only after they say yes. `media place accounts
+[add <handle> [--pds URL] | remove <handle>]` (the app password on stdin),
+`media place posts`, `media place unshare <at:// uri>`.
+
 ### 6.51 Related threads from the org-roam graph — gated (built 7 Nov 2026)
 
 David, 7 Nov 2026 (planned in thread a0910dbc): use the org-roam links

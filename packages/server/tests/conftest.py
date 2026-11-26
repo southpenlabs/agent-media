@@ -129,6 +129,20 @@ def _clean_media_env(monkeypatch, tmp_path, request):
     monkeypatch.setattr(map_reviews, "_post", _no_mangrove)
     monkeypatch.setattr(map_reviews, "_keys_path", lambda: tmp_path / "mangrove-keys.json")
     map_reviews.forget()
+    # No test reaches a real PDS, plc.directory or Bluesky (place_share.py):
+    # only a fake one on 127.0.0.1, and its accounts and previews in a scratch folder.
+    from agent_media_server import place_share
+
+    _real_http = place_share._http
+
+    def _local_only(method, url, headers, body):
+        if not url.startswith(("http://127.0.0.1:", "http://localhost:")):
+            raise RuntimeError(f"a test reached a real AT Protocol service: {url}")
+        return _real_http(method, url, headers, body)
+
+    monkeypatch.setattr(place_share, "_http", _local_only)
+    monkeypatch.setattr(place_share, "_DEPS", place_share.Deps(accounts=tmp_path / "atproto-accounts.json",
+                                                               stage=tmp_path / "place-share"))
     # Wikipedia, Wikidata, Commons, Wikivoyage and Nominatim (map_wiki.py) are
     # never asked by a test, and its answers are kept in a scratch folder.
     from agent_media_server import map_wiki
