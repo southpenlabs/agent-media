@@ -10182,18 +10182,14 @@ wait_for_url_pattern?, hidden?}`; each field has `id`, `required` and
 `local_storage`; `request_header`; `request_body`; `special`), any one of
 which is enough.
 
-- **On Android** the app opens `url` in a native, full-screen WebView of
-  its own (with `user_agent` when given), the user signs in, and the app
-  reads the `cookie` sources from Android's cookie store for
-  `https://<cookie_domain>` (HttpOnly ones included), `local_storage`
-  ones and `extract_js` by script. It submits when every required field
-  has a value and the page's URL matches `wait_for_url_pattern` (or when
-  the user taps Done with every required field found). It then removes
-  those domains' cookies from the WebView, so the app holds no session of
-  its own. `request_header`/`request_body` sources are not read.
-- **Anywhere else** (a browser) the app cannot read another site's
-  cookies: it shows the step's `instructions` and a box for the JSON of
-  the cookies (what the bridge bot takes), submitted as `values`.
+- **On Android, with Sasonica Bridges** (since 26 Nov 2026; David: "keep
+  all of the bridging out of sasonica itself for legal reasons") the app
+  hands the step, as relayed, to the companion (`org.sasonica.bridges.COOKIE_STEP`,
+  sasonica-bridges docs/android.md), which opens the page in its own
+  WebView, reads the fields there and hands them back; the app submits
+  them as `values`. The app has no sign-in WebView of its own.
+- **Anywhere else** (a browser, or no companion) the step says to finish
+  in Sasonica on a phone with the companion. There is no paste box.
 
 ### 6.27 Reactions on messages — gated (built 26 Oct 2026)
 
