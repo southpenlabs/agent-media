@@ -301,3 +301,18 @@ def test_whatsapp_ghosts_number_or_lid():
 
     assert "+61412345678" in contacts.identities("@whatsapp_61412345678:ryer.org")["phones"]
     assert not contacts.identities("@whatsapp_lid-123456789012345:ryer.org")["phones"]
+
+
+def test_every_networks_group_only_people_carry_a_label():
+    # David, 26 Nov 2026: 3,252 Telegram group members had no label. Any
+    # network's group-only people are "<its name> groups"; Messenger's and
+    # Instagram's keep their names; Teams is "Teams" by its name too, since
+    # the bridges add-on's Teams bridge reports a generic id.
+    label = contacts._bridge_label
+    assert label("telegram", "Telegram", direct=False) == "Telegram groups"
+    assert label("telegram", "Telegram", direct=True) is None
+    assert label("whatsapp", "WhatsApp", direct=False) == "WhatsApp groups"
+    assert label("facebookgo", "Facebook Messenger", direct=False) == "Messenger groups"
+    assert label("go.mau.fi/mautrix", "Microsoft Teams", direct=True) == "Teams"
+    assert label("go.mau.fi/mautrix", "Microsoft Teams", direct=False) == "Teams"
+    assert label("x", "", direct=False) is None

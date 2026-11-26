@@ -1981,14 +1981,27 @@ def own_ghosts(rooms: list | None = None) -> set[str]:
     return out
 
 
-#: The label a person met only in a bridged group chat carries, by network
-#: id, so People can show them apart (David, 19 Oct 2026: a full list).
+#: The label a person met only in a bridged group chat carries, so People
+#: can show them apart (David, 19 Oct 2026: a full list). These names stay
+#: as they were; any other network's group-only people are "<its name>
+#: groups", the name the bridges add-on gives it (David, 26 Nov 2026: "Can
+#: we add a label to them?" — 3,252 Telegram group members had none).
 GROUP_LABELS = {"facebookgo": "Messenger groups", "facebook": "Messenger groups",
                 "meta": "Messenger groups", "instagramgo": "Instagram groups",
                 "instagram": "Instagram groups"}
 #: Networks whose people all carry one label, whether met one to one or in
-#: a group: Teams is work.
-NETWORK_LABELS = {"msteams": "Teams", "teams": "Teams"}
+#: a group: Teams is work. By network id or the network's name (the bridges
+#: add-on's Teams bridge reports a generic id, go.mau.fi/mautrix).
+NETWORK_LABELS = {"msteams": "Teams", "teams": "Teams", "microsoft teams": "Teams"}
+
+
+def _bridge_label(net: str, name: str, direct: bool) -> str | None:
+    """The label a bridged person carries: their network's, else, met only in
+    groups, the group label."""
+    label = NETWORK_LABELS.get(net) or NETWORK_LABELS.get((name or "").lower())
+    if label or direct:
+        return label
+    return GROUP_LABELS.get(net) or (f"{name} groups" if name else None)
 
 
 def _is_ghost(uid: str) -> bool:
@@ -2037,8 +2050,8 @@ def bridge_records(rooms: list | None = None) -> dict[str, dict]:
                              "rooms": []}}
             rec["meta"]["rooms"] = sorted(set(rec["meta"]["rooms"]) | {r.id})
     for uid, rec in out.items():
-        net = rec["meta"]["network"]
-        label = NETWORK_LABELS.get(net) or (GROUP_LABELS.get(net) if uid not in direct else None)
+        label = _bridge_label(rec["meta"]["network"], rec["meta"].get("network_name") or "",
+                              uid in direct)
         if label:
             rec["card"]["labels"] = [label]
         if uid not in direct:
