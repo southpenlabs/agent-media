@@ -552,13 +552,14 @@ Everything a message can be pointed at.
   for in the background every 5 min, so absent until first answered or
   with no bridges add-on. No `account` for a room with no receiver (an
   older bridge); the room's `room` envelope on the log carries it too. `network.service` and `network.chat` (26 Nov 2026,
-  §6.61 "Homes"): the companion's id for the network (`facebookgo` →
-  `meta`, `instagramgo` → `instagram`, the Teams fork's
-  `go.mau.fi/mautrix` named "Microsoft Teams" → `teams`, the rest as they
-  are; absent for a bridge none of those) and the network's own id for the
-  conversation (the `m.bridge` channel id, the same id the companion files
-  a Local chat under), so the app can show a chat bridged on the server and
-  on the phone once. `session` is a uuid made from the room id (stable,
+  §6.61 "Homes"): the network id Sasonica's Local chats use (`meta`,
+  `whatsapp`, `teams`, …), as the bridges add-on names the room's
+  protocol (its `service_of`; absent with no add-on, or a protocol it does
+  not know: which bridge is which network is the add-on's knowledge, not
+  this package's), and the network's own id for the conversation (the
+  `m.bridge` channel id, the same id the companion files a Local chat
+  under), so the app can show a chat bridged on the server and on the
+  phone once. `session` is a uuid made from the room id (stable,
   so every session route takes it); `title` the room's name, else its other
   members; `recap` the last message, `{"text": "<name>: <words>", "at",
   "source": "matrix"}`; never live, rested or pinned. `/conversation/log`
