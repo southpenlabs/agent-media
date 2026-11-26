@@ -34,8 +34,20 @@ Records in the user's own repo, under Sasonica's namespace `com.sasonica`
 
 Coordinates and addresses reuse the Lexicon Community's shared location
 types (`community.lexicon.location.*`) if they fit, so other apps can read
-our posts without knowing Sasonica (open source first: to check before
-building, with what else already exists for places on atproto).
+our posts without knowing Sasonica.
+
+**Looked at first (26 Nov 2026).** The Lexicon Community's location set
+(github.com/lexicon-community/lexicon, `community/lexicon/location`): `geo`
+(latitude and longitude as strings, the atproto data model having no floats;
+fewer decimals is also how a blurred place is written), `address`, `hthree`
+and `fsq`. Used as they are, embedded in our records. Anchor (dropanchor.app,
+open source, `app.dropanchor.checkin`) is a check-in app on the same types,
+finding places from OpenStreetMap as the Map does; its records are "I am here
+now", which the privacy rule below rules out, so ours are our own type, with
+location embedded the way Anchor embeds it so either can read the other's
+places. Python: the established client is MarshalX's `atproto` (MIT); the
+few XRPC calls needed (createSession, uploadBlob, createRecord,
+deleteRecord, listRecords) may not need it.
 
 A post can also make an ordinary Bluesky post (`app.bsky.feed.post`): the
 text, the place's name and a link to it, its first photo. Followers without
