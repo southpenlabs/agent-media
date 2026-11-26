@@ -5870,6 +5870,24 @@ channel.
   book's speed (listen-prefs.json `books`), not the listener's, and a book
   with none of its own loads at the listener's.
 
+**A practice's sound** (27 Nov 2026). With `MEDIA_LISTEN_ENDPOINT` set,
+`POST /practice {"action": "play", "id", "at"?, "resume"?}` (§6.45, and
+Watch's Listen with `at`) plays the practice's sound the same way, in the
+app's book player, so it plays with the screen off (David, 27 Nov 2026:
+"can't we just use background play so it will play with the screen off?"),
+instead of on the book channel, which on red2 landed on the speech channel
+and was replaced by the next reply. The sound is its file in the library or
+in the cache (a YouTube practice's small sound, a video file's extracted
+sound), streamed by a signed `/books/files/` link on `MEDIA_PUBLIC_URL`;
+it starts at `at`, else its place with `resume`, else the top, at its own
+speed else 1× (never the notes'), and is not recorded as a book. The answer
+adds `listening`, whose `practice` is its id beside `book` (the file).
+A YouTube or video practice whose sound is not ready is 409 `preparing`
+(its fetch or extraction started); a podcast's address or a file in the
+Practice folder plays on the book channel as before. `watch` pauses it
+when the app's player holds that practice and answers `paused` and
+`start_s` from its place, so Back to video carries on there.
+
 **A project's documents** (15 Oct 2026). `GET /docs?project=<label>` or
 `?path=<folder>` — gated → `{"ok", "project", "root", "docs": [{path, title,
 kind, status, date}]}`: the app's project page.

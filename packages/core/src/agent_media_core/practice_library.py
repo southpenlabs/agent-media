@@ -1081,6 +1081,27 @@ def match(query: str) -> Optional[dict]:
     return None
 
 
+def sound_uri(it: dict) -> str:
+    """What playing `it` plays: a video file's extracted sound or a YouTube
+    practice's own small sound when made, else what the list names."""
+    uri = it["_uri"]
+    if it.get("video") == "file":
+        uri = str(sound_for(it) or uri)
+    elif it.get("video") == "youtube":
+        uri = str(_yt_sound(it["youtube_id"]) or uri)
+    return uri
+
+
+def marked_id(path: Optional[str]) -> Optional[str]:
+    """The practice id of the mark, when `path` is the practice last played."""
+    if not is_marked(path):
+        return None
+    try:
+        return json.loads(_now_path().read_text()).get("id") or None
+    except (OSError, ValueError):
+        return None
+
+
 def play(item_id: str, target: str = "", resume: bool = False, start_ms: int = -1) -> dict:
     """Play a saved practice on the book channel (by id, or a `match`), from
     `start_ms` when given (a video handed back to sound, `watch`). A video
@@ -1096,11 +1117,7 @@ def play(item_id: str, target: str = "", resume: bool = False, start_ms: int = -
         return {"ok": True, "id": it["id"], "title": it.get("title"),
                 "embed": it["embed"], "page": it.get("page")}
     from . import mcp_server
-    uri = it["_uri"]
-    if it.get("video") == "file":
-        uri = str(sound_for(it) or uri)
-    elif it.get("video") == "youtube":
-        uri = str(_yt_sound(it["youtube_id"]) or uri)
+    uri = sound_uri(it)
     mark_playing(uri, it["id"])
     note_play(it["id"])
     r = mcp_server.book_play(uri, resume=resume, start_ms=start_ms,

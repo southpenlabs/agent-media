@@ -122,6 +122,64 @@ def embed_play() -> str:
     return "page" if personal_use.allowed("insight-timer-page") else "widget"
 
 
+def _play_on_app(item_id: str, body: dict) -> "tuple[bool, dict] | None":
+    """A practice's sound in the app's own book player (org_listen
+    .listen_book), as a library book plays (agent-media f9df79c6): on the
+    phone's media session, so it plays with the screen off and a headset's
+    keys reach it, from `at` when given (Watch's Listen), else from its
+    place with `resume`, else from the top. None where the server has no app
+    player, or for a sound that is not a file here (a podcast's address, a
+    file in the Practice folder): the book channel plays it, as before. A
+    YouTube practice whose sound is not fetched yet starts its fetch and is
+    409 `preparing`, rather than being played on the speech channel, which
+    the next reply replaces (red2, 27 Nov 2026)."""
+    from pathlib import Path
+
+    from agent_media_core import book_files, play_gate
+    from agent_media_core import practice_library as lib
+
+    from . import org_listen
+
+    if not org_listen._endpoint():
+        return None
+    it = lib.find(item_id)
+    if not it:
+        return None
+    uri = lib.sound_uri(it)
+    p = Path(uri).expanduser() if not uri.startswith(("http://", "https://", "yt:")) else None
+    servable = bool(p and p.is_file() and (book_files.library_url(p) or book_files.cache_url(p)))
+    if not servable:
+        if it.get("video") in ("youtube", "file"):
+            lib.prepare_sound(it)
+            return False, {"error": "Its sound is still being got ready on the server; "
+                                    "try again in a minute.", "code": "preparing", "status": 409}
+        return None
+    assert p is not None
+    try:
+        at = float(body["at"]) if body.get("at") is not None else None
+    except (TypeError, ValueError):
+        return False, {"error": "at must be seconds"}
+    start: "int | None"
+    if at is not None and at >= 0:
+        start = int(at * 1000)
+    elif body.get("resume"):
+        start = None                               # its place
+    else:
+        start = 0
+    title = it.get("title") or "Practice"
+    lib.mark_playing(str(p), it["id"])
+    lib.note_play(it["id"])
+    try:
+        with play_gate.request(title=title):
+            ok, got = org_listen.listen_book(str(p), gate=False, title=title,
+                                             start_ms=start, practice=it["id"])
+    except play_gate.PlayHeld as e:
+        return False, {"error": str(e), "held": True, "code": "held", "status": 409}
+    if not ok:
+        return False, got
+    return True, {"playing": it["id"], "title": title, "listening": got}
+
+
 def control(body: dict, bearer: str) -> tuple[bool, dict]:
     user, err = auth.gate(bearer)
     if not user:
@@ -172,6 +230,9 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
             r = lib.play(item_id)
             return True, {"playing": item_id, "title": r.get("title"),
                           "embed": r.get("embed"), "page": r.get("page")}
+        app = _play_on_app(item_id, body)
+        if app is not None:
+            return app
         argv = [sys.executable, "-m", "agent_media_core.cli", "practice", "play"]
         if body.get("target"):
             argv += ["--target", str(body["target"])]
@@ -195,9 +256,16 @@ def control(body: dict, bearer: str) -> tuple[bool, dict]:
     if action == "watch":
         # Watched in the app (practice_library.watch): YouTube's embed, or a
         # signed link to a video file in the Practice folder.
+        from . import org_listen
+        heard = org_listen.pause_practice(str(body.get("id") or ""))
         r = lib.watch(str(body.get("id") or ""))
         if not r.get("ok"):
             return False, {"error": r.get("error"), "status": r.get("status", 400)}
+        if heard is not None:
+            # Its sound was playing in the app's player: paused, the video from there.
+            r["paused"] = True
+            if heard > 1:
+                r["start_s"] = int(heard)
         return True, {k: v for k, v in r.items() if k not in ("ok", "status")}
     if action == "keep":
         # A YouTube practice's small video, for the app to save offline (practice_library.keep).

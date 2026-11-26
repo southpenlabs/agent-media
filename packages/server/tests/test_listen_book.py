@@ -215,3 +215,79 @@ def test_start_over_plays_from_the_top_in_the_app(lib, monkeypatch):
     ok, got = music._book_mark({"uri": str(lib.file), "mark": "start_over"})
     assert ok and got["mark"] is None and got["listening"]["pos_ms"] < 500
     assert lib.sent[-1][0] == ["seek", 0, "absolute"]
+
+
+# ---- a practice's sound (Practice's Listen, 27 Nov 2026) ------------------------
+
+@pytest.fixture()
+def prac(lib, monkeypatch, tmp_path):
+    """A YouTube practice whose small sound is in the cache (the signed
+    /books/files/ root), the practice list stubbed."""
+    from agent_media_core import practice_library
+
+    cache = tmp_path / "cache" / "agent-media"
+    snd = cache / "practice-sound" / "yt" / "Yoga Nidra [CGskEfXeXzs].m4a"
+    snd.parent.mkdir(parents=True)
+    snd.write_bytes(b"\0" * 2048)
+    monkeypatch.setenv("MEDIA_BOOK_HTTP_ROOT", str(cache))
+    it = {"id": "yt:CGskEfXeXzs", "title": "Yoga Nidra Nervous System Reboot",
+          "video": "youtube", "youtube_id": "CGskEfXeXzs", "_uri": "yt:https://youtu.be/CGskEfXeXzs"}
+    monkeypatch.setattr(practice_library, "find", lambda i: it if i == it["id"] else None)
+    monkeypatch.setattr(practice_library, "_yt_sound", lambda vid: snd)
+    monkeypatch.setattr(practice_library, "note_play", lambda i: None)
+    monkeypatch.setattr(practice_library, "_now_path", lambda: tmp_path / "practice-now.json")
+    lib.snd, lib.it = snd, it
+    return lib
+
+
+def test_practice_listen_plays_in_the_apps_player_from_at(prac):
+    from agent_media_server import practice
+
+    org_listen._keep_prefs(1.3, None)               # the notes' speed: not a practice's
+    ok, got = practice._play_on_app("yt:CGskEfXeXzs", {"at": 15})
+    assert ok and got["playing"] == "yt:CGskEfXeXzs"
+    load = prac.sent[-1]
+    assert load[0][0] == "loadfile" and "/books/files/practice-sound/yt/" in load[0][1] and "sig=" in load[0][1]
+    assert load[1] == ["set_property", "force-media-title", "Yoga Nidra Nervous System Reboot"]
+    assert ["seek", 15.0, "absolute"] in load and ["set_property", "speed", 1.0] in load
+    assert prac.lasts == []                         # not a book in Recently played
+    lst = got["listening"]
+    assert lst["practice"] == "yt:CGskEfXeXzs" and lst["title"] == "Yoga Nidra Nervous System Reboot"
+
+
+def test_watch_takes_the_video_from_the_apps_player(prac, monkeypatch):
+    """Back to video: the sound paused, its place kept, start_s from it."""
+    from agent_media_server import practice
+
+    practice._play_on_app("yt:CGskEfXeXzs", {"at": 15})
+    prac.np["position_ms"] = 95000
+    org_listen._forget_cache()
+    assert org_listen.pause_practice("yt:other") is None
+    assert org_listen.pause_practice("yt:CGskEfXeXzs") == 95.0
+    assert prac.np["paused"] is True and prac.resume_pos[str(prac.snd)] == 95000
+
+
+def test_a_practice_not_fetched_yet_is_preparing_not_the_speech_channel(prac, monkeypatch):
+    from agent_media_core import practice_library
+    from agent_media_server import practice
+
+    monkeypatch.setattr(practice_library, "_yt_sound", lambda vid: None)
+    asked: list = []
+    monkeypatch.setattr(practice_library, "prepare_sound", lambda it, background=True: asked.append(it["id"]))
+    ok, got = practice._play_on_app("yt:CGskEfXeXzs", {})
+    assert not ok and got["code"] == "preparing" and asked == ["yt:CGskEfXeXzs"]
+    assert prac.sent == []
+
+
+def test_without_the_app_player_practice_plays_as_before(prac, monkeypatch):
+    from agent_media_server import practice
+
+    monkeypatch.delenv("MEDIA_LISTEN_ENDPOINT")
+    assert practice._play_on_app("yt:CGskEfXeXzs", {"at": 15}) is None
+
+
+def test_cache_links_round_trip_and_a_note_render_is_not_a_book(prac, tmp_path):
+    url = book_files.cache_url(prac.snd)
+    assert book_files.cache_path(url) == prac.snd.resolve()
+    assert org_listen._book_of(url) == prac.snd.resolve()
+    assert book_files.cache_url(tmp_path / "elsewhere.m4a") is None

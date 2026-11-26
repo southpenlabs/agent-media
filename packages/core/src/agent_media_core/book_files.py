@@ -130,6 +130,35 @@ def library_path(url: str) -> Optional[Path]:
     return lib / Path(*rel.split("/"))
 
 
+def cache_url(path: Path) -> Optional[str]:
+    """`<MEDIA_PUBLIC_URL>/books/files/<rel>?sig=` for a file under
+    MEDIA_BOOK_HTTP_ROOT (a practice's sound, kept in the cache), for the
+    app's own book player; None without a public address or outside it."""
+    base, public = root(), (os.environ.get("MEDIA_PUBLIC_URL") or "").strip().rstrip("/")
+    if base is None or not public:
+        return None
+    try:
+        rel = Path(path).resolve().relative_to(base)
+    except (ValueError, OSError):
+        return None
+    if Path(rel.parts[-1]).suffix.lower() not in SUFFIXES:
+        return None
+    return signed(f"{public}/books/files", "/".join(rel.parts))
+
+
+def cache_path(url: str) -> Optional[Path]:
+    """The file a `/books/files/` link names, under MEDIA_BOOK_HTTP_ROOT, else
+    None. Only the path is read, not the signature."""
+    from urllib.parse import unquote, urlsplit
+
+    base = root()
+    path = urlsplit(url or "").path
+    mark = "/books/files/"
+    if base is None or mark not in path:
+        return None
+    return _inside(base, unquote(path.split(mark, 1)[1]))
+
+
 def served_library(rel: str, sig: str) -> "Optional[tuple[Path, str]]":
     """`GET /books/library/<rel>?sig=`: as `served`, under the library."""
     from . import book_library
