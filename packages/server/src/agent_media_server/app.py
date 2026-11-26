@@ -1230,6 +1230,9 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         # /books/covers/ so a cover is never reached by this one.
         if path.startswith("/books/files/"):
             return _signed_book_file(h, path.removeprefix("/books/files/"))
+        # A file of the book library, for the app's own book player (book_files.served_library).
+        if path.startswith("/books/library/"):
+            return _signed_book_file(h, path.removeprefix("/books/library/"), library=True)
         # A saved podcast link's download, the same way (podcast_links.served).
         if path.startswith("/podcasts/files/"):
             return _signed_podcast(h, path.removeprefix("/podcasts/files/"))
@@ -1343,9 +1346,11 @@ def _signed_book_cover(h: BaseHTTPRequestHandler, name: str) -> bool:
     return True
 
 
-def _signed_book_file(h: BaseHTTPRequestHandler, rel: str) -> bool:
+def _signed_book_file(h: BaseHTTPRequestHandler, rel: str, library: bool = False) -> bool:
     """`GET /books/files/<rel>?sig=` — a book's audio for a player off the
     mesh (`media book play --target phone`); the link is the credential.
+    With `library`, `GET /books/library/<rel>?sig=`: a file of the book
+    library, which the app's own book player streams (org_listen.listen_book).
 
     `rel` is a relative path with directories in it, not a flat name, so
     `book_files.served` does the containment check; this only unquotes it.
@@ -1357,7 +1362,7 @@ def _signed_book_file(h: BaseHTTPRequestHandler, rel: str) -> bool:
     from agent_media_core import book_files
 
     sig = (parse_qs(urlsplit(h.path).query).get("sig") or [""])[0]
-    found = book_files.served(unquote(rel), sig)
+    found = (book_files.served_library if library else book_files.served)(unquote(rel), sig)
     if not found:
         _json(h, 404, {"ok": False, "error": "no such file"})
         return True

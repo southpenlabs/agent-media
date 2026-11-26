@@ -29,6 +29,17 @@ no media session (David, 15 Oct 2026: "Pausing with my earbuds doesn't seem
 to work"). The place it was left is kept here, as the book channel's
 observer keeps it for mpv.
 
+A book of the library (book_library) plays in the same app player
+(`listen_book`, from the Books tab through `POST /music/control` "book"):
+streamed by its signed `/books/library/` link, answered by GET /org/listen
+with `book` (its path) for `path`, its keys the same (prev and next are back
+and on 30 s), its place kept every 10 s while it plays and on every pause
+or stop, by its path as the book channel keeps it, so the Books tab's
+progress and `media book resume` read it. Its speed is the book's own
+(kept per book in listen-prefs.json), the listener's when it has none
+(sweep 2026-11-27 item 1: the Books tab fired the desk's book channel,
+which on a server whose speech goes to the app could not play it at all).
+
 Speed and volume are the listener's, not the note's: kept in
 listen-prefs.json, written by every press of those knobs (playing or not),
 and set on each note as it loads, so they can be set with nothing playing
@@ -100,7 +111,12 @@ def _prefs() -> dict:
 
 
 def _keep_prefs(speed: float | None, volume: int | None) -> None:
-    prefs = {**_prefs(), **({"speed": speed} if speed is not None else {}),
+    try:
+        kept = json.loads(_prefs_path().read_text())     # the books' speeds too
+        kept = kept if isinstance(kept, dict) else {}
+    except (OSError, ValueError):
+        kept = {}
+    prefs = {**kept, **_prefs(), **({"speed": speed} if speed is not None else {}),
              **({"volume": volume} if volume is not None else {})}
     try:
         path = _prefs_path()
@@ -160,10 +176,182 @@ def _served_url(clip: Path) -> str | None:
 
 
 def _keep_place(np: dict) -> None:
-    """Where the app's player is in a note, for the next Listen without a line."""
-    clip = None if np.get("idle") else _clip_of(np.get("uri") or "")
-    if clip:
-        _book()._state().set_resume_pos(str(clip), int(np.get("position_ms") or 0))
+    """Where the app's player is in a note or book, for the next Listen
+    without a line (a book: the next tap in the Books tab)."""
+    if np.get("idle"):
+        return
+    uri = np.get("uri") or ""
+    item = _clip_of(uri) or _book_of(uri)
+    if item:
+        _book()._state().set_resume_pos(str(item), int(np.get("position_ms") or 0))
+
+
+# ---- a book of the library on the app's player ---------------------------------
+
+#: Seconds "prev" and "next" move a book by (it has no paragraphs).
+_BOOK_JUMP_S = 30.0
+#: How often a playing book's place is kept, so a killed app loses no more.
+_BOOK_SAVE_S = 10.0
+#: The saver stops after the player has been idle this long.
+_SAVER_IDLE_S = 120.0
+_SAVER: list = [None]
+_TITLES: dict = {}
+
+
+def _book_of(uri: str) -> Path | None:
+    """The library book a playing link is (book_files.library_url), else None."""
+    if not uri or "/books/library/" not in uri:
+        return None
+    from agent_media_core import book_files
+    return book_files.library_path(uri)
+
+
+def _book_title(path: Path) -> str:
+    """The book's title as the Books tab shows it, else its file's name."""
+    key = str(path)
+    if key not in _TITLES:
+        title = ""
+        try:
+            from agent_media_core import book_library
+            title = (book_library.by_name().get(path.name) or {}).get("title") or ""
+        except Exception as _exc:
+            _failures.swallowed(_exc)
+        _TITLES[key] = title or path.stem.replace("_", " ")
+    return _TITLES[key]
+
+
+def _book_speed(path: Path | str) -> float | None:
+    try:
+        got = (json.loads(_prefs_path().read_text()).get("books") or {}).get(str(path))
+    except (OSError, ValueError, AttributeError):
+        return None
+    if isinstance(got, (int, float)) and not isinstance(got, bool):
+        return round(max(_SPEED_MIN, min(_SPEED_MAX, float(got))), 2)
+    return None
+
+
+def _keep_book_speed(path: Path | str, speed: float) -> None:
+    """A book's own speed, beside the listener's in listen-prefs.json."""
+    try:
+        cur = json.loads(_prefs_path().read_text())
+        cur = cur if isinstance(cur, dict) else {}
+    except (OSError, ValueError):
+        cur = {}
+    got = cur.get("books")
+    books: dict = got if isinstance(got, dict) else {}
+    books[str(path)] = speed
+    cur["books"] = books
+    try:
+        path_ = _prefs_path()
+        path_.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path_.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cur))
+        tmp.replace(path_)
+    except OSError as e:
+        log.info("org-listen: could not keep the book's speed: %s", e)
+
+
+def _saver_loop() -> None:
+    """Keep a playing book's place every few seconds: the app can be killed
+    (or the phone lose its link) without a pause or stop reaching here."""
+    idle_since = None
+    while True:
+        time.sleep(_BOOK_SAVE_S)
+        try:
+            np = _playing(_BOOK_SAVE_S / 2)
+        except Exception as _exc:
+            _failures.swallowed(_exc)
+            np = {"idle": True}
+        if not np.get("idle") and _book_of(np.get("uri") or ""):
+            idle_since = None
+            if not np.get("paused"):
+                _keep_place(np)
+            continue
+        idle_since = idle_since or time.monotonic()
+        if time.monotonic() - idle_since > _SAVER_IDLE_S:
+            with _LOCK:
+                _SAVER[0] = None
+            return
+
+
+def _start_saver() -> None:
+    with _LOCK:
+        if _SAVER[0] is not None and _SAVER[0].is_alive():
+            return
+        t = threading.Thread(target=_saver_loop, daemon=True, name="org-listen-book-saver")
+        _SAVER[0] = t
+    t.start()
+
+
+def listen_book(path: str, bearer: str = "", gate: bool = True,
+                restart: bool = False) -> tuple[bool, dict]:
+    """Play a library book in the app's book player from where it was left
+    (from the top once heard to the end, or with `restart`), at its own speed. Not ok when the
+    server has no app player (MEDIA_LISTEN_ENDPOINT), no public address, or
+    the file is not in the library: the caller then uses the book channel."""
+    if gate:
+        ok, detail = auth.may_control_speech(bearer)
+        if not ok:
+            return False, detail
+    if not _endpoint():
+        return False, {"error": "no app book player here", "status": 409}
+    from agent_media_core import book_files
+    p = Path(path).expanduser()
+    url = book_files.library_url(p) if p.is_file() else None
+    if not url:
+        return False, {"error": "not a book of the library", "status": 404}
+    key = str(p)
+    title = _book_title(p)
+    srv = _book()
+    now = _playing(_PRESS_AGE_S)
+    if not now.get("idle"):
+        if _book_of(now.get("uri") or "") == p:
+            # Already this book: a tap carries on rather than reloading.
+            if restart:
+                _send([["seek", 0, "absolute"], ["set_property", "pause", False]])
+                _predict({**now, "position_ms": 0, "paused": False})
+            elif now.get("paused"):
+                _send([["set_property", "pause", False]])
+                _predict({**now, "paused": False})
+            return True, _answer(_playing(_PRESS_AGE_S))
+        _keep_place(now)                           # the note or book it replaces
+    st = srv._state()
+    start = 0 if restart else (st.get_resume_pos(key) or 0)
+    dur_s = 0.0
+    try:
+        from agent_media_core import book_library
+        dur_s = float((book_library.by_name().get(p.name) or {}).get("duration") or 0)
+    except Exception as _exc:
+        _failures.swallowed(_exc)
+    if dur_s and start >= (dur_s - _HEARD_S) * 1000:
+        start = 0
+    speed = _book_speed(key) or _prefs().get("speed")
+    cmds: list = [["loadfile", url, "replace"],
+                  ["set_property", "force-media-title", title]]
+    if start > 0:
+        cmds.append(["seek", start / 1000.0, "absolute"])
+    if speed:
+        cmds.append(["set_property", "speed", speed])
+    if "volume" in _prefs():
+        cmds.append(["set_property", "volume", _prefs()["volume"]])
+    try:
+        _send(cmds)
+    except Exception as e:
+        log.info("org-listen: the app's book player did not take %s: %s", p.name, e)
+        return False, {"error": f"the app's book player did not take it ({e})", "status": 502}
+    try:
+        st.set_book_last(key, title)               # Recently played, and `book resume`
+    except Exception as _exc:
+        _failures.swallowed(_exc)
+    _LAST.clear()
+    _LAST.update({"book": key})
+    _predict({"idle": False, "uri": url, "position_ms": start,
+              "duration_ms": int(dur_s * 1000) or None, "paused": False,
+              "speed": speed or now.get("speed") or 1.0,
+              "volume": _prefs().get("volume", now.get("volume")),
+              "muted": bool(now.get("muted"))})
+    _start_saver()
+    return True, _answer(_playing(_PRESS_AGE_S))
 
 
 def _target() -> str:
@@ -520,6 +708,13 @@ def _answer(np: dict) -> dict:
                 "muted": np.get("muted"), "chapters": t.get("chapters") or [],
                 "line": _line_at(t, pos / 1000.0), "pos_ms": pos,
                 "dur_ms": np.get("duration_ms") or int((t.get("duration") or 0) * 1000)}
+    book = None if np.get("idle") else _book_of(np.get("uri") or "")
+    if book:
+        state = "ended" if _ended(np) else "paused" if np.get("paused") else "playing"
+        return {"state": state, "book": str(book), "title": _book_title(book),
+                "speed": np.get("speed"), "volume": np.get("volume"),
+                "muted": np.get("muted"), "chapters": [], "line": None,
+                "pos_ms": np.get("position_ms") or 0, "dur_ms": np.get("duration_ms")}
     # Nothing loaded: the knobs read what the next note will play at.
     knobs = {"speed": 1.0, "volume": min(100, _vol_max()), **_prefs()}
     with _LOCK:
@@ -570,7 +765,12 @@ def control(action: str, bearer: str, value: float | None = None) -> tuple[bool,
             if app:
                 if not _LAST:
                     return False, {"error": "nothing is being listened to", "status": 409}
-                _play(_LAST["clip"], _LAST["meta"], None)
+                if _LAST.get("book"):
+                    ok, got = listen_book(_LAST["book"], gate=False)
+                    if not ok:
+                        return False, got
+                else:
+                    _play(_LAST["clip"], _LAST["meta"], None)
             else:
                 srv.book_resume(target=_target())  # reopens the last one
             _forget_cache()
@@ -602,6 +802,8 @@ def control(action: str, bearer: str, value: float | None = None) -> tuple[bool,
         seek(value)
     elif action == "skip":
         seek(pos + value)
+    elif action in ("prev", "next") and _book_of(np.get("uri") or ""):
+        seek(pos + (_BOOK_JUMP_S if action == "next" else -_BOOK_JUMP_S))
     elif action in ("prev", "next"):
         # A paragraph back or on, as a sentence is for a reply. "prev"
         # restarts the paragraph when past its start.
@@ -623,7 +825,11 @@ def control(action: str, bearer: str, value: float | None = None) -> tuple[bool,
         if action.startswith("speed"):
             new["speed"] = speed
             cmds.append(["set_property", "speed", speed])
-            _keep_prefs(speed, None)
+            book = _book_of(np.get("uri") or "")
+            if book:
+                _keep_book_speed(book, speed)      # the book's own, not the listener's
+            else:
+                _keep_prefs(speed, None)
         else:
             new["volume"] = volume
             cmds.append(["set_property", "volume", volume])

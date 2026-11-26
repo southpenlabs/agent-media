@@ -5841,6 +5841,35 @@ sessions `POST /doc/ask` started about it, newest first, as a note's). With
 "path", "mtime", "unchanged": true}`: the reader asks every few seconds
 while open, to show an edit as it lands (16 Oct 2026).
 
+**A book of the library** (27 Nov 2026; audiobooks sweep item 1). With
+`MEDIA_LISTEN_ENDPOINT` set, `POST /music {"action": "book", "uri"}` for a
+file of the book library (`book_library.root()`, the Books tab's rows)
+plays it in the app's book player, as Listen plays a note, instead of on
+the book channel; elsewhere (no app player, a podcast, a link) the book
+channel plays it as before. The answer is the music answer with
+`listening`: the `GET /org/listen` answer below, so the mini player shows
+it at once. A play the play gate holds is 409 `held`, as for the book
+channel.
+- It streams by `GET /books/library/<rel>?sig=` on `MEDIA_PUBLIC_URL`:
+  `rel` under the library, signed as `/books/files/` is but over
+  `booklib:<rel>`, so a link for one root never opens the other; the same
+  containment after symlinks, ranges answered 206, 404 for anything wrong.
+  `.mka` is served as well as `/books/files/`'s types.
+- It starts where the book was left (the book channel's place, by its path,
+  so the Books tab's progress and `media book resume` read it), or from the
+  top once within 3 s of the end. A tap on the book already loaded carries
+  on (resumes it if paused) rather than reloading. It is recorded as the
+  last book (`set_book_last`: Recently played).
+- `GET /org/listen` and `/org/listen/ctl` answer for it with `book` (its
+  path) for `path`/`doc`, `title` (the library's), `line` null and
+  `chapters` `[]`. `prev` and `next` move it 30 s back and on. Its place is
+  kept on pause and stop and every 10 s while it plays (a server-side
+  reader that stops 2 min after the player goes idle), so a killed app
+  loses at most that much. `resume` with nothing loaded reopens it there.
+- Its speed is its own: `speed±`/`speed0` with a book loaded write that
+  book's speed (listen-prefs.json `books`), not the listener's, and a book
+  with none of its own loads at the listener's.
+
 **A project's documents** (15 Oct 2026). `GET /docs?project=<label>` or
 `?path=<folder>` — gated → `{"ok", "project", "root", "docs": [{path, title,
 kind, status, date}]}`: the app's project page.

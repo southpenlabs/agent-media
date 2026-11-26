@@ -1587,6 +1587,35 @@ def _playlist_control(body: dict) -> tuple[bool, dict]:
     return True, {"playlist": row}
 
 
+def _book_on_app(uri: str, force: bool, restart: bool = False) -> "tuple[bool, dict] | None":
+    """A library book played in the app's own book player (org_listen
+    .listen_book), the way Listen plays a note: on this phone, with the mini
+    player's keys, its place kept (sweep 2026-11-27 item 1). None when this
+    server has no app player or `uri` is not a library file: the book
+    channel plays it, as before. The answer is the listen state (§6.10) as
+    `listening`, beside the music answer. `restart`: from the beginning
+    (start over), even when it is the book already loaded."""
+    from pathlib import Path
+
+    from . import org_listen
+
+    if not org_listen._endpoint() or uri.startswith(("http://", "https://", "yt:")):
+        return None
+    from agent_media_core import book_files, play_gate
+
+    if not Path(uri).expanduser().is_file() or not book_files.library_url(Path(uri).expanduser()):
+        return None
+    try:
+        with play_gate.request(force=force, title=Path(uri).stem):
+            ok, got = org_listen.listen_book(uri, gate=False, restart=restart)
+    except play_gate.PlayHeld as e:
+        return False, _held_answer(str(e))
+    if not ok:
+        print(f"music: book on the app's player failed: {got.get('error')}", file=sys.stderr)
+        return False, {**_answer(), **got}
+    return True, {**_answer(), "listening": got}
+
+
 def _played_book(uri: str) -> bool:
     """Whether `uri` is one the book and podcast lists hold (what was
     played, the library, new episodes) — the only books this route will
@@ -1614,6 +1643,9 @@ def _book_mark(body: dict, force: bool = False) -> tuple[bool, dict]:
         _reset_cache()
         if body.get("play", True) is False:
             return True, {"mark": None, **_answer()}
+        app = _book_on_app(uri, force, restart=True)
+        if app is not None:
+            return app[0], {"mark": None, **app[1]} if app[0] else app[1]
         done, said = _run_book(uri, force)
         _reset_cache()
         if not done:
@@ -1853,6 +1885,10 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
 
         # A saved link's download plays as music, from its web address.
         url = podcast_links.play_url(uri.strip())
+        if not url:
+            app = _book_on_app(uri.strip(), force)
+            if app is not None:
+                return app
         done, said = (_run(["play", *(["--in-treatment"] if force else []), url]) if url
                       else _run_book(uri.strip(), force))
         _reset_cache()

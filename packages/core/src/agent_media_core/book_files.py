@@ -75,6 +75,95 @@ def sign(rel: str) -> str:
                     hashlib.sha256).hexdigest()[:32]
 
 
+def sign_library(rel: str) -> str:
+    """The same for a file of the book library (`book_library.root()`), a
+    second root: "booklib:" in the signed text, so a link for one root never
+    opens the same relative path under the other."""
+    return hmac.new(_key(), f"booklib:{rel}".encode(),
+                    hashlib.sha256).hexdigest()[:32]
+
+
+def library_url(path: Path) -> Optional[str]:
+    """`<MEDIA_PUBLIC_URL>/books/library/<rel>?sig=` for a file of the book
+    library, for the app's own book player (sweep 2026-11-27 item 1: a book
+    tapped in the Books tab plays on this phone, streamed, rather than being
+    staged over ssh). None when there is no public address or the file is
+    not in the library."""
+    from urllib.parse import quote
+
+    from . import book_library
+
+    public = (os.environ.get("MEDIA_PUBLIC_URL") or "").strip().rstrip("/")
+    if not public:
+        return None
+    try:
+        rel = Path(path).resolve().relative_to(book_library.root().expanduser().resolve())
+    except (ValueError, OSError):
+        return None
+    rel_s = "/".join(rel.parts)
+    quoted = "/".join(quote(part) for part in rel.parts)
+    return f"{public}/books/library/{quoted}?sig={sign_library(rel_s)}"
+
+
+def library_path(url: str) -> Optional[Path]:
+    """The library file a `library_url` link names, else None: how the book
+    player's answer is read back to a book. Only the path is read, not the
+    signature; the file must be in the library."""
+    from urllib.parse import unquote, urlsplit
+
+    from . import book_library
+
+    path = urlsplit(url or "").path
+    mark = "/books/library/"
+    if mark not in path:
+        return None
+    rel = unquote(path.split(mark, 1)[1])
+    lib = book_library.root().expanduser()
+    try:
+        base = lib.resolve()
+    except OSError:
+        return None
+    if _inside(base, rel) is None:
+        return None
+    # As the library names it (book_library.path_of), not resolved: a
+    # book's place is kept under that name.
+    return lib / Path(*rel.split("/"))
+
+
+def served_library(rel: str, sig: str) -> "Optional[tuple[Path, str]]":
+    """`GET /books/library/<rel>?sig=`: as `served`, under the library."""
+    from . import book_library
+
+    if not rel or not sig or not hmac.compare_digest(sign_library(rel), sig):
+        return None
+    try:
+        base = book_library.root().expanduser().resolve()
+    except OSError:
+        return None
+    f = _inside(base, rel)
+    if f is None:
+        return None
+    ctype = SUFFIXES.get(f.suffix.lower()) or {
+        ".mka": "audio/x-matroska"}.get(f.suffix.lower())
+    return (f, ctype) if ctype else None
+
+
+def _inside(base: Path, rel: str) -> Optional[Path]:
+    """`base/rel` when it is a file inside `base` after symlinks, else None."""
+    if not rel or rel.startswith("/") or "\0" in rel or "\\" in rel:
+        return None
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return None
+    try:
+        f = (base / Path(*parts)).resolve()
+    except OSError:
+        return None
+    if f != base and base not in f.parents:
+        return None
+    return f if f.is_file() else None
+
+
 def signed(base: str, rel: str) -> str:
     """`<base>/<quoted rel>?sig=` for the *unquoted* relative path `rel`.
 
