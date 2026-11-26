@@ -533,3 +533,26 @@ def test_a_history_visit_posts_as_its_named_place_never_its_own_point(tmp_path, 
     assert code({**visit, "lat": -38.0004, "lon": 145.0}) == "private_place"
     assert code({**visit, "layer": "trip"}) == "private_place"              # trips are still never posted
     assert pds.writes() == []
+
+
+def test_where_i_am_now_only_when_chosen(tmp_path, pds):
+    # David, 27 Nov 2026: "Or use phone location manually?" → "Allow, blurred by default".
+    home = {"id": "home", "lat": -38.0, "lon": 145.0}
+    d = _signed_up(tmp_path, pds, saved=[home], fixes=[{"lat": -37.9, "lon": 144.9}])
+    spot = {"name": "Secret swim spot", "lat": -37.90001, "lon": 144.9, "layer": "pin"}
+
+    def code(body):
+        with pytest.raises(ps.ShareError) as e:
+            ps.preview("", body, d)
+        return e.value.code
+
+    assert code({"place": spot}) == "phone_position"                          # not chosen: refused as before
+    assert code({"place": {**spot, "from_phone": True}}) == "phone_position"
+    pv = ps.preview("", {"place": {**spot, "from_phone": True}, "here": True, "blur": True}, d)
+    assert pv["here"] is True and "right now, to about 100 m" in pv["here_warning"]
+    assert pv["records"][0]["record"]["place"]["location"]["latitude"] == "-37.9"
+    exact = ps.preview("", {"place": {**spot, "here": True}}, d)
+    assert exact["here_warning"].endswith("exactly. Anyone can see it as soon as it is posted.")
+    # Home is still never shared, chosen or not.
+    assert code({"place": {"name": "Here", "lat": -38.0003, "lon": 145.0}, "here": True}) == "private_place"
+    assert pds.writes() == []

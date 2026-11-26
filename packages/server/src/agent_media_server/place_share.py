@@ -870,7 +870,7 @@ def _address(place: dict, blur: bool, country_hint: str = "") -> dict | None:
 
 
 def _check_private(place: dict, pt: tuple[float, float], has_osm: bool, book: str, d: Deps,
-                   visit_as_place: bool = False) -> None:
+                   visit_as_place: bool = False, here: bool = False) -> None:
     layer = str(place.get("layer") or "").strip().lower()
     if visit_as_place and layer.startswith("history"):
         layer = ""
@@ -890,7 +890,7 @@ def _check_private(place: dict, pt: tuple[float, float], has_osm: bool, book: st
         tp = _point(t.get("lat"), t.get("lon")) if isinstance(t, dict) else None
         if tp and _metres(pt, tp) <= THING_M:
             raise ShareError(403, "private_place", "that is where one of your things is, not a place to share")
-    if not has_osm:
+    if not has_osm and not here:
         for f in d.fixes():
             fp = _point(f.get("lat"), f.get("lon")) if isinstance(f, dict) else None
             if fp and _metres(pt, fp) <= PHONE_M:
@@ -979,8 +979,16 @@ def preview(book: str, body: dict, d: Deps | None = None) -> dict:
     pt = _point(place.get("lat"), place.get("lon"))
     if not name or pt is None:
         raise ShareError(400, "bad_place", "a place needs its name, lat and lon")
-    if body.get("from_phone") or place.get("from_phone"):
-        raise ShareError(403, "phone_position", "the phone's own position is never shared")
+    # "Use where I am now": the phone's own position, only when the person
+    # chose it in so many words (David, 27 Nov 2026: "Or use phone location
+    # manually?", then "Allow, blurred by default"). The app ticks blur for
+    # it; Home, Work and placed things are still refused; the preview says
+    # it shows where they are now. A phone position sent without it is
+    # refused as before.
+    here = body.get("here") is True or place.get("here") is True
+    if (body.get("from_phone") or place.get("from_phone")) and not here:
+        raise ShareError(403, "phone_position", "the phone's own position is never shared unless you choose "
+                                                "\"Use where I am now\"")
     osm = _osm(place)
     visit = str(place.get("layer") or "").strip().lower().startswith("history")
     if visit and osm is not None:
@@ -998,7 +1006,7 @@ def preview(book: str, body: dict, d: Deps | None = None) -> dict:
                                                    "names, so it is not shared")
         pt = own
         place = {**place, "lat": own[0], "lon": own[1]}
-    _check_private(place, pt, osm is not None, book, d, visit_as_place=visit and osm is not None)
+    _check_private(place, pt, osm is not None, book, d, visit_as_place=visit and osm is not None, here=here)
     text = str(body.get("text") or "").strip()
     if len(text) > MAX_TEXT:
         raise ShareError(400, "too_long", f"at most {MAX_TEXT} characters")
@@ -1076,6 +1084,10 @@ def preview(book: str, body: dict, d: Deps | None = None) -> dict:
                              **({"width": p["width"], "height": p["height"]} if "width" in p else {})}
                             for p in prepared],
                  "public": "Everything posted to an AT Protocol repo is public, and deleting it does not unsay it."}
+    if here:
+        out["here"] = True
+        out["here_warning"] = ("This shows where you are right now" + (", to about 100 m." if blur else ", exactly.")
+                               + " Anyone can see it as soon as it is posted.")
     if bluesky:
         out["uris"]["bluesky"] = _at_uri(did, BSKY_POST, bkey)
         out["bluesky_link"] = bsky_link(a.get("handle") or did, bkey)

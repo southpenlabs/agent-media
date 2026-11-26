@@ -12807,7 +12807,8 @@ the `phone`, `things` ("Your things"), `parked`, `history` or trip layers,
 `saved: home|work`, a point within 150 m of the book's saved Home or Work
 or 30 m of a placed thing; 403 `phone_position` for `from_phone: true` or a
 point with no OSM id within 15 m of where a phone last said it was (a pin
-dropped on oneself; a café with an OSM id the phone is in is fine). Also
+dropped on oneself; a café with an OSM id the phone is in is fine), unless
+`here: true` (below). Also
 400 `bad_place`, `too_long`, `too_many_photos`, `bad_photo`; 413
 `photo_too_large`; 404 `no_account` (none set up: offer Settings),
 `unknown_account`.
@@ -12817,6 +12818,15 @@ named OpenStreetMap place it matches: it must carry the element's `id`; the
 server looks the element up and writes its own point (never the visit's), and
 refuses (`private_place`) a visit with no id, one it cannot look up, or one
 more than 200 m from the element (David, 27 Nov 2026; mail #1376).
+
+"Use where I am now": `here: true` (in the body or the place) lets the phone's
+own position be posted: `from_phone: true`, or a point with no OSM id near
+where a phone last said it was, are accepted only with it. The app sends it
+only from an explicit "Use where I am now" and ticks blur by default for it.
+Home, Work and placed things are still refused. The preview then also answers
+`here: true` and `here_warning` (that it shows where they are right now, to
+about 100 m or exactly), to be shown above Confirm (David, 27 Nov 2026: "Or
+use phone location manually?", then "Allow, blurred by default").
 
 **Confirm** — `POST /map/share/confirm {token}` → `{uri (the place post),
 cid?, bsky_uri?, bsky_link? (https://bsky.app/profile/<handle>/post/<rkey>),
