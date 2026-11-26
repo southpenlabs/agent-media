@@ -182,6 +182,9 @@ never a network call, so the app can ask on every start.
   practice_upload  POST /practice {"action": "add", "upload"} (practice.py,
             §6.45, 20 Nov 2026): a file POST /upload kept moved into the
             Practice folder; always true here
+  book_upload  POST /books {"action": "add", "upload"} (books.py, §6.9b,
+            27 Nov 2026): a file POST /upload kept moved into the book
+            library and read at once; always true here
 
 A check that raises answers false: the app hides that part, which is what a
 server without it would show.
@@ -338,7 +341,7 @@ CHECKS = {"org": _org, "music": _music, "contacts": _contacts, "mail": _mail, "m
           "youtube": _personal("youtube"), "play_gate": _play_gate,
           "trakt": lambda: True, "watch": _watch, "pair_request": _pair_request,
           "photo_edit": _photo_edit, "agents": _agents, "scenes": _scenes, "device_kinds": lambda: True,
-          "practice_upload": lambda: True, "device_limits": lambda: True, "task_stop": lambda: True}
+          "practice_upload": lambda: True, "book_upload": lambda: True, "device_limits": lambda: True, "task_stop": lambda: True}
 
 
 def detect() -> dict[str, bool]:

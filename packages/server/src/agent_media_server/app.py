@@ -571,6 +571,9 @@ PRACTICE_PATHS = frozenset({"/practice", "/practice/teacher", "/practice/discove
 # Peer to peer: practice shared with the owner over Matrix (shares.py, §6.48).
 SHARES_PATHS = frozenset({"/shares"})
 CORS_PATHS = CORS_PATHS | PRACTICE_PATHS | SHARES_PATHS
+# The book library's own changes: a book uploaded from the phone (books.py, §6.9b).
+BOOKS_PATHS = frozenset({"/books"})
+CORS_PATHS = CORS_PATHS | BOOKS_PATHS
 # Podcasts to find and follow (podcasts.py, §6.9a).
 PODCAST_PATHS = frozenset({"/podcasts/discover", "/podcasts/show"})
 CORS_PATHS = CORS_PATHS | PODCAST_PATHS
@@ -1180,6 +1183,8 @@ def _dispatch(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
         return True
     if path in PRACTICE_PATHS and method in ("GET", "POST"):
         return _practice(h, method)
+    if path in BOOKS_PATHS and method == "POST":
+        return _books(h)
     if path in MEDIA_LINK_PATHS and method in ("GET", "POST"):
         return _media_links(h, method)
     if path in (ORG_PATHS | MAP_PATHS) and method in ("GET", "POST"):
@@ -6481,6 +6486,16 @@ def _practice(h: BaseHTTPRequestHandler, method: str) -> bool:
     else:
         body = _read_json(h)
         ok, detail = practice.control(body if isinstance(body, dict) else {}, _bearer(h))
+    _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
+    return True
+
+
+def _books(h: BaseHTTPRequestHandler) -> bool:
+    """`POST /books` (§6.9b): the book library's own changes."""
+    from . import books
+
+    body = _read_json(h)
+    ok, detail = books.control(body if isinstance(body, dict) else {}, _bearer(h))
     _json(h, 200 if ok else detail.pop("status", 400), {"ok": ok, **detail})
     return True
 
