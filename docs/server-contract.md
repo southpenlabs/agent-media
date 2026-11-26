@@ -4993,7 +4993,9 @@ Oct 2026: "let's get some relevant show filters going for each tab"):
 | `book` | `recent`, `progress` and `finished` (the book library's books with how far through each is, latest listened first; since 11 Nov 2026 the library is this server's own, `book_library`: the audiobook folder's files read for their tags, length and cover, how far through from the book channel's positions, finished within the last minute or 98%), `all` (every book whose file is on the host, by title); a library book's row has `id` `b-<hash>`, `duration` in seconds and `art`, its cover by signed link (`GET /books/covers/<id>.jpg?sig=`, no bearer), `most`, and to browse the library (11 Nov 2026): `added` (every book, newest added first; each row's `added`, epoch seconds) and `unstarted` (the books not begun, by title). `q` searches each over its own rows |
 | `podcast` | `recent`, `most` (`new` went with Audiobookshelf on 11 Nov 2026: the followed shows' new episodes are `GET /podcasts/discover?list=new`), `saved` (YouTube links saved for the tab with §6.46, newest first; `downloaded`, `size` in bytes; `uri` is the file while it is on the host, else `yt:<link>`, which plays by fetching it again) |
 
-A library book adds `progress` (0–1) and `finished`; its `id` is
+A library book adds `progress` (0–1), `finished` and `marked`
+(27 Nov 2026): `"finished"` or `"unfinished"` when set by hand with
+`book_mark` (§6.9a, below), null otherwise; its `id` is
 `b-<hash>` (a string), a liked song's a negative number. A
 server before this ignores `list` and answers without `"list"`: the
 client then has only what was played.
@@ -5267,6 +5269,18 @@ what is kept is still answered. A row or upload plays as any does, `POST
 podcast again (`media book play`, resumed where it was left). Only a `uri`
 one of the book or podcast lists holds is accepted (400 otherwise), so
 this is not a way to play any file on the host.
+
+`POST /music {"action": "book_mark", "uri", "mark"}` (27 Nov 2026, the
+audiobook sweep's B10): a book of the library (400 otherwise) marked by
+hand. `mark` `"finished"` puts it in `finished` (progress 1);
+`"unfinished"` keeps one counted finished at 98% in `progress`; null drops
+the mark. A mark stands until the book is listened to again after it, when
+the position decides as before. Nothing plays, so no play gate. `mark`
+`"start_over"` drops the mark, puts every saved place of the file (the
+host's and a phone copy's) back to 0 and plays it from the beginning as
+`book` does, through the play gate (409 `held`); `"play": false` only
+resets. The answer is the music state with `"mark"` (null after a start
+over); 400 for any other `mark`.
 
 #### Radio (29 Sep 2026)
 

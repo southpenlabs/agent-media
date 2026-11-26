@@ -67,6 +67,35 @@ def test_progress_from_the_book_channels_positions(lib):
     assert B.progress(e, B.resume_positions(st))["finished"]
 
 
+def test_marked_by_hand_until_listened_to_again_and_started_over(lib):
+    """Mark finished, not finished, start over (sweep 27 Nov 2026, B10)."""
+    from agent_media_core.state import StateStore
+    _book(lib / "Book.m4b", 400)
+    B.scan()
+    [e] = B.items()
+    st = StateStore()
+    st.set_resume_pos(e["path"], 200_000)
+    B.mark(e["path"], "finished", clock=lambda: 9e12)
+    p = B.progress(e, B.resume_positions(st))
+    assert p["finished"] and p["progress"] == 1.0 and p["marked"] == "finished"
+    st.set_resume_pos(e["path"], 390_000)          # finished by position: 98%
+    B.mark(e["path"], "unfinished", clock=lambda: 9e12)
+    p = B.progress(e, B.resume_positions(st))
+    assert not p["finished"] and p["marked"] == "unfinished"
+    B.mark(e["path"], "finished", clock=lambda: 1.0)   # older than the position: it decides
+    p = B.progress(e, B.resume_positions(st))
+    assert p["finished"] and p["marked"] is None
+    st.set_resume_pos("/phone/cache/Book.m4b", 300_000)
+    B.mark(e["path"], "finished")
+    assert B.start_over(e["path"], st) == 2
+    assert B.marks() == {}
+    p = B.progress(e, B.resume_positions(st))
+    assert p == {"progress": 0.0, "finished": False, "at": p["at"], "marked": None}
+    assert st.get_resume_pos("/phone/cache/Book.m4b") == 0
+    with pytest.raises(ValueError):
+        B.mark(e["path"], "half")
+
+
 def test_a_folder_that_is_away_keeps_the_last_reading(lib):
     _book(lib / "Book.m4b", 400)
     B.scan()

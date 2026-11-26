@@ -292,6 +292,34 @@ def test_a_book_is_played_only_from_the_list(server, signed_in, audio_host, monk
     assert res.status == 200 and ran == ["/home/u/audiobooks/Hounded.m4b"]
 
 
+def test_a_library_book_is_marked_or_started_over(server, signed_in, audio_host, monkeypatch):
+    """`book_mark` (sweep 27 Nov 2026, B10): finished, not finished or
+    cleared by hand, nothing played; start over resets and plays."""
+    from agent_media_core import book_library, music_recent
+    path = "/home/u/audiobooks/Hounded.m4b"
+    monkeypatch.setattr(music_recent, "_library_books", lambda which: [{"uri": path}])
+    marked, over, ran = [], [], []
+    monkeypatch.setattr(book_library, "mark", lambda p, m: marked.append((p, m)))
+    monkeypatch.setattr(book_library, "start_over", lambda p: over.append(p))
+    monkeypatch.setattr(music, "_run_book", lambda uri, *_: (ran.append(uri), (True, ""))[1])
+    monkeypatch.setattr(music, "_answer", lambda: {"now": None})
+    res, obj = call(server, "POST", "/music", {"action": "book_mark", "uri": "/etc/passwd", "mark": "finished"},
+                    headers=AUTH)
+    assert res.status == 400 and marked == []
+    res, obj = call(server, "POST", "/music", {"action": "book_mark", "uri": path, "mark": "gone"}, headers=AUTH)
+    assert res.status == 400 and marked == []
+    for m in ("finished", "unfinished", None):
+        res, obj = call(server, "POST", "/music", {"action": "book_mark", "uri": path, "mark": m}, headers=AUTH)
+        assert res.status == 200 and obj["mark"] == m
+    assert marked == [(path, "finished"), (path, "unfinished"), (path, None)] and ran == []
+    res, obj = call(server, "POST", "/music", {"action": "book_mark", "uri": path, "mark": "start_over",
+                                               "play": False}, headers=AUTH)
+    assert res.status == 200 and over == [path] and ran == []
+    res, obj = call(server, "POST", "/music", {"action": "book_mark", "uri": path, "mark": "start_over"},
+                    headers=AUTH)
+    assert res.status == 200 and over == [path, path] and ran == [path]
+
+
 def test_recent_searches_with_q(server, signed_in, audio_host, monkeypatch):
     """`?q=` (9 Nov 2026): the server searches, the whole history."""
     from agent_media_core import music_recent

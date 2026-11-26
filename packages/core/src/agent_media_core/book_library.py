@@ -21,6 +21,13 @@ length; finished within the last minute or 98%. The folder can be a mount
 that is sometimes away (red5's comes from another machine): then the last
 reading stands.
 
+A book can also be marked by hand (`mark`, sweep 27 Nov 2026, B10): marked
+finished, or not finished (one counted finished at 98% that was not), kept
+by path in ``<state_dir>/book-marks.json``. A mark stands until the book is
+listened to again after it: a newer position decides as before. Starting
+over (`start_over`) drops the mark and puts every saved position of the
+file (the host's and a phone copy's, by name) back to 0.
+
 A file shorter than MIN_BOOK_S, or one of this server's own spoken renders
 (named by date: ``2026-08-09-…``, ``20260603T034856==…``, ``0001 - …``), is
 not a book.
@@ -236,16 +243,81 @@ def find(bid: str) -> Optional[dict]:
     return next((e for e in items(0) if e["id"] == bid), None)
 
 
-def progress(e: dict, positions: dict) -> dict:
-    """``{progress 0–1, finished, at}`` for a book from `positions`
-    (`resume_positions()`), by its path or file name."""
+def progress(e: dict, positions: dict, marked: Optional[dict] = None) -> dict:
+    """``{progress 0–1, finished, at, marked}`` for a book from `positions`
+    (`resume_positions()`), by its path or file name, and its hand mark
+    (`marks()`, read when not given) when no position is newer. `marked` is
+    "finished", "unfinished" or None."""
     got = positions.get(e["path"]) or positions.get("name:" + os.path.basename(e["path"]))
     dur = float(e.get("duration") or 0)
+    m = (marks() if marked is None else marked).get(e["path"])
+    if m and got and got[1] > float(m.get("at") or 0):
+        m = None                                   # listened to since: the position decides
+    if m and m.get("state") == "finished":
+        return {"progress": 1.0, "finished": True, "at": float(m.get("at") or 0), "marked": "finished"}
     if not got or dur <= 0:
-        return {"progress": 0.0, "finished": False, "at": 0.0}
+        return {"progress": 0.0, "finished": False, "at": 0.0, "marked": None}
     pos_s = got[0] / 1000.0
     frac = max(0.0, min(1.0, pos_s / dur))
-    return {"progress": frac, "finished": frac >= 0.98 or dur - pos_s <= 60, "at": got[1]}
+    finished = frac >= 0.98 or dur - pos_s <= 60
+    if m and m.get("state") == "unfinished":
+        return {"progress": min(frac, 0.99), "finished": False,
+                "at": max(got[1], float(m.get("at") or 0)), "marked": "unfinished"}
+    return {"progress": frac, "finished": finished, "at": got[1], "marked": None}
+
+
+# ---- marks by hand ------------------------------------------------------------
+
+MARKS = ("finished", "unfinished")
+
+
+def _marks_path() -> Path:
+    return state_dir() / "book-marks.json"
+
+
+def marks() -> dict:
+    """`{path: {"state": "finished" | "unfinished", "at"}}`."""
+    try:
+        d = json.loads(_marks_path().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_marks(d: dict) -> None:
+    p = _marks_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(d, ensure_ascii=False))
+    tmp.replace(p)
+
+
+def mark(path: str, state: Optional[str], clock=time.time) -> None:
+    """Mark the book at `path` finished or not finished; None drops the mark."""
+    if state is not None and state not in MARKS:
+        raise ValueError(f"mark must be one of {MARKS} or None")
+    with _LOCK:
+        d = marks()
+        if state is None:
+            d.pop(path, None)
+        else:
+            d[path] = {"state": state, "at": clock()}
+        _save_marks(d)
+
+
+def start_over(path: str, store=None) -> int:
+    """The book at `path` from the beginning: its mark dropped, and every
+    saved position of it (by path, or a copy's by file name) put to 0.
+    How many positions were reset."""
+    from .state import StateStore
+
+    st = store or StateStore()
+    mark(path, None)
+    name = os.path.basename(path)
+    uris = {path, *(u for u, _p, _a in st.all_resume_pos() if os.path.basename(u) == name)}
+    for u in uris:
+        st.set_resume_pos(u, 0)
+    return len(uris)
 
 
 def resume_positions(store=None) -> dict:

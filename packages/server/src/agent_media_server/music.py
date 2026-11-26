@@ -129,6 +129,9 @@ ACTIONS = {
     "play": "play", "add": "play",
     # A book or podcast from Recently played: `media book play`, resumed.
     "book": "book",
+    # A library book marked finished or not by hand, or started over
+    # (book_library.mark / start_over; sweep 27 Nov 2026, B10).
+    "book_mark": "book_mark",
     # The station, run here rather than by the CLI (radio.py).
     "radio": "radio", "dislike": "dislike",
     # ♥ or 👎 on what is playing taken back (its `verdict` goes to null).
@@ -1588,6 +1591,37 @@ def _played_book(uri: str) -> bool:
     return music_recent.playable_book(uri)
 
 
+def _book_mark(body: dict, force: bool = False) -> tuple[bool, dict]:
+    """`{"action": "book_mark", "uri", "mark"}` (sweep 27 Nov 2026, B10): a
+    library book's `mark` "finished" or "unfinished" kept by hand, null to
+    drop it, or "start_over": the mark dropped, its place put back to 0,
+    and it played from the beginning unless `"play": false`."""
+    from agent_media_core import book_library, music_recent
+
+    uri = body.get("uri")
+    m = body.get("mark")
+    if not isinstance(uri, str) or not any(i["uri"] == uri.strip()
+                                           for i in music_recent._library_books("all")):
+        return False, {"error": "uri must be a book from the book library", "status": 400}
+    uri = uri.strip()
+    if m == "start_over":
+        book_library.start_over(uri)
+        _reset_cache()
+        if body.get("play", True) is False:
+            return True, {"mark": None, **_answer()}
+        done, said = _run_book(uri, force)
+        _reset_cache()
+        if not done:
+            print(f"music: book play failed: {said}", file=sys.stderr)
+            return False, _failed_answer(said, "book failed")
+        return True, {"mark": None, **_answer()}
+    if m is not None and m not in book_library.MARKS:
+        return False, {"error": "mark must be finished, unfinished, start_over or null", "status": 400}
+    book_library.mark(uri, m)
+    _reset_cache()
+    return True, {"mark": m, **_answer()}
+
+
 def _spotify_play(body: dict) -> tuple[bool, dict]:
     """A saved album (`uri` album:…) played on Spotify itself, on `device`
     or the one Spotify makes plain (agent_media_core.spotify_remote). A
@@ -1655,6 +1689,9 @@ def owner_control(body: dict) -> tuple[bool, dict]:
         return _vote_by_uri(action, body)
     if action == "rotation":
         return _rotation_control(body)
+    if action == "book_mark" and body.get("mark") != "start_over":
+        # Only a mark: nothing plays, so no play gate.
+        return _book_mark(body)
     from agent_media_core import play_gate
 
     # `force: true`: through the play gate on purpose (music in a treatment).
@@ -1801,6 +1838,8 @@ def _control(action: str, body: dict, force: bool) -> tuple[bool, dict]:
             argv.append(f"{'+' if v >= 0 else '-'}{abs(int(round(v)))}")
     elif action == "prev":
         argv.append("--restart-first")
+    elif action == "book_mark":
+        return _book_mark(body, force)
     elif action == "book":
         uri = body.get("uri")
         if not isinstance(uri, str) or not uri.strip() or not _played_book(uri.strip()):

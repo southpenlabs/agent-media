@@ -660,9 +660,10 @@ def _library_books(which: str) -> list[dict]:
     from . import book_library
 
     positions = book_library.resume_positions()
+    marked = book_library.marks()
     out = []
     for e in book_library.items():
-        p = book_library.progress(e, positions)
+        p = book_library.progress(e, positions, marked)
         if which == "progress" and not (p["progress"] > 0 and not p["finished"]):
             continue
         if which == "finished" and not p["finished"]:
@@ -681,7 +682,8 @@ def _library_books(which: str) -> list[dict]:
                     "series": media_meta.series_of(title, meta["seriesName"]),
                     "narrator": meta["narratorName"] or None,
                     "genre": genre, "progress": round(p["progress"], 3),
-                    "finished": bool(p["finished"]), "added": float(e.get("added") or 0) or None,
+                    "finished": bool(p["finished"]), "marked": p["marked"],
+                    "added": float(e.get("added") or 0) or None,
                     "duration": float(e.get("duration") or 0) or None})
     if which in ("all", "unstarted"):
         out.sort(key=lambda r: (r["title"] or "").lower())
