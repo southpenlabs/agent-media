@@ -5457,6 +5457,36 @@ and `packages/core/tests/test_mix_songs.py`.
 
 Clients: S (the Media tab).
 
+### 6.9b The book library: adding a book — gated (built 27 Nov 2026)
+
+The library is this server's audiobook folder (`MEDIA_AUDIOBOOK_ABS_DIR`,
+else `~/audiobooks`; `book_library`, listed by `GET /music/recent?kind=book`).
+Before this the only way in was a file put in that folder on the host; now
+the Books tab can upload one (audiobooks sweep 27 Nov 2026, B5).
+
+- `POST /books {"action": "add", "upload", "title"?}` (`/features`
+  `book_upload`) → `{"ok": true, "book": <its row, as
+  /music/recent?kind=book&list=added lists it>, "folder"}`. Send the file to
+  `POST /upload` first, as any shared file (raw body, `?name=`), and pass the
+  `path` it answered as `upload`. The file is moved from the upload folder
+  to the top of the library folder, renamed to `title` when given (made safe
+  as `/upload` does, its extension kept), never over another file
+  (`name-2.m4b`), and read at once (tags, length, embedded cover), so the
+  answer's row and the next list carry it. The library folder is made when
+  missing, but not its parent (a mount that is away answers 500, the upload
+  kept). Any of the library's audio kinds is taken (m4b, m4a, mp3, opus, ogg,
+  flac…); 400 `{"code": "not_a_book"}` for another kind, a file with no
+  readable length, or one shorter than 5 minutes (it would never be listed),
+  the upload left where it was; 400 `not an upload` for a path outside
+  MEDIA_UPLOAD_DIR; 404 when the upload is gone. The upload's size limit is
+  `/upload`'s (MEDIA_UPLOAD_MAX_MB, 512 by default): a larger book is put in
+  the folder on the host.
+- A guest device cannot add (not one of a guest's POSTs).
+
+Pinned by `packages/server/tests/test_books_route.py`.
+
+Clients: S (the Books tab's "Add a book", and its empty list).
+
 ### 6.10 The Organiser (org) — gated (built 22 Sep 2026)
 
 Renamed from Notes on 26 Sep 2026 (routes `/notes/…`, `MEDIA_NOTES_*`, `[notes]`); the old names were retired the same day, once the app calling `/org` was installed.
@@ -6260,6 +6290,7 @@ local look, never a network call:
 | `agents` | this server runs agent chats: its session host is here (the socket, or TCP); `MEDIA_AGENTS=0/1` says so outright (16 Nov 2026). False on a server for people's chats only (Matrix and bridges); the app draws its strip pill as a chat server then, not an agent one |
 | `device_kinds` | always true (§6.59, 16 Nov 2026): devices report their kind (`POST /device/app {"kind"}`), `GET /device/rules` and `GET /devices` rows carry `kind` and `rules`, the owner sets them with `POST /devices/kind` and `POST /devices/rules`, and private threads are withheld from a device whose rules say so |
 | `practice_upload` | always true (§6.45, 20 Nov 2026): `POST /practice {"action": "add", "upload"}` moves a file `POST /upload` kept into the Practice folder |
+| `book_upload` | always true (§6.9b, 27 Nov 2026): `POST /books {"action": "add", "upload"}` moves a file `POST /upload` kept into the book library and lists it at once; the Books tab offers "Add a book" only then |
 | `task_stop` | always true (§6.12a, 20 Nov 2026): `background.items` names each background task (§6.1) and `POST /threads/{session}/tasks/{id}/stop` stops one, a background command too, saying when the stop did not take |
 | `weather` | a place for the weather is set (Settings, or `MEDIA_MUSIC_BED_WEATHER`) |
 | `astro` | Astro Tunes can read the moment: astrotunes installed, switched on, its birth details entered (or `MEDIA_ASTRO=1`) |
