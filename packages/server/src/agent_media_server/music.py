@@ -1297,6 +1297,11 @@ def recent(bearer: str, kind: str = "music", which: str = "recent", q: str = "")
     if kind == "music":
         _mark_votes(items)
     out = {"kind": kind, "list": which, "lists": list(music_recent.LISTS[kind]), "items": items}
+    if kind == "book":
+        # Where books go on the host, for the empty Books tab to name (§6.9b).
+        from agent_media_core import book_library
+
+        out["folder"] = str(book_library.root())
     if q:
         out["q"] = q
     return True, out

@@ -66,6 +66,14 @@ def test_a_book_on_an_empty_library_is_listed_at_once(server, shelf, signed_in, 
     assert not [p for p in _library.iterdir() if p.name.startswith(".")]
     res, got = call(server, "GET", "/music/recent?kind=book&list=added", None, AUTH)
     assert res.status == 200 and [i["id"] for i in got["items"]] == [obj["book"]["id"]]
+    assert got["folder"] == str(_library)
+
+
+def test_an_empty_book_list_names_the_folder(server, shelf, signed_in, _library):
+    res, got = call(server, "GET", "/music/recent?kind=book&list=all", None, AUTH)
+    assert res.status == 200 and got["items"] == [] and got["folder"] == str(_library)
+    res, got = call(server, "GET", "/music/recent?kind=music", None, AUTH)
+    assert "folder" not in got
 
 
 def test_a_title_names_the_file_and_never_over_another(server, shelf, signed_in, uploaded, _library):

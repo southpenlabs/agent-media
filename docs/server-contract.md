@@ -5482,6 +5482,9 @@ the Books tab can upload one (audiobooks sweep 27 Nov 2026, B5).
   `/upload`'s (MEDIA_UPLOAD_MAX_MB, 512 by default): a larger book is put in
   the folder on the host.
 - A guest device cannot add (not one of a guest's POSTs).
+- `GET /music/recent?kind=book` answers `folder` too (27 Nov 2026), so an
+  empty Books tab can say where books can be put on the host; a
+  `not_a_book` refusal carries it as well.
 
 Pinned by `packages/server/tests/test_books_route.py`.
 

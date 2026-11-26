@@ -48,7 +48,7 @@ def add_upload(path: str, title: str = "") -> tuple[bool, dict]:
     try:
         got = book_add.add(src, name)
     except book_add.NotABook as e:
-        return False, {"error": str(e), "code": "not_a_book"}
+        return False, {"error": str(e), "code": "not_a_book", "folder": str(book_library.root())}
     except OSError as e:
         return False, {"error": f"could not put it in the library folder: {e}", "status": 500}
     row = next((r for r in music_recent._library_books("added") if r["id"] == got["id"]), None)
