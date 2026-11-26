@@ -12812,6 +12812,12 @@ dropped on oneself; a café with an OSM id the phone is in is fine). Also
 `photo_too_large`; 404 `no_account` (none set up: offer Settings),
 `unknown_account`.
 
+A visit from location history (`layer: "history"`) is posted only as the
+named OpenStreetMap place it matches: it must carry the element's `id`; the
+server looks the element up and writes its own point (never the visit's), and
+refuses (`private_place`) a visit with no id, one it cannot look up, or one
+more than 200 m from the element (David, 27 Nov 2026; mail #1376).
+
 **Confirm** — `POST /map/share/confirm {token}` → `{uri (the place post),
 cid?, bsky_uri?, bsky_link? (https://bsky.app/profile/<handle>/post/<rkey>),
 account: {handle, did}}`. Uploads the staged photos (`uploadBlob`) and

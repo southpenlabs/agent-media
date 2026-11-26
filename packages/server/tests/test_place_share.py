@@ -507,3 +507,29 @@ def test_a_card_without_a_country_gets_it_from_the_point(tmp_path, pds):
     d.country_at = lambda la, lo: ""
     rec = ps.preview("", {"place": place}, d)["records"][0]["record"]
     assert "address" not in rec["place"]          # no country, no address record, as before
+
+
+def test_a_history_visit_posts_as_its_named_place_never_its_own_point(tmp_path, pds):
+    # David, 27 Nov 2026: "Yes, do that" (sasonica-app mail #1376).
+    home = {"id": "home", "lat": -38.0, "lon": 145.0}
+    d = _signed_up(tmp_path, pds, saved=[home])
+    own = (-38.4741234, 145.0215678)                       # the pier's own point
+    d.element_at = lambda osm: own if osm == {"type": "way", "id": 123456} else None
+    visit = {**PLACE, "lat": -38.4745, "lon": 145.0219, "layer": "history"}   # where the phone was
+    rec = ps.preview("", {"place": visit}, d)["records"][0]["record"]
+    loc = rec["place"]["location"]
+    assert (loc["latitude"], loc["longitude"]) == ("-38.474123", "145.021568")   # the element's, not the visit's
+
+    def code(place):
+        with pytest.raises(ps.ShareError) as e:
+            ps.preview("", {"place": place}, d)
+        return e.value.code
+
+    no_id = {k: v for k, v in visit.items() if k != "id"}
+    assert code(no_id) == "private_place"                                   # a bare visit stays private
+    assert code({**visit, "id": "node/77"}) == "private_place"              # its place could not be looked up
+    assert code({**visit, "lat": -38.49, "lon": 145.0215678}) == "private_place"   # too far from the place
+    d.element_at = lambda osm: (-38.0004, 145.0)                            # a place right by Home
+    assert code({**visit, "lat": -38.0004, "lon": 145.0}) == "private_place"
+    assert code({**visit, "layer": "trip"}) == "private_place"              # trips are still never posted
+    assert pds.writes() == []

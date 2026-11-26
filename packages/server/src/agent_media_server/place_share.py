@@ -100,6 +100,9 @@ DECIMALS = 6
 BLUR_DECIMALS = 3
 
 #: The Map's layers whose points are the person's, not places.
+#: A visit is posted as a named place only when the card's point is this near
+#: the OpenStreetMap element's own (the app matches within 150 m).
+VISIT_MATCH_M = 200
 PRIVATE_LAYERS = frozenset({"phone", "things", "parked", "history", "trip", "trips", "home", "work"})
 PRIVATE_SAVED = frozenset({"home", "work"})
 HOME_M = 150
@@ -154,6 +157,7 @@ class Deps:
     phone_fixes: Callable[[], list] | None = None
     photo_bytes: Callable[[Any, str], bytes] | None = None
     country_at: Callable[[float, float], str] | None = None
+    element_at: Callable[[dict], tuple[float, float] | None] | None = None
 
     def accounts_path(self) -> Path:
         if self.accounts is not None:
@@ -206,6 +210,9 @@ class Deps:
     def country(self, la: float, lo: float) -> str:
         return (self.country_at or _country_at)(la, lo)
 
+    def element(self, osm: dict) -> tuple[float, float] | None:
+        return (self.element_at or _element_at)(osm)
+
 
 
 _countries: dict[str, str] = {}
@@ -231,6 +238,22 @@ def _country_at(la: float, lo: float) -> str:
     cc = cc if re.fullmatch(r"[A-Z]{2}", cc) else ""
     _countries[key] = cc
     return cc
+
+
+
+def _element_at(osm: dict) -> tuple[float, float] | None:
+    """An OpenStreetMap element's own point (Nominatim's lookup: a node's
+    position, a way's or relation's centre), or None when it cannot say."""
+    from . import map_wiki
+
+    try:
+        q = {"osm_ids": f"{str(osm['type'])[0].upper()}{int(osm['id'])}", "format": "jsonv2"}
+        rows = map_wiki._json(f"{map_wiki._nominatim_base()}/lookup?{urllib.parse.urlencode(q)}", None, nominatim=True)
+    except Exception as e:  # no answer: the visit is not posted
+        _failures.swallowed(e)
+        return None
+    row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+    return _point(row.get("lat"), row.get("lon"))
 
 
 _DEPS = Deps()
@@ -846,8 +869,11 @@ def _address(place: dict, blur: bool, country_hint: str = "") -> dict | None:
     return out
 
 
-def _check_private(place: dict, pt: tuple[float, float], has_osm: bool, book: str, d: Deps) -> None:
+def _check_private(place: dict, pt: tuple[float, float], has_osm: bool, book: str, d: Deps,
+                   visit_as_place: bool = False) -> None:
     layer = str(place.get("layer") or "").strip().lower()
+    if visit_as_place and layer.startswith("history"):
+        layer = ""
     if layer in PRIVATE_LAYERS or layer.startswith(("trip", "history")):
         raise ShareError(403, "private_place", "that is one of your own places (your things, the car, a trip or "
                                                "where you have been), not a place to share")
@@ -956,7 +982,23 @@ def preview(book: str, body: dict, d: Deps | None = None) -> dict:
     if body.get("from_phone") or place.get("from_phone"):
         raise ShareError(403, "phone_position", "the phone's own position is never shared")
     osm = _osm(place)
-    _check_private(place, pt, osm is not None, book, d)
+    visit = str(place.get("layer") or "").strip().lower().startswith("history")
+    if visit and osm is not None:
+        # A visit from location history, posted as the named place it matches
+        # (David, 27 Nov 2026: "Yes, do that"; sasonica-app mail #1376). Only
+        # the OpenStreetMap element's own point is ever written, never the
+        # visit's: looked up, it replaces what the card sent, and a card
+        # whose point is not near it was not that place.
+        own = d.element(osm)
+        if own is None:
+            raise ShareError(403, "private_place", "that visit could not be matched to its place on the map, so "
+                                                   "it is not shared: post the place from the Map instead")
+        if _metres(pt, own) > VISIT_MATCH_M:
+            raise ShareError(403, "private_place", f"that visit is more than {VISIT_MATCH_M} m from the place it "
+                                                   "names, so it is not shared")
+        pt = own
+        place = {**place, "lat": own[0], "lon": own[1]}
+    _check_private(place, pt, osm is not None, book, d, visit_as_place=visit and osm is not None)
     text = str(body.get("text") or "").strip()
     if len(text) > MAX_TEXT:
         raise ShareError(400, "too_long", f"at most {MAX_TEXT} characters")
