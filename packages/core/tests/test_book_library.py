@@ -24,6 +24,8 @@ def _book(path, seconds, tags=(), cover=False):
         argv += ["-i", str(pic), "-map", "0:a", "-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic"]
     for k, v in tags:
         argv += ["-metadata", f"{k}={v}"]
+    if not cover:  # free-form tags (series-part) kept, as Libation writes them; it loses a cover
+        argv += ["-movflags", "use_metadata_tags"]
     subprocess.run([*argv, "-c:a", "aac", str(path)], check=True)
 
 
@@ -51,6 +53,27 @@ def test_the_folder_is_read_tags_covers_and_series(lib):
     url = B.cover_url(h)
     name, sig = url.rsplit("/", 1)[1].split("?sig=")
     assert B.served_cover(name, sig) is not None and B.served_cover(name, "bad") is None
+
+
+def test_a_books_number_in_its_series_is_kept(lib):
+    _book(lib / "Iron Druid" / "Hounded.m4b", 400, (("title", "Hounded"), ("series-part", "1")))
+    _book(lib / "Iron Druid" / "Shattered.m4b", 400, (("title", "Shattered: Book 10"),))
+    _book(lib / "Iron Druid" / "Other.m4b", 400, (("title", "Other"),))
+    B.scan()
+    got = {e["title"]: (e["series"], e["series_part"]) for e in B.items()}
+    assert got == {"Hounded": ("Iron Druid", 1.0), "Shattered: Book 10": ("Iron Druid", 10.0),
+                   "Other": ("Iron Druid", None)}
+
+
+def test_an_entry_kept_from_before_is_read_again_for_its_number(lib):
+    _book(lib / "Hounded: Book 3.m4b", 400)
+    B.scan()
+    d = B._load()
+    for e in d["books"].values():
+        e.pop("series_part")
+    B._save(d)
+    [e] = B.scan()["books"].values()
+    assert e["series_part"] == 3.0
 
 
 def test_progress_from_the_book_channels_positions(lib):

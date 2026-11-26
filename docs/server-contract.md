@@ -4959,6 +4959,14 @@ are kept (`media-meta.json`), so a later visit knows more. Books and
 podcasts are the book player's history less what Threads already holds (a
 conversation read back, the agenda, a note sent to the phone).
 
+A book item also has `series_part` (27 Nov 2026): its number in its
+series (1, 2, 2.5), null when nothing says. It comes from the file's
+``series-part`` tag (as Libation and OpenAudible write it), else a ``#N``
+on the series tag, else the title's "Book 6", "Book Six", "Volume 2" or
+"#4"; `series` itself never carries the number. A client grouping by
+series lists a group by it, the books without one after
+(`media_meta.series_part`).
+
 Every item also has `plays` (31 Oct 2026): how often it was played, in
 the stretch of history read.
 

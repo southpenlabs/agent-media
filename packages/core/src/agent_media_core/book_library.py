@@ -9,7 +9,9 @@ a folder one deep) and keeps what it learns in ``<state_dir>/book-library.json``
 
 - each file's tags by ffprobe — title (the album, else the title, else the
   file's name), author (album artist, else artist), narrator (composer),
-  series (a ``series`` tag, else the folder it sits in), genre — and its
+  series (a ``series`` tag, else the folder it sits in) and the book's
+  number in it (`series_part`: a ``series-part`` tag, else the title's
+  "Book 6" or "#6"; media_meta.series_part), genre — and its
   length, read again only when its size or time changes
 - its cover, the picture embedded in the file, kept in ``<cache>/book-covers/``
   and served by a signed link (`cover_url`, ``GET /books/covers/<id>.jpg?sig=``)
@@ -47,6 +49,7 @@ from typing import Optional
 
 from ._paths import cache_dir, state_dir
 from agent_media_core import failures as _failures
+from agent_media_core import media_meta
 
 AUDIO_EXTS = {".m4b", ".m4a", ".mp3", ".mka", ".opus", ".ogg", ".webm", ".flac", ".aac", ".wav"}
 MIN_BOOK_S = 5 * 60
@@ -125,15 +128,24 @@ def _name_title(path: Path) -> str:
     return re.sub(r"[_]+", " ", t).strip()
 
 
+#: The tags a book's place in its series is kept in (Libation's and
+#: OpenAudible's ``series-part``, iTunes' movement number).
+_PART_TAGS = ("series-part", "series_part", "seriespart", "series_index", "movement")
+
+
 def _entry(rel: str, path: Path, got: dict, added: float) -> dict:
     tags = got["tags"]
     folder = rel.split("/", 1)[0] if "/" in rel else ""
     title = (tags.get("album") if folder == "" else tags.get("title")) or tags.get("title") \
         or tags.get("album") or _name_title(path)
+    series = (tags.get("series") or tags.get("movementname") or tags.get("grouping")
+              or folder or "").strip() or None
     return {"id": book_id(rel), "rel": rel, "title": title.strip(),
             "author": (tags.get("album_artist") or tags.get("artist") or "").strip() or None,
             "narrator": (tags.get("composer") or "").strip() or None,
-            "series": (tags.get("series") or tags.get("grouping") or folder or "").strip() or None,
+            "series": series,
+            "series_part": media_meta.series_part(title, series or "", next(
+                (str(tags[k]) for k in _PART_TAGS if str(tags.get(k) or "").strip()), "")),
             "genre": (tags.get("genre") or "").strip() or None,
             "duration": got["duration"], "cover": bool(got["has_cover"]), "added": added}
 
@@ -175,7 +187,8 @@ def scan() -> dict:
                 continue
             sig = f"{st.st_size}:{int(st.st_mtime)}"
             prev = old.get(rel)
-            if prev and prev.get("sig") == sig:
+            # An entry read before series_part was kept (27 Nov 2026) is read again once.
+            if prev and prev.get("sig") == sig and "series_part" in prev:
                 books[rel] = prev
                 continue
             try:

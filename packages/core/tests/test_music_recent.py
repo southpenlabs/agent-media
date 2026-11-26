@@ -124,6 +124,23 @@ def test_series_from_a_title(title, want):
     assert media_meta.series_of(title) == want
 
 
+@pytest.mark.parametrize("title,series,tag,want", [
+    ("Hounded: The Iron Druid Chronicles, Book 1 (Unabridged)", "", "", 1.0),
+    ("Shattered: The Iron Druid Chronicles, Book 7", "", "", 7.0),
+    ("The Way of Kings", "The Stormlight Archive", "1", 1.0),
+    ("Edgedancer", "", "2.5/4", 2.5),
+    ("Words of Radiance", "The Stormlight Archive #2", "", 2.0),
+    ("The Sixth Book: Book Six of the Saga", "", "", 6.0),
+    ("Mistborn #10 - The Lost Metal", "", "", 10.0),
+    ("Part of the Sea", "", "", None),
+    ("Blood Scent (Unabridged)", "", "", None),
+])
+def test_a_books_number_in_its_series(title, series, tag, want):
+    """Sweep 27 Nov 2026 B8: books 1, 2 and 10 list in that order, so the
+    number is kept rather than stripped."""
+    assert media_meta.series_part(title, series, tag) == want
+
+
 def test_books_and_podcasts_are_their_own_lists(st, monkeypatch):
     item = {"id": "b-000000000001", "rel": "Hounded.m4b", "path": "/home/u/audiobooks/Hounded.m4b",
             "title": "Hounded: The Iron Druid Chronicles, Book 1 (Unabridged)", "author": "Kevin Hearne",
@@ -137,6 +154,7 @@ def test_books_and_podcasts_are_their_own_lists(st, monkeypatch):
     books = music_recent.recent(store=st, kind="book")
     assert [(b["title"][:7], b["author"], b["series"], b["narrator"], b["genre"]) for b in books] == \
         [("Hounded", "Kevin Hearne", "The Iron Druid Chronicles", "Luke Daniels", None)]
+    assert books[0]["series_part"] == 1.0
     pods = music_recent.recent(store=st, kind="podcast")
     assert [(p["title"], p["author"]) for p in pods] == [("Episode 205", "traffic.libsyn.com")]
     assert not any("token" in r["uri"] for r in books + pods)

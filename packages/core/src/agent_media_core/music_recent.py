@@ -366,8 +366,17 @@ def _meta(e: Optional[dict]) -> dict:
     if not e:
         return {}
     return {"title": e.get("title") or "", "authorName": e.get("author") or "",
-            "seriesName": e.get("series") or "", "narratorName": e.get("narrator") or "",
+            "seriesName": e.get("series") or "", "seriesPart": e.get("series_part"),
+            "narratorName": e.get("narrator") or "",
             "genres": [e["genre"]] if e.get("genre") else []}
+
+
+def _part(title: str, meta: dict) -> Optional[float]:
+    """The book's number in its series: the library's, else the title's."""
+    got = meta.get("seriesPart")
+    if isinstance(got, (int, float)):
+        return float(got)
+    return media_meta.series_part(title, meta.get("seriesName") or "")
 
 
 def _cover(e: Optional[dict]) -> Optional[str]:
@@ -502,6 +511,7 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
                     "at": r["started_at"], "session": sid or None, "inferred": inferred,
                     "plays": plays.get(r["uri"], 1), "kind": kind, "author": author,
                     "series": media_meta.series_of(title, meta.get("seriesName") or ""),
+                    "series_part": _part(title, meta),
                     "narrator": (meta.get("narratorName") or "").strip() or None,
                     "genre": genre})
     media_meta.fill(wanted)
@@ -680,6 +690,7 @@ def _library_books(which: str) -> list[dict]:
                     "session": None, "inferred": False, "kind": "book",
                     "author": meta["authorName"] or None,
                     "series": media_meta.series_of(title, meta["seriesName"]),
+                    "series_part": _part(title, meta),
                     "narrator": meta["narratorName"] or None,
                     "genre": genre, "progress": round(p["progress"], 3),
                     "finished": bool(p["finished"]), "marked": p["marked"],

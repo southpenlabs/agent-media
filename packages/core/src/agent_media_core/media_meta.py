@@ -288,6 +288,46 @@ _SERIES = re.compile(r":\s*(?:Book \w+ of )?(?:the )?(.+?),?\s+(?:Book|Volume|Vo
 _NAMED_SERIES = re.compile(r"(?:(?i:the) )?((?:[A-Z][\w'’]* )+(?:Chronicles|Saga|Trilogy|Cycle|Series))\b")
 
 
+_NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty".split())}
+_ORDINALS = {w: i + 1 for i, w in enumerate(
+    "first second third fourth fifth sixth seventh eighth ninth tenth".split())}
+
+#: Where a book's place in its series is written: "Book 6", "Volume 2",
+#: "Vol. 3", "Book Six", "Book 1 of …", "#4", "(Series 2)", "Part 3".
+_PART = re.compile(r"(?:\b(?:Book|Volume|Vol\.?|Part|Series)\s+|#\s*)(\d+(?:\.\d+)?|[a-z]+)\b", re.I)
+
+
+def _number(word: str) -> Optional[float]:
+    w = word.strip().lower().rstrip(".")
+    try:
+        n: Optional[float] = float(w)
+    except ValueError:
+        got = _NUMBER_WORDS.get(w, _ORDINALS.get(w))
+        n = float(got) if got is not None else None
+    return n if n is not None and 0 <= n < 10000 else None
+
+
+def series_part(title: str, series: str = "", tag: str = "") -> Optional[float]:
+    """A book's place in its series (sweep 27 Nov 2026, B8: "books 1, 2 and
+    10 of a series list in that order"): a ``series-part`` tag ("3", "3.5",
+    "3/9"), else a ``#N`` on the series ("Iron Druid #6"), else what the
+    title says ("…, Book 6", "Book Six", "#4 - …"). None when nothing says."""
+    if tag.strip():
+        n = _number(re.split(r"[/,;\s]", tag.strip(), maxsplit=1)[0])
+        if n is not None:
+            return n
+    m = re.search(r"#\s*(\d+(?:\.\d+)?)\s*$", series or "")
+    if m:
+        return _number(m.group(1))
+    for m in _PART.finditer(title or ""):
+        n = _number(m.group(1))
+        if n is not None:
+            return n
+    return None
+
+
 def series_of(title: str, series: str = "") -> Optional[str]:
     if series:
         return re.sub(r"\s*#[\d.]+$", "", series).strip() or None
