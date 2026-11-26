@@ -5,21 +5,30 @@ still using it for serving sasonica books and podcasts" — "All the way".
 Audiobookshelf used to be what knew which files were books, their names
 and who read them, and how far he was through each. Now this module reads
 the folder (MEDIA_AUDIOBOOK_ABS_DIR, else ~/audiobooks: a file, or a file in
-a folder one deep) and keeps what it learns in ``<state_dir>/book-library.json``:
+a folder one or two deep, as in Author/Title/files) and keeps what it learns
+in ``<state_dir>/book-library.json``:
 
 - each file's tags by ffprobe — title (the album, else the title, else the
-  file's name), author (album artist, else artist), narrator (composer),
-  series (a ``series`` tag, else the folder it sits in) and the book's
-  number in it (`series_part`: a ``series-part`` tag, else the title's
-  "Book 6" or "#6"; media_meta.series_part), genre — and its
-  length, read again only when its size or time changes
-- its cover, the picture embedded in the file, kept in ``<cache>/book-covers/``
-  and served by a signed link (`cover_url`, ``GET /books/covers/<id>.jpg?sig=``)
+  file's name), author (album artist, else artist, else the top folder of
+  Author/Title), narrator (composer), series (a ``series`` tag, else the
+  folder it sits in) and the book's number in it (`series_part`: a
+  ``series-part`` tag, else the title's "Book 6" or "#6";
+  media_meta.series_part), genre — and its length, read again only when
+  its size or time changes
+- a folder whose audio files are all one album (one album tag, or none and
+  numbered names) is one book, its parts in order (disc, track, then the
+  names as numbers read); a folder of different albums stays separate books
+  (sweep 27 Nov 2026, B6). A part keeps its own file and so its old place.
+- its cover, the picture embedded in the file, else an image beside it
+  (``cover.jpg``, ``folder.jpg``, or one named as the file), kept in
+  ``<cache>/book-covers/`` and served by a signed link (`cover_url`,
+  ``GET /books/covers/<id>.jpg?sig=``)
 - `added`: when the file first appeared here
 
 How far through each is: the book channel's own position (`resume_pos`,
 by its path or, for a copy played on the phone, by its file name) over its
-length; finished within the last minute or 98%. The folder can be a mount
+length — for a book in parts, the parts before the one last played and the
+place in it, over them all; finished within the last minute or 98%. The folder can be a mount
 that is sometimes away (red5's comes from another machine): then the last
 reading stands.
 
@@ -92,17 +101,38 @@ def book_id(rel: str) -> str:
     return "b-" + hashlib.sha1(rel.encode()).hexdigest()[:12]
 
 
-def _files(base: Path) -> list[Path]:
+def _files(base: Path, depth: int = 2) -> list[Path]:
+    """The audio files in `base` and its folders up to `depth` deep."""
     out = []
     for p in sorted(base.iterdir()):
         if p.name.startswith("."):
             continue
         if p.is_dir():
-            out += [q for q in sorted(p.iterdir()) if q.is_file() and q.suffix.lower() in AUDIO_EXTS
-                    and not q.name.startswith(".")]
+            if depth > 0:
+                out += _files(p, depth - 1)
         elif p.is_file() and p.suffix.lower() in AUDIO_EXTS:
             out.append(p)
     return out
+
+
+_COVER_NAMES = ("cover", "folder", "front", "poster")
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _side_cover(path: Path, folder_book: bool) -> Optional[Path]:
+    """An image beside `path`: one named as the file, or (in its own folder,
+    not the library's top) cover.jpg, folder.jpg and the like."""
+    try:
+        here = {q.name.lower(): q for q in path.parent.iterdir() if q.is_file()}
+    except OSError:
+        return None
+    stems = ([] if folder_book else [path.stem.lower()]) + \
+        (list(_COVER_NAMES) if path.parent != root() else [])
+    for stem in stems:
+        for ext in _IMAGE_EXTS:
+            if stem + ext in here:
+                return here[stem + ext]
+    return None
 
 
 def _probe(path: Path) -> dict:
@@ -131,29 +161,115 @@ def _name_title(path: Path) -> str:
 #: The tags a book's place in its series is kept in (Libation's and
 #: OpenAudible's ``series-part``, iTunes' movement number).
 _PART_TAGS = ("series-part", "series_part", "seriespart", "series_index", "movement")
+def _num(v) -> int:
+    m = re.match(r"\s*(\d+)", str(v or ""))
+    return int(m.group(1)) if m else 0
 
 
 def _entry(rel: str, path: Path, got: dict, added: float) -> dict:
     tags = got["tags"]
-    folder = rel.split("/", 1)[0] if "/" in rel else ""
+    dirs = rel.split("/")[:-1]
+    folder = dirs[-1] if dirs else ""
     title = (tags.get("album") if folder == "" else tags.get("title")) or tags.get("title") \
         or tags.get("album") or _name_title(path)
     series = (tags.get("series") or tags.get("movementname") or tags.get("grouping")
               or folder or "").strip() or None
+    author = (tags.get("album_artist") or tags.get("artist") or "").strip() \
+        or (dirs[0] if len(dirs) > 1 else "")
     return {"id": book_id(rel), "rel": rel, "title": title.strip(),
-            "author": (tags.get("album_artist") or tags.get("artist") or "").strip() or None,
+            "author": author or None,
             "narrator": (tags.get("composer") or "").strip() or None,
             "series": series,
             "series_part": media_meta.series_part(title, series or "", next(
                 (str(tags[k]) for k in _PART_TAGS if str(tags.get(k) or "").strip()), "")),
             "genre": (tags.get("genre") or "").strip() or None,
-            "duration": got["duration"], "cover": bool(got["has_cover"]), "added": added}
+            "duration": got["duration"], "cover": bool(got["has_cover"]), "added": added,
+            # What grouping a folder into one book reads (_group).
+            "album": (tags.get("album") or "").strip(), "tag_title": (tags.get("title") or "").strip(),
+            "disc": _num(tags.get("disc")), "track": _num(tags.get("track"))}
 
 
-def _extract_cover(path: Path, bid: str) -> None:
+#: A part's own title that still says only which part it is.
+_PART_TITLE = re.compile(r"^\W*(?:(?:chapter|part|track|disc|cd|section|kapitel|cap[ií]tulo)\W*)?\d+\W*$", re.I)
+
+
+def _natural(name: str) -> list:
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in re.split(r"(\d+)", name) if t]
+
+
+def _titled(e: dict) -> bool:
+    """Whether a file has a title of its own, not just its part's number."""
+    t = e.get("tag_title") or ""
+    return bool(t) and not _PART_TITLE.match(t) and t != os.path.splitext(os.path.basename(e["rel"]))[0]
+
+
+def _one_book(parts: list[dict]) -> bool:
+    """Whether the files of one folder are parts of one book: one album tag
+    for them all; or none, every name numbered and no part titled as its
+    own thing (a folder of episodes is not one book). An m4b is a whole
+    book: a folder of them each with its own title stays separate books,
+    one album or not (Audible's episodes of a series share one)."""
+    if len(parts) < 2:
+        return False
+    if all(e["rel"].lower().endswith(".m4b") and _titled(e) for e in parts) \
+            and len({e["tag_title"] for e in parts}) == len(parts):
+        return False
+    albums = {e["album"] for e in parts}
+    if len(albums) == 1 and "" not in albums:
+        return True
+    if albums != {""}:
+        return False
+    return all(re.search(r"\d", os.path.basename(e["rel"])) and not _titled(e) for e in parts)
+
+
+def _book_of(folder: str, parts: list[dict]) -> dict:
+    """One book from the files of `folder`, in order."""
+    parts = sorted(parts, key=lambda e: (e["disc"], e["track"], _natural(os.path.basename(e["rel"]))))
+    if not all(e["track"] for e in parts):
+        parts = sorted(parts, key=lambda e: _natural(os.path.basename(e["rel"])))
+    first = parts[0]
+    dirs = folder.split("/")
+    name = dirs[-1]
+    series = next((e["series"] for e in parts if e.get("series") and e["series"] != name), None)
+    title = first["album"] or name
+    # Its number in the series: a part's (from its tag), else the book's title.
+    part = next((e.get("series_part") for e in parts
+                 if series and e.get("series") == series and e.get("series_part") is not None), None)
+    return {"id": book_id(folder), "rel": folder, "title": title,
+            "series_part": part if part is not None else media_meta.series_part(title, series or ""),
+            "author": first.get("author") or (dirs[0] if len(dirs) > 1 else None),
+            "narrator": first.get("narrator"), "series": series, "genre": first.get("genre"),
+            "duration": sum(float(e.get("duration") or 0) for e in parts),
+            "cover": False, "added": min(float(e.get("added") or 0) for e in parts),
+            "parts": [{"rel": e["rel"], "duration": float(e.get("duration") or 0)} for e in parts],
+            "_cover_from": next((e["rel"] for e in parts if e.get("cover")), None)}
+
+
+def _group(files: dict) -> dict:
+    """The books from the files read (`{rel: entry}`): a folder that is one
+    book (`_one_book`) as one, every other file its own."""
+    by_dir: dict[str, list[dict]] = {}
+    for rel, e in files.items():
+        if "/" in rel:
+            by_dir.setdefault(rel.rsplit("/", 1)[0], []).append(e)
+    books: dict = {}
+    grouped: set = set()
+    for folder, parts in by_dir.items():
+        if _one_book(parts):
+            books[folder] = _book_of(folder, parts)
+            grouped.update(e["rel"] for e in parts)
+    for rel, e in files.items():
+        if rel not in grouped:
+            books[rel] = e
+    return books
+
+
+def _extract_cover(path: Path, bid: str) -> bool:
+    """The first picture in `path` (an audio file's embedded one, or an
+    image) as the book's cover; whether there is one."""
     out = _covers() / f"{bid}.jpg"
     if out.exists():
-        return
+        return True
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f".{out.name}.part.jpg")
     r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(path), "-an",
@@ -161,25 +277,45 @@ def _extract_cover(path: Path, bid: str) -> None:
                        capture_output=True, timeout=120)
     if r.returncode == 0 and tmp.exists() and tmp.stat().st_size:
         tmp.replace(out)
-    else:
-        tmp.unlink(missing_ok=True)
+        return True
+    tmp.unlink(missing_ok=True)
+    return False
+
+
+def _cover_for(e: dict, base: Path) -> bool:
+    """Make `e`'s cover: the picture in its file (a book in parts: the first
+    part with one), else an image beside it. Whether it has one."""
+    src = e.get("_cover_from") if e.get("parts") else (e["rel"] if e.get("cover") else None)
+    try:
+        if src and _extract_cover(base / src, e["id"]):
+            return True
+        side = _side_cover(base / (e["parts"][0]["rel"] if e.get("parts") else e["rel"]),
+                           bool(e.get("parts")))
+        return side is not None and _extract_cover(side, e["id"])
+    except Exception as _exc:  # noqa: BLE001 — no cover this time; tried next scan
+        _failures.swallowed(_exc)
+        return False
 
 
 def scan() -> dict:
-    """Read the folder: new and changed files probed, gone ones dropped. The
-    catalogue as kept; the last one when the folder is not there."""
+    """Read the folder: new and changed files probed, gone ones dropped, and
+    the files made into books (`_group`). The catalogue as kept; the last
+    one when the folder is not there."""
     base = root()
     with _LOCK:
         d = _load()
         if not base.is_dir():
             return d
         try:
-            files = _files(base)
+            found = _files(base)
         except OSError:
             return d
-        old = d.get("books") or {}
-        books = {}
-        for p in files:
+        # Before folders were books (27 Nov 2026) the files were kept under
+        # "books" without what grouping reads: those are read again.
+        old = d.get("files") or {}
+        was = {**(d.get("books") or {}), **old}
+        files = {}
+        for p in found:
             rel = str(p.relative_to(base))
             try:
                 st = p.stat()
@@ -187,25 +323,24 @@ def scan() -> dict:
                 continue
             sig = f"{st.st_size}:{int(st.st_mtime)}"
             prev = old.get(rel)
-            # An entry read before series_part was kept (27 Nov 2026) is read again once.
             if prev and prev.get("sig") == sig and "series_part" in prev:
-                books[rel] = prev
+                files[rel] = prev
                 continue
             try:
                 got = _probe(p)
             except Exception as _exc:  # noqa: BLE001 — unreadable for now; tried next time
                 _failures.swallowed(_exc)
                 continue
-            e = _entry(rel, p, got, (prev or {}).get("added") or st.st_mtime)
+            e = _entry(rel, p, got, (was.get(rel) or {}).get("added") or st.st_mtime)
             e["sig"] = sig
-            if e["cover"]:
-                try:
-                    _extract_cover(p, e["id"])
-                except Exception as _exc:  # noqa: BLE001
-                    _failures.swallowed(_exc)
-                    e["cover"] = False
+            files[rel] = e
+        books = {}
+        for rel, e in _group(files).items():
+            e = dict(e)
+            e["cover"] = _cover_for(e, base)
+            e.pop("_cover_from", None)
             books[rel] = e
-        d = {"at": time.time(), "root": str(base), "books": books}
+        d = {"at": time.time(), "root": str(base), "files": files, "books": books}
         _save(d)
         return d
 
@@ -230,26 +365,69 @@ def _catalogue() -> dict:
 
 
 def path_of(e: dict) -> Path:
+    """The book's file, or for a book in parts its folder."""
     return root() / e["rel"]
 
 
+def _placed(e: dict) -> dict:
+    """`e` with `path`, and for a book in parts each part's `path` (`parts`)
+    and their paths in order (`part_paths`)."""
+    out = {**e, "path": str(path_of(e))}
+    if e.get("parts"):
+        out["parts"] = [{**q, "path": str(root() / q["rel"])} for q in e["parts"]]
+        out["part_paths"] = [q["path"] for q in out["parts"]]
+    return out
+
+
 def items(min_s: float = MIN_BOOK_S) -> list[dict]:
-    """The books whose file is here, each with `path`."""
+    """The books whose file (or folder) is here, each with `path`; a book in
+    parts with `parts` and `part_paths` too."""
     out = []
     for e in (_catalogue().get("books") or {}).values():
         p = path_of(e)
         if float(e.get("duration") or 0) < min_s or not p.exists() \
                 or (min_s and _RENDER.match(os.path.basename(e["rel"]))):
             continue
-        out.append({**e, "path": str(p)})
+        out.append(_placed(e))
     return out
 
 
 def by_name() -> dict:
     """Every file the catalogue knows (clips too), by its file name: for
-    naming a play the history holds by its path."""
-    return {os.path.basename(e["rel"]): {**e, "path": str(path_of(e))}
-            for e in (_catalogue().get("books") or {}).values()}
+    naming a play the history holds by its path. A part names its book
+    (whose `path` is the book's folder)."""
+    out = {}
+    for e in (_catalogue().get("books") or {}).values():
+        placed = _placed(e)
+        for q in placed.get("parts") or [placed]:
+            out[os.path.basename(q["rel"])] = placed
+            # And by its whole path, which a part's common name ("01.mp3")
+            # needs: look that up first.
+            out[q["path"]] = placed
+    return out
+
+
+def book_of_part(path: str) -> Optional[dict]:
+    """The book in parts that the file `path` is a part of, or None."""
+    e = by_name().get(os.path.normpath(os.path.expanduser(path)))
+    return e if e and e.get("parts") else None
+
+
+def of_path(path: str) -> Optional[dict]:
+    """The book in parts whose folder is `path`, or None."""
+    want = os.path.normpath(os.path.expanduser(path))
+    return next((e for e in items(0) if e.get("parts") and os.path.normpath(e["path"]) == want), None)
+
+
+def place_in_parts(e: dict, positions: dict) -> tuple[int, float, float]:
+    """``(index, pos_s, at)`` in a book in parts: the part played last
+    (the newest saved place among them) and the place in it."""
+    best = (0, 0.0, 0.0)
+    for i, q in enumerate(e["parts"]):
+        got = positions.get(q["path"]) or positions.get("name:" + os.path.basename(q["path"]))
+        if got and got[1] > best[2]:
+            best = (i, got[0] / 1000.0, got[1])
+    return best
 
 
 def find(bid: str) -> Optional[dict]:
@@ -258,10 +436,15 @@ def find(bid: str) -> Optional[dict]:
 
 def progress(e: dict, positions: dict, marked: Optional[dict] = None) -> dict:
     """``{progress 0–1, finished, at, marked}`` for a book from `positions`
-    (`resume_positions()`), by its path or file name, and its hand mark
-    (`marks()`, read when not given) when no position is newer. `marked` is
-    "finished", "unfinished" or None."""
-    got = positions.get(e["path"]) or positions.get("name:" + os.path.basename(e["path"]))
+    (`resume_positions()`), by its path or file name (a book in parts: the
+    parts before the one played last and the place in it), and its hand
+    mark (`marks()`, read when not given) when no position is newer.
+    `marked` is "finished", "unfinished" or None."""
+    if e.get("parts"):
+        i, at_s, at = place_in_parts(e, positions)
+        got = (int((sum(q["duration"] for q in e["parts"][:i]) + at_s) * 1000), at) if at else None
+    else:
+        got = positions.get(e["path"]) or positions.get("name:" + os.path.basename(e["path"]))
     dur = float(e.get("duration") or 0)
     m = (marks() if marked is None else marked).get(e["path"])
     if m and got and got[1] > float(m.get("at") or 0):
@@ -326,11 +509,18 @@ def start_over(path: str, store=None) -> int:
 
     st = store or StateStore()
     mark(path, None)
-    name = os.path.basename(path)
-    uris = {path, *(u for u, _p, _a in st.all_resume_pos() if os.path.basename(u) == name)}
-    for u in uris:
-        st.set_resume_pos(u, 0)
-    return len(uris)
+    whole = of_path(path)
+    # A book in parts: every part, the first last, so it is the part played
+    # last (place_in_parts keeps the earlier part on a tie).
+    files = list(reversed(whole["part_paths"])) if whole else [path]
+    saved = [(u, os.path.basename(u)) for u, _p, _a in st.all_resume_pos()]
+    n = 0
+    for f in files:
+        name = os.path.basename(f)
+        for u in [u for u, b in saved if b == name and u != f] + [f]:
+            st.set_resume_pos(u, 0)
+            n += 1
+    return n
 
 
 def resume_positions(store=None) -> dict:

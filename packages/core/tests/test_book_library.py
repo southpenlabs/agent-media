@@ -124,3 +124,133 @@ def test_a_folder_that_is_away_keeps_the_last_reading(lib):
     B.scan()
     shutil.rmtree(lib)
     assert len(B.scan().get("books") or {}) == 1
+
+
+# ---- a folder is one book (sweep 27 Nov 2026, B6 and B9) ----------------------
+
+def _pic(path):
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=blue:s=32x32:d=1", "-frames:v", "1", str(path)], check=True)
+
+
+def test_a_folder_of_one_album_is_one_book_in_order_with_its_cover(lib):
+    d = lib / "Hounded"
+    for n in (1, 2, 10):          # 10 after 2: the names read as numbers
+        _book(d / f"Hounded {n}.m4a", 120, (("album", "Hounded"), ("artist", "Kevin Hearne")))
+    _pic(d / "cover.jpg")
+    B.scan()
+    [e] = B.items()
+    assert (e["title"], e["author"], e["rel"]) == ("Hounded", "Kevin Hearne", "Hounded")
+    assert [p.rsplit("/", 1)[1] for p in e["part_paths"]] == ["Hounded 1.m4a", "Hounded 2.m4a",
+                                                              "Hounded 10.m4a"]
+    assert round(e["duration"]) == 360 and e["series"] is None and e["series_part"] is None
+    assert e["cover"] and B.cover_url(e)
+
+
+def test_parts_go_by_their_track_numbers(lib):
+    d = lib / "Book"
+    for name, track in (("b.m4a", "1/3"), ("a.m4a", "2/3"), ("c.m4a", "3/3")):
+        _book(d / name, 120, (("album", "Book"), ("track", track)))
+    B.scan()
+    [e] = B.items()
+    assert [p.rsplit("/", 1)[1] for p in e["part_paths"]] == ["b.m4a", "a.m4a", "c.m4a"]
+
+
+def test_author_and_title_two_deep_untagged_numbered_parts(lib):
+    for n in ("01", "02", "03"):
+        _book(lib / "Kevin Hearne" / "Hounded" / f"{n}.m4a", 120)
+    B.scan()
+    [e] = B.items()
+    assert (e["title"], e["author"], len(e["parts"])) == ("Hounded", "Kevin Hearne", 3)
+
+
+def test_a_folder_of_different_albums_or_episodes_stays_separate_books(lib):
+    _book(lib / "Iron Druid" / "Hounded.m4b", 400, (("album", "Hounded"),))
+    _book(lib / "Iron Druid" / "Hexed.m4b", 400, (("album", "Hexed"),))
+    _book(lib / "Slaving Away" / "Ep_1.m4b", 330, (("title", "Ep. 1: Meet Miranda"),))
+    _book(lib / "Slaving Away" / "Ep_2.m4b", 330, (("title", "Ep. 2: The Agency"),))
+    # Audible's episodes: whole m4bs with their own titles, one album for all.
+    _book(lib / "Series 2" / "Ep_1.m4b", 330, (("title", "Ep. 1: Back"), ("album", "Series 2")))
+    _book(lib / "Series 2" / "Ep_2.m4b", 330, (("title", "Ep. 2: Again"), ("album", "Series 2")))
+    B.scan()
+    assert len(B.items()) == 6 and not any(e.get("parts") for e in B.items())
+
+
+def test_a_books_place_is_over_its_parts_and_old_places_are_kept(lib):
+    from agent_media_core.state import StateStore
+    d = lib / "Book"
+    for n in (1, 2, 3):
+        _book(d / f"{n}.m4a", 200, (("album", "Book"),))
+    st = StateStore()
+    st.set_resume_pos(str(d / "1.m4a"), 150_000)           # played before folders were books
+    st.set_resume_pos("/phone/cache/2.m4a", 100_000)       # then part 2 on the phone, later
+    B.scan()
+    [e] = B.items()
+    p = B.progress(e, B.resume_positions(st))
+    assert round(p["progress"], 2) == 0.5 and not p["finished"]   # (200 + 100) / 600
+    assert B.book_of_part(str(d / "3.m4a"))["id"] == e["id"]
+    assert B.by_name()["2.m4a"]["path"] == e["path"]
+
+
+def test_a_book_in_parts_plays_as_its_parts_from_the_part_played_last(lib, tmp_path, monkeypatch):
+    import agent_media_core.mcp_server as m
+    from agent_media_core.state import StateStore
+
+    class Book:
+        def __init__(self):
+            self.plays = []
+
+        def play(self, uri, target, start_ms=None):
+            self.plays.append((uri.rsplit("/", 1)[1], start_ms))
+
+        def position(self, target):
+            return None
+
+        def idle(self, target):
+            return True
+
+    st, fb = StateStore(tmp_path / "state.db"), Book()
+    monkeypatch.setattr(m._state, "_v", st, raising=False)
+    monkeypatch.setattr(m._book, "_v", fb, raising=False)
+    monkeypatch.setattr(m, "_ensure_autoadvance_watcher", lambda: None)
+    d = lib / "Book"
+    for n in (1, 2, 3):
+        _book(d / f"{n}.m4a", 200, (("album", "Book"),))
+    B.scan()
+    st.set_resume_pos(str(d / "2.m4a"), 50_000)
+    r = m._book_play(str(d), True, -1, "local", "")
+    assert r["ok"] and r["uri"] == str(d) and fb.plays == [("2.m4a", 50_000)]
+    assert st.get_now_playing("book")["extras"]["title"] == "Book"
+    m._advance_after_eof()                                  # part 2 ended: part 3
+    assert fb.plays[-1] == ("3.m4a", 0)
+    assert st.get_now_playing("book")["extras"]["title"] == "Book"
+    m._book_play(str(d), True, 250_000, "local", "")       # a place in the whole book
+    assert fb.plays[-1] == ("2.m4a", 50_000)
+    m._book_play(str(d), False, -1, "local", "")           # from the start
+    assert fb.plays[-1] == ("1.m4a", 0)
+    m.book_resume("local")                                  # idle: the book again
+    assert st.get_playlist_active() == f"book:{B.items()[0]['id']}"
+    assert not m._book_play(str(lib), True, -1, "local", "")["ok"]   # not a book
+
+
+def test_starting_a_book_in_parts_over_goes_back_to_its_first_part(lib):
+    from agent_media_core.state import StateStore
+    d = lib / "Book"
+    for n in (1, 2, 3):
+        _book(d / f"{n}.m4a", 200, (("album", "Book"),))
+    st = StateStore()
+    st.set_resume_pos(str(d / "3.m4a"), 100_000)
+    st.set_resume_pos("/phone/cache/2.m4a", 50_000)
+    B.scan()
+    [e] = B.items()
+    B.start_over(e["path"], store=st)
+    assert B.place_in_parts(e, B.resume_positions(st))[:2] == (0, 0.0)
+    assert B.progress(e, B.resume_positions(st), {})["progress"] == 0.0
+
+
+def test_a_book_in_parts_has_its_number_in_its_series(lib):
+    for n in (1, 2):
+        _book(lib / "Hearne" / "Hounded, Book 1" / f"{n:02}.m4a", 200)
+    B.scan()
+    [e] = B.items()
+    assert (e["title"], e["series_part"]) == ("Hounded, Book 1", 1.0)

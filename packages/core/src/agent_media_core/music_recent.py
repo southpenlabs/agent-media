@@ -462,7 +462,10 @@ def _spoken_books(store: StateStore, kind: str, limit: int, window: int = 400) -
         if uri.startswith(("http://127.", "http://localhost")):
             continue
         else:
-            it = items.get(os.path.basename(urllib.parse.urlparse(uri).path if "://" in uri else uri))
+            it = items.get(uri) or \
+                items.get(os.path.basename(urllib.parse.urlparse(uri).path if "://" in uri else uri))
+        if it and it.get("parts"):
+            uri = it["path"]  # a part of a book in parts: the book, once
         plays[uri] = plays.get(uri, 0) + 1
         if uri in seen:
             continue

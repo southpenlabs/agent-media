@@ -810,6 +810,12 @@ def book_play(uri: str, resume: bool = True, start_ms: int = -1,
 def _book_play(uri: str, resume: bool, start_ms: int, target: str, title: str) -> dict:
     b, st, t = _book(), _state(), _book_target(target)
     norm = normalize_uri(uri)
+    if not norm.startswith(("http://", "https://", "rtsp://")) and Path(norm).expanduser().is_dir():
+        from . import book_library
+        e = book_library.of_path(norm)
+        if e is None:
+            return {"ok": False, "uri": norm, "reason": "a folder that is not a book in the library"}
+        return _play_book_in_parts(e, resume, start_ms, t, title)
     # Download-first: a YouTube URL is unplayable directly on a datacenter IP
     # (datacenter hosts get 403'd). Resolve it to a cached local file, or start a
     # phone-side fetch (audiobook-fetch) that auto-plays when it finishes.
@@ -901,6 +907,16 @@ def book_resume(target: str = "") -> dict:
         last = st.get_book_last()
         if not last:
             return {"ok": False, "reason": "no book to resume"}
+        from . import book_library
+        whole = book_library.book_of_part(last)
+        if whole is not None:
+            # A part of a library book: the book again, so it goes on to
+            # the next part when this one ends.
+            try:
+                with play_gate.request(title=whole["title"]):
+                    return _play_book_in_parts(whole, True, None, t)
+            except play_gate.PlayHeld as e:
+                return _held(e)
         start = st.get_resume_pos(last) or 0
         try:
             # Nothing loaded: reopening the last book is a start (play_gate).
@@ -1028,8 +1044,38 @@ def book_now_playing(target: str = "") -> dict:
 # the part at the cursor; `book_next`/`book_prev` step the cursor. The active
 # playlist is remembered so `book_next` knows what to advance.
 
+def _play_book_in_parts(e: dict, resume: bool, start_ms: "int | None", t: Target,
+                        title: str = "") -> dict:
+    """A library book that is a folder of parts (book_library): played as
+    the book playlist ``book:<id>``, its parts in the library's order, so a
+    part's end goes on to the next (the event watcher). Resumes in the part
+    played last, at its place; `start_ms` is a place in the whole book."""
+    from . import book_library
+
+    st = _state()
+    name = f"book:{e['id']}"
+    paths = e["part_paths"]
+    pl = st.get_playlist(name)
+    if pl is None or [i["uri"] for i in pl["items"]] != paths:
+        st.delete_playlist(name)
+        st.create_playlist(name, channel="book")
+        st.add_playlist_items(name, [(p, f"{e['title']}, part {n}") for n, p in enumerate(paths, 1)])
+    if start_ms is not None and start_ms >= 0:
+        index, left = 0, start_ms / 1000.0
+        for index, q in enumerate(e["parts"]):
+            if left < q["duration"] or index == len(paths) - 1:
+                break
+            left -= q["duration"]
+        return _play_playlist_part(name, index, t, start_ms=int(left * 1000),
+                                   title=title or e["title"], book_uri=e["path"])
+    index = book_library.place_in_parts(e, book_library.resume_positions(st))[0] if resume else 0
+    return _play_playlist_part(name, index, t, resume_part=resume,
+                               title=title or e["title"], book_uri=e["path"])
+
+
 def _play_playlist_part(name: str, index: int, target: Target,
-                        resume_part: bool = True) -> dict:
+                        resume_part: bool = True, start_ms: "int | None" = None,
+                        title: str = "", book_uri: str = "") -> dict:
     """Open the playlist `name` at `index` on the book channel.
 
     Saves the outgoing book's bookmark first, points the playlist cursor at
@@ -1042,16 +1088,21 @@ def _play_playlist_part(name: str, index: int, target: Target,
         return {"ok": False, "reason": "index out of range", "index": index}
     _save_book_bookmark(b, st, target)
     uri = normalize_uri(item["uri"])
-    start = (st.get_resume_pos(uri) or 0) if resume_part else 0
+    if start_ms is not None:
+        start = start_ms
+    else:
+        start = (st.get_resume_pos(uri) or 0) if resume_part else 0
     b.play(uri, target, start_ms=start)
     st.set_playlist_index(name, index)
     st.set_playlist_active(name)
     st.set_now_playing(sink="book", uri=uri, started_at=time.time(),
-                       content_type="audiobook", target=target.name)
-    st.set_book_last(uri)
+                       content_type="audiobook", target=target.name,
+                       extras={"title": title} if title else None)
+    st.set_book_last(uri, title or None)
     _ensure_autoadvance_watcher()
-    return {"ok": True, "playlist": name, "index": index, "uri": uri,
-            "title": item["title"], "resumed_from_ms": start}
+    out = {"ok": True, "playlist": name, "index": index, "uri": uri,
+           "title": item["title"], "resumed_from_ms": start}
+    return {**out, "uri": book_uri, "part": uri} if book_uri else out
 
 
 # --- book event watcher: playlist auto-advance + EOF self-heal ------------
@@ -1106,7 +1157,9 @@ def _advance_after_eof() -> None:
         st.clear_now_playing("book")
         log.info("book playlist %r finished", name)
         return
-    _play_playlist_part(name, nxt, t)
+    # A library book's parts carry its title on (_play_book_in_parts).
+    title = ((np or {}).get("extras") or {}).get("title") if name.startswith("book:") else ""
+    _play_playlist_part(name, nxt, t, title=title or "")
 
 
 def _reheal_after_error(last_pos_ms: "int | None",
