@@ -1190,7 +1190,7 @@ def speech_before_restart(emit: Callable[[str], None]) -> bool:
     from . import cli
     from .intake.submit import set_speech_hold
 
-    set_speech_hold(health_s() + 90.0, SPEECH_HOLD_OWNER)
+    set_speech_hold(health_s() + 90.0 + PHONE_BACK_S, SPEECH_HOLD_OWNER)
     if not speech_in_flight() or cli._speech_paused_mirror():
         return False
     try:
@@ -1205,8 +1205,56 @@ def speech_before_restart(emit: Callable[[str], None]) -> bool:
     return True
 
 
+#: How long the pick-up waits for the phone to report after a restart.
+PHONE_BACK_S = 45.0
+
+
+def _phone_reported() -> bool:
+    """Has the frames hub heard from the phone since the hub started? Its
+    REPORTED_AT (speech_frames) is 0 until the first report; a player that
+    is not a frames hub has no such property and counts as reported."""
+    from . import cli
+    from .sinks import _mpv_ipc as ipc
+
+    try:
+        at = ipc.get_property(cli._sock(), "user-data/agent-media/reported-at")
+    except Exception as e:  # noqa: BLE001 — not a frames hub: nothing to wait for
+        _failures.swallowed(e)
+        return True
+    if not isinstance(at, (int, float)) or isinstance(at, bool):
+        return True
+    return float(at) > 0
+
+
+def _phone_back(emit: Callable[[str], None],
+                reported: "Optional[Callable[[], bool]]" = None) -> None:
+    """Wait, up to PHONE_BACK_S, for the phone to report to a restarted hub.
+
+    A phone on speech frames reconnects through the front door, which
+    answers 502 for a while after the server restarts (about 12 s, 27 Nov
+    2026). A replay sent in that gap went to no listener; the phone's first
+    report on reconnect then said idle, the hub took its word (speech_frames
+    `_lost`), and the reply waited until David opened the chat, 100 s later
+    (sasonica-app mail #1374). A hub that was not restarted has heard from
+    the phone already and is not waited on."""
+    reported = reported or _phone_reported
+    deadline = time.time() + PHONE_BACK_S
+    waited = False
+    while not reported():
+        if time.time() >= deadline:
+            emit("speech: the phone has not reported since the restart; picking up anyway")
+            return
+        if not waited:
+            emit("speech: waiting for the phone's speech channel to come back")
+            waited = True
+        _sleep(0.5)
+    if waited:
+        emit("speech: the phone is back")
+
+
 def speech_after_restart(stopped: bool, emit: Callable[[str], None]) -> None:
     """Replay the reply `speech_before_restart` stopped from its sentence,
+    once a restarted frames hub has heard from the phone (`_phone_back`),
     then lift the hold, once that replay has the voice (so it plays before
     the replies held behind it) or after 15 s."""
     from .intake.submit import release_speech_hold
@@ -1214,6 +1262,7 @@ def speech_after_restart(stopped: bool, emit: Callable[[str], None]) -> None:
     try:
         row = _cut_row() if stopped else None
         if row is not None:
+            _phone_back(emit)
             _resume_speech(int(row["id"]))
             emit(f"speech: picking reply {row['id']} back up where it stopped")
             deadline = time.time() + 15.0

@@ -81,6 +81,7 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(rs, "_stop_speech", lambda: speech_calls.append("stop"))
     monkeypatch.setattr(rs, "_resume_speech", lambda rid: speech_calls.append(("resume", rid)))
     monkeypatch.setattr(rs, "_cut_row", lambda: None)
+    monkeypatch.setattr(rs, "_phone_reported", lambda: True)
 
     class Host:
         path = tmp_path
@@ -249,6 +250,62 @@ def test_a_longer_reply_is_stopped_and_picked_up_after(host, monkeypatch, capsys
     assert seen["held"] and submit.speech_hold_until() == 0
     assert "picking reply 77 back up" in out
     assert host.restarts() == ["agent-media-visual-canvas.service"]
+
+
+def test_the_pick_up_waits_for_the_phone_to_come_back(host, monkeypatch, capsys):
+    """sasonica-app mail #1374 (27 Nov 2026): the replay went out while the
+    phone was still getting 502s from the front door, its idle report on
+    reconnect undid it, and the reply waited until David opened the chat.
+    The replay now waits for the restarted hub to hear from the phone."""
+    _speaking(monkeypatch, left_s=45)
+    flight = iter([True, True, False])
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: next(flight, False))
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    monkeypatch.setattr(rs, "_cut_row", lambda: {"id": 77})
+    reports = iter([False, False, False, True])
+
+    def reported():
+        ok = next(reports, True)
+        if ok:
+            assert host.speech == ["stop"]   # nothing replayed into the gap
+        return ok
+
+    monkeypatch.setattr(rs, "_phone_reported", reported)
+    assert _run("--only", "canvas") == 0
+    out = capsys.readouterr().out
+    assert host.speech == ["stop", ("resume", 77)]
+    assert "waiting for the phone's speech channel" in out
+    assert "the phone is back" in out
+
+
+def test_the_pick_up_goes_ahead_when_the_phone_stays_away(host, monkeypatch, capsys):
+    _speaking(monkeypatch, left_s=45)
+    flight = iter([True, True, False])
+    monkeypatch.setattr(cli, "_speech_in_flight", lambda: next(flight, False))
+    monkeypatch.setattr(rs, "_sleep", lambda s: None)
+    monkeypatch.setattr(rs, "_cut_row", lambda: {"id": 78})
+    monkeypatch.setattr(rs, "PHONE_BACK_S", 0.0)
+    monkeypatch.setattr(rs, "_phone_reported", lambda: False)
+    assert _run("--only", "canvas") == 0
+    assert host.speech == ["stop", ("resume", 78)]
+    assert "picking up anyway" in capsys.readouterr().out
+
+
+def test_phone_reported_reads_the_hub(monkeypatch):
+    from agent_media_core.sinks import _mpv_ipc as ipc
+
+    monkeypatch.setattr(cli, "_sock", lambda: "/nonexistent/hub.sock")
+    seen = []
+    for value, want in ((0, False), (0.0, False), (1795726516.2, True), (None, True)):
+        monkeypatch.setattr(ipc, "get_property", lambda sock, prop, v=value: seen.append(prop) or v)
+        assert rs._phone_reported() is want
+    assert set(seen) == {"user-data/agent-media/reported-at"}
+
+    def no_hub(sock, prop):
+        raise ipc.MpvIpcError("not a frames hub")
+
+    monkeypatch.setattr(ipc, "get_property", no_hub)
+    assert rs._phone_reported() is True
 
 
 def test_unknown_length_is_picked_up_too(host, monkeypatch):
