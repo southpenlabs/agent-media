@@ -31,6 +31,8 @@ client details into calendar descriptions.
 
 ## Private Employment Hero setup
 
+**Removed 26 Nov 2026.** The roster comes from payroll mail now, and nothing is kept that signs in to a work account; the script, its test and its saved file are gone. What follows is history.
+
 `deploy/employmenthero-cred-setup` prompts in a terminal with hidden input.
 It pipes JSON directly to SOPS using the existing dotfiles-secrets policy,
 then atomically saves only encrypted dotenv output to
