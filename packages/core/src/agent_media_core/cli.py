@@ -10969,6 +10969,20 @@ def cmd_doctor(a) -> int:
         if bad and "local" not in unhealthy:
             unhealthy.append("local")
 
+    # Replies refused because no device holds the speech stream
+    # (speech_reach; 25 Nov 2026 every reply went unheard, said nowhere).
+    try:
+        from . import speech_reach
+        run = speech_reach.status()
+        if run.get("alerted"):
+            print(f"speech: ✗ {speech_reach.detail_of(run)}\n  {speech_reach.FIX}")
+            if "local" not in unhealthy:
+                unhealthy.append("local")
+        elif run.get("misses"):
+            print(f"speech: {speech_reach.detail_of(run)}")
+    except Exception as _exc:  # noqa: BLE001 — a line of the report, never a failed doctor
+        _failures.swallowed(_exc)
+
     return _write_ledger(hosts, skewed, unhealthy, unreachable)
 
 

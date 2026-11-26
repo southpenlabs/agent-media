@@ -29,6 +29,7 @@ from typing import Callable, Optional, Sequence
 
 from .. import _lock as fcntl
 from .. import audio_targets
+from .. import speech_reach
 from .._notify import notify
 from ..render import render_text
 from ..render import device as device_voice
@@ -5366,6 +5367,8 @@ def _submit_event(event: Event,
                                   name="speech-claim", daemon=True)
         _claim.start()
         played_any = False
+        #: The no-device refusal a play met, for speech_reach (25 Nov 2026).
+        no_device_err: Optional[Exception] = None
         n = len(clip_data)
         highlighter = _HighlightScheduler(_highlight_delay_s, do_highlight,
                                           source_pane)
@@ -5848,6 +5851,8 @@ def _submit_event(event: Event,
                     played_any = True
                 except Exception as e:  # noqa: BLE001
                     log.warning("intake: play_playlist failed: %s", e)
+                    if speech_reach.is_no_device(e):
+                        no_device_err = e
                     state.log_error("intake", "play_playlist failed",
                                     extras={"detail": str(e),
                                             "source": event.source.value})
@@ -6446,6 +6451,8 @@ def _submit_event(event: Event,
                         played_any = True
                     except Exception as e:  # noqa: BLE001
                         log.warning("intake: sink-speech.play failed: %s", e)
+                        if speech_reach.is_no_device(e):
+                            no_device_err = e
                         state.log_error("intake", "sink-speech play failed",
                                         extras={"detail": str(e),
                                                 "source": event.source.value})
@@ -6552,6 +6559,11 @@ def _submit_event(event: Event,
             # (and the next local waiter) can take over immediately. No-op local.
             getattr(sink, "release_broker", lambda *a, **k: None)(target)
             playback_lock.release()
+            if not thinking:
+                # A reply refused for want of a device, a few in a row, is an
+                # alert; one that plays clears it (speech_reach).
+                speech_reach.reply_ended(bool(played_any), no_device_err is not None,
+                                         no_device_err)
 
         if not played_any:
             return None
