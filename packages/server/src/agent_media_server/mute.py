@@ -124,4 +124,8 @@ def session_mute(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         set_mute(session, on, until if on else None)
     except OSError as e:
         return False, {"error": f"could not save the mute ({e})", "status": 500}
+    if not local:
+        from . import bridge_mute
+
+        bridge_mute.soon(session)      # Telegram muted too (bridge_mute.py)
     return True, {"session": session, "muted": mute_of(session) or False}

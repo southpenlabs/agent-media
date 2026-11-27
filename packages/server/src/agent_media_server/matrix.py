@@ -37,7 +37,7 @@ from collections.abc import Collection
 from agent_media_core import failures as _failures
 from agent_media_core import matrix
 
-from . import read_receipts, replies, spam, voice_notes
+from . import bridge_mute, read_receipts, replies, spam, voice_notes
 
 log = logging.getLogger("agent-media.server.matrix")
 
@@ -683,6 +683,8 @@ class Room:
         ev_id = ev.get("event_id") or ""
         if not ev_id or ev_id in self._by_id:
             return
+        if ev.get("sender") == self.owner and bridge_mute.COMMAND.match(str(content.get("body") or "")):
+            return                 # a mute sent to the bridge for Quiet/Mute (bridge_mute.py)
         m = self._message(ev)
         if ev_id in self._edits:
             m["parts"], m["edited"] = self._edits.pop(ev_id), True

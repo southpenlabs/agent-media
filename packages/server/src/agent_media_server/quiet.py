@@ -352,4 +352,8 @@ def session_quiet(session: str, body: dict, bearer: str) -> tuple[bool, dict]:
         set_quiet(session, until, at, rule)
     except OSError as e:
         return False, {"error": f"could not save the quiet ({e})", "status": 500}
+    if not local:
+        from . import bridge_mute
+
+        bridge_mute.soon(session)      # Telegram muted too (bridge_mute.py)
     return True, {"session": session, "quiet": quiet_of(session), "quiet_rule": rule_of(session)}

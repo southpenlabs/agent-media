@@ -15626,6 +15626,19 @@ tests in `test_spam.py`.
   `api.cas.chat/check` once, off the sync thread; a listed id is kept for
   good, a clear one a week. Nothing else leaves the server.
 
+### 6.72 Quiet and Mute reach Telegram (built 28 Nov 2026)
+
+David, 28 Nov 2026: "when marking something with quiet till I turn it off,
+does it also mute it on telegram?" Code: server `bridge_mute.py`; tests in
+`test_bridge_mute.py`. No new route: `POST /session/mute` and `POST
+/session/quiet` on a Telegram chat also mute it on Telegram, until the later
+of the two ends (for good when either is "until I turn it off"; a shifts
+rule is not passed on), and unmute it when neither holds — only a mute the
+server sent, never one made in Telegram. Sent as the bridge command `!tg
+mute [<n>s]` / `!tg unmute` in the chat as David (Beeper's `com.beeper.mute`
+account data does not reach a bridge on our homeserver); the bridge acts on
+it and does not pass it on, and the room's log leaves it out.
+
 ## 11. v1: the per-thread stream — BUILT 22 Sep 2026
 
 Code: `packages/server/src/agent_media_server/thread_events.py`, routed in
