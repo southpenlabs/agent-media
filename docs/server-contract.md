@@ -10192,6 +10192,27 @@ the owner's"`. With no bridges configured, `GET /bridges` is `{"ok": true,
   code, `message` its text, `since` its timestamp (s). **Needs you**:
   `BAD_CREDENTIALS`, `LOGGED_OUT` and `UNKNOWN_ERROR` — the app marks them
   and offers Sign in again.
+- `host` and `prefer` (27 Nov 2026, sasonica-app mail #1413; David: where
+  a new account runs "basically depends on whether the host server is on
+  all the time or not"): so the app picks where Add account signs in
+  rather than asking Server or This phone. Top level, `host: {always_on,
+  why}`: whether this server is meant to run around the clock, with a
+  short reason the app may show. From `MEDIA_HOST_ALWAYS_ON` (`1`/`0`)
+  when set; else false when the machine has slept since it started
+  (`/sys/power/suspend_stats/success`) or its chassis is a laptop's,
+  tablet's or convertible's; true when it is a virtual machine
+  (`systemd-detect-virt`), a server chassis, or up 3 days or more without
+  sleeping. Absent when none of those says (a desktop up a short while):
+  unknown, and the app asks as before. Per bridge, `prefer: "server" |
+  "phone" | null` and, when set, `prefer_why`: a network that flags
+  sign-ins from a server's address prefers the phone even on an always-on
+  server — Meta's (`network` `facebook`, `facebookgo`, `messenger`,
+  `meta`, `instagram`, `instagramgo`) answer `"phone"`, "Meta may flag a
+  sign-in from a server's address as suspicious"; null for the rest. An
+  add-on's own `prefer` on a bridge is kept. The app's rule: `prefer` if
+  set, else server when `host.always_on`, else phone — the phone only
+  where Sasonica Bridges on that phone runs the network.
+  (`bridge_home.py`.)
 - A bridge that does not answer (or refuses) is listed with `reachable:
   false`, `error` saying why, its id as `name` and `network`, no `icon`
   and empty `flows`/`logins`; the others still answer (they are asked at

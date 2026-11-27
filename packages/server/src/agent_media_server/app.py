@@ -2472,7 +2472,8 @@ def _bridges(h: BaseHTTPRequestHandler, method: str, path: str) -> bool:
     setup = BRIDGE_SETUP.fullmatch(path)
     try:
         if method == "GET" and path == "/bridges":
-            _json(h, 200, {"ok": True, "bridges": bridges.listing()})
+            from . import bridge_home
+            _json(h, 200, bridge_home.annotate(bridges.listing()))
         elif icon or avatar:
             got = (bridges.icon(icon.group(1)) if icon
                    else bridges.avatar(avatar.group(1), unquote(avatar.group(2))))
