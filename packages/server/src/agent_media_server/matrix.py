@@ -111,6 +111,31 @@ _KIND = {"m.image": "sent a photo", "m.video": "sent a video",
          "m.file": "sent a file", "m.location": "shared a location"}
 
 
+_GEO = re.compile(r"geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)")
+#: What a bridge adds to a place's name: its coordinates in brackets
+#: ("Café (37.8000° S, 144.9000° E)"), or a "Location:" label.
+_COORDS = re.compile(r"\s*\(?-?\d+(?:\.\d+)?°\s*[NS],\s*-?\d+(?:\.\d+)?°\s*[EW]\)?\s*$")
+
+
+def _location_text(content: dict, body: str) -> str:
+    """A shared location (`m.location`) in words: the place's name, which a
+    bridge puts in `body` (a Telegram venue's title and address) with its
+    coordinates and a maps link after, and a link to the point from
+    `geo_uri`. 28 Nov 2026: "shared a location" alone dropped both."""
+    lines = [ln for ln in body.splitlines()
+             if ln.strip() and not re.match(r"\s*https?://", ln)]
+    name = _COORDS.sub("", "\n".join(lines)).strip()
+    name = re.sub(r"^(location|shared location)\s*:?\s*", "", name, flags=re.I).strip()
+    text = f"_shared a location_\n{name[:2000]}" if name else "_shared a location_"
+    m = _GEO.match(str(content.get("geo_uri") or ""))
+    if m:
+        lat, lon = float(m[1]), float(m[2])
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            text += (f"\n[Map: {lat:.5f}, {lon:.5f}](https://www.openstreetmap.org/"
+                     f"?mlat={lat:.6f}&mlon={lon:.6f}#map=16/{lat:.6f}/{lon:.6f})")
+    return text
+
+
 def _without_fallback(body: str) -> str:
     """A reply's words without the quote of what it answers that older
     clients put in front (`> <@who:server> …` lines, then a blank line)."""
@@ -664,6 +689,8 @@ class Room:
             if content.get("filename") and body and body != content["filename"]:
                 out.append({"type": "text", "text": body[:32768]})
             return out
+        if msgtype == "m.location":
+            return [{"type": "text", "text": _location_text(content, body)}]
         if msgtype in _KIND:
             text = _KIND[msgtype] + (f": {body}" if msgtype == "m.file" and body else "")
             return [{"type": "text", "text": f"_{text}_"}]

@@ -631,3 +631,19 @@ def test_a_rows_network_names_the_chat_and_the_companions_network():
     assert bare == {"id": "facebookgo", "name": "Facebook Messenger", "chat": "200002"}
     assert with_chat({"id": "x", "name": "Other"}, None, service_of) == {"id": "x", "name": "Other"}
     assert with_chat(None, None) is None
+
+
+def test_a_shared_location_keeps_its_name_and_a_map_link():
+    venue = _ev(1, MEL, "Spot Café: 1 Main St (37.8136° S, 144.9631° E)\n"
+                "https://maps.google.com/?q=-37.8136,144.9631",
+                msgtype="m.location", geo_uri="geo:-37.8136,144.9631")
+    bare = _ev(2, MEL, "Location: 37.8136° S, 144.9631° E",
+               msgtype="m.location", geo_uri="geo:-37.8136,144.9631;u=35")
+    nogeo = _ev(3, MEL, " ", msgtype="m.location")
+    r, _ = _room([venue, bare, nogeo])
+    r.load()
+    texts = [m["parts"][0]["text"] for m in r.messages]
+    assert texts[0].startswith("_shared a location_\nSpot Café: 1 Main St\n[Map: -37.81360, 144.96310]")
+    assert "maps.google" not in texts[0] and "openstreetmap.org/?mlat=-37.813600" in texts[0]
+    assert texts[1].startswith("_shared a location_\n[Map: ")
+    assert texts[2] == "_shared a location_"
